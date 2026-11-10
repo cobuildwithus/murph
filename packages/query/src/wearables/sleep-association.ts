@@ -22,10 +22,16 @@ export function sleepMetricAssociatedWithWindow(
   candidate: WearableMetricCandidate,
   window: WearableSleepWindowCandidate,
 ): boolean {
-  if (resolveSleepCandidateProvider(candidate) !== resolveSleepCandidateProvider(window)) {
-    return false;
-  }
+  return resolveSleepCandidateProvider(candidate) === resolveSleepCandidateProvider(window)
+    && sleepMetricBelongsToWindow(candidate, window);
+}
 
+/** The association itself, for a caller that already holds a candidate and a
+ * window of one public provider and must not resolve both again per pair. */
+export function sleepMetricBelongsToWindow(
+  candidate: WearableMetricCandidate,
+  window: WearableSleepWindowCandidate,
+): boolean {
   return sleepMetricMatchesWindow(candidate, window) || sleepMetricOccursInsideWindow(candidate, window);
 }
 

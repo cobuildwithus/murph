@@ -196,11 +196,12 @@ function rankMetricCandidates(
     candidates.map((candidate) => candidate.recordedAt ?? candidate.occurredAt),
   );
   const scorecards = new Map<string, WearableMetricScorecard>();
+  const healthStoreFallbackScore = buildHealthStoreFallbackScore(candidates);
 
   for (const candidate of candidates) {
     const providerScore =
       (providerScores.get(candidate.provider) ?? 0) + scoreJunctionSourcePolicy(candidate, candidates)
-      + (metric === "steps" ? 0 : scoreHealthStoreFallback(candidate, candidates));
+      + (metric === "steps" ? 0 : healthStoreFallbackScore(candidate));
     const resourceScore = resourceTypeScore(metric, candidate.externalRef?.resourceType);
     const familyScore = sourceFamilyScore(candidate.sourceFamily);
     const recencyScore = recencyScores.get(candidate.recordedAt ?? candidate.occurredAt ?? "") ?? 0;
@@ -280,11 +281,12 @@ function rankSleepWindows(
   const durationScores = buildNumberRankScores(eligibleCandidates.map((candidate) => candidate.durationMinutes));
   const maxDurationMinutes = Math.max(0, ...eligibleCandidates.map((candidate) => candidate.durationMinutes));
   const scorecards = new Map<string, WearableSleepWindowScorecard>();
+  const healthStoreFallbackScore = buildHealthStoreFallbackScore(eligibleCandidates);
 
   for (const candidate of eligibleCandidates) {
     const providerScore =
       (providerScores.get(candidate.provider) ?? 0) + scoreJunctionSourcePolicy(candidate, eligibleCandidates)
-      + scoreHealthStoreFallback(candidate, eligibleCandidates);
+      + healthStoreFallbackScore(candidate);
     const recencyScore = recencyScores.get(candidate.recordedAt ?? candidate.endAt ?? candidate.startAt ?? "") ?? 0;
     const durationScore = durationScores.get(candidate.durationMinutes) ?? 0;
     const agreementScore = scoreSleepWindowAgreement(candidate, eligibleCandidates);
@@ -357,22 +359,42 @@ function buildProviderRankScores(
 
 /** Health stores can contain a copy of a wearable's own reading. A later sync
  * or agreement with another copy must not displace the device on the same day.
- * Steps keep their separate worn-coverage policy, including partial-day fallback. */
-function scoreHealthStoreFallback(
-  candidate: WearableMetricCandidate | WearableSleepWindowCandidate,
-  candidates: readonly (WearableMetricCandidate | WearableSleepWindowCandidate)[],
-): number {
-  const isStore = (item: typeof candidate) => !isAppleWatchWearableSource(item)
-    && (HEALTH_STORES.has(resolveWearablePublicSourceProvider(item))
-      || normalizeWearableOriginSourceSlug(item.dataOrigin?.sourceType) === "multiple-sources");
-  if (!isStore(candidate)) return 0;
-  const hasDevice = candidates.some(other => {
-    if (other.date !== candidate.date || isStore(other)) return false;
-    const type = normalizeWearableOriginSourceSlug(other.dataOrigin?.sourceType);
-    return type === "watch" || type === "ring"
-      || hasDirectWearableProviderForSource(resolveWearablePublicSourceProvider(other));
-  });
-  return hasDevice ? HEALTH_STORE_FALLBACK_PENALTY : 0;
+ * Steps keep their separate worn-coverage policy, including partial-day fallback.
+ * One ranking scores every candidate against the same list, so each
+ * candidate's role is resolved once per list instead of once per pair. */
+function buildHealthStoreFallbackScore<
+  TCandidate extends WearableMetricCandidate | WearableSleepWindowCandidate,
+>(candidates: readonly TCandidate[]): (candidate: TCandidate) => number {
+  const roles = new Map<TCandidate, "store" | "device" | null>();
+  const roleOf = (item: TCandidate) => {
+    let role = roles.get(item);
+    if (role === undefined) {
+      role = resolveHealthStoreFallbackRole(item);
+      roles.set(item, role);
+    }
+    return role;
+  };
+  return (candidate) =>
+    roleOf(candidate) === "store"
+      && candidates.some((other) => other.date === candidate.date && roleOf(other) === "device")
+      ? HEALTH_STORE_FALLBACK_PENALTY
+      : 0;
+}
+
+function resolveHealthStoreFallbackRole(
+  item: WearableMetricCandidate | WearableSleepWindowCandidate,
+): "store" | "device" | null {
+  const provider = resolveWearablePublicSourceProvider(item);
+  const sourceType = normalizeWearableOriginSourceSlug(item.dataOrigin?.sourceType);
+  if (
+    !isAppleWatchWearableSource(item)
+    && (HEALTH_STORES.has(provider) || sourceType === "multiple-sources")
+  ) {
+    return "store";
+  }
+  return sourceType === "watch" || sourceType === "ring" || hasDirectWearableProviderForSource(provider)
+    ? "device"
+    : null;
 }
 
 function scoreJunctionSourcePolicy(

@@ -572,8 +572,21 @@ function replaceProviderToken(text: string, sourceLabel: string, publicLabel: st
     return text;
   }
 
-  const pattern = new RegExp(`(^|[^A-Za-z0-9_-])${escapeRegExp(sourceLabel)}(?=$|[^A-Za-z0-9_-])`, "giu");
-  return text.replace(pattern, (_match, prefix: string) => `${prefix}${publicLabel}`);
+  return text.replace(providerTokenPattern(sourceLabel), (_match, prefix: string) => `${prefix}${publicLabel}`);
+}
+
+// One projection applies the same few provider labels to every title and note,
+// so compile each label's pattern once. `replace` restarts a global pattern at
+// index 0 on every call, so sharing one is safe.
+const providerTokenPatterns = new Map<string, RegExp>();
+
+function providerTokenPattern(sourceLabel: string): RegExp {
+  let pattern = providerTokenPatterns.get(sourceLabel);
+  if (!pattern) {
+    pattern = new RegExp(`(^|[^A-Za-z0-9_-])${escapeRegExp(sourceLabel)}(?=$|[^A-Za-z0-9_-])`, "giu");
+    providerTokenPatterns.set(sourceLabel, pattern);
+  }
+  return pattern;
 }
 
 function collapseRepeatedProviderLabel(text: string, providerLabel: string): string {
