@@ -237,8 +237,53 @@ Owner decision, 2026-11-10: build the full move.
 
 ## Revised design
 
-This section is the specification. Where it differs from the first draft, this
-section wins.
+The silent-move owner decision below supersedes the notice-specific parts of
+this section and the historical PR A checkpoint. Other invariants still apply.
+
+## Owner decision: silent move
+
+2026-11-10: Murph posts no announcement, notice, template or marker. The source
+number adds the target number; after adoption the source number leaves. This
+replaces the marker correlation accepted in review finding 1: one reserved move
+per target line plus fresh, complete source/candidate rosters with equal people
+and both verified service numbers active in the candidate authorize adoption
+on the first inbound message of any kind. Source-service speech is consumed;
+a person's event must survive adoption and enter the normal group reply path.
+
+PR B keeps the single route writer, existing chat locks, after-response leave
+and provider retry owner. Cleanup encryption and provider calls stay outside
+transactions. Start sets a 24-hour adoption deadline; expiry preserves source
+authority, resume reports expiry, and cancel verifies target removal. The
+legacy notice hash becomes nullable through a forward migration and is omitted
+from new reads/writes; the column stays for old Web readers during rollout.
+
+The source hold is 60 seconds from the original webhook creation time,
+using the same retryable 503 boundary as game bootstrap. Linq documents stable
+event creation time across retries, exponential backoff with jitter and a
+30-minute retry window. The bound releases on the first retry after 60 seconds,
+well within that window; it is not a new timer or retry system.
+Source: https://docs.linqapp.com/channel/imessage/guides/webhooks/.
+
+Conservative checkpoint deviation: on the first source message beyond that
+bound, the source transaction expires automatic adoption before admitting the
+message normally. The row remains reserved for cancel; resume never renews it.
+Expiry also restores ordinary source admission. This avoids both indefinite
+source downtime and unproved cross-line deduplication, but **does not implement
+later adoption within the same reservation after a source fallback**. That
+requested path remains blocked pending a reliable shared message identity.
+The user was asked whether original `sent_at` is guaranteed equal on both
+copies; no such guarantee appears in the SDK or public webhook contract.
+
+Open implementation questions: cross-line message ids differ and the provider
+does not document a shared message identity; exact cross-copy deduplication
+needs an authority stronger than text matching. Roster equality also cannot
+distinguish two unbound chats with identical people and both service numbers.
+These limits must be resolved conservatively and recorded with the proof.
+
+Work is local to the producer checkout. No push, PR, production access, real
+Linq API, dotenv reads or ReviewGPT is authorized. Keep this plan active.
+
+### Historical revised design
 
 ### Base operation
 
@@ -549,3 +594,209 @@ not used because it invokes the dotenv-reading Prisma config; the prepared
 command ran the full Web compiler after explicit no-dotenv generation.
 CI, ReviewGPT, real-Codex journeys and live provider proof were not run. There
 are no changed prompts/tools or model-dependent decisions in this consumer.
+
+## PR B silent producer checkpoint — 2026-11-10
+
+Status remains active. This is a local implementation checkpoint, **not a
+completed PR B or a release approval**. The requested later adoption after a
+source fallback still needs reliable cross-line message correlation. No push,
+PR, production access, real Linq API, dotenv read or ReviewGPT was performed.
+
+### Implemented and retained
+
+- Reused the partial ops route, inventory phone lock, roster validation,
+  encrypted cleanup, quiet-work checks, reservation, resume, cancel, overview
+  and leave code. The only route writer remains PR A's replacement primitive.
+- Deleted the partial notice module, notice rendering/hash/send/claim path and
+  both notice-specific delivery-store exceptions. No template or marker remains
+  in executable code. The legacy notice/progress columns remain for rollout.
+- Added the forward nullable-hash migration without changing PR A's migration;
+  all new move selects omit the hash. Old Web must drain before new null-hash
+  reservations are created, since its generated client expects non-null data.
+- Any first iMessage group message can authorize adoption through the reserved
+  target line and complete equal rosters. Source speech is consumed; a person's
+  event commits adoption, schedules leave after response, and throws the
+  existing retryable 503. Its unchanged redelivery enters the existing bound
+  group path and original event-id mailbox deduplication.
+- A 60-second source hold uses the signed event's original creation time. The
+  transaction that admits overdue source input also expires adoption. Expiry
+  allows source traffic while retaining target admission protection. No new
+  retry owner, receipt table, message-content hash or route writer was added.
+- Complete roster reads verify removal and departure. Too-small groups and
+  refused leaves retain adopted state. Provider errors expose only fixed
+  operation names and numeric status/code metadata, never provider prose.
+- GET pages at most 50 moves and 50 candidate containers; candidate references
+  are opaque route lookup keys, with container hints, last mailbox activity and
+  live-game presence. Existing ops exposes no group-title hint to reuse, so no
+  new private-title projection was introduced.
+
+### Deliberate deviations and unresolved authority
+
+1. **Later adoption after a source fallback is unfinished.** The reservation
+   remains present but its deadline is expired atomically with source admission.
+   Cancel/restart is required for another attempt. This is the conservative
+   choice pending a provider guarantee for a shared message identity; sender,
+   text or timestamp similarity alone is not proof of one physical message.
+2. **Ambiguous adds do not immediately release their reservation.** Rejected
+   requests plus verified absence cancel cleanly. An in-flight, timed-out or
+   queued add can still take effect after an absence read. It is disarmed and
+   reports `add_outcome_unknown` or its preserved `add_unconfirmed` provider code; source admission resumes and target admission
+   stays protected. Later positive presence permits verified remove/cancel.
+   This preserves safety under concurrent cancel and add. The requested clean
+   cancellation of every unconfirmed add requires a provider terminal-outcome
+   guarantee that the current API contract does not supply.
+3. Roster equality protects different audiences and bound destinations. It
+   cannot distinguish two **unbound** candidates containing identical people
+   and both verified service numbers. The first qualifying candidate can win.
+   The bound second-group case is tested; the indistinguishable unbound case
+   remains a release question under the owner's chosen correlation contract.
+4. Kept the prior 60-second quiet-start check, pending-work rejection, 32-handle
+   cap, 30-second roster freshness, iMessage requirement and sequential-overlap
+   limit. These are the conservative existing-owner constraints.
+5. A human photo follows the same adoption/retry path. Empty or otherwise
+   unsupported content retains ordinary bound-group behavior on redelivery;
+   the move does not invent a reply policy for such events.
+
+Product UX verdict: **Hold** for the complete requested journey, because item 1
+is not implemented. The synthetic normal handoff, source-service first event,
+photo first event, source availability on expiry, ambiguous-add protection,
+verified cancel and too-small/refused leave paths have deterministic proof.
+The synthetic reply harness consumes the one accepted mailbox input and uses
+real egress authority with a fake Linq SDK; it is not a live runner/model proof.
+Changelog: none for this incomplete internal ops checkpoint.
+
+### Operator request contract (for review; no production execution)
+
+All requests use the existing ops access guard. POST additionally requires the
+same-origin mutation check. Opaque values come from GET; do not supply phones,
+raw chat ids or member ids.
+
+```http
+GET /api/ops/linq-group-line-move?status=reserved&sourceLineLookupKey=<opaque-line-key>
+```
+
+GET has no body. Optional `status` is `reserved`, `adopted`, `left` or
+`cancelled`; omit it for all statuses. `sourceLineLookupKey` includes the
+candidate page. Continue with `afterMoveId=<nextMoveId>` and/or
+`afterContainerRef=<nextContainerRef>`, preserving the filters. The response has
+`moves`, `assignableTargetLines`, `candidates`, and nullable next cursors.
+
+```json
+{"operation":"start","containerRef":"<opaque-container-ref>","targetLineLookupKey":"<opaque-line-key>"}
+```
+
+```json
+{"operation":"resume","moveId":"00000000-0000-4000-8000-000000000001"}
+```
+
+```json
+{"operation":"cancel","moveId":"00000000-0000-4000-8000-000000000001"}
+```
+
+```json
+{"operation":"retry_leave","moveId":"00000000-0000-4000-8000-000000000001"}
+```
+
+POST responses are the move summary itself, not an additional envelope:
+`moveId`, `containerHint`, source/target blinded line keys, `status`, deadline,
+`adoptionExpired`, `holdActive`, `sourceHoldActive`, progress timestamps and
+nullable `code`. `holdActive` means the reservation still protects target
+admission; `sourceHoldActive` reports whether source messages can still wait.
+
+- `reserved`, non-null `addConfirmedAt`, `code: null`: target presence verified;
+  waiting for a qualifying group message. Normal deadline is 24 hours.
+- `adopted`: destination is authoritative permanently; leave is still pending.
+- `left`: source departure verified. Repeated leave/resume is a no-op.
+- `cancelled`: pre-adoption cleanup verified and protection released.
+- `adoptionExpired: true`: source remains authoritative; resume does not renew.
+  Cancel verifies target removal. `source_hold_expired` identifies automatic
+  disarming; resume may subsequently report `adoption_deadline_elapsed`.
+- `add_outcome_unknown` or `add_unconfirmed` (possibly with a provider suffix): disarmed but provider add is not terminally settled;
+  retain the reservation, then retry cleanup from fresh provider truth.
+- `remove_pending`, `leave_pending`, `leave_requires_four_participants`, or
+  operation/provider error codes: the named effect is unconfirmed/refused;
+  repeat the appropriate recovery action after resolving the condition.
+- Validation/auth errors are HTTP 400/403/404/409. A 200 summary with a non-null
+  code is an operation result requiring inspection, not proof of completion.
+
+### Verification commands and evidence
+
+Prisma used an ignored explicit local config; root typecheck used an ignored
+Node preload replacing `process.loadEnvFile` with a no-op. This reuses the
+existing Frog entry about mandatory dotenv reads. The preload contains no
+credentials or personal paths. Command output was redacted before persistence.
+All provider fixtures are synthetic; database work uses only the isolated local
+`murph_test_linq_group_move` database.
+
+```sh
+scripts/frog list
+pnpm --dir apps/web exec prisma generate --config ../../.tmp/prisma-no-env.config.ts
+pnpm --dir apps/web exec prisma validate --config ../../.tmp/prisma-no-env.config.ts
+pnpm --dir apps/web exec prisma migrate deploy --config ../../.tmp/prisma-no-env.config.ts
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test_linq_group_move \
+MURPH_TEST_POSTGRES_CONCURRENCY=1 \
+pnpm exec vitest run --config apps/web/vitest.config.ts \
+  apps/web/test/hosted-linq-group-line-move.test.ts \
+  apps/web/test/hosted-linq-group-line-move-postgres.test.ts \
+  apps/web/test/hosted-linq-group-line-move-producer-postgres.test.ts \
+  apps/web/test/hosted-ops-linq-group-line-move-route.test.ts \
+  apps/web/test/hosted-onboarding-linq-http.test.ts \
+  apps/web/test/hosted-onboarding-privacy-foundation-migration.test.ts --maxWorkers 1
+MURPH_APP_VITEST_MAX_WORKERS=2 pnpm --dir apps/web test
+NODE_OPTIONS="--require=$PWD/.tmp/skip-dotenv.cjs" \
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test_linq_group_move \
+pnpm typecheck
+pnpm --dir apps/web typecheck:prepared
+pnpm --dir apps/web lint
+pnpm complexity:diff
+pnpm docs:drift
+git diff --check
+```
+
+Initial focused iterations corrected query-count expectations, the inherited
+runtime-owner fixture, the second-room fixture, and a fake roster outage that
+only failed the preliminary read instead of the authoritative read. New HTTP
+proof exposed that the old error-code helper only allowed avatar codes; group
+mutations now preserve bounded numeric provider codes without provider prose.
+The initial full Web run had 14,591 passes, 2,390 skips and three failures from
+HTTP summary fixtures missing the new `service` field. The migration reviewed
+list now includes the forward migration. The supplied main already includes
+PR A's mock-delegate fixes; the full run found no missing delegate failures.
+
+Final focused selection: six files, 158 tests passed. This includes 26 PR A
+consumer Postgres scenarios and 31 producer Postgres scenarios. Final inspection
+found that a failed confirmation roster read after a successful add bypassed
+disarming. The add and its confirmation read now share the cleanup error path;
+both unavailable and incomplete confirmation cases have Postgres proof.
+Prisma generate, validate and all 282 migrations passed against the local test
+database. Root typecheck passed with dotenv disabled; Web typecheck, Web lint
+(existing warnings only), complexity, docs drift and diff whitespace passed.
+The second full Web attempt had 14,606 passes, 2,398 skips and three new numeric
+provider-code test failures; those are fixed and pass in the focused selection.
+Full Web run before the confirmation-read fix: **872 files passed, 159 files
+skipped; 14,609 tests passed, 2,398 skipped; zero failures** (431.30 seconds).
+Root typecheck (including Web), Web lint and complexity passed again after that
+fix. The next full run overlapped root typecheck's Prisma regeneration and
+failed to collect `hosted-onboarding-env.test.ts` because
+`.prisma/client/default` was temporarily absent: 871 files and 14,582 tests
+passed, 159 files and 2,400 tests skipped, one collection failure. All 27 tests
+in that suite passed alone afterward:
+
+```sh
+pnpm exec vitest run --config apps/web/vitest.config.ts \
+  apps/web/test/hosted-onboarding-env.test.ts --maxWorkers 1
+```
+
+The shared-artifact race is recorded in
+`.agents/friction-log/20261110150031-concurrent-root-typecheck/friction.md`.
+The final full Web rerun ran after generation: **872 files passed, 159 files
+skipped; 14,609 tests passed, 2,400 skipped; zero failures** (347.23 seconds).
+
+The normal full suite skips opt-in database/live-provider lanes; the separate
+local Postgres selection above supplies this task's database evidence. No CI,
+live Linq call, live model/runner journey, production proof or ReviewGPT was
+run. The required later-message adoption after source fallback and the
+indistinguishable unbound second-group case remain unproved as described above.
+
+The reviewed files form a local checkpoint for `scripts/committer`; the active
+plan remains open. This checkpoint is not a claim that PR B is ready to ship.

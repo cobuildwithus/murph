@@ -3916,7 +3916,7 @@ authentication failures never consume the row.
 
 `hosted_linq_group_line_move` is hosted control truth owned beside thread
 routing, not member memory or runner state. It retains one reservation's
-source/destination blind keys, exact notice hash, adoption deadline and progress
+source/destination blind keys, adoption deadline and progress
 receipts. Its versioned cleanup envelope contains only the source chat and two
 provider-inventory-verified service numbers, authenticated to the retained
 container and move id. Container deletion cascades to these rows. Otherwise
@@ -3928,12 +3928,16 @@ closed on ambiguity; privacy-key read candidates apply to all lookups. Ordinary
 group ingress adds two reads (preparation and locked revalidation), and direct
 ingress adds none. Reservations protect source traffic and affected unbound
 target chats using the existing retryable-error/preparation retry boundary.
-An expired adoption deadline never releases that protection. Cancelled rows
+An expired adoption deadline releases the source hold, retaining unbound-target
+admission protection. Cancelled rows
 grant no authority; the producer must verify provider cleanup before cancelling.
 
-Automatic adoption requires the exact single signed text part, source sender,
-target receiving line and iMessage service, plus two complete provider rosters
+Silent adoption requires one reservation on the target receiving line and an
+iMessage group message of any kind, plus two complete provider rosters
 with equal active human handle sets, including unknown phone/email contacts.
+Source-service speech is consumed. A person's adopting event commits the move
+and gets a retryable 503; redelivery finds the bound route and ordinary mailbox
+deduplication admits it once. No message, template or marker announces the move.
 Both service numbers must be active on the destination; each chat must identify
 its own line as self. Reads use a three-second timeout and a 32-handle bound.
 Evidence must be at most 30 seconds old when the transaction runs. The explicit
@@ -3955,8 +3959,21 @@ With no move rows these consumers are inert. They must be deployed and older
 Web producers drained before the first reservation/provider effect. This is
 the rollback floor even with no saved schedules: rollback below it requires
 disabling and draining affected ingress as well as dealing with retired saved
-targets. PR A supplies consumers only; provider add/remove/leave, reservations,
-notice delivery and operator recovery belong to the separately gated producer.
+targets. The producer reserves before adding, confirms the complete source
+roster and never sends a notice. Ops start/resume/cancel/retry_leave use the
+existing access guard; GET pages opaque move/container/line references and
+activity/game hints. Cleanup is verified before cancellation/departure. Leave
+runs after the adoption response and is also operator-retryable; refusal keeps
+adoption permanent. Start requires a quiet source with no pending work and uses
+a 24-hour deadline. The legacy notice hash column remains nullable for rollout;
+new code omits it. Drain old Web before producing null-hash reservations.
+
+PR B is an active, local implementation checkpoint, not a release-ready change:
+later adoption after bounded source fallback remains unresolved in the active
+execution plan. A source message older than 60 seconds atomically expires
+adoption before normal admission. The row stays reserved for verified cleanup;
+resume never renews it. This conservative boundary avoids a heuristic duplicate
+match but requires cancel/restart instead of later adoption in that reservation.
 
 A private accepted text turn may arm one expiring
 `HostedPendingGroupSetup` for a person member's current managed Linq line. The

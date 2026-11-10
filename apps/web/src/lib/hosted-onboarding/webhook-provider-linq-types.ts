@@ -31,4 +31,6 @@ export type HostedOnboardingLinqDirectPlan =
     instantStartEnrollment?: HostedLinqInstantStartEnrollment;
     nextRequiredPendingGroupSetupCandidateId?: string | null;
     postCommitGroupRosterReconciles?: readonly HostedOnboardingLinqGroupRosterReconcile[];
+    postCommitGroupLineMoveId?: string;
+  retryAfterGroupLineMoveAdoption?: boolean;
   };

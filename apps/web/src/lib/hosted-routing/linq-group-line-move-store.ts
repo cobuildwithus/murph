@@ -11,7 +11,7 @@ import { readHostedLinqLinePhoneNumberByLookupKey } from "../hosted-onboarding/l
 export const linqGroupMoveSelect = {
   id: true, containerMemberId: true, fromAccountLookupKey: true, toAccountLookupKey: true,
   fromThreadIdentityLookupKey: true, toThreadIdentityLookupKey: true, sourceCleanupEncrypted: true,
-  noticeTextHash: true, status: true, adoptionDeadlineAt: true,
+  status: true, adoptionDeadlineAt: true,
 } satisfies Prisma.HostedLinqGroupLineMoveSelect;
 export type HostedLinqGroupLineMove = Prisma.HostedLinqGroupLineMoveGetPayload<{ select: typeof linqGroupMoveSelect }>;
 type MoveClient = Pick<Prisma.TransactionClient, "hostedLinqGroupLineMove">;

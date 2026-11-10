@@ -21,6 +21,9 @@ import {
   updateHostedLinqChatDisplayName,
 } from "@/src/lib/hosted-onboarding/linq";
 import {
+  addHostedLinqChatParticipant,
+  removeHostedLinqChatParticipant,
+  leaveHostedLinqChat,
   createHostedLinqChat,
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
@@ -35,6 +38,30 @@ import {
 
 const originalFetch = globalThis.fetch;
 const describe = baseDescribe.sequential;
+
+describe("silent group move provider operations", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("uses the SDK add, remove and leave endpoints without a message send", async () => {
+    const fetchMock = vi.fn(async () => createJsonResponse({ status: "queued" }, 200));
+    vi.stubGlobal("fetch", fetchMock);
+    await addHostedLinqChatParticipant({ chatId: "synthetic-chat", handle: "+15555550123" });
+    await removeHostedLinqChatParticipant({ chatId: "synthetic-chat", handle: "+15555550123" });
+    await leaveHostedLinqChat({ chatId: "synthetic-chat" });
+    expect(fetchMock.mock.calls).toHaveLength(3);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, new URL(`${DEFAULT_LINQ_API_BASE_URL}/chats/synthetic-chat/participants`), expect.objectContaining({ method: "POST", body: JSON.stringify({ handle: "+15555550123" }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, new URL(`${DEFAULT_LINQ_API_BASE_URL}/chats/synthetic-chat/participants`), expect.objectContaining({ method: "DELETE" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, new URL(`${DEFAULT_LINQ_API_BASE_URL}/chats/synthetic-chat/leave`), expect.objectContaining({ method: "POST" }));
+  });
+  it.each([addHostedLinqChatParticipant, removeHostedLinqChatParticipant, leaveHostedLinqChat])("reports provider rejection metadata without provider text", async operation => {
+    const fetchMock = vi.fn(async () => createJsonResponse({ success: false, error: { code: 1007, message: "Synthetic provider detail" } }, 403));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(operation({ chatId: "synthetic-chat", handle: "+15555550123" })).rejects.toMatchObject({
+      retryable: false, details: { status: 403, providerErrorCode: 1007 },
+      message: "Linq group operation did not confirm success.",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
 
 describe("terminal retry provider boundary", () => {
   it("retrieves the exact message and resends the supplied body in the same chat", async () => {
@@ -190,6 +217,7 @@ describe("getHostedLinqChatSummary", () => {
       timeoutMs: 1_500,
     })).resolves.toEqual({
       displayName: "Weekend Warriors",
+      service: "iMessage",
       handleCount: 1,
       handles: [
         {
@@ -246,6 +274,7 @@ describe("getHostedLinqChatSummary", () => {
       timeoutMs: 1_500,
     })).resolves.toEqual({
       displayName: null,
+      service: null,
       handleCount: 0,
       handles: [],
       handlesComplete: false,
@@ -323,6 +352,7 @@ describe("readHostedLinqExplicitGroupDisplayName", () => {
   it("keeps a real group title", () => {
     expect(readHostedLinqExplicitGroupDisplayName(linqRoster({
       displayName: "Weekend Warriors",
+      service: "iMessage",
       handles,
       isGroup: true,
     }))).toBe("Weekend Warriors");
@@ -352,6 +382,7 @@ describe("readHostedLinqExplicitGroupDisplayName", () => {
   it("rejects provider titles when the roster was not parsed completely", () => {
     expect(readHostedLinqExplicitGroupDisplayName(linqRoster({
       displayName: "Weekend Warriors",
+      service: "iMessage",
       handles,
       handlesComplete: false,
       isGroup: true,

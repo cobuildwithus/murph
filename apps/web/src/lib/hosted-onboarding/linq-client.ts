@@ -648,6 +648,7 @@ export type HostedLinqChatRosterObservation = {
 
 export type HostedLinqChatSummary = HostedLinqChatRosterObservation & {
   displayName?: string | null;
+  service?: string | null;
   isGroup: boolean | null;
 };
 
@@ -749,12 +750,48 @@ export async function getHostedLinqChatSummary(input: {
     .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null);
   return {
     displayName,
+    service: canonical?.service ?? null,
     handleCount: handles.length,
     handles: parsedHandles,
     handlesComplete: canonical !== null && parsedHandles.length === handles.length,
     observedAt,
     isGroup,
   };
+}
+
+/** Mutations have one attempt; the caller settles their effect with a complete roster. */
+async function requestHostedLinqGroupMutation(input: {
+  operation: "ADD" | "REMOVE" | "LEAVE";
+  request: (client: LinqAPIV3) => Promise<unknown>;
+}): Promise<void> {
+  try {
+    await requestHostedLinqSdk({ request: input.request, timeoutMs: 3_000,
+      timeoutMessage: "Linq group operation timed out." });
+  } catch (error) {
+    const status = readLinqApiErrorStatus(error);
+    const payload = readLinqApiErrorPayload(error);
+    const providerError = payload && typeof payload === "object" && "error" in payload ? payload.error : null;
+    const code = providerError && typeof providerError === "object" && "code" in providerError ? providerError.code : null;
+    const providerErrorCode = typeof code === "number" && Number.isInteger(code) && code >= 1_000 && code <= 9_999 ? code : null;
+    const rejected = status !== null && [400, 401, 403, 404, 422].includes(status);
+    throw hostedOnboardingError({
+      code: `LINQ_GROUP_${input.operation}_${rejected ? "REJECTED" : "UNCONFIRMED"}`,
+      details: { ...(status === null ? {} : { status }), ...(providerErrorCode === null ? {} : { providerErrorCode }) },
+      httpStatus: 502, retryable: !rejected, message: "Linq group operation did not confirm success.",
+    });
+  }
+}
+
+export async function addHostedLinqChatParticipant(input: { chatId: string; handle: string }): Promise<void> {
+  await requestHostedLinqGroupMutation({ operation: "ADD",
+    request: client => client.chats.participants.add(input.chatId, { handle: input.handle }) });
+}
+export async function removeHostedLinqChatParticipant(input: { chatId: string; handle: string }): Promise<void> {
+  await requestHostedLinqGroupMutation({ operation: "REMOVE",
+    request: client => client.chats.participants.remove(input.chatId, { handle: input.handle }) });
+}
+export async function leaveHostedLinqChat(input: { chatId: string }): Promise<void> {
+  await requestHostedLinqGroupMutation({ operation: "LEAVE", request: client => client.chats.leaveChat(input.chatId) });
 }
 
 export async function getHostedLinqReactionTargetMessage(input: {
@@ -835,7 +872,7 @@ function parseHostedLinqReactionTargetPart(value: unknown): string {
 
 function readHostedLinqCanonicalChat(
   value: unknown,
-): Pick<Chat, "display_name" | "handles" | "is_group"> | null {
+): (Pick<Chat, "display_name" | "handles" | "is_group"> & { service: string | null }) | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -849,6 +886,7 @@ function readHostedLinqCanonicalChat(
     display_name: normalizeNullableString(record.display_name),
     handles: record.handles,
     is_group: record.is_group,
+    service: normalizeNullableString(record.service),
   };
 }
 

@@ -2,7 +2,7 @@ Linq group line moves retain container identity through a move-aware ingress
 rollback floor, an egress-only retired-target alias and verified service-number
 normalization for games. [Architecture](../ARCHITECTURE.md#linq-group-line-moves)
 and [Security](SECURITY.md#weekly-game-chat-authority) own the contracts;
-implementation and producer follow-up remain in the
+silent producer implementation and the unresolved bounded source fallback remain in the
 [active plan](exec-plans/active/2026-11-10-linq-group-line-move.md).
 
 The [synthetic game self-play QA map](references/game-selfplay-qa.md) records reachable game states, local native gameplay, real-model chat edits and explicit coverage gaps, with a [machine-readable native scenario inventory](references/game-selfplay-scenarios.json).

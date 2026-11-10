@@ -2231,7 +2231,7 @@ model HostedLinqGroupLineMove {
   fromThreadIdentityLookupKey  String @map("from_thread_identity_lookup_key")
   toThreadIdentityLookupKey    String? @map("to_thread_identity_lookup_key")
   sourceCleanupEncrypted      String @map("source_cleanup_encrypted")
-  noticeTextHash              String @map("notice_text_hash")
+  noticeTextHash              String? @map("notice_text_hash")
   status                      String @default("reserved")
   adoptionDeadlineAt          DateTime @map("adoption_deadline_at")
   addStartedAt                DateTime? @map("add_started_at")
