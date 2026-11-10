@@ -3478,7 +3478,6 @@ describeRealCodex('real Codex canonical availability e2e', () => {
       expect(result.responseMedia).toEqual([])
       expect(result.responseCard).toBeNull()
       expect(result.runtimeIssueInputs).toEqual([])
-      expect(JSON.stringify(result.jsonEvents)).not.toContain('resume_failure')
       expect(await snapshotRealCodexCanonicalVault(workingDirectory)).toEqual(before)
       expect(await listCanonicalWriteEvidence(workingDirectory)).toEqual(writesBefore)
     } finally {

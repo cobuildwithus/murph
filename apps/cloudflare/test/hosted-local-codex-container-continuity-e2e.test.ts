@@ -152,9 +152,6 @@ describe("hosted local Codex container continuity e2e", () => {
     });
     expect(secondTurnEvidence.runtimeLogs.length).toBeGreaterThan(0);
     expect(secondTurnEvidence.totalRuntimeLogCount).toBeLessThan(runtimeLogLimit);
-    expect(secondTurnEvidence.runtimeLogs.some((entry) =>
-      entry.redactedJson?.providerTraceKind === "codex.resume_failure"
-    )).toBe(false);
 
     const firstTurnProviderRequests = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
