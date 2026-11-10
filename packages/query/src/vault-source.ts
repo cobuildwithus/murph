@@ -110,7 +110,12 @@ function explicitCanonicalLinks(value: unknown) {
 
 export async function readVaultSourceStrict(
   vaultRoot: string,
-  options: { signal?: AbortSignal } = {},
+  options: {
+    /** Pass false to leave audit records unread. The query projection stores
+     * none of them and the source manifest does not track their files. */
+    audits?: boolean;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<VaultSourceSnapshot> {
   options.signal?.throwIfAborted();
   const metadata = await readOptionalVaultMetadata(
@@ -119,7 +124,7 @@ export async function readVaultSourceStrict(
   );
   options.signal?.throwIfAborted();
   const [baseEntitiesResult, healthEntitiesResult] = await Promise.allSettled([
-    readBaseEntities(vaultRoot, metadata, "strict", options.signal),
+    readBaseEntities(vaultRoot, metadata, "strict", options),
     collectCanonicalEntities(vaultRoot, {
       mode: "strict-async",
       signal: options.signal,
@@ -147,7 +152,7 @@ export async function readVaultSourceTolerant(
 ): Promise<VaultSourceSnapshot> {
   const metadata = await readOptionalVaultMetadata(path.join(vaultRoot, VAULT_LAYOUT.metadata));
   const [baseEntities, healthEntities] = await Promise.all([
-    readBaseEntities(vaultRoot, metadata, "tolerant"),
+    readBaseEntities(vaultRoot, metadata, "tolerant", {}),
     collectCanonicalEntities(vaultRoot, { mode: "tolerant-async" }),
   ]);
 
@@ -510,7 +515,7 @@ async function readBaseEntities(
   vaultRoot: string,
   metadata: QueryRecordData | null,
   markdownMode: MarkdownParseMode,
-  signal?: AbortSignal,
+  { audits: includeAudits = true, signal }: { audits?: boolean; signal?: AbortSignal },
 ): Promise<CanonicalEntity[]> {
   signal?.throwIfAborted();
   const coreDocument = await readOptionalCoreEntity(
@@ -535,12 +540,9 @@ async function readBaseEntities(
   signal?.throwIfAborted();
   const metricSamples = await readMetricSampleEntities(vaultRoot, signal);
   signal?.throwIfAborted();
-  const audits = await readJsonlRecordFamily(
-    vaultRoot,
-    VAULT_LAYOUT.auditDirectory,
-    "audit",
-    signal,
-  );
+  const audits = includeAudits
+    ? await readJsonlRecordFamily(vaultRoot, VAULT_LAYOUT.auditDirectory, "audit", signal)
+    : [];
   signal?.throwIfAborted();
 
   return [

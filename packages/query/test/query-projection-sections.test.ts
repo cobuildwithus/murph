@@ -102,6 +102,18 @@ for (const first of QUERY_PROJECTION_SECTION_NAMES) {
   });
 }
 
+test("publication leaves audit records unread", async () => {
+  const { root } = await fixture();
+  await mkdir(path.join(root, "audit/2026"), { recursive: true });
+  await writeFile(path.join(root, "audit/2026/2026-07.jsonl"), "not an audit record\n");
+  // The default strict read still covers audits, and rejects this one.
+  await assert.rejects(source.readVaultSourceStrict(root));
+  assert.equal((await source.readVaultSourceStrict(root, { audits: false })).entities.some(entity => entity.family === "audit"), false);
+  const rebuilt = await query.rebuildQueryProjection(root);
+  assert.equal(rebuilt.fresh, true);
+  assert.deepEqual(await fresh(root), QUERY_PROJECTION_SECTION_NAMES);
+});
+
 test("entities retain display-grade summary IDs, filters and citations without metric or wearable work", async () => {
   const { root } = await fixture();
   const dataset = vi.spyOn(candidates, "collectWearableDataset");

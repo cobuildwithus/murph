@@ -28,6 +28,7 @@ import {
 } from "../wearables/observation.ts";
 import { isDeletionSentinelObservation } from "../observation-sentinels.ts";
 import { buildSampleSummaryId } from "../sample-summary-id.ts";
+import { fnv1a64Hex } from "./fnv1a64.ts";
 
 export { parseGoalMetricTargets } from "./goals.ts";
 
@@ -634,21 +635,6 @@ function metricPointIdentityTuple(point: Omit<MetricPoint, "id" | "schemaVersion
     point.canonicalValue ?? point.value ?? point.textValue ?? null,
     point.canonicalUnit ?? point.unit ?? null,
   ];
-}
-
-const FNV_64_OFFSET_BASIS = 0xcbf29ce484222325n;
-const FNV_64_PRIME = 0x100000001b3n;
-const FNV_64_MASK = 0xffffffffffffffffn;
-
-function fnv1a64Hex(value: string): string {
-  let hash = FNV_64_OFFSET_BASIS;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= BigInt(value.charCodeAt(index));
-    hash = (hash * FNV_64_PRIME) & FNV_64_MASK;
-  }
-
-  return hash.toString(16).padStart(16, "0");
 }
 
 function resolveNonEmptyMetricKey(metric: string): string {

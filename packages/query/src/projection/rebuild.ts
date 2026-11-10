@@ -87,7 +87,7 @@ export async function publishQueryProjectionSections<T>(
         await timeCliPhase("query-rebuild", () => publishSections({
           location,
           manifest,
-          readSource: options.readSource ?? readVaultSourceStrict,
+          readSource: options.readSource ?? readProjectionSource,
           sections: new Set(stale),
           vaultRoot,
         }));
@@ -111,6 +111,11 @@ export async function readFreshWearableSummaryRows(
     ["wearables"],
     (location) => readWearableSummaryRows(location, filters),
   ));
+}
+
+/** No section stores audit records, so publication never parses them. */
+function readProjectionSource(vaultRoot: string): Promise<VaultSourceSnapshot> {
+  return readVaultSourceStrict(vaultRoot, { audits: false });
 }
 
 async function publishSections(input: {
