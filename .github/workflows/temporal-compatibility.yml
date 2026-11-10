@@ -75,6 +75,8 @@ jobs:
       actions: read
       contents: read
       pull-requests: read
+    outputs:
+      unchanged: ${{ steps.base-fixtures.outputs.unchanged }}
     steps:
       - name: Revalidate exact PR head before credentialed setup
         env:
@@ -105,8 +107,29 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
+      - name: Setup Node
+        continue-on-error: true
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      # The private readers only parse the producer fixtures, and every main
+      # commit sends main's fixtures to them at release admission. When this
+      # PR's fixtures equal the ones trusted main builds, the private matrix
+      # has nothing new to prove and is not dispatched. A failure here, or in
+      # the Node setup above, falls back to the full proof.
+      - name: Compare producer fixtures with trusted main
+        id: base-fixtures
+        continue-on-error: true
+        env:
+          TEMPORAL_COMPATIBILITY_PRODUCER_FIXTURES_PATH: ${{ runner.temp }}/temporal-compatibility-producer/temporal-compatibility-producer-fixtures.json
+        run: >-
+          node scripts/hosted-orchestration-compatibility.mjs compare-base
+          --fixtures "${TEMPORAL_COMPATIBILITY_PRODUCER_FIXTURES_PATH}"
+
       - name: Mint private compatibility token
         id: private-app-token
+        if: ${{ steps.base-fixtures.outputs.unchanged != 'true' }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ vars.TEMPORAL_COMPATIBILITY_GITHUB_APP_ID }}
@@ -117,6 +140,7 @@ jobs:
           permission-contents: read
 
       - name: Dispatch exact private reader matrix
+        if: ${{ steps.base-fixtures.outputs.unchanged != 'true' }}
         env:
           EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
@@ -149,6 +173,7 @@ jobs:
           SOURCE_RESULT: ${{ github.event.workflow_run.conclusion }}
           STATUS_SHA: ${{ needs.select-pr.outputs.head_sha || github.event.workflow_run.head_sha }}
           TRUSTED: ${{ needs.select-pr.outputs.trusted }}
+          UNCHANGED: ${{ needs.compatibility.outputs.unchanged }}
         shell: bash
         run: |
           set -euo pipefail
@@ -165,6 +190,9 @@ jobs:
             description='Repo Hygiene did not pass for this exact commit.'
           elif [[ "${SELECT_RESULT}" == success && "${TRUSTED}" != true ]]; then
             description='Relevant changes require a same-repository human-authored head.'
+          elif [[ "${SELECT_RESULT}" == success && "${COMPATIBILITY_RESULT}" == success && "${UNCHANGED}" == true ]]; then
+            state=success
+            description='Temporal producer fixtures equal trusted main; no new reader proof is needed.'
           elif [[ "${SELECT_RESULT}" == success && "${COMPATIBILITY_RESULT}" == success ]]; then
             state=success
             description='Exact public SHA passed every supported private Temporal reader.'

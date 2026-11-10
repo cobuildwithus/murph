@@ -243,7 +243,13 @@ Current product admission, delivery and native runtime safety rules remain.
   attestation re-reads the complete set and fails on identity or routing drift.
   This is a fixture-only pull-request gate: private CI never checks out or
   imports public pull-request candidate code. Irrelevant changes complete
-  without private work; relevant changes require the same current public head
+  without private work. So does a relevant change whose producer fixtures
+  equal the ones trusted `main` builds: the readers would parse the same
+  bytes that every `main` commit already sends them at release admission, and
+  the merge commit is admitted again before it deploys. The trusted
+  controller makes that comparison before it mints any private credential,
+  and a comparison that fails for any reason runs the full proof. Other
+  relevant changes require the same current public head
   throughout selection and dispatch. The exact candidate producer runs in
   unprivileged public CI; the trusted controller sends only its bounded
   canonical fixture JSON and digest to private CI. Using the repository-scoped

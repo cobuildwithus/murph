@@ -991,7 +991,10 @@ The hard-cut architecture is accepted when:
   pull requests targeting the default branch may publish that SHA-global
   status, so stacked non-default-branch pull requests cannot overwrite it. The
   candidate producer runs only in unprivileged Repo Hygiene and hands the
-  trusted controller a run/head-bound bounded JSON artifact. The controller
+  trusted controller a run/head-bound bounded JSON artifact. When that
+  artifact equals the fixtures trusted `main` builds, the controller reports
+  success without dispatching private work, since release admission already
+  sends those bytes to the readers on every `main` commit. The controller
   never owns worker code or reader policy: private Murph Cloud receives only
   serialized fixture data, derives the live Current and traffic-bearing Ramping
   readers, automatically includes the exact dispatched private candidate and,
