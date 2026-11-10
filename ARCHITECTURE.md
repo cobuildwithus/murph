@@ -4548,7 +4548,7 @@ implementation, or image-specific usage lifecycle; unfinished provider work
 may be lost with the runner invocation.
 
 Reconciliation evaluates AI-usage authorization for runnable model work even
-when deterministic system lag is present. The 28-day inactivity pause is owned
+when deterministic system lag is present. The 90-day inactivity pause is owned
 by proactive iMessage egress. Authorized
 conversation/default work owns the foreground pass and imports system items
 before the assistant phase without letting a retryable system item starve fresh
@@ -6760,7 +6760,7 @@ stops at that watermark. Publication and dispatch recheck the frozen witness
 under game and mailbox locks; an expired or changed witness is stale. Recovery
 signals an existing mailbox item without replacing it. The runner parses this
 policy and allows a skip, with no game host tools or lore. Egress checks the
-28-day inactivity pause separately after validating evening currentness.
+90-day inactivity pause separately after validating evening currentness.
 
 Private game reminders reuse the signed group-tool transport for a direct-only
 `my_game_reminders` request. The runtime member and accepted direct input own
@@ -6781,7 +6781,7 @@ records an idempotent activation event. A new-person or changed-rhythm offer
 gets one `game_private_kickoff` receipt per game and member. It waits overnight
 until 09:00 local, expires 24 hours after start, and rechecks live seating and
 private text eligibility at publication and dispatch. Both notifications are
-output-only, allow a skip, and remain subject to the 28-day pause; ordinary
+output-only, allow a skip, and remain subject to the 90-day pause; ordinary
 direct replies use behavior-followthrough and the direct tool.
 
 The minute drain handles up to ten lifecycle receipts a pass, four at a time. It

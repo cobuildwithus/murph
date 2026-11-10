@@ -563,7 +563,7 @@ resulting avatar. No private photo is shared with the subject or other players.
   Murph stays quiet about someone who already said they will or will not do it.
   Three consecutive accepted scheduled evening sends without a player message
   pause future evenings until someone writes. Skips and failures do not count.
-  The 28-day iMessage inactivity pause still applies. The feature is off unless
+  The 90-day iMessage inactivity pause still applies. The feature is off unless
   `MURPH_GAME_EVENING_CHECK_IN_ENABLED` is exactly `true`.
 - **Hosted recap.** Settlement reserves one durable recap turn for the bound
   group. The turn reads the finished shared game, a bounded current-room
@@ -807,7 +807,7 @@ One private evening check-in may follow an hour after the member's reminder time
 on an open day, within a 30-minute window, when text is on and no room check-in
 covers that game. It uses only the member's own unfinished tasks, a frozen batch
 and direct-conversation watermark, and the room check-in's unanswered-evening
-pause. It remains subject to the 28-day engagement pause. On activation, the
+pause. It remains subject to the 90-day engagement pause. On activation, the
 member's reminder opt-out and count-game cadence carry from a validated previous
 game, then the latest same-people game if there is no lineage. An explicit choice
 for the new game wins over carry-over, including a delayed activation retry.
