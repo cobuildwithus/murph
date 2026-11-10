@@ -1,4 +1,5 @@
 import type { MetricSampleRecord } from "@murphai/contracts";
+export { withDeviceBatchImportPass } from "./mutations.ts";
 import {
   metricSampleRecordSchema,
   safeParseContract,

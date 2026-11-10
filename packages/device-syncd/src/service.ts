@@ -1747,26 +1747,31 @@ class DeviceSyncServiceController {
     accountId?: string,
     options: { onProcessedJobRows?: (processedJobRows: number) => void } = {},
   ): Promise<number> {
-    const maxJobRows = normalizeProviderJobBatchLimit(limit, this.workerBatchSize);
-    let processedJobRows = 0;
-    const providerExecutors = new Map<string, DeviceJobExecutor>();
+    const drain = async () => {
+      const maxJobRows = normalizeProviderJobBatchLimit(limit, this.workerBatchSize);
+      let processedJobRows = 0;
+      const providerExecutors = new Map<string, DeviceJobExecutor>();
 
-    while (processedJobRows < maxJobRows) {
-      const result = await this.runWorkerPassOnce({
-        accountId,
-        providerExecutors,
-        maxJobRows: maxJobRows - processedJobRows,
-      });
+      while (processedJobRows < maxJobRows) {
+        const result = await this.runWorkerPassOnce({
+          accountId,
+          providerExecutors,
+          maxJobRows: maxJobRows - processedJobRows,
+        });
 
-      if (!result) {
-        break;
+        if (!result) {
+          break;
+        }
+
+        processedJobRows += result.processedJobRows;
+        options.onProcessedJobRows?.(processedJobRows);
       }
 
-      processedJobRows += result.processedJobRows;
-      options.onProcessedJobRows?.(processedJobRows);
-    }
-
-    return processedJobRows;
+      return processedJobRows;
+    };
+    return this.importer.withDeviceImportPass
+      ? this.importer.withDeviceImportPass(drain)
+      : drain();
   }
 
   private claimProviderJobBatch(input: {
@@ -2130,6 +2135,9 @@ export function createDefaultImporterPort(): DeviceSyncImporterPort {
   const importers = createImporters();
 
   return {
+    withDeviceImportPass(work) {
+      return importers.withDeviceImportPass(work);
+    },
     importDeviceProviderSnapshot(input, options) {
       return importers.importDeviceProviderSnapshot(input, options);
     },
