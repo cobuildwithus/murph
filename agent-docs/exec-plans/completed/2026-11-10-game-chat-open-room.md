@@ -1,6 +1,6 @@
 # Game chats keep working when people are added
 
-Status: active
+Status: completed
 Created: 2026-11-10
 Updated: 2026-11-10
 
@@ -139,7 +139,7 @@ Replace the rule with one sentence that covers two-person and group games:
 
 ## Tasks
 
-Commit in three steps, each with its tests green:
+Implementation stages, each verified before completion:
 
 1. Authority, room evidence, chat tool, funding, Board (design 1 to 4, 6).
 2. Delivery, lifecycle and recap proof shape (design 5).
@@ -174,9 +174,8 @@ pair missed-day receipt suppresses a later group claim with a bystander present.
   4. Pair delivery must carry room evidence. Accepted (design 5), replacing
      the first draft's "pass the game's players downstream". The rollout
      coordination ask is rejected: old instances behave as today.
-  5. Board enrollment grants health sharing. First accepted, then overruled
-     by the owner on 2026-11-10 ("nah dont require this"): Board enrollment
-     follows the same room rule as everything else (design 6).
+  5. Board enrollment follows the shared bound-room rule (design 6), while
+     retaining its per-member consent and verified-contact requirements.
   6. Evening eligibility inherits morning lore selection. Accepted (design 7).
      Morning keeps its one-fingerprint rule; rooms whose group games have
      different original audiences already get no morning batch today.
@@ -262,3 +261,68 @@ git diff --check
 
 Initial runs exposed old-rule expectations and fixture omissions; final reruns
 above are green. No requested suite was unavailable locally.
+
+
+## Completion — 2026-11-10
+
+Local implementation is complete. Delivery, lifecycle append/recovery, recap
+material/sealing and final provider claims now use prepared room evidence for
+both game modes. Board enrollment follows the same bound-room rule. Evening
+eligibility and time zones derive from game players independently of morning
+lore; mixed morning claims derive pair locks and immutable receipt identities
+from live/recently settled pair-game rosters. No migration, flag or wire change.
+
+Parent review preserved two adjacent success paths: a fresh room still exposes
+verified profiles for first-game setup, and only pair bootstrap can recover
+before a provider route exists. A new setup regression test failed before the
+correction and passed afterward. Group recovery still needs room authority.
+Tests also cover restrictions changing between preparation and append, recap
+sealing or provider claim, missing players, bystanders without accounts, and
+mixed-room receipt deduplication. The initial exact-Board implementation was
+removed in accordance with Design 6. Stages 2 and 3 share the final commit.
+
+Product UX: Ready for local review. Established players continue using the same
+chat after people are added, with no newcomer announcement or additional step.
+Bystanders gain no game actions. First binding, legacy runtime capability,
+member consent, verified contacts and the morning one-lore boundary remain as
+specified above. No visual component changes or simulator proof are needed.
+
+Final validation:
+
+- Six focused unit files passed: membership, tool, lifecycle, delivery,
+  delivery authority and evening (174 passed, one pre-existing gated skip).
+  After the final setup/recovery regressions were added, the changed tool and
+  lifecycle files passed again (107 tests).
+- Database suites for groups, Board, Talk, service, mixed check-ins and
+  bootstrap recovery exercised 411 cases. Five suites passed together; the
+  final Board grant-scope assertion then passed separately (21 tests).
+- Funding and mixed check-ins passed after the reservation simplification
+  (123 tests across two database suites).
+- Real Linq egress route suite: 213 passed.
+- Web and assistant-engine typechecks passed. Web typecheck was repeated after
+  the final source and test changes.
+- Focused subscription-backed assistant journey passed: a bound pair edit
+  after a bystander joins reads the game, proposes one length change, asks the
+  other player to agree, and makes no announcement about the newcomer. The
+  synthetic reply and tool calls were inspected.
+- `pnpm complexity:diff`: passed, 11 source files, no hotspots above 20.
+  `git diff --check` and added-content identifier checks passed.
+- The task-owned loopback database was used for all integration checks; no
+  production credentials or production data were used.
+
+Operational shape: provider evidence is prepared outside transactions and
+reused for database-only revalidation. Collection size limits are unchanged;
+room funding uses the existing 32-participant bound. Morning reservation adds
+one bounded room-pair query and two set-based claim-history queries, with at
+most twenty distinct pair locks acquired in stable order before game locks.
+Evening collection uses one provider audience read and each game's actual
+players for profiles and timing. No prompt or schema text was changed.
+
+Release follow-through is outside this local continuation: no push, PR, merge
+or deployment was requested. This is changelog-eligible; the eventual PR must
+include a member-facing fragment describing games continuing in their bound
+chat with bystanders, backed by that PR's source reference. Final ReviewGPT is
+required on the stable pushed PR candidate because this touches authority,
+funding and receipt ordering, alongside exact-head CI. The earlier plan review
+does not replace that release gate. None of those unrun gates is claimed here.
+Completed: 2026-11-10

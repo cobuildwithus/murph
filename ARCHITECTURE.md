@@ -6420,7 +6420,8 @@ room's single allowance beneficiary. Funding never proves content authority.
 
 After a chat mutation, tools refresh provider and route evidence and let each
 game's authority decide the response projection. They do not compare the old
-and new whole room. Player lists and pair lore use game players; group lore
+and new whole room. Player lists and pair lore use game players; a room with
+no games still exposes verified profiles for first-game setup. Group lore
 keeps its original audience key. Legacy non-multiplayer tools stay exact.
 Group lifecycle context carries its bound room. Roomless notice lookups remain
 pair-only. Pair room reuse selects only pair games and deliberately lets a new
@@ -6740,7 +6741,9 @@ That exception requires the original lifecycle reservation template and no
 sender, payload or provider receipt evidence; frozen effects keep their existing
 reconciliation contract.
 Provider lookup and encryption stay outside database transactions. Existing-room
-delivery rechecks the primary route, exact pair and source before provider dispatch.
+delivery rechecks the primary route, shared game-room authority and source before
+provider dispatch. Pair and group notices carry the same prepared room evidence;
+final database checks retain restrictions on every resolved participant.
 Only that validated game notification bypasses iMessage inactivity; other route,
 runtime, health and dispatch fences remain authoritative.
 
@@ -6773,9 +6776,10 @@ behavior even with two players. For each missed date, the room cutoff is the
 latest next-day 9am among all eligible scheduled game/player slots in their
 frozen zones, including people who posted. The inclusive two-hour window starts
 at that cutoff. Mixed pair/group rooms use this horizon; the pair path cannot
-claim earlier. The shared reservation function takes `lockGamePair` only for a
-verified actual two-contact audience, before any game locks, then consults
-immutable pair and group delivery hashes. One `game_group_missed` receipt keyed
+claim earlier. The shared reservation function derives distinct pair locks from
+bound live and recently settled pair-game rosters, takes them in stable order
+before game locks, then consults immutable pair and group delivery hashes.
+Room size does not affect the lock or receipt identity. One `game_group_missed` receipt keyed
 by `game-missed:<roomId>:group:<firstMissedDate>` survives quiet, retries,
 settlement and uncertain sends.
 
@@ -6800,10 +6804,11 @@ receipt is skipped unless its mailbox item already exists, and a published one
 leaves the sweep without being skipped. Final egress refuses either past the same
 deadline, which also bounds outbox retries.
 
-`evening-check-in.ts` reuses the room collector, rule state and lifecycle
-publication path for pair, group and mixed rooms. The five-minute room sweep
-stays inside the minute drain's budget. Real audience membership and current
-profile zones gate the room before the latest scheduled 8pm horizon; posting and
+`evening-check-in.ts` independently validates each candidate game against one
+prepared room audience, then reuses rule state and lifecycle publication for
+pair, group and mixed rooms. It does not inherit morning lore eligibility. The five-minute room sweep
+stays inside the minute drain's budget. Current players must be in the room,
+and only their current profile zones gate the latest scheduled 8pm horizon; posting and
 per-game opt-outs affect the addressed set only. One `game_evening` receipt per
 room/date owns the claim, with the room as payload owner. Its immutable event
 key survives delivery metadata rewrites and identifies each of the previous

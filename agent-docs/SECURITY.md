@@ -1951,7 +1951,7 @@ replacement writes, because their evidence contains only room conversation and
 shared structural state. A mixed room never merges pair lore or different group
 notebooks. Public names are disambiguated once across the room; private labels,
 unjoined task overrides, captions and media never enter the instructions.
-`readGameChatAuthority` remains the sole group authority at collection,
+`readGameChatAuthority` remains the shared pair/group authority at collection,
 publication, recovery and final egress, including two-person turnout.
 
 The strict `game_group_missed_check_in` policy in the encrypted mailbox binds
@@ -1966,9 +1966,10 @@ departures do not. Provider lookup and decryption stay outside these locks.
 The mailbox causal-append lock protects the conversation-lane watermark through
 publication/dispatch. New conversation suppresses even unrelated chatter, while
 notification appends do not. Suppression, quiet, settlement and uncertain sends
-retain the immutable room/date claim. Authorized mixed two-contact rooms share
-the existing pair-before-game reservation lock and consult both receipt families
-by delivery hash even after receipt metadata is rewritten.
+retain the immutable room/date claim. Mixed rooms derive pair-before-game
+reservation locks from bound live and recently settled pair-game rosters, in
+stable order, and consult both receipt families by delivery hash even after
+receipt metadata is rewritten. Bystanders do not alter those pair identities.
 
 Deploy the compatible policy readers and runner before the Web producer. Older
 runners reject the unknown policy before generation and older Web rejects the

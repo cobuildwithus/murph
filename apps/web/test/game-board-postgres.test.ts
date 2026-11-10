@@ -293,12 +293,6 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
     mocks.audience.mockRejectedValueOnce(new Error("synthetic provider failure"));
     await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
     const evidence = await mocks.audience();
-    for (const registered of [false, true]) {
-      mocks.audience.mockResolvedValueOnce({ ...evidence,
-        contacts: [...evidence.contacts, createHostedLinqParticipantContact({ kind: "email", value: "bystander@example.test" })!],
-        memberIds: registered ? [...evidence.memberIds, f.room] : evidence.memberIds });
-      await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
-    }
     mocks.audience.mockResolvedValueOnce({ ...evidence, memberIds: [f.a, f.room] });
     await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
     mocks.audience.mockImplementationOnce(async () => { await db.game.update({ where: { id: f.gameId }, data: { chatContainerMemberId: null } }); return evidence; });
@@ -307,6 +301,16 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
     await db.game.update({ where: { id: f.gameId }, data: { chatContainerMemberId: f.room } });
     await db.gamePlayer.update({ where: { gameId_memberId: { gameId: f.gameId, memberId: f.a } }, data: { leftAt: new Date() } });
     await expect(f.read()).rejects.toMatchObject({ httpStatus: 404 });
+  });
+  it.each([false, true])("enrolls health sharing in the bound room with a bystander (registered: %s)", async registered => {
+    const f = await fixture();
+    const evidence = await mocks.audience();
+    mocks.audience.mockResolvedValueOnce({ ...evidence,
+      contacts: [...evidence.contacts, createHostedLinqParticipantContact({ kind: "email", value: "bystander@example.test" })!],
+      memberIds: registered ? [...evidence.memberIds, f.room] : evidence.memberIds });
+    await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: ["steps"] }))
+      .resolves.toMatchObject({ myShares: ["steps"] });
+    expect(await db.hostedVaultShare.count({ where: { grantorMemberId: f.a, destinationMemberId: f.room, status: "granted", projectionKind: "steps-days.v0" } })).toBe(1);
   });
   it("keeps legacy and missing snapshots pending and revalidates viewer membership after decryption", async () => {
     const f = await fixture(true);

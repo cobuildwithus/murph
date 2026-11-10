@@ -47,7 +47,7 @@ describe("game chat tool authority", () => {
     m.recapMaterial.mockResolvedValue(null);
     expect(await handleGameChatTool({ memberId: group, runtimeIdentity: null, request }))
       .toEqual({ action, result: { status: "unavailable", error: "recap_authority_unavailable" } });
-    expect(m.recapMaterial).toHaveBeenCalledExactlyOnceWith(origin.gameId, group, [actor, "other_synthetic"], origin.eventId);
+    expect(m.recapMaterial).toHaveBeenCalledExactlyOnceWith(origin.gameId, group, [actor, "other_synthetic"], origin.eventId, undefined);
     m.recapMaterial.mockClear();
     const unavailable = new Error("Synthetic roster unavailable");
     m.exact.mockRejectedValueOnce(unavailable);
@@ -101,6 +101,14 @@ describe("game chat tool authority", () => {
     expect(next.result).toHaveProperty("state.players", players.map(p => ({ ...p, isSender: p.memberId === actor })));
     expect(m.profiles).toHaveBeenCalledExactlyOnceWith([actor, "other_synthetic"]);
     expect(m.read).toHaveBeenLastCalledWith(group, [actor, "other_synthetic"], actor, false);
+  });
+  it("keeps verified room profiles available when setting up the first game", async () => {
+    const players = [{ memberId: actor, firstName: "Ava", timeZone: "UTC" }, { memberId: "other_synthetic", firstName: "Sam", timeZone: "UTC" }];
+    m.audience.mockResolvedValue({ memberIds: players.map(player => player.memberId), threadId: "chat_synthetic" });
+    m.profiles.mockResolvedValue(players);
+    const result = await handleGameChatTool({ ...read, multiplayer: true, request: { ...read.request, includePlayers: true } });
+    expect(result.result).toHaveProperty("state.players", players.map(player => ({ ...player, isSender: player.memberId === actor })));
+    expect(m.profiles).toHaveBeenCalledExactlyOnceWith(players.map(player => player.memberId));
   });
   it("reads a scheduled exact pair neutrally without sender or photo authority", async () => {
     const players = [{ memberId: actor, firstName: "Ava", timeZone: "UTC" }, { memberId: "other_synthetic", firstName: "Sam", timeZone: "UTC" }];
@@ -317,7 +325,7 @@ describe("game chat tool authority", () => {
       priorChatLines: ["Sauna citizenship held. Earlier evidence arrived."], recap };
 
     const rejected = await handleGameChatTool({ memberId: group, request, runtimeIdentity: null });
-    expect(m.recapMaterial).toHaveBeenLastCalledWith("game_synthetic", group, [actor, "other_synthetic"], request.origin.eventId);
+    expect(m.recapMaterial).toHaveBeenLastCalledWith("game_synthetic", group, [actor, "other_synthetic"], request.origin.eventId, undefined);
     expect(rejected.result).toMatchObject({ status: "rejected", recapOutcome: expect.stringContaining('chatLine: repeats "sauna citizenship held"') });
     // A recap written after the game reads only that game's chat, never the next game's.
     expect(m.mailbox).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({

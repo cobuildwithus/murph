@@ -556,10 +556,10 @@ resulting avatar. No private photo is shared with the subject or other players.
   scheduled game/player slots, Murph may ask one short question in the existing
   room naming each still-open player's own task. The half-hour window and one
   room/date claim never move earlier when someone posts; a late item is dropped.
-  Pair, group and mixed rooms share this path. Every actual recipient must be a
-  joined member with a known current game-profile time zone, and the widest
-  clock gap must be strictly under three hours. Unjoined or unresolved recipients
-  stop the room check-in. A player switched off for a game is not addressed.
+  Pair, group and mixed rooms share this path. Each eligible game needs all its
+  current players in the bound room, with known current game-profile time zones
+  and a widest clock gap strictly under three hours. Bystanders may receive the
+  message but are not addressed and their time zones do not gate the check-in. A player switched off for a game is not addressed.
   Murph stays quiet about someone who already said they will or will not do it.
   Three consecutive accepted scheduled evening sends without a player message
   pause future evenings until someone writes. Skips and failures do not count.
@@ -1069,8 +1069,10 @@ notification. Concurrent games reuse the pair's established room, including a
 room whose first message is still being prepared. An already-bound game keeps
 that room for app announcements.
 Either exact same-pair room can read and discuss the same canonical game; Murph
-replies where the players are talking without asking them to relink it. Extra
-participants make that room ineligible. Proposal copy
+replies where the players are talking without asking them to relink it. In the
+bound room, additional people do not interrupt play or announcements while all
+current players remain present. They gain no player actions, and Murph does not
+announce their arrival. A larger room the game is not bound to stays ineligible. Proposal copy
 names only the requested changes and asks the other player naturally. It mentions
 a date only for an explicit start-date change, omitting cutoff times and routine
 check-in preservation text. An
@@ -1240,7 +1242,7 @@ Fresh creation in a two-human room remains a pair, while Same again preserves
 the previous game's immutable group mode even with two humans present. The
 accepted message's signed sender is always the actor. Group creation and rematch
 require the original exact audience; later reads and delivery use the existing
-subset-room authority.
+bound-room authority with every current player present and bystanders allowed.
 
 Murph gathers each person's task (or the same task for both), one prize for the
 winner or dare for the loser, schedule, length and optional Day 1. It asks only

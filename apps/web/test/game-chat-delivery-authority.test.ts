@@ -1,3 +1,9 @@
+import type { GameChatAudience } from "../src/lib/game/chat-membership";
+vi.mock("../src/lib/hosted-routing/thread-route-store", async original => ({ ...await original<object>(),
+  readHostedThreadRouteByThreadIdentity: async () => ({ containerMemberId: "room" }) }));
+function audience(memberIds = ["person-a", "person-b", "bystander"]): GameChatAudience {
+  return { memberIds, contacts: [], resolvedContacts: [], keys: { current: null, candidates: [] }, threadId: "chat" };
+}
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { writeFile, rm } from "node:fs/promises";
@@ -14,6 +20,8 @@ const row = () => ({
 } satisfies Game & { invitees: { memberId: string | null }[]; players: Array<{ memberId: string; seat: number; timeZone: string; dayOne: Date }> });
 function setup() {
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: "postgresql://localhost/synthetic_unused" }) });
+  vi.spyOn(prisma.gameBlock, "findFirst").mockResolvedValue(null);
+  vi.spyOn(prisma.hostedMember, "findFirst").mockResolvedValue(null);
   const findFirst = vi.spyOn(prisma.game, "findFirst");
   findFirst.mockResolvedValue(row());
   const findMany = vi.spyOn(prisma.game, "findMany").mockResolvedValue([row()]);
@@ -28,7 +36,7 @@ function setup() {
   vi.spyOn(prisma, "$queryRaw").mockResolvedValue([{ id: "game" }]);
   const event = vi.spyOn(prisma.gameEvent, "findUnique").mockResolvedValue({ id: 1n, gameId: "game", actor: "person-a", createdAt: now,
     type: "change_expired", commandKey: "game-change-resolved:game:proposal", payload: { proposalId: "proposal", reason: "The start date locks once someone checks in." } });
-  return { findFirst, findMany, event, receipt, setGame, input: { tx: prisma, containerMemberId: "room", deliveryIdempotencyKey: "game-change:game:proposal", playerMemberIds: ["person-a", "person-b"], now } };
+  return { findFirst, findMany, event, receipt, setGame, input: { tx: prisma, containerMemberId: "room", deliveryIdempotencyKey: "game-change:game:proposal", audience: audience(["person-a", "person-b"]), now } };
 }
 describe("game proposal provider dispatch authority", () => {
   // Reads the base revision from git history; runs in the local MURPH_VERIFY_GAME_SKEW lane.
@@ -46,12 +54,12 @@ describe("game proposal provider dispatch authority", () => {
     await expect(legacy.assertGameProposalDeliveryCurrentTx(missed)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     await expect(assertGameProposalDeliveryCurrentTx(missed)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
-  it("requires the resolved refusal event and exact bound audience", async () => {
+  it("requires the resolved refusal event and bound room audience", async () => {
     const { input, event, setGame } = setup();
     const refusal={...input,deliveryIdempotencyKey:"game-change-expired:game:proposal"};
     expect(await assertGameProposalDeliveryCurrentTx(refusal)).toBe(true);
     expect(event).toHaveBeenCalledWith(expect.objectContaining({ where: { commandKey: "game-change-resolved:game:proposal" } }));
-    await expect(assertGameProposalDeliveryCurrentTx({...refusal,playerMemberIds:["person-a","outsider"]})).rejects.toMatchObject({code:"GAME_CHANGE_SUPERSEDED"});
+    await expect(assertGameProposalDeliveryCurrentTx({...refusal,audience: audience(["person-a","outsider"])})).rejects.toMatchObject({code:"GAME_CHANGE_SUPERSEDED"});
     setGame(null);
     await expect(assertGameProposalDeliveryCurrentTx(refusal)).rejects.toMatchObject({code:"GAME_CHANGE_SUPERSEDED"});
   });
@@ -72,15 +80,15 @@ describe("game proposal provider dispatch authority", () => {
     setGame(null);
     await expect(assertGameProposalDeliveryCurrentTx(input)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
-  it("requires a fresh two-player audience proof before granting the exemption", async () => {
+  it("requires prepared room evidence containing both players before granting the exemption", async () => {
     const { input } = setup();
     for (const playerMemberIds of [undefined, ["person-a"], ["person-a", "person-a"]]) {
-      await expect(assertGameProposalDeliveryCurrentTx({ ...input, playerMemberIds })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+      await expect(assertGameProposalDeliveryCurrentTx({ ...input, audience: playerMemberIds ? audience(playerMemberIds) : undefined })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     }
   });
   it("rejects an old game whose players differ from the current provider-proven pair", async () => {
     const { input } = setup();
-    await expect(assertGameProposalDeliveryCurrentTx({ ...input, playerMemberIds: ["person-a", "person-c"] })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, audience: audience(["person-a", "person-c"]) })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
   it("rejects replaced or expired proposals before provider dispatch", async () => {
     const { input, setGame } = setup();
@@ -90,12 +98,12 @@ describe("game proposal provider dispatch authority", () => {
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, now: new Date("2030-03-06T16:00:00Z") })).resolves.toBe(true);
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, now: new Date("2030-03-13T16:00:00Z") })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
-  it("allows a live kickoff only in its primary room with the exact audience", async () => {
+  it("allows a live kickoff only in its primary room with both players present", async () => {
     const { input, findFirst, setGame } = setup();
     const kickoff = { ...input, deliveryIdempotencyKey: "game-started:game" };
     await expect(assertGameProposalDeliveryCurrentTx(kickoff)).resolves.toBe(true);
     expect(findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "game", chatContainerMemberId: "room", status: "live" } }));
-    await expect(assertGameProposalDeliveryCurrentTx({ ...kickoff, playerMemberIds: ["person-a", "stranger"] })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await expect(assertGameProposalDeliveryCurrentTx({ ...kickoff, audience: audience(["person-a", "stranger"]) })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     setGame(null);
     await expect(assertGameProposalDeliveryCurrentTx(kickoff)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
@@ -109,7 +117,7 @@ describe("game proposal provider dispatch authority", () => {
       id: "game", chatContainerMemberId: "room", status: "settled",
       OR: [{ maxPlayers: 10 }, { maxPlayers: 2, players: { none: { leftAt: { not: null } } } }],
     }) }));
-    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game", playerMemberIds: ["person-a", "outsider"] }))
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game", audience: audience(["person-a", "outsider"]) }))
       .rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     setGame(null);
     await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game" }))
@@ -141,7 +149,7 @@ describe("game proposal provider dispatch authority", () => {
   });
   it("allows a rematch only while its addressed pair is still invited in the inherited room", async () => {
     const { input, findFirst, setGame } = setup();
-    const invited = { ...row(), status: "invited", invitees: [{ memberId: "person-b" }], pendingChange: null,
+    const invited = { ...row(), status: "invited", previousGameId: "previous", invitees: [{ memberId: "person-b" }], pendingChange: null,
       players: [row().players[0]!] };
     setGame(invited);
     const rematch = { ...input, deliveryIdempotencyKey: "game-rematch:game" };
@@ -149,7 +157,7 @@ describe("game proposal provider dispatch authority", () => {
     expect(findFirst).toHaveBeenLastCalledWith(expect.objectContaining({ where: {
       id: "game", chatContainerMemberId: "room", status: "invited",
     } }));
-    await expect(assertGameProposalDeliveryCurrentTx({ ...rematch, playerMemberIds: ["person-a", "stranger"] }))
+    await expect(assertGameProposalDeliveryCurrentTx({ ...rematch, audience: audience(["person-a", "stranger"]) }))
       .rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     setGame({ ...invited, inviteExpiresAt: now });
     await expect(assertGameProposalDeliveryCurrentTx(rematch)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
@@ -173,7 +181,7 @@ describe("game proposal provider dispatch authority", () => {
       id: "game", chatContainerMemberId: "room", status: "void", events: { some: { type: "cancelled" } },
     } }));
     for (const playerMemberIds of [undefined, ["person-a", "stranger"], ["person-a"]]) {
-      await expect(assertGameProposalDeliveryCurrentTx({ ...cancelled, playerMemberIds })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+      await expect(assertGameProposalDeliveryCurrentTx({ ...cancelled, audience: playerMemberIds ? audience(playerMemberIds) : undefined })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     }
     setGame(null);
     await expect(assertGameProposalDeliveryCurrentTx(cancelled)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
@@ -188,7 +196,7 @@ describe("game proposal provider dispatch authority", () => {
     const cancelled = { ...input, deliveryIdempotencyKey: "game-change-cancelled:game:proposal" };
     await expect(assertGameProposalDeliveryCurrentTx(cancelled)).resolves.toBe(true);
     expect(event).toHaveBeenCalledWith(expect.objectContaining({ where: { commandKey: "game-change-resolved:game:proposal" } }));
-    await expect(assertGameProposalDeliveryCurrentTx({ ...cancelled, playerMemberIds: ["person-a", "stranger"] })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    await expect(assertGameProposalDeliveryCurrentTx({ ...cancelled, audience: audience(["person-a", "stranger"]) })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     setGame(null);
     await expect(assertGameProposalDeliveryCurrentTx(cancelled)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     await expect(assertGameProposalDeliveryCurrentTx({ ...cancelled, deliveryIdempotencyKey: "game-change-cancelled:game:" })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });

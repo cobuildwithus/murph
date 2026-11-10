@@ -280,7 +280,8 @@ top-level response window stay unchanged.
 `PUT /api/game/v1/people/:memberId/board/sharing` takes
 `{ expectedMembershipId: string | null, numbers: MetricName[] }` and returns a
 fresh `{ board }`. Null means an intentional first join, authorized by a current
-pair seat and prepared exact chat evidence revalidated at mutation. Existing
+pair seat and prepared bound-room evidence revalidated at mutation. Both players
+must be present; bystanders are allowed at first enrollment too. Existing
 members retain self-service sharing authority. Only these four scopes are
 replaced; other permissions survive. Stale membership gives
 `409 MEMBERSHIP_CHANGED`; missing current consent uses the existing

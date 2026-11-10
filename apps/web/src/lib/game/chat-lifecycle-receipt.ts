@@ -1,3 +1,4 @@
+import { GAME_MISSED_ROOM_MAX_GAMES } from "@murphai/hosted-execution/runtime-control";
 import { isPairRoster } from "./roster";
 import { lockGamePair } from "./blocks";
 import { gamePairWhere } from "./chat-membership";
@@ -72,28 +73,30 @@ type MissedDayReservation = {
   firstMissedDate: string; dueAt: Date; now: Date; tx: Prisma.TransactionClient;
   beforeClaim?: (tx: Prisma.TransactionClient) => Promise<boolean>;
 } & ({ gameId: string; memberId: string; playerMemberIds: readonly string[]; roomId?: never }
-  | { roomId: string; pairMemberIds: readonly string[] });
+  | { roomId: string });
 
-/** One claim owner. Verified two-contact rooms use the same pair-before-game lock. */
+/** One claim owner. Game rosters, never room size, select pair-before-game locks. */
 export async function reserveGameMissedDayTx(input: MissedDayReservation): Promise<boolean> {
   const { tx } = input;
   const group = input.roomId !== undefined;
-  const players = group ? input.pairMemberIds : input.playerMemberIds;
-  if (isPairRoster(players)) await lockGamePair(tx, players[0]!, players[1]!);
-  else if (!group) return false;
+  const pairs = group ? await readMissedDayRoomPairs(tx, input.roomId, input.dueAt) : [input.playerMemberIds];
+  if (!pairs?.every(isPairRoster)) return false;
+  for (const pair of pairs) await lockGamePair(tx, pair[0]!, pair[1]!);
   if (input.beforeClaim && !await input.beforeClaim(tx)) return false;
-  const current = group ? null : await tx.game.findFirst({ where: { id: input.gameId, status: "live", chatContainerMemberId: { not: null } }, select: { chatContainerMemberId: true } });
-  const roomId = group ? input.roomId : current?.chatContainerMemberId;
+  const roomId = group ? input.roomId : (await tx.game.findFirst({ where: { id: input.gameId, status: "live", chatContainerMemberId: { not: null } },
+    select: { chatContainerMemberId: true } }))?.chatContainerMemberId;
   if (!roomId) return false;
   // Mixed rooms belong to the room collector, even before its cutoff or claim.
   if (!group && await tx.game.findFirst({ where: { chatContainerMemberId: roomId, maxPlayers: 10, status: "live" }, select: { id: true } })) return false;
-  const games = await missedDayPairClaimGameIds(tx, players, input.dueAt, group);
+  const games = await missedDayPairClaimGames(tx, pairs, input.dueAt, group);
   if (!games) return false;
-  const [gameIds, memberIds] = group || games.length > 1 ? [games, players] : [[input.gameId], [input.memberId]];
+  const pairEvents = group || games.length > 1
+    ? games.flatMap(game => game.players.flatMap(player => player.memberId ? [gameMissedDayEventId(game.id, player.memberId, input.firstMissedDate)] : []))
+    : [gameMissedDayEventId(input.gameId, input.memberId, input.firstMissedDate)];
   // Immutable hashes survive quiet, settlement and delivery's source/template rewrite.
   const eventId = group ? gameGroupMissedDayEventId(roomId, input.firstMissedDate) : gameMissedDayEventId(input.gameId, input.memberId, input.firstMissedDate);
   const keys = [gameGroupMissedDayEventId(roomId, input.firstMissedDate),
-    ...gameIds.flatMap(gameId => memberIds.map(memberId => gameMissedDayEventId(gameId, memberId, input.firstMissedDate)))]
+    ...pairEvents]
     .map(createHostedLinqDeliveryIdempotencyLookupKey).filter((key): key is string => key !== null);
   if (await tx.hostedLinqDelivery.findFirst({ where: { idempotencyKey: { in: keys } }, select: { id: true } })) return false;
   const key = createHostedLinqDeliveryIdempotencyLookupKey(eventId);
@@ -105,17 +108,29 @@ export async function reserveGameMissedDayTx(input: MissedDayReservation): Promi
   return created.count === 1;
 }
 
-async function missedDayPairClaimGameIds(tx: Prisma.TransactionClient, players: readonly string[], dueAt: Date, group: boolean): Promise<string[] | null> {
-  if (!isPairRoster(players)) return [];
-  const pairWhere = { maxPlayers: 2, ...gamePairWhere(players) };
-  const take = GAME_MAX_OPEN_PER_PAIR + (group ? 1 : 0);
-  // Preserve the pair-only query bounds; the room collector detects overflow.
+/** Include recently settled pairs so a prior pair notice still suppresses a room claim. */
+async function readMissedDayRoomPairs(tx: Prisma.TransactionClient, roomId: string, dueAt: Date): Promise<string[][] | null> {
+  const games = await tx.game.findMany({ where: { chatContainerMemberId: roomId, maxPlayers: 2,
+    OR: [{ status: "live" }, { status: "settled", settledAt: { gte: new Date(dueAt.getTime() - MISSED_DATE_CLAIM_LOOKBACK_MS) } }] },
+    select: { players: { select: { memberId: true }, take: 3 } }, take: GAME_MISSED_ROOM_MAX_GAMES + 1 });
+  if (games.length > GAME_MISSED_ROOM_MAX_GAMES) return null;
+  const pairs = games.map(game => game.players.map(player => player.memberId));
+  const valid = pairs.filter((pair): pair is string[] => pair.every((id): id is string => id !== null) && isPairRoster(pair));
+  return [...new Map(valid.map(pair => { const sorted = [...pair].sort(); return [sorted.join(":"), sorted] as const; })).entries()]
+    .sort(([a], [b]) => a.localeCompare(b)).map(([, pair]) => pair);
+}
+
+async function missedDayPairClaimGames(tx: Prisma.TransactionClient, pairs: readonly (readonly string[])[], dueAt: Date, group: boolean) {
+  if (!pairs.length) return [];
+  const take = GAME_MAX_OPEN_PER_PAIR * pairs.length + (group ? 1 : 0);
+  const pairWhere = { maxPlayers: 2, OR: pairs.map(gamePairWhere) };
+  const select = { id: true, players: { select: { memberId: true }, take: 2 } } as const;
   const [active, ended] = await Promise.all([
-    tx.game.findMany({ where: { ...pairWhere, status: "live" }, select: { id: true }, take }),
-    tx.game.findMany({ where: { ...pairWhere, status: "settled", settledAt: { gte: new Date(dueAt.getTime() - MISSED_DATE_CLAIM_LOOKBACK_MS) } }, select: { id: true }, take }),
+    tx.game.findMany({ where: { ...pairWhere, status: "live" }, select, take }),
+    tx.game.findMany({ where: { ...pairWhere, status: "settled", settledAt: { gte: new Date(dueAt.getTime() - MISSED_DATE_CLAIM_LOOKBACK_MS) } }, select, take }),
   ]);
-  if (group && (active.length > GAME_MAX_OPEN_PER_PAIR || ended.length > GAME_MAX_OPEN_PER_PAIR)) return null;
-  return [...active, ...ended].map(game => game.id);
+  if (group && (active.length >= take || ended.length >= take)) return null;
+  return [...active, ...ended];
 }
 
 /** App proposals, including invite negotiation, own one ordinary proposal send. */

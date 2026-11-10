@@ -11,8 +11,7 @@ import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxMaxSeqByLane, 
 import { getPrisma } from "../prisma";
 import { isGameOn } from "./access";
 import { lockGamePair } from "./blocks";
-import { GameChatAudienceError, readGameChatAuthority, requireExactGameChat, sameGamePlayers, type GameChatAudience } from "./chat-membership";
-import { readGroupMissedDayRoom } from "./group-missed-day";
+import { GameChatAudienceError, readGameChatAuthority, readGameChatAudience, type GameChatAudience } from "./chat-membership";
 import { visitGameMissedCheckInPages } from "./missed-check-in";
 import { reminderOpenDay } from "./reminders";
 import { currentTerms, eligibleFromDay, isScheduledDay, remainingPlayers, type RuleState } from "./rules";
@@ -56,10 +55,7 @@ async function readRoom(roomId: string, gameIds?: readonly string[], now = new D
   const room = await readEligibleRoomGames(roomId, ids, worthProving);
   if (!room) return null;
   const { games, audience } = room;
-  const memberIds = audience?.memberIds ?? await readPairAudience(roomId);
-  if (!memberIds) return null;
-  if (audience && (audience.contacts.length !== memberIds.length || audience.resolvedContacts.some(contact => !contact.memberId))) return null;
-  if (!games.every(game => hasJoinedAudience(game.row, memberIds))) return null;
+  const memberIds = [...new Set(games.flatMap(game => remainingPlayers(game.state).map(player => player.memberId)))];
   const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: [...memberIds] } }, select: { memberId: true, timeZone: true } });
   if (profiles.length !== memberIds.length || profiles.some(profile => !normalizeIanaTimeZone(profile.timeZone))) return null;
   const zones = profiles.map(profile => profile.timeZone);
@@ -74,31 +70,18 @@ export async function roomCoversEveningGame(roomId: string | null, gameId: strin
   return Boolean(room?.games.some(game => game.row.id === gameId));
 }
 
-async function readPairAudience(roomId: string): Promise<readonly string[] | null> {
-  try { return await requireExactGameChat(roomId); }
-  catch (error) {
-    if (error instanceof Error && ["Game chat requires 2 to 10 available players.", "Game chat requires verified players.",
-      "The game's chat participants have changed.", "Game chat route is unavailable."].includes(error.message)) return null;
-    throw error;
-  }
-}
-
-async function readEligibleRoomGames(roomId: string, ids: readonly string[], worthProving?: (games: Games) => boolean): Promise<{ games: Games; audience: GameChatAudience | undefined } | null> {
+/** Each game's current players determine eligibility, independently of other games. */
+async function readEligibleRoomGames(roomId: string, ids: readonly string[], worthProving?: (games: Games) => boolean) {
   const prisma = getPrisma();
-  const games = await loadGameMissedCheckInGames(prisma, ids);
-  if (worthProving && !worthProving(games)) return null;
-  const group = games.some(game => game.row.maxPlayers === 10);
-  const groupRoom = group ? await readGroupMissedDayRoom(roomId, ids) : null;
-  if (group && !groupRoom) return null;
-  const eligible = groupRoom?.games ?? games.filter(game => game.row.status === "live" && game.row.chatContainerMemberId === roomId && isGameOn(game.row));
-  if (!eligible.length) return null;
-  return { games: eligible, audience: groupRoom?.audience };
-}
-
-function hasJoinedAudience(row: Games[number]["row"], memberIds: readonly string[]): boolean {
-  return row.maxPlayers === 10
-    ? memberIds.every(id => row.players.some(player => player.memberId === id && !player.leftAt && player.joinedAt))
-    : sameGamePlayers(row.players.map(player => player.memberId), memberIds) && row.players.every(player => !player.leftAt);
+  const candidates = await loadGameMissedCheckInGames(prisma, ids);
+  if (worthProving && !worthProving(candidates)) return null;
+  const audience = await readGameChatAudience(roomId);
+  const games: Games = [];
+  for (const game of candidates) {
+    if (game.row.status === "live" && game.row.chatContainerMemberId === roomId && isGameOn(game.row)
+      && await readGameChatAuthority(game.row, roomId, audience)) games.push(game);
+  }
+  return games.length ? { games, audience } : null;
 }
 
 function addressedBatch(games: Games, date: string, now: Date): HostedGameEveningCheckInPolicy["batch"] {
@@ -162,7 +145,9 @@ export async function reserveGameEveningCheckIn(roomId: string, gameIds: readonl
     const policy = gameEveningCheckInPolicySchema.parse({ kind: "game_evening_check_in", eventId, roomId, date,
       expiresAt: new Date(dueAt.getTime() + WINDOW_MS).toISOString(), conversationLaneSeq: "0", batch });
     const created = await getPrisma().$transaction(async tx => {
-      if (room.memberIds.length === 2) await lockGamePair(tx, room.memberIds[0]!, room.memberIds[1]!);
+      const pairs = room.games.filter(game => game.row.maxPlayers === 2)
+        .map(game => game.row.players.map(player => player.memberId!).sort()).sort((a, b) => a.join(":").localeCompare(b.join(":")));
+      for (const pair of pairs) await lockGamePair(tx, pair[0]!, pair[1]!);
       if (!await isEveningBatchCurrentTx(policy, room.memberIds, room.audience, tx, now, false)
         || await paused(roomId, gameEveningCheckInHorizons(room.games.map(game => game.state)), date, tx)) return false;
       const result = await tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
@@ -225,7 +210,9 @@ export async function isEveningBatchCurrentTx(policy: HostedGameEveningCheckInPo
   await tx.$queryRaw`SELECT id FROM game WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
   const games = await loadGameMissedCheckInGames(tx, ids);
   if (games.length !== ids.length || games.some(game => game.row.status !== "live" || game.row.chatContainerMemberId !== policy.roomId || !isGameOn(game.row))) return false;
-  if (!await roomAudienceCurrentTx(games, policy.roomId, memberIds, audience, tx)) return false;
+  if (!audience) return false;
+  for (const { row } of games) if (!await readGameChatAuthority(row, policy.roomId, audience, tx)) return false;
+  memberIds = [...new Set(games.flatMap(game => remainingPlayers(game.state).map(player => player.memberId)))];
   const profiles = await tx.gameProfile.findMany({ where: { memberId: { in: [...memberIds] } }, select: { timeZone: true } });
   if (profiles.length !== memberIds.length || profiles.some(profile => !normalizeIanaTimeZone(profile.timeZone))
     || gameZoneSpreadHours(profiles.map(profile => profile.timeZone), now) >= GAME_ROOM_FAR_APART_HOURS) return false;
@@ -235,16 +222,6 @@ export async function isEveningBatchCurrentTx(policy: HostedGameEveningCheckInPo
   await acquireHostedMailboxCausalAppendLockTx({ tx, userId: policy.roomId });
   const [watermark] = await readHostedMailboxMaxSeqByLane({ prisma: tx, userId: policy.roomId, lanes: ["conversation"] });
   return watermark.maxSeq === policy.conversationLaneSeq;
-}
-
-async function roomAudienceCurrentTx(games: Games, roomId: string, memberIds: readonly string[], audience: GameChatAudience | undefined,
-  tx: Prisma.TransactionClient): Promise<boolean> {
-  for (const { row } of games) {
-    if (!hasJoinedAudience(row, memberIds)) return false;
-    if (row.maxPlayers === 10 && (!audience || audience.contacts.length !== memberIds.length
-      || !await readGameChatAuthority(row, roomId, audience, tx))) return false;
-  }
-  return true;
 }
 
 export async function readGameEveningDeliveryAuthority(eventId: string, roomId: string, target?: string | null) {

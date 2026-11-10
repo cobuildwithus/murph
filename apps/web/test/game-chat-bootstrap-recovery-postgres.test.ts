@@ -133,7 +133,7 @@ describe.skipIf(!enabled)("game bootstrap lifecycle recovery against PostgreSQL"
     const access = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/runtime-access")>("@/src/lib/hosted-mailbox/runtime-access");
     m.activeAccess.mockImplementation(access.requireHostedRuntimeActiveAccessForUpdateTx);
     await db.hostedMember.createMany({ data: [a, b, room].map(id => ({ id, billingStatus: "not_started" })) });
-    await db.hostedMemberIdentity.createMany({ data: [a, b].map((memberId, index) => ({ memberId, phoneLookupKey: createHostedPhoneLookupKey(index === 0 ? "+15555550101" : "+15555550102") })) });
+    await db.hostedMemberIdentity.createMany({ data: [a, b].map((memberId, index) => ({ memberId, phoneNumberVerifiedAt: new Date(), phoneLookupKey: createHostedPhoneLookupKey(index === 0 ? "+15555550101" : "+15555550102") })) });
     for (const actorMemberId of [a, b]) await runGameCommand({ actorMemberId, command: { type: "setProfile", firstName: actorMemberId === a ? "Ava" : "Sam", timeZone: "UTC" } });
     const tokens = new Map<string, string>();
     for (const [index, gameId] of [older, newer].entries()) {

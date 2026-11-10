@@ -2675,15 +2675,15 @@ export type GameRecapMaterial = {
 };
 
 /** Finished shared projection for the bound recap turn; omit eventId only before publication, when nothing has been exposed. */
-export async function readGameRecapMaterial(gameId: string, containerMemberId: string, expectedPlayers: readonly string[], eventId?: string): Promise<GameRecapMaterial | null> {
+export async function readGameRecapMaterial(gameId: string, containerMemberId: string, expectedPlayers: readonly string[], eventId?: string, audience?: GameChatAudience): Promise<GameRecapMaterial | null> {
   const prisma = getPrisma();
   const row = await prisma.game.findFirst({ where: { id: gameId, chatContainerMemberId: containerMemberId, status: "settled", OR: [{ maxPlayers: 10 }, { maxPlayers: 2, players: { none: { leftAt: { not: null } } } }] }, include: { invitees: true, players: { orderBy: { seat: "asc" } }, tickets: true } });
   if (!row || !row.result) return null;
   const recapPlayers = row.maxPlayers === 10 ? groupGameRecapPlayers(row) : row.players;
-  if (!recapPlayers || !recapPlayers.every(hasGameIdentity) || row.maxPlayers !== 10 && !sameGamePlayers(recapPlayers.map(player => player.memberId), expectedPlayers)) return null;
+  if (!recapPlayers || !recapPlayers.every(hasGameIdentity) || row.maxPlayers !== 10 && !audience && !sameGamePlayers(recapPlayers.map(player => player.memberId), expectedPlayers)) return null;
   const memberIds = recapPlayers.map(player => player.memberId);
-  if (await hasGameChatBlock(prisma, expectedPlayers)) return null;
-  if (row.maxPlayers === 10 && !await readGameChatAuthority(row, containerMemberId)) return null;
+  const roomAudience = audience ?? await readGameChatAudience(containerMemberId);
+  if (!await readGameChatAuthority(row, containerMemberId, roomAudience)) return null;
   const rowEntries = await prisma.gameEntry.findMany({ where: { gameId, ...(row.maxPlayers === 10 ? { memberId: { in: memberIds } } : {}) }, orderBy: { receivedAt: "asc" } });
   const allowed = await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
@@ -2750,7 +2750,7 @@ export async function sealGameRecap(input: {
   const prisma = getPrisma();
   const row = await prisma.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled" } });
   if (!row || row.maxPlayers !== 10 && !sameGamePlayers(input.playerMemberIds, input.playerMemberIds)) return null;
-  const audience = row.maxPlayers === 10 ? await readGameChatAudience(input.containerMemberId) : undefined;
+  const audience = await readGameChatAudience(input.containerMemberId);
   const recapEncrypted = input.recap === null
     ? null
     : await seal(gameTarget(row, "recap"), JSON.stringify(input.recap));
@@ -2768,8 +2768,9 @@ export async function sealGameRecap(input: {
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
     const current = await tx.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled", OR: [{ maxPlayers: 10 }, { maxPlayers: 2, players: { none: { leftAt: { not: null } } } }] }, include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
     if (!current || current.wordsOwnerMemberId !== row.wordsOwnerMemberId) return null;
-    if (current.maxPlayers === 10 ? !groupGameRecapPlayers(current) || !audience || !await readGameChatAuthority(current, input.containerMemberId, audience, tx)
-      : !sameGamePlayers(current.players.map((player) => player.memberId), input.playerMemberIds) || await hasGameChatBlock(tx, input.playerMemberIds)) return null;
+    if ((current.maxPlayers === 10 ? !groupGameRecapPlayers(current)
+      : !sameGamePlayers(current.players.map(player => player.memberId), input.playerMemberIds))
+      || !await readGameChatAuthority(current, input.containerMemberId, audience, tx)) return null;
     if (!await settleGameRecapGenerationTx(tx, current, input.eventId)) return null;
     if (scope.regenerationId) {
       const requested = await tx.gameEvent.findUnique({ where: { commandKey: input.eventId }, select: { gameId: true, type: true } });

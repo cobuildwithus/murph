@@ -1009,6 +1009,63 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     expect(await readGameChatAuthority(await gameRow(gameId), room)).toBeNull();
   });
 
+  it.each([false, true])("delivers and seals a pair recap in its expanded room (registered bystander: %s)", async registered => {
+    const people = [await person(), await person()], members = people.map(person => person.id);
+    const bystander = registered ? await person() : { id: "", email: "bystander@example.test" };
+    const room = await exactRoom(people);
+    const created = await runGameCommand({ actorMemberId: people[0].id, command: { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Player",
+      terms: { ...terms, defaultTask: undefined, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }] } }, now: createdAt });
+    if (!created.ok || !created.game?.inviteToken) throw new Error("Expected pair invitation");
+    const game = { id: created.game.id, token: created.game.inviteToken };
+    await ok(people[1].id, join(game.token));
+    await bindPairGameChat(game.id, members, room);
+    chatProof.rooms.set(room, [...people.map(person => person.email), bystander.email]);
+    prepareGroupLifecycle(room);
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    const { readGameProposalDeliveryPlayers } = await import("@/src/lib/game/chat-delivery");
+    expect(await deliverGameChatLifecycle(game.id, "started")).toBe(true);
+    expect(lifecycleProof.append).toHaveBeenCalledOnce();
+    const authority = await readGameProposalDeliveryPlayers(`game-started:${game.id}`, room, room);
+    if (!authority || "policy" in authority) throw new Error("Expected game room authority");
+    const dispatch = () => db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: room,
+      deliveryIdempotencyKey: `game-started:${game.id}`, audience: authority }));
+    expect(await dispatch()).toBe(true);
+    if (registered) {
+      await db.hostedMember.update({ where: { id: bystander.id }, data: { suspendedAt: createdAt } });
+      await expect(dispatch()).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+      await db.hostedMember.update({ where: { id: bystander.id }, data: { suspendedAt: null } });
+    }
+    await settle(game.id, people[0].id);
+    expect((await readGameRecapMaterial(game.id, room, authority.memberIds, undefined, authority))?.validation.result).toHaveLength(2);
+    const sealing = await queuedGroupRecap({ game, room, people, members });
+    if (registered) {
+      expect(await sealGameRecap({ ...sealing, beforeMutationTx: async tx => {
+        await tx.hostedMember.update({ where: { id: bystander.id }, data: { suspendedAt: createdAt } });
+      } })).toBeNull();
+      expect((await gameRow(game.id)).recapEncrypted).toBeNull();
+      await db.hostedMember.update({ where: { id: bystander.id }, data: { suspendedAt: null } });
+    }
+    expect(await sealGameRecap(sealing)).toEqual(sealing.recap);
+    expect(await readGame(game.id, people[1].id)).toMatchObject({ recap: sealing.recap });
+  });
+
+  it("rechecks a pair room restriction after notice preparation before append", async () => {
+    const people = [await person(), await person()], bystander = await person(), room = await exactRoom(people);
+    const created = await runGameCommand({ actorMemberId: people[0].id, command: { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Player",
+      terms: { ...terms, defaultTask: undefined, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }] } }, now: createdAt });
+    if (!created.ok || !created.game?.inviteToken) throw new Error("Expected pair invitation");
+    await ok(people[1].id, join(created.game.inviteToken));
+    await bindPairGameChat(created.game.id, people.map(person => person.id), room);
+    chatProof.rooms.set(room, [...people.map(person => person.email), bystander.email]);
+    prepareGroupLifecycle(room);
+    lifecycleProof.prepare.mockImplementationOnce(async () => {
+      await db.hostedMember.update({ where: { id: bystander.id }, data: { suspendedAt: createdAt } }); return {};
+    });
+    const { deliverGameChatLifecycle } = await vi.importActual<typeof import("@/src/lib/game/chat-lifecycle")>("@/src/lib/game/chat-lifecycle");
+    expect(await deliverGameChatLifecycle(created.game.id, "started")).toBe(false);
+    expect(lifecycleProof.append).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])("reads and funds ten players plus a bystander through real room evidence (registered: %s)", async registered => {
     const people = await Promise.all(Array.from({ length: 10 }, () => person()));
     const room = await exactRoom(people);

@@ -128,7 +128,7 @@ function sameRoomIdentities(left: readonly string[], right: readonly string[]): 
 /** Preserve the unmarked response shape for older strict runtime readers. */
 async function readGameToolState(input: Input, playerMemberIds: readonly string[], actor?: string) {
   const state = await readGameChatState(input.memberId, playerMemberIds, actor, input.multiplayer === true, ...(input.audience ? [input.audience] : []));
-  const visiblePlayers = input.multiplayer
+  const visiblePlayers = input.multiplayer && state.games.length > 0
     ? [...new Set(state.games.flatMap(game => game.players.map(player => player.memberId)))] : playerMemberIds;
   return hostedGameChatStateSchema.parse({ ...state,
     ...(input.request.action === "read_game" && input.request.includePlayers && visiblePlayers.length ? { players: (await readGameChatProfiles(visiblePlayers)).map(player => ({ ...player, isSender: player.memberId === actor })) } : {}),
@@ -209,12 +209,13 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
   });
   if (await isGameRecapGenerationRetired(prisma, eventId, input.memberId)) return { action: input.request.action, result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
-  const players = await requireExactGameChat(input.memberId, input.multiplayer);
-  if (!supportsGameChatRoster(input, players)) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const audience = input.multiplayer ? await readGameChatAudience(input.memberId) : undefined;
-  const material = await readGameRecapMaterial(gameId, input.memberId, players, eventId);
+  const roomPlayers = audience?.memberIds ?? await requireExactGameChat(input.memberId);
+  if (!supportsGameChatRoster(input, roomPlayers)) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
+  const material = await readGameRecapMaterial(gameId, input.memberId, roomPlayers, eventId, audience);
   if (!material) return unavailable();
-  if ((!input.multiplayer && material.validation.group) || !material.validation.group && audience && (audience.contacts.length !== 2 || await hasGameChatRestriction(prisma, audience.memberIds))) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
+  const players = material.validation.playerNamesByMemberId.map(player => player.memberId);
+  if (!input.multiplayer && material.validation.group) return { action: input.request.action, result: { status: "unavailable", error: "recap_authority_unavailable" } };
   if (input.request.action === "read_game") return { action: "read_game", result: { status: "ok", recapGame: material.game } };
   const authorizeMutation = async (tx: Prisma.TransactionClient) => {
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);

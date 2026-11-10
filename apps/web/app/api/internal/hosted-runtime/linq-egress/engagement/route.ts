@@ -134,19 +134,18 @@ export const POST = withJsonError(async (request: Request) => {
     authorityCheckOnly, expectedResolvedRoute, replyToMessageId, targetKind,
     deliveryPurpose: body.deliveryPurpose, memberId: userId, target, prisma,
   });
-  const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId, gameTarget);
+  const gameChatAuthority = await readGameProposalDeliveryPlayers(idempotencyKey, userId, gameTarget);
   const rematchTermsVersion = await readGameRematchDeliveryRevision(idempotencyKey, userId);
   const privateEveningPolicy = idempotencyKey?.startsWith("game-evening-private:")
     ? await readPrivateEveningDeliveryAuthority(idempotencyKey, userId) : null;
   const privateKickoffPolicy = idempotencyKey?.startsWith("game-dm:")
     ? await readPrivateKickoffDeliveryAuthority(idempotencyKey, userId) : null;
 
-  const gameAuthority = gameChatPlayers && "policy" in gameChatPlayers
-    ? "memberIds" in gameChatPlayers
-      ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers.audience, eveningPolicy: gameChatPlayers.policy }
-      : { playerMemberIds: gameChatPlayers.audience.memberIds, audience: gameChatPlayers.audience, groupMissedPolicy: gameChatPlayers.policy }
-    : gameChatPlayers && "memberIds" in gameChatPlayers
-    ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers } : { playerMemberIds: gameChatPlayers };
+  const gameAuthority = gameChatAuthority && "policy" in gameChatAuthority
+    ? "memberIds" in gameChatAuthority
+      ? { playerMemberIds: gameChatAuthority.memberIds, audience: gameChatAuthority.audience, eveningPolicy: gameChatAuthority.policy }
+      : { playerMemberIds: gameChatAuthority.audience.memberIds, audience: gameChatAuthority.audience, groupMissedPolicy: gameChatAuthority.policy }
+    : { audience: gameChatAuthority };
 
   const assertion = await prisma.$transaction(async (tx) => {
     await lockGameEgressRouteTx({ tx, targetKind, expectedResolvedRoute, target: lockTarget, userId });

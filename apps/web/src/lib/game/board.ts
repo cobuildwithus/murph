@@ -12,7 +12,7 @@ import { lockHostedGroupRow, readHostedGroupBoardData, saveHostedGroupBoardShari
 import { finishHostedGroupJoin } from "../hosted-groups/join-post-commit";
 import { gameOnWhere } from "./access";
 import { areGamePlayersBlocked, lockGamePair } from "./blocks";
-import { gameChatContextCurrent, readGameChatAudience, sameGamePlayers } from "./chat-membership";
+import { gameChatContextCurrent, readGameChatAudience } from "./chat-membership";
 import { verifiedGameContactKeys } from "./audience";
 import { gameNotFound } from "./http/errors";
 import { BOARD_METRICS, boardCrowns, boardNumber, type BoardMetric, type BoardPerson, type PairBoard } from "./board-numbers";
@@ -130,8 +130,7 @@ export async function savePairBoardSharing(viewerId: string, otherId: string, in
         const row = await tx.game.findUnique({ where: { id: binding.gameId },
           select: { maxPlayers: true, audienceKey: true, chatContainerMemberId: true, status: true, previousGameId: true, createdBy: true, invitees: { take: 2, select: { memberId: true, recipientLookupKey: true } }, players: { take: 2, select: { memberId: true, leftAt: true, seat: true } } } });
         const route = await readHostedThreadRouteByThreadIdentity({ channel: "linq", threadId: audience.threadId, prisma: tx });
-        if (!row || audience.contacts.length !== 2 || !sameGamePlayers(audience.memberIds, [viewerId, otherId])
-          || route?.containerMemberId !== binding.runtimeMemberId || !await gameChatContextCurrent(row, {
+        if (!row || route?.containerMemberId !== binding.runtimeMemberId || !await gameChatContextCurrent(row, {
           chatContainerMemberId: binding.runtimeMemberId, chatPlayerMemberIds: audience.memberIds, chatAudience: audience,
         }, tx)) throw gameNotFound();
         for (const memberId of [viewerId, otherId]) {

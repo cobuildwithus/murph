@@ -295,10 +295,11 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await prepareGameEveningCheckIn(f.roomId, date, at))?.policy.batch.map(game => game.gameId)).toEqual([open]);
   });
 
-  it("suppresses unjoined and far-apart audiences, and excludes a switched-off player", async () => {
+  it("ignores unjoined bystanders, suppresses far-apart players, and excludes a switched-off player", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const unjoined = await fixture(3), unjoinedId = await unjoined.addGame(10, [], 2);
-    expect(await reserveGameEveningCheckIn(unjoined.roomId, [unjoinedId], eveningAt)).toBe(0);
+    events.push(gameEveningEventId(unjoined.roomId, date));
+    expect(await reserveGameEveningCheckIn(unjoined.roomId, [unjoinedId], eveningAt)).toBe(1);
     const far = await fixture(3), farId = await far.addGame();
     await db.gameProfile.update({ where: { memberId: far.people[2]!.id }, data: { timeZone: "America/Los_Angeles" } });
     expect(await reserveGameEveningCheckIn(far.roomId, [farId], eveningAt)).toBe(0);
@@ -309,28 +310,22 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await prepareGameEveningCheckIn(close.roomId, date, eveningAt))?.policy.batch[0]?.memberIds).toEqual(close.people.slice(0, 2).map(person => person.id).sort());
   });
 
-  it("reserves the same evening family for an exact two-player pair room", async () => {
+  it("reserves the same evening family for a pair with verified email contacts", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(2), id = await f.addGame(2);
-    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(0);
-    const phones = ["+12025550181", "+12025550182"];
-    for (const [index, person] of f.people.entries()) await db.$transaction(tx => upsertHostedMemberIdentity({
-      ...buildHostedMemberPhoneIdentityFields(phones[index]!), memberId: person.id, prisma: tx,
-      phoneNumberVerifiedAt: now, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
-    proof.rooms.set(f.roomId, phones);
     const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
     expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
     expect((await prepareGameEveningCheckIn(f.roomId, date, eveningAt))?.policy.batch[0]?.memberIds).toEqual(f.people.map(person => person.id).sort());
   });
 
-  it("does not reserve when an authorized room recipient has unresolved identity", async () => {
+  it("ignores an unresolved bystander when reserving the players evening", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(3), id = await f.addGame();
     const unknown = `${randomUUID()}@example.test`;
     await db.gameInvitee.create({ data: { gameId: id, seat: 3, memberId: null, recipientLookupKey: createHostedEmailLookupKey(unknown) } });
     proof.rooms.set(f.roomId, [...f.people.map(person => person.email), unknown]);
-    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(0);
+    events.push(gameEveningEventId(f.roomId, date));
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
   });
 
   it("combines pair and group games in one mixed-room evening witness", async () => {
@@ -339,6 +334,32 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
     expect(await reserveGameEveningCheckIn(f.roomId, [pair, group], eveningAt)).toBe(1);
     expect((await prepareGameEveningCheckIn(f.roomId, date, eveningAt))?.policy.batch.map(game => game.gameId).sort()).toEqual([pair, group].sort());
+  });
+
+  it("combines independently eligible pair and group evenings without addressing bystanders", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(3), pair = await f.addGame(2, [], 2), group = await f.addGame();
+    proof.rooms.get(f.roomId)!.push("bystander@example.test");
+    events.push(gameEveningEventId(f.roomId, date));
+    expect(await reserveGameEveningCheckIn(f.roomId, [pair, group], eveningAt)).toBe(1);
+    const prepared = await prepareGameEveningCheckIn(f.roomId, date, eveningAt);
+    expect(prepared?.policy.batch).toEqual(expect.arrayContaining([
+      expect.objectContaining({ gameId: pair, memberIds: f.people.slice(0, 2).map(person => person.id).sort() }),
+      expect.objectContaining({ gameId: group, memberIds: f.people.map(person => person.id).sort() }),
+    ]));
+    expect(prepared?.policy.batch).toHaveLength(2);
+    expect(await db.$transaction(tx => isEveningBatchCurrentTx(prepared!.policy, prepared!.memberIds, prepared!.audience, tx, eveningAt))).toBe(true);
+  });
+
+  it.each([false, true])("a prior pair receipt suppresses the larger room after settlement: %s", async settled => {
+    const f = await fixture(2), pair = await f.addGame(2);
+    events.push(gameMissedDayEventId(pair, f.people[0]!.id, date));
+    expect(await db.$transaction(tx => reserveGameMissedDayTx({ tx, gameId: pair, memberId: f.people[0]!.id,
+      playerMemberIds: f.people.map(person => person.id), firstMissedDate: date, dueAt: now, now }))).toBe(true);
+    if (settled) await db.game.update({ where: { id: pair }, data: { status: "settled", settledAt: now } });
+    const group = await f.addGame();
+    proof.rooms.get(f.roomId)!.push("bystander@example.test");
+    expect(await reserveGroupGameMissedDay(f.roomId, settled ? [group] : [pair, group], now)).toBe(0);
   });
 
   it("keeps the flag off and rejects expiry", async () => {
@@ -605,7 +626,6 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
   });
 
   it.each([
-    ["a pair game in a three-person room", 3, (f: Fixture) => f.addGame(2, ["America/Los_Angeles", "America/Los_Angeles"], 2)],
     ["a group game with a player outside the text", 4, (f: Fixture) => f.addGame(10, f.people.map(() => "America/Los_Angeles"))],
   ] as const)("claims at the kept game's time when %s has a later horizon", async (_excluded, count, addExcluded) => {
     const f = await fixture(count), kept = await f.addGame(10, [], 3), excluded = await addExcluded(f);
@@ -613,6 +633,15 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(await reserveGroupGameMissedDay(f.roomId, [kept, excluded], now)).toBe(1);
     expect((await receipt(gameGroupMissedDayEventId(f.roomId, date))).retryAfterAt).toEqual(now);
     expect((await prepareGroupMissedDay(f.roomId, date, now))?.policy.batch.map(game => game.gameId)).toEqual([kept]);
+  });
+
+  it("includes a bound pair in a larger room and waits for its later morning horizon", async () => {
+    const f = await fixture(3), group = await f.addGame(), pair = await f.addGame(2, ["America/Los_Angeles", "America/Los_Angeles"], 2);
+    proof.rooms.get(f.roomId)!.push("bystander@example.test");
+    expect(await reserveGroupGameMissedDay(f.roomId, [group, pair], now)).toBe(0);
+    const later = new Date("2030-03-05T17:00:00Z");
+    expect(await reserveGroupGameMissedDay(f.roomId, [group, pair], later)).toBe(1);
+    expect((await prepareGroupMissedDay(f.roomId, date, later))?.policy.batch.map(game => game.gameId).sort()).toEqual([group, pair].sort());
   });
 
   it("claims at a horizon set by a game with no miss of its own", async () => {
@@ -794,6 +823,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     events.push(eventId);
     expect(await db.$transaction(tx => reserveGameMissedDayTx({ tx, gameId: id, memberId: f.people[0]!.id, playerMemberIds: f.people.map(person => person.id), firstMissedDate: date, dueAt: now, now }))).toBe(true);
     if (settled) await db.game.update({ where: { id }, data: { status: "settled", settledAt: now } });
+    proof.rooms.set(f.roomId, [f.people[0]!.email, f.people[0]!.email]);
     expect(await turn(eventId, hours(.5))).toMatchObject({ attempted: 1, queued: 0 });
     expect((await receipt(eventId)).status).toBe("awaiting_generation");
     proof.audienceReads.length = 0;
@@ -802,13 +832,14 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     await expectEnded(f, eventId, warn);
   });
 
-  it("serializes pair and group contenders under the verified two-contact pair lock", async () => {
+  it("serializes pair and group contenders with a bystander under the game pair lock", async () => {
     const f = await fixture(2), pair = await f.addGame(2), group = await f.addGame();
+    proof.rooms.get(f.roomId)!.push("bystander@example.test");
     const prepared = await prepareGroupMissedDay(f.roomId, date, now);
     if (!prepared) throw new Error("Expected authorized mixed room");
     const locked = barrier(), release = barrier();
     const groupClaim = db.$transaction(tx => reserveGameMissedDayTx({ tx, roomId: f.roomId, firstMissedDate: date, dueAt: now, now,
-      pairMemberIds: prepared.audience.memberIds, beforeClaim: async tx => {
+      beforeClaim: async tx => {
         const current = await isGroupMissedDayBatchCurrentTx(prepared.policy, prepared.audience, tx, now);
         locked.release(); await release.promise; return current;
       } }));

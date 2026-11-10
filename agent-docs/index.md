@@ -1,3 +1,9 @@
+Bound pair and group games tolerate bystanders while retaining current-player,
+route and restriction checks. [Architecture](../ARCHITECTURE.md),
+[Weekly Game](product-specs/weekly-game.md), and
+[the completed implementation plan](exec-plans/completed/2026-11-10-game-chat-open-room.md)
+record the contract and local evidence.
+
 Linq group line moves retain container identity through a move-aware ingress
 rollback floor, an egress-only retired-target alias and verified service-number
 normalization for games. [Architecture](../ARCHITECTURE.md#linq-group-line-moves)
