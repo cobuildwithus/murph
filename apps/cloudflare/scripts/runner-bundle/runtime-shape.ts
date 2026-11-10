@@ -409,9 +409,19 @@ function normalizeBinMap(packageJson: {
   );
 }
 
+/** Where bundled Node CLIs keep V8's compiled code between calls in one
+ * container. It is derived data: outside the workspace snapshot, gone with the
+ * container, and ignored by Node when it cannot be written or does not match
+ * the file being loaded. The path is fixed rather than inherited because Node
+ * 24 spins forever creating a cache directory under /proc. */
+export const RUNNER_NODE_COMPILE_CACHE_DIR = "/tmp/murph-node-compile-cache";
+
 export function buildPortableNodeBinWrapper(relativeTargetPath: string): string {
   return [
     "#!/bin/sh",
+    // A tool command starts a new Node process per call, so each call would
+    // otherwise compile the same bundle again.
+    `export NODE_COMPILE_CACHE=${RUNNER_NODE_COMPILE_CACHE_DIR}`,
     "basedir=$(dirname \"$(echo \"$0\" | sed -e 's,\\\\,/,g')\")",
     "",
     "case `uname` in",
