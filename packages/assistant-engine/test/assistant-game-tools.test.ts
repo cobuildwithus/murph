@@ -206,7 +206,7 @@ describe('game dynamic tools', () => {
     else {
       expect(text).toContain(GAME_SELECTION_GUIDANCE)
       // A move names its game only from the speaker's own words or the one game it can apply to; otherwise one question and no write.
-      expect(GAME_SELECTION_GUIDANCE).toContain('for marking a day not done, games where the speaker has a post that date; for restoring a day, games where that date does not show as posted, since a day marked not done reads as unposted')
+      expect(GAME_SELECTION_GUIDANCE).toContain('for marking a day not done, games where the speaker has a post that date; for counting a day as done, games where that date does not show as posted, since a missed day and a day marked not done both read as unposted')
       // Photo silence and consent rules outrank the selection question.
       expect(GAME_SELECTION_GUIDANCE).toContain('The photo rules still decide whether a photo gets any reply or save: a photo they keep quiet stays quiet.')
       // What a photo shows narrows only unsolicited offers; an explicit save goes to the game the player names.
@@ -468,7 +468,7 @@ describe('game photo dynamic contract', () => {
 })
 
 
-it.each(['mark_incomplete', 'restore_day'])('binds %s to the current speaker without a target or proposal', async (operation) => {
+it.each(['mark_incomplete', 'mark_complete', 'restore_day'])('binds %s to the current speaker without a target or proposal', async (operation) => {
   port.mockClear()
   const args = { messageRef: inputId, operation, gameId: 'game_synthetic', date: '2030-04-01' }
   expect((await execute(args)).rpcResult.success).toBe(true)
@@ -478,6 +478,16 @@ it.each(['mark_incomplete', 'restore_day'])('binds %s to the current speaker wit
   expect(MURPH_UPDATE_GAME_TOOL.description).toContain('one plain line naming the date or weekday')
   expect(MURPH_UPDATE_GAME_TOOL.description).toContain('never from progress.checkedAt or processing time')
   expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Before 3 AM, today is the previous calendar date; yesterday is one further day back')
+})
+
+it('offers Murph one way to count a day as done, on the player’s word', () => {
+  // restore_day still parses for a turn already in flight, but Murph is only offered mark_complete.
+  expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.operation.enum).toContain('mark_complete')
+  expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.operation.enum).not.toContain('restore_day')
+  expect(MURPH_UPDATE_GAME_TOOL.description).not.toContain('restore_day')
+  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('counts a closed game day they never posted on')
+  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Take their word; never ask for proof or put it to the other players, and never offer it unasked')
+  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('credited confirms the missed day now counts on their word')
 })
 
 it('cancels a not-yet-started game for the current speaker with no proposal or extra selector', async () => {

@@ -70,6 +70,7 @@ import {
   decideLeave,
   remainingPlayers,
   decideDayCompletion,
+  GAME_CREDITED_DAY_TEXT,
   decideDevAdvance,
   decideJoin,
   decideNegotiationStart,
@@ -345,7 +346,7 @@ export async function runGameChatUpdate(input: Omit<Parameters<typeof runGameCom
     } else if (update.operation === "cancel_game") {
       command = { type: "cancelInvite", gameId: update.gameId };
     } else if ("date" in update) {
-      command = { type: "setDayCompletion", gameId: update.gameId, date: update.date, incomplete: update.operation === "mark_incomplete" };
+      command = { type: "setDayCompletion", gameId: update.gameId, date: update.date, incomplete: update.operation === "mark_incomplete", ...(update.operation === "mark_complete" ? { credit: true } : {}) };
     } else {
       command = { type: "respondChange", gameId: update.gameId, proposalId: update.proposalId!, decision: update.operation };
     }
@@ -561,7 +562,7 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** History holds metadata and sealed words, never plaintext. */
 interface GameEventDraft {
   createdAt?: Date;
@@ -1556,11 +1557,20 @@ async function challenge(context: CommandContext, command: Extract<GameCommand, 
 
 async function setDayCompletion(context: CommandContext, command: Extract<GameCommand, { type: "setDayCompletion" }>): Promise<{ gameId: string; dayOutcome: GameDayOutcome }> {
   let dayOutcome: GameDayOutcome | undefined;
-  await runLocked(command.gameId, context, async ({ loaded, now, tx }) => {
+  // A counted day is a words post in its player's name; its fixed line is sealed before the game lock.
+  const creditEntryId = randomUUID();
+  const creditText = command.credit ? await seal({ memberId: context.actor, rowId: creditEntryId, table: "game_entry", field: "text" }, GAME_CREDITED_DAY_TEXT) : null;
+  await runLocked(command.gameId, context, async ({ clock, loaded, now, tx }) => {
     if (!context.chatContainerMemberId || loaded.row.chatContainerMemberId !== context.chatContainerMemberId) reject("NOT_A_PLAYER", "Use the group chat bound to this game.");
-    const decision = decideDayCompletion(loaded.state, { memberId: context.actor, date: command.date, incomplete: command.incomplete, now });
+    const decision = decideDayCompletion(loaded.state, { memberId: context.actor, date: command.date, incomplete: command.incomplete, credit: command.credit, now });
     dayOutcome = decision.outcome;
     if (!decision.changed) return [];
+    if (decision.outcome.status === "credited") {
+      // No push: the request and Murph's answer are already in the game's own chat.
+      await tx.gameEntry.create({ data: { id: creditEntryId, gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex,
+        attempt: 1, kind: "words", mediaKeys: [], textEncrypted: creditText, receivedAt: clock } });
+      return [{ type: "day_credited", payload: { dayIndex: decision.dayIndex, entryId: creditEntryId } }];
+    }
     await tx.gameEntry.updateMany({ where: { gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex, attempt: { gt: 0 } }, data: { incomplete: command.incomplete ? true : null } });
     return [{ type: command.incomplete ? "day_marked_incomplete" : "day_restored", payload: { dayIndex: decision.dayIndex } }];
   });

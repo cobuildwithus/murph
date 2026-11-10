@@ -853,6 +853,59 @@ describe("self-reported incomplete days", () => {
   });
 });
 
+describe("a missed day counted on the player's word", () => {
+  const count = (state: RuleState, dayIndex: number, now: Date, incomplete = false) => decideDayCompletion(state, {
+    memberId: LEO, date: addDays(playerFor(state, LEO)!.dayOne!, dayIndex), incomplete, credit: true, now });
+
+  it("counts a closed scheduled day that never had a post, and nothing else", () => {
+    const state = live(invited(), NYC);
+    // The second game day becomes the one day off (Monday is 0).
+    const offDay = (new Date(`${addDays(playerFor(state, LEO)!.dayOne!, 1)}T12:00:00Z`).getUTCDay() + 6) % 7;
+    state.game.terms.versions[0] = { ...state.game.terms.versions[0], checkInKind: "any", schedule: { days: ([0, 1, 2, 3, 4, 5, 6] as const).filter((day) => day !== offDay) } };
+    const now = at(state, LEO, 3, 12);
+    expect(count(state, 0, now)).toEqual({ dayIndex: 0, changed: true, outcome: { date: playerFor(state, LEO)!.dayOne, status: "credited" } });
+    // Marking not done, and the older restore, still find nothing to change.
+    expect(count(state, 0, now, true).outcome.status).toBe("no_artifact");
+    expect(decideDayCompletion(state, { memberId: LEO, date: playerFor(state, LEO)!.dayOne!, incomplete: false, now }).outcome.status).toBe("no_artifact");
+    expect(() => count(state, 3, now)).toThrow("still open");
+    expect(() => count(state, 1, now)).toThrow("day off");
+    expect(() => count(state, 4, now)).toThrow("already started");
+    state.game.terms.versions[0].checkInKind = "photo";
+    expect(() => count(state, 0, now)).toThrow("requires a photo check-in");
+    state.game.terms.versions[0].checkInKind = "heart_rate";
+    expect(() => count(state, 0, now)).toThrow("requires a heart-rate check-in");
+  });
+
+  it("clears the player's own flag when the day has a post, and never replaces a post that was taken down", () => {
+    let state = live(invited(), NYC);
+    state.game.terms.versions[0].checkInKind = "any";
+    state = post(state, LEO, at(state, LEO, 0, 12));
+    const now = at(state, LEO, 2, 12);
+    const posted = state.entries.find((entry) => entry.memberId === LEO)!;
+    expect(count(state, 0, now).outcome.status).toBe("already_complete");
+    posted.incomplete = true;
+    expect(count(state, 0, now)).toMatchObject({ changed: true, outcome: { status: "restored" } });
+    posted.incomplete = false;
+    posted.withdrawnAt = now;
+    expect(() => count(state, 0, now)).toThrow("taken down");
+  });
+
+  it("scores the counted day like any other post", () => {
+    let state = live(invited(), NYC);
+    state.game.terms.versions[0].checkInKind = "any";
+    for (const day of [0, 1, 2]) state = post(state, AVA, at(state, AVA, day, 12));
+    for (const day of [0, 2]) state = post(state, LEO, at(state, LEO, day, 12));
+    const player = playerFor(state, LEO)!;
+    const now = at(state, LEO, 3, 12);
+    expect(scorePlayer(state, player, 2)).toMatchObject({ score: 2, misses: 1 });
+    const { dayIndex } = count(state, 1, now);
+    state.entries.push({ id: "entry_counted", memberId: LEO, dayIndex, attempt: 1, kind: "words", mediaKeys: [], receivedAt: now, blurHash: null, withdrawnAt: null });
+    expect(scorePlayer(state, player, 2)).toMatchObject({ score: 3, misses: 0 });
+    expect(playerStreak(state, player, now)).toBe(3);
+    expect(count(state, 1, now).outcome.status).toBe("already_complete");
+  });
+});
+
 describe("weekly game: self-play round 1 regressions", () => {
   // Monday 2026-10-12 through Sunday 2026-10-18, accepted at 10am in the accepter's zone.
   const WEEK = ["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-17", "2026-10-18"];

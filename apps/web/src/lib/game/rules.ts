@@ -324,17 +324,37 @@ export function completedEntry(entries: RuleEntries, memberId: string, dayIndex:
   return entry && !entry.incomplete ? entry : null;
 }
 
-export function decideDayCompletion(state: RuleState, input: { memberId: string; date: string; incomplete: boolean; now: Date }): { dayIndex: number; changed: boolean; outcome: GameDayOutcome } {
+/** The whole post for a day counted late on its player's word: there is no check-in to show. */
+export const GAME_CREDITED_DAY_TEXT = "Did it. Counted late, on my word.";
+
+export function decideDayCompletion(state: RuleState, input: { memberId: string; date: string; incomplete: boolean; credit?: boolean; now: Date }): { dayIndex: number; changed: boolean; outcome: GameDayOutcome } {
   const player = requireLivePlayer(state, input.memberId);
   if (isGameDue(state, input.now)) reject("GAME_NOT_LIVE", "This game has ended.");
   const dayIndex = daysBetween(player.dayOne!, input.date);
   const today = dayIndexAt(player, input.now)!;
   if (dayIndex < eligibleFromDay(state, player) || dayIndex >= state.game.lengthDays || dayIndex > today) reject("INVALID_REQUEST", "Choose a game day that has already started.");
   const entry = liveEntry(state.entries, input.memberId, dayIndex);
+  if (!entry && input.credit && !input.incomplete) {
+    assertCreditableDay(state, player, dayIndex, today);
+    return { dayIndex, changed: true, outcome: { date: input.date, status: "credited" } };
+  }
   const status = !entry ? "no_artifact" : input.incomplete
     ? entry.incomplete ? "already_incomplete" : "marked_incomplete"
     : entry.incomplete ? "restored" : "already_complete";
   return { dayIndex, changed: status === "marked_incomplete" || status === "restored", outcome: { date: input.date, status } };
+}
+
+/**
+ * A player's word stands in for a check-in only on a closed, scheduled day that
+ * never had a post, in a game that takes any kind of check-in. An open day is
+ * still theirs to post; a required photo or heart rate stays required.
+ */
+function assertCreditableDay(state: RuleState, player: RulePlayer, dayIndex: number, today: number): void {
+  if (dayIndex >= today) reject("INVALID_REQUEST", "That day is still open. Post your check-in before it closes.");
+  if (!isScheduledDay(state, dayIndex)) reject("INVALID_REQUEST", "That was a day off, so there is nothing to count.");
+  if (attemptsUsed(state.entries, player.memberId, dayIndex) > 0) reject("INVALID_REQUEST", "A post for that day was taken down, so it can't be counted now.");
+  const required = termsForDay(state.game.terms, dayIndex).checkInKind ?? "photo";
+  if (required !== "any") reject("INVALID_REQUEST", `This challenge requires a ${required === "heart_rate" ? "heart-rate" : "photo"} check-in.`);
 }
 
 /** Posts made for a day, withdrawn ones included. Excuses don't count. */
