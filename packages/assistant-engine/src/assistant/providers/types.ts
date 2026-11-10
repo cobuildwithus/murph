@@ -58,21 +58,6 @@ import type {
 } from '../../assistant-codex/analyze-video-tool.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
-export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
-
-export function supportsAnyAssistantRichUserMessageContent(
-  supportedTypes: readonly AssistantUserMessageContentType[],
-): boolean {
-  return supportedTypes.some((type) => type !== 'text')
-}
-
-export interface AssistantProviderCapabilities {
-  supportedUserMessageContentTypes: readonly AssistantUserMessageContentType[]
-  supportsNativeResume: boolean
-  supportsReasoningEffort: boolean
-  supportsRichUserMessageContent: boolean
-}
-
 export interface AssistantProviderConversationMessage {
   content: string | AssistantUserMessageContentPart[]
   /** Trusted occurrence instant, supplied when a turn needs temporal evidence. */

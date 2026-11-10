@@ -42,12 +42,6 @@ export const assistantAcceptedTurnInputSourceValues = [
   'system',
 ] as const
 
-export const assistantCodexContinuationKindValues = [
-  'explicit-structured-history',
-  'provider-state-optimization',
-  'thread-start',
-] as const
-
 export const assistantAcceptedTurnInputPromptFallbackReasonValues = [
   'missing-transcript-ref',
   'missing-content-ref',

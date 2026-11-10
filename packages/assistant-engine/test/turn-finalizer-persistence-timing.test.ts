@@ -30,7 +30,6 @@ it.each([false, true])('attributes transcript and session writes without changin
   const onPersistenceTiming = vi.fn(() => { throw new Error('synthetic observer failure') })
   const providerResult: ExecutedAssistantProviderTurnResult = {
     assistantContractFingerprint: 'a'.repeat(64),
-    attemptCount: 1,
     codexContinuation: { kind: 'explicit-structured-history' },
     codexThreadId: null,
     provider: 'codex-cli',
@@ -43,7 +42,7 @@ it.each([false, true])('attributes transcript and session writes without changin
       label: 'synthetic',
       provider: 'codex-cli',
       providerOptions: session.providerOptions,
-      routeId: 'synthetic-route',
+      routeFingerprint: 'synthetic-route',
     },
     session,
     stderr: '',

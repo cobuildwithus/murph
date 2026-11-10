@@ -123,7 +123,6 @@ export async function resolveAssistantFollowUpTurnContext(input: {
   interactiveConversation: boolean
   providerTools: boolean
   onboardingGoalCheckin: boolean
-  supportsNativeResume: boolean
 }) {
   const record = input.privateConversation
     ? await readAssistantFollowUpForInvocation(input.message.vault, input.message.scheduledInvocationAuthority?.automationId)
@@ -141,7 +140,6 @@ export async function resolveAssistantFollowUpTurnContext(input: {
   return {
     invocation, attachmentAllowed, context,
     requiresExplicitHistory: invocation || input.onboardingGoalCheckin,
-    supportsNativeResume: input.supportsNativeResume && !invocation,
   }
 }
 

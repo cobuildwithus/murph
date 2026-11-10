@@ -65,8 +65,6 @@ const EXPECTED_GROUP_EMAIL_THREAD_CONFIG = {
 } as const
 const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
-  resolveCodexAssistantCapabilities: vi.fn(),
-  resolveCodexAssistantTargetCapabilities: vi.fn(),
   resolveCodexAssistantLabel: vi.fn(() => 'Codex CLI'),
 }))
 
@@ -92,10 +90,6 @@ vi.mock('../src/assistant/codex-runtime.js', () => ({
     ...input.turn,
     providerConfig: input.providerConfig,
   }),
-  resolveCodexAssistantTargetCapabilities:
-    providerMocks.resolveCodexAssistantTargetCapabilities,
-  resolveCodexAssistantCapabilities:
-    providerMocks.resolveCodexAssistantCapabilities,
   resolveCodexAssistantLabel: providerMocks.resolveCodexAssistantLabel,
 }))
 
@@ -176,8 +170,6 @@ import type {
 
 afterEach(() => {
   providerMocks.executeCodexAssistantTurnAttemptFromInput.mockReset()
-  providerMocks.resolveCodexAssistantCapabilities.mockReset()
-  providerMocks.resolveCodexAssistantTargetCapabilities.mockReset()
   providerMocks.resolveCodexAssistantLabel.mockReset()
   providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockReset()
   providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockReset()
@@ -210,14 +202,14 @@ function createRoute(input?: {
   label: string
   provider: 'codex-cli'
   providerOptions: AssistantProviderSessionOptions
-  routeId: string
+  routeFingerprint: string
 } {
   return {
     codexCommand: null,
     label: 'Primary',
     provider: 'codex-cli',
     providerOptions: createProviderOptions(input?.providerOptions),
-    routeId: input?.routeId ?? 'route-primary',
+    routeFingerprint: input?.routeId ?? 'route-primary',
   }
 }
 
@@ -420,11 +412,6 @@ describe('Codex provider routing', () => {
     expect(managedAutomationOverride).toEqual({
       reasoningEffort: 'high',
     })
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
@@ -482,7 +469,6 @@ describe('Codex provider routing', () => {
         turnId: 'turn-provider-plan-reasoning-effort',
       } satisfies AssistantCodexTurnExecutionPlan)
       providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-        attemptCount: 1,
         route,
         routePlan: {
           transcriptBoundary: 'start',
@@ -570,11 +556,6 @@ describe('Codex provider routing', () => {
     if (!providerAttempt.ok) {
       throw new Error('Expected a successful provider fixture.')
     }
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue({
       ...providerAttempt,
       result: {
@@ -613,7 +594,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-response-card-propagation',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -693,10 +673,6 @@ describe('Codex provider routing', () => {
         source: 'system' as const,
       })),
     }
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
@@ -728,7 +704,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-system-notification',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -860,11 +835,6 @@ describe('Codex provider routing', () => {
       physicalNotesAvailable: true,
       vaultFileSendAvailable: true,
     })
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
@@ -899,7 +869,6 @@ describe('Codex provider routing', () => {
       executionPlan,
     )
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -1063,11 +1032,6 @@ describe('Codex provider routing', () => {
       },
       vault: '/vaults/group',
     }
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
@@ -1096,7 +1060,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-room-model-maintenance',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -1130,7 +1093,6 @@ describe('Codex provider routing', () => {
       input,
       plan: createSharedPlan(),
       profile: {
-        nativeResumePolicy: 'disabled',
         promptProfile: 'maintenance',
         threadScope: 'isolated-thread',
         toolProfile: 'maintenance-turn',
@@ -1201,11 +1163,6 @@ describe('Codex provider routing', () => {
       },
       vault: '/vaults/member',
     }
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
@@ -1235,7 +1192,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-member-memory-maintenance',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -1268,7 +1224,6 @@ describe('Codex provider routing', () => {
       input,
       plan: createSharedPlan(),
       profile: {
-        nativeResumePolicy: 'disabled',
         promptProfile: 'maintenance',
         threadScope: 'isolated-thread',
         toolProfile: 'maintenance-turn',
@@ -1335,11 +1290,6 @@ describe('Codex provider routing', () => {
         source: 'system' as const,
       })),
     }
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
@@ -1378,7 +1328,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-onboarding-goal-checkin',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -1468,11 +1417,6 @@ describe('Codex provider routing', () => {
       prompt: 'Reply to the group email.',
       vault: '/vaults/group',
     }
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
@@ -1496,7 +1440,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-group-email',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -1595,11 +1538,6 @@ describe('Codex provider routing', () => {
       serviceTier: 'requested' in scenario ? scenario.requested : null,
       ...('scheduled' in scenario ? { turnTrigger: 'automation-cron' as const } : {}),
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockImplementation(
       async () => {
         providerScopeEvents.push('provider')
@@ -1626,7 +1564,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-1',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -1800,11 +1737,6 @@ describe('Codex provider routing', () => {
       },
     ] as const
 
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
-
     for (const scenario of scenarios) {
       const input = {
         deliverResponse: scenario.deliverResponse,
@@ -1841,7 +1773,6 @@ describe('Codex provider routing', () => {
         turnId: `turn-${scenario.name.replaceAll(' ', '-')}`,
       } satisfies AssistantCodexTurnExecutionPlan)
       providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValueOnce({
-        attemptCount: 1,
         route,
         routePlan: {
           transcriptBoundary: 'start',
@@ -1900,11 +1831,6 @@ describe('Codex provider routing', () => {
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
     const sharedPlan = createSharedPlan()
     const authorizeAcceptedMessageTarget = vi.fn(async () => null)
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValueOnce(
       createProviderAttemptResult(),
     )
@@ -1929,7 +1855,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-message-targeting',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValueOnce({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -2001,10 +1926,6 @@ describe('Codex provider routing', () => {
       summary: 'Codex command execution failed during provider turn.',
     }
     const providerAttempt = createProviderAttemptResult()
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue({
       ...providerAttempt,
       metadata: {
@@ -2038,7 +1959,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-runtime-issue',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -2125,11 +2045,6 @@ describe('Codex provider routing', () => {
       ],
       usage: null,
     }
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       failedProviderAttempt,
     )
@@ -2156,7 +2071,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-terminal-provider-failure',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         assistantContractFingerprint,
@@ -2205,7 +2119,6 @@ describe('Codex provider routing', () => {
       codexRolloutRelativePath,
       codexThreadId: 'thread-terminal-provider-failure',
       providerRequestOutcome: 'failed',
-      providerTurnId: 'turn-terminal-provider-failure',
     })
     expect(releaseProviderAcceptedInputs).toHaveBeenCalledOnce()
     expect(
@@ -2286,11 +2199,6 @@ describe('Codex provider routing', () => {
       ],
       usage: null,
     }
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       failedProviderAttempt,
     )
@@ -2317,7 +2225,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-maintenance-provider-failure',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -2360,7 +2267,6 @@ describe('Codex provider routing', () => {
       kind: 'failed_terminal',
       codexThreadId: 'thread-maintenance-provider-failure',
       providerRequestOutcome: 'failed',
-      providerTurnId: 'turn-maintenance-provider-failure',
     })
     expect(storeMocks.appendAssistantTranscriptEntries).not.toHaveBeenCalled()
     expect(providerTurnRunnerMocks.recordCodexAttemptFailed).toHaveBeenCalledWith(
@@ -2388,11 +2294,6 @@ describe('Codex provider routing', () => {
       serviceTier: 'flex',
       vault: '/vaults/test',
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
@@ -2419,7 +2320,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-1',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -2481,11 +2381,6 @@ describe('Codex provider routing', () => {
       serviceTier: 'flex',
       vault: '/vaults/test',
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
-
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportedUserMessageContentTypes: ['text', 'image'],
-      supportsReasoningEffort: true,
-    })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
@@ -2512,7 +2407,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-1',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -2608,7 +2502,6 @@ describe('Codex provider routing', () => {
       turnId: 'turn-hosted-device-connect',
     } satisfies AssistantCodexTurnExecutionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-      attemptCount: 1,
       route,
       routePlan: {
         transcriptBoundary: 'start',
@@ -2687,7 +2580,6 @@ describe('attested reaction routing through the admitted provider turn', () => {
       if (decision === 'aborted-leaf') throw new Error('Synthetic outer cancellation')
       return decision.startsWith('quiet') ? 'quiet' : 'escalate'
     })
-    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportedUserMessageContentTypes: ['text'], supportsReasoningEffort: true })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(createProviderAttemptResult())
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
       acceptedInputItems: [{ id: 'synthetic-reaction-input', source: 'manual' }, ...(decision === 'mixed' ? [{ id: 'synthetic-other-input', source: 'manual' as const }] : [])],
@@ -2697,7 +2589,7 @@ describe('attested reaction routing through the admitted provider turn', () => {
       profile: { promptProfile: 'conversation', toolProfile: 'provider-turn', threadScope: 'session-thread' },
       promptTimeContext: { currentLocalDate: '2026-09-30', currentTimeZone: 'UTC' }, route, sharedPlan: createSharedPlan(), turnId: 'synthetic-parent-turn',
     } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({ attemptCount: 1, route, session, routePlan: {
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({ route, session, routePlan: {
       transcriptBoundary: 'start',
       assistantContractFingerprint: 'a'.repeat(64), assistantCliContract: null, cliEnv: {},
       codexContinuation: { kind: 'explicit-structured-history' }, developerInstructions: null,
@@ -2758,11 +2650,8 @@ describe('streamed child usage identity', () => {
           servedModel: null, totalTokens: 188,
         },
       })
-      providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-        supportedUserMessageContentTypes: ['text'], supportsReasoningEffort: true,
-      })
       providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-        attemptCount: 1, route, session, routePlan: {
+        route, session, routePlan: {
           transcriptBoundary: 'start',
           assistantContractFingerprint: 'a'.repeat(64), assistantCliContract: null, cliEnv: {},
           codexContinuation: { kind: 'explicit-structured-history' }, developerInstructions: null,

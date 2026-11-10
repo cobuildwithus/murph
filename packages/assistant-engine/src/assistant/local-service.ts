@@ -1915,7 +1915,6 @@ export async function sendAssistantMessageLocal(
           acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           if (providerOutcome.kind === 'failed_terminal') {
             const failedProviderResult = {
-              attemptCount: providerOutcome.attemptCount,
               provider: providerOutcome.route.provider,
               providerOptions: providerOutcome.route.providerOptions,
               route: providerOutcome.route,
@@ -1985,7 +1984,6 @@ export async function sendAssistantMessageLocal(
                 acceptedNoReplyDeliveryContextOrdinals: acceptedNoReplyOrdinals,
                 assistantContractFingerprint:
                   providerOutcome.assistantContractFingerprint,
-                attemptCount: providerOutcome.attemptCount,
                 codexContinuation: providerOutcome.codexContinuation,
                 codexRolloutRelativePath:
                   providerOutcome.codexRolloutRelativePath,

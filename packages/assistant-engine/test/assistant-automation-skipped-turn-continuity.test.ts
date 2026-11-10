@@ -163,7 +163,6 @@ function createProviderResult(input: {
     acceptedNoReplyDeliveryContextOrdinals: [],
     additionalUsages: [],
     assistantContractFingerprint: 'b'.repeat(64),
-    attemptCount: 1,
     codexContinuation: {
       kind: 'provider-state-optimization',
     },

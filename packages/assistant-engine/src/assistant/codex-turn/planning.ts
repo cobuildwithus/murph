@@ -19,9 +19,6 @@ import {
 } from '@murphai/contracts'
 import { readPreferencesDocument } from '@murphai/core'
 import {
-  resolveCodexAssistantTargetCapabilities,
-} from '../codex-runtime.js'
-import {
   readAssistantCliSurfaceBootstrapContext,
   scopeAssistantCliSurfaceContractForAssistant,
 } from '../cli-surface-bootstrap.js'
@@ -58,7 +55,6 @@ import {
   type AssistantDiagnosticsPolicy,
 } from '../issue-reporting.js'
 import {
-  resolveAssistantCodexResumeThreadId,
   resolveAssistantRouteResumeBinding,
 } from '../codex-resume-binding.js'
 import {
@@ -177,7 +173,7 @@ export interface AssistantRouteTurnPlan {
 }
 
 export interface AssistantRoutePlanningDiagnostics {
-  threadRotationReason: 'binding_absent' | 'route_mismatch' | 'contract_mismatch' | 'profile_isolated' | 'native_resume_disabled' | 'transcript_bookmark_missing' | null
+  threadRotationReason: 'binding_absent' | 'route_mismatch' | 'contract_mismatch' | 'profile_isolated' | 'transcript_bookmark_missing' | null
   assistantContextSnapshotElapsedMs: number | null
   assistantContextSnapshotRefreshElapsedMs: number | null
   followUpContextElapsedMs: number | null
@@ -289,12 +285,7 @@ export type AssistantCodexThreadScope =
   | 'session-thread'
   | 'isolated-thread'
 
-export type AssistantCodexTurnNativeResumePolicy =
-  | 'default'
-  | 'disabled'
-
 export interface AssistantCodexTurnExecutionProfile {
-  nativeResumePolicy?: AssistantCodexTurnNativeResumePolicy
   promptProfile?: AssistantCodexTurnPromptProfile
   threadScope?: AssistantCodexThreadScope
   toolProfile?: AssistantCodexTurnToolProfile
@@ -304,7 +295,7 @@ export interface AssistantCodexTurnThreadScopeProfile
   extends AssistantCodexTurnExecutionProfile {}
 
 export type AssistantCodexTurnResolvedExecutionProfile =
-  Required<Omit<AssistantCodexTurnExecutionProfile, 'nativeResumePolicy'>>
+  Required<AssistantCodexTurnExecutionProfile>
 
 export interface AssistantCodexTurnExecutionPlan {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
@@ -330,7 +321,6 @@ export interface AssistantCodexTurnExecutionPlan {
 }
 
 export interface AssistantCodexAttemptPlan {
-  attemptCount: number
   route: CodexThreadIdentity
   routePlan: AssistantRouteTurnPlan
   session: AssistantSession
@@ -368,14 +358,7 @@ function resolveAssistantCodexTurnExecutionProfile(
 export function resolveAssistantCodexThreadScope(input: {
   profile?: AssistantCodexTurnThreadScopeProfile | null
 }): AssistantCodexThreadScope {
-  if (
-    input.profile?.threadScope === 'isolated-thread' ||
-    input.profile?.nativeResumePolicy === 'disabled'
-  ) {
-    return 'isolated-thread'
-  }
-
-  return 'session-thread'
+  return input.profile?.threadScope ?? 'session-thread'
 }
 
 export async function buildCodexTurnExecutionPlan(input: {
@@ -430,13 +413,11 @@ export async function buildCodexTurnExecutionPlan(input: {
 }
 
 export async function buildCodexTurnAttemptPlan(input: {
-  attemptCount: number
   executionPlan: AssistantCodexTurnExecutionPlan
   session: AssistantSession
 }): Promise<AssistantCodexAttemptPlan> {
   const route = input.executionPlan.route
   return {
-    attemptCount: input.attemptCount,
     route,
     routePlan: await resolveAssistantRouteTurnPlan({
       acceptedInputItems: input.executionPlan.acceptedInputItems,
@@ -834,7 +815,6 @@ function resolveRouteStylePreferences(
 function resolveRouteNativeResumeThreadId({
   input,
   resumeBinding,
-  supportsNativeResume,
   assistantContractFingerprint,
   threadStartDeveloperInstructions,
   dynamicTools,
@@ -842,7 +822,6 @@ function resolveRouteNativeResumeThreadId({
 }: {
   input: AssistantRouteTurnPlanInput
   resumeBinding: ReturnType<typeof resolveAssistantRouteResumeBinding>
-  supportsNativeResume: boolean
   assistantContractFingerprint: string
   threadStartDeveloperInstructions: string | null
   dynamicTools: readonly MurphDynamicTool[]
@@ -868,23 +847,17 @@ function resolveRouteNativeResumeThreadId({
     input.profile.threadScope === 'session-thread'
   const resumeCodexThreadId =
     nativeResumeEnabled &&
-    supportsNativeResume &&
     resumeBinding !== null &&
     resumeBinding.transcriptSeenThrough !== undefined &&
     transcriptEntries !== null &&
     findEntriesAfterBookmark(transcriptEntries, resumeBinding.transcriptSeenThrough) !== null &&
     assistantContractMatches
-      ? resolveAssistantEffectiveCodexResumeThreadId({
-          resumeCodexThreadId: resolveAssistantCodexResumeThreadId({
-            resumeState: resumeBinding,
-          }),
-        })
+      ? resumeBinding.threadId
       : null
   return {
     resumeCodexThreadId,
     threadRotationReason: resumeCodexThreadId !== null ? null
       : !nativeResumeEnabled ? 'profile_isolated'
-      : !supportsNativeResume ? 'native_resume_disabled'
       : resumeBinding === null
         ? readAssistantCodexResume(input.session) === null ? 'binding_absent' : 'route_mismatch'
         : assistantContractMatches ? 'transcript_bookmark_missing'
@@ -907,13 +880,6 @@ export async function resolveAssistantRouteTurnPlan(
     () => resolveAssistantRouteResumeBinding({
       route: input.route,
       sessionResumeState: readAssistantCodexResume(input.session),
-    }),
-  )
-  const routeProviderCapabilities = measureRoutePlanningSync(
-    routePlanningSpans,
-    'routeTargetCapabilitiesElapsedMs',
-    () => resolveCodexAssistantTargetCapabilities({
-      ...input.route.providerOptions,
     }),
   )
   const routeFingerprint = readCodexThreadRouteFingerprint(input.route)
@@ -991,7 +957,6 @@ export async function resolveAssistantRouteTurnPlan(
       interactiveConversation: conversationProviderTurn,
       providerTools: input.profile.toolProfile === 'provider-turn',
       onboardingGoalCheckin: onboardingGoalCheckinTurn,
-      supportsNativeResume: routeProviderCapabilities.supportsNativeResume,
     }),
   )
   const followUpInvocation = followUp.invocation
@@ -1407,7 +1372,6 @@ export async function resolveAssistantRouteTurnPlan(
   const { resumeCodexThreadId, threadRotationReason } = resolveRouteNativeResumeThreadId({
     input,
     resumeBinding,
-    supportsNativeResume: followUp.supportsNativeResume,
     transcriptEntries: routeTranscript.entries,
     assistantContractFingerprint,
     threadStartDeveloperInstructions,
@@ -1937,12 +1901,6 @@ function resolveAssistantCodexContinuation(input: {
   return {
     kind: 'thread-start',
   }
-}
-
-function resolveAssistantEffectiveCodexResumeThreadId(input: {
-  resumeCodexThreadId: string | null
-}): string | null {
-  return normalizeNullableString(input.resumeCodexThreadId)
 }
 
 function isConversationMediaTurn(

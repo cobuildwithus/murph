@@ -59,7 +59,6 @@ const ASSISTANT_ASK_CONTINUATION_RECEIPT_PROMPT =
 export const ASSISTANT_ASK_CONTINUATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
-  nativeResumePolicy: 'disabled',
   promptProfile: 'assistant-ask-continuation',
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
@@ -280,7 +279,6 @@ export async function sendAssistantAskContinuationLocal(
 
       if (providerOutcome.kind === 'failed_terminal') {
         const failedProviderResult = {
-          attemptCount: providerOutcome.attemptCount,
           provider: providerOutcome.route.provider,
           providerOptions: providerOutcome.route.providerOptions,
           route: providerOutcome.route,

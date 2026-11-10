@@ -15,8 +15,7 @@ export interface CodexThreadIdentity {
   label: string
   provider: 'codex-cli'
   providerOptions: AssistantProviderSessionOptions
-  routeFingerprint?: string
-  routeId: string
+  routeFingerprint: string
   threadCompatibilityFingerprint?: string
 }
 
@@ -39,7 +38,6 @@ export function buildCodexThreadIdentity(
   })
   return {
     routeFingerprint,
-    routeId: routeFingerprint,
     threadCompatibilityFingerprint,
     label: [
       'primary',
@@ -54,9 +52,9 @@ export function buildCodexThreadIdentity(
 }
 
 export function readCodexThreadRouteFingerprint(
-  route: Pick<CodexThreadIdentity, 'routeId' | 'routeFingerprint'> | null | undefined,
+  route: Pick<CodexThreadIdentity, 'routeFingerprint'> | null | undefined,
 ): string {
-  return route?.routeFingerprint ?? route?.routeId ?? ''
+  return route?.routeFingerprint ?? ''
 }
 
 export function readCodexThreadCompatibilityFingerprint(

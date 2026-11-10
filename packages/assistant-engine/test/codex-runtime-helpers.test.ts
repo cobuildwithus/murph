@@ -69,8 +69,6 @@ import {
   executeCodexAssistantTurnAttemptFromInput,
   prepareHostedCodexAssistantProcess,
   startHostedCodexAssistantVoice,
-  resolveCodexAssistantCapabilities,
-  resolveCodexAssistantTargetCapabilities,
 } from '../src/assistant/codex-runtime.ts'
 import {
   MURPH_DYNAMIC_TOOLS,
@@ -2340,7 +2338,7 @@ describe('Codex assistant registry helpers', () => {
           provider: 'codex-cli',
         }),
       ),
-      routeId: 'route-failed',
+      routeFingerprint: 'route-failed',
     }
 
     await recordCodexAttemptFailed({
@@ -2374,7 +2372,7 @@ describe('Codex assistant registry helpers', () => {
           provider: 'codex-cli',
         }),
       ),
-      routeId: 'route-failed',
+      routeFingerprint: 'route-failed',
     }
     turnsMocks.appendAssistantTurnReceiptEvent.mockRejectedValueOnce(
       new Error('receipt store unavailable'),

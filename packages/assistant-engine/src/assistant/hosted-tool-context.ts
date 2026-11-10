@@ -521,7 +521,6 @@ export function createAssistantHostedToolContext(input: {
               providerRequestOutcome:
                 usageInput.usageDraft.providerRequestOutcome,
               providerResult: {
-                attemptCount: 1,
                 provider: usageInput.usageDraft.provider,
                 providerOptions: route.providerOptions,
                 route,

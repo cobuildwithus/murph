@@ -32,8 +32,6 @@ import {
   resolveAssistantProviderPrompt,
 } from './helpers.js'
 import {
-  supportsAnyAssistantRichUserMessageContent,
-  type AssistantProviderCapabilities,
   type AssistantProviderTurnAttemptResult,
   type AssistantProviderTurnExecutionInput,
   type AssistantProviderUsage,
@@ -144,16 +142,6 @@ const SAFE_CODEX_DIAGNOSTIC_STRUCTURAL_KEYS = new Set([
   'text',
   'type',
 ])
-
-export const CODEX_ASSISTANT_CAPABILITIES: AssistantProviderCapabilities = {
-  supportedUserMessageContentTypes: ['text', 'image'],
-  supportsNativeResume: true,
-  supportsReasoningEffort: true,
-  supportsRichUserMessageContent: supportsAnyAssistantRichUserMessageContent([
-    'text',
-    'image',
-  ]),
-}
 
 type CodexAssistantProcessPreparationInput = Pick<
   AssistantProviderTurnExecutionInput,

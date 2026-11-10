@@ -484,7 +484,6 @@ describe("assistant usage recording seam", () => {
       occurredAt: "2026-04-08T09:59:58.123Z",
       providerRequestAcceptedInputIds: ["assistant_input_a"],
       providerResult: createProviderResult({
-        attemptCount: 3,
         codexThreadId: "provider-session-42",
         route: createRoute({ routeId: "route-usage" }),
         usage: {
@@ -516,7 +515,7 @@ describe("assistant usage recording seam", () => {
     });
 
     expect(seamMocks.createAssistantUsageId).toHaveBeenCalledWith({
-      attemptCount: 3,
+      attemptCount: 1,
       providerRequestOrdinal: 0,
       turnId: "turn-usage",
     });
@@ -531,7 +530,7 @@ describe("assistant usage recording seam", () => {
     });
     expect(recordUsage).toHaveBeenCalledWith({
         apiKeyEnv: "RUNTIME_KEY",
-        attemptCount: 3,
+        attemptCount: 1,
         baseUrl: "https://usage.example.test/v1",
         cacheWriteTokens: 5,
         cachedInputTokens: 7,
@@ -566,7 +565,7 @@ describe("assistant usage recording seam", () => {
         triggerKind: null,
         turnId: "turn-usage",
         turnProfileJson: null,
-        usageId: "turn-usage:0:3",
+        usageId: "turn-usage:0:1",
         usageExtractionSourcePath: "params.usage",
         usageExtractionVersion: "codex-usage-v1",
     }, ["assistant_input_a"]);
@@ -4869,7 +4868,7 @@ function createRoute(input?: {
     label: "Primary",
     provider: input?.provider ?? "codex-cli",
     providerOptions: createProviderOptions(input?.providerOptions),
-    routeId: input?.routeId ?? "route-primary",
+    routeFingerprint: input?.routeId ?? "route-primary",
   };
 }
 
@@ -4987,7 +4986,6 @@ function createSharedPlan(input?: {
 function createProviderResult(input?: {
   acceptedNoReplyDeliveryContextOrdinals?: readonly number[] | null;
   assistantContractFingerprint?: string;
-  attemptCount?: number;
   providerOptions?: AssistantProviderSessionOptions;
   codexThreadId?: string | null;
   finalAction?: AssistantNoReplyDisposition;
@@ -5020,7 +5018,6 @@ function createProviderResult(input?: {
     assistantContractFingerprint:
       input?.assistantContractFingerprint ??
       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    attemptCount: input?.attemptCount ?? 1,
     provider: "codex-cli",
     codexContinuation: {
       kind: "explicit-structured-history",

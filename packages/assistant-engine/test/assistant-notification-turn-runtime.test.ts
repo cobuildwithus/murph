@@ -319,7 +319,7 @@ test('connected-channel greeting selects isolated output-only continuation and r
     expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
     const request = mocks.executeCodexTurnWithRecovery.mock.calls[0]![0]
     expect(request.profile).toEqual({
-      nativeResumePolicy: 'disabled', promptProfile: 'operator-message',
+      promptProfile: 'operator-message',
       threadScope: 'isolated-thread', toolProfile: 'output-only-turn',
     })
     expect(request.input.prompt).toContain('Do not restart onboarding')
@@ -2558,7 +2558,6 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
         turnTrigger: 'manual-deliver',
       }),
       profile: {
-        nativeResumePolicy: 'disabled',
         promptProfile: 'system-notification',
         threadScope: 'isolated-thread',
         toolProfile: 'output-only-turn',
@@ -2589,7 +2588,6 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       profile: {
-        nativeResumePolicy: 'disabled',
         promptProfile: 'conversation',
         threadScope: 'isolated-thread',
         toolProfile: 'provider-turn',
@@ -2629,7 +2627,6 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       profile: {
-        nativeResumePolicy: 'disabled',
         promptProfile: 'conversation',
         threadScope: 'isolated-thread',
         toolProfile: 'provider-turn',
@@ -2684,7 +2681,6 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
       // top-level; the message-input copy alone never fires in production.
       onProviderRequestStarted: expect.any(Function),
       profile: expect.objectContaining({
-        nativeResumePolicy: 'disabled',
         threadScope: 'isolated-thread',
         toolProfile: 'maintenance-turn',
       }),
@@ -2746,7 +2742,6 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
         ),
       }),
       profile: {
-        nativeResumePolicy: 'disabled',
         promptProfile: 'maintenance',
         threadScope: 'isolated-thread',
         toolProfile: 'maintenance-turn',
@@ -3379,7 +3374,7 @@ test('sendAssistantNotificationLocal keeps scheduled group reads and offers mode
       expect(hostedToolContext?.groupSharedReader).toBe(groupSharedReader)
       expect(hostedToolContext?.groupTool).toBeNull()
       expect(providerInput.profile).toEqual({
-        nativeResumePolicy: 'disabled', promptProfile: 'conversation',
+        promptProfile: 'conversation',
         threadScope: 'isolated-thread', toolProfile: 'provider-turn',
       })
       expect(groupSharedRead).not.toHaveBeenCalled()
@@ -3521,7 +3516,7 @@ test('sendAssistantNotificationLocal forwards one hosted context and leaves audi
         request: groupSharedRead,
       })
       expect(providerInput.profile).toEqual({
-        nativeResumePolicy: 'disabled', promptProfile: 'conversation',
+        promptProfile: 'conversation',
         threadScope: 'isolated-thread', toolProfile: 'provider-turn',
       })
       return {
@@ -3575,7 +3570,7 @@ test.each(['authorized', 'ordinary', 'wrong-occurrence', 'wrong-trigger', 'not-h
     })
     const providerInput = mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]
     expect(providerInput?.profile).toEqual({
-      nativeResumePolicy: 'disabled', promptProfile: 'conversation',
+      promptProfile: 'conversation',
       threadScope: 'isolated-thread', toolProfile: 'provider-turn',
     })
     expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(expect.objectContaining({
@@ -3613,10 +3608,10 @@ test('usage optimizer isolation preserves foreground resume on terminal failure'
     providerOutcome: {
       acceptedNoReplyDeliveryContextOrdinals: [], additionalUsages: [],
       assistantContractFingerprint: providerResult.assistantContractFingerprint,
-      attemptCount: 1, codexContinuation: providerResult.codexContinuation,
+      codexContinuation: providerResult.codexContinuation,
       codexRolloutRelativePath: null, codexThreadId: 'synthetic-review-thread',
       error: providerError, kind: 'failed_terminal', providerRequestOutcome: 'failed',
-      providerTurnId: null, rawEvents: [], reactions: [], route: providerResult.route,
+      rawEvents: [], reactions: [], route: providerResult.route,
       session: providerResult.session, usage: null, usageAttribution: null,
     },
   })
@@ -4275,7 +4270,7 @@ test('manual meal estimation has isolated vault tools and one private reply', as
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       profile: {
-        nativeResumePolicy: 'disabled', promptProfile: 'conversation',
+        promptProfile: 'conversation',
         threadScope: 'isolated-thread', toolProfile: 'provider-turn',
       },
     }),
@@ -4340,7 +4335,6 @@ test('sendAssistantNotificationLocal delivers ordinary context handoff text thro
         sandbox: 'danger-full-access',
       }),
       profile: {
-        nativeResumePolicy: 'disabled',
         promptProfile: 'conversation',
         threadScope: 'isolated-thread',
         toolProfile: 'output-only-turn',
@@ -4437,7 +4431,7 @@ test.each(['send_message', 'skip'] as const)('group missed-day notifications iso
   if (kind === 'skip') expect(deliverMessage).not.toHaveBeenCalled()
   else expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({ message: 'Alex, your reading post is missing from yesterday.', card: null, media: [] }))
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(expect.objectContaining({ profile: {
-    nativeResumePolicy: 'disabled', promptProfile: 'conversation', threadScope: 'isolated-thread', toolProfile: 'game-host-turn',
+    promptProfile: 'conversation', threadScope: 'isolated-thread', toolProfile: 'game-host-turn',
   } }))
 })
 
@@ -4508,7 +4502,6 @@ test.each(['game-recap:game_synthetic', 'game-recap:game_synthetic:synthetic_req
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       profile: {
-        nativeResumePolicy: 'disabled',
         promptProfile: 'conversation',
         threadScope: 'isolated-thread',
         toolProfile: 'game-host-turn',
@@ -5497,14 +5490,12 @@ test('a failed scheduled turn leaves the conversation saved thread untouched', a
         additionalUsages: [],
         assistantContractFingerprint:
           providerResult.assistantContractFingerprint,
-        attemptCount: 1,
         codexContinuation: providerResult.codexContinuation,
         codexRolloutRelativePath: null,
         codexThreadId: null,
         error: providerError,
         kind: 'failed_terminal',
         providerRequestOutcome: 'failed',
-        providerTurnId: null,
         rawEvents: [],
         reactions: [],
         route: providerResult.route,
@@ -5798,7 +5789,7 @@ function createRoute(input?: {
     label: 'Primary',
     provider: input?.provider ?? 'codex-cli',
     providerOptions: createProviderOptions(input?.providerOptions),
-    routeId: input?.routeId ?? 'route-primary',
+    routeFingerprint: input?.routeId ?? 'route-primary',
   }
 }
 
@@ -6442,7 +6433,6 @@ function createProviderResult(input?: {
   return {
     assistantContractFingerprint:
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-    attemptCount: 1,
     provider: 'codex-cli',
     codexContinuation: {
       kind: 'explicit-structured-history',
