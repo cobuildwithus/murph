@@ -4147,7 +4147,7 @@ function runPhotoIdleMaintenance(vaultRoot: string, store: ReturnType<typeof cre
   reportRetentionIssue?: Parameters<typeof runHostedIdleCheckpointMaintenance>[0]["reportRetentionIssue"];
 } = {}) {
   return runHostedIdleCheckpointMaintenance({ vaultRoot, credentialSource: "platform", memberId: "member_synthetic",
-    model: null, providerName: null, pendingWork: false, processingMode: options.processingMode ?? "inbox_media_retention",
+    providerName: null, pendingWork: false, processingMode: options.processingMode ?? "inbox_media_retention",
     recordUsage: null, resolveAssistantSessionId: null, shutdownSignal: null, wakeSignal: null,
     reportRetentionIssue: options.reportRetentionIssue,
     mealMedia: { mediaStore: store.mediaStore, budget: createHostedMealMediaBudget(), persistRetry: options.persistRetry ?? (async () => {}) } });

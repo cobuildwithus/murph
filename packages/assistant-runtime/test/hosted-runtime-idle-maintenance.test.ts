@@ -199,7 +199,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       }
       const input = {
         credentialSource: "platform" as const,
-        memberId: "synthetic-member", model: null, pendingWork: false,
+        memberId: "synthetic-member", pendingWork: false,
         providerName: null, recordUsage: null, resolveAssistantSessionId: null,
         shutdownSignal: null, vaultRoot, wakeSignal: null,
       };
@@ -226,12 +226,11 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(HOSTED_IDLE_ARCHIVE_TIMEOUT_MS).toBe(30_000);
   });
 
-  it("skips on shutdown, missing model, and missing provider without touching the engine", async () => {
+  it("skips on shutdown and missing provider without touching the engine", async () => {
     expect(
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -245,21 +244,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: null,
-        providerName: "hosted-openai",
-        pendingWork: false,
-        recordUsage: null,
-        resolveAssistantSessionId: null,
-        shutdownSignal: null,
-        wakeSignal: null,
-      }),
-    ).toEqual({ kind: "skipped", reason: "missing_model", threadContextTokensBefore: null });
-
-    expect(
-      await runHostedIdleCheckpointMaintenance({
-        credentialSource: "platform",
-        memberId: "member_1",
-        model: "gpt-6.1-sol",
         providerName: " ",
         pendingWork: false,
         recordUsage: null,
@@ -289,7 +273,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     });
     const recorded: AssistantUsageRecord[] = [];
     await runHostedIdleCheckpointMaintenance({
-      credentialSource: "platform", memberId: "member_1", model: "gpt-6.1-sol",
+      credentialSource: "platform", memberId: "member_1",
       providerName: "hosted-openai", pendingWork: false,
       recordUsage: async (record) => {
         recorded.push(record);
@@ -331,7 +315,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "member",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       providerName: "openai-local-test",
       pendingWork: false,
       recordUsage: async (record) => {
@@ -385,7 +368,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage,
@@ -416,7 +398,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         wakes.push(now);
         const outcome = await runHostedIdleCheckpointMaintenance({
           credentialSource: "platform", memberId: "member_synthetic_retention",
-          model: null, providerName: null, pendingWork: false,
+          providerName: null, pendingWork: false,
           recordUsage: null, resolveAssistantSessionId: null,
           shutdownSignal: null, vaultRoot, wakeSignal: null,
         });
@@ -460,7 +442,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         vi.setSystemTime(now + day * 24 * 60 * 60 * 1000);
         const outcome = await runHostedIdleCheckpointMaintenance({
           credentialSource: "platform", memberId: "member_synthetic_retention",
-          model: null, providerName: null, pendingWork: false,
+          providerName: null, pendingWork: false,
           recordUsage: null, resolveAssistantSessionId: null,
           shutdownSignal: null, vaultRoot, wakeSignal: null,
         });
@@ -485,7 +467,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     try {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform", memberId: "member_synthetic_retention",
-        model: null, providerName: null, pendingWork: false,
+        providerName: null, pendingWork: false,
         recordUsage: null, resolveAssistantSessionId: null,
         shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
       });
@@ -508,7 +490,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     try {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform", memberId: "member_synthetic_retention",
-        model: null, providerName: null, pendingWork: false,
+        providerName: null, pendingWork: false,
         recordUsage: null, resolveAssistantSessionId: null,
         shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
       });
@@ -529,7 +511,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     runInboxMediaRetention.mockRejectedValueOnce(new Error("synthetic private fixture content"));
     const input = {
       credentialSource: "platform" as const, memberId: "member_synthetic_retention",
-      model: null, providerName: null, pendingWork: false,
+      providerName: null, pendingWork: false,
       recordUsage: null, reportRetentionIssue, resolveAssistantSessionId: null,
       shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
     };
@@ -561,7 +543,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     try {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform", memberId: "member_synthetic_retention",
-        model: null, providerName: null, pendingWork: false,
+        providerName: null, pendingWork: false,
         recordUsage: null, resolveAssistantSessionId: null,
         shutdownSignal: null, vaultRoot: "/vault", wakeSignal: null,
       });
@@ -585,7 +567,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -625,7 +606,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -665,7 +645,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -717,7 +696,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "platform",
       materializeRetentionCandidatePaths,
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       pendingWork: false,
       protectedAttachmentIds: ["att_pending"],
       protectedCaptureIds: ["cap_pending"],
@@ -773,7 +751,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -850,7 +827,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await expect(runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_synthetic_retention_1",
-        model: null,
         pendingWork: true,
         providerName: null,
         recordUsage: null,
@@ -909,7 +885,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       credentialSource: "platform",
       generatedImageRetentionMaxCaptures: 7,
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -939,7 +914,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         credentialSource: "platform",
         generatedImageRetentionMaxCaptures: 0,
         memberId: "member_1",
-        model: "gpt-6.1-sol",
         pendingWork: false,
         persistGeneratedImageRetention,
         providerName: "hosted-openai",
@@ -982,7 +956,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -1021,7 +994,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -1057,7 +1029,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -1087,7 +1058,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: true,
       recordUsage: null,
@@ -1122,7 +1092,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1161,7 +1130,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -1202,7 +1170,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1252,7 +1219,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const interrupted = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1280,7 +1246,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const resumed = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1321,7 +1286,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       pendingWork: false,
       protectedAttachmentIds: ["att_active_01"],
       protectedCaptureIds: ["cap_active"],
@@ -1367,7 +1331,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async (record) => {
@@ -1421,7 +1384,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async () => {
@@ -1461,7 +1423,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1503,7 +1464,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: null,
@@ -1520,7 +1480,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: true,
         recordUsage: null,
@@ -1548,7 +1507,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_retention_scope",
-        model: null,
         pendingWork: false,
         processingMode,
         providerName: null,
@@ -1587,7 +1545,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1657,7 +1614,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await expect(runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_event_archive",
-        model: "gpt-6.1-sol",
         pendingWork: false,
         providerName: "hosted-openai",
         recordUsage: null,
@@ -1728,7 +1684,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       const maintenance = runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_event_archive_wake",
-        model: "gpt-6.1-sol",
         pendingWork: false,
         providerName: "hosted-openai",
         recordUsage: null,
@@ -1771,7 +1726,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1801,7 +1755,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1832,7 +1785,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1864,7 +1816,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     await expect(runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       pendingWork: false,
       providerName: "hosted-openai",
       recordUsage: null,
@@ -1897,7 +1848,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         runHostedIdleCheckpointMaintenance({
           credentialSource: "platform",
           memberId: "member_1",
-          model: "gpt-6.1-sol",
           pendingWork: true,
           protectedCaptureIds: ["cap_pending"],
           providerName: "hosted-openai",
@@ -1947,7 +1897,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-unpriced-experimental",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1965,7 +1914,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
         memberId: "member_1",
-        model: "gpt-6.1-sol",
         providerName: "hosted-openai",
         pendingWork: false,
         recordUsage: null,
@@ -1996,7 +1944,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
       memberId: "member_1",
-      model: "gpt-6.1-sol",
       providerName: "hosted-openai",
       pendingWork: false,
       recordUsage: async (record) => {

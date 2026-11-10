@@ -122,7 +122,6 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     storedPaths: readonly string[]
   ) => Promise<InboxMediaRetentionMaterializeResult | void>) | null;
   memberId: string;
-  model: string | null;
   pendingWork: boolean;
   processingMode?: HostedWorkspaceInvocationProcessingMode;
   persistGeneratedImageRetention?: (<T>(write: () => Promise<T>) => Promise<T>) | null;
@@ -343,16 +342,6 @@ export async function runHostedIdleCheckpointMaintenance(input: {
         vaultRoot: input.vaultRoot,
         wakeInterrupted,
       });
-    }
-    // Without a priced hosted model id the compact call's usage cannot be
-    // accounted against the member's allowance, so do not spend unattributable
-    // tokens. The two reasons are distinct on purpose: missing_model means a
-    // misconfigured runtime; unpriced_model means a deliberate unsupported model.
-    if (!input.model) {
-      return attachInboxMediaRetentionWake(
-        { kind: "skipped", reason: "missing_model", threadContextTokensBefore: null },
-        retentionWake,
-      );
     }
     const routedProviderName = input.providerName?.trim() || null;
     if (!routedProviderName) {

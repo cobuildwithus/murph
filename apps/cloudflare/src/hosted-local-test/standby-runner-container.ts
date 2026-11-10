@@ -1,6 +1,4 @@
-import {
-  registerHostedRunnerContainerOutboundInterception,
-} from "../runner-container.ts";
+import { HOSTED_RUNNER_OUTBOUND_BY_HOST } from "../runner-egress-intercept.ts";
 import {
   StandbyRunnerContainer,
 } from "../standby-runner-container.ts";
@@ -13,6 +11,4 @@ export class HostedLocalTestStandbyRunnerContainer extends StandbyRunnerContaine
   }
 }
 
-registerHostedRunnerContainerOutboundInterception(
-  HostedLocalTestStandbyRunnerContainer,
-);
+HostedLocalTestStandbyRunnerContainer.outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;

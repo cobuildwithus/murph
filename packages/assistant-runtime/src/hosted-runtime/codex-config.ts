@@ -44,7 +44,6 @@ import {
 } from "./launch-spec.ts";
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
-  resolveHostedOperatorModelProvider,
 } from "./codex-runtime-env.ts";
 import {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE,
@@ -545,21 +544,11 @@ export function buildHostedCodexConfigToml(input: {
   const modelProviderId = input.chatGptAuth
     ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
     : input.provider.id;
-  const operatorModelProvider = resolveHostedOperatorModelProvider(modelProviderId);
   const providerConfigLines = [
     ...buildHostedCodexProviderTomlLines(input),
     ...(input.chatGptAuth ? buildHostedCodexProviderTomlLines({
       provider: { ...OPENAI_CODEX_MODEL_PROVIDER_CONFIG, id: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID },
     }) : []),
-    ...(operatorModelProvider === modelProviderId ? [] : buildHostedCodexProviderTomlLines({
-      provider: {
-        ...OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
-        id: operatorModelProvider,
-        ...(operatorModelProvider === HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
-          ? { baseUrl: input.provider.baseUrl }
-          : {}),
-      },
-    })),
   ];
 
   return [

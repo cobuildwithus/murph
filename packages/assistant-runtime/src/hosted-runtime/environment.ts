@@ -263,7 +263,6 @@ export function normalizeHostedAssistantRuntimeConfig(
   const parserToolchain =
     normalizeHostedAssistantRuntimeParserToolchain(input?.parserToolchain);
   const userEnv = sanitizeHostedAssistantRuntimeUserEnv({
-    forwardedEnv,
     userEnv: input?.userEnv ?? {},
   });
   const normalizedPlatform = platform ?? null;
@@ -299,16 +298,11 @@ export function projectHostedRuntimeProcessEnv(input: {
   platformTransportEnv?: Readonly<Record<string, string | undefined>>;
 }): Record<string, string> {
   const baseEnv = buildHostedBaseProcessEnvironment(input.ambientEnv);
-  const imageCodexModelCatalogJson =
-    baseEnv[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV];
 
   return {
     ...baseEnv,
     ...buildHostedPlatformTransportProcessEnvironment(input.platformTransportEnv ?? {}),
     ...sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv),
-    ...(imageCodexModelCatalogJson
-      ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
-      : {}),
   };
 }
 
@@ -407,33 +401,14 @@ function sanitizeHostedAssistantRuntimeChannelPlatformEnv(
 }
 
 export function sanitizeHostedAssistantRuntimeUserEnv(input: {
-  forwardedEnv: Readonly<Record<string, string>>;
   userEnv: Readonly<Record<string, string>>;
 }): Record<string, string> {
-  const normalizedUserEnv = Object.fromEntries(
+  return Object.fromEntries(
     Object.entries(input.userEnv).filter(([key]) =>
       !HOSTED_RUNTIME_USER_ENV_DENYLIST.has(key)
       && !HOSTED_RUNTIME_USER_ENV_DENYLIST_PREFIXES.some((prefix) => key.startsWith(prefix))
     ),
   );
-  const configuredApiKeyEnv = normalizeHostedRuntimeString(
-    input.forwardedEnv.HOSTED_ASSISTANT_API_KEY_ENV,
-  );
-
-  for (const envName of HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES) {
-    if (normalizeHostedRuntimeString(normalizedUserEnv[envName]) === null) {
-      delete normalizedUserEnv[envName];
-    }
-  }
-
-  if (
-    configuredApiKeyEnv &&
-    normalizeHostedRuntimeString(normalizedUserEnv[configuredApiKeyEnv]) === null
-  ) {
-    delete normalizedUserEnv[configuredApiKeyEnv];
-  }
-
-  return normalizedUserEnv;
 }
 
 function normalizeHostedRuntimeString(value: string | null | undefined): string | null {

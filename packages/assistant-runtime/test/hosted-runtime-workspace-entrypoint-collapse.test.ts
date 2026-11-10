@@ -533,14 +533,9 @@ describe("hosted workspace runtime entrypoint", () => {
       const result = await resultPromise;
       assert.equal(result.status, "idle");
       assert.equal(checkpointRequests.length, 1);
+      // Usage attribution comes from the model bound to the warm thread, so
+      // idle maintenance takes no configured model.
       expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledOnce();
-      // Idle maintenance can still check runtime configuration, while usage
-      // attribution comes from the model actually bound to the warm thread.
-      expect(mocks.runHostedIdleCheckpointMaintenance).toHaveBeenCalledWith(
-        expect.objectContaining({
-          model: "gpt-6.1-sol",
-        }),
-      );
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

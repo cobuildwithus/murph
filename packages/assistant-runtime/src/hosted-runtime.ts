@@ -7138,10 +7138,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           || (pendingWake.nextWakeAt !== null
             && Date.parse(pendingWake.nextWakeAt) - Date.now()
               < HOSTED_IDLE_COMPACT_TIMEOUT_MS);
-        const idleMaintenanceModel =
-          readConfirmedAssistantTarget()?.model
-          ?? runtimeEnv.HOSTED_ASSISTANT_MODEL
-          ?? null;
         let idleMaintenance: HostedIdleMaintenanceOutcome;
         try {
           idleMaintenance =
@@ -7188,7 +7184,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   }),
                   materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
                   memberId: input.request.userId,
-                  model: idleMaintenanceModel,
                   pendingWork: idleMaintenancePendingWork,
                   providerName:
                     runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
@@ -7960,7 +7955,6 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
   generatedImageRetentionMaxCaptures?: number;
   materializeWorkspaceArtifacts: HostedWorkspaceArtifactMaterializer;
   memberId: string;
-  model: string | null;
   pendingWork: boolean;
   persistGeneratedImageRetention?: Parameters<
     typeof runHostedIdleCheckpointMaintenance
@@ -7999,7 +7993,6 @@ export async function runHostedPendingInputProtectedIdleMaintenance(input: {
       };
     },
     memberId: input.memberId,
-    model: input.model,
     pendingWork: input.pendingWork,
     persistGeneratedImageRetention: input.persistGeneratedImageRetention ?? null,
     processingMode: input.processingMode,
@@ -8076,7 +8069,6 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
           }),
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
           memberId: input.input.request.userId,
-          model: null,
           pendingWork: false,
           processingMode: "inbox_media_retention",
           persistGeneratedImageRetention: async (write) => {

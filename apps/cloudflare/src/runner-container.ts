@@ -4102,28 +4102,12 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
   }
 }
 
-registerHostedRunnerContainerOutboundInterception(RunnerContainer);
-registerHostedRunnerContainerOutboundInterception(NextRunnerContainer);
-registerHostedRunnerContainerOutboundInterception(DeploySmokeRunnerContainer);
-
-export function registerHostedRunnerContainerOutboundInterception(
-  containerClass: typeof RunnerContainer,
-): void {
-  const outboundByHostSetter = Object.getOwnPropertyDescriptor(Container, "outboundByHost")?.set;
-
-  // A static catch-all outbound handler makes Cloudflare Containers intercept all
-  // HTTPS destinations. Keep interception host-specific so direct R2 uploads stay
-  // on the container's internet path instead of the Worker request body path.
-  if (outboundByHostSetter) {
-    outboundByHostSetter.call(containerClass, HOSTED_RUNNER_OUTBOUND_BY_HOST);
-    return;
-  }
-
-  const legacyContainerClass = containerClass as typeof RunnerContainer & {
-    outboundByHost: typeof HOSTED_RUNNER_OUTBOUND_BY_HOST;
-  };
-  legacyContainerClass.outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;
-}
+// A static catch-all outbound handler makes Cloudflare Containers intercept all
+// HTTPS destinations. Keep interception host-specific so direct R2 uploads stay
+// on the container's internet path instead of the Worker request body path.
+RunnerContainer.outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;
+NextRunnerContainer.outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;
+DeploySmokeRunnerContainer.outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;
 
 export async function refreshHostedExecutionContainerBrowserVaultReplica(_input?: unknown): Promise<never> {
   throw new Error("Hosted runner browser-vault refresh side path has been removed.");

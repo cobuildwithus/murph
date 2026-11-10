@@ -1,6 +1,6 @@
+import { HOSTED_RUNNER_OUTBOUND_BY_HOST } from "./runner-egress-intercept.ts";
 import { readHostedRunnerDeployment } from "./hosted-runner-release.ts";
 import {
-  registerHostedRunnerContainerOutboundInterception,
   RunnerContainer,
 } from "./runner-container.js";
 
@@ -9,7 +9,7 @@ export class StandbyRunnerContainer extends RunnerContainer {
   protected override readonly slotNamespace = "standby" as const;
 }
 
-registerHostedRunnerContainerOutboundInterception(StandbyRunnerContainer);
+StandbyRunnerContainer.outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;
 
 /** Retained namespace only; the base class rejects fresh preparation and binding. */
 export class SmallRunnerContainer extends RunnerContainer {
@@ -20,4 +20,4 @@ export class SmallRunnerContainer extends RunnerContainer {
   }
 }
 
-registerHostedRunnerContainerOutboundInterception(SmallRunnerContainer);
+SmallRunnerContainer.outboundByHost = HOSTED_RUNNER_OUTBOUND_BY_HOST;

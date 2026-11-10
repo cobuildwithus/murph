@@ -60,13 +60,10 @@ const HOSTED_ASSISTANT_THREAD_ROTATION_REASON_VALUES = new Set([
   "binding_absent", "route_mismatch", "contract_mismatch", "profile_isolated", "native_resume_disabled", "transcript_bookmark_missing",
 ]);
 const HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES = new Set([
-  "active_experiment_context",
   "assistant_context_snapshot",
   "assistant_context_snapshot_refresh",
   "follow_up_context",
   "cli_bootstrap",
-  "fallback_instructions",
-  "memory_overview",
   "primary_instructions",
   "resume_binding",
   "target_capabilities",
@@ -388,8 +385,6 @@ const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_BOOLEAN_KEYS = [
   "conversationHistoryPresent",
   "developerInstructionsPresent",
   "messageTargetDynamicToolsAvailable",
-  "messageReactionsAvailable",
-  "reactionDynamicToolAvailable",
   "resumeCodexThreadIdPresent",
 ] as const;
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_SIZE_NUMBER_KEYS = [
@@ -584,11 +579,6 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
       record,
       "codexContinuation",
       HOSTED_ASSISTANT_CODEX_CONTINUATION_VALUES,
-    )
-    ?? readHostedAssistantProviderPlanAllowedString(
-      record,
-      "providerContinuation",
-      HOSTED_ASSISTANT_CODEX_CONTINUATION_VALUES,
     );
   const workingDirectoryKind = readHostedAssistantProviderPlanAllowedString(
     record,
@@ -603,16 +593,13 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
     codexContinuation,
     providerPlanKind: "provider.plan",
     messageTargetingAvailable:
-      readHostedAssistantProviderPlanBoolean(record, "messageTargetingAvailable")
-      ?? readHostedAssistantProviderPlanBoolean(record, "messageReactionsAvailable"),
+      readHostedAssistantProviderPlanBoolean(record, "messageTargetingAvailable"),
     messageTargetDynamicToolsAvailable:
-      readHostedAssistantProviderPlanBoolean(record, "messageTargetDynamicToolsAvailable")
-      ?? readHostedAssistantProviderPlanBoolean(record, "reactionDynamicToolAvailable"),
+      readHostedAssistantProviderPlanBoolean(record, "messageTargetDynamicToolsAvailable"),
     providerRequestOrdinal:
       readHostedAssistantProviderPlanNullableNumber(record, "providerRequestOrdinal"),
     resumeCodexThreadIdPresent:
-      readHostedAssistantProviderPlanBoolean(record, "resumeCodexThreadIdPresent")
-        ?? readHostedAssistantProviderPlanBoolean(record, "resumeProviderSessionIdPresent"),
+      readHostedAssistantProviderPlanBoolean(record, "resumeCodexThreadIdPresent"),
     workingDirectoryKind,
   };
 
@@ -623,22 +610,17 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
 
   for (const key of [
     "dynamicToolCount",
-    "routePlanningActiveExperimentContextElapsedMs",
     "routePlanningAssistantContextSnapshotElapsedMs",
     "routePlanningAssistantContextSnapshotRefreshElapsedMs",
     "routePlanningFollowUpContextElapsedMs",
     "routePlanningCliBootstrapElapsedMs",
     "routePlanningElapsedMs",
-    "routePlanningFallbackInstructionsElapsedMs",
-    "routePlanningMemoryOverviewElapsedMs",
     "routePlanningMeasuredElapsedMs",
-    "routePlanningPrimaryInstructionsElapsedMs",
     "routePlanningPrimarySystemPromptElapsedMs",
     "routePlanningResumeBindingElapsedMs",
     "routePlanningSlowestStageElapsedMs",
     "routePlanningTargetCapabilitiesElapsedMs",
     "routePlanningUnaccountedElapsedMs",
-    "routePlanningVaultOverviewElapsedMs",
   ] as const) {
     maybeSetHostedAssistantProviderDiagnosticDetail(
       details,
@@ -664,16 +646,11 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
       HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES,
     ),
   );
-  for (const key of [
-    "routePlanningAnyBootstrapContextPrepared",
+  maybeSetHostedAssistantProviderDiagnosticDetail(
+    details,
     "routePlanningBootstrapContextPrepared",
-  ] as const) {
-    maybeSetHostedAssistantProviderDiagnosticDetail(
-      details,
-      key,
-      readHostedAssistantProviderDiagnosticBoolean(record, key),
-    );
-  }
+    readHostedAssistantProviderDiagnosticBoolean(record, "routePlanningBootstrapContextPrepared"),
+  );
 
   return details;
 }
