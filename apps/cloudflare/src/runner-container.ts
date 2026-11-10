@@ -233,12 +233,16 @@ class RunnerContainerCleanupUnsettledError extends Error {
 }
 
 export interface HostedExecutionContainerInvokeRequest {
-  launch?: Pick<Extract<HostedRuntimeOwnerCommand, { operation: "prepare_launch" }>,
-    "providerEgressTokenHash" | "platformAiUsageAllowed">;
   job: HostedExecutionRunnerJobInput;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   timeoutMs?: number | null;
   userId: string;
+}
+
+/** The slot submits these launch facts as `prepare_launch` before its receipt. */
+export interface HostedExecutionContainerSupervisedInvocationRequest extends HostedExecutionContainerInvokeRequest {
+  launch: Pick<Extract<HostedRuntimeOwnerCommand, { operation: "prepare_launch" }>,
+    "providerEgressTokenHash" | "platformAiUsageAllowed">;
 }
 
 type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest;
@@ -272,8 +276,9 @@ interface RunnerContainerStartupFailureObservation {
 export type RunnerContainerEnsureReadyForProcessingResult =
   | {
       action?: "already_warm" | "started";
-      coldStartTiming?: RunnerContainerColdStartTiming;
       kind: "ready";
+      // Constant since #3532. Workers before this release read it to send
+      // `launch`; delete once the rollback floor passes this release.
       preparesSupervisedLaunch?: true;
     }
   | {
@@ -281,27 +286,9 @@ export type RunnerContainerEnsureReadyForProcessingResult =
       kind: "cleanup_unsettled";
     };
 
-export interface RunnerContainerColdStartTiming {
-  healthCheckFinishedAtEpochMs: number;
-  healthCheckStartedAtEpochMs: number;
-  lifecycleLockAcquiredAtEpochMs: number;
-  onStartAtEpochMs?: number;
-  portsReadyAtEpochMs: number;
-  processStartedAtEpochMs?: number;
-  readinessRequestedAtEpochMs: number;
-  readyObservedAtEpochMs: number;
-  serverListeningAtEpochMs?: number;
-  startIssuedAtEpochMs: number;
-  stateReadFinishedAtEpochMs: number;
-}
-
 type RunnerContainerEnsureReadyResult = {
   action: "already_warm" | "started";
   runnerBusy: boolean;
-  coldStartTiming?: Omit<
-    RunnerContainerColdStartTiming,
-    "lifecycleLockAcquiredAtEpochMs" | "readinessRequestedAtEpochMs"
-  >;
 };
 
 export interface RunnerContainerRuntimeCompletionRecordedInput {
@@ -324,7 +311,7 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
-  startSupervisedInvocation?(input: HostedExecutionContainerInvokeRequest): Promise<{ accepted: true }>;
+  startSupervisedInvocation?(input: HostedExecutionContainerSupervisedInvocationRequest): Promise<{ accepted: true }>;
   // Keep result: older controllers read input.result, and the outbound route still validates it.
   recordSupervisedRuntimeCompletion?(input: { userId: string; attemptId: string; generation: string; result: HostedWorkspaceInvocationResult }): Promise<HostedRuntimeCompletionReceipt>;
   readSupervisedInvocation?(input: { userId: string }): Promise<RunnerInvocationReceipt | null>;
@@ -370,8 +357,6 @@ type RunnerContainerCleanupOwnership =
   | "superseded";
 
 interface RunnerContainerCurrentStart {
-  issuedAtMs: number | null;
-  onStartAtMs: number | null;
   pendingOnStartObservation: boolean;
   pendingUntilMs: number | null;
   readyObservedBy: RunnerContainerReadinessObservation | null;
@@ -1016,7 +1001,7 @@ export class RunnerContainer extends Container {
   }
 
   async startSupervisedInvocation(
-    payload: HostedExecutionContainerInvokeRequest,
+    payload: HostedExecutionContainerSupervisedInvocationRequest,
   ): Promise<{ accepted: true }> {
     this.authorizeBoundUser(payload.userId);
     const parsed = parseHostedExecutionContainerInvokeInput(payload);
@@ -1027,14 +1012,11 @@ export class RunnerContainer extends Container {
     const identity = { attemptId: request.attemptId, generation: request.leaseGeneration };
     const authority = await commandHostedRuntimeOwner({
       source: this.environment, userId: payload.userId,
-      command: payload.launch
-        ? { ...payload.launch, operation: "prepare_launch", ...identity,
-            runnerContainerName: target.slotName, workspaceVersion: request.workspaceVersion,
-            processingMode: request.processingMode ?? "default" }
-        : { operation: "authorize_effect", ...identity, runnerContainerName: target.slotName, managedAi: false },
+      command: { ...payload.launch, operation: "prepare_launch", ...identity,
+        runnerContainerName: target.slotName, workspaceVersion: request.workspaceVersion,
+        processingMode: request.processingMode ?? "default" },
     });
-    if (authority.status !== (payload.launch ? "updated" : "authorized")
-      || authority.owner?.workspaceVersion !== request.workspaceVersion) {
+    if (authority.status !== "updated" || authority.owner?.workspaceVersion !== request.workspaceVersion) {
       throw new Error("Hosted runtime launch authority is stale.");
     }
     const receipts = this.requireInvocationReceiptStore();
@@ -1375,7 +1357,6 @@ export class RunnerContainer extends Container {
     const readiness = this.withLifecycleLock(async () => {
       this.authorizeBoundUser(input.userId);
       lifecycleLockAcquired = true;
-      const lifecycleLockAcquiredAtEpochMs = Date.now();
       throwIfRunnerContainerOperationAborted(readinessSignal);
       const logContext: RunnerContainerLogContext = {
         userId: input.userId,
@@ -1403,13 +1384,6 @@ export class RunnerContainer extends Container {
         }
         return {
           action: readinessResult.action,
-          ...(readinessResult.coldStartTiming === undefined ? {} : {
-            coldStartTiming: {
-              ...readinessResult.coldStartTiming,
-              lifecycleLockAcquiredAtEpochMs,
-              readinessRequestedAtEpochMs,
-            },
-          }),
           kind: "ready" as const,
           preparesSupervisedLaunch: true as const,
         };
@@ -3014,7 +2988,6 @@ export class RunnerContainer extends Container {
       );
     }
     const initialState = await this.getState();
-    const stateReadFinishedAtEpochMs = Date.now();
     const status = readContainerStatus(initialState);
     const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
     const readinessBudgetMs = input.timeoutMs ?? readyTimeoutMs;
@@ -3203,7 +3176,6 @@ export class RunnerContainer extends Container {
       Math.max(1, readinessBudgetMs - (Date.now() - readinessStartedAt)),
       readyTimeoutMs,
     );
-    let coldStartTiming: RunnerContainerEnsureReadyResult["coldStartTiming"];
     let runnerBusy = false;
     const coldStartWaitStartedAtMs = Date.now();
     const startupAbortSignal = combineRunnerContainerAbortSignals(
@@ -3258,15 +3230,12 @@ export class RunnerContainer extends Container {
       if (options.startupFailureObservation) {
         options.startupFailureObservation.stage = "cold_health_or_finalization";
       }
-      const portsReadyAtEpochMs = Date.now();
-      const healthCheckStartedAtEpochMs = Date.now();
-      const healthStartupTiming = await assertRunnerHealthy(
+      const health = await assertRunnerHealthy(
         this,
         readinessTimeoutMs,
         this.environment,
         operationAbortSignal,
       );
-      const healthCheckFinishedAtEpochMs = Date.now();
       const readyStart = this.recordContainerReady(
         "cold-start-ready",
         undefined,
@@ -3277,28 +3246,8 @@ export class RunnerContainer extends Container {
           "Hosted runner container changed while cold readiness was recorded.",
         );
       }
-      runnerBusy = healthStartupTiming.runnerBusy;
+      runnerBusy = health.runnerBusy;
       this.recordRecentReadinessProof(input.userId, readyStart, runnerBusy);
-      const readyObservedAtEpochMs = Date.now();
-
-      coldStartTiming = {
-        healthCheckFinishedAtEpochMs,
-        healthCheckStartedAtEpochMs,
-        ...(currentStart.onStartAtMs === null ? {} : {
-          onStartAtEpochMs: currentStart.onStartAtMs,
-        }),
-        portsReadyAtEpochMs,
-        ...(healthStartupTiming.processStartedAtEpochMs === undefined ? {} : {
-          processStartedAtEpochMs: healthStartupTiming.processStartedAtEpochMs,
-        }),
-        readyObservedAtEpochMs,
-        ...(healthStartupTiming.serverListeningAtEpochMs === undefined ? {} : {
-          serverListeningAtEpochMs: healthStartupTiming.serverListeningAtEpochMs,
-        }),
-        startIssuedAtEpochMs:
-          currentStart.issuedAtMs ?? coldStartWaitStartedAtMs,
-        stateReadFinishedAtEpochMs,
-      };
     } catch (error) {
       if (this.currentContainerStart !== currentStart) {
         throw error;
@@ -3377,7 +3326,6 @@ export class RunnerContainer extends Container {
     return {
       action: "started",
       runnerBusy,
-      ...(coldStartTiming === undefined ? {} : { coldStartTiming }),
     };
   }
 
@@ -3787,9 +3735,7 @@ export class RunnerContainer extends Container {
     if (existing?.readyObservedBy === null) {
       return existing;
     }
-    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, true, {
-      issuedAtMs: startedAtMs,
-    });
+    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, true);
   }
 
   private recordContainerStartObserved(
@@ -3799,7 +3745,6 @@ export class RunnerContainer extends Container {
     const existing = this.currentContainerStart;
     if (existing?.pendingOnStartObservation) {
       existing.pendingOnStartObservation = false;
-      existing.onStartAtMs = startedAtMs;
       existing.startedAtMs = startedAtMs;
       if (existing.pendingUntilMs !== null) {
         existing.pendingUntilMs = startedAtMs + maxAgeMs;
@@ -3809,23 +3754,15 @@ export class RunnerContainer extends Container {
       this.lastDestroyRequest = null;
       return existing;
     }
-    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, false, {
-      onStartAtMs: startedAtMs,
-    });
+    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, false);
   }
 
   private replaceCurrentContainerStart(
     startedAtMs: number,
     maxAgeMs: number,
     pendingOnStartObservation: boolean,
-    timing: {
-      issuedAtMs?: number;
-      onStartAtMs?: number;
-    } = {},
   ): RunnerContainerCurrentStart {
     const currentStart: RunnerContainerCurrentStart = {
-      issuedAtMs: timing.issuedAtMs ?? null,
-      onStartAtMs: timing.onStartAtMs ?? null,
       pendingOnStartObservation,
       pendingUntilMs: startedAtMs + maxAgeMs,
       readyObservedBy: null,
@@ -3849,8 +3786,6 @@ export class RunnerContainer extends Container {
       return null;
     }
     const currentStart: RunnerContainerCurrentStart = expectedStart ?? {
-      issuedAtMs: null,
-      onStartAtMs: null,
       pendingOnStartObservation: false,
       pendingUntilMs: null,
       readyObservedBy: null,
@@ -4961,13 +4896,11 @@ async function assertRunnerHealthy(
     });
   }
 
-  return readRunnerContainerHealthMetadata(payload);
+  return { runnerBusy: readRunnerContainerAdmissionBusy(payload) };
 }
 
 interface RunnerContainerHealthMetadata {
   runnerBusy: boolean;
-  processStartedAtEpochMs?: number;
-  serverListeningAtEpochMs?: number;
 }
 
 // activeJobCount includes finished jobs whose completion callback is still
@@ -4987,35 +4920,6 @@ function readRunnerContainerAdmissionBusy(payload: Record<string, unknown>): boo
 
 function isRunnerContainerCount(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
-}
-
-function readRunnerContainerHealthMetadata(
-  payload: Record<string, unknown>,
-): RunnerContainerHealthMetadata {
-  const processStartedAtEpochMs = readOptionalRunnerContainerEpochMs(
-    payload.processStartedAtEpochMs,
-  );
-  const serverListeningAtEpochMs = readOptionalRunnerContainerEpochMs(
-    payload.serverListeningAtEpochMs,
-  );
-  return {
-    runnerBusy: readRunnerContainerAdmissionBusy(payload),
-    ...(processStartedAtEpochMs === undefined ? {} : {
-      processStartedAtEpochMs,
-    }),
-    ...(serverListeningAtEpochMs === undefined ? {} : {
-      serverListeningAtEpochMs,
-    }),
-  };
-}
-
-function readOptionalRunnerContainerEpochMs(value: unknown): number | undefined {
-  return typeof value === "number"
-    && Number.isFinite(value)
-    && Number.isInteger(value)
-    && value >= 0
-    ? value
-    : undefined;
 }
 
 function readHostedRunnerExpectedBundleIdentity(

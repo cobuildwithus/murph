@@ -496,22 +496,17 @@ empty `mailbox.imported` attempts with `runtime.invocation_finished` attempts
 and confirm the Web ingest-rejection aggregate remains zero. Keep the proof
 deidentified: report only aggregate counts, not attempt IDs or row payloads.
 
-## Container Readiness Telemetry Rollout
+## Cold-Path Step Telemetry Rollout
 
-Deploy Web's shared hosted-execution reader first because its strict phase-
-breakdown parser must accept the additive cold-container orchestration leaves
-before a new Worker can return them. Then deploy the Worker and runner bundle
-together through the protected Murph Cloud workflow with
-`container_rollout=immediate`, and require managed-container smoke to report the
-new bundle fingerprint. The new Worker accepts an old warm container health
-response that omits process-start and TCP-listen timestamps; the fields are
-diagnostic-only and readiness behavior is unchanged during skew.
-
-Roll back the Worker writer first; the additive Web reader is safe to retain.
-After deployment, use the bounded cold-start report to confirm new direct cold
-traces carry the lifecycle-lock, state-read, start/`onStart`, port-wait, health,
-and process-to-listen subdivisions. Keep the proof aggregate or deidentified;
-do not publish trace, attempt, mailbox, or member identifiers.
+Web and the Worker may deploy in either order. A Web direct ensure reads the
+Worker's step timings from an optional response header that Web sanitizes
+against its own contract; old Web ignores the header and an old Worker sends
+none. The slot still advertises `preparesSupervisedLaunch` so an older Worker in
+the rollback window keeps sending launch facts; the new Worker always sends
+them. Runner `/health` no longer returns process-start and listen timestamps,
+which the Worker already treated as optional. After deployment, confirm with an
+aggregate-only query that new direct cold traces carry
+`runnerTargetPathKind` and the step `*ElapsedMs` leaves.
 
 ## Gemini Video Analysis Rollout
 
@@ -2985,7 +2980,7 @@ without rejecting durable mailbox signaling or the post-Temporal direct ensure.
 No queued hint is replayed or converted into runtime work. Memberless standby
 preparation and normal admitted ensure-processing remain unchanged.
 
-Historical latency fields remain readable, and exact legacy stop targets retain
+Exact legacy stop targets retain
 their recovery and deletion paths. This deletion writes no new persistent format
 and introduces no additional persisted-state rollback floor. Container identity,
 namespace recovery, and rollback constraints remain those of the unified fleet

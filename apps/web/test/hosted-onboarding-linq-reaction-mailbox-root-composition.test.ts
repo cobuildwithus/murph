@@ -208,7 +208,7 @@ function createPrismaStub(): PrismaClient {
         return [{ rootKeyId: TEST_ROOT_KEY_ID }];
       }
       if (sql.includes("INSERT INTO hosted_mailbox_lane_counter")) {
-        return [{ seq: 1n }];
+        return [{ causalSeq: 1n, laneSeq: 1n }];
       }
       if (sql.includes("INSERT INTO hosted_mailbox_item")) {
         state.calls.push("mailbox-insert");

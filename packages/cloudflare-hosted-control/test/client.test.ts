@@ -14,6 +14,7 @@ import {
   type HostedBrowserVaultReplicaMetricBucketId,
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
+import { HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER } from "@murphai/hosted-execution/runtime-control";
 
 import {
   CloudflareHostedControlBrowserVaultReplicaNotFoundError,
@@ -507,6 +508,30 @@ describe("createCloudflareHostedControlClient", () => {
         }
       }
     }
+  });
+
+  it.each([
+    ['{"containerReadinessElapsedMs":12,"runnerTargetPathKind":"standby","futureLeaf":1}',
+      { containerReadinessElapsedMs: 12, runnerTargetPathKind: "standby" }],
+    ["{not json", undefined],
+  ] as const)("keeps only known Worker step leaves without dropping other timing: %s", async (header, expected) => {
+    const onTiming = vi.fn();
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl: vi.fn(async () => createJsonResponse({ accepted: true }, {
+        headers: {
+          [HOSTED_RUNTIME_ENSURE_PROCESSING_HANDLER_DURATION_MS_HEADER]: "42",
+          [HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER]: header,
+        },
+        status: 202,
+      })) as typeof fetch,
+      getBearerToken: async () => "token-123",
+    });
+
+    await client.ensureRuntimeProcessing({ onTiming, orchestrationAttemptId: "web-ingress-attempt-test", userId: "user_123" });
+
+    expect(onTiming).toHaveBeenCalledWith(expect.objectContaining({ directEnsureHandlerDurationMs: 42 }));
+    expect(onTiming.mock.calls[0]?.[0]?.stepLatency).toEqual(expected);
   });
 
   it("reports retry_later timing only after the response parses", async () => {

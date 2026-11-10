@@ -424,7 +424,7 @@ function createPrismaStub(input: {
       return root ? [root.row] : [];
     }
     if (sql.includes("insert into hosted_mailbox_lane_counter")) {
-      return [{ seq: 1n }];
+      return [{ causalSeq: 1n, laneSeq: 1n }];
     }
     if (sql.includes("insert into hosted_mailbox_item")) {
       input.state.mailboxInsertCount += 1;

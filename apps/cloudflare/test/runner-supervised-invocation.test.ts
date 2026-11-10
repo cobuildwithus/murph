@@ -32,15 +32,14 @@ function job(attemptId = "attempt-a", generation = "1"): HostedExecutionWorkspac
   }, runtime: buildHostedRunnerJobRuntimeConfig({ forwardedEnv: {}, runnerSecrets: {} }) };
 }
 
-describe.each([false, true])("native supervised invocation with launch preparation %s", (prepareAtLaunch) => {
+describe("native supervised invocation", () => {
   function payload(attemptId = "attempt-a", generation = "1") {
-    return { userId, job: job(attemptId, generation), ...(prepareAtLaunch ? {
-      launch: { providerEgressTokenHash: "a".repeat(64), platformAiUsageAllowed: true },
-    } : {}) };
+    return { userId, job: job(attemptId, generation),
+      launch: { providerEgressTokenHash: "a".repeat(64), platformAiUsageAllowed: true } };
   }
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: prepareAtLaunch ? "updated" : "authorized", owner: {
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status: "updated", owner: {
       userId, attemptId: "attempt-a", generation: "1", phase: "active", workspaceVersion: "0", processingMode: "default",
       allocationId: "standby-claim-11111111-1111-4111-8111-111111111111", runnerContainerName: target,
       platformAiUsageAllowed: true, startedAt: null, acceptedAt: null, completedAt: null,
@@ -103,7 +102,7 @@ describe.each([false, true])("native supervised invocation with launch preparati
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(1);
     expect(commandHostedRuntimeOwner).toHaveBeenCalledWith(expect.objectContaining({
-      command: expect.objectContaining({ operation: prepareAtLaunch ? "prepare_launch" : "authorize_effect",
+      command: expect.objectContaining({ operation: "prepare_launch",
         attemptId: "attempt-a", generation: "1", runnerContainerName: target }),
     }));
     const recovered = create();

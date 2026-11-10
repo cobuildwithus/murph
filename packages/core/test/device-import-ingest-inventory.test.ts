@@ -170,6 +170,111 @@ test("repeated evidence stops reading candidates once the requested output links
   } finally { parses.mockRestore(); }
 }));
 
+for (const novel of ["part", "receipt"] as const) {
+  test(`a novel ${novel} does not scan 50 copies of unchanged evidence on a warm import`, async () => withVault(async (root) => {
+    await withVault(async (coldRoot) => {
+      const seed = await importDeviceBatch(input(root, 1));
+      const stored = await readIntegrationIngestById(root, seed.ingestId!);
+      assert.ok(stored);
+      await fs.appendFile(path.join(root, seed.ingestShardPath!), Array.from({ length: 50 }, (_, index) =>
+        JSON.stringify({ ...stored.record, id: `xfm_UnchangedEvidence${index}` })
+      ).join("\n") + "\n");
+      await fs.cp(root, coldRoot, { recursive: true });
+      await withCanonicalWriteLock(root, () => inspectIntegrationIngestHistory(root, stored.record.importedAt, new Set(), { useInventory: true }));
+      const request = {
+        ...input(root, 1), importedAt: "2026-02-04T00:00:00.000Z", events: [],
+        evidenceParts: [...input(root, 1).evidenceParts, ...(novel === "part"
+          ? [{ role: "novel", fileName: "novel.json", content: { value: 2 } }] : [])],
+        ...(novel === "receipt" ? { ingestReceipt: {
+          schemaVersion: "wearable.raw_ingest_receipt.v1" as const,
+          id: `wearable_raw_${"a".repeat(24)}`, provider: "synthetic",
+          sourceKind: "poll" as const, deliveryMode: "full_payload" as const,
+          observedAt: "2026-02-04T00:00:00.000Z", payloadHash: "b".repeat(64),
+        } } : {}),
+      };
+      if (request.ingestReceipt) await withCanonicalWriteLock(root, async () => {
+        const receiptOnly = await inspectIntegrationIngestHistory(root, request.importedAt, new Set(), {
+          useInventory: true, deferEvidence: true,
+          evidence: { provider: request.provider, accountId: request.accountId, parts: [], receipt: request.ingestReceipt },
+        });
+        assert.equal(receiptOnly.inventoryCacheHit, true);
+        const parses = vi.spyOn(JSON, "parse");
+        try {
+          assert.deepEqual(await receiptOnly.inspectEvidence({}), { parts: [], receiptIsNovel: true });
+          assert.equal(parses.mock.calls.length, 0);
+        } finally { parses.mockRestore(); }
+      });
+      const parses = vi.spyOn(JSON, "parse");
+      let timing: DeviceBatchImportTiming | undefined;
+      let warm;
+      try {
+        warm = await importDeviceBatch(request, { onTiming: (value) => { timing = value; } });
+        assert.equal(timing?.ingestInventoryCacheHit, true);
+        // One candidate read plus the committed append's inventory update.
+        assert.ok(parses.mock.calls.filter(([line]) => line.includes('"parts":')).length <= 2);
+        assert.equal(parses.mock.calls.filter(([line]) => line.includes('"id":"xfm_UnchangedEvidence49"')).length, 1);
+      } finally { parses.mockRestore(); }
+      assert.equal(warm.applied, true);
+      inventory.invalidateIntegrationIngestInventory(coldRoot);
+      const cold = await importDeviceBatch({ ...request, vaultRoot: coldRoot });
+      assert.deepEqual(warm, cold);
+      const persisted = await readIntegrationIngestById(root, warm.ingestId!);
+      assert.deepEqual(persisted?.record.parts.map((part) => part.role), novel === "part" ? ["novel"] : []);
+      assert.deepEqual(persisted, await readIntegrationIngestById(coldRoot, cold.ingestId!));
+    });
+  }));
+}
+
+for (const link of ["event", "sample", "absent"] as const) {
+  test(`warm evidence keeps older ranges for an unproved ${link} link and skips decided keys`, async () => withVault(async (root) => {
+    const seed = await importDeviceBatch(input(root, 1));
+    const stored = await readIntegrationIngestById(root, seed.ingestId!);
+    assert.ok(stored);
+    const record = stored.record;
+    const delayedPart = { ...record.parts[0]!, role: "delayed" };
+    const sampleIds = link === "sample" ? ["smp_InventoryProof"] : [];
+    const complete = {
+      ...record, id: "xfm_OlderLinkProof", parts: [delayedPart],
+      outputs: { ...record.outputs, events: record.outputs.events.map((output) => ({ ...output, roles: ["delayed"] })), sampleIds },
+      counts: { ...record.counts, sampleCount: sampleIds.length },
+    };
+    const incomplete = {
+      ...complete, id: "xfm_NewerFingerprintOnly",
+      outputs: { ...complete.outputs, events: link === "sample" ? complete.outputs.events : [], sampleIds: [] },
+      counts: { eventCount: link === "sample" ? complete.counts.eventCount : 0, sampleCount: 0 },
+    };
+    const rows = [
+      link === "absent" ? { ...incomplete, id: complete.id } : complete,
+      ...Array.from({ length: 50 }, (_, index) => ({
+        ...record, id: `xfm_DecidedEvidence${index}`,
+        outputs: { ...record.outputs, sampleIds }, counts: { ...record.counts, sampleCount: sampleIds.length },
+      })),
+      incomplete,
+    ];
+    await fs.writeFile(path.join(root, seed.ingestShardPath!), rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    const evidence = { provider: record.provider, accountId: record.accountId, parts: [...record.parts, delayedPart] };
+    const outputs = {
+      eventIdsByRole: new Map(evidence.parts.map((part) => [part.role, new Set(record.outputs.events.map((output) => output.id))])),
+      sampleIds: new Set(sampleIds),
+    };
+    await withCanonicalWriteLock(root, async () => {
+      await inspectIntegrationIngestHistory(root, record.importedAt, new Set(), { useInventory: true });
+      const warm = await inspectIntegrationIngestHistory(root, record.importedAt, new Set(), { evidence, useInventory: true, deferEvidence: true });
+      assert.equal(warm.inventoryCacheHit, true);
+      const parses = vi.spyOn(JSON, "parse");
+      let selection;
+      try {
+        selection = await warm.inspectEvidence(outputs);
+        const readIds = parses.mock.calls.filter(([line]) => line.includes('"parts":')).map(([line]) => line.match(/"id":"([^"]+)"/)?.[1]);
+        assert.deepEqual(readIds, ["xfm_NewerFingerprintOnly", "xfm_DecidedEvidence49", "xfm_OlderLinkProof"]);
+      } finally { parses.mockRestore(); }
+      assert.deepEqual(selection, { parts: link === "absent" ? [delayedPart] : [], receiptIsNovel: false });
+      const cold = await inspectIntegrationIngestHistory(root, record.importedAt, new Set(), { evidence });
+      assert.deepEqual(selection, cold.selectNovelEvidence(outputs));
+    });
+  }));
+}
+
 test("a second applied import on a large shard never reads or parses its full prefix", async () => withVault(async (root) => {
   const seed = await importDeviceBatch(input(root, 1));
   assert.ok(seed.ingestId && seed.ingestShardPath);

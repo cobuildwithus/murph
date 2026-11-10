@@ -2384,8 +2384,6 @@ export const HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES = [
 
 export const HOSTED_RUNTIME_ASSISTANT_MILESTONES = [
   "pending_reply_admitted",
-  // Web input compatibility only; current runners do not emit this.
-  "foreground_input_selected",
   "assistant_input_accepted_for_execution",
   "linq_typing_request_started",
   "linq_typing_accepted",
@@ -2403,45 +2401,23 @@ export type HostedRuntimeAssistantMilestone =
 export type HostedRuntimeLatencyTraceMilestone =
   (typeof HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES)[number];
 
-export const HOSTED_STANDBY_ALLOCATION_OUTCOMES = [
-  "claimed",
-  "disabled",
+/** The first native target a fresh start took within one ensure. */
+export const HOSTED_RUNTIME_TARGET_PATH_KINDS = [
+  "retained_warm",
+  "retained_retired",
+  "standby",
   "fallback",
-  "retained",
 ] as const;
 
-export type HostedStandbyAllocationOutcome =
-  (typeof HOSTED_STANDBY_ALLOCATION_OUTCOMES)[number];
-
-export const HOSTED_STANDBY_ALLOCATION_REASONS = [
-  "bind_completed",
-  "bind_recovered",
-  "bind_rejected",
-  "bindings_unavailable",
-  "claim_deadline_expired",
-  "claim_disabled",
-  "claim_failed",
-  "claim_no_ready_slot",
-  "claim_stale_release",
-  "claim_timed_out",
-  "exact_user_pending",
-  "mode_not_allocate",
-  "not_trusted_web_direct",
-  "processing_mode_not_default",
-  "retained",
-] as const;
-
-export type HostedStandbyAllocationReason =
-  (typeof HOSTED_STANDBY_ALLOCATION_REASONS)[number];
+export type HostedRuntimeTargetPathKind =
+  (typeof HOSTED_RUNTIME_TARGET_PATH_KINDS)[number];
 
 export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
   // Control-plane orchestration diagnostics before the runner-container DO
   // starts dispatch. Timestamps come from different hosts and are for coarse
-  // span splitting only. UserRunner constructor and first-ensure timestamps are
-  // facts about one Durable Object activation, so they can predate a warm
-  // request's route timestamp. The two bounded ids correlate one Web direct
-  // ensure with the runtime invocation it launched.
+  // span splitting only. The two bounded ids correlate one Web direct ensure
+  // with the runtime invocation it launched.
   orchestration?: {
     ingressConversationIsGroup?: boolean;
     temporalActivityStartedAtEpochMs?: number;
@@ -2464,35 +2440,14 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
       | "retry_later";
     directEnsureAction?: "started" | "replaced" | "woken" | "already_running";
     directEnsureRuntimeAttemptId?: string;
-    shellPrewarmExpectedOrchestrationAttemptId?: string;
-    shellPrewarmOrchestrationAttemptId?: string;
-    shellPrewarmRequestStartedAtEpochMs?: number;
-    shellPrewarmRuntimeControlAuthStartedAtEpochMs?: number;
-    shellPrewarmRuntimeControlAuthFinishedAtEpochMs?: number;
-    shellPrewarmCloudflareRouteReceivedAtEpochMs?: number;
-    shellPrewarmUserRunnerConstructorStartedAtEpochMs?: number;
-    shellPrewarmUserRunnerConstructorFinishedAtEpochMs?: number;
-    shellPrewarmUserRunnerRpcStartedAtEpochMs?: number;
-    shellPrewarmConsentLockAcquiredAtEpochMs?: number;
-    shellPrewarmAdmissionReadStartedAtEpochMs?: number;
-    shellPrewarmAdmissionReadFinishedAtEpochMs?: number;
     runtimeControlAuthStartedAtEpochMs?: number;
     runtimeControlAuthFinishedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
     runtimeInvocationOrchestrationAttemptId?: string;
     triggeredByWebDirect?: boolean;
-    userRunnerConstructorStartedAtEpochMs?: number;
-    userRunnerConstructorFinishedAtEpochMs?: number;
-    userRunnerFirstEnsureRuntimeProcessingAtEpochMs?: number;
-    userRunnerRpcStartedAtEpochMs?: number;
     runtimeConsentLockAcquiredAtEpochMs?: number;
     healthDataAdmissionReadStartedAtEpochMs?: number;
     healthDataAdmissionReadFinishedAtEpochMs?: number;
-    userRunnerEnsureStartedAtEpochMs?: number;
-    runnerStateBindStartedAtEpochMs?: number;
-    runnerStateBindFinishedAtEpochMs?: number;
-    runnerStateReadStartedAtEpochMs?: number;
-    runnerStateReadFinishedAtEpochMs?: number;
     activeFenceObservedAtEpochMs?: number;
     activeFenceTargetWasPriorVersion?: boolean;
     activeWakeStartedAtEpochMs?: number;
@@ -2505,41 +2460,21 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     replacementFenceClearElapsedMs?: number;
     replacedStaleFence?: boolean;
     freshStartRequestedAtEpochMs?: number;
+    // Worker step durations within one direct ensure, summed when the bounded
+    // admission loop repeats a step. The handler reports them on its response.
+    runtimeOwnerClaimElapsedMs?: number;
+    runnerTargetPathKind?: HostedRuntimeTargetPathKind;
     runnerTargetReconcileElapsedMs?: number;
+    runnerTargetRetireElapsedMs?: number;
     standbyClaimElapsedMs?: number;
+    runnerTargetSelectElapsedMs?: number;
     runnerTargetBindElapsedMs?: number;
-    standbyAllocationElapsedMs?: number;
-    standbyAllocationOutcome?: HostedStandbyAllocationOutcome;
-    standbyAllocationReason?: HostedStandbyAllocationReason;
+    containerReadinessElapsedMs?: number;
+    // Includes the slot's own `prepare_launch` owner command.
+    invocationStartElapsedMs?: number;
     freshStartFenceBoundAtEpochMs?: number;
-    freshStartContainerReadinessRequestedAtEpochMs?: number;
-    freshStartContainerLifecycleLockAcquiredAtEpochMs?: number;
-    freshStartContainerStateReadFinishedAtEpochMs?: number;
-    freshStartContainerStartIssuedAtEpochMs?: number;
-    freshStartContainerOnStartAtEpochMs?: number;
-    freshStartContainerPortsReadyAtEpochMs?: number;
-    freshStartContainerHealthStartedAtEpochMs?: number;
-    freshStartContainerHealthFinishedAtEpochMs?: number;
-    freshStartContainerProcessStartedAtEpochMs?: number;
-    freshStartContainerListeningAtEpochMs?: number;
-    freshStartContainerReadyObservedAtEpochMs?: number;
-    freshStartContainerReadyAtEpochMs?: number;
     freshStartInvocationPreparedAtEpochMs?: number;
     freshStartInvocationAcceptedAtEpochMs?: number;
-    shellPrewarmFirstHintAtEpochMs?: number;
-    shellPrewarmFinishedAtEpochMs?: number;
-    shellPrewarmOperationElapsedMs?: number;
-    shellPrewarmHintCount?: number;
-    shellPrewarmOutcome?:
-      | "cold_start_observed"
-      | "failed"
-      | "start_issued_warm"
-      | "superseded";
-    shellPrewarmSource?:
-      | "linq-instant-start"
-      | "linq-message-routing"
-      | "linq-typing-started"
-      | "unknown";
     workspaceReadElapsedMs?: number;
     runtimeStoreEnsureElapsedMs?: number;
     runtimeInvocationPreparationElapsedMs?: number;
@@ -2649,7 +2584,6 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
   // request or token boundary that the runtime cannot observe.
   assistant?: {
     pendingReplyAdmittedAtEpochMs?: number;
-    foregroundInputSelectedAtEpochMs?: number;
     assistantInputAcceptedForExecutionAtEpochMs?: number;
     linqTypingRequestStartedAtEpochMs?: number;
     linqTypingAcceptedAtEpochMs?: number;
@@ -2894,35 +2828,14 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "directEnsureResultKind",
     "directEnsureAction",
     "directEnsureRuntimeAttemptId",
-    "shellPrewarmExpectedOrchestrationAttemptId",
-    "shellPrewarmOrchestrationAttemptId",
-    "shellPrewarmRequestStartedAtEpochMs",
-    "shellPrewarmRuntimeControlAuthStartedAtEpochMs",
-    "shellPrewarmRuntimeControlAuthFinishedAtEpochMs",
-    "shellPrewarmCloudflareRouteReceivedAtEpochMs",
-    "shellPrewarmUserRunnerConstructorStartedAtEpochMs",
-    "shellPrewarmUserRunnerConstructorFinishedAtEpochMs",
-    "shellPrewarmUserRunnerRpcStartedAtEpochMs",
-    "shellPrewarmConsentLockAcquiredAtEpochMs",
-    "shellPrewarmAdmissionReadStartedAtEpochMs",
-    "shellPrewarmAdmissionReadFinishedAtEpochMs",
     "runtimeControlAuthStartedAtEpochMs",
     "runtimeControlAuthFinishedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
     "runtimeInvocationOrchestrationAttemptId",
     "triggeredByWebDirect",
-    "userRunnerConstructorStartedAtEpochMs",
-    "userRunnerConstructorFinishedAtEpochMs",
-    "userRunnerFirstEnsureRuntimeProcessingAtEpochMs",
-    "userRunnerRpcStartedAtEpochMs",
     "runtimeConsentLockAcquiredAtEpochMs",
     "healthDataAdmissionReadStartedAtEpochMs",
     "healthDataAdmissionReadFinishedAtEpochMs",
-    "userRunnerEnsureStartedAtEpochMs",
-    "runnerStateBindStartedAtEpochMs",
-    "runnerStateBindFinishedAtEpochMs",
-    "runnerStateReadStartedAtEpochMs",
-    "runnerStateReadFinishedAtEpochMs",
     "activeFenceObservedAtEpochMs",
     "activeFenceTargetWasPriorVersion",
     "activeWakeStartedAtEpochMs",
@@ -2935,33 +2848,18 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "replacementFenceClearElapsedMs",
     "replacedStaleFence",
     "freshStartRequestedAtEpochMs",
+    "runtimeOwnerClaimElapsedMs",
+    "runnerTargetPathKind",
     "runnerTargetReconcileElapsedMs",
+    "runnerTargetRetireElapsedMs",
     "standbyClaimElapsedMs",
+    "runnerTargetSelectElapsedMs",
     "runnerTargetBindElapsedMs",
-    "standbyAllocationElapsedMs",
-    "standbyAllocationOutcome",
-    "standbyAllocationReason",
+    "containerReadinessElapsedMs",
+    "invocationStartElapsedMs",
     "freshStartFenceBoundAtEpochMs",
-    "freshStartContainerReadinessRequestedAtEpochMs",
-    "freshStartContainerLifecycleLockAcquiredAtEpochMs",
-    "freshStartContainerStateReadFinishedAtEpochMs",
-    "freshStartContainerStartIssuedAtEpochMs",
-    "freshStartContainerOnStartAtEpochMs",
-    "freshStartContainerPortsReadyAtEpochMs",
-    "freshStartContainerHealthStartedAtEpochMs",
-    "freshStartContainerHealthFinishedAtEpochMs",
-    "freshStartContainerProcessStartedAtEpochMs",
-    "freshStartContainerListeningAtEpochMs",
-    "freshStartContainerReadyObservedAtEpochMs",
-    "freshStartContainerReadyAtEpochMs",
     "freshStartInvocationPreparedAtEpochMs",
     "freshStartInvocationAcceptedAtEpochMs",
-    "shellPrewarmFirstHintAtEpochMs",
-    "shellPrewarmFinishedAtEpochMs",
-    "shellPrewarmOperationElapsedMs",
-    "shellPrewarmHintCount",
-    "shellPrewarmOutcome",
-    "shellPrewarmSource",
     "workspaceReadElapsedMs",
     "runtimeStoreEnsureElapsedMs",
     "runtimeInvocationPreparationElapsedMs",
@@ -3044,7 +2942,6 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
   ],
   assistant: [
     "pendingReplyAdmittedAtEpochMs",
-    "foregroundInputSelectedAtEpochMs",
     "assistantInputAcceptedForExecutionAtEpochMs",
     "linqTypingRequestStartedAtEpochMs",
     "linqTypingAcceptedAtEpochMs",
@@ -3091,18 +2988,6 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
 
 const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES:
   Readonly<Record<string, readonly string[]>> = {
-    "orchestration.shellPrewarmOutcome": [
-      "cold_start_observed",
-      "failed",
-      "start_issued_warm",
-      "superseded",
-    ],
-    "orchestration.shellPrewarmSource": [
-      "linq-instant-start",
-      "linq-message-routing",
-      "linq-typing-started",
-      "unknown",
-    ],
     "orchestration.directEnsureResultKind": [
       "legacy_accepted",
       "runtime_processing_accepted",
@@ -3114,10 +2999,7 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES:
       "woken",
       "already_running",
     ],
-    "orchestration.standbyAllocationOutcome":
-      HOSTED_STANDBY_ALLOCATION_OUTCOMES,
-    "orchestration.standbyAllocationReason":
-      HOSTED_STANDBY_ALLOCATION_REASONS,
+    "orchestration.runnerTargetPathKind": HOSTED_RUNTIME_TARGET_PATH_KINDS,
   };
 
 export type HostedRuntimeLatencyPhaseBreakdownLeafRule =
@@ -3125,7 +3007,6 @@ export type HostedRuntimeLatencyPhaseBreakdownLeafRule =
   | { kind: "enum_string"; values: readonly string[] }
   | { kind: "lease_generation" }
   | { kind: "orchestration_attempt_id" }
-  | { kind: "shell_prewarm_attempt_id" }
   | { kind: "opaque_identifier" }
   | { kind: "safe_integer" };
 
@@ -3171,15 +3052,6 @@ function readHostedRuntimeLatencyPhaseBreakdownLeafRule(
     )
   ) {
     return { kind: "orchestration_attempt_id" };
-  }
-  if (
-    phase === "orchestration"
-    && (
-      leafKey === "shellPrewarmExpectedOrchestrationAttemptId"
-      || leafKey === "shellPrewarmOrchestrationAttemptId"
-    )
-  ) {
-    return { kind: "shell_prewarm_attempt_id" };
   }
   if (
     phase === "orchestration"
@@ -3268,13 +3140,11 @@ export function sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(
 
 // Diagnostic JSON can be merged repeatedly as late runtime phases arrive.
 // Existing leaves win so retries cannot clobber earlier timestamps, while stale
-// stored leaves are dropped before the next write. Admission, legacy selection,
-// execution acceptance, and accepted progress can be observed more than once
-// across retries: retain their earliest timestamps when callbacks arrive out of
-// order.
+// stored leaves are dropped before the next write. Admission, execution
+// acceptance, and accepted progress can be observed more than once across
+// retries: retain their earliest timestamps when callbacks arrive out of order.
 const HOSTED_RUNTIME_ASSISTANT_EARLIEST_TIMESTAMP_LEAF_KEYS = new Set([
   "pendingReplyAdmittedAtEpochMs",
-  "foregroundInputSelectedAtEpochMs",
   "assistantInputAcceptedForExecutionAtEpochMs",
   "progressUpdateAcceptedAtEpochMs",
 ]);
@@ -3502,8 +3372,6 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
         && /^(?:0|[1-9]\d*)$/u.test(value);
     case "orchestration_attempt_id":
       return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
-    case "shell_prewarm_attempt_id":
-      return isHostedRuntimeShellPrewarmOrchestrationAttemptId(value);
     case "opaque_identifier":
       return isHostedRuntimeLatencyOpaqueIdentifier(value);
     case "safe_integer":
@@ -3518,13 +3386,6 @@ export function isHostedRuntimeDirectEnsureOrchestrationAttemptId(
 ): value is string {
   return typeof value === "string"
     && /^web-ingress-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
-}
-
-export function isHostedRuntimeShellPrewarmOrchestrationAttemptId(
-  value: unknown,
-): value is string {
-  return typeof value === "string"
-    && /^web-prewarm-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
 }
 
 function isHostedRuntimeLatencyOpaqueIdentifier(value: unknown): value is string {

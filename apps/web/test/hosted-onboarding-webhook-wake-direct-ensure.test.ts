@@ -63,6 +63,7 @@ type DirectEnsureInput = {
       directEnsureAuthDurationMs?: number;
       directEnsureHandlerDurationMs?: number;
       orchestrationAttemptId: string;
+      stepLatency?: Record<string, number | string>;
       tokenAcquiredAtEpochMs: number;
       tokenAcquireStartedAtEpochMs: number;
     }
@@ -259,6 +260,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         directEnsureResultKind: "runtime_processing_accepted",
         directEnsureRuntimeAttemptId: "runtime-attempt-test",
         orchestrationAttemptId: input.orchestrationAttemptId,
+        stepLatency: { containerReadinessElapsedMs: 7, runnerTargetPathKind: "standby" },
       });
       return {
         action: "woken",
@@ -332,6 +334,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       phaseBreakdown: {
         schemaVersion: 1,
         orchestration: {
+          containerReadinessElapsedMs: 7,
+          runnerTargetPathKind: "standby",
           directWakeStartedAtEpochMs: expect.any(Number),
           directWakeAttemptCount: 1,
           directWakeRetryWaitMs: 0,

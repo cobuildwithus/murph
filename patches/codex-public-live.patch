@@ -7801,7 +7801,7 @@ index 2ac9b931ffbcf47809d54c35569458003ccd7181..8d05dfe77e1a0d43da32325a4f406f81
              text,
              client_metadata: Some(client_metadata),
              access_programs: None,
-@@ -3263,3 +3294,23 @@ impl WebsocketTelemetry for ApiTelemetry {
+@@ -3263,3 +3294,24 @@ impl WebsocketTelemetry for ApiTelemetry {
  #[cfg(test)]
  #[path = "client_tests.rs"]
  mod tests;
@@ -7818,6 +7818,7 @@ index 2ac9b931ffbcf47809d54c35569458003ccd7181..8d05dfe77e1a0d43da32325a4f406f81
 +        && matches!(
 +            model,
 +            "gpt-6.1-sol"
++                | "gpt-6.1-terra"
 +                | "gpt-6-sol"
 +                | "gpt-6-luna"
 +                | "gpt-6-astra"
@@ -7829,7 +7830,7 @@ diff --git a/codex-rs/core/src/client_tests.rs b/codex-rs/core/src/client_tests.
 index 4f60892b53f9e002fa6b59ea49fc9153a2399d6a..4600ec8a12bf73387c2e8c8e6633544fec9c7228 100644
 --- a/codex-rs/core/src/client_tests.rs
 +++ b/codex-rs/core/src/client_tests.rs
-@@ -2360,3 +2360,46 @@ async fn inference_tools_changes_follow_full_specs_across_turns() {
+@@ -2360,3 +2360,47 @@ async fn inference_tools_changes_follow_full_specs_across_turns() {
          );
      }
  }
@@ -7859,6 +7860,7 @@ index 4f60892b53f9e002fa6b59ea49fc9153a2399d6a..4600ec8a12bf73387c2e8c8e6633544f
 +fn hosted_cache_ttl_requires_managed_api_key_and_supported_model() {
 +    for model in [
 +        "gpt-6.1-sol",
++        "gpt-6.1-terra",
 +        "gpt-6-sol",
 +        "gpt-6-luna",
 +        "gpt-6-astra",

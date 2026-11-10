@@ -483,6 +483,26 @@ describe("RunnerContainer slot lifecycle", () => {
     })).rejects.toThrow();
   });
 
+  it("never resolves a retained slot as retired when native destruction times out", async () => {
+    vi.useFakeTimers();
+    const destroy = createDeferred<void>();
+    const bound = { claimId: createHostedStandbyClaimId(), userId: "member_reserved" };
+    const h = createStandbyContainerHarness({ bound, destroy: () => destroy.promise,
+      environment: { CF_VERSION_METADATA: { id: "release_2" } } });
+    const resolution = { currentReleaseId: "release_2", region: HOSTED_RUNNER_REGION,
+      slotName: h.slotName, userId: "member_reserved" };
+    const result = expect(h.container.resolveRetainedStandbySlot(resolution))
+      .rejects.toThrow("failed to destroy cleanly");
+    await vi.advanceTimersByTimeAsync(5_000);
+    await result;
+    expect(h.destroy).toHaveBeenCalledOnce();
+    expect(await h.container.readStandbySlotBinding()).toMatchObject({ ...bound, state: "retiring" });
+    destroy.resolve(undefined);
+    expect(await h.container.resolveRetainedStandbySlot(resolution)).toMatchObject({
+      state: "retired", claimId: null, userId: null,
+    });
+  });
+
   it("keeps a claimed slot assigned for foreign users or ambiguous liveness", async () => {
     const harness = createStandbyContainerHarness();
     const slotName = harness.slotName;

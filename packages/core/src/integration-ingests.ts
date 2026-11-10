@@ -939,7 +939,9 @@ export async function inspectIntegrationIngestHistory(
         try {
           await readInventoryCandidates([], evidenceKeys(retainedRoles, outputs.includeReceipt !== false), () => {
             const selection = inspection.selectNovelEvidence(outputs);
-            return !selection.receiptIsNovel && selection.parts.every((part) => retainedRoles.has(part.role));
+            const keys = selection.parts.filter((part) => !retainedRoles.has(part.role)).map(integrationEvidenceFingerprint);
+            if (selection.receiptIsNovel && requestedReceiptFingerprint !== null) keys.push(requestedReceiptFingerprint);
+            return new Set(keys);
           });
         } catch {
           // Optional evidence is retained when its indexed proof is uncertain.
@@ -1043,27 +1045,36 @@ export async function inspectIntegrationIngestHistory(
   };
 
   async function readInventoryCandidates(
-    ids: Iterable<string>, evidenceKeys: readonly string[], complete?: () => boolean,
+    ids: Iterable<string>, evidenceKeys: readonly string[],
+    pendingEvidenceKeys: () => ReadonlySet<string> = () => new Set(evidenceKeys),
   ): Promise<void> {
     if (!inventory) return;
     const currentFence = await readIngestFileFence(vaultRoot, logicalPath);
     if (currentFence.fingerprint !== inventory.fence.fingerprint) throw new Error("Ingest inventory generation changed.");
-    if (complete?.()) return;
-    const ranges = new Set<IngestRowRange>();
+    const idRanges = new Set<IngestRowRange>();
     for (const id of ids) {
       const range = inventory.byId.get(id);
-      if (range) ranges.add(range);
+      if (range) idRanges.add(range);
     }
+    const ranges = new Map<IngestRowRange, string[]>([...idRanges].map((range) => [range, []]));
+    let pendingKeys = pendingEvidenceKeys();
     const evidenceIndex = inventory.byEvidence.get(ingestInventoryEvidenceScope(evidence?.provider, evidence?.accountId));
     for (const key of evidenceKeys) {
       const matches = evidenceIndex?.get(key);
-      if (Array.isArray(matches)) for (const range of matches) ranges.add(range);
-      else if (matches) ranges.add(matches);
+      if (!matches || !pendingKeys.has(key)) continue;
+      for (const range of [matches].flat()) {
+        const keys = ranges.get(range) ?? [];
+        keys.push(key);
+        ranges.set(range, keys);
+      }
     }
     if (ranges.size === 0) return;
     const handle = await openFile(resolveVaultPath(vaultRoot, logicalPath).absolutePath, "r");
     try {
-      for (const range of [...ranges].sort((a, b) => a.offset - b.offset)) {
+      // Missing/exhausted keys need no reads. A proof for one key must not keep
+      // its older rows in play while another key still lacks output links.
+      for (const [range, keys] of [...ranges].sort(([a], [b]) => b.offset - a.offset)) {
+        if (!idRanges.has(range) && !keys.some((key) => pendingKeys.has(key))) continue;
         const bytes = Buffer.allocUnsafe(range.length);
         const result = await handle.read(bytes, 0, bytes.length, range.offset);
         if (result.bytesRead !== bytes.length) throw new Error("Incomplete ingest inventory read.");
@@ -1073,7 +1084,7 @@ export async function inspectIntegrationIngestHistory(
         }
         observedIds.delete(raw.id);
         visitRaw(raw);
-        if (complete?.()) return;
+        pendingKeys = pendingEvidenceKeys();
       }
     } finally {
       await handle.close();

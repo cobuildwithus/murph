@@ -82,7 +82,7 @@ async function fixture({ wakeMs = 10, handoffMs = 10 } = {}) {
         id: "synthetic-root-row", domain: "ingress", userId: "synthetic-deferred", status: "active",
         rootKeyId: root.envelope.rootKeyId, signedEnvelopeJson: root.envelope, updatedAt: now,
       }] : [];
-      if (sql.includes("INSERT INTO hosted_mailbox_lane_counter")) return [{ seq: 1n }];
+      if (sql.includes("INSERT INTO hosted_mailbox_lane_counter")) return [{ causalSeq: 1n, laneSeq: 1n }];
       if (sql.includes("INSERT INTO hosted_mailbox_item")) {
         events.push({ kind: "write", id: "deferred", at: elapsed() });
         return [{ id: "deferred-mailbox", userId: "synthetic-deferred", kind: "device-sync.wake", lane: "system", laneSeq: 1n,

@@ -15,6 +15,8 @@ ReviewGPT runs for risky behavior and core architecture, not for size, and one r
 Checkpoint step timings, the archive plan/build split, and unconditional residue
 pruning outcomes are owned by [the hosted runtime protocol](references/hosted-runtime-protocol.md).
 
+Direct-ensure cold-path step timings and target path kind are owned by [the hosted runtime protocol](references/hosted-runtime-protocol.md); the always-sent launch facts and the skipped second retirement proof are owned by [Postgres runtime ownership](references/hosted-postgres-runtime.md).
+
 Runtime logs are diagnostic only: an accepted-attempt failure log no longer triggers a recheck, and its historical rows stay parseable; [the hosted runtime protocol](references/hosted-runtime-protocol.md) owns that contract, and [the removal plan](exec-plans/completed/2026-11-06-sm-f11b-log-triggered-wake.md) records the drain evidence.
 
 Native invocation receipts no longer store or rebuild the completion recheck bit, while the SQLite column and wire boolean stay for older controllers; [Cloudflare deployment](../apps/cloudflare/DEPLOY.md#runtime-completion-consolidation) owns the remaining drain, and [the plan](exec-plans/completed/2026-11-06-sm-f11a-completion-recheck-bit.md) records the evidence.
@@ -1327,7 +1329,7 @@ The broader dashboard latency work is recorded in
 The admission and runtime launch reduction is recorded in
 [`2026-09-17-ingress-admission-simplification.md`](exec-plans/completed/2026-09-17-ingress-admission-simplification.md).
 
-Five-minute ingress cache retention and member isolation proof are tracked in
+The earlier five-minute ingress cache retention and member isolation proof are in
 [`ingress cache retention`](exec-plans/completed/2026-09-21-ingress-cache-five-minutes.md).
 
 Mailbox callback phase diagnostics and lazy Google SDK loading are owned by

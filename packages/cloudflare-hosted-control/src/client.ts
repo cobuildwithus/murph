@@ -40,9 +40,12 @@ import type {
   HostedRuntimeEnsureProcessingResponse,
   HostedRuntimeProcessingAcceptedAction,
 } from "@murphai/hosted-execution/orchestration-control";
-import type {
-  HostedHealthDataConsentState,
-  HostedRunnerStatusResponse,
+import {
+  HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
+  sanitizeHostedRuntimeOrchestrationLatencyDiagnostics,
+  type HostedHealthDataConsentState,
+  type HostedRunnerStatusResponse,
+  type HostedRuntimeOrchestrationLatencyDiagnostics,
 } from "@murphai/hosted-execution/runtime-control";
 import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 
@@ -300,6 +303,8 @@ interface CloudflareHostedControlRuntimeEnsureProcessingTimingBase {
   directEnsureRequestStartedAtEpochMs: number;
   directEnsureResponseReceivedAtEpochMs: number;
   orchestrationAttemptId: string;
+  /** The Worker's step timings and target path, already sanitized. */
+  stepLatency?: HostedRuntimeOrchestrationLatencyDiagnostics;
   tokenAcquiredAtEpochMs: number;
   tokenAcquireStartedAtEpochMs: number;
 }
@@ -2328,6 +2333,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
         directEnsureResponseReceivedAtEpochMs,
         orchestrationAttemptId:
           input.runtimeEnsureProcessingOrchestrationAttemptId,
+        ...readRuntimeEnsureProcessingStepLatencyHeader(response.headers),
         tokenAcquiredAtEpochMs,
         tokenAcquireStartedAtEpochMs,
         ...input.readRuntimeEnsureProcessingTimingResult(parsed),
@@ -2338,6 +2344,18 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   }
 
   return parsed;
+}
+
+function readRuntimeEnsureProcessingStepLatencyHeader(
+  headers: Headers,
+): { stepLatency?: HostedRuntimeOrchestrationLatencyDiagnostics } {
+  const value = headers.get(HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER);
+  try {
+    const stepLatency = value === null ? null : sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(JSON.parse(value));
+    return stepLatency ? { stepLatency } : {};
+  } catch {
+    return {};
+  }
 }
 
 function readRuntimeEnsureProcessingDurationHeader(

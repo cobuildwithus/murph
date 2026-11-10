@@ -202,6 +202,18 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
       mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
     lookupHostedMemberRoutingByHomeLinqChatId:
       mocks.lookupHostedMemberRoutingByHomeLinqChatId,
+    readHostedLinqDirectRoutingTx: async (input: Parameters<typeof actual.readHostedLinqDirectRoutingTx>[0]) => {
+      const home = await mocks.lookupHostedMemberRoutingByHomeLinqChatId({
+        linqChatId: input.chatId, prisma: input.prisma, projection: "core",
+      });
+      return {
+        home: home ? { core: home.core, memberId: home.core.id } : null,
+        routingRecord: input.lockedMember
+          ? await mocks.readHostedMemberRoutingRecord({ memberId: input.lockedMember.memberId, prisma: input.prisma })
+          : null,
+        hasForeignPendingOwner: false,
+      };
+    },
     lookupHostedMemberCoreByPendingLinqParticipantContact:
       mocks.lookupHostedMemberCoreByPendingLinqParticipantContact,
     projectHostedMemberRoutingState: mocks.projectHostedMemberRoutingState,

@@ -804,7 +804,7 @@ Existing product admission, delivery and runtime safety rules still apply.
   lease-generation, and workspace-version fence.
 - Web may retain a bounded exception to request-lifetime plaintext root keys:
   the crypto owner caches only successfully unwrapped ingress roots, at most
-  128 entries for a fixed, non-sliding five minutes from admission. This trades up
+  128 entries for a fixed, non-sliding 30 minutes from admission. This trades up
   to 4 KiB of longer-lived process-owned root material for fewer KMS round trips;
   compromise of that Web process can expose those retained keys even after the
   originating request ends. Entries contain independent key copies, an exact
@@ -820,7 +820,7 @@ Existing product admission, delivery and runtime safety rules still apply.
   This cache is local to a Web process, not the separate hosted runtime, and
   does not change durable message encryption. KMS IAM/policy changes or key
   disablement do **not** instantly invalidate already-unwrapped cached bytes:
-  an otherwise valid entry can avoid KMS for the remaining five-minute lifetime.
+  an otherwise valid entry can avoid KMS for the remaining 30-minute lifetime.
   Urgent response must also stop/recycle affected Web processes and apply current
   database authority
   changes; it must not assume a provider-only change erases resident keys.

@@ -12,6 +12,7 @@ import {
   isHostedRuntimeFailurePhaseCode,
   type HostedRuntimeFailurePhaseCode,
   type HostedRuntimeLogRequest,
+  type HostedRuntimeOrchestrationLatencyDiagnostics,
   type HostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/runtime-control";
 
@@ -24,6 +25,8 @@ export interface RuntimeProcessingDiagnostics {
     | "active_wake" | "liveness" | "fresh_start";
   details: HostedRuntimeRedactedJson;
   wakeDetails?: HostedRuntimeRedactedJson;
+  /** Step timings and target path the direct response reports to Web. */
+  orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics;
 }
 
 export function observeRuntimeProcessingFence(

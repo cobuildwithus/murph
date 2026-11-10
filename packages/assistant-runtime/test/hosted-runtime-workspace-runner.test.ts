@@ -6959,7 +6959,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               activeWakeAccepted: true,
               activeWakeFinishedAtEpochMs: 1_777_000_001_005,
               activeWakeStartedAtEpochMs: 1_777_000_001_000,
-              userRunnerEnsureStartedAtEpochMs: 1_777_000_000_995,
             },
           });
           await waitForCondition(() => importedSeqs.includes("2"));
@@ -6979,7 +6978,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         activeWakeAccepted: true,
         activeWakeFinishedAtEpochMs: 1_777_000_001_005,
         activeWakeStartedAtEpochMs: 1_777_000_001_000,
-        userRunnerEnsureStartedAtEpochMs: 1_777_000_000_995,
       });
       assert.ok(wake);
       const runtimeWakeNotifiedAtEpochMs = wake.runtimeWakeNotifiedAtEpochMs;

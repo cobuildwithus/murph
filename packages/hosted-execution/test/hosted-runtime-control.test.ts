@@ -1502,16 +1502,6 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedRuntimeLatencyTraceRequest({
       event: {
-        assistantInputIds: ["input_1"],
-        at: "2026-04-26T00:00:01.540Z",
-        milestone: "foreground_input_selected",
-        runtimeAttemptId: "attempt_1",
-        source: "linq",
-        type: "assistant_milestone",
-      },
-    }).event).toMatchObject({ milestone: "foreground_input_selected" });
-    expect(parseHostedRuntimeLatencyTraceRequest({
-      event: {
         assistantInputIds: ["input_1", "input_2"],
         at: "2026-04-26T00:00:01.550Z",
         milestone: "assistant_input_accepted_for_execution",
@@ -1683,37 +1673,14 @@ describe("hosted runtime control contracts", () => {
         directEnsureResultKind: "runtime_processing_accepted",
         directEnsureAction: "woken",
         directEnsureRuntimeAttemptId: "runtime-attempt-direct",
-        shellPrewarmExpectedOrchestrationAttemptId:
-          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-        shellPrewarmOrchestrationAttemptId:
-          "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
-        shellPrewarmRequestStartedAtEpochMs: 1_777_000_000_001,
-        shellPrewarmRuntimeControlAuthStartedAtEpochMs: 1_777_000_000_002,
-        shellPrewarmRuntimeControlAuthFinishedAtEpochMs: 1_777_000_000_003,
-        shellPrewarmCloudflareRouteReceivedAtEpochMs: 1_777_000_000_004,
-        shellPrewarmUserRunnerConstructorStartedAtEpochMs: 1_777_000_000_005,
-        shellPrewarmUserRunnerConstructorFinishedAtEpochMs: 1_777_000_000_006,
-        shellPrewarmUserRunnerRpcStartedAtEpochMs: 1_777_000_000_007,
-        shellPrewarmConsentLockAcquiredAtEpochMs: 1_777_000_000_008,
-        shellPrewarmAdmissionReadStartedAtEpochMs: 1_777_000_000_009,
-        shellPrewarmAdmissionReadFinishedAtEpochMs: 1_777_000_000_010,
         runtimeControlAuthStartedAtEpochMs: 1_777_000_000_015,
         runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_016,
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
         runtimeInvocationOrchestrationAttemptId:
           "web-ingress-123e4567-e89b-42d3-a456-426614174000",
-        userRunnerConstructorStartedAtEpochMs: 1_777_000_000_021,
-        userRunnerConstructorFinishedAtEpochMs: 1_777_000_000_022,
-        userRunnerFirstEnsureRuntimeProcessingAtEpochMs: 1_777_000_000_023,
-        userRunnerRpcStartedAtEpochMs: 1_777_000_000_023,
         runtimeConsentLockAcquiredAtEpochMs: 1_777_000_000_024,
         healthDataAdmissionReadStartedAtEpochMs: 1_777_000_000_025,
         healthDataAdmissionReadFinishedAtEpochMs: 1_777_000_000_026,
-        userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
-        runnerStateBindStartedAtEpochMs: 1_777_000_000_031,
-        runnerStateBindFinishedAtEpochMs: 1_777_000_000_032,
-        runnerStateReadStartedAtEpochMs: 1_777_000_000_033,
-        runnerStateReadFinishedAtEpochMs: 1_777_000_000_034,
         activeFenceObservedAtEpochMs: 1_777_000_000_035,
         activeFenceTargetWasPriorVersion: true,
         activeWakeStartedAtEpochMs: 1_777_000_000_040,
@@ -1726,30 +1693,18 @@ describe("hosted runtime control contracts", () => {
         replacementFenceClearElapsedMs: 5,
         replacedStaleFence: true,
         freshStartRequestedAtEpochMs: 1_777_000_000_070,
-        standbyAllocationElapsedMs: 250,
-        standbyAllocationOutcome: "fallback",
-        standbyAllocationReason: "claim_no_ready_slot",
+        runtimeOwnerClaimElapsedMs: 70,
+        runnerTargetPathKind: "standby",
+        runnerTargetReconcileElapsedMs: 11,
+        runnerTargetRetireElapsedMs: 12,
+        standbyClaimElapsedMs: 13,
+        runnerTargetSelectElapsedMs: 14,
+        runnerTargetBindElapsedMs: 15,
+        containerReadinessElapsedMs: 16,
+        invocationStartElapsedMs: 17,
         freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
-        freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
-        freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
-        freshStartContainerStateReadFinishedAtEpochMs: 1_777_000_000_083,
-        freshStartContainerStartIssuedAtEpochMs: 1_777_000_000_084,
-        freshStartContainerOnStartAtEpochMs: 1_777_000_000_085,
-        freshStartContainerPortsReadyAtEpochMs: 1_777_000_000_086,
-        freshStartContainerHealthStartedAtEpochMs: 1_777_000_000_087,
-        freshStartContainerHealthFinishedAtEpochMs: 1_777_000_000_088,
-        freshStartContainerProcessStartedAtEpochMs: 1_777_000_000_084,
-        freshStartContainerListeningAtEpochMs: 1_777_000_000_085,
-        freshStartContainerReadyObservedAtEpochMs: 1_777_000_000_089,
-        freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
         freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
-        shellPrewarmFirstHintAtEpochMs: 1_777_000_000_061,
-        shellPrewarmFinishedAtEpochMs: 1_777_000_000_063,
-        shellPrewarmOperationElapsedMs: 2,
-        shellPrewarmHintCount: 2,
-        shellPrewarmOutcome: "cold_start_observed",
-        shellPrewarmSource: "linq-message-routing",
         workspaceReadElapsedMs: 30,
         runtimeInvocationInputsWaitElapsedMs: 1,
         runtimeInvocationAdmissionElapsedMs: 2,
@@ -1851,7 +1806,6 @@ describe("hosted runtime control contracts", () => {
       },
       assistant: {
         pendingReplyAdmittedAtEpochMs: 1_777_000_000_120,
-        foregroundInputSelectedAtEpochMs: 1_777_000_000_121,
         assistantInputAcceptedForExecutionAtEpochMs: 1_777_000_000_123,
         runtimeLeaseGeneration: "18446744073709551615",
         terminalNonReplyCommittedAtEpochMs: 1_777_000_000_125,
@@ -2032,25 +1986,13 @@ describe("hosted runtime control contracts", () => {
       { directEnsureHandlerDurationMs: Number.POSITIVE_INFINITY },
       { directEnsureHandlerDurationMs: Number.MAX_SAFE_INTEGER + 1 },
       { directEnsureOrchestrationAttemptId: "web-ingress-not-a-uuid" }, // correlation id must be bounded
-      { shellPrewarmOrchestrationAttemptId: "web-prewarm-not-a-uuid" }, // prewarm correlation ids have their own exact prefix and shape
-      { shellPrewarmExpectedOrchestrationAttemptId: "web-ingress-123e4567-e89b-42d3-a456-426614174000" }, // direct-wake ids cannot enter the prewarm channel
       { directEnsureResultKind: "failed", rawError: "secret" }, // result values and arbitrary error metadata are forbidden
       { directEnsureResultKind: "retry_later", directEnsureRetryReason: "container_rpc_timeout" }, // retry reasons remain in structured logs only
       { directEnsureResultKind: "retry_later", directEnsureAction: "woken" }, // accepted metadata must match the result
       { directEnsureResultKind: "runtime_processing_accepted", directEnsureAction: "woken" }, // accepted results require a runtime id
-      { standbyAllocationOutcome: "fallback" }, // allocation timing, outcome, and reason are one diagnostic fact
-      { standbyAllocationReason: "claim_no_ready_slot" }, // allocation timing, outcome, and reason are one diagnostic fact
-      { standbyAllocationElapsedMs: 87 }, // allocation timing, outcome, and reason are one diagnostic fact
-      {
-        standbyAllocationElapsedMs: 87,
-        standbyAllocationOutcome: "fallback",
-        standbyAllocationReason: "raw_coordinator_error",
-      }, // allocation reasons are a bounded enum
-      {
-        standbyAllocationElapsedMs: 87,
-        standbyAllocationOutcome: "claimed",
-        standbyAllocationReason: "claim_no_ready_slot",
-      }, // allocation reasons must match their outcome
+      { runnerTargetPathKind: "warm" }, // target paths stay in the bounded enum
+      { containerReadinessElapsedMs: -1 }, // step durations stay non-negative
+      { invocationStartElapsedMs: 1.5 }, // step durations stay integral
       {
         directEnsureResultKind: "runtime_processing_accepted",
         directEnsureAction: "woken",
@@ -2059,10 +2001,6 @@ describe("hosted runtime control contracts", () => {
       { runtimeInvocationOrchestrationAttemptId: "attempt_1" }, // arbitrary attempt ids are forbidden
       { runtimeControlAuthStartedAtEpochMs: "1777000000015" }, // CF-side string leaf
       { cloudflareRouteReceivedAtEpochMs: 1.5 }, // non-integer leaf
-      { userRunnerConstructorStartedAtEpochMs: "1777000000021" }, // activation timestamps stay numeric
-      { userRunnerConstructorFinishedAtEpochMs: -1 }, // activation timestamps stay non-negative
-      { userRunnerFirstEnsureRuntimeProcessingAtEpochMs: 1.5 }, // activation timestamps stay integral
-      { userRunnerEnsureStartedAtEpochMs: -1 }, // negative leaf
       { activeFenceTargetWasPriorVersion: 1 }, // boolean leaf must stay boolean
       { activeWakeAccepted: 1 }, // boolean leaf must stay boolean
       { activeWakeFoundNoActiveChild: "true" }, // boolean leaf must stay boolean
@@ -2072,11 +2010,7 @@ describe("hosted runtime control contracts", () => {
       { runtimeInvocationFenceBindElapsedMs: 1.5 },
       { runtimeInvocationJobPrepareElapsedMs: Number.POSITIVE_INFINITY },
       { freshStartRequestedAtEpochMs: "1777000000070" }, // string leaf
-      { freshStartContainerPortsReadyAtEpochMs: -1 }, // container timestamps stay non-negative
-      { shellPrewarmHintCount: -1 }, // counts must be non-negative
-      { shellPrewarmFirstHintAtEpochMs: "1777000000061" }, // timestamps stay numeric
-      { shellPrewarmOutcome: "started" }, // outcomes stay in the bounded enum
-      { shellPrewarmSource: "linq" }, // sources stay in the bounded enum
+      { standbyAllocationElapsedMs: 87 }, // retired leaves are unknown to new events
       { runtimeStoreEnsureElapsedMs: -1 }, // duration must be non-negative
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({
@@ -2296,7 +2230,6 @@ describe("hosted runtime control contracts", () => {
       existing: {
         assistant: {
           pendingReplyAdmittedAtEpochMs: 1_777_000_020_000,
-          foregroundInputSelectedAtEpochMs: 1_777_000_020_500,
           assistantInputAcceptedForExecutionAtEpochMs: 1_777_000_021_000,
         },
         schemaVersion: 1,
@@ -2304,7 +2237,6 @@ describe("hosted runtime control contracts", () => {
       incoming: {
         assistant: {
           pendingReplyAdmittedAtEpochMs: 1_777_000_019_000,
-          foregroundInputSelectedAtEpochMs: 1_777_000_019_500,
           assistantInputAcceptedForExecutionAtEpochMs: 1_777_000_022_000,
         },
         schemaVersion: 1,
@@ -2316,7 +2248,6 @@ describe("hosted runtime control contracts", () => {
       value: {
         assistant: {
           pendingReplyAdmittedAtEpochMs: 1_777_000_019_000,
-          foregroundInputSelectedAtEpochMs: 1_777_000_019_500,
           assistantInputAcceptedForExecutionAtEpochMs: 1_777_000_021_000,
         },
         schemaVersion: 1,
@@ -2406,6 +2337,8 @@ describe("hosted runtime control contracts", () => {
       runnerTargetReconcileElapsedMs: 12,
       standbyClaimElapsedMs: 25,
       runnerTargetBindElapsedMs: 50,
+      runnerTargetPathKind: "retained_retired",
+      // Retired leaves from an older producer are dropped, never rejected.
       standbyAllocationElapsedMs: 87,
       standbyAllocationOutcome: "fallback",
       standbyAllocationReason: "claim_no_ready_slot",
@@ -2416,8 +2349,6 @@ describe("hosted runtime control contracts", () => {
       tokenAcquiredAtEpochMs: 1_777_000_000_010,
       tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
       userRunnerConstructorStartedAtEpochMs: 1_777_000_000_120,
-      userRunnerConstructorFinishedAtEpochMs: 1_777_000_000_122,
-      userRunnerFirstEnsureRuntimeProcessingAtEpochMs: 1_777_000_000_123,
       workspaceReadElapsedMs: 70,
     })).toEqual({
       activeFenceTargetWasPriorVersion: true,
@@ -2436,16 +2367,11 @@ describe("hosted runtime control contracts", () => {
       runnerTargetReconcileElapsedMs: 12,
       standbyClaimElapsedMs: 25,
       runnerTargetBindElapsedMs: 50,
-      standbyAllocationElapsedMs: 87,
-      standbyAllocationOutcome: "fallback",
-      standbyAllocationReason: "claim_no_ready_slot",
+      runnerTargetPathKind: "retained_retired",
       runtimeInvocationPreparationElapsedMs: 120,
       runtimeStoreEnsureElapsedMs: 80,
       tokenAcquiredAtEpochMs: 1_777_000_000_010,
       tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
-      userRunnerConstructorStartedAtEpochMs: 1_777_000_000_120,
-      userRunnerConstructorFinishedAtEpochMs: 1_777_000_000_122,
-      userRunnerFirstEnsureRuntimeProcessingAtEpochMs: 1_777_000_000_123,
       workspaceReadElapsedMs: 70,
     });
 

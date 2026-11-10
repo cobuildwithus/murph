@@ -2755,19 +2755,20 @@ Private food-name search bounds indexed matches before similarity scoring,
 canonical-key deduplication, and window sorting. A literal-equality btree lane
 admits up to 250 exact names without SQL-pattern semantics, an unordered GIN
 lane admits up to 10,000 full-text matches without sorting the whole match set,
-and at most one GiST trigram branch is realized per query. A full-text search
-supplements GIN recall with up to 10,000 strict-word-nearest names only when
-the GIN set reaches its cap and may be truncated; an unsaturated set is
-exhaustive and skips that whole-catalog scan. When FTS finds nothing, typo
-recovery instead admits up to 10,000 names by whole-name distance and then
-applies the matching whole-name threshold. Strict-word matches within that
-same admitted set provide additional typo recovery, while whole-name matches
-retain ranking priority; this does not add a second GiST scan or promise
-exhaustive strict-word recall. Whole-name-eligible names precede ineligible
-names because their ordering and threshold use the same similarity.
+and no query orders the whole catalog by name distance: on the live catalog
+that scan exceeds the labels database statement timeout. A full-text set that
+reaches its cap is ranked as admitted, together with the exact names. When FTS
+finds nothing, typo recovery admits the 1,000 nearest names that pass the
+whole-name similarity threshold, with that threshold as the GiST index
+condition so the scan reads only eligible names. Strict-word recovery runs
+only when no whole name is similar; it admits up to 1,000 strict-word matches
+unordered and does not promise exhaustive strict-word recall. Whole-name
+matches therefore always outrank strict-word matches.
 Canonical-key deduplication happens only after those bounded admissions.
-The bounded admissions preserve representative choice and canonical diversity
-across the established 5,000-row boundary and ineligible-neighbor fixtures.
+The full-text admission preserves representative choice and canonical
+diversity across the established 5,000-row boundary; typo recovery ranks only
+within its nearest-name bound, which a larger group of identical names can
+fill.
 Ranking is deterministic
 within the admitted set rather than exhaustive across the full food catalog.
 Private food ranking favors query terms covered by the name and brand and
@@ -3793,7 +3794,7 @@ reads are not ordinary direct-message classification.
 
 Web's crypto owner (`domain-root-store.ts` / `domain-root-unwrap-cache.ts`)
 may reuse successfully unwrapped **ingress** root bytes across requests in the
-same process. The process cache has a fixed, non-sliding five-minute lifetime per
+same process. The process cache has a fixed, non-sliding 30-minute lifetime per
 successful entry and FIFO capacity of 128 roots (4 KiB of owned plaintext root
 material, apart from request/caller copies). Its identity hashes the complete
 verified envelope, including member, domain, root, generation, wraps, contexts
@@ -4631,8 +4632,7 @@ impact: accepted Linq reply delivery stamps the exact mailbox item with
 `consumedAt`, while Assistant Ask has deterministic request/completion identity,
 mailbox dedupe, and idempotent continuation delivery. The Durable Object write
 fence coalesces runners that overlap in the same invocation. Exact legacy stop
-targets retain their recovery and deletion paths, and stored shell-prewarm
-latency fields remain readable. Transport retirement adds no persistent format
+targets retain their recovery and deletion paths. Transport retirement adds no persistent format
 or rollback floor beyond the unified fleet contract.
 
 Hosted Linq message edits are immutable correction inputs, not mutations of an
@@ -5105,6 +5105,12 @@ Prepared direct Linq admission takes the same lock before revalidating its
 prepared control root, matching activation's member-then-root order, so it
 waits for short runtime callbacks instead of returning a retryable 503. Identity,
 root, and route checks remain inside the admission transaction.
+Direct admission acquires participant then chat locks in one lock-only statement;
+the chat lock consumes the participant lock result. The thread route is read in
+a following statement so a waiter sees the preceding holder's committed route.
+Prepared direct admission reads its member routing row and all rotated home and
+pending chat keys together, without a row cap. Home ambiguity, duplicate replay,
+prepared-row comparison and pending-claim repair keep their existing policy order.
 This avoids a second lock namespace and avoids a routing-row/member-row
 cross-channel deadlock. The effective proactive limit is the lower of the hard
 50-conversation ceiling and the line's configured
