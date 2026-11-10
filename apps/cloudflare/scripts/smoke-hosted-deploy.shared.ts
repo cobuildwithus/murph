@@ -247,40 +247,25 @@ export async function runSmokeHostedDeploy(input: {
     }
 
     try {
-      const convergedAttempt = await assertRunnerContainerSmoke({
+      // One request per attempt runs every enabled check in the container that
+      // attempt started. A second request would restart the container this
+      // attempt just stopped, and that restart often misses the ready timeout.
+      await assertRunnerContainerSmoke({
         fetchImpl: runnerSmokeFetchImpl,
         log,
         source,
         url: buildRunnerContainerSmokeUrl({
           directR2PresignedPut: shouldSmokeDirectR2PresignedPut,
-          liveModelTurn: false,
+          liveModelTurn: shouldSmokeLiveModelTurn,
           phase: input.phase,
           smokeBaseUrl,
         }),
         versionOverrideHeaders,
         expectDirectR2PresignedPut: shouldSmokeDirectR2PresignedPut,
-        expectLiveModelTurnModel: null,
+        expectLiveModelTurnModel: shouldSmokeLiveModelTurn
+          ? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL
+          : null,
       });
-      if (shouldSmokeLiveModelTurn) {
-        await assertRunnerContainerSmoke({
-          expectDirectR2PresignedPut: false,
-          expectLiveModelTurnModel: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-          fetchImpl: runnerSmokeFetchImpl,
-          log,
-          source,
-          // Stay on the container the bundle phase proved current. Live model turn
-          // failures are non-retryable, so restarting the attempt counter here would
-          // send this phase back to a pre-rollout container.
-          pinnedAttempt: convergedAttempt,
-          url: buildRunnerContainerSmokeUrl({
-            directR2PresignedPut: false,
-            liveModelTurn: true,
-            phase: input.phase,
-            smokeBaseUrl,
-          }),
-          versionOverrideHeaders,
-        });
-      }
     } finally {
       await runnerSmokeDispatcher?.close();
     }
@@ -317,28 +302,22 @@ export async function runSmokeHostedDeploy(input: {
   log("Cloudflare hosted execution smoke checks passed.");
 }
 
-// Returns the attempt whose container satisfied the assertion, so a later phase can
-// address that same proven container instead of restarting the attempt counter.
 async function assertRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
   log: (message: string) => void;
-  pinnedAttempt?: number;
   source: EnvSource;
   url: string;
   versionOverrideHeaders: Record<string, string> | undefined;
-}): Promise<number> {
+}): Promise<void> {
   // Validate retry configuration before touching the filesystem so a bad knob
   // reports itself rather than surfacing as a missing-manifest error.
   const retryPolicy = readRunnerContainerSmokeRetryPolicy(input.source);
   const expectedManifest = await readExpectedRunnerBundleManifest(input.source);
-  const retryableFailures = input.expectLiveModelTurnModel === null;
   const startedAtMs = Date.now();
-  const firstAttempt = input.pinnedAttempt ?? 1;
-  const lastAttempt = input.pinnedAttempt ?? retryPolicy.maxAttempts;
 
-  for (let attempt = firstAttempt; attempt <= lastAttempt; attempt += 1) {
+  for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
     const elapsedBeforeAttemptMs = Date.now() - startedAtMs;
     const requestDeadline = AbortSignal.timeout(
       Math.max(1, retryPolicy.maxWaitMs - elapsedBeforeAttemptMs),
@@ -354,10 +333,9 @@ async function assertRunnerContainerSmoke(input: {
         ...input,
         attempt,
         expectedManifest,
-        retryableManifestMismatch: retryableFailures,
         signal: requestDeadline,
       });
-      return attempt;
+      return;
     } catch (error) {
       const elapsedMs = Date.now() - startedAtMs;
       if (requestDeadline.aborted || elapsedMs >= retryPolicy.maxWaitMs) {
@@ -368,8 +346,7 @@ async function assertRunnerContainerSmoke(input: {
         );
       }
       if (
-        !retryableFailures ||
-        attempt >= lastAttempt ||
+        attempt >= retryPolicy.maxAttempts ||
         !(error instanceof RunnerContainerSmokeRetryableError)
       ) {
         throw error;
@@ -420,7 +397,6 @@ async function readRunnerContainerSmoke(input: {
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
   expectedManifest: SmokeRunnerBundleManifest;
-  retryableManifestMismatch: boolean;
   signal: AbortSignal;
   source: EnvSource;
   url: string;
@@ -452,9 +428,6 @@ async function readRunnerContainerSmoke(input: {
     const message = `runner container smoke failed with HTTP ${response.status}${
       failureBody ? `: ${failureBody}` : "."
     }`;
-    if (input.expectLiveModelTurnModel !== null) {
-      throw new Error(message);
-    }
     throw (
       response.status === 400 || response.status >= 500
       || (response.status === 404 && url.pathname === "/internal/deploy/artifact-smoke")
@@ -470,17 +443,32 @@ async function readRunnerContainerSmoke(input: {
       codexShell?: SmokeCodexShellResult | null;
       directR2PresignedPut?: SmokeDirectR2PresignedPutResult | null;
       liveModelTurn?: SmokeLiveModelTurnResult | null;
+      liveModelTurnFailure?: unknown;
       ok?: unknown;
       runnerBundle?: SmokeRunnerBundleManifest | null;
       service?: unknown;
     };
   };
 
+  const liveModelTurnFailure = responsePayload.runnerContainer?.liveModelTurnFailure;
+  if (typeof liveModelTurnFailure === "string") {
+    // An old container's failed turn says nothing about this release, so rollout
+    // skew is retried first. A failed turn on the expected bundle is final.
+    assertSmokeRunnerBundleManifest(
+      responsePayload.runnerContainer?.runnerBundle ?? null,
+      input.expectedManifest,
+    );
+    throw new Error(
+      `runner container live model turn smoke failed: ${
+        redactSmokeFailureBody(liveModelTurnFailure).slice(0, 512)
+      }`,
+    );
+  }
+
   if (responsePayload.ok !== true || responsePayload.runnerContainer?.ok !== true) {
-    const message = "runner container smoke did not return ok=true.";
-    throw input.expectLiveModelTurnModel === null
-      ? new RunnerContainerSmokeRetryableError(message)
-      : new Error(message);
+    throw new RunnerContainerSmokeRetryableError(
+      "runner container smoke did not return ok=true.",
+    );
   }
 
   if (responsePayload.runnerContainer.service !== "cloudflare-hosted-runner-node") {
@@ -491,10 +479,8 @@ async function readRunnerContainerSmoke(input: {
   // A pre-rollout container can implement an older smoke response schema. Check
   // provenance before asserting current schema fields so that expected rollout
   // skew remains retryable instead of failing the deployment immediately.
-  assertSmokeRunnerBundleManifest(runnerBundle, input.expectedManifest, {
-    retryable: input.retryableManifestMismatch,
-  });
-  if (input.expectLiveModelTurnModel === null && new URL(input.url).pathname !== "/internal/deploy/artifact-smoke") {
+  assertSmokeRunnerBundleManifest(runnerBundle, input.expectedManifest);
+  if (new URL(input.url).pathname !== "/internal/deploy/artifact-smoke") {
     assertSmokeStandbyInventory(responsePayload.standbyInventory, input.source);
   }
   assertSmokeCodexShellResult(responsePayload.runnerContainer.codexShell);
@@ -662,13 +648,9 @@ async function readExpectedRunnerBundleManifest(source: EnvSource): Promise<Smok
 function assertSmokeRunnerBundleManifest(
   actual: SmokeRunnerBundleManifest | null,
   expected: SmokeRunnerBundleManifest,
-  options: {
-    retryable?: boolean;
-  } = {},
 ): void {
-  const retryable = options.retryable !== false;
   const createManifestError = (message: string): Error =>
-    retryable ? new RunnerContainerSmokeRetryableError(message) : new Error(message);
+    new RunnerContainerSmokeRetryableError(message);
 
   if (!actual) {
     throw createManifestError(

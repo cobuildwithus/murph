@@ -4,6 +4,10 @@ route and restriction checks. [Architecture](../ARCHITECTURE.md),
 [the completed implementation plan](exec-plans/completed/2026-11-10-game-chat-open-room.md)
 record the contract and local evidence.
 
+Hosted device import pass-scope forwarding is tracked in the
+[execution plan](exec-plans/completed/2026-11-10-hosted-device-pass-scope.md);
+the [runtime owner](../packages/assistant-runtime/README.md) owns cache composition.
+
 Linq group line moves retain container identity through a move-aware ingress
 rollback floor, an egress-only retired-target alias and verified service-number
 normalization for games. [Architecture](../ARCHITECTURE.md#linq-group-line-moves)
@@ -2045,3 +2049,5 @@ proof and local verification are recorded in
 
 The [chat reliability release plan](exec-plans/completed/2026-11-07-chat-reliability-release.md)
 tracks combined verification and release of prompt checkpointing and unique foreground usage identities.
+
+Frog backlog resolution and verification: [execution record](exec-plans/completed/2026-11-10-frog-backlog.md).

@@ -8234,8 +8234,6 @@ function isAnchorHostedAssistantAutomationDetailKey(key: string): boolean {
 function isPreferredHostedAssistantAutomationDetailKey(key: string): boolean {
   return isAnchorHostedAssistantAutomationDetailKey(key)
     || key.startsWith("assistantNotification")
-    || key.startsWith("codexInvalidOutput")
-    || key.startsWith("codexResumeFailure")
     || key.startsWith("failure")
     || key.startsWith("routePlanning")
     || key.startsWith("turnTiming");

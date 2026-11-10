@@ -1,8 +1,14 @@
+import { spawn } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 
 import { warmHostedContainerCodexBinary } from "../src/container-codex-binary-warmup.js";
 
@@ -20,6 +26,7 @@ interface FakeRecord {
 let testRoot: string;
 
 beforeEach(async () => {
+  vi.mocked(spawn).mockClear();
   testRoot = await mkdtemp(path.join(tmpdir(), "codex-warmup-test-"));
 });
 
@@ -113,8 +120,13 @@ describe("warmHostedContainerCodexBinary", () => {
     });
 
     expect(result.outcome).toBe("timed_out");
-    const record = await readRecord(fake.recordPath);
-    expect(isProcessAlive(record.pid)).toBe(false);
+    // The parent owns the PID even if Node has not executed the fixture yet.
+    const child = vi.mocked(spawn).mock.results[0]?.value;
+    expect(child?.pid).toBeTypeOf("number");
+    expect(isProcessAlive(child!.pid!)).toBe(false);
+    const scratchRoot = vi.mocked(spawn).mock.calls[0]?.[2]?.cwd;
+    expect(scratchRoot).toBeTypeOf("string");
+    expect(await pathExists(String(scratchRoot))).toBe(false);
   });
 
   it("stops when the container shutdown signal aborts", async () => {
@@ -127,7 +139,14 @@ describe("warmHostedContainerCodexBinary", () => {
       modelCatalogJsonPath: "/catalog.json",
       signal: controller.signal,
     });
-    setTimeout(() => controller.abort(), 300);
+    try {
+      await vi.waitFor(async () => {
+        expect(await pathExists(fake.recordPath)).toBe(true);
+      }, { timeout: 10_000 });
+    } finally {
+      controller.abort();
+      await pending;
+    }
 
     expect((await pending).outcome).toBe("aborted");
     const record = await readRecord(fake.recordPath);

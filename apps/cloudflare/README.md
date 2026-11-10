@@ -1330,3 +1330,19 @@ selection remains owned by the Web Max-plan eligibility check.
 See [the restore benchmark](scripts/benchmark-workspace-restore.md) for a
 synthetic 50 MiB encrypted snapshot, real local HTTP transport, production
 restore timings, content verification, and a fixed-resource Linux command.
+
+## Focused runner verification
+
+`pnpm --dir apps/cloudflare typecheck` generates the Web-owned Prisma client
+before checking the shared test support. Set `MURPH_PRISMA_SKIP_ENV_FILES=1`
+for synthetic proof that must not read local dotenv files.
+
+Use `pnpm --dir apps/cloudflare runner:bundle --offline` when the existing pnpm
+store contains the complete pinned dependency graph. Missing cache entries fail
+without registry access; the frozen install and patch checks remain mandatory.
+The old `--skip-bundle-only-dependencies` option is rejected before assembly
+because a runnable bundle requires the CLI it would omit.
+
+Run artifact-producing Cloudflare tests and `pnpm verify:cli` sequentially in
+a single checkout. Separate checkouts can run independently; both commands
+consume generated workspace distributions.

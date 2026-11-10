@@ -5,6 +5,7 @@ import { test, vi } from "vitest";
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { createVaultReadModel } from "../src/model.ts";
 import { collectWearableDataset } from "../src/wearables/candidates.ts";
+import { resolveMetricTolerance } from "../src/wearables/provider-policy.ts";
 import * as sleepAssociation from "../src/wearables/sleep-association.ts";
 import { summarizeWearableDay, summarizeWearableMetricTrend, summarizeWearableSleep } from "../src/wearables.ts";
 
@@ -1108,6 +1109,43 @@ test("daily sleep summary derives stage totals from the selected sleep window in
   assert.equal(night?.totalSleepMinutes.selection.value, 450);
   assert.equal(night?.totalSleepMinutes.selection.sourceKind, "sleep-stage-total");
   assert.deepEqual(night?.lightMinutes.selection.recordIds, ["sample_oura_stage_long_light"]);
+});
+
+test("pre-parsed times give the same sleep window association as the timestamps", () => {
+  const dataset = collectWearableDataset(createVaultReadModel({
+    entities: makeSleepRepairWorkFixture(0),
+    vaultRoot: "browser://synthetic-sleep-repair",
+  }), {});
+  const window = dataset.sleepWindows[0];
+  const metric = dataset.rawMetricCandidates[0];
+  assert.ok(window && metric);
+  const toleranceMs = resolveMetricTolerance("sessionMinutes") * 60000;
+  const startMs = Date.parse(window.startAt ?? "");
+  const endMs = Date.parse(window.endAt ?? "");
+  const at = (ms: number) => new Date(ms).toISOString();
+  const cases: [string | null, boolean][] = [
+    [at(startMs - toleranceMs - 1), false],
+    [at(startMs - toleranceMs), true],
+    [at(startMs + 60000), true],
+    [at(endMs + toleranceMs), true],
+    [at(endMs + toleranceMs + 1), false],
+    ["not a time", false],
+    [null, false],
+  ];
+  for (const candidateWindow of [window, { ...window, startAt: "not a time" }, { ...window, endAt: null }]) {
+    const insideWindow = sleepAssociation.sleepWindowTimeTest(candidateWindow);
+    for (const [occurredAt, inside] of cases) {
+      // No external reference, so only the time half can associate the pair.
+      const candidate = { ...metric, externalRef: null, occurredAt };
+      const expected = candidateWindow === window && inside;
+      assert.equal(sleepAssociation.sleepMetricBelongsToWindow(candidate, candidateWindow), expected, String(occurredAt));
+      assert.equal(
+        sleepAssociation.sleepMetricBelongsToWindow(candidate, candidateWindow, insideWindow, Date.parse(occurredAt ?? "")),
+        expected,
+        String(occurredAt),
+      );
+    }
+  }
 });
 
 test("sleep repair skips window association when no zero sleep total exists", () => {

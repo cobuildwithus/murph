@@ -174,3 +174,11 @@ for the supported command surface.
 Update only the owner whose contract changed: `DESIGN.md` for tokens and
 patterns, `PRODUCT.md` for brand principles, `agent-docs/PRODUCT_SENSE.md` for
 product meaning, or `apps/web/README.md` for setup/runtime contracts.
+
+## Manual Web preview upload
+
+For a current-branch Vercel preview, link the repository root to the existing Web
+project (`vercel link --repo`) and confirm the project's Root Directory is
+`apps/web`. Run `vercel deploy --archive=tgz` from the repository root so the
+workspace lockfile and sibling packages are included without exceeding the file
+upload limit. Generated Playwright results are excluded by `.vercelignore`.

@@ -62,7 +62,7 @@ const CLI_WRAPPER = [
   '',
 ].join('\n')
 
-export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, channel: 'telegram' | 'linq' = 'telegram', options: { capabilities?: 'production-hosted' } = {}): Promise<CanonicalLiveFixture> {
+export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, channel: 'telegram' | 'linq' = 'telegram', options: { capabilities?: 'production-hosted'; requirePublicReferences?: boolean } = {}): Promise<CanonicalLiveFixture> {
   try {
     await access(CLI_ENTRYPOINT)
   } catch (error) {
@@ -73,6 +73,15 @@ export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, ch
   }
   if (options.capabilities === 'production-hosted' && !await readAssistantCliSurfaceBootstrapContext()) {
     throw new Error('Production hosted capabilities require the generated CLI contract. Run node scripts/assemble-assistant-cli-surface.mjs after pnpm build:test-runtime:prepared.')
+  }
+  if (options.requirePublicReferences) {
+    try {
+      for (const artifact of ['web/browse/goals.json', 'knowledge.sqlite']) {
+        await access(new URL(`../../../health-commons/generated/${artifact}`, import.meta.url))
+      }
+    } catch (error) {
+      throw new Error('This journey requires available public references. Run pnpm health-commons:generate before comparing discovery behavior.', { cause: error })
+    }
   }
   const root = await mkdtemp(path.join(tmpdir(), 'murph-canonical-live-'))
   const vault = path.join(root, 'vault')

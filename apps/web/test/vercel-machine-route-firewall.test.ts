@@ -63,6 +63,21 @@ describe("machine route inventory", () => {
     expect(routeMethods("export const GET = handler; export const { POST } = handlers;")).toContain("POST");
   });
 
+  it("classifies generated workflow webhooks without hiding their firewall requirements", async () => {
+    const webRoot = await mkdtemp(path.join(tmpdir(), "workflow-routes-"));
+    try {
+      const directory = path.join(webRoot, "app/.well-known/workflow/v1/webhook/[token]");
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, "route.js"), "export async function POST() {}");
+      await writeFile(path.join(webRoot, "vercel.json"), JSON.stringify({ crons: [] }));
+      expect(await readProtectedMachineRoutes(webRoot)).toEqual([{
+        path: "/.well-known/workflow/v1/webhook/[token]", methods: ["POST", "OPTIONS"],
+      }]);
+    } finally {
+      await rm(webRoot, { recursive: true, force: true });
+    }
+  });
+
   it("discovers every supported route-handler extension", async () => {
     const webRoot = await mkdtemp(path.join(tmpdir(), "machine-routes-"));
     try {

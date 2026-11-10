@@ -227,7 +227,7 @@ test.each((['linq', 'telegram'] as const).flatMap((channel) => [
   const draftReady = createDeferred<void>()
   const draftTypes = draft === 'text' || draft === 'media'
   const selectedReplies = selected === null ? draftTypes : selected === 'text'
-  const stopsAtResumeCleanup: number[] = []
+  const stopsAtCommit: number[] = []
   const result = (kind: string) => ({
     kind: 'succeeded' as const,
     providerTurn: {
@@ -265,10 +265,11 @@ test.each((['linq', 'telegram'] as const).flatMap((channel) => [
       }
       return result(selected)
     })
-    mocks.clearAssistantSessionCodexResumeState.mockImplementationOnce(async (input) => {
-      // The replacement decision stops typing before resume cleanup or commit work.
-      stopsAtResumeCleanup.push(stop.mock.calls.length)
-      return input.session
+    const commit = mocks.finalizeAssistantTurnArtifacts.getMockImplementation()!
+    mocks.finalizeAssistantTurnArtifacts.mockImplementationOnce(async (input) => {
+      // The replacement decision stops typing before commit work.
+      stopsAtCommit.push(stop.mock.calls.length)
+      return commit(input)
     })
   }
   const dispatch = mocks.dispatchAssistantReply.getMockImplementation()!
@@ -305,7 +306,7 @@ test.each((['linq', 'telegram'] as const).flatMap((channel) => [
   await Promise.all([turn, joined])
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(selected === null ? 1 : 2)
   expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(selectedReplies ? 1 : 0)
-  expect(stopsAtResumeCleanup).toEqual(selected === null ? [] : [draftTypes && !selectedReplies ? 1 : 0])
+  expect(stopsAtCommit).toEqual(selected === null ? [] : [draftTypes && !selectedReplies ? 1 : 0])
   expect(startTyping).toHaveBeenCalledTimes(draftTypes ? 1 : 0)
   expect(stop).toHaveBeenCalledTimes(draftTypes ? 1 : 0)
   if (draftTypes) {

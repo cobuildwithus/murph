@@ -661,11 +661,16 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     const t = await nativeTelegramFixture(f);
     const adapter = hostedAuthAdapter(f.prisma)({});
     const where = [{ field: "identifier", value: `native-telegram-start:${t.link.startId}` }];
-    if (kind === "missing") await adapter.delete({ model: "verification", where });
-    else await adapter.update({ model: "verification", where, update: kind === "expired"
-      ? { expiresAt: new Date(0) } : { createdAt: new Date(Date.now() + 60_000) } });
-    expect((await completeNativeTelegram(nativeRequest(f.token, t.body))).status).toBe(401);
-    expect(provider.telegram).not.toHaveBeenCalled();
+    try {
+      if (kind === "missing") await adapter.delete({ model: "verification", where });
+      else await adapter.update({ model: "verification", where, update: kind === "expired"
+        ? { expiresAt: new Date(0) } : { createdAt: new Date(Date.now() + 60_000) } });
+      expect((await completeNativeTelegram(nativeRequest(f.token, t.body))).status).toBe(401);
+      expect(provider.telegram).not.toHaveBeenCalled();
+    } finally {
+      // Pre-auth records have no member FK; member teardown cannot remove them.
+      await adapter.deleteMany({ model: "verification", where });
+    }
   }));
 
   it("native Telegram rejects a consumed token with a new start from another member", () => withInitialPasskeyMember(async (f) => {

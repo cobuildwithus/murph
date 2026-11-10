@@ -332,6 +332,10 @@ the current user explicitly asks for it.
    - `review-gpt-pr-context/since-first-reviewed-head.diff`
    - `review-gpt-pr-context/since-previous-reviewed-head.diff`
 
+   The packager also writes `<archive>.zip.review-round.json` beside the ZIP.
+   Retain this small record when retiring the large archive so later rounds can
+   recover the reviewed heads and context mode.
+
    Later rounds either re-send the full guarded snapshot or use a small
    correction packet in the same conversation, as described below. Only an
    explicit full-review reason starts a new conversation.

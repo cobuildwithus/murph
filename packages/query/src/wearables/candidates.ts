@@ -34,6 +34,7 @@ import {
   resolveSleepCandidateProvider,
   sleepMetricBelongsToWindow,
   sleepMetricMatchesWindow,
+  sleepWindowTimeTest,
 } from "./sleep-association.ts";
 import {
   buildCandidateId,
@@ -279,6 +280,10 @@ function collectInvalidAppleZeroSleepMetricCandidates(
     resolveSleepCandidateProvider(candidate) === APPLE_HEALTH_KIT_PROVIDER
   );
   const invalidCandidates: WearableMetricCandidate[] = [];
+  // Every window is tested against every repair candidate, so each timestamp
+  // is parsed once here, not once per pair.
+  const occurredAtMs = new Map(appleRepairCandidates.map((candidate) =>
+    [candidate, Date.parse(candidate.occurredAt ?? "")]));
 
   // Every candidate and window below is Apple Health, so each pair needs only
   // the association test, not another provider resolution on both sides.
@@ -286,17 +291,19 @@ function collectInvalidAppleZeroSleepMetricCandidates(
     if (resolveSleepCandidateProvider(window) !== APPLE_HEALTH_KIT_PROVIDER) {
       continue;
     }
+    const insideWindow = sleepWindowTimeTest(window);
+    const belongsToWindow = (candidate: WearableMetricCandidate) =>
+      sleepMetricBelongsToWindow(candidate, window, insideWindow, occurredAtMs.get(candidate));
 
     // A window without an owned zero total cannot be repaired. Avoid scanning
     // its entire awake/stage history until that necessary condition holds.
     const invalidZeroTotalCandidates = zeroTotalCandidates.filter((candidate) =>
-      isInvalidZeroSleepSummaryOwnedCandidate(candidate, window) &&
-      sleepMetricBelongsToWindow(candidate, window)
+      isInvalidZeroSleepSummaryOwnedCandidate(candidate, window) && belongsToWindow(candidate)
     );
     if (invalidZeroTotalCandidates.length === 0) {
       continue;
     }
-    const windowCandidates = appleRepairCandidates.filter((candidate) => sleepMetricBelongsToWindow(candidate, window));
+    const windowCandidates = appleRepairCandidates.filter(belongsToWindow);
     const awakeMinutes = firstPositiveMetricValue(windowCandidates, "awakeMinutes");
     if (
       awakeMinutes === null ||

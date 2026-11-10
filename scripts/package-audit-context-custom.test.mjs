@@ -83,9 +83,12 @@ test("full audit packaging includes unchanged native patch and skill imports and
     const dependencies = [
       ...["normalize", "fetch-preview", "ocr-preview"].map(name => `${skillRoot}/${name}.mjs`),
       "patches/codex-public-live.patch",
+      "patches/@example__unchanged@1.0.0.patch",
     ];
     const excluded = [
       ".agents/skills/example/.env",
+      "packages/example/assets/nested/image.png",
+      "packages/example/assets/nested/archive.zip",
       ".agents/skills/example/cache/residue.mjs",
       ".agents/skills/example/node_modules/residue.mjs",
       ".agents/friction-log/example/friction.md",

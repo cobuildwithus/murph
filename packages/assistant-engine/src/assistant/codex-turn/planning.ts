@@ -485,6 +485,22 @@ async function prepareAssistantGameLoreGuidance(input: {
   return await input.hostedToolContext?.prepareGameLore?.() ?? null
 }
 
+// Tools are fixed when a thread starts, so the lore tool is declared for every
+// reply in a room that can host a game, not only while a game is live. The
+// handler still refuses when the room has no lore, and only a live game adds
+// the guidance that asks for it.
+function isGameLoreToolDeclared(
+  input: AssistantRouteTurnPlanInput,
+  acceptedInputIds: readonly string[],
+  scope: string,
+  authenticatedGroupProviderTurn: boolean,
+  gameLoreGuidance: string | null,
+): boolean {
+  if (gameLoreGuidance !== null) return true
+  return authenticatedGroupProviderTurn && input.input.channel === 'linq'
+    && areConversationGamesAvailable(input, acceptedInputIds, scope)
+}
+
 function optionalPrompt(prompt: string | null): string[] {
   return prompt ? [prompt] : []
 }
@@ -1295,7 +1311,7 @@ export async function resolveAssistantRouteTurnPlan(
         gameReadAvailable: isConversationGameReadAvailable(input, userActionAcceptedInputIds, conversationScope, scheduledInvocationScope),
         myGameRemindersAvailable: privateGameReminderAvailable(input, conversationScope, userActionAcceptedInputIds),
         gamesAvailable: areConversationGamesAvailable(input, userActionAcceptedInputIds, conversationScope),
-        gameLoreAvailable: gameLoreGuidance !== null,
+        gameLoreAvailable: isGameLoreToolDeclared(input, userActionAcceptedInputIds, conversationScope, authenticatedGroupProviderTurn, gameLoreGuidance),
         gamePhotosAvailable: gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope).length > 0,
         pollsAvailable,
         assistantStyleSettingsAvailable,

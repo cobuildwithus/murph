@@ -15,6 +15,19 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("workspace source resolution", () => {
+  it("keeps the complete Web typecheck independent of built workspace declarations", () => {
+    const output = execFileSync(process.execPath, [
+      path.join(repoRoot, "scripts/run-typescript.mjs"), "web", "-p", "apps/web/tsconfig.json",
+      "--listFilesOnly", "--pretty", "false",
+    ], { cwd: repoRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+    const workspaceArtifacts = output.split(/\r?\n/u)
+      .map(file => path.relative(repoRoot, file))
+      .filter(file => /^packages[/\\][^/\\]+[/\\](?:dist|\.test-dist)[/\\]/u.test(file));
+    // Ordinary Web typecheck catches unresolved imports on a clean checkout;
+    // this companion check catches imports masked by an earlier package build.
+    expect(workspaceArtifacts).toEqual([]);
+  });
+
   it.each([
     { packageName: "core", entry: "event-read.ts", specifier: "@murphai/core/event-read", symbol: "readEvent" },
     { packageName: "device-syncd", entry: "service.ts", specifier: "@murphai/device-syncd/service", symbol: "SqliteDeviceSyncStore" },

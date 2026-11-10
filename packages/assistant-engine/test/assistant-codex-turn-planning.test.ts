@@ -4793,7 +4793,7 @@ describe('assistant Codex turn planning', () => {
   it.each([
     ['authorized scheduled', false, true, ['read_game']],
     ['scheduled without authority', false, false, []],
-    ['accepted-input', true, false, ['read_game', 'update_game', 'game_photo']],
+    ['accepted-input', true, false, ['read_game', 'update_game', 'game_photo', 'game_lore']],
   ] as const)('plans game tools for an %s group turn', async (_label, accepted, scheduledAuthority, expectedTools) => {
     const occurrenceAt = '2026-08-05T18:00:00.000Z'
     const plan = await resolveAssistantRouteTurnPlan({
@@ -4863,11 +4863,7 @@ describe('assistant Codex turn planning', () => {
     expect((plan.systemPrompt ?? '').includes('a clear current photo relevant to the sender')).toBe(available)
   })
 
-  it.each([
-    ['direct', true, null, false],
-    ['group without a live game', false, null, false],
-    ['group with a live game', false, GAME_LIVE_LORE_GUIDANCE, true],
-  ] as const)('exposes game lore only for a %s turn', async (_label, threadIsDirect, loreGuidance, available) => {
+  const planGameLoreTurn = async (threadIsDirect: boolean, loreGuidance: string | null) => {
     const prepareGameLore = vi.fn(async () => loreGuidance)
     const plan = await resolveAssistantRouteTurnPlan({
       acceptedInputItems: [{ id: `ain_${'f'.repeat(32)}`, source: 'assistant-input' }],
@@ -4883,11 +4879,26 @@ describe('assistant Codex turn planning', () => {
       route: createRoute(), session: createSession(),
       sharedPlan: createSharedPlan({}, { channel: 'linq', threadIsDirect, threadId: 'synthetic-lore-thread' }),
     })
+    return { plan, prepareGameLore }
+  }
+
+  it.each([
+    ['direct', true, null, false, false],
+    ['group without a live game', false, null, true, false],
+    ['group with a live game', false, GAME_LIVE_LORE_GUIDANCE, true, true],
+  ] as const)('declares game lore and its guidance for a %s turn', async (_label, threadIsDirect, loreGuidance, declared, guided) => {
+    const { plan, prepareGameLore } = await planGameLoreTurn(threadIsDirect, loreGuidance)
     const toolNames = plan.dynamicTools.map((tool) => tool.name)
-    expect(toolNames.includes('game_lore')).toBe(available)
+    expect(toolNames.includes('game_lore')).toBe(declared)
     expect(toolNames).not.toContain('write_recap')
-    expect((plan.systemPrompt ?? '').includes(GAME_LIVE_LORE_GUIDANCE)).toBe(available)
+    expect((plan.systemPrompt ?? '').includes(GAME_LIVE_LORE_GUIDANCE)).toBe(guided)
     expect(prepareGameLore).toHaveBeenCalledTimes(threadIsDirect ? 0 : 1)
+  })
+
+  it('keeps one thread contract for a game room when its game starts or ends', async () => {
+    const idle = await planGameLoreTurn(false, null)
+    const live = await planGameLoreTurn(false, GAME_LIVE_LORE_GUIDANCE)
+    expect(live.plan.assistantContractFingerprint).toBe(idle.plan.assistantContractFingerprint)
   })
 
   it.each([
@@ -7019,7 +7030,7 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('rebuilds reconsidered group history without the provisional provider thread', async () => {
+  it('keeps the reconsidered group thread and replays nothing from its own turn', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -7049,10 +7060,34 @@ describe('assistant Codex turn planning', () => {
         { kind: 'user', text: firstRequest },
         { kind: 'user', text: secondRequest },
       ])
+      const planNextTurn = async (planSession: AssistantSession) =>
+        await resolveAssistantRouteTurnPlan({
+          executionContext: null,
+          input: {
+            ...createMessageInput(),
+            prompt: 'Summarize the visible conversation.',
+            vault,
+          },
+          profile: {
+            promptProfile: 'conversation',
+            threadScope: 'session-thread',
+            toolProfile: 'provider-turn',
+          },
+          promptTimeContext: {
+            currentLocalDate: '2026-08-25',
+            currentTimeZone: 'UTC',
+          },
+          route,
+          session: planSession,
+          sharedPlan: createPrivateSharedPlan(),
+        })
+      // Request 1 planned after the held messages were the transcript tail.
+      const reconsiderationPlan = await planNextTurn(session)
       const providerResult: ExecutedAssistantProviderTurnResult = {
         acceptedNoReplyDeliveryContextOrdinals: [],
         additionalUsages: [],
-        assistantContractFingerprint: 'b'.repeat(64),
+        assistantContractFingerprint:
+          reconsiderationPlan.assistantContractFingerprint,
         codexContinuation: { kind: 'explicit-structured-history' },
         codexRolloutRelativePath: null,
         codexThreadId: 'provider-thread-reconsidered',
@@ -7073,6 +7108,7 @@ describe('assistant Codex turn planning', () => {
         session,
         stderr: '',
         stdout: '',
+        transcriptBoundary: reconsiderationPlan.transcriptBoundary,
         transcriptResponse: selectedFinal,
         usage: null,
         workingDirectory: '/work',
@@ -7089,14 +7125,15 @@ describe('assistant Codex turn planning', () => {
         plan: createPrivateSharedPlan(),
         precedingAssistantTranscriptTexts: [],
         providerResult,
-        providerResumeStateAction: 'clear',
+        providerResumeStateAction: 'persist-from-provider-turn',
         session,
         turnCreatedAt: '2026-08-25T16:40:00.000Z',
         turnId: 'turn-group-reconsideration',
       })
 
-      expect(saved.resumeState).toBeNull()
-      expect(saved.codexResume).toBeNull()
+      expect(saved.codexResume).toMatchObject({
+        threadId: 'provider-thread-reconsidered',
+      })
       const transcript = await listAssistantTranscriptEntries(
         vault,
         session.sessionId,
@@ -7109,39 +7146,15 @@ describe('assistant Codex turn planning', () => {
       expect(JSON.stringify(transcript)).not.toContain(provisionalDraft)
       expect(JSON.stringify(transcript)).not.toContain(reconsiderationMarker)
 
-      const plan = await resolveAssistantRouteTurnPlan({
-        executionContext: null,
-        input: {
-          ...createMessageInput(),
-          prompt: 'Summarize the visible conversation.',
-          vault,
-        },
-        profile: {
-          promptProfile: 'conversation',
-          threadScope: 'session-thread',
-          toolProfile: 'provider-turn',
-        },
-        promptTimeContext: {
-          currentLocalDate: '2026-08-25',
-          currentTimeZone: 'UTC',
-        },
-        route,
-        session: saved,
-        sharedPlan: createPrivateSharedPlan(),
-      })
+      // The thread already holds this turn, including the instruction that
+      // the draft was never sent, so the next reply resumes it as is.
+      const plan = await planNextTurn(saved)
 
-      expect(plan.resume).toBeNull()
-      expect(plan.conversationHistoryMessages).toEqual([
-        { content: firstRequest, role: 'user' },
-        { content: secondRequest, role: 'user' },
-        { content: selectedFinal, role: 'assistant' },
-      ])
-      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
-        provisionalDraft,
-      )
-      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
-        reconsiderationMarker,
-      )
+      expect(plan.resume).toEqual({
+        codexThreadId: 'provider-thread-reconsidered',
+      })
+      expect(plan.planningDiagnostics.threadRotationReason).toBeNull()
+      expect(plan.conversationHistoryMessages).toBeUndefined()
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
