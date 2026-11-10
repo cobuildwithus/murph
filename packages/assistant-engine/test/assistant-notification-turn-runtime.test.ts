@@ -3541,7 +3541,7 @@ test.each(['authorized', 'ordinary', 'wrong-occurrence', 'wrong-trigger', 'not-h
     const occurrenceAt = '2030-01-10T12:00:00.000Z'
     const providerResult = createProviderResult({
       codexThreadId: 'synthetic-review-thread',
-      response: '{"kind":"skip","privateSummary":"Biweekly usage review completed."}',
+      response: '{"kind":"skip","privateSummary":"Monthly usage review completed."}',
     })
     const sharedPlan = createSharedPlan()
     sharedPlan.conversationPolicy.audience.threadIsDirect = scenario !== 'group'

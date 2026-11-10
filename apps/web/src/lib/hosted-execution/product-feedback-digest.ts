@@ -19,10 +19,10 @@ import { getPrisma } from "../prisma";
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_TIME_ZONE = "America/New_York";
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_SEND_HOUR = 18;
 export const HOSTED_PRODUCT_FEEDBACK_DIGEST_MAX_ROWS = 200;
-// Per-member usage optimizers run on staggered 14-day cycles, so their
-// reports are collected into one email on this fixed 14-day cadence.
+// Per-member usage optimizers run on staggered 30-day cycles, so their
+// reports are collected into one email on this fixed 30-day cadence.
 export const HOSTED_USAGE_REPORT_DIGEST_ANCHOR_DAY = "2026-11-07";
-export const HOSTED_USAGE_REPORT_DIGEST_CYCLE_DAYS = 14;
+export const HOSTED_USAGE_REPORT_DIGEST_CYCLE_DAYS = 30;
 
 const HOSTED_PRODUCT_FEEDBACK_DIGEST_RECIPIENTS_ENV =
   "HOSTED_PRODUCT_FEEDBACK_DIGEST_EMAILS";
@@ -123,7 +123,7 @@ export async function runHostedProductFeedbackDigest(input: {
       config: emailConfig.resend,
       idempotencyKey: `hosted-usage-report-digest/${window.dayKey}`,
       ...(input.signal ? { signal: input.signal } : {}),
-      subject: `Biweekly usage reports — ${window.dayKey}`,
+      subject: `Monthly usage reports — ${window.dayKey}`,
       text: [
         `Usage optimization reports (${usageReportCount})`,
         ...usageReports.rows.map((row) => `- ${row.summary}`),
