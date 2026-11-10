@@ -335,6 +335,7 @@ export async function executeCodexAssistantTurnAttempt(
       ? undefined
       : providerConfig.policy.sandbox ?? undefined,
     serviceTier: input.serviceTier ?? null,
+    turnTrigger: input.turnTrigger ?? null,
     vaultRoot: input.vaultRoot ?? null,
     voiceMemoRuntime,
     analyzeVideoRuntime,

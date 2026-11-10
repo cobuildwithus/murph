@@ -116,6 +116,9 @@ export async function prepareScriptedTurnScenario(
   options: {
     websocket?: { streamIdleTimeoutMs: number }
     additionalTomlLines?: readonly string[]
+    // The patched Codex build applies hosted prompt-cache retention only when
+    // the provider key env is the platform one.
+    apiKeyEnv?: string
     model?: string
     modelProvider?: string
     multiAgentV2?: boolean
@@ -159,7 +162,7 @@ export async function prepareScriptedTurnScenario(
       codexCommand,
       codexHome,
       env: {
-        [SCRIPTED_STUB_KEY_ENV]: 'scripted-local-key',
+        [options.apiKeyEnv ?? SCRIPTED_STUB_KEY_ENV]: 'scripted-local-key',
         HOME: process.env.HOME,
         PATH: process.env.PATH,
         TMPDIR: process.env.TMPDIR,
@@ -178,6 +181,7 @@ function buildScriptedCodexConfigToml(
   options: {
     websocket?: { streamIdleTimeoutMs: number }
     additionalTomlLines?: readonly string[]
+    apiKeyEnv?: string
     modelProvider?: string
     multiAgentV2?: boolean
   } = {},
@@ -197,7 +201,7 @@ function buildScriptedCodexConfigToml(
     `[model_providers."${modelProvider}"]`,
     'name = "Local scripted stub"',
     `base_url = "${baseUrl}"`,
-    `env_key = "${SCRIPTED_STUB_KEY_ENV}"`,
+    `env_key = "${options.apiKeyEnv ?? SCRIPTED_STUB_KEY_ENV}"`,
     'wire_api = "responses"',
     'requires_openai_auth = false',
     'request_max_retries = 4',

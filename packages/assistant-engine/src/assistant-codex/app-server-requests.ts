@@ -168,6 +168,11 @@ export function buildCodexTurnStartParams(input: {
       : undefined,
     model: normalizeNullableString(input.input.model),
     threadId: input.codexThreadId,
+    // Per turn, never sticky. Murph's Codex build keeps scheduled turns on
+    // 30-minute prompt-cache retention; every other turn keeps 12 hours.
+    turnTrigger: input.input.turnTrigger === 'automation-cron'
+      ? 'automation-cron'
+      : undefined,
   })
 
   // Always explicit: `serviceTier` overrides stick to the thread for
