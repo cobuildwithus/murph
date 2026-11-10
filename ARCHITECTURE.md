@@ -2755,19 +2755,20 @@ Private food-name search bounds indexed matches before similarity scoring,
 canonical-key deduplication, and window sorting. A literal-equality btree lane
 admits up to 250 exact names without SQL-pattern semantics, an unordered GIN
 lane admits up to 10,000 full-text matches without sorting the whole match set,
-and at most one GiST trigram branch is realized per query. A full-text search
-supplements GIN recall with up to 10,000 strict-word-nearest names only when
-the GIN set reaches its cap and may be truncated; an unsaturated set is
-exhaustive and skips that whole-catalog scan. When FTS finds nothing, typo
-recovery instead admits up to 10,000 names by whole-name distance and then
-applies the matching whole-name threshold. Strict-word matches within that
-same admitted set provide additional typo recovery, while whole-name matches
-retain ranking priority; this does not add a second GiST scan or promise
-exhaustive strict-word recall. Whole-name-eligible names precede ineligible
-names because their ordering and threshold use the same similarity.
+and no query orders the whole catalog by name distance: on the live catalog
+that scan exceeds the labels database statement timeout. A full-text set that
+reaches its cap is ranked as admitted, together with the exact names. When FTS
+finds nothing, typo recovery admits the 1,000 nearest names that pass the
+whole-name similarity threshold, with that threshold as the GiST index
+condition so the scan reads only eligible names. Strict-word recovery runs
+only when no whole name is similar; it admits up to 1,000 strict-word matches
+unordered and does not promise exhaustive strict-word recall. Whole-name
+matches therefore always outrank strict-word matches.
 Canonical-key deduplication happens only after those bounded admissions.
-The bounded admissions preserve representative choice and canonical diversity
-across the established 5,000-row boundary and ineligible-neighbor fixtures.
+The full-text admission preserves representative choice and canonical
+diversity across the established 5,000-row boundary; typo recovery ranks only
+within its nearest-name bound, which a larger group of identical names can
+fill.
 Ranking is deterministic
 within the admitted set rather than exhaustive across the full food catalog.
 Private food ranking favors query terms covered by the name and brand and

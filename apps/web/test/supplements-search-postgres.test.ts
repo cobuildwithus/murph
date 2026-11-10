@@ -559,9 +559,10 @@ const TYPO_CASES: readonly SearchCase[] = [
 
 const FOOD_EXACT_ADMISSION_LIMIT = 250;
 const FOOD_FTS_ADMISSION_LIMIT = 10_000;
-const FOOD_NEAREST_NAME_ADMISSION_LIMIT = 10_000;
+const FOOD_TYPO_ADMISSION_LIMIT = 1_000;
+// Full-text and typo admission are mutually exclusive; full-text is larger.
 const FOOD_MAX_SORT_INPUT = FOOD_EXACT_ADMISSION_LIMIT +
-  FOOD_FTS_ADMISSION_LIMIT + FOOD_NEAREST_NAME_ADMISSION_LIMIT;
+  FOOD_FTS_ADMISSION_LIMIT;
 
 const UNICODE_CASES: readonly SearchCase[] = [
   { category: "unicode", name: "curly possessive apostrophe", query: "Doctor’s Best Magnesium", expectedTopId: "doctors-best-magnesium" },
@@ -1082,7 +1083,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
       );
     }, 20_000);
 
-    it("keeps typo recovery, canonical diversity, and stable results for a large alias group", async () => {
+    it("keeps typo recovery and stable results inside the nearest-name bound for a large alias group", async () => {
       const q = "Boundryfts";
       const predicates = await client.query<{
         distractor_fts_match: boolean;
@@ -1131,14 +1132,57 @@ describe.runIf(Boolean(testDatabaseUrl))(
         q,
       });
 
-      expect(first).toHaveLength(50);
-      expect(first[0]?.id).toBe("zz-food-boundary-fts-winner");
-      expect(first.map((row) => row.id)).toContain(
-        "zz-food-boundary-fts-alias-priority",
-      );
+      // Typo recovery admits only the nearest eligible names. The winner and
+      // 6,000 identical alias names fill that bound, so the farther distinct
+      // names and the strict-word-only distractors are never read.
+      expect(first.map((row) => row.id)).toEqual([
+        "zz-food-boundary-fts-winner",
+        expect.stringContaining("food-boundary-fts-alias"),
+      ]);
       expect(repeated.map((row) => row.id)).toEqual(
         first.map((row) => row.id),
       );
+    }, 20_000);
+
+    it("recovers a strict-word typo only when no whole name is similar", async () => {
+      const predicates = await client.query<{
+        strict_word_matches: number;
+        whole_name_matches: number;
+      }>(
+        `
+        SELECT
+          count(*) FILTER (WHERE name % $1::text)::integer AS whole_name_matches,
+          count(*) FILTER (WHERE name %>> $1::text)::integer AS strict_word_matches
+        FROM foods
+        WHERE NOT (
+          to_tsvector('simple', search_text) @@ websearch_to_tsquery('simple', $1)
+        )
+        `,
+        ["chikpeas"],
+      );
+      // "chikpeas" resembles one word of a long name and no whole name.
+      expect(predicates.rows[0]).toEqual({
+        strict_word_matches: 1,
+        whole_name_matches: 0,
+      });
+      const strictOnly = await foodQueries.searchFoods({
+        includeOffMarket: false,
+        limit: 5,
+        q: "chikpeas",
+      });
+      expect(strictOnly.map((row) => row.id)).toEqual(["food-long-chickpeas"]);
+
+      // With whole-name matches present, the 10,050 strict-word-only
+      // distractors stay out of the result.
+      const wholeName = await foodQueries.searchFoods({
+        includeOffMarket: false,
+        limit: 50,
+        q: "Boundryfts",
+      });
+      expect(wholeName.length).toBeGreaterThan(0);
+      expect(wholeName.map((row) => row.id).filter((id) =>
+        id.startsWith("food-boundary-typo-ineligible-")
+      )).toEqual([]);
     }, 20_000);
 
     it.each(["% boundaryfts", "_ boundaryfts"])(
@@ -1210,6 +1254,7 @@ describe.runIf(Boolean(testDatabaseUrl))(
 type ExplainPlanNode = {
   "Actual Loops"?: number;
   "Actual Rows"?: number;
+  "Index Cond"?: string;
   "Index Name"?: string;
   "Node Type"?: string;
   "Parent Relationship"?: string;
@@ -1497,10 +1542,12 @@ describe.runIf(Boolean(testDatabaseUrl))(
         const broadPlan = broadExplain.rows[0]?.["QUERY PLAN"][0]?.Plan;
         expect(broadPlan).toBeDefined();
         const broadNodes = flattenExplainPlan(broadPlan ?? {});
+        // A saturated full-text search ranks its bounded admission and never
+        // orders the whole catalog by name distance.
         expect(broadNodes.filter((node) =>
           node["Index Name"] === "foods_perf_name_rank_idx" &&
           (node["Actual Loops"] ?? 0) > 0
-        )).toHaveLength(1);
+        )).toHaveLength(0);
         expectBoundedFoodSortInputs(broadNodes);
         await client.query("SET LOCAL statement_timeout = '8s'");
 
@@ -1588,10 +1635,18 @@ describe.runIf(Boolean(testDatabaseUrl))(
         const typoPlan = typoExplain.rows[0]?.["QUERY PLAN"][0]?.Plan;
         expect(typoPlan).toBeDefined();
         const typoNodes = flattenExplainPlan(typoPlan ?? {});
-        expect(typoNodes.filter((node) =>
+        const typoNameScans = typoNodes.filter((node) =>
           node["Index Name"] === "foods_perf_name_rank_idx" &&
           (node["Actual Loops"] ?? 0) > 0
-        )).toHaveLength(1);
+        );
+        // Nearly every name is eligible here, yet the one executed name scan
+        // carries the similarity predicate as its index condition and stops
+        // at the typo admission bound instead of reading the catalog.
+        expect(typoNameScans).toHaveLength(1);
+        expect(typoNameScans[0]?.["Index Cond"]).toContain("name % ");
+        expect(explainRowsProcessed(typoNameScans[0] ?? {})).toBe(
+          FOOD_TYPO_ADMISSION_LIMIT,
+        );
         expectBoundedFoodSortInputs(typoNodes);
         await client.query("SET LOCAL statement_timeout = '8s'");
 
