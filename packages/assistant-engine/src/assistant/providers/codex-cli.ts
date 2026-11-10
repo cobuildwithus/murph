@@ -30,7 +30,6 @@ import {
   extractCodexAssistantProviderUsage,
   resolveAssistantProviderFlatPromptConversationHistorySection,
   resolveAssistantProviderPrompt,
-  resolveCodexModelProviderConfigOverrides,
 } from './helpers.js'
 import {
   supportsAnyAssistantRichUserMessageContent,
@@ -215,7 +214,6 @@ export async function executeCodexAssistantTurnAttempt(
     providerConfig.target.modelProvider,
   )
   const modelProviderConfig = modelProviderResolution.config
-  const providerFailureHint = modelProviderConfig?.failureHint ?? null
   const providerSecretValue =
     modelProviderConfig?.envKey
       ? normalizeNullableString(
@@ -357,9 +355,8 @@ export async function executeCodexAssistantTurnAttempt(
           serviceTier: input.serviceTier ?? null,
         })
       : null
-    const surfacedError = addCodexModelProviderFailureHint({
+    const surfacedError = redactCodexProviderFailureError({
       error: failureError,
-      failureHint: providerFailureHint,
       providerSecretValue,
     })
     return {
@@ -367,9 +364,7 @@ export async function executeCodexAssistantTurnAttempt(
       error: surfacedError,
       metadata: {
         activityLabels: [],
-        executedToolCount: 0,
         providerActionCount: failureContext?.providerActionCount ?? 0,
-        rawToolEvents: [],
         runtimeIssueInputs: failureContext?.runtimeIssueInputs ?? [],
       },
       ok: false,
@@ -445,9 +440,7 @@ export async function executeCodexAssistantTurnAttempt(
   const attemptResult: AssistantProviderTurnAttemptResult = {
     metadata: {
       activityLabels: [],
-      executedToolCount: 0,
       providerActionCount: result.providerActionCount,
-      rawToolEvents: [],
       runtimeIssueInputs: result.runtimeIssueInputs ?? [],
     },
     ok: true,
@@ -593,14 +586,9 @@ function resolveCodexAssistantProcessLaunchInput(
   input: CodexAssistantProcessPreparationInput,
 ): CodexAssistantProcessLaunchInput {
   const providerConfig = input.providerConfig
-  const configOverrides = resolveCodexModelProviderConfigOverrides(
-    providerConfig.target.modelProvider,
-  )
-
   return {
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
-    configOverrides,
     env: prepareCodexProcessEnv(input.env ?? process.env),
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
@@ -639,53 +627,6 @@ function byteLength(value: string | null): number {
   return value ? Buffer.byteLength(value, 'utf8') : 0
 }
 
-function addCodexModelProviderFailureHint(input: {
-  error: unknown
-  failureHint?: string | null
-  providerSecretValue?: string | null
-}): unknown {
-  const failureHint = normalizeNullableString(input.failureHint)
-  if (!failureHint) {
-    return redactCodexProviderFailureError({
-      error: input.error,
-      providerSecretValue: input.providerSecretValue,
-    })
-  }
-
-  const redactedError = redactCodexProviderFailureError({
-    error: input.error,
-    providerSecretValue: input.providerSecretValue,
-  })
-
-  if (
-    redactedError instanceof Error &&
-    redactedError.message.includes(failureHint)
-  ) {
-    return redactedError
-  }
-
-  if (redactedError instanceof VaultCliError) {
-    return new VaultCliError(
-      redactedError.code,
-      `${redactedError.message} ${failureHint}`,
-      redactedError.context,
-    )
-  }
-
-  if (redactedError instanceof Error) {
-    setCodexProviderFailureErrorMessage(
-      redactedError,
-      `${redactedError.message} ${failureHint}`,
-    )
-    return redactedError
-  }
-
-  return new VaultCliError(
-    'ASSISTANT_CODEX_FAILED',
-    failureHint,
-  )
-}
-
 function redactCodexProviderFailureError(input: {
   error: unknown
   providerSecretValue?: string | null
@@ -702,13 +643,6 @@ function redactCodexProviderFailureError(input: {
     }),
   })
   return input.error
-}
-
-function setCodexProviderFailureErrorMessage(error: Error, message: string): void {
-  Object.defineProperty(error, 'message', {
-    configurable: true,
-    value: message,
-  })
 }
 
 function redactCodexProviderFailureText(input: {
@@ -1003,10 +937,6 @@ function classifyCodexResumeFailureErrorKind(error: unknown): string {
   if (errorCode === 'ASSISTANT_CODEX_FAILED') {
     return 'codex-failed'
   }
-  if (errorCode === 'ASSISTANT_PROVIDER_UNSUPPORTED') {
-    return 'provider-unsupported'
-  }
-
   return 'unknown'
 }
 
@@ -1041,8 +971,7 @@ function isCodexDiagnosticTraceError(error: unknown): boolean {
     code === 'ASSISTANT_CODEX_USAGE_LIMIT' ||
     code === 'ASSISTANT_CODEX_RESUME_STALE' ||
     code === 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT' ||
-    code === 'ASSISTANT_CODEX_APP_SERVER_RPC_FAILED' ||
-    code === 'ASSISTANT_PROVIDER_UNSUPPORTED'
+    code === 'ASSISTANT_CODEX_APP_SERVER_RPC_FAILED'
   )
 }
 
@@ -1388,10 +1317,4 @@ function asDiagnosticRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
-}
-
-export function resolveCodexAssistantLabel(
-  _config: AssistantProviderTurnExecutionInput['providerConfig'],
-): string {
-  return 'Codex app-server'
 }

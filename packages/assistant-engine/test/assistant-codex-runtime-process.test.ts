@@ -101,7 +101,7 @@ describe('assistant codex runtime', () => {
         expect(finishTiming).toHaveReturnedWith(diagnostic)
         expect(finishTiming).toHaveReturnedWith(null)
         expect(result.rawEvents).toEqual(failure === 'empty exit' ? [] : [...nativeEvents, diagnostic])
-        expect(result.metadata).toMatchObject({ executedToolCount: 0, providerActionCount: 0 })
+        expect(result.metadata).toMatchObject({ providerActionCount: 0 })
         if (failure === 'empty exit') expect(result.usage).toBeUndefined()
       } finally { receiver.mockRestore() }
     },

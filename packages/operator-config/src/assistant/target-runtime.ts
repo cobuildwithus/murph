@@ -25,7 +25,6 @@ export interface AssistantCodexModelProviderConfig {
   name: string
   baseUrl: string
   envKey: string
-  failureHint?: string
   supportsWebSockets?: boolean
   wireApi: AssistantCodexModelProviderWireApi
 }

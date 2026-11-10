@@ -18,11 +18,8 @@ import {
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
-  isCodexReservedModelProviderId,
   resolveAssistantCodexUsageProviderName,
-  resolveAssistantCodexModelProviderConfig,
 } from '@murphai/operator-config/assistant/target-runtime'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   vaultCliBatchResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
@@ -195,92 +192,6 @@ export function resolveAssistantProviderPrompt(
   ]
     .filter((line): line is string => Boolean(line))
     .join('\n\n')
-}
-
-export function resolveCodexModelProviderConfigOverrides(
-  modelProviderInput?: string | null,
-): readonly string[] | undefined {
-  const overrides: string[] = []
-  const modelProvider = normalizeNullableString(modelProviderInput)
-  const modelProviderConfig =
-    resolveAssistantCodexModelProviderConfig(modelProvider)
-
-  if (
-    modelProvider &&
-    !modelProviderConfig &&
-    !isCodexReservedModelProviderId(modelProvider)
-  ) {
-    throw new VaultCliError(
-      'ASSISTANT_PROVIDER_UNSUPPORTED',
-      `Unknown Codex model provider: ${modelProvider}.`,
-    )
-  }
-
-  if (
-    modelProviderConfig &&
-    !isCodexReservedModelProviderId(modelProviderConfig.id)
-  ) {
-    const providerKey = formatCodexConfigPathSegment(modelProviderConfig.id)
-    upsertCodexConfigOverride(
-      overrides,
-      `model_providers.${providerKey}.name`,
-      formatCodexTomlString(modelProviderConfig.name),
-    )
-    upsertCodexConfigOverride(
-      overrides,
-      `model_providers.${providerKey}.base_url`,
-      formatCodexTomlString(modelProviderConfig.baseUrl),
-    )
-    upsertCodexConfigOverride(
-      overrides,
-      `model_providers.${providerKey}.env_key`,
-      formatCodexTomlString(modelProviderConfig.envKey),
-    )
-    upsertCodexConfigOverride(
-      overrides,
-      `model_providers.${providerKey}.wire_api`,
-      formatCodexTomlString(modelProviderConfig.wireApi),
-    )
-    upsertCodexConfigOverride(
-      overrides,
-      `model_providers.${providerKey}.requires_openai_auth`,
-      'false',
-    )
-  }
-  return overrides.length > 0 ? overrides : undefined
-}
-
-function formatCodexTomlString(value: string): string {
-  return JSON.stringify(value)
-}
-
-function formatCodexConfigPathSegment(value: string): string {
-  if (/^[a-z0-9_-]+$/u.test(value)) {
-    return value
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_PROVIDER_UNSUPPORTED',
-    `Codex model provider id cannot be represented as a --config dotted path: ${value}.`,
-  )
-}
-
-function upsertCodexConfigOverride(
-  overrides: string[],
-  key: string,
-  value: string,
-): void {
-  const assignmentPrefix = `${key}=`
-  const existingIndex = overrides.findIndex((override) =>
-    override.trim().startsWith(assignmentPrefix),
-  )
-
-  if (existingIndex >= 0) {
-    overrides[existingIndex] = `${key}=${value}`
-    return
-  }
-
-  overrides.push(`${key}=${value}`)
 }
 
 export function extractCodexAssistantProviderUsage(input: {

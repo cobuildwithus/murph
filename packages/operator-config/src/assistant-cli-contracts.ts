@@ -23,7 +23,6 @@ import {
   pathSchema,
 } from './primitive-schemas.js'
 import {
-  assistantCodexModelProviderWireApiValues,
   assistantExecutionDriverValues,
   assistantResumeKindValues,
   buildCodexAssistantContinuityFingerprint,
@@ -244,18 +243,6 @@ export const assistantHeadersSchema = z.record(
   z.string().min(1),
   z.string(),
 )
-
-export const assistantCodexModelProviderConfigSchema = z
-  .object({
-    id: z.string().trim().regex(/^[a-z0-9][a-z0-9_-]*$/u),
-    name: z.string().min(1),
-    baseUrl: z.string().url(),
-    envKey: z.string().min(1),
-    failureHint: z.string().min(1).optional(),
-    supportsWebSockets: z.boolean().optional(),
-    wireApi: z.enum(assistantCodexModelProviderWireApiValues),
-  })
-  .strict()
 
 const assistantOpenAiModelProviderSchema = z.string().min(1).refine(
   isCodexReservedModelProviderId,
@@ -1519,9 +1506,6 @@ export type AssistantMessageReaction = z.infer<
 >
 export type AssistantOutboxOperation = z.infer<
   typeof assistantOutboxOperationSchema
->
-export type AssistantCodexModelProviderConfig = z.infer<
-  typeof assistantCodexModelProviderConfigSchema
 >
 export type AssistantModelTarget = z.infer<typeof assistantModelTargetSchema>
 export type AssistantSessionResumeState = CodexResumeState

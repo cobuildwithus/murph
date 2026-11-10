@@ -65,13 +65,11 @@ import {
   recordCodexAttemptFailed,
 } from '../src/assistant/codex-turn/attempt-observability.ts'
 import {
-  executeCodexAssistantTurnFromInput,
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   executeCodexAssistantTurnAttemptFromInput,
   prepareHostedCodexAssistantProcess,
   startHostedCodexAssistantVoice,
   resolveCodexAssistantCapabilities,
-  resolveCodexAssistantLabel,
   resolveCodexAssistantTargetCapabilities,
 } from '../src/assistant/codex-runtime.ts'
 import {
@@ -313,20 +311,6 @@ describe('Codex assistant registry helpers', () => {
     expect(finishWithoutReply?.description).toBe(
       'Finish the current response without adding a new text reply. This does not withdraw a reply you already completed earlier in the turn.',
     )
-  })
-
-  it('resolves provider labels for Codex app-server variants', () => {
-    expect(
-      resolveCodexAssistantLabel(
-        normalizeAssistantProviderConfig({
-          provider: 'codex-cli',
-          oss: false,
-        }),
-      ),
-    ).toBe('Codex app-server')
-
-    expect(() => normalizeAssistantProviderConfig({ provider: 'codex-cli', oss: true }))
-      .toThrow(/must use OpenAI/u)
   })
 
   it('extracts Codex usage from sparse provider metadata', () => {
@@ -3530,7 +3514,7 @@ describe('Codex assistant registry helpers', () => {
     })
 
     await expect(
-      executeCodexAssistantTurnFromInput({
+      executeCodexAssistantTurnAttemptFromInput({
         providerConfig: { provider: 'codex-cli' },
         turn: {
           dynamicTools: resolveMurphDynamicTools({
@@ -3547,7 +3531,8 @@ describe('Codex assistant registry helpers', () => {
         },
       }),
     ).resolves.toMatchObject({
-      response: 'ok',
+      ok: true,
+      result: { response: 'ok' },
     })
     const telegramTurnInput =
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
@@ -3599,7 +3584,7 @@ describe('Codex assistant registry helpers', () => {
     })
 
     await expect(
-      executeCodexAssistantTurnFromInput({
+      executeCodexAssistantTurnAttemptFromInput({
         providerConfig: { provider: 'codex-cli' },
         turn: {
           authorizeAcceptedMessageTarget,
@@ -3612,7 +3597,8 @@ describe('Codex assistant registry helpers', () => {
         },
       }),
     ).resolves.toMatchObject({
-      response: 'ok',
+      ok: true,
+      result: { response: 'ok' },
     })
     expect(
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0],
@@ -3831,8 +3817,6 @@ describe('Codex assistant registry helpers', () => {
     expect(bubbledEvents).toHaveLength(1)
     expect(attempt.metadata).toEqual({
       activityLabels: ['Search Web'],
-      executedToolCount: 0,
-      rawToolEvents: [],
       providerActionCount: 1,
       runtimeIssueInputs: [],
     })
@@ -3887,7 +3871,6 @@ describe('Codex assistant registry helpers', () => {
 
     expect(attempt.metadata).toMatchObject({
       providerActionCount: 1,
-      rawToolEvents: [],
       runtimeIssueInputs: [runtimeIssueInput],
     })
   })
@@ -3972,7 +3955,6 @@ describe('Codex assistant registry helpers', () => {
 
     expect(attempt.metadata).toMatchObject({
       providerActionCount: 1,
-      rawToolEvents: [],
       runtimeIssueInputs: [runtimeIssueInput],
     })
     expect(attempt.rawEvents).toEqual([])
@@ -5180,13 +5162,32 @@ describe('Codex assistant registry helpers', () => {
       error: expectedError,
       metadata: {
         activityLabels: ['Refresh Session'],
-        executedToolCount: 0,
-        rawToolEvents: [],
         providerActionCount: 0,
         runtimeIssueInputs: [],
       },
       ok: false,
     })
+  })
+
+  it('redacts the direct OpenAI credential from provider failures', async () => {
+    const secret = 'synthetic-openai-credential-xyz'
+    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(
+      new Error(`Provider failed with ${secret}`),
+    )
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      env: { OPENAI_API_KEY: secret },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        modelProvider: 'openai',
+      }),
+      userPrompt: 'Run the turn.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(false)
+    if (attempt.ok) throw new Error('Expected the provider attempt to fail')
+    expect((attempt.error as Error).message).not.toContain(secret)
   })
 })
 

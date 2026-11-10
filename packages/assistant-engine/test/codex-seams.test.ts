@@ -18,11 +18,10 @@ import {
   summarizeAssistantProviderActivityLabels,
 } from '../src/assistant/provider-progress.ts'
 import {
-  annotateRecoveredCodexThreadIdForDiagnostics,
-  extractRecoveredCodexThreadId,
   isAssistantProviderConnectionLostError,
   isAssistantProviderInterruptedError,
   isAssistantProviderStalledError,
+  sanitizePublicCodexThreadDiagnostics,
 } from '../src/assistant/provider-failure-diagnostics.ts'
 import {
   resolveAssistantResumeStateFromProviderTurn,
@@ -341,7 +340,7 @@ describe('assistant Codex seam helpers', () => {
         codexThreadId: 'provider_session_current',
       },
     }
-    annotateRecoveredCodexThreadIdForDiagnostics(skipped)
+    sanitizePublicCodexThreadDiagnostics(skipped)
 
     expect(skipped.context).toMatchObject({
       codexThreadIdPresent: true,
@@ -350,20 +349,27 @@ describe('assistant Codex seam helpers', () => {
     expect(skipped.context).not.toHaveProperty('recoveredCodexThreadId')
     expect(skipped.context).not.toHaveProperty('recoveredCodexThreadIdPresent')
 
+    const current = { context: { codexThreadIdPresent: true, recoverableConnectionLoss: true } }
+    sanitizePublicCodexThreadDiagnostics(current)
+    expect(current.context).toEqual({
+      codexThreadIdPresent: true,
+      recoverableConnectionLoss: true,
+    })
+
     const error = {
       context: {
         connectionLost: true,
         codexThreadId: 'provider_session_recovered',
+        recoveredCodexThreadId: 'provider_session_legacy',
         requestId: 'req_123',
       },
     }
 
-    annotateRecoveredCodexThreadIdForDiagnostics(error)
+    sanitizePublicCodexThreadDiagnostics(error)
 
     expect(error.context.requestId).toBe('req_123')
     expect(error.context).toMatchObject({
       codexThreadIdPresent: true,
-      recoveredCodexThreadIdPresent: true,
     })
     expect(error.context).not.toHaveProperty('codexThreadId')
     expect(error.context).not.toHaveProperty('recoveredCodexThreadId')
@@ -374,11 +380,10 @@ describe('assistant Codex seam helpers', () => {
         codexThreadId: ' provider_session_interrupted ',
       },
     }
-    annotateRecoveredCodexThreadIdForDiagnostics(interrupted)
+    sanitizePublicCodexThreadDiagnostics(interrupted)
 
     expect(interrupted.context).toMatchObject({
       codexThreadIdPresent: true,
-      recoveredCodexThreadIdPresent: true,
     })
     expect(interrupted.context).not.toHaveProperty('codexThreadId')
     expect(interrupted.context).not.toHaveProperty('recoveredCodexThreadId')
@@ -550,11 +555,9 @@ describe('assistant Codex seam helpers', () => {
       },
     }
 
-    expect(extractRecoveredCodexThreadId(error)).toBe('provider_session_recovered')
     expect(isAssistantProviderConnectionLostError(error)).toBe(true)
     expect(isAssistantProviderInterruptedError(error)).toBe(true)
     expect(isAssistantProviderStalledError(error)).toBe(true)
-    expect(extractRecoveredCodexThreadId({ context: { codexThreadId: '   ' } })).toBeNull()
   })
 
   it('rejects route drift even when unrelated provider options stay compatible', () => {
