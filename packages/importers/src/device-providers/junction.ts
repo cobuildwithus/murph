@@ -2390,8 +2390,11 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
       fallbackArtifactRole: `junction-timeseries-reading-${input.resourceSlug}`,
       context: input.context,
     });
-    const providerValue = finiteNumber(firstValueFromPaths(entry, input.descriptor.valuePaths));
-    const value = input.descriptor.normalizeValue(providerValue, entry);
+    const providerRawValue = firstValueFromPaths(entry, input.descriptor.valuePaths);
+    const providerValue = finiteNumber(providerRawValue);
+    const valueDiagnostic = junctionSparseIntervalValueDiagnostic(
+      entry, input.descriptor, providerRawValue, providerValue,
+    );
     const startRaw = firstStringFromPaths(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS);
     const endRaw = firstStringFromPaths(entry, JUNCTION_INTERVAL_END_TIMESTAMP_PATHS);
     const startAt = resolveSafeTimestamp(startRaw);
@@ -2412,24 +2415,27 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
           input.context.defaultTimeZone,
         )
       : undefined;
-    const valid = resourceContext !== null
-      && providerValue !== undefined
-      && value !== undefined
-      && startRaw !== undefined
-      && endRaw !== undefined
-      && startAt !== undefined
-      && endAt !== undefined
-      && Date.parse(endAt) >= Date.parse(startAt)
-      && dayKey === expectation.dayKey
-      && resourceContext.sourceProviderSlug === expectation.sourceProviderSlug
-      && (expectation.sourceType == null
-        || resourceContext.origin.sourceType === expectation.sourceType)
-      && (expectation.sourceInstanceId == null
-        || resourceContext.origin.sourceInstanceId === expectation.sourceInstanceId);
-    if (!valid) {
+    // Preserve the validation order and report only the first failed predicate.
+    const reason: JunctionCalendarRefreshNormalizationFailureReason | undefined =
+      resourceContext === null ? "sparse_interval.source_context_missing"
+      : valueDiagnostic.reason ? valueDiagnostic.reason
+      : startRaw === undefined ? "sparse_interval.start_missing"
+      : endRaw === undefined ? "sparse_interval.end_missing"
+      : startAt === undefined ? "sparse_interval.start_invalid"
+      : endAt === undefined ? "sparse_interval.end_invalid"
+      : Date.parse(endAt) < Date.parse(startAt) ? "sparse_interval.end_before_start"
+      : dayKey !== expectation.dayKey ? "sparse_interval.day_mismatch"
+      : resourceContext.sourceProviderSlug !== expectation.sourceProviderSlug ? "sparse_interval.provider_mismatch"
+      : expectation.sourceType != null && resourceContext.origin.sourceType !== expectation.sourceType
+        ? "sparse_interval.source_type_mismatch"
+      : expectation.sourceInstanceId != null && resourceContext.origin.sourceInstanceId !== expectation.sourceInstanceId
+        ? "sparse_interval.source_instance_mismatch"
+      : undefined;
+    if (reason) {
       throw junctionCalendarRefreshNormalizationError(
-        "sparse_interval.row_incomplete",
+        reason,
         {
+          ...valueDiagnostic,
           rowOrdinal: index + 1,
           sourceProvider: normalizeKnownJunctionSourceProviderSlug(
             resourceContext?.sourceProviderSlug,
@@ -2442,6 +2448,36 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
   }
 }
 
+function junctionSparseIntervalValueDiagnostic(
+  entry: PlainObject,
+  descriptor: JunctionDailyTimeseriesDescriptor,
+  rawValue: unknown,
+  numeric: number | undefined,
+): Partial<Pick<JunctionCalendarRefreshNormalizationDiagnostic, "reason" | "valueKind" | "valueRange" | "unitKind">> {
+  const value = descriptor.normalizeValue(numeric, entry);
+  if (numeric !== undefined && value !== undefined) return {};
+  const unit = firstValueFromPaths(entry, ["unit", "units", "valueUnit", "value_unit"]);
+  const normalizedUnit = typeof unit === "string" ? unit.trim().toLowerCase() : "";
+  return {
+    reason: rawValue == null ? "sparse_interval.value_missing"
+      : typeof rawValue === "number" && !Number.isFinite(rawValue) ? "sparse_interval.value_not_finite"
+        : numeric === undefined ? "sparse_interval.value_non_numeric" : "sparse_interval.value_out_of_range",
+    valueKind: rawValue == null ? "missing"
+      : typeof rawValue === "number" && !Number.isFinite(rawValue) ? "non_finite"
+        : numeric === undefined ? "non_numeric"
+          : typeof rawValue === "string" ? "numeric_string" : "number",
+    // All three sparse interval validators accept 0..max. Reuse them to bucket
+    // rejected values without duplicating their bounds or changing admission.
+    valueRange: numeric === undefined ? undefined
+      : numeric < 0 ? "below_range"
+        : descriptor.normalizeValue(numeric / 10, entry) !== undefined ? "above_range_up_to_10x"
+          : descriptor.normalizeValue(numeric / 1000, entry) !== undefined ? "above_range_10x_to_1000x"
+            : "above_range_over_1000x",
+    unitKind: unit == null ? "missing"
+      : (["g", "mg", "ml", "l", "min", "s"] as const).find((known) => known === normalizedUnit) ?? "other",
+  };
+}
+
 export type JunctionCalendarRefreshNormalizationFailureReason =
   | "daily.timestamp_or_day_unresolved"
   | "daily.value_missing"
@@ -2450,6 +2486,20 @@ export type JunctionCalendarRefreshNormalizationFailureReason =
   | "source_context.unresolved"
   | "source_day.outside_authorized_day"
   | "sparse_interval.row_incomplete"
+  | "sparse_interval.source_context_missing"
+  | "sparse_interval.value_missing"
+  | "sparse_interval.value_non_numeric"
+  | "sparse_interval.value_not_finite"
+  | "sparse_interval.value_out_of_range"
+  | "sparse_interval.start_missing"
+  | "sparse_interval.end_missing"
+  | "sparse_interval.start_invalid"
+  | "sparse_interval.end_invalid"
+  | "sparse_interval.end_before_start"
+  | "sparse_interval.day_mismatch"
+  | "sparse_interval.provider_mismatch"
+  | "sparse_interval.source_type_mismatch"
+  | "sparse_interval.source_instance_mismatch"
   | "temporal.local_time_ambiguous_or_nonexistent"
   | "temporal.timestamp_invalid"
   | "temporal.timestamp_missing_or_non_string"
@@ -2469,8 +2519,9 @@ export interface JunctionCalendarRefreshNormalizationDiagnostic {
   timestampKind?: JunctionNormalizationTimestampKind;
   timestampSemantics?: TimestampSemantics;
   valueKind?: "missing" | "non_numeric" | "non_finite" | "numeric_string" | "number";
-  valueRange?: "negative" | "zero" | "fraction" | "percentage" | "above_percentage";
-  unitKind?: "missing" | "percent" | "ratio" | "other";
+  valueRange?: "negative" | "zero" | "fraction" | "percentage" | "above_percentage"
+    | "below_range" | "above_range_up_to_10x" | "above_range_10x_to_1000x" | "above_range_over_1000x";
+  unitKind?: "missing" | "percent" | "ratio" | "other" | "g" | "mg" | "ml" | "l" | "min" | "s";
 }
 
 export class JunctionSparseCalendarRepairNormalizationError extends Error {

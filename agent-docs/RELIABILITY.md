@@ -1947,6 +1947,21 @@ Current product admission, delivery and native runtime safety rules remain.
   scale or sentinel problems without interpreting them as valid measurements.
   Missing, nonnumeric, and nonfinite values remain distinguishable. Service and
   hosted boundaries independently allowlist these categories.
+  Sparse calendar intervals report the first failed predicate as a
+  `sparse_interval.*` reason: source context, value, start/end presence or
+  validity, interval ordering, day, provider, source type, or source instance.
+  Historical producers may still report `sparse_interval.row_incomplete`.
+  Value failures reuse the same fields: `below_range`,
+  `above_range_up_to_10x`, `above_range_10x_to_1000x`, and
+  `above_range_over_1000x` compare finite rejected values against the existing
+  resource validator's inclusive upper bound; nonfinite and nonnumeric values
+  omit the magnitude bucket. Sparse unit categories are the allowlisted
+  `g`, `mg`, `ml`, `l`, `min`, and `s` symbols (case/whitespace normalized),
+  `missing`, or `other`. These diagnostics never include raw values, unit text,
+  timestamps, or source identities and do not alter admission or retries.
+  The existing Web log reader accepts these scalar categories; only the runner
+  image needs deployment. Aggregate by reason/range/unit after runner convergence
+  to distinguish range or unit problems from incomplete source intervals.
   For Junction resource jobs, incomplete-normalization failures (including
   caffeine, water, and mindfulness calendar refreshes)
   and ECG binding failures retain the existing queued job beyond its initial

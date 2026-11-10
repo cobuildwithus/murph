@@ -4470,6 +4470,16 @@ describe("runHostedDeviceSyncPass", () => {
       extraDetails: { normalizationValueKind: "number", normalizationValueRange: "zero", normalizationUnitKind: "percent", validationRetryDelayMs: 1_800_000 },
       expectedExtra: { normalizationValueKind: "number", normalizationValueRange: "zero", normalizationUnitKind: "percent", validationRetryDelayMs: 1_800_000 },
     },
+    ...["below_range", "above_range_up_to_10x", "above_range_10x_to_1000x", "above_range_over_1000x"].map((range) => ({
+      label: `sparse interval magnitude ${range}`, code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      extraDetails: { normalizationFailureReason: "sparse_interval.value_out_of_range", normalizationValueKind: "number", normalizationValueRange: range, normalizationUnitKind: "mg", validationRetryDelayMs: 1_800_000 },
+      expectedExtra: { normalizationFailureReason: "sparse_interval.value_out_of_range", normalizationValueKind: "number", normalizationValueRange: range, normalizationUnitKind: "mg", validationRetryDelayMs: 1_800_000 },
+    })),
+    ...["g", "ml", "l", "min", "s"].map((unit) => ({
+      label: `sparse interval unit ${unit}`, code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      extraDetails: { normalizationUnitKind: unit },
+      expectedExtra: { normalizationUnitKind: unit },
+    })),
     {
       label: "unsafe oxygen classification", code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
       extraDetails: { normalizationValueKind: "synthetic-private-value", normalizationValueRange: 150, normalizationUnitKind: { raw: "synthetic-private-unit" }, validationRetryDelayMs: -1 },
@@ -4550,7 +4560,7 @@ describe("runHostedDeviceSyncPass", () => {
             junctionWorkoutStreamMaxTimestampCount: 100_000,
             junctionWorkoutStreamTimestampCardinalityKind: "over_limit",
             junctionWorkoutStreamTimestampCount: 100_127,
-            normalizationFailureReason: "temporal.timestamp_invalid",
+            normalizationFailureReason: extraDetails.normalizationFailureReason ?? "temporal.timestamp_invalid",
             normalizationRowOrdinal: 3,
             normalizationSourceProvider: "garmin",
             normalizationTimestampKind: "invalid",

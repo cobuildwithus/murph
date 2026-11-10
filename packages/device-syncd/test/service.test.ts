@@ -13427,9 +13427,15 @@ test.each([
     sourceProvider: "member-12345",
     sourceProviderKind: "unrecognized",
   },
-])("device sync service preserves safe Junction normalization diagnostics ($sourceProviderKind source)", async ({
+].flatMap((source) => [
+  { ...source, reason: "temporal.timestamp_invalid" as const, valueRange: "above_percentage" as const, unitKind: "percent" as const },
+  { ...source, reason: "sparse_interval.value_out_of_range" as const, valueRange: "above_range_10x_to_1000x" as const, unitKind: "mg" as const },
+]))("device sync service preserves safe Junction normalization diagnostics ($sourceProviderKind source, $reason)", async ({
   expectedSourceProvider,
   sourceProvider,
+  reason,
+  valueRange,
+  unitKind,
 }) => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-normalization-diagnostics");
   const { service, close } = createServiceFixture({
@@ -13443,14 +13449,14 @@ test.each([
       createFakeProvider({
         async executeJob() {
           throw new JunctionSparseCalendarRepairNormalizationError({
-            reason: "temporal.timestamp_invalid",
+            reason,
             rowOrdinal: 3,
             sourceProvider,
             timestampKind: "invalid",
             timestampSemantics: "unknown",
             valueKind: "numeric_string",
-            valueRange: "above_percentage",
-            unitKind: "percent",
+            valueRange,
+            unitKind,
           });
         },
       }),
@@ -13469,7 +13475,7 @@ test.each([
     const [diagnostic] = service.listJobFailureDiagnostics();
     assert.ok(diagnostic);
     assert.deepEqual(diagnostic.details, {
-      normalizationFailureReason: "temporal.timestamp_invalid",
+      normalizationFailureReason: reason,
       normalizationRowOrdinal: 3,
       ...(expectedSourceProvider
         ? { normalizationSourceProvider: expectedSourceProvider }
@@ -13477,8 +13483,8 @@ test.each([
       normalizationTimestampKind: "invalid",
       normalizationTimestampSemantics: "unknown",
       normalizationValueKind: "numeric_string",
-      normalizationValueRange: "above_percentage",
-      normalizationUnitKind: "percent",
+      normalizationValueRange: valueRange,
+      normalizationUnitKind: unitKind,
     });
   } finally {
     close();
