@@ -37,6 +37,7 @@ describe("hosted canonical publication evidence", () => {
       await initializeVault({ vaultRoot });
       await withHostedCanonicalWritePort({
         persistCanonicalWrite: async () => undefined,
+        startDiagnosticTiming: () => performance.now(),
         recordDiagnosticTiming(stage, elapsedMs) {
           expect(elapsedMs).toBeGreaterThanOrEqual(0);
           stages.push(stage);

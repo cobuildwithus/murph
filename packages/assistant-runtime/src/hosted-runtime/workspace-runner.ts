@@ -20,7 +20,11 @@ import {
   type HostedCanonicalWritePort,
   type HostedCanonicalWriteReceipt,
 } from "@murphai/core";
-import { recordDeviceSyncPassTiming } from "./device-sync-pass-timing.ts";
+import {
+  finishDeviceSyncPassTiming,
+  recordDeviceSyncPassTiming,
+  startDeviceSyncPassTiming,
+} from "./device-sync-pass-timing.ts";
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import type {
   HostedRuntimeRedactedJson,
@@ -1617,6 +1621,7 @@ export async function runHostedWorkspaceCanonicalWriteAtBoundary<TResult>(input:
   });
   let canonicalWritePersisted = false;
   const port: HostedCanonicalWritePort = {
+    startDiagnosticTiming: startDeviceSyncPassTiming,
     recordDiagnosticTiming: recordDeviceSyncPassTiming,
     async persistCanonicalWrite(writeInput) {
       await canonicalWritePort.persistCanonicalWrite(writeInput);
@@ -2967,6 +2972,29 @@ function mergeGeneratedImageRetentionWakeIntoWorkspace(input: {
   };
 }
 
+async function appendHostedCanonicalWriteReceiptWithPassTiming(
+  input: Parameters<typeof appendHostedCanonicalWriteReceiptToArtifactLog>[0],
+): ReturnType<typeof appendHostedCanonicalWriteReceiptToArtifactLog> {
+  const startedAt = startDeviceSyncPassTiming();
+  let artifactUploadElapsedMs = 0;
+  const result = await appendHostedCanonicalWriteReceiptToArtifactLog({
+    ...input,
+    ...(startedAt !== null ? {
+      onArtifactUploadTiming(count: number, elapsedMs: number) {
+        artifactUploadElapsedMs += elapsedMs;
+        recordDeviceSyncPassTiming("artifactUpload", elapsedMs, count);
+      },
+    } : {}),
+  });
+  if (startedAt !== null) {
+    recordDeviceSyncPassTiming(
+      "receiptBuild",
+      Math.max(0, performance.now() - startedAt - artifactUploadElapsedMs),
+    );
+  }
+  return result;
+}
+
 function createHostedWorkspaceCanonicalWritePort(input: {
   canonicalWriteCheckpointCoalescer?:
     HostedWorkspaceCanonicalWriteCheckpointCoalescer;
@@ -3033,7 +3061,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
         ? createHostedRuntimeWakeCandidate(now, HOSTED_ASSISTANT_WAKE_REASON)
         : null,
     ]);
-    const checkpointStartedAt = performance.now();
+    const checkpointStartedAt = startDeviceSyncPassTiming();
     const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
       ...(canonicalWriteReceiptLogUpdated ? { canonicalWriteReceiptLogUpdated: true as const } : {}),
       ...(state.canonicalSystemProgressCommitted
@@ -3048,7 +3076,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
         workspace,
       }),
     });
-    recordDeviceSyncPassTiming("webCheckpoint", performance.now() - checkpointStartedAt);
+    finishDeviceSyncPassTiming("webCheckpoint", checkpointStartedAt);
     if (checkpoint.workspace.userId !== input.input.expectedUserId) {
       throw new HostedMailboxImportCheckpointUserMismatchError({
         actualUserId: checkpoint.workspace.userId,
@@ -3064,6 +3092,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
   };
 
   return {
+    startDiagnosticTiming: startDeviceSyncPassTiming,
     recordDiagnosticTiming: recordDeviceSyncPassTiming,
     async flushDeferredRuntimeStatusCheckpoint() {
       const pendingCheckpoint =
@@ -3101,7 +3130,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(
             writeInput.receipt,
           );
-        const localPreparationStartedAt = performance.now();
+        const localPreparationStartedAt = startDeviceSyncPassTiming();
         if (snapshotDirtyDomains.length > 0) {
           try {
             await markAssistantContextSnapshotDirty({
@@ -3124,23 +3153,13 @@ function createHostedWorkspaceCanonicalWritePort(input: {
             persistence: writeInput,
             vaultRoot: input.input.vaultRoot,
           });
-        recordDeviceSyncPassTiming("localLedgerWrite", performance.now() - localPreparationStartedAt);
-        const receiptLogStartedAt = performance.now();
-        let artifactUploadElapsedMs = 0;
-        const receiptLogUpdate = await appendHostedCanonicalWriteReceiptToArtifactLog({
+        finishDeviceSyncPassTiming("localLedgerWrite", localPreparationStartedAt);
+        const receiptLogUpdate = await appendHostedCanonicalWriteReceiptWithPassTiming({
           artifactStore: input.input.platform.artifactStore,
-          onArtifactUploadTiming(count, elapsedMs) {
-            artifactUploadElapsedMs += elapsedMs;
-            recordDeviceSyncPassTiming("artifactUpload", elapsedMs, count);
-          },
           payloads: canonicalWritePersistence.payloads,
           previousStatus: readCurrentStatus(),
           receipt: canonicalWritePersistence.receipt,
         });
-        recordDeviceSyncPassTiming(
-          "receiptBuild",
-          Math.max(0, performance.now() - receiptLogStartedAt - artifactUploadElapsedMs),
-        );
         const receiptLogStatus = hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate);
         if (deferStatusCheckpoint) {
           const coalescer = input.canonicalWriteCheckpointCoalescer;
@@ -3178,7 +3197,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           if (!input.input.checkpointRuntimeRedactedStatus) {
             throw new TypeError("Hosted canonical write receipt checkpoint requires runtime status checkpoint support.");
           }
-          const checkpointStartedAt = performance.now();
+          const checkpointStartedAt = startDeviceSyncPassTiming();
           const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
             canonicalWriteReceiptLogUpdated: true,
             // Keep schedule persistence and wake ownership in one durable checkpoint.
@@ -3200,7 +3219,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
                 ?? input.input.workspace,
             }),
           });
-          recordDeviceSyncPassTiming("webCheckpoint", performance.now() - checkpointStartedAt);
+          finishDeviceSyncPassTiming("webCheckpoint", checkpointStartedAt);
           input.checkpointRequestBuilder.recordStatusCheckpoint(checkpoint);
           recordCurrentStatus(receiptLogStatus);
           input.checkpointRequestBuilder.markRuntimeStateDirty();
@@ -3275,7 +3294,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           ),
           systemMailboxWake,
         ]);
-        const checkpointStartedAt = performance.now();
+        const checkpointStartedAt = startDeviceSyncPassTiming();
         const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
           nextWakeAt: nextWake.at,
           nextWakeReason: nextWake.reason,
@@ -3283,7 +3302,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           redactedStatus: readCurrentStatus(),
           workspace,
         });
-        recordDeviceSyncPassTiming("webCheckpoint", performance.now() - checkpointStartedAt);
+        finishDeviceSyncPassTiming("webCheckpoint", checkpointStartedAt);
         if (checkpoint.workspace.userId !== input.input.expectedUserId) {
           throw new HostedMailboxImportCheckpointUserMismatchError({
             actualUserId: checkpoint.workspace.userId,

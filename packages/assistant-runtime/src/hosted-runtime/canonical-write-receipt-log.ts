@@ -291,12 +291,14 @@ async function uploadHostedCanonicalWriteArtifacts(input: {
     offset < input.artifacts.length;
     offset += HOSTED_CANONICAL_WRITE_ARTIFACT_IO_CONCURRENCY
   ) {
-    const uploadStartedAt = performance.now();
+    const uploadStartedAt = input.onArtifactUploadTiming ? performance.now() : null;
     const wave = input.artifacts.slice(offset, offset + HOSTED_CANONICAL_WRITE_ARTIFACT_IO_CONCURRENCY);
     const results = await Promise.allSettled(
       wave.map((artifact) => input.artifactStore.put(artifact)),
     );
-    input.onArtifactUploadTiming?.(wave.length, performance.now() - uploadStartedAt);
+    if (uploadStartedAt !== null) {
+      input.onArtifactUploadTiming?.(wave.length, performance.now() - uploadStartedAt);
+    }
     for (const result of results) {
       if (result.status === "rejected") {
         throw result.reason;

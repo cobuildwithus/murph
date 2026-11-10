@@ -20,6 +20,23 @@ export type DeviceSyncPassTimings = Record<DeviceSyncPassTimingStage, StageTotal
 
 const activePass = new AsyncLocalStorage<DeviceSyncPassTimings>();
 
+export function isDeviceSyncPassTimingActive(): boolean {
+  return activePass.getStore() !== undefined;
+}
+
+export function startDeviceSyncPassTiming(): number | null {
+  return isDeviceSyncPassTimingActive() ? performance.now() : null;
+}
+
+export function finishDeviceSyncPassTiming(
+  stage: DeviceSyncPassTimingStage,
+  startedAt: number | null,
+): void {
+  if (startedAt !== null) {
+    recordDeviceSyncPassTiming(stage, performance.now() - startedAt);
+  }
+}
+
 export function createDeviceSyncPassTimings(): DeviceSyncPassTimings {
   return Object.fromEntries(stages.map((stage) => [
     stage,
