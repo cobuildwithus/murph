@@ -242,11 +242,8 @@ function buildHostedGroupSharedPrompt(
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
     assistantHostedGroupToolSurface,
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',

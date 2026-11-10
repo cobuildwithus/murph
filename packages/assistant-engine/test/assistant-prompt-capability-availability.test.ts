@@ -34,11 +34,9 @@ describe('assistant prompt capability availability', () => {
     expect(
       resolveAssistantPromptCapabilityAvailability({ executionContext }),
     ).toEqual({
-      assistantHostedDeviceConnectAvailable: true,
       assistantHostedDeviceConnectProviders: [
         { label: 'WHOOP', provider: 'whoop' },
       ],
-      assistantKnowledgeToolsAvailable: false,
     })
   })
 
@@ -56,9 +54,7 @@ describe('assistant prompt capability availability', () => {
     expect(
       resolveAssistantPromptCapabilityAvailability({ executionContext }),
     ).toEqual({
-      assistantHostedDeviceConnectAvailable: false,
       assistantHostedDeviceConnectProviders: [],
-      assistantKnowledgeToolsAvailable: false,
     })
   })
 
@@ -73,9 +69,7 @@ describe('assistant prompt capability availability', () => {
     expect(
       resolveAssistantPromptCapabilityAvailability({ executionContext }),
     ).toEqual({
-      assistantHostedDeviceConnectAvailable: false,
       assistantHostedDeviceConnectProviders: [],
-      assistantKnowledgeToolsAvailable: false,
     })
   })
 })

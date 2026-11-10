@@ -27,10 +27,7 @@ function connectedAppsPath(...segments: readonly string[]): string {
 function buildDirectPrompt(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'imessage',
     cliAccess: { rawCommand: 'vault-cli' },
     currentLocalDate: '2026-08-09',

@@ -378,14 +378,13 @@ describe("hosted local Telegram auto-reply e2e", () => {
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
-      exerciseRoutineResponseCardAvailable: true,
+      telegramPresentationResponseCardAvailable: true,
       imessageContactAvailable: true,
       messageTargetingAvailable: true,
       pendingVaultFilesAvailable: true,
       phoneCallsAvailable: true,
       progressUpdatesAvailable: true,
       responseCardAvailable: true,
-      telegramRichContentResponseCardAvailable: true,
       vaultFileSendAvailable: true,
     });
 

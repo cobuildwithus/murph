@@ -271,8 +271,8 @@ describe('scheduled audit rejection through the real parser, recorder and failur
 
   it('keeps private attribution out of the production prompt, managed instructions and tool schema', () => {
     const prompt = buildAssistantSystemPrompt({
-      assistantCliContract: null, assistantContextSnapshotPrompt: null,
-      assistantHostedDeviceConnectAvailable: false, assistantKnowledgeToolsAvailable: false,
+      assistantCliContract: null,
+
       channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
       currentLocalDate: '2030-01-07', currentTimeZone: 'UTC',
       turnTrigger: 'automation-cron', hostedRuntime: true, conversationScope: 'direct', onboardingGuidance: false,

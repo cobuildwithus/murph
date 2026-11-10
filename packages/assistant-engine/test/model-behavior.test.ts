@@ -14,18 +14,18 @@ import {
 import { MURPH_ATTACH_SLEEP_CARD_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import {
   buildAssistantSystemPrompt,
-  buildAssistantMaintenanceSystemPromptWithCacheMetadata,
-  buildAssistantOperatorMessagePromptWithCacheMetadata,
-  buildAssistantSystemNotificationPromptWithCacheMetadata,
+  buildAssistantMaintenanceSystemPromptResult,
+  buildAssistantOperatorMessagePromptResult,
+  buildAssistantSystemNotificationPromptResult,
   buildAssistantSystemPromptLayers,
-  buildAssistantSystemPromptWithCacheMetadata,
+  buildAssistantSystemPromptResult,
   resolveAssistantMurphProductBaseUrl,
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
 
 describe('assistant execution prompt contract', () => {
   it('treats detached system notifications as untrusted output-only formatting work', () => {
-    const prompt = buildAssistantSystemNotificationPromptWithCacheMetadata({
+    const prompt = buildAssistantSystemNotificationPromptResult({
       channel: 'linq',
     }).prompt
 
@@ -41,7 +41,7 @@ describe('assistant execution prompt contract', () => {
   })
 
   it('gives operator messages one private direct JSON delivery contract', () => {
-    const prompt = buildAssistantOperatorMessagePromptWithCacheMetadata({
+    const prompt = buildAssistantOperatorMessagePromptResult({
       channel: 'linq',
     }).prompt
 
@@ -1054,7 +1054,6 @@ describe('assistant local PDF evidence guidance', () => {
 
   it('hides Android app guidance while forbidding fabricated wearable connect URLs', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
-      assistantHostedDeviceConnectAvailable: false,
       assistantHostedDeviceConnectProviders: [],
       hostedRuntime: true,
       onboardingGuidance: false,
@@ -1192,7 +1191,7 @@ describe('assistant local PDF evidence guidance', () => {
   })
 })
 
-describe('assistant system prompt cache stability', () => {
+describe('assistant system prompt layers', () => {
   it.each(['direct', 'group', 'unverified-external'] as const)('keeps %s workout access in chat without a Training destination', (conversationScope) => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope,
@@ -1331,7 +1330,6 @@ describe('assistant system prompt cache stability', () => {
 
   it('partitions thread-stable context away from per-turn Codex context', () => {
     const layers = buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
-      assistantContextSnapshotPrompt: 'Layer partition assistant context snapshot.',
       currentLocalDate: '2026-04-15',
       currentTimeZone: 'Asia/Kuala_Lumpur',
       murphProductBaseUrl: 'http://localhost:3000',
@@ -1345,9 +1343,7 @@ describe('assistant system prompt cache stability', () => {
       layers.stableRouteCapabilityPrompt,
     ].join('\n\n')
 
-    expect(layers.prompt.slice(0, layers.dynamicContextStartsAfterStaticCore)).toBe(
-      stablePrefix,
-    )
+    expect(layers.prompt.startsWith(stablePrefix)).toBe(true)
     expect(stablePrefix).not.toContain('Layer partition assistant context snapshot.')
     expect(stablePrefix).not.toContain('Asia/Kuala_Lumpur')
     expect(stablePrefix).not.toContain('Murph onboarding:')
@@ -1401,9 +1397,6 @@ describe('assistant system prompt cache stability', () => {
     )
     expect(layers.dynamicTurnContextPrompt).toContain('Asia/Kuala_Lumpur')
     expect(layers.dynamicTurnContextPrompt).not.toContain('upcoming wake-day')
-    expect(layers.dynamicTurnContextPrompt).toContain(
-      'Layer partition assistant context snapshot.',
-    )
     expect(layers.dynamicTurnContextPrompt).not.toContain('Murph onboarding:')
     expect(layers.dynamicTurnContextPrompt).not.toContain(
       'Before sending any user-facing reply',
@@ -1413,7 +1406,6 @@ describe('assistant system prompt cache stability', () => {
 
   it('gives scheduled work the ordinary turn prompt layers', () => {
     const input = createCommonNotificationPromptInput({
-      assistantContextSnapshotPrompt: 'Notification layer partition snapshot.',
       currentLocalDate: '2026-04-15',
       currentTimeZone: 'Asia/Kuala_Lumpur',
     })
@@ -1435,9 +1427,6 @@ describe('assistant system prompt cache stability', () => {
     )
     expect(scheduledLayers.threadContextPrompt).toContain(
       "The user's canonical timezone for this vault is Asia/Kuala_Lumpur.",
-    )
-    expect(scheduledLayers.dynamicTurnContextPrompt).toContain(
-      'Notification layer partition snapshot.',
     )
     expect(scheduledLayers.dynamicTurnContextPrompt).toContain(
       'Delivery adapter contract:',
@@ -1476,7 +1465,7 @@ describe('assistant system prompt cache stability', () => {
 
   it('applies assistant tone preference to ordinary scheduled turns', () => {
     const prompt =
-      buildAssistantSystemPromptWithCacheMetadata(
+      buildAssistantSystemPromptResult(
         createCommonNotificationPromptInput({
           assistantTone: 'casual',
         }),
@@ -1489,7 +1478,7 @@ describe('assistant system prompt cache stability', () => {
     )
 
     const defaultPrompt =
-      buildAssistantSystemPromptWithCacheMetadata(
+      buildAssistantSystemPromptResult(
         createCommonNotificationPromptInput(),
       ).prompt
     expect(defaultPrompt).toContain('Assistant tone preference:')
@@ -1497,7 +1486,7 @@ describe('assistant system prompt cache stability', () => {
     expect(defaultPrompt).toContain('standard capitalization and punctuation')
 
     const maintenancePrompt =
-      buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+      buildAssistantMaintenanceSystemPromptResult({
         currentLocalDate: '2026-04-15',
         currentTimeZone: 'Asia/Kuala_Lumpur',
         profile: 'member-memory',
@@ -1510,7 +1499,7 @@ describe('assistant system prompt cache stability', () => {
       currentLocalDate: '2026-04-03',
     }))
     const notificationPrompt =
-      buildAssistantSystemPromptWithCacheMetadata(
+      buildAssistantSystemPromptResult(
         createCommonNotificationPromptInput({
           currentLocalDate: '2026-04-03',
         }),
@@ -1536,225 +1525,53 @@ describe('assistant system prompt cache stability', () => {
     )
   })
 
-  it('keeps the common Codex route prefix stable across dynamic turn context', () => {
-    const cacheInput = {
-      toolSchemaHash: 'assistant-tool-schema-common-codex-test',
-    }
-    const promptA = buildAssistantSystemPromptWithCacheMetadata(
-      createCommonCodexPromptInput({
-        assistantContextSnapshotPrompt:
-          'Vault overview for user A.\n\nActive experiment context for user A.',
-        channel: 'telegram',
-        currentInstant: '2027-02-14T07:17:05.678Z',
-        currentLocalDate: '2027-02-13',
-        currentTimeZone: 'America/Los_Angeles',
-        conversationScope: 'direct',
-        hostedRuntime: true,
-        murphProductBaseUrl: 'http://localhost:3000',
-      }),
-      cacheInput,
-    )
-    const promptB = buildAssistantSystemPromptWithCacheMetadata(
-      createCommonCodexPromptInput({
-        assistantContextSnapshotPrompt:
-          'Vault overview for user B.\n\nActive experiment context for user B.',
-        channel: 'sms',
-        currentInstant: '2027-07-02T03:04:05.678Z',
-        currentLocalDate: '2027-07-01',
-        currentTimeZone: 'America/Los_Angeles',
-        conversationScope: 'direct',
-        hostedRuntime: true,
-        murphProductBaseUrl: 'https://withmurph.ai',
-      }),
-      cacheInput,
-    )
-
-    expect(
-      firstNChars(
-        promptA.prompt,
-        promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
-      ),
-    ).toEqual(
-      firstNChars(
-        promptB.prompt,
-        promptB.cacheMetadata.dynamicContextStartsAfterStaticCore,
-      ),
-    )
-    expect(promptA.cacheMetadata.dynamicContextStartsAfterStaticCore).toBeGreaterThan(
-      8_000,
-    )
-    expect(promptB.cacheMetadata.dynamicContextStartsAfterStaticCore).toBe(
-      promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
-    )
-    const stablePrefix = firstNChars(
-      promptA.prompt,
-      promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
-    )
-    const dynamicSuffix = promptA.prompt.slice(
-      promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
-    )
-
-    expect(stablePrefix).not.toContain('America/Los_Angeles')
-    expect(stablePrefix).not.toContain('2027-02-13')
-    expect(stablePrefix).not.toContain('2027-02-14T07:17:05.678Z')
-    expect(stablePrefix).not.toContain('http://localhost:3000')
-    expect(stablePrefix).not.toContain('Vault overview for user A.')
-    expect(stablePrefix).not.toContain('Active experiment context for user A.')
-    expect(dynamicSuffix).toContain('The user\'s canonical timezone')
-    expect(dynamicSuffix).toContain('America/Los_Angeles')
-    expect(dynamicSuffix).toContain(
-      'Current local clock for the user (America/Los_Angeles): 2027-02-13 23:17:05 [UTC 2027-02-14T07:17:05.678Z].',
-    )
-    expect(promptB.layers.dynamicTurnContextPrompt).toContain(
-      'Current local clock for the user (America/Los_Angeles): 2027-07-01 20:04:05 [UTC 2027-07-02T03:04:05.678Z].',
-    )
-    expect(dynamicSuffix).toContain('Vault overview for user A.')
-    expect(promptB.prompt).toContain('Vault overview for user B.')
-    expect(promptB.prompt).toContain('Active experiment context for user B.')
-    expect(dynamicSuffix).toContain(
-      'Current Murph product base URL for user-facing app links: http://localhost:3000',
-    )
-    expect(promptA.cacheMetadata.staticPromptHash).toMatchInlineSnapshot(`"68a1d5108af16ff8649843be4ab7aa231321228a52be79e80f0f3010cfea7c67"`)
-    expect(promptA.cacheMetadata.stableRouteCapabilityPromptHash).toMatchInlineSnapshot(`"3655166dcd734afb7a8d05164b49d7fec09164bfcf4273d05be63f24e8156c29"`)
-    expect(promptA.cacheMetadata.toolSchemaHash).toBe(
-      'assistant-tool-schema-common-codex-test',
-    )
-    expect(promptB.cacheMetadata.staticPromptHash).toBe(
-      promptA.cacheMetadata.staticPromptHash,
-    )
-    expect(promptB.cacheMetadata.stableRouteCapabilityPromptHash).toBe(
-      promptA.cacheMetadata.stableRouteCapabilityPromptHash,
-    )
-    expect(promptB.cacheMetadata.toolSchemaHash).toBe(
-      promptA.cacheMetadata.toolSchemaHash,
-    )
+  it('keeps the common route core stable across per-turn context', () => {
+    const a = buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+      channel: 'telegram', currentInstant: '2027-02-14T07:17:05.678Z',
+      currentLocalDate: '2027-02-13', currentTimeZone: 'America/Los_Angeles',
+      conversationScope: 'direct', hostedRuntime: true,
+      murphProductBaseUrl: 'http://localhost:3000',
+    }))
+    const b = buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+      channel: 'sms', currentInstant: '2027-07-02T03:04:05.678Z',
+      currentLocalDate: '2027-07-01', currentTimeZone: 'America/Los_Angeles',
+      conversationScope: 'direct', hostedRuntime: true,
+      murphProductBaseUrl: 'https://withmurph.ai',
+    }))
+    expect(a.staticCacheableCorePrompt).toBe(b.staticCacheableCorePrompt)
+    expect(a.stableRouteCapabilityPrompt).toBe(b.stableRouteCapabilityPrompt)
+    expect(a.staticCacheableCorePrompt.length).toBeGreaterThan(8_000)
+    expect(a.stableRouteCapabilityPrompt).not.toContain('2027-02-14T07:17:05.678Z')
+    expect(a.stableRouteCapabilityPrompt).not.toContain('http://localhost:3000')
+    expect(a.dynamicTurnContextPrompt).toContain('2027-02-13 23:17:05 [UTC 2027-02-14T07:17:05.678Z]')
+    expect(b.dynamicTurnContextPrompt).toContain('2027-07-01 20:04:05 [UTC 2027-07-02T03:04:05.678Z]')
+    expect(a.threadContextPrompt).toContain('Current Murph product base URL for user-facing app links: http://localhost:3000')
   })
 
-  it('keeps onboarding activation out of the common Codex route prefix', () => {
-    const cacheInput = {
-      toolSchemaHash: 'assistant-tool-schema-common-codex-test',
-    }
-    const onboardingOpen = buildAssistantSystemPromptWithCacheMetadata(
-      createCommonCodexPromptInput({
-        onboardingGuidance: true,
-      }),
-      cacheInput,
-    )
-    const onboardingClosed = buildAssistantSystemPromptWithCacheMetadata(
-      createCommonCodexPromptInput({
-        onboardingGuidance: false,
-      }),
-      cacheInput,
-    )
-
-    expect(onboardingOpen.cacheMetadata.dynamicContextStartsAfterStaticCore).toBe(
-      onboardingClosed.cacheMetadata.dynamicContextStartsAfterStaticCore,
-    )
-    expect(onboardingOpen.cacheMetadata.staticPromptHash).toBe(
-      onboardingClosed.cacheMetadata.staticPromptHash,
-    )
-    expect(onboardingOpen.cacheMetadata.stableRouteCapabilityPromptHash).toBe(
-      onboardingClosed.cacheMetadata.stableRouteCapabilityPromptHash,
-    )
-
-    const openStablePrefix = firstNChars(
-      onboardingOpen.prompt,
-      onboardingOpen.cacheMetadata.dynamicContextStartsAfterStaticCore,
-    )
-    const closedStablePrefix = firstNChars(
-      onboardingClosed.prompt,
-      onboardingClosed.cacheMetadata.dynamicContextStartsAfterStaticCore,
-    )
-    const openDynamicSuffix = onboardingOpen.prompt.slice(
-      onboardingOpen.cacheMetadata.dynamicContextStartsAfterStaticCore,
-    )
-    const closedDynamicSuffix = onboardingClosed.prompt.slice(
-      onboardingClosed.cacheMetadata.dynamicContextStartsAfterStaticCore,
-    )
-
-    expect(openStablePrefix).toEqual(closedStablePrefix)
-    expect(openStablePrefix).toContain('Murph skill router:')
-    expect(openStablePrefix).toContain(
-      'explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup;',
-    )
-    expect(openStablePrefix).toContain(
-      'facts -> domain.',
-    )
-    expect(openStablePrefix).toContain(
-      'When the private longitudinal default in turn priority applies, read self-management-experiments.',
-    )
-    expect(openStablePrefix).not.toContain(
-      'behavior-followthrough, self-management-experiments.',
-    )
-    expect(openStablePrefix).not.toContain('Murph onboarding:')
-    expect(openDynamicSuffix).toContain('Murph onboarding:')
-    expect(closedDynamicSuffix).not.toContain('Murph onboarding:')
+  it('keeps onboarding activation out of the stable route core', () => {
+    const open = buildAssistantSystemPromptLayers(createCommonCodexPromptInput({ onboardingGuidance: true }))
+    const closed = buildAssistantSystemPromptLayers(createCommonCodexPromptInput({ onboardingGuidance: false }))
+    expect(open.staticCacheableCorePrompt).toBe(closed.staticCacheableCorePrompt)
+    expect(open.stableRouteCapabilityPrompt).toBe(closed.stableRouteCapabilityPrompt)
+    expect(open.stableRouteCapabilityPrompt).toContain('Murph skill router:')
+    expect(open.stableRouteCapabilityPrompt).not.toContain('Murph onboarding:')
+    expect(open.threadContextPrompt).toContain('Murph onboarding:')
+    expect(closed.threadContextPrompt).not.toContain('Murph onboarding:')
   })
 
-  it('keeps the ordinary scheduled-turn prefix stable across dynamic context', () => {
-    const cacheInput = {
-      toolSchemaHash: 'assistant-notification-tools-test',
-    }
-    const promptA = buildAssistantSystemPromptWithCacheMetadata(
-      createCommonNotificationPromptInput({
-        assistantContextSnapshotPrompt:
-          'Notification vault overview for user A.\n\nNotification active experiment for user A.',
-        channel: 'telegram',
-        currentLocalDate: '2026-04-15',
-        currentTimeZone: 'Asia/Kuala_Lumpur',
-      }),
-      cacheInput,
-    )
-    const promptB = buildAssistantSystemPromptWithCacheMetadata(
-      createCommonNotificationPromptInput({
-        assistantContextSnapshotPrompt:
-          'Notification vault overview for user B.\n\nNotification active experiment for user B.',
-        channel: 'sms',
-        currentLocalDate: '2026-04-16',
-        currentTimeZone: 'America/Los_Angeles',
-      }),
-      cacheInput,
-    )
-
-    expect(promptB.cacheMetadata.staticPromptHash).toBe(
-      promptA.cacheMetadata.staticPromptHash,
-    )
-    expect(promptB.cacheMetadata.stableRouteCapabilityPromptHash).toBe(
-      promptA.cacheMetadata.stableRouteCapabilityPromptHash,
-    )
-    expect(promptB.cacheMetadata.dynamicContextStartsAfterStaticCore).toBe(
-      promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
-    )
-    expect(promptB.cacheMetadata.toolSchemaHash).toBe(
-      promptA.cacheMetadata.toolSchemaHash,
-    )
-
-    const stablePrefix = firstNChars(
-      promptA.prompt,
-      promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
-    )
-    expect(stablePrefix).toEqual(
-      firstNChars(
-        promptB.prompt,
-        promptB.cacheMetadata.dynamicContextStartsAfterStaticCore,
-      ),
-    )
-    const dynamicSuffix = promptA.prompt.slice(
-      promptA.cacheMetadata.dynamicContextStartsAfterStaticCore,
-    )
-
-    expect(stablePrefix).not.toContain('Asia/Kuala_Lumpur')
-    expect(stablePrefix).not.toContain('Notification vault overview for user A.')
-    expect(stablePrefix).not.toContain(
-      'Notification active experiment for user A.',
-    )
-    expect(dynamicSuffix).toContain('Delivery adapter contract:')
-    expect(dynamicSuffix).toContain('Asia/Kuala_Lumpur')
-    expect(dynamicSuffix).toContain('Notification vault overview for user A.')
-    expect(promptB.prompt).toContain('Notification vault overview for user B.')
-    expect(promptB.prompt).toContain(
-      'Notification active experiment for user B.',
-    )
+  it('keeps scheduled route capabilities stable across occurrence context', () => {
+    const a = buildAssistantSystemPromptLayers(createCommonNotificationPromptInput({
+      channel: 'telegram', currentLocalDate: '2026-04-15', currentTimeZone: 'Asia/Kuala_Lumpur',
+    }))
+    const b = buildAssistantSystemPromptLayers(createCommonNotificationPromptInput({
+      channel: 'sms', currentLocalDate: '2026-04-16', currentTimeZone: 'America/Los_Angeles',
+    }))
+    expect(a.staticCacheableCorePrompt).toBe(b.staticCacheableCorePrompt)
+    expect(a.stableRouteCapabilityPrompt).toBe(b.stableRouteCapabilityPrompt)
+    expect(a.stableRouteCapabilityPrompt).not.toContain('Asia/Kuala_Lumpur')
+    expect(a.dynamicTurnContextPrompt).toContain('Delivery adapter contract:')
+    expect(a.dynamicTurnContextPrompt).toContain('Asia/Kuala_Lumpur')
+    expect(b.dynamicTurnContextPrompt).toContain('America/Los_Angeles')
   })
 })
 
@@ -1982,7 +1799,6 @@ describe('assistant conversation scope', () => {
         'vault-cli device connect <provider> --format json',
         'vault-cli assistant style set humor 10 --format json',
       ].join('\n'),
-      assistantContextSnapshotPrompt: 'PERSONAL_GROUP_CONTEXT_SNAPSHOT',
       conversationScope: 'group',
       hostedRuntime: true,
     }))
@@ -2456,7 +2272,6 @@ describe('assistant conversation scope', () => {
   it('fails closed without claiming that an unknown external audience is private or a group', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       assistantCliContract: 'PERSONAL_CLI_CONTRACT',
-      assistantContextSnapshotPrompt: 'PERSONAL_CONTEXT_SNAPSHOT',
       conversationScope: 'unverified-external',
     }))
 
@@ -2493,12 +2308,10 @@ function createCommonCodexPromptInput(
 ): AssistantSystemPromptInput {
   return {
     assistantCliContract: 'Stable CLI contract for common Codex route.',
-    assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [
       { label: 'Oura', provider: 'oura' },
       { label: 'WHOOP', provider: 'whoop' },
     ],
-    assistantKnowledgeToolsAvailable: true,
     channel: 'telegram',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -2507,7 +2320,6 @@ function createCommonCodexPromptInput(
     currentTimeZone: 'Asia/Kuala_Lumpur',
     onboardingGuidance: true,
     turnTrigger: null,
-    assistantContextSnapshotPrompt: null,
     ...overrides,
   }
 }
@@ -2517,7 +2329,6 @@ function createCommonNotificationPromptInput(
 ): AssistantSystemPromptInput {
   return {
     assistantCliContract: 'Stable CLI contract for scheduled turn.',
-    assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [
       { label: 'Oura', provider: 'oura' },
       { label: 'WHOOP', provider: 'whoop' },
@@ -2529,15 +2340,10 @@ function createCommonNotificationPromptInput(
     currentLocalDate: '2026-04-15',
     currentTimeZone: 'Asia/Kuala_Lumpur',
     onboardingGuidance: false,
-    assistantContextSnapshotPrompt: null,
     scheduledOccurrenceAt: '2026-04-15T13:00:00.000Z',
     turnTrigger: 'automation-cron',
     ...overrides,
   }
-}
-
-function firstNChars(value: string, length: number): string {
-  return value.slice(0, length)
 }
 
 function readHostedWearableProviderList(prompt: string): string | null {

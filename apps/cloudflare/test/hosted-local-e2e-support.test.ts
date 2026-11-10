@@ -985,7 +985,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       calendarLinkAvailable: true,
       connectedAppsAvailable: true,
       computerToolsAvailable: true,
-      exerciseRoutineResponseCardAvailable: true,
+      telegramPresentationResponseCardAvailable: true,
       groupAvailable: true,
       gameReadAvailable: true,
       gamesAvailable: true,
@@ -1001,7 +1001,6 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       physicalNotesAvailable: true,
       progressUpdatesAvailable: true,
       responseCardAvailable: true,
-      telegramRichContentResponseCardAvailable: true,
       vaultFileSendAvailable: true,
       usageDiagnosticsAvailable: true,
     } as const;

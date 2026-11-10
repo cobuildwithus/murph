@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { buildAssistantSystemPrompt } from "../src/assistant/system-prompt.js";
 it.each([false, true])("composes canonical demographic persistence without gender inference (onboarding=%s)", onboardingGuidance => {
-  const prompt = buildAssistantSystemPrompt({ assistantCliContract: null, assistantContextSnapshotPrompt: null,
+  const prompt = buildAssistantSystemPrompt({ assistantCliContract: null,
     channel: "linq", cliAccess: { rawCommand: "vault-cli" }, conversationScope: "direct",
     currentLocalDate: "2026-01-01", currentTimeZone: "UTC", hostedRuntime: true,
     onboardingGuidance, ordinaryInboundTurn: true,

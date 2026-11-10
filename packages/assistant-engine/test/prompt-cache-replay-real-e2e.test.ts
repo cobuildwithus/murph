@@ -7,7 +7,7 @@ import { expect, it } from 'vitest'
 import { buildMurphHostedPermissionProfileTomlLines } from '@murphai/hosted-execution/assistant-permissions'
 
 import { executeCodexAppServerTurn, resolveMurphDynamicTools, stopWarmCodexAppServer } from '../src/assistant-codex.js'
-import { buildAssistantSystemPromptWithCacheMetadata } from '../src/assistant/system-prompt.js'
+import { buildAssistantSystemPromptResult } from '../src/assistant/system-prompt.js'
 import { executeClinicalDocumentExtraction } from '../src/clinical-document-extraction.js'
 import { CacheReplayDiagnostics, type CacheReplayPolicy } from '../scripts/lib/prompt-cache-diagnostics.js'
 import { startCacheReplayProxy } from '../scripts/lib/prompt-cache-proxy.js'
@@ -76,7 +76,7 @@ it.skipIf(!live)('replays synthetic Murph workflows through native Codex with ca
         expect(result.status).toBe('complete')
         expect(result.records.length).toBeGreaterThan(0)
       } else {
-        const { layers } = buildAssistantSystemPromptWithCacheMetadata({
+        const { layers } = buildAssistantSystemPromptResult({
           assistantCliContract: null, channel: 'imessage',
           cliAccess: { rawCommand: 'vault-cli' },
           currentLocalDate: '2026-09-22', currentTimeZone: 'UTC',

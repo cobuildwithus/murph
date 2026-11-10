@@ -23,10 +23,7 @@ function compactWhitespace(value: string): string {
 function buildPrompt(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',

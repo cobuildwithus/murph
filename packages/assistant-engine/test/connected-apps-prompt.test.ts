@@ -303,10 +303,7 @@ function createPromptInput(
 ): AssistantSystemPromptInput {
   return {
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'local',
     cliAccess: {
       rawCommand: 'vault-cli',

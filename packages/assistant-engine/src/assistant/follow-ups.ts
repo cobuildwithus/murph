@@ -121,8 +121,6 @@ export async function resolveAssistantFollowUpTurnContext(input: {
   session: Pick<AssistantSession, 'binding'>
   privateConversation: boolean
   interactiveConversation: boolean
-  systemNotification: boolean
-  outputOnly: boolean
   providerTools: boolean
   onboardingGoalCheckin: boolean
   supportsNativeResume: boolean
@@ -132,7 +130,7 @@ export async function resolveAssistantFollowUpTurnContext(input: {
     : null
   const invocation = record !== null
   const attachmentAllowed = input.privateConversation && !invocation
-    && !input.systemNotification && !input.outputOnly && !input.onboardingGoalCheckin && input.providerTools
+    && !input.onboardingGoalCheckin && input.providerTools
   const pending = input.privateConversation && input.interactiveConversation
     && !input.message.scheduledInvocationAuthority
     ? await readAssistantPendingFollowUps({ vault: input.message.vault, session: input.session })

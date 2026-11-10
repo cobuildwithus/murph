@@ -333,7 +333,7 @@ import {
   resolveAssistantPromptTimeContext,
 } from '../src/assistant/prompt-time.ts'
 import {
-  buildAssistantMaintenanceSystemPromptWithCacheMetadata,
+  buildAssistantMaintenanceSystemPromptResult,
   buildAssistantSystemPrompt,
   buildAssistantSystemPromptLayers,
 } from '../src/assistant/system-prompt.ts'
@@ -1718,10 +1718,7 @@ describeRealCodex('real Codex event-list family isolation', () => {
       const developerInstructions = buildAssistantSystemPrompt({
         assistantCliContract,
         assistantHostedAutomationAvailable: false,
-        assistantContextSnapshotPrompt: null,
-        assistantHostedDeviceConnectAvailable: false,
         assistantHostedDeviceConnectProviders: [],
-        assistantKnowledgeToolsAvailable: false,
         channel: 'linq',
         cliAccess: { rawCommand: 'vault-cli' },
         conversationScope: 'direct',
@@ -1834,8 +1831,8 @@ const BOUNDED_EVENT_LIST_LIMIT_DESCRIPTION = 'Maximum number of results to retur
 function buildBoundedEventListPrompt(assistantCliContract: string, conversationScope: 'direct' | 'group') {
   return buildAssistantSystemPrompt({
     assistantCliContract, assistantHostedAutomationAvailable: false,
-    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
-    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+
+    assistantHostedDeviceConnectProviders: [],
     channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
     conversationScope, currentInstant: '2026-04-11T12:00:00.000Z',
     currentLocalDate: '2026-04-11', currentTimeZone: 'America/New_York', hostedRuntime: true,
@@ -2056,8 +2053,8 @@ async function buildFocusedExperimentListInstructions() {
   if (!assistantCliContract) throw new Error('Expected the generated experiment CLI contract.')
   const instructions = buildAssistantSystemPrompt({
     assistantCliContract, assistantHostedAutomationAvailable: false,
-    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
-    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+
+    assistantHostedDeviceConnectProviders: [],
     channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: 'direct', currentInstant: '2026-04-11T12:00:00.000Z',
     currentLocalDate: '2026-04-11', currentTimeZone: 'UTC', hostedRuntime: true,
@@ -2229,8 +2226,8 @@ async function buildFocusedActivityProjectionInstructions() {
   if (!assistantCliContract) throw new Error('Expected the generated activity CLI contract.')
   const instructions = buildAssistantSystemPrompt({
     assistantCliContract, assistantHostedAutomationAvailable: false,
-    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
-    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+
+    assistantHostedDeviceConnectProviders: [],
     channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: 'direct', currentInstant: '2026-01-03T12:00:00.000Z',
     currentLocalDate: '2026-01-03', currentTimeZone: 'UTC', hostedRuntime: true,
@@ -2515,8 +2512,8 @@ async function buildFocusedSleepPatternProjectionInstructions() {
   if (!assistantCliContract) throw new Error('Expected the generated sleep-pattern CLI contract.')
   const instructions = buildAssistantSystemPrompt({
     assistantCliContract, assistantHostedAutomationAvailable: false,
-    assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
-    assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+
+    assistantHostedDeviceConnectProviders: [],
     channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: 'direct', currentInstant: '2026-01-04T12:00:00.000Z',
     currentLocalDate: '2026-01-04', currentTimeZone: 'UTC', hostedRuntime: true,
@@ -2573,8 +2570,8 @@ describeRealCodex('real Codex sleep summary cards', () => {
         codexHome: config.codexHome, groupConversation: false, vaultRoot,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract,
-          assistantContextSnapshotPrompt: null, assistantHostedDeviceConnectAvailable: false,
-          assistantHostedDeviceConnectProviders: [], assistantKnowledgeToolsAvailable: false,
+
+          assistantHostedDeviceConnectProviders: [],
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct',
           currentInstant: '2026-11-03T12:00:00Z', currentLocalDate: '2026-11-03', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false,
@@ -3602,11 +3599,9 @@ async function buildBloodTypeDeveloperInstructions(vaultRoot: string): Promise<s
   await markAssistantContextSnapshotDirty({ vaultRoot, domains: ['blood_tests', 'health_context'] })
   await refreshAssistantContextSnapshot({ vaultRoot, now: () => '2026-11-04T23:30:00.000Z' })
   return buildAssistantSystemPrompt({
+    assistantDynamicContextPrompts: [await readAssistantCurrentStatePrompt({ vaultRoot }) ?? ''],
     assistantCliContract,
-    assistantContextSnapshotPrompt: await readAssistantCurrentStatePrompt({ vaultRoot }),
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: 'direct',
@@ -3850,9 +3845,9 @@ describeRealCodex('real Codex Telegram file delivery e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false, channel: 'telegram',
+          assistantCliContract: null,
+          assistantHostedDeviceConnectProviders: [],
+          channel: 'telegram',
           cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -3924,9 +3919,9 @@ describeRealCodex('real Codex common media file delivery e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          assistantCliContract: null,
+          assistantHostedDeviceConnectProviders: [],
+          channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-10-21', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -3978,9 +3973,9 @@ describeRealCodex('real Codex public image URL recovery e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          assistantCliContract: null,
+          assistantHostedDeviceConnectProviders: [],
+          channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-10-21', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -6895,9 +6890,9 @@ describeRealCodex('real Codex missing knowledge recovery e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          assistantCliContract: null,
+          assistantHostedDeviceConnectProviders: [],
+          channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false,
@@ -6948,9 +6943,9 @@ describeRealCodex('real Codex compact knowledge read e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          assistantCliContract: null,
+          assistantHostedDeviceConnectProviders: [],
+          channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false,
@@ -7009,9 +7004,9 @@ describeRealCodex('real Codex optional knowledge show e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          assistantCliContract: null,
+          assistantHostedDeviceConnectProviders: [],
+          channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false,
@@ -7066,9 +7061,10 @@ describeRealCodex('real Codex optional knowledge ledger and wiki write e2e', () 
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantContextSnapshotPrompt: await readAssistantCurrentStatePrompt({ vaultRoot }),
-          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          assistantDynamicContextPrompts: [await readAssistantCurrentStatePrompt({ vaultRoot }) ?? ''],
+          assistantCliContract: null,
+          assistantHostedDeviceConnectProviders: [],
+          channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false,
@@ -7174,16 +7170,14 @@ describeRealCodex('real Codex workout capture default e2e', () => {
             ?? undefined,
           codexHome: config.codexHome,
           developerInstructions: buildAssistantSystemPrompt({
+            assistantDynamicContextPrompts: [await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory }) ?? ''],
             assistantCliContract: buildAssistantCliSurfaceContract(
               await readAssistantCliLlmsFullManifestFromCliEntry({
                 cliEntryPath: fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url)),
                 workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
               }),
             ),
-            assistantContextSnapshotPrompt: await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory }),
-            assistantHostedDeviceConnectAvailable: false,
             assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
@@ -7437,10 +7431,7 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
               'vault-cli workout start [name] [--routine <format>]',
               'vault-cli workout show <event-id> --format json',
             ].join('\n'),
-            assistantContextSnapshotPrompt: null,
-            assistantHostedDeviceConnectAvailable: false,
             assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
@@ -7780,10 +7771,7 @@ describeRealCodex('real Codex routine chat readiness e2e', () => {
         configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null,
-          assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false,
           assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false,
           channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct',
@@ -7918,10 +7906,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
               'vault-cli workout show <event-id> --format json',
               'vault-cli workout units show --format json',
             ].join('\n'),
-            assistantContextSnapshotPrompt: null,
-            assistantHostedDeviceConnectAvailable: false,
             assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
@@ -8190,10 +8175,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
               'vault-cli workout show <event-id> --format json',
               'vault-cli workout units show --format json',
             ].join('\n'),
-            assistantContextSnapshotPrompt: null,
-            assistantHostedDeviceConnectAvailable: false,
             assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
@@ -8413,10 +8395,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
               'vault-cli workout show <event-id> --format json',
               'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> --reps <n>',
             ].join('\n'),
-            assistantContextSnapshotPrompt: null,
-            assistantHostedDeviceConnectAvailable: false,
             assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
             channel: 'linq',
             cliAccess: { rawCommand: 'vault-cli' },
             conversationScope: 'direct',
@@ -8620,10 +8599,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
               'vault-cli workout show <event-id> --format json',
               'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> [--reps <n>]',
             ].join('\n'),
-            assistantContextSnapshotPrompt: null,
-            assistantHostedDeviceConnectAvailable: false,
             assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
@@ -8806,10 +8782,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
                 workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
               }),
             ),
-            assistantContextSnapshotPrompt: null,
-            assistantHostedDeviceConnectAvailable: false,
             assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
@@ -9374,10 +9347,7 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           codexHome: config.codexHome,
           developerInstructions: buildAssistantSystemPrompt({
             assistantCliContract: 'No vault command is needed for this video request.',
-            assistantContextSnapshotPrompt: null,
-            assistantHostedDeviceConnectAvailable: false,
             assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
             channel: 'telegram',
             cliAccess: {
               rawCommand: 'vault-cli',
@@ -9730,10 +9700,7 @@ describeRealCodex('real Codex X post reading e2e', () => {
           ? buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true })
           : buildAssistantSystemPrompt({
             assistantCliContract: 'No vault command is needed for this X post request.',
-            assistantContextSnapshotPrompt: null,
-            assistantHostedDeviceConnectAvailable: false,
             assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
             channel: 'telegram',
             cliAccess: {
               rawCommand: 'vault-cli',
@@ -9832,10 +9799,7 @@ describeRealCodex('real Codex member-local current clock e2e', () => {
       try {
         const layers = buildAssistantSystemPromptLayers({
           assistantCliContract: null,
-          assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false,
           assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false,
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
@@ -20541,7 +20505,7 @@ describeRealCodex('real Codex private Journal capture recovery e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          assistantCliContract: null,
           channel: 'telegram', conversationScope: 'direct', hostedRuntime: false,
           cliAccess: { rawCommand: 'vault-cli' },
           currentInstant: '2026-05-18T16:00:00Z', currentLocalDate: '2026-05-18',
@@ -20619,7 +20583,7 @@ describeRealCodex('real Codex private Journal capture recovery boundaries e2e', 
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          assistantCliContract: null,
           channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
           cliAccess: { rawCommand: 'vault-cli' },
           currentInstant: '2026-05-18T16:00:00Z', currentLocalDate: '2026-05-18',
@@ -21114,8 +21078,8 @@ describeRealCodex('real Codex memory compact receipt e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
+          assistantDynamicContextPrompts: [`Observed conversational language: English. Canonical saved memory: ${JSON.stringify(saved.record)}`],
           assistantCliContract,
-          assistantContextSnapshotPrompt: `Observed conversational language: English. Canonical saved memory: ${JSON.stringify(saved.record)}`,
           canonicalTimeZoneAvailable: true, channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: promptTimeContext.currentLocalDate,
@@ -22733,9 +22697,9 @@ describeRealCodex('real Codex canonical plan reminder targets e2e', () => {
           turnTrigger: 'automation-cron',
         }, { sessionId: `session-synthetic-target-${index}` })
         const developerInstructions = buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-          assistantHostedGroupToolSurface: 'none', assistantKnowledgeToolsAvailable: false,
+          assistantCliContract: null,
+          assistantHostedDeviceConnectProviders: [],
+          assistantHostedGroupToolSurface: 'none',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: scenario.date, currentInstant: occurrenceAt,
           currentTimeZone: 'America/New_York', hostedRuntime: true,
@@ -23922,7 +23886,7 @@ describeRealCodex('real Codex member-memory result compaction e2e', () => {
             ?? undefined,
           codexHome: config.codexHome,
           developerInstructions:
-            buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+            buildAssistantMaintenanceSystemPromptResult({
               currentLocalDate: '2026-08-27',
               currentTimeZone: 'America/New_York',
               profile: 'member-memory',
@@ -24166,7 +24130,7 @@ describeRealCodex('real Codex generic transcript memory judgment e2e', () => {
             ?? undefined,
           codexHome: config.codexHome,
           developerInstructions:
-            buildAssistantMaintenanceSystemPromptWithCacheMetadata({
+            buildAssistantMaintenanceSystemPromptResult({
               currentLocalDate: '2026-08-30',
               currentTimeZone: 'America/New_York',
               profile: 'member-memory',
@@ -24741,7 +24705,7 @@ describeRealCodex('real Codex memory profile improvement e2e', () => {
         approvalPolicy: 'never' as const, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildAssistantMaintenanceSystemPromptWithCacheMetadata({ currentLocalDate: '2026-09-21', currentTimeZone: 'UTC', profile: 'member-memory' }).prompt,
+        developerInstructions: buildAssistantMaintenanceSystemPromptResult({ currentLocalDate: '2026-09-21', currentTimeZone: 'UTC', profile: 'member-memory' }).prompt,
         dynamicTools: [MURPH_MEMBER_MEMORY_TOOL], env: config.env, ephemeral: true,
         memberMemoryMaintenanceAuthorized: true, model: config.model, modelProvider: config.modelProvider,
         processLifetime: 'one-shot' as const, prompt: [seed.instructions, evidence.prompt].join('\n\n'),
@@ -26182,11 +26146,8 @@ function buildPublicGoalSetupDeveloperInstructions(now = new Date()): string {
       '- `memory show`: options --compact, --format=json.',
       '- `wearables sleep pattern`: options --format=json.',
     ].join('\n'),
-    assistantContextSnapshotPrompt: null,
     assistantHostedAutomationAvailable: true,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -30990,8 +30951,8 @@ describeRealCodex('real Codex voice reminder destination e2e', () => {
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: 'Use the hosted automation tool for reminder creation.',
           assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: false,
-          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectProviders: [],
+
           channel: 'voice', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-10-14',
           currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
@@ -31064,10 +31025,9 @@ describeRealCodex('real Codex link recovery progress e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: true,
+          assistantCliContract: null,
           assistantHostedDeviceConnectProviders: [{ label: 'Oura', provider: 'oura' }],
-          assistantKnowledgeToolsAvailable: false, assistantProgressUpdatesAvailable: true,
+          assistantProgressUpdatesAvailable: true,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-10-14',
           currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
@@ -31188,8 +31148,8 @@ describeRealCodex('real Codex automation edit progress e2e', () => {
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: 'Read-only inventory: vault-cli automation list --compact --format json. Use the automation tool for hosted inspections and writes.',
           assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: true,
-          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectProviders: [],
+
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-10-14',
           currentInstant: '2026-10-14T16:00:00.000Z', currentTimeZone: 'America/New_York',
@@ -31299,8 +31259,8 @@ describeRealCodex('real Codex weekday automation authoring e2e', () => {
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: 'Read-only inventory: vault-cli automation list --compact --format json. Use the automation tool for hosted inspections and writes.',
           assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: false,
-          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectProviders: [],
+
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: '2026-10-09',
           currentInstant: '2026-10-09T19:00:00.000Z', currentTimeZone: 'America/New_York',
@@ -31601,11 +31561,8 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
               'Use vault-cli for canonical member data.',
               'Read a condition with: vault-cli condition show <condition-id> --format json',
             ].join('\n'),
-            assistantContextSnapshotPrompt: null,
             assistantHostedAutomationAvailable: true,
-            assistantHostedDeviceConnectAvailable: false,
             assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
@@ -31817,11 +31774,8 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           codexHome: config.codexHome,
           developerInstructions: buildAssistantSystemPrompt({
             assistantCliContract: null,
-            assistantContextSnapshotPrompt: null,
             assistantHostedAutomationAvailable: true,
-            assistantHostedDeviceConnectAvailable: false,
             assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
@@ -32212,9 +32166,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
     const layers = buildAssistantSystemPromptLayers({
       assistantCliContract: null,
       assistantHostedAutomationAvailable: true,
-      assistantHostedDeviceConnectAvailable: false,
       assistantHostedDeviceConnectProviders: [],
-      assistantKnowledgeToolsAvailable: false,
       assistantProgressUpdatesAvailable: false,
       channel: 'linq',
       cliAccess: { rawCommand: 'vault-cli' },
@@ -34287,10 +34239,7 @@ describeRealCodex('real Codex recurring meal-tracking setup e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: null,
-          assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false,
           assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false,
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
@@ -34399,11 +34348,9 @@ describeRealCodex('real Codex recurring meal-tracking setup e2e', () => {
             ?? undefined,
           codexHome: config.codexHome,
           developerInstructions: buildAssistantSystemPrompt({
+            assistantDynamicContextPrompts: [input.context ?? ''],
             assistantCliContract: null,
-            assistantContextSnapshotPrompt: input.context,
-            assistantHostedDeviceConnectAvailable: false,
             assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
             channel: 'linq',
             cliAccess: {
               rawCommand: 'vault-cli',
@@ -34581,10 +34528,7 @@ describeRealCodex('real Codex strict meal import recovery e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: 'Use vault-cli for canonical member data.',
-          assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false,
           assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false,
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
@@ -34764,10 +34708,7 @@ describeRealCodex('real Codex food label query recovery e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract,
-          assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false,
           assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false,
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
@@ -35042,10 +34983,7 @@ describeRealCodex('real Codex typed goal stale-ID recovery e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract,
-          assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false,
           assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false,
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
@@ -35274,11 +35212,9 @@ async function buildRegimenLabelDeveloperInstructions(vaultRoot: string) {
   if (assistantCliContract === null) throw new Error('Expected the production CLI surface contract.')
   await refreshAssistantContextSnapshot({ vaultRoot })
   const developerInstructions = buildAssistantSystemPrompt({
+    assistantDynamicContextPrompts: [await readAssistantCurrentStatePrompt({ vaultRoot }) ?? ''],
     assistantCliContract,
-    assistantContextSnapshotPrompt: await readAssistantCurrentStatePrompt({ vaultRoot }),
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: { rawCommand: 'vault-cli' },
     conversationScope: 'direct',
@@ -35412,10 +35348,7 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: 'Use vault-cli for canonical member data.',
-          assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false,
           assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false,
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
@@ -35535,10 +35468,7 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
           assistantCliContract: 'Use vault-cli for canonical member data.',
-          assistantContextSnapshotPrompt: null,
-          assistantHostedDeviceConnectAvailable: false,
           assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false,
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
@@ -35743,15 +35673,13 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
           ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: 'Use vault-cli for canonical member data.',
-          assistantContextSnapshotPrompt: [
+          assistantDynamicContextPrompts: [[
             'Known member context:',
             '- The member uses intuitive eating and is number-sensitive.',
             '- Do not estimate or surface calories or macros, and minimize food prompts.',
-          ].join('\n'),
-          assistantHostedDeviceConnectAvailable: false,
+          ].join('\n') ?? ''],
+          assistantCliContract: 'Use vault-cli for canonical member data.',
           assistantHostedDeviceConnectProviders: [],
-          assistantKnowledgeToolsAvailable: false,
           channel: 'linq',
           cliAccess: {
             rawCommand: 'vault-cli',
@@ -39969,17 +39897,15 @@ function buildAutomaticMealClarificationDeveloperInstructions(input: {
   scheduled: boolean
 }): string {
   return buildAssistantSystemPrompt({
-    assistantCliContract: 'Use vault-cli for canonical member data.',
-    assistantContextSnapshotPrompt: input.protectedContext
+    assistantDynamicContextPrompts: [(input.protectedContext
       ? [
           'Known member context:',
           '- The member uses intuitive eating, has eating-disorder-risk context, and is number-sensitive.',
           '- Do not estimate or surface calories or macros, and minimize food prompts.',
         ].join('\n')
-      : null,
-    assistantHostedDeviceConnectAvailable: false,
+      : null) ?? ''],
+    assistantCliContract: 'Use vault-cli for canonical member data.',
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -40163,10 +40089,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
           'Use vault-cli for canonical member data.',
           'The nutrition skills own exact card, safety, and target-authority commands.',
         ].join('\n'),
-        assistantContextSnapshotPrompt: null,
-        assistantHostedDeviceConnectAvailable: false,
         assistantHostedDeviceConnectProviders: [],
-        assistantKnowledgeToolsAvailable: false,
         assistantProgressUpdatesAvailable: true,
         channel: 'linq',
         cliAccess: {
@@ -41993,10 +41916,7 @@ function buildRepeatedSetDeveloperInstructions(
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -42543,10 +42463,7 @@ async function runLiveWorkoutRepetitionRecoveryProbe(
     }))
     const developerInstructions = buildAssistantSystemPrompt({
       assistantCliContract,
-      assistantContextSnapshotPrompt: null,
-      assistantHostedDeviceConnectAvailable: false,
       assistantHostedDeviceConnectProviders: [],
-      assistantKnowledgeToolsAvailable: false,
       channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
       conversationScope: 'direct', currentLocalDate: new Date().toISOString().slice(0, 10),
       currentTimeZone: 'UTC', hostedRuntime: true,
@@ -42958,10 +42875,7 @@ function buildWearableArrivalDeveloperInstructions(
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     canonicalTimeZoneAvailable:
       promptTimeContext.canonicalTimeZoneAvailable,
     channel: 'linq',
@@ -43539,11 +43453,8 @@ function buildGroupPointOfViewDeveloperInstructions(input?: {
 }): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
     assistantDynamicContextPrompts: input?.dynamicContextPrompts ?? [],
-    assistantKnowledgeToolsAvailable: false,
     assistantPersonality:
       input?.humor === undefined
         ? null
@@ -43565,10 +43476,7 @@ function buildExperimentOnboardingDeveloperInstructions(assistantHostedAutomatio
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantHostedAutomationAvailable,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -43594,11 +43502,8 @@ function buildScheduledAutomationDeveloperInstructions(
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantHostedAutomationAvailable,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
     assistantHostedGroupToolSurface,
-    assistantKnowledgeToolsAvailable: false,
     channel,
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -43880,11 +43785,8 @@ function buildHostedGroupStatusDeveloperInstructions(
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantHostedAutomationAvailable,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
     assistantHostedGroupToolSurface,
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -43903,10 +43805,7 @@ function buildHostedUsageOptionsDeveloperInstructions(
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -43925,10 +43824,7 @@ function buildHostedUsageProgressDeveloperInstructions(
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel,
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -43944,7 +43840,7 @@ function buildHostedUsageProgressDeveloperInstructions(
 
 function buildDirectConversationDeveloperInstructions(
   onboardingGuidance = false,
-  assistantContextSnapshotPrompt: string | null = null,
+  context: string | null = null,
   assistantHostedDeviceConnectProviders:
     readonly AssistantHostedDeviceConnectProvider[] = [],
   currentInstant: string | null = null,
@@ -43952,13 +43848,10 @@ function buildDirectConversationDeveloperInstructions(
   channel: 'linq' | 'email' = 'linq',
 ): string {
   return buildAssistantSystemPrompt({
+    assistantDynamicContextPrompts: [context ?? ''],
     assistantCliContract: null,
     assistantHostedAutomationAvailable,
-    assistantContextSnapshotPrompt,
-    assistantHostedDeviceConnectAvailable:
-      assistantHostedDeviceConnectProviders.length > 0,
     assistantHostedDeviceConnectProviders,
-    assistantKnowledgeToolsAvailable: false,
     channel,
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -43981,10 +43874,7 @@ function buildPainRoutingDeveloperInstructions(
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: input.channel,
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -44325,11 +44215,8 @@ function buildMidnightLinqReminderDeveloperInstructions(
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract,
-    assistantContextSnapshotPrompt: null,
     assistantHostedAutomationAvailable: true,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -44346,16 +44233,14 @@ function buildMidnightLinqReminderDeveloperInstructions(
 
 function buildVagueReminderDeveloperInstructions(): string {
   return buildAssistantSystemPrompt({
-    assistantCliContract: null,
-    assistantContextSnapshotPrompt: [
+    assistantDynamicContextPrompts: [[
       'Known member context:',
       '- Valid recent sleep summaries place the usual wake window between 7:30 and 8:00 AM.',
       '- Recent training normally begins after 11:00 AM, with no earlier routine conflict.',
-    ].join('\n'),
+    ].join('\n') ?? ''],
+    assistantCliContract: null,
     assistantHostedAutomationAvailable: true,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -44454,10 +44339,7 @@ async function materializeAutomationLookupJourneyVaultCli(input: {
 function buildWeatherAlertDeveloperInstructions(scheduled: boolean): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -44477,12 +44359,9 @@ function buildAdaptiveWearableDeveloperInstructions(input: {
 }): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [
       { label: 'Garmin', provider: 'garmin' },
     ],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -44509,10 +44388,7 @@ function buildWeeklyHealthInsightDeveloperInstructions(input: {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantHostedAutomationAvailable: input.hostedAutomationAvailable ?? false,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -44534,10 +44410,7 @@ function buildAutomaticMealCloseoutDeveloperInstructions(input: {
 } = {}): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'linq',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -44553,13 +44426,11 @@ function buildAutomaticMealCloseoutDeveloperInstructions(input: {
   })
 }
 
-function buildCapabilityRoutingDeveloperInstructions(assistantContextSnapshotPrompt: string | null = null): string {
+function buildCapabilityRoutingDeveloperInstructions(context: string | null = null): string {
   return buildAssistantSystemPrompt({
+    assistantDynamicContextPrompts: [context ?? ''],
     assistantCliContract: null,
-    assistantContextSnapshotPrompt,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'local',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -44578,10 +44449,7 @@ function buildRoutinePresentationDeveloperInstructions(input: {
 }): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: 'vault-cli exercise show <id-or-slug> --format json',
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: input.channel,
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -44689,10 +44557,7 @@ function buildRoutineValidationProbeTool(
 function buildTelegramRichContentDeveloperInstructions(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'telegram',
     cliAccess: {
       rawCommand: 'vault-cli',
@@ -45882,7 +45747,7 @@ describeRealCodex('real Codex imported hospital history e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          assistantCliContract: null,
           channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
           cliAccess: { rawCommand: 'vault-cli' },
           currentInstant: '2026-09-10T16:00:00Z', currentLocalDate: '2026-09-10', currentTimeZone: 'America/New_York',
@@ -45958,7 +45823,7 @@ describeRealCodex('real Codex downloaded hospital documents e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          assistantCliContract: null,
           channel: 'telegram', conversationScope: 'direct', hostedRuntime: true,
           cliAccess: { rawCommand: 'vault-cli' },
           currentInstant: '2026-09-10T16:00:00Z', currentLocalDate: '2026-09-10', currentTimeZone: 'America/New_York',
@@ -46098,7 +45963,7 @@ describeRealCodex('real Codex native conversation polls e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
+          assistantCliContract: null, assistantPollsAvailable: true,
           channel, cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2026-09-21',
           currentInstant: '2026-09-21T16:00:00.000Z', currentTimeZone: 'America/New_York',
@@ -46190,7 +46055,7 @@ describeRealCodex('real Codex scheduled native poll e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
+          assistantCliContract: null, assistantPollsAvailable: true,
           channel: route.channel, cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2026-11-02', currentInstant: occurrenceAt, currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false,
@@ -46249,7 +46114,7 @@ describeRealCodex('real Codex poll self vote e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
+          assistantCliContract: null, assistantPollsAvailable: true,
           channel, cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2026-09-22',
           currentInstant: '2026-09-22T16:00:00.000Z', currentTimeZone: 'UTC',
@@ -46384,7 +46249,7 @@ describeRealCodex('real Codex poll freshness e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true,
+          assistantCliContract: null, assistantPollsAvailable: true,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2026-09-22', currentInstant: '2026-09-22T16:00:00.000Z',
           currentTimeZone: 'UTC', hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -46449,10 +46314,9 @@ describeRealCodex('real Codex proactive plan follow-through e2e', () => {
           codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
           codexHome: config.codexHome,
           developerInstructions: buildAssistantSystemPrompt({
-            assistantCliContract: null, assistantContextSnapshotPrompt: null,
+            assistantCliContract: null,
             assistantHostedAutomationAvailable: true, assistantProgressUpdatesAvailable: false,
-            assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
-            assistantKnowledgeToolsAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
             channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
             conversationScope: 'direct', currentLocalDate: '2030-04-01',
             currentInstant: '2030-04-01T08:00:00.000Z', currentTimeZone: 'UTC',
@@ -46569,7 +46433,7 @@ describeRealCodex('companion device capabilities', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedDeviceConnectAvailable: true,
+          assistantCliContract: null,
           assistantHostedDeviceConnectProviders: [], channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: now.toISOString().slice(0, 10),
           currentInstant: now.toISOString(), currentTimeZone: 'UTC', hostedRuntime: true,
@@ -46629,8 +46493,8 @@ onboardingGuidance: false,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
-          assistantHostedDeviceConnectAvailable: true, assistantHostedDeviceConnectProviders: [],
+          assistantCliContract: null, assistantHostedAutomationAvailable: true,
+          assistantHostedDeviceConnectProviders: [],
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct',
           currentLocalDate: now.slice(0, 10), currentInstant: now, currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false,
@@ -46719,7 +46583,7 @@ describeRealCodex('scheduled phone-call reminder journey', () => {
         model: config.model, modelProvider: config.modelProvider,
         automationRelativeDateReferenceWindow: { earliestAt: now, latestAt: now },
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          assistantCliContract: null,
           assistantHostedAutomationAvailable: !scheduled,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'direct', currentLocalDate: scheduled ? '2030-04-02' : '2030-04-01',
@@ -47093,7 +46957,7 @@ describeRealCodex('real Codex canonical game selfplay e2e', () => {
           codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
           codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
           developerInstructions: buildAssistantSystemPrompt({
-            assistantCliContract: null, assistantKnowledgeToolsAvailable: false, channel: 'linq',
+            assistantCliContract: null, channel: 'linq',
             cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
             currentLocalDate: context.today, currentInstant: context.instant, currentTimeZone: 'UTC',
             hostedRuntime: true, onboardingGuidance: false, turnTrigger: null,
@@ -47164,7 +47028,7 @@ describeRealCodex('real Codex game v1 rules e2e', () => {
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          assistantCliContract: null, channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -47245,7 +47109,7 @@ describeRealCodex('real Codex game agreement e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -47322,7 +47186,7 @@ describeRealCodex('real Codex game chat adjustment e2e', () => {
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          assistantCliContract: null, channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T22:00:00.000Z', currentTimeZone: 'America/New_York',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -47758,7 +47622,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -47956,7 +47820,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -48016,7 +47880,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+          assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -48103,7 +47967,7 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       const guidance = await context.prepareGameLore?.()
       const live = await executeRealCodexAppServerTurn({ approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null }) + '\n' + guidance,
         dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_GAME_LORE_TOOL], env: config.env,
@@ -48664,7 +48528,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-05', currentInstant: '2030-03-05T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null }),
@@ -48745,7 +48609,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-05', currentInstant: '2030-03-05T15:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null }),
@@ -48871,7 +48735,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
-        developerInstructions: [buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false,
+        developerInstructions: [buildAssistantSystemPrompt({ assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: kind === 'off-day' ? '2030-03-09' : '2030-03-05', currentInstant: kind === 'off-day' ? '2030-03-09T12:00:00.000Z' : '2030-03-05T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null }), GAME_PHOTO_CHAT_GUIDANCE].join('\n'),
@@ -48977,7 +48841,7 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          assistantCliContract: null, channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: processingAt, currentTimeZone: 'America/New_York',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -49172,7 +49036,7 @@ describeRealCodex('real Codex game chat setup', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantPollsAvailable: true, assistantHostedGroupToolSurface: 'families',
+          assistantCliContract: null, assistantPollsAvailable: true, assistantHostedGroupToolSurface: 'families',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -49523,7 +49387,7 @@ describeRealCodex('real Codex exact group games', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedGroupToolSurface: 'families',
+          assistantCliContract: null, assistantHostedGroupToolSurface: 'families',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -49586,7 +49450,7 @@ describeRealCodex('real Codex group majority changes', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedGroupToolSurface: 'families',
+          assistantCliContract: null, assistantHostedGroupToolSurface: 'families',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
@@ -49665,7 +49529,7 @@ describeRealCodex('real Codex group Start now parity', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
         developerInstructions: buildAssistantSystemPrompt({
-          assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedGroupToolSurface: 'families',
+          assistantCliContract: null, assistantHostedGroupToolSurface: 'families',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, onboardingGuidance: false, turnTrigger: null,
@@ -49833,7 +49697,7 @@ async function runHostingTurn(input: { name: string; prompt: string; state: Host
       allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
       codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
       codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
-      developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
+      developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantHostedAutomationAvailable: true,
         channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
         hostedRuntime: true, onboardingGuidance: false, turnTrigger: null }),
       dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_AUTOMATION_TOOL, ...resolveMurphDynamicTools({}).filter(tool => tool.name === 'finish_without_reply')],
@@ -50200,7 +50064,7 @@ describeRealCodex('ordinary input replay reminder journeys', () => {
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
         developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null,
-          assistantKnowledgeToolsAvailable: false, assistantHostedAutomationAvailable: true,
+          assistantHostedAutomationAvailable: true,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct',
           currentLocalDate: '2030-01-15', currentInstant: '2030-01-15T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true, onboardingGuidance: false, turnTrigger: null }),

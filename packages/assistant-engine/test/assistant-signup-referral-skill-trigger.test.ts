@@ -13,10 +13,7 @@ import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 function buildPrompt(): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
     channel: 'imessage',
     cliAccess: { rawCommand: 'vault-cli' },
     currentLocalDate: '2026-08-05',

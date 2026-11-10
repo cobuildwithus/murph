@@ -6,12 +6,10 @@ import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../src/assistant/system-prompt.js', () => ({
-  buildAssistantMaintenanceSystemPromptWithCacheMetadata: () => ({
-    cacheMetadata: null,
+  buildAssistantMaintenanceSystemPromptResult: () => ({
     prompt: '',
   }),
-  buildAssistantSystemPromptWithCacheMetadata: () => ({
-    cacheMetadata: null,
+  buildAssistantSystemPromptResult: () => ({
     prompt: '',
   }),
 }))
