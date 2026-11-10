@@ -3071,7 +3071,7 @@ key in Cloudflare, never copy it into a local environment or app configuration.
 
 The generated production and local configs both bind `GAME_IMAGES`. The hosted
 deploy entrypoint reads account variants before Worker upload and again before
-activation; it fails closed if any variant bypasses signatures or either required
+activation; it fails closed if any variant bypasses signatures or any required
 rendition is missing or unsafe. Its existing hosted Cloudflare token needs
 **Images Read** permission. This preflight only reads configuration; it does not
 provision variants, change existing assets, prove a paid plan/signing key, or
@@ -3083,15 +3083,47 @@ alphanumeric provider IDs exactly; hyphenated names are rejected by Images:
 
 | ID | Width / height | Fit | Metadata | Never require signed URLs |
 | --- | --- | --- | --- | --- |
+| `gamethumb` | 240 / 240 | scale-down | none | false |
 | `gameavatar` | 600 / 600 | scale-down | none | false |
 | `gamephoto` | 1600 / 1600 | scale-down | none | false |
+
+History card and film-band frames use `thumb` (`gamethumb`). Provision it in the
+bound account through an authorized Cloudflare operator before deploying the
+Worker that accepts `thumb`, then deploy Web's history signer. With the intended
+account selected in the authenticated `cf` profile, the manual provisioning step is:
+
+```bash
+cf images variants create --id gamethumb \
+  --options-width 240 --options-height 240 --options-fit scale-down \
+  --options-metadata none --never-require-signed-urls=false
+```
+
+`scripts/deploy-game-images.ts` only validates these account variants; it is
+imported by `deploy-worker-version.cli.ts`, not a standalone provisioning CLI.
+The hosted command below runs that validation before upload and activation,
+after deploy artifacts are prepared:
+
+```bash
+pnpm --dir apps/cloudflare deploy:worker:apply -- --config ./.deploy/wrangler.generated.jsonc
+```
+
+Production deployment belongs to private `cobuildwithus/murph-cloud`'s
+`deploy-cloudflare-hosted.yml`; this repository's `.github/workflows` has no
+production Cloudflare deploy workflow. Do not run a production deploy locally.
+
+If Web arrives before the accepting Worker, history catches each failed `thumb`
+delivery and retains the stable media URL without a signed delivery; the app can
+still request `variant=avatar` from the media route. Existing `avatar` and `photo`
+requests remain supported. An accepting Worker without `gamethumb` provisioned
+is not safe: signing need not detect a missing CDN variant. The deploy preflight
+requires all three renditions before allowing that Worker to serve.
 
 Inspect **all** variants in the bound account: any `neverRequireSignedURLs: true`
 variant bypasses image-level privacy, even if this app never signs that variant.
 Use an account without such variants; do not silently change unrelated public
 assets. Verify a synthetic uploaded image returns 403 unsigned for every variant,
 200 with a valid capability, and rejects an expired or modified signature. Verify
-JPEG/HEIC ingestion, both rendition dimensions and absence of EXIF/location.
+JPEG/HEIC ingestion, all three rendition dimensions and absence of EXIF/location.
 Cloudflare supports HEIC input; delivery negotiates a supported output format.
 
 Deploy Worker/binding/variants first, then Web, then native. The Worker retains

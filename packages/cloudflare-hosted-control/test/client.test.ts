@@ -1815,6 +1815,9 @@ describe("createCloudflareHostedControlClient", () => {
       await expect(signed.client.gameImageDelivery({ mediaId, userId: "user_123", variant: "avatar" })).resolves.toEqual(delivery);
       expect(observed(signed.fetchImpl).headers.get("x-murph-image-variant")).toBe("avatar");
       expect(observed(signed.fetchImpl).headers.get("x-hosted-execution-user-id")).toBe("user_123");
+      const thumbnail = gameMediaClient(() => createJsonResponse(delivery));
+      await expect(thumbnail.client.gameImageDelivery({ mediaId, userId: "user_123", variant: "thumb" })).resolves.toEqual(delivery);
+      expect(observed(thumbnail.fetchImpl).headers.get("x-murph-image-variant")).toBe("thumb");
       const missing = gameMediaClient(() => createJsonResponse({}, { status: 404 }));
       await expect(missing.client.gameImageDelivery({ mediaId, userId: "user_123", variant: "photo" })).resolves.toBeNull();
       await expect(missing.client.statGameImage({ mediaId, userId: "user_123" })).resolves.toBeNull();

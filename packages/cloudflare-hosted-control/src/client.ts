@@ -255,7 +255,7 @@ export interface CloudflareHostedControlClient {
   }): Promise<void>;
   putGameImage(input: { bytes: Uint8Array; contentType: "image/jpeg" | "image/heic"; mediaId: string; userId: string }): Promise<void>;
   mealThumbnailDeliveries(input: { userId: string; photos: Array<{ mediaId: string; sha256: string; byteSize: number }> }): Promise<Array<{ mediaId: string; url: string }> | null>;
-  gameImageDelivery(input: { mediaId: string; userId: string; variant: "avatar" | "photo" }): Promise<{ url: string; expiresAt: string } | null>;
+  gameImageDelivery(input: { mediaId: string; userId: string; variant: "thumb" | "avatar" | "photo" }): Promise<{ url: string; expiresAt: string } | null>;
   statGameImage(input: { mediaId: string; userId: string }): Promise<{ byteLength: number } | null>;
   /** Legacy weekly game photos: Web seals them; the Worker stores the sealed envelope. */
   deleteGameMedia(input: { mediaId: string; userId: string }): Promise<void>;

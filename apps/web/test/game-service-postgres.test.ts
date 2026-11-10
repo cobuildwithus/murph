@@ -1944,7 +1944,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       vi.spyOn(gameMedia, "servesSignedGameMedia").mockReturnValue(true);
       const sign = vi.spyOn(gameMedia, "gameMediaDelivery").mockImplementation(async () => {
         if (process.env.MURPH_GAME_HISTORY_BENCH_LATENCY === "1") await new Promise(resolve => setTimeout(resolve, 128));
-        return { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic",
+        return { url: "https://imagedelivery.net/account/image/gamethumb?exp=9999999999&sig=synthetic",
           expiresAt: "2030-01-01T00:00:00.000Z" };
       });
       const open = vi.spyOn(crypto, "openGameTexts");
@@ -2150,7 +2150,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     } });
     await getPrisma().gameEntry.update({ where: { id: game.entryIds[3] }, data: { withdrawnAt: new Date() } });
     vi.spyOn(gameMedia, "servesSignedGameMedia").mockReturnValue(true);
-    const delivery = { url: "https://imagedelivery.net/account/image/gameavatar?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
+    const delivery = { url: "https://imagedelivery.net/account/image/gamethumb?exp=9999999999&sig=synthetic", expiresAt: "2030-01-01T00:00:00.000Z" };
     const sign = vi.spyOn(gameMedia, "gameMediaDelivery").mockResolvedValue(delivery);
     const history = await readHistory(viewer);
     const previewKeys = history.people[0].games[0].previews.map(preview => decodeURIComponent(preview.mediaUrls[0].split("/media/")[1]));
@@ -2159,8 +2159,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(signed.people[0].games[0].previews).toHaveLength(6);
     expect(signed.people[0].games[0].previews.every((preview) => preview.delivery?.url === delivery.url)).toBe(true);
     expect(sign).toHaveBeenCalledTimes(6);
-    expect(sign).not.toHaveBeenCalledWith(game.mediaKeys[1], "avatar");
-    expect(sign).not.toHaveBeenCalledWith(game.mediaKeys[3], "avatar");
+    expect(sign).not.toHaveBeenCalledWith(game.mediaKeys[1], "thumb");
+    expect(sign).not.toHaveBeenCalledWith(game.mediaKeys[3], "thumb");
     sign.mockClear();
     expect(await withHistoryPhotoDeliveries(await readHistory(outsider), outsider)).toEqual({ people: [] });
     await withHistoryPhotoDeliveries(history, outsider);

@@ -134,6 +134,8 @@ describe("private game Images", () => {
     expect(p.sign).toHaveBeenCalledWith({ variant: "gameavatar", expiresIn: 300 });
     await store.delivery(mediaId, "photo");
     expect(p.sign).toHaveBeenLastCalledWith({ variant: "gamephoto", expiresIn: 300 });
+    await store.delivery(mediaId, "thumb");
+    expect(p.sign).toHaveBeenLastCalledWith({ variant: "gamethumb", expiresIn: 300 });
   });
 
   it("returns a stored copy without waiting on the inspection that ran alongside it", async () => {
@@ -170,11 +172,12 @@ describe("private game Images", () => {
     await store.upload(mediaId, bytes);
     await store.delivery(mediaId, "avatar");
     await store.delivery(mediaId, "photo");
+    await store.delivery(mediaId, "thumb");
     const signedVariants = p.sign.mock.calls.map(([options]) => options.variant);
-    expect(signedVariants).toEqual(["gameavatar", "gamephoto"]);
+    expect(signedVariants).toEqual(["gameavatar", "gamephoto", "gamethumb"]);
     const variants = Object.fromEntries(signedVariants.map((id, index) => {
       expect(id).toMatch(/^[a-zA-Z0-9]+$/u);
-      const pixels = index === 0 ? 600 : 1600;
+      const pixels = [600, 1600, 240][index];
       return [id, { id, neverRequireSignedURLs: false,
         options: { width: pixels, height: pixels, fit: "scale-down", metadata: "none" } }];
     }));
@@ -316,10 +319,15 @@ describe("private game Images", () => {
     expect((await call("gameImageStage", { body: bytes })).status).toBe(200);
     expect(await (await call("gameImageStat")).json()).toEqual({ byteLength: bytes.length });
     expect((await call("gameImageDelivery", { variant: "public" })).status).toBe(400);
-    const delivered = await call("gameImageDelivery");
-    expect(delivered.headers.get("cache-control")).toBe("private, no-store");
-    expect(await delivered.json()).toMatchObject({ url: expect.stringContaining("sig=") });
-    expect(p.sign).toHaveBeenCalledExactlyOnceWith({ variant: "gameavatar", expiresIn: 300 });
+    expect((await call("gameImageDelivery", { variant: "toString" })).status).toBe(400);
+    expect(p.sign).not.toHaveBeenCalled();
+    for (const variant of ["avatar", "photo", "thumb"]) {
+      const delivered = await call("gameImageDelivery", { variant });
+      expect(delivered.status).toBe(200);
+      expect(delivered.headers.get("cache-control")).toBe("private, no-store");
+      expect(await delivered.json()).toMatchObject({ url: expect.stringContaining("sig=") });
+      expect(p.sign).toHaveBeenLastCalledWith({ variant: `game${variant}`, expiresIn: 300 });
+    }
   });
 
   it("keeps the Images routes behind the existing owner-bound Vercel OIDC gate", () => {

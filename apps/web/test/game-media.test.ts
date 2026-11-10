@@ -135,6 +135,8 @@ describe("game media when deployed (private Cloudflare Images)", () => {
     expect(mocks.control!.statGameImage).not.toHaveBeenCalled();
     await expect(gameMediaDelivery(key, "avatar")).resolves.toEqual(delivery);
     expect(mocks.control!.gameImageDelivery).toHaveBeenCalledWith({ mediaId: key.slice(PREFIX.length), userId: LEO, variant: "avatar" });
+    await expect(gameMediaDelivery(key, "thumb")).resolves.toEqual(delivery);
+    expect(mocks.control!.gameImageDelivery).toHaveBeenLastCalledWith({ mediaId: key.slice(PREFIX.length), userId: LEO, variant: "thumb" });
   });
 
   it("serves old clients through a credential-free, bounded CDN fetch", async () => {
