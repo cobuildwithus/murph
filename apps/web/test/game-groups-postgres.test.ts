@@ -9,7 +9,7 @@ import { upsertHostedMemberIdentity } from "@/src/lib/hosted-onboarding/hosted-m
 import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboarding/member-identity-fields";
 import { createHostedEmailLookupKey, createHostedExternalThreadIdentityLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { areGameGroupsEnabled } from "@/src/lib/game/access";
-import { gameAudienceKeys, gameGroupLoreFingerprint, gamePairLoreFingerprint } from "@/src/lib/game/audience";
+import { gameAudienceKeys, gameGroupLoreFingerprint } from "@/src/lib/game/audience";
 import { runGameCommand, readGame, readHome, readGameChatState, readGameRematchNotice, runGameChatUpdate, readGameRecapMaterial, sealGameRecap, authorizeMediaRead } from "@/src/lib/game/service";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { readGameChatFundingRooms } from "@/src/lib/game/chat-access";
@@ -961,7 +961,8 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     const origin = { kind: "accepted_input" as const, assistantInputId: "ain_synthetic_open_room" };
     chatProof.sender = people[0].id; chatProof.wake = leaverChatWake(room);
     const read = await handleGameChatTool({ ...input, request: { action: "read_game", origin, includePlayers: true } });
-    expect(read).toMatchObject({ result: { status: "ok", state: { games: [{ id: gameId }], players: expect.any(Array) }, loreFingerprint: gamePairLoreFingerprint(players) } });
+    expect(read).toMatchObject({ result: { status: "ok", state: { games: [{ id: gameId }], players: expect.any(Array) } } });
+    expect(read.result).not.toHaveProperty("loreFingerprint");
     expect(read.result.state?.players?.map(p => p.memberId).sort()).toEqual([...players].sort());
     await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(new Date("2030-03-09T12:00:01Z").getTime() - Date.now()) } });
     const download = vi.spyOn(await import("@/src/lib/game/chat-photo-media"), "downloadGameChatPhoto").mockResolvedValue({ bytes: new Uint8Array([255, 216, 255]), contentType: "image/jpeg" });

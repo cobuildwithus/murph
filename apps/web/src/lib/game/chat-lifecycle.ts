@@ -372,10 +372,11 @@ async function recoverGameNotificationWake(receiptId: string, gameId: string, ev
   }
   if (!game.chatContainerMemberId) return false;
   const room = game.chatContainerMemberId;
-  // Bootstrap recovery precedes its provider route; the bootstrap owner proves it.
-  if ((game.maxPlayers === 10 || await prisma.hostedThreadRoute.findFirst({ where: { containerMemberId: room }, select: { containerMemberId: true } }))
-    && !await revalidateGameNotificationWake(game, eventId, now)) return false;
-  return recoverGameNotificationPointer(receiptId, room, eventId);
+  return recoverGameNotificationPointer(receiptId, room, eventId, async () => {
+    // Bootstrap recovery precedes its provider route; the bootstrap owner proves it.
+    const needsProof = game.maxPlayers === 10 || await prisma.hostedThreadRoute.findFirst({ where: { containerMemberId: room }, select: { containerMemberId: true } });
+    return !needsProof || revalidateGameNotificationWake(game, eventId, now);
+  });
 }
 
 function isRoomCheckInEvent(eventId: string): boolean {
@@ -396,7 +397,7 @@ async function recoverRoomCheckInWake(receiptId: string, roomId: string, eventId
   return recoverGameNotificationPointer(receiptId, roomId, eventId);
 }
 
-async function recoverGameNotificationPointer(receiptId: string, roomId: string, eventId: string): Promise<boolean> {
+async function recoverGameNotificationPointer(receiptId: string, roomId: string, eventId: string, beforeSignal?: () => Promise<boolean>): Promise<boolean> {
   const prisma = getPrisma();
   const mailbox = await readHostedMailboxItemByDedupeKey({ dedupeKey: eventId, userId: roomId, prisma });
   if (!mailbox) return false;
@@ -405,6 +406,7 @@ async function recoverGameNotificationPointer(receiptId: string, roomId: string,
     // provider truth intact and stop this pre-generation wake sweep.
     await prisma.hostedLinqDelivery.updateMany({ where: { id: receiptId, status: "generation_queued" }, data: { retryAfterAt: null } });
   } else {
+    if (beforeSignal && !await beforeSignal()) return false;
     await signalHostedMailboxAppendRuntime({ expectedUserId: roomId, mailboxItemId: mailbox.id });
   }
   return true;

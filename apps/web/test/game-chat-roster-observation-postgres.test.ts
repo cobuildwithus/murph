@@ -92,13 +92,20 @@ describe.skipIf(!enabled)("game roster leases and pointer recovery on migrated P
     expect((await rows()).filter(row => row.removedAt === null).map(row => row.participantMemberId).sort()).toEqual([a, b].sort());
     expect(provider.signal).toHaveBeenCalledOnce();
   });
-  it.each(["changed", "partial"])("does not renew or signal a pair with a %s roster", async kind => {
+  it.each(["changed", "partial"])("does not fund or signal a pair with a %s roster", async kind => {
     const receiptId = await pointer();
     provider.read.mockResolvedValue(linqRoster({ observedAt, handlesComplete: kind !== "partial", handles: [
       { handle: line, isMe: true, status: "active" }, ...[phones[0], kind === "changed" ? syntheticPhone() : phones[1]].map(handle => ({ handle, isMe: false, status: "active" })),
     ] }));
     await drainGameChatLifecycle({ now, prisma: db });
-    expect((await rows()).every(row => row.lastSeenAt.getTime() === old.getTime())).toBe(true);
+    if (kind === "partial") expect((await rows()).every(row => row.lastSeenAt.getTime() === old.getTime())).toBe(true);
+    else {
+      // Complete observations still own current membership, even when the
+      // missing player makes this particular game ineligible.
+      expect((await rows()).find(row => row.participantMemberId === a)).toMatchObject({ lastSeenAt: observedAt, removedAt: null });
+      expect((await rows()).find(row => row.participantMemberId === b)?.removedAt).not.toBeNull();
+    }
+    expect(await readGameChatFundingRooms({ memberIds: [room], now, prisma: db })).toEqual(new Map());
     expect(provider.signal).not.toHaveBeenCalled();
     expect(await db.hostedLinqDelivery.findUniqueOrThrow({ where: { id: receiptId } })).toMatchObject({ status: "generation_queued", retryAfterAt: expect.any(Date) });
   });
