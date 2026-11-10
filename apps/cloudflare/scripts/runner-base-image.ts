@@ -23,7 +23,7 @@ const runnerBaseImagePlatform = "linux/amd64";
 export interface RunnerBaseImagePreparationResult {
   fingerprint: string;
   imageTag: string;
-  status: "built" | "current" | "pulled" | "pushed";
+  status: "built" | "current" | "published-version" | "pulled" | "pushed";
 }
 
 export async function computeRunnerBaseImageSourceFingerprint(): Promise<string> {
@@ -118,6 +118,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export async function prepareRunnerBaseImage(input: {
+  // Admit the newest published image for this version tag when the exact
+  // source is not published yet. Only for comparisons that run both sides on
+  // one image; never for an image that ships or proves native behavior.
+  acceptPublishedVersion?: boolean;
   env?: NodeJS.ProcessEnv;
   force?: boolean;
   imageTag?: string;
@@ -141,6 +145,16 @@ export async function prepareRunnerBaseImage(input: {
   if (!force && pullCurrentRunnerBaseImage({ env, fingerprint, imageTag })) {
     process.stdout.write(`Runner base image pulled: ${imageTag}\n`);
     return { fingerprint, imageTag, status: "pulled" };
+  }
+
+  if (!force && input.acceptPublishedVersion === true) {
+    const publishedFingerprint = pullPublishedVersionRunnerBaseImage({ env, imageTag });
+    if (publishedFingerprint) {
+      process.stdout.write(
+        `Runner base image accepted from published source ${publishedFingerprint}: ${imageTag}\n`,
+      );
+      return { fingerprint, imageTag, status: "published-version" };
+    }
   }
 
   await buildRunnerBaseImage({ env, fingerprint, imageTag, push: false });
@@ -248,6 +262,25 @@ function pullCurrentRunnerBaseImage(input: {
   return false;
 }
 
+function pullPublishedVersionRunnerBaseImage(input: {
+  env: NodeJS.ProcessEnv;
+  imageTag: string;
+}): string | null {
+  const remoteTag = hostedRunnerBaseImageRemoteTag;
+  if (!runDockerSync(["pull", "--platform", runnerBaseImagePlatform, remoteTag], input.env).ok) {
+    return null;
+  }
+  // Only the protected-main publisher labels this tag; an unlabeled image is not one of ours.
+  const publishedFingerprint = readRunnerBaseImageFingerprint(remoteTag, input.env);
+  if (!publishedFingerprint) {
+    return null;
+  }
+  if (remoteTag !== input.imageTag && !runDockerSync(["tag", remoteTag, input.imageTag], input.env).ok) {
+    return null;
+  }
+  return publishedFingerprint;
+}
+
 function runDockerSync(args: readonly string[], env: NodeJS.ProcessEnv): { ok: boolean } {
   const result = spawnSync("docker", [...args], {
     encoding: "utf8",
@@ -274,24 +307,32 @@ function shouldRunMain(): boolean {
     && fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? "");
 }
 
-function parseForceArg(argv: readonly string[]): boolean {
-  const normalized = argv[0] === "--" ? argv.slice(1) : argv;
-  const unknown = normalized.filter((arg) => arg !== "--force" && arg !== "--push" && arg !== "--wait-published");
+const runnerBaseImageArgs = ["--accept-published-version", "--force", "--push", "--wait-published"];
+
+export function parseRunnerBaseImageArgs(argv: readonly string[]): Set<string> {
+  const args = new Set(argv[0] === "--" ? argv.slice(1) : argv);
+  const unknown = [...args].filter((arg) => !runnerBaseImageArgs.includes(arg));
   if (unknown.length > 0) {
     throw new Error(`Unsupported runner base image argument: ${unknown.join(" ")}`);
   }
-  if (normalized.includes("--wait-published") && normalized.some((arg) => arg === "--force" || arg === "--push")) {
+  if (args.has("--wait-published") && (args.has("--force") || args.has("--push"))) {
     throw new Error("Publication waiting cannot build or push an image.");
   }
-  return normalized.includes("--force");
+  if (args.has("--accept-published-version") && args.size > 1) {
+    throw new Error("Accepting a published version cannot force, push, or wait for an image.");
+  }
+  return args;
 }
 
 if (shouldRunMain()) {
-  const argv = process.argv.slice(2);
-  const force = parseForceArg(argv);
-  if (argv.includes("--wait-published")) {
+  const args = parseRunnerBaseImageArgs(process.argv.slice(2));
+  if (args.has("--wait-published")) {
     await waitForPublishedRunnerBaseImage();
   } else {
-    await prepareRunnerBaseImage({ force, push: argv.includes("--push") });
+    await prepareRunnerBaseImage({
+      acceptPublishedVersion: args.has("--accept-published-version"),
+      force: args.has("--force"),
+      push: args.has("--push"),
+    });
   }
 }

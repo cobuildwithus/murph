@@ -1207,7 +1207,10 @@ boundaries are owned by `agent-docs/operations/verification-and-runtime.md`.
   that history. Required canonical readback and semantic/replay/correction proof
   accompany median CPU and wall-time comparisons. The focused Node tests prove
   threshold boundaries, malformed-output rejection, lifecycle-log handling,
-  required-job wiring, and exact created-container cleanup. See
+  required-job wiring, and exact created-container cleanup. When both revisions
+  have byte-identical base image sources, both sides run on one shared published
+  base image and the job does not compile native Codex; a failure on a published
+  image that predates the source retries on each checkout's exact image. See
   [the benchmark contract](../../packages/core/bench/README.md#required-one-vcpu-regression-check)
   for budgets, reproduction, and limits; this is not production sizing approval.
 - The runner-bundle total-output gate measures the independently emitted vault
