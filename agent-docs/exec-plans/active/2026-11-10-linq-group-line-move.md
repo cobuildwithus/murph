@@ -4,7 +4,39 @@ Status: active
 Created: 2026-11-10
 Updated: 2026-11-10
 
-## PR 4806 round 1 remediation
+## Parent continuation and release checkpoint
+
+The resumed parent owns PR #4806 completion, including the push, required
+review, CI and merge. The local-only instructions in the worker checkpoint
+below describe that delegated slice, not the parent release scope.
+
+The silent design keeps the original group identity and sends no announcement.
+A source message that reaches the 60-second fallback disarms that reservation;
+verified cancellation and a fresh reservation are the supported recovery.
+Later adoption within the expired reservation is deliberately excluded because
+cross-line message IDs do not provide a proven deduplication identity. The
+operator must move only one group at a time and avoid a second unbound room
+with the same human roster and both service numbers during that reservation.
+
+Parent candidate review inspected the full producer and ingress changes, both
+accepted cancellation findings, the scoped migration and the production-path
+regressions. The final local result is 180 focused tests plus 872 Web files and
+14,609 Web tests passing; root typecheck, lint, complexity, docs drift and diff
+checks pass. No assistant prompt or model decision surface changes, so model
+behavior is not the evidence boundary; the composed webhook/Postgres tests
+exercise admission, identity, cancellation and handoff with a fake provider.
+
+A bounded production read confirmed zero move rows and only the consumer
+migration applied before release. No real group operation was performed.
+Local correctness is Ready; execution against real groups remains Hold pending
+Web convergence and explicit authorization of the throwaway-group proof. The
+active plan remains open for that provider proof and the separate duplicate
+repair. Publication of the operator code does not start a move.
+
+Round 2 is required because the fixes add persisted removal receipts and a
+migration extension. It will review the stable pushed candidate alongside CI.
+
+## Historical worker checkpoint: PR 4806 round 1 remediation
 
 Both High findings in `audit-packages/pr-4806-round-1.md` are accepted.
 This continuation is local only: no push, PR edit, production access, real

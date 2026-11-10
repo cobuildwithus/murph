@@ -3990,10 +3990,8 @@ claim reset. The forward silent-producer migration adds nullable progress
 columns without new statuses. The existing no-moves-until-all-Web-converges
 rollout gate remains required: older consumers lack these replay boundaries.
 
-PR B is an active, local implementation checkpoint, not a release-ready change:
-later adoption after bounded source fallback remains unresolved in the active
-execution plan. A source message older than 60 seconds atomically expires
-adoption before normal admission. The row stays reserved for verified cleanup;
+A source message older than 60 seconds atomically expires adoption before
+normal admission. The row stays reserved for verified cleanup;
 resume never renews it. This conservative boundary avoids a heuristic duplicate
 match but requires cancel/restart instead of later adoption in that reservation.
 
