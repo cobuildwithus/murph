@@ -22,7 +22,8 @@ MURPH_DEVICE_PASS_SAVE_FIXTURE=.artifacts/device-pass-fixture \
 MURPH_DEVICE_PASS_FIXTURE=.artifacts/device-pass-fixture \
   MURPH_DEVICE_PASS_PROFILE=.artifacts/device-pass.cpuprofile \
   node --cpu-prof --cpu-prof-dir=.artifacts .artifacts/device-pass-bench.mjs
-node --test packages/device-syncd/bench/differential.test.mjs
+MURPH_DEVICE_PASS_FIXTURE=.artifacts/device-pass-fixture MURPH_DEVICE_PASS_NO_SCOPE=1 \
+  node .artifacts/device-pass-bench.mjs
 ```
 
 The second run reuses identical seeded vault bytes. Output contains only
@@ -31,10 +32,10 @@ including receipts. `MURPH_DEVICE_PASS_HISTORY_ROWS` defaults to 105,000 and
 `MURPH_DEVICE_PASS_JOB_ROWS` to 80. A small smoke run can set both to 200 and
 4 respectively. `.artifacts` is disposable and ignored by Git. To compare
 revisions, run the same fixture and job count on each build and require equal
-manifest hashes. The differential test runs the same durable job sequence with
-the original unscoped cache policy and the new pass scope, and compares every
-canonical file byte through its SHA-256 manifest, including integration ingest
-receipts. The CPU profile collected through Inspector covers only the
+manifest hashes. For a differential check, run the same fixture once with
+`MURPH_DEVICE_PASS_NO_SCOPE=1` (the original unscoped cache policy) and once
+without it, and require equal `manifestSha256` values: the manifest covers every
+canonical file byte, including integration ingest receipts. The CPU profile collected through Inspector covers only the
 job pass; Node's `--cpu-prof` also captures fixture copying and startup.
 
 The source history is intentionally larger than the core process cache's
