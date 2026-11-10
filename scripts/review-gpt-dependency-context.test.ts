@@ -67,6 +67,7 @@ async function fixture(kind = 'safe', packageSlug = 'review-gpt', selectedVersio
   await writeFile(path.join(repoRoot, selectedPatchPath), committedPatch);
   const git = (args: string[]) => execFileSync('git', args, { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
   git(['init', '-q']);
+  git(['config', 'core.hooksPath', '.git/hooks']);
   git(['config', 'user.name', 'Synthetic Fixture']);
   git(['config', 'user.email', 'fixture@example.invalid']);
   git(['add', '.']);
