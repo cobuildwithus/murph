@@ -3,6 +3,7 @@ import type {
   AssistantMessageReaction,
   AssistantResponseMedia,
   AssistantSessionBinding,
+  AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   AssistantProviderTraceEvent,
@@ -157,6 +158,7 @@ export interface AssistantProviderTurn {
   runtimeWorkspaceRoots?: readonly string[] | null
   resume?: AssistantProviderCodexResume | null
   serviceTier?: AssistantProviderServiceTier | null
+  turnTrigger?: AssistantTurnTrigger | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null
   }

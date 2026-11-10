@@ -7725,7 +7725,7 @@ index 7849225b5cbb6c37456d14e85b3fe069d878ada3..5aeed081e40e62e1b821340a6661c2e3
              make_request,
              |req| {
 diff --git a/codex-rs/core/src/client.rs b/codex-rs/core/src/client.rs
-index 2ac9b931ffbcf47809d54c35569458003ccd7181..8d05dfe77e1a0d43da32325a4f406f8128727ef2 100644
+index 2ac9b931ffbcf47809d54c35569458003ccd7181..9ca0b7d8c3ffdd11b4982b03179f32ad3ef9d945 100644
 --- a/codex-rs/core/src/client.rs
 +++ b/codex-rs/core/src/client.rs
 @@ -436,6 +436,7 @@ fn responses_request_properties_mismatch(
@@ -7756,7 +7756,7 @@ index 2ac9b931ffbcf47809d54c35569458003ccd7181..8d05dfe77e1a0d43da32325a4f406f81
 @@ -807,6 +811,17 @@ impl ModelClient {
          activated
      }
-
+ 
 +    pub(crate) async fn realtime_v3_wire_adapter(&self) -> Result<codex_api::RealtimeEventParser> {
 +        let setup = self
 +            .current_client_setup(ClientRouting::ConfiguredProvider)
@@ -7789,7 +7789,7 @@ index 2ac9b931ffbcf47809d54c35569458003ccd7181..8d05dfe77e1a0d43da32325a4f406f81
          if let Some(header_value) = self.generate_attestation_header_for().await {
              extra_headers.insert(X_OAI_ATTESTATION_HEADER, header_value);
          }
-@@ -1164,6 +1190,11 @@ impl ModelClient {
+@@ -1164,6 +1190,16 @@ impl ModelClient {
              include,
              service_tier,
              prompt_cache_key: self.prompt_cache_key(responses_metadata),
@@ -7797,21 +7797,30 @@ index 2ac9b931ffbcf47809d54c35569458003ccd7181..8d05dfe77e1a0d43da32325a4f406f81
 +                &model_info.slug,
 +                std::env::var("MURPH_HOSTED_RUNTIME_PROCESS").as_deref() == Ok("1"),
 +                self.state.provider.info().env_key.as_deref() == Some("OPENAI_API_KEY"),
++                responses_metadata.turn_trigger.as_deref() == Some("automation-cron")
++                    || matches!(
++                        responses_metadata.request_kind,
++                        Some(crate::responses_metadata::CodexResponsesRequestKind::Compaction(_))
++                    ),
 +            ),
              text,
              client_metadata: Some(client_metadata),
              access_programs: None,
-@@ -3263,3 +3294,24 @@ impl WebsocketTelemetry for ApiTelemetry {
+@@ -3263,3 +3299,28 @@ impl WebsocketTelemetry for ApiTelemetry {
  #[cfg(test)]
  #[path = "client_tests.rs"]
  mod tests;
 +
 +// Only Murph's managed API-key runtime opts into the higher cache-write rate.
-+// Subscription auth and other models keep the provider default.
++// Subscription auth and other models keep the provider default. Scheduled
++// turns and compaction keep the 30-minute rate: what they write is rarely
++// read again within 12 hours, and a 30-minute request still reads 12-hour
++// entries.
 +fn hosted_prompt_cache_options(
 +    model: &str,
 +    hosted: bool,
 +    api_key: bool,
++    short_retention: bool,
 +) -> Option<serde_json::Value> {
 +    (hosted
 +        && api_key
@@ -7824,13 +7833,13 @@ index 2ac9b931ffbcf47809d54c35569458003ccd7181..8d05dfe77e1a0d43da32325a4f406f81
 +                | "gpt-6-astra"
 +                | "gpt-5.6-luna"
 +        ))
-+    .then(|| serde_json::json!({ "ttl": "12h" }))
++    .then(|| serde_json::json!({ "ttl": if short_retention { "30m" } else { "12h" } }))
 +}
 diff --git a/codex-rs/core/src/client_tests.rs b/codex-rs/core/src/client_tests.rs
-index 4f60892b53f9e002fa6b59ea49fc9153a2399d6a..4600ec8a12bf73387c2e8c8e6633544fec9c7228 100644
+index 4f60892b53f9e002fa6b59ea49fc9153a2399d6a..c0159aa7a981f83e030b1d5b9e57711e4a55287a 100644
 --- a/codex-rs/core/src/client_tests.rs
 +++ b/codex-rs/core/src/client_tests.rs
-@@ -2360,3 +2360,47 @@ async fn inference_tools_changes_follow_full_specs_across_turns() {
+@@ -2360,3 +2360,61 @@ async fn inference_tools_changes_follow_full_specs_across_turns() {
          );
      }
  }
@@ -7867,16 +7876,30 @@ index 4f60892b53f9e002fa6b59ea49fc9153a2399d6a..4600ec8a12bf73387c2e8c8e6633544f
 +        "gpt-5.6-luna",
 +    ] {
 +        assert_eq!(
-+            super::hosted_prompt_cache_options(model, true, true),
++            super::hosted_prompt_cache_options(model, true, true, false),
 +            Some(serde_json::json!({"ttl": "12h"}))
 +        );
-+        assert_eq!(super::hosted_prompt_cache_options(model, false, true), None);
-+        assert_eq!(super::hosted_prompt_cache_options(model, true, false), None);
++        assert_eq!(
++            super::hosted_prompt_cache_options(model, true, true, true),
++            Some(serde_json::json!({"ttl": "30m"}))
++        );
++        for short_retention in [false, true] {
++            assert_eq!(
++                super::hosted_prompt_cache_options(model, false, true, short_retention),
++                None
++            );
++            assert_eq!(
++                super::hosted_prompt_cache_options(model, true, false, short_retention),
++                None
++            );
++        }
 +    }
-+    assert_eq!(
-+        super::hosted_prompt_cache_options("gpt-5.4", true, true),
-+        None
-+    );
++    for short_retention in [false, true] {
++        assert_eq!(
++            super::hosted_prompt_cache_options("gpt-5.4", true, true, short_retention),
++            None
++        );
++    }
 +}
 diff --git a/codex-rs/core/src/realtime_conversation/sideband.rs b/codex-rs/core/src/realtime_conversation/sideband.rs
 index e378592c5a6cd73919932a87f116759c8d83a938..4f4504b0d57f2254529fb6c6d6edfc948f9cc80b 100644

@@ -1028,6 +1028,7 @@ function buildCodexAttemptProviderInput(
         : attemptPlan.routePlan.resume,
       // Per-turn execution policy from the message input, not route identity.
       serviceTier,
+      turnTrigger: executionPlan.input.turnTrigger,
       sessionContext: attemptPlan.routePlan.sessionContext
         ? {
             binding: attemptPlan.session.binding,

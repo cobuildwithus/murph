@@ -1741,6 +1741,20 @@ selection, and `store: false` remain unchanged. Subscription auth and non-hosted
 runs retain provider defaults. The Worker continues opaque socket forwarding;
 HTTP diagnostics recognize the finite `12h` TTL without logging request content.
 
+Scheduled turns and compaction are the exception. The engine sends
+`turnTrigger: "automation-cron"` on a scheduled `turn/start`, and the same
+request builder then sets `ttl: "30m"` for every request of that turn and for
+every compaction request. The label is per turn, so a reply on the same thread
+returns to twelve hours. What a scheduled turn or a compaction writes is rarely
+read again between thirty minutes and twelve hours later, so the longer
+retention only doubled its write rate. The provider lets a thirty-minute request
+read twelve-hour entries but not the reverse: a twelve-hour request re-writes a
+prefix that exists only at thirty minutes. Compaction therefore must stay at
+thirty minutes to read what a scheduled turn just wrote, and a reply after a
+scheduled turn re-writes that turn's addition once. After a runner deploy,
+`automation_cron` allowance snapshots should carry no `tokens.cacheWrite12h`
+while replies still do.
+
 Deploy Web's allowance consumer before the new runner image. Native usage carries
 the provider-reported twelve-hour write subset through cumulative totals,
 per-turn deltas, and measured idle compaction into sanitized `rawUsageJson`.
