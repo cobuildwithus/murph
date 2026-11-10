@@ -3263,6 +3263,10 @@ function currentDeviceEventIdentityCache(vaultRoot: string): Map<string, DeviceE
   return passCache?.has(vaultRoot) ? passCache : deviceEventIdentityCache;
 }
 
+function currentDeviceEventIdentityRowLimit(cache: Map<string, DeviceEventIdentityCacheEntry>): number {
+  return cache === deviceEventIdentityCache ? MAX_WARM_IDENTITY_ROWS : MAX_PASS_IDENTITY_ROWS;
+}
+
 function retainDeviceEventIdentityIndex(
   vaultRoot: string,
   index: EventExternalRefIndex,
@@ -7223,7 +7227,7 @@ timing: DeviceBatchImportTiming,
       await refreshEventExternalRefMatches(index, changedIds, options.signal);
       index.aliasRepairHistoryById = new Map();
       cached.pendingPayloads = [];
-      const limit = cache === deviceEventIdentityCache ? MAX_WARM_IDENTITY_ROWS : MAX_PASS_IDENTITY_ROWS;
+      const limit = currentDeviceEventIdentityRowLimit(cache);
       if ([...index.shardRowCounts.values()].reduce((sum, count) => sum + count, 0) <= limit) {
         cachedIndex = index;
       }
