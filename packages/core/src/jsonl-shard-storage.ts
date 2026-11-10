@@ -260,6 +260,57 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
     return rows;
   }
 
+  /**
+   * A parsed string can equal an id made of these characters without the id
+   * appearing in the row text only through a `\u` escape, so the byte search is
+   * exact when the ids are this plain and the shard has no such escape.
+   */
+  function literalJsonlRowNeedles(
+    containing: readonly string[] | undefined,
+    bytes: Buffer,
+  ): Buffer[] | null {
+    if (
+      !containing
+      || containing.length === 0
+      || !containing.every((value) => /^[0-9A-Za-z_-]+$/u.test(value))
+      || bytes.includes("\\u")
+    ) {
+      return null;
+    }
+    return containing.map((value) => Buffer.from(value, "utf8"));
+  }
+
+  function parseJsonlRowsContaining(
+    bytes: Buffer,
+    relativePath: string,
+    needles: readonly Buffer[],
+  ): UnknownRecord[] {
+    const lineEnds = new Map<number, number>();
+    for (const needle of needles) {
+      for (let hit = bytes.indexOf(needle); hit >= 0;) {
+        const newline = bytes.indexOf(0x0a, hit);
+        const end = newline < 0 ? bytes.length : newline;
+        lineEnds.set(hit === 0 ? 0 : bytes.lastIndexOf(0x0a, hit - 1) + 1, end);
+        hit = bytes.indexOf(needle, end + 1);
+      }
+    }
+    const rows: UnknownRecord[] = [];
+    let lineNumber = 1;
+    let counted = 0;
+    for (const [start, end] of [...lineEnds].sort(([left], [right]) => left - right)) {
+      for (
+        let newline = bytes.indexOf(0x0a, counted);
+        newline >= 0 && newline < start;
+        newline = bytes.indexOf(0x0a, newline + 1)
+      ) {
+        lineNumber += 1;
+      }
+      counted = start;
+      rows.push(parseJsonlRow(bytes.toString("utf8", start, end), lineNumber, relativePath));
+    }
+    return rows;
+  }
+
   function parseJsonlRow(
     line: string,
     lineNumber: number,
@@ -280,10 +331,10 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
     }
   }
 
-  async function readJsonlShardRows(input: {
+  async function readTimedJsonlShardSourceBytes(input: {
     vaultRoot: string;
     relativePath: string;
-  }): Promise<Array<{ lineNumber: number; value: UnknownRecord }>> {
+  }): Promise<{ bytes: Buffer; logicalPath: string; source: JsonlShardSource }> {
     const endSource = startEventOwnerOperation("source");
     let logicalPath: string;
     let source: JsonlShardSource;
@@ -299,7 +350,18 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
       }
       source = resolvedSource;
     } finally { endSource(); }
-    const bytes = await readBoundedJsonlSourceBytes(input.vaultRoot, source);
+    return {
+      bytes: await readBoundedJsonlSourceBytes(input.vaultRoot, source),
+      logicalPath,
+      source,
+    };
+  }
+
+  async function readJsonlShardRows(input: {
+    vaultRoot: string;
+    relativePath: string;
+  }): Promise<Array<{ lineNumber: number; value: UnknownRecord }>> {
+    const { bytes, logicalPath } = await readTimedJsonlShardSourceBytes(input);
     const endParse = startEventOwnerOperation("parse");
     try { return await parseJsonlRows(bytes, logicalPath); }
     finally { endParse(); }
@@ -328,14 +390,28 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
     return await readBoundedJsonlSourceBytes(input.vaultRoot, source);
   }
 
+  /**
+   * `containing` is for callers that keep only rows holding one of a few exact
+   * ids. Every such row is still returned, in file order. In an archive, rows
+   * whose text holds none of the ids are not parsed: archives are parsed in
+   * full before they are written, and one id lookup otherwise parses every row
+   * of every closed month. Plain shards are always parsed in full.
+   */
   async function readJsonlShardRecords(input: {
     vaultRoot: string;
     relativePath: string;
+    containing?: readonly string[];
   }): Promise<UnknownRecord[]> {
-    const rows = await readJsonlShardRows(input);
+    const { bytes, logicalPath, source } = await readTimedJsonlShardSourceBytes(input);
     const endParse = startEventOwnerOperation("parse");
-    try { return rows.map((row) => row.value); }
-    finally { endParse(); }
+    try {
+      const needles = source.kind === "jsonl"
+        ? null
+        : literalJsonlRowNeedles(input.containing, bytes);
+      return needles
+        ? parseJsonlRowsContaining(bytes, logicalPath, needles)
+        : (await parseJsonlRows(bytes, logicalPath)).map((row) => row.value);
+    } finally { endParse(); }
   }
 
   async function visitJsonlShardRecordsInterruptible(input: {

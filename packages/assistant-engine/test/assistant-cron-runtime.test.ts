@@ -80,6 +80,7 @@ const cronMocks = vi.hoisted(() => ({
   archiveAutomationIfOccurrenceCurrent: vi.fn(),
   archiveScheduledLogIfOccurrenceCurrent: vi.fn(),
   canSkipManagedAutomaticMealCloseout: vi.fn(),
+  canSkipManagedJournalConnectedContext: vi.fn(),
   applyAssistantSelfDeliveryTargetDefaults: vi.fn(),
   automationsByVault: new Map<string, MockAutomationRecord[]>(),
   buildExperimentFinalResultsSeeds: vi.fn(),
@@ -107,6 +108,10 @@ const cronMocks = vi.hoisted(() => ({
 
 vi.mock('../src/assistant/automatic-meal-closeout-eligibility.js', () => ({
   canSkipManagedAutomaticMealCloseout: cronMocks.canSkipManagedAutomaticMealCloseout,
+}))
+
+vi.mock('../src/assistant/journal-connected-context-eligibility.js', () => ({
+  canSkipManagedJournalConnectedContext: cronMocks.canSkipManagedJournalConnectedContext,
 }))
 
 vi.mock('@murphai/core', async (importOriginal) => ({
@@ -300,6 +305,7 @@ const tempRoots: string[] = []
 
 beforeEach(() => {
   cronMocks.canSkipManagedAutomaticMealCloseout.mockReset().mockResolvedValue(false)
+  cronMocks.canSkipManagedJournalConnectedContext.mockReset().mockResolvedValue(false)
   vi.useRealTimers()
   cronMocks.automationsByVault.clear()
   cronMocks.scheduledLogsByVault.clear()
@@ -6771,6 +6777,64 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
   })
 
+  it('skips idle morning Journal before model entry and advances to the next daily occurrence without retry', async () => {
+    vi.useFakeTimers()
+    const occurrenceAt = '2026-04-08T08:00:00.000Z'
+    vi.setSystemTime(new Date(occurrenceAt))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-idle-journal-')
+    const automationId = MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID
+    addManagedBackgroundAutomation(vaultRoot, automationId)
+    // A member-edited slug cannot bypass the immutable-id gate.
+    getVaultAutomationStore(vaultRoot)[0]!.slug = 'renamed-journal-job'
+    const connectedApps = { request: vi.fn(async () => ({ result: { accounts: [], toolkits: [] } })) }
+    const executionContext: AssistantExecutionContext = {
+      hosted: { connectedApps, memberId: 'member-synthetic', userEnvKeys: [],
+        resolveScheduledExternalThreadRoute: async ({ target }) => ({
+          channel: 'telegram', containerMemberId: 'member-synthetic', threadId: target, threadIsDirect: true,
+        }),
+      },
+    }
+    cronMocks.canSkipManagedJournalConnectedContext.mockResolvedValueOnce(true)
+    const onEvent = vi.fn()
+    expect(await processDueAssistantCronJobsLocal({ executionContext, limit: 1, onEvent, vault: vaultRoot }))
+      .toEqual({ failed: 0, processed: 1, succeeded: 0 })
+    expect(cronMocks.canSkipManagedJournalConnectedContext).toHaveBeenCalledExactlyOnceWith({
+      automationId, connectedApps, signal: expect.any(AbortSignal), vaultRoot,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'cron.job.completed', safeDetails: 'cron_job_skipped_gate',
+      failureContext: expect.objectContaining({ runOutcome: 'skipped_gate', retryScheduled: false }),
+    }))
+    expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+    expect(await listAssistantCronRuns({ job: automationId, vault: vaultRoot }))
+      .toMatchObject({ runs: [{ outcome: 'skipped_gate', status: 'skipped',
+        reason: 'lifecycle_precondition',
+        error: 'No reminders or eligible connected context require reconciliation.' }] })
+    const next = await getAssistantCronJob(vaultRoot, automationId)
+    expect(next.state).toMatchObject({
+      nextRunAt: '2026-04-09T08:00:00.000Z', consecutiveFailures: 0,
+      lastSucceededAt: occurrenceAt, lastFailedAt: null, lastError: null,
+    })
+    expect(await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot }))
+      .toEqual({ failed: 0, processed: 0, succeeded: 0 })
+    vi.setSystemTime(new Date(next.state.nextRunAt!))
+    await processDueAssistantCronJobsLocal({ limit: 1, vault: vaultRoot })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps explicit morning Journal runs outside idle suppression', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-journal-manual-')
+    const automationId = MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID
+    addManagedBackgroundAutomation(vaultRoot, automationId)
+    cronMocks.canSkipManagedJournalConnectedContext.mockResolvedValue(true)
+    await runAssistantCronJobNow({ job: automationId, vault: vaultRoot })
+    expect(cronMocks.canSkipManagedJournalConnectedContext).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+  })
+
   it('retries automatic meal closeout read failures without model entry or losing the occurrence', async () => {
     vi.useFakeTimers()
     const occurrenceAt = '2026-04-08T21:00:00.000Z'
@@ -7002,7 +7066,7 @@ describe('assistant cron runtime orchestration', () => {
       occurrenceAt: '2026-04-08T08:00:00.000Z',
       hasAccount: true,
     },
-  ])('preserves managed $name provider eligibility', async ({
+  ])('preserves managed $name provider eligibility when the precondition cannot prove an idle run', async ({
     automationId,
     hasAccount,
     occurrenceAt,
@@ -7037,8 +7101,8 @@ describe('assistant cron runtime orchestration', () => {
       vault: vaultRoot,
     })
 
-    // Account inventory cannot prove that member-authored reminders need no work.
-    // Source eligibility is evaluated by the skill after the morning turn starts.
+    // Without an idle proof, the skill still owns reminder repair and capture.
+    expect(cronMocks.canSkipManagedJournalConnectedContext).toHaveBeenCalled()
     expect(request).not.toHaveBeenCalled()
     expect(summary).toEqual({ failed: 0, processed: 1, succeeded: 1 })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(

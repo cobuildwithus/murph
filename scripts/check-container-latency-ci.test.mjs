@@ -6,11 +6,14 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  baseImageSources,
   bundleBenchmarkSource,
   compareLatencyRuns,
   inspectLatencyWorkflow,
+  measureSharedOrExact,
   parseLatencyRun,
   runContainer,
+  sharesBaseImageSource,
 } from "./check-container-latency-ci.mjs";
 
 const require = createRequire(new URL("../apps/cloudflare/package.json", import.meta.url));
@@ -115,4 +118,48 @@ test("the existing required bundle job executes the comparator tests and latency
   await inspectLatencyWorkflow(source);
   await assert.rejects(inspectLatencyWorkflow(source.replace("          node candidate/scripts/check-container-latency-ci.mjs base candidate", "")));
   await assert.rejects(inspectLatencyWorkflow(source.replace("          node --test candidate/scripts/check-container-latency-ci.test.mjs", "")));
+});
+
+test("revisions share a base image only when every fingerprinted source is byte-identical", async () => {
+  const fingerprint = await readFile(new URL("../apps/cloudflare/scripts/runner-base-image.ts", import.meta.url), "utf8");
+  const listed = fingerprint.split("computeRunnerBaseImageSourceFingerprint")[1].match(/for \(const source of \[([^\]]+)\]/u)[1];
+  assert.deepEqual(listed.match(/"[^"]+"/gu).map((entry) => JSON.parse(entry)), baseImageSources);
+  const temp = await mkdtemp(path.join(os.tmpdir(), "container-latency-sources-"));
+  try {
+    const roots = [path.join(temp, "base"), path.join(temp, "candidate")];
+    for (const root of roots) {
+      for (const source of baseImageSources) {
+        await mkdir(path.dirname(path.join(root, source)), { recursive: true });
+        await writeFile(path.join(root, source), `synthetic ${source}\n`);
+      }
+    }
+    assert.equal(await sharesBaseImageSource(roots), true);
+    for (const source of baseImageSources) {
+      await writeFile(path.join(roots[1], source), "changed\n");
+      assert.equal(await sharesBaseImageSource(roots), false);
+      await writeFile(path.join(roots[1], source), `synthetic ${source}\n`);
+    }
+    await rm(path.join(roots[0], baseImageSources[0]));
+    await assert.rejects(sharesBaseImageSource(roots));
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("a shared base image is measured on the published version first and on the exact image only after it fails", async () => {
+  const attempts = [];
+  const measure = (failures) => (acceptPublished) => {
+    attempts.push(acceptPublished);
+    if (failures.includes(acceptPublished)) throw new Error(`synthetic ${acceptPublished}`);
+    return `samples-${acceptPublished}`;
+  };
+  const logs = [];
+  assert.equal(await measureSharedOrExact(true, measure([]), (line) => logs.push(line)), "samples-true");
+  assert.equal(await measureSharedOrExact(true, measure([true]), (line) => logs.push(line)), "samples-false");
+  assert.equal(await measureSharedOrExact(false, measure([]), (line) => logs.push(line)), "samples-false");
+  await assert.rejects(measureSharedOrExact(true, measure([true, false]), (line) => logs.push(line)), /synthetic false/u);
+  await assert.rejects(measureSharedOrExact(false, measure([false]), (line) => logs.push(line)), /synthetic false/u);
+  assert.deepEqual(attempts, [true, true, false, false, true, false, false]);
+  assert.equal(logs.length, 2);
+  assert.match(logs[0], /retrying on the exact image: synthetic true/u);
 });

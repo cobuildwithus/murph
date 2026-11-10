@@ -195,8 +195,14 @@ export async function listCanonicalEventEntitiesRuntime(
       // A global reader may have published while this reader waited.
       const indexed = await readFreshEntities();
       if (indexed !== null) return indexed;
+      // A kind filter scopes the source read itself; the filter below still
+      // applies, so both paths return the same entities.
       const entities = await timeCliPhase("query-source-read", () =>
-        readCanonicalEntityFamilySource(vaultRoot, "event"));
+        readCanonicalEntityFamilySource(
+          vaultRoot,
+          "event",
+          filters.kinds?.length ? { eventKinds: filters.kinds } : {},
+        ));
       return entities.filter((entity) => {
         if (filters.kinds?.length && (entity.kind === null || !filters.kinds.includes(entity.kind))) return false;
         // Match the indexed COALESCE(date, substr(occurred_at, 1, 10)) predicate,

@@ -5,6 +5,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 
 import {
+  collapseEventRevisions,
   experimentDocumentRelativePath,
   isExperimentDocumentRelativePath,
   validateCurrentVaultMetadata,
@@ -37,7 +38,10 @@ import {
   readCanonicalHealthFamilyEntities,
 } from "./health/canonical-collector.ts";
 import { walkRelativeFiles } from "./health/loaders.ts";
-import { collapseEventLedgerEntities } from "./health/projectors/history.ts";
+import {
+  collapseEventLedgerEntities,
+  eventLedgerRevisionFields,
+} from "./health/projectors/history.ts";
 import { deriveVaultRecordIdentity } from "./id-families.ts";
 import {
   parseMarkdownDocument,
@@ -164,6 +168,15 @@ export async function readBrowserVaultReplicaExperiments(
   return experiments.filter(isDefaultProjectedQueryEntity);
 }
 
+export interface CanonicalEntityFamilySourceOptions {
+  /**
+   * Event family only: return just these event kinds. The result equals the
+   * full family read filtered by kind, but entities are built only for the
+   * selected rows instead of for every ledger row.
+   */
+  eventKinds?: readonly string[];
+}
+
 /**
  * Read one canonical family directly from its source owner without consulting
  * or rebuilding the shared query projection.
@@ -171,6 +184,7 @@ export async function readBrowserVaultReplicaExperiments(
 export async function readCanonicalEntityFamilySource(
   vaultRoot: string,
   family: CanonicalEntityFamily,
+  options: CanonicalEntityFamilySourceOptions = {},
 ): Promise<CanonicalEntity[]> {
   let entities: CanonicalEntity[];
 
@@ -193,11 +207,13 @@ export async function readCanonicalEntityFamilySource(
       entities = await readJournalEntities(vaultRoot, "strict");
       break;
     case "event":
-      entities = await readJsonlRecordFamily(
-        vaultRoot,
-        VAULT_LAYOUT.eventLedgerDirectory,
-        "event",
-      );
+      entities = options.eventKinds
+        ? await readEventLedgerEntitiesOfKinds(vaultRoot, options.eventKinds)
+        : await readJsonlRecordFamily(
+            vaultRoot,
+            VAULT_LAYOUT.eventLedgerDirectory,
+            "event",
+          );
       break;
     case "sample":
       entities = await readMetricSampleEntities(vaultRoot);
@@ -850,79 +866,175 @@ async function readJournalEntities(
   return pages.sort(compareCanonicalEntities);
 }
 
+type JsonlLedgerRecordType = Exclude<JsonRecordType, "metric_sample" | "sample">;
+
+/** The identity, ordering and revision fields of one ledger row. */
+interface JsonlLedgerRowHead {
+  recordType: JsonlLedgerRecordType;
+  sourcePath: string;
+  payload: QueryRecordData;
+  kind: string;
+  rawRecordId: string;
+  occurredAt: string;
+  displayId: string;
+  primaryLookupId: string;
+}
+
+function readJsonlLedgerRowHead(
+  recordType: JsonlLedgerRecordType,
+  sourcePath: string,
+  lineNumber: number,
+  rawPayload: QueryRecordData,
+): JsonlLedgerRowHead {
+  const payload = normalizeJsonRecordPayload(recordType, rawPayload);
+  const kind =
+    recordType === "audit"
+      ? pickString(payload, ["kind"]) ?? "audit"
+      : requireCanonicalString(
+          payload,
+          "kind",
+          sourcePath,
+          lineNumber,
+        );
+
+  const rawRecordId = requireCanonicalString(
+    payload,
+    "id",
+    sourcePath,
+    lineNumber,
+  );
+  const occurredAt = requireCanonicalString(
+    payload,
+    "occurredAt",
+    sourcePath,
+    lineNumber,
+  );
+  const identity = deriveVaultRecordIdentity(recordType, payload, rawRecordId);
+
+  return {
+    recordType,
+    sourcePath,
+    payload,
+    kind,
+    rawRecordId,
+    occurredAt,
+    displayId: identity.displayId,
+    primaryLookupId: identity.primaryLookupId,
+  };
+}
+
+function buildJsonlLedgerEntity(head: JsonlLedgerRowHead): CanonicalEntity {
+  const { recordType, payload, rawRecordId, occurredAt } = head;
+  const links = explicitCanonicalLinks(payload.links);
+  const relatedIds = linkTargetIds(links);
+
+  return {
+    entityId: head.displayId,
+    primaryLookupId: head.primaryLookupId,
+    lookupIds: uniqueStrings([
+      head.displayId,
+      head.primaryLookupId,
+      rawRecordId,
+      ...relatedIds,
+    ]),
+    family: recordType,
+    recordClass: resolveCanonicalRecordClass(recordType),
+    kind: head.kind,
+    status: pickString(payload, ["status"]),
+    occurredAt,
+    date: pickString(payload, ["dayKey"]) ?? normalizeCanonicalDate(occurredAt),
+    path: head.sourcePath,
+    title: pickString(payload, ["title", "summary"]),
+    body: pickString(payload, ["note", "summary"]),
+    attributes: normalizeRecordData(payload, {
+      recordType,
+      displayId: head.displayId,
+      primaryLookupId: head.primaryLookupId,
+      rawRecordId,
+    }),
+    frontmatter: null,
+    links,
+    relatedIds,
+    stream: null,
+    experimentSlug: pickString(payload, ["experimentSlug"]),
+    tags: normalizeTags(payload.tags),
+  };
+}
+
 async function readJsonlRecordFamily(
   vaultRoot: string,
   relativeDir: string,
-  recordType: Exclude<JsonRecordType, "metric_sample" | "sample">,
+  recordType: JsonlLedgerRecordType,
   signal?: AbortSignal,
 ): Promise<CanonicalEntity[]> {
   const entities = await readSortedJsonlRecords(
     vaultRoot,
     relativeDir,
-    (sourcePath, lineNumber, rawPayload) => {
-      const payload = normalizeJsonRecordPayload(recordType, rawPayload);
-      const kind =
-        recordType === "audit"
-          ? pickString(payload, ["kind"]) ?? "audit"
-          : requireCanonicalString(
-              payload,
-              "kind",
-              sourcePath,
-              lineNumber,
-            );
-
-      const rawRecordId = requireCanonicalString(
-        payload,
-        "id",
-        sourcePath,
-        lineNumber,
-      );
-      const occurredAt = requireCanonicalString(
-        payload,
-        "occurredAt",
-        sourcePath,
-        lineNumber,
-      );
-      const identity = deriveVaultRecordIdentity(recordType, payload, rawRecordId);
-      const links = explicitCanonicalLinks(payload.links);
-      const relatedIds = linkTargetIds(links);
-
-      return {
-        entityId: identity.displayId,
-        primaryLookupId: identity.primaryLookupId,
-        lookupIds: uniqueStrings([
-          identity.displayId,
-          identity.primaryLookupId,
-          rawRecordId,
-          ...relatedIds,
-        ]),
-        family: recordType,
-        recordClass: resolveCanonicalRecordClass(recordType),
-        kind,
-        status: pickString(payload, ["status"]),
-        occurredAt,
-        date: pickString(payload, ["dayKey"]) ?? normalizeCanonicalDate(occurredAt),
-        path: sourcePath,
-        title: pickString(payload, ["title", "summary"]),
-        body: pickString(payload, ["note", "summary"]),
-        attributes: normalizeRecordData(payload, {
-          recordType,
-          displayId: identity.displayId,
-          primaryLookupId: identity.primaryLookupId,
-          rawRecordId,
-        }),
-        frontmatter: null,
-        links,
-        relatedIds,
-        stream: null,
-        experimentSlug: pickString(payload, ["experimentSlug"]),
-        tags: normalizeTags(payload.tags),
-      };
-    },
+    (sourcePath, lineNumber, rawPayload) =>
+      buildJsonlLedgerEntity(
+        readJsonlLedgerRowHead(recordType, sourcePath, lineNumber, rawPayload),
+      ),
     signal,
   );
 
   return recordType === "event" ? collapseEventLedgerEntities(entities) : entities;
+}
+
+/**
+ * Kind-scoped event read. Every row is still parsed and checked for its
+ * required fields, and revisions collapse across all kinds in the same order
+ * as the full read, so the result equals the full read filtered by kind. Only
+ * the surviving rows of the requested kinds become entities.
+ */
+async function readEventLedgerEntitiesOfKinds(
+  vaultRoot: string,
+  eventKinds: readonly string[],
+  signal?: AbortSignal,
+): Promise<CanonicalEntity[]> {
+  const heads: JsonlLedgerRowHead[] = [];
+
+  await forEachJsonlPayload(
+    vaultRoot,
+    VAULT_LAYOUT.eventLedgerDirectory,
+    (sourcePath, lineNumber, rawPayload) => {
+      heads.push(readJsonlLedgerRowHead("event", sourcePath, lineNumber, rawPayload));
+    },
+    signal,
+  );
+
+  const selectedKinds = new Set(eventKinds);
+  return collapseEventRevisions(
+    heads.sort(compareJsonlLedgerRowHeads),
+    eventLedgerRowHeadRevisionFields,
+  )
+    .filter((head) => selectedKinds.has(head.kind))
+    .map(buildJsonlLedgerEntity)
+    .sort(compareCanonicalEntities);
+}
+
+// Mirrors compareCanonicalEntities for ledger rows, whose occurredAt is required.
+function compareJsonlLedgerRowHeads(
+  left: JsonlLedgerRowHead,
+  right: JsonlLedgerRowHead,
+): number {
+  if (left.occurredAt < right.occurredAt) {
+    return -1;
+  }
+
+  if (left.occurredAt > right.occurredAt) {
+    return 1;
+  }
+
+  return left.displayId.localeCompare(right.displayId);
+}
+
+function eventLedgerRowHeadRevisionFields(head: JsonlLedgerRowHead) {
+  return eventLedgerRevisionFields({
+    eventId: head.primaryLookupId,
+    data: head.payload,
+    occurredAt: head.occurredAt,
+    relativePath: head.sourcePath,
+  });
 }
 
 async function readMetricSampleEntities(
@@ -1336,7 +1448,9 @@ function readProtocolAttributesForQuery(
 
 function removeKeys(target: QueryRecordData, keys: readonly string[]): void {
   for (const key of keys) {
-    delete target[key];
+    if (key in target) {
+      delete target[key];
+    }
   }
 }
 

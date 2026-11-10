@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-09",
+  "order": 100,
+  "item": {
+    "id": "packaged-food-lookups-finish",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Packaged food lookups finish instead of failing",
+    "summary": "When Murph looks up a packaged food and the catalog has no product with those exact words, the label search now returns the closest product or no match in a few seconds instead of failing.",
+    "details": "Lookups for very common foods, such as plain Greek yogurt, finish too. Spelling recovery checks the 1,000 closest product names, so an unusual misspelling can still come back with no match and Murph estimates the meal another way.",
+    "relevanceTags": ["food", "search", "reliability"],
+    "sourcePullRequests": [4768]
+  }
+}

@@ -71,14 +71,10 @@ const NUTRITION_CARD_MONTHS = [
   'Nov',
   'Dec',
 ] as const
-const NUTRITION_CARD_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
-  maximumFractionDigits: 3,
-  useGrouping: true,
-})
-const CHALLENGE_POINTS_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
-  maximumFractionDigits: 0,
-  useGrouping: true,
-})
+// Created on first use: constructing an Intl.NumberFormat loads locale data,
+// which every process importing this module (each vault-cli call) would pay.
+let nutritionCardNumberFormatter: Intl.NumberFormat | undefined
+let challengePointsNumberFormatter: Intl.NumberFormat | undefined
 export const LINQ_IMESSAGE_APP_CARD_ORIGIN = MURPH_PRODUCT_ORIGIN
 
 export type AppCardEnvelopeV1 = {
@@ -940,7 +936,11 @@ function buildChallengeStandingsLinqLayout(
 }
 
 function formatChallengePoints(points: number): string {
-  return CHALLENGE_POINTS_NUMBER_FORMATTER.format(points)
+  challengePointsNumberFormatter ??= new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 0,
+    useGrouping: true,
+  })
+  return challengePointsNumberFormatter.format(points)
 }
 
 function renderTelegramChallengeStandingsCardHtml(
@@ -1250,7 +1250,11 @@ function renderPartialNutritionLabel(
 }
 
 function formatNutritionCardNumber(value: number): string {
-  return NUTRITION_CARD_NUMBER_FORMATTER.format(value)
+  nutritionCardNumberFormatter ??= new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 3,
+    useGrouping: true,
+  })
+  return nutritionCardNumberFormatter.format(value)
 }
 
 function formatNutritionCardDate(localDate: string): string {

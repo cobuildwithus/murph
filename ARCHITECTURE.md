@@ -992,7 +992,7 @@ External conversation directness is three-state authority. Explicit direct evide
 
 Assistant-authored cron schedules require a literal wildcard in either day-of-month or day-of-week. The shared automation tool argument schema rejects combined restrictions before creation or schedule replacement and returns repair guidance through the existing validation feedback. Finite recurrences keep their repeating days in the schedule and their exclusive expiration in `activeUntil`. Canonical cron retains standard OR semantics for existing records and operator workflows; inspection and patches without a replacement schedule remain compatible.
 
-A private hosted biweekly usage review is a managed automation pinned to
+A private hosted monthly usage review is a managed automation pinned to
 GPT-6.1 Sol medium. Its verified private hosted occurrence uses the existing
 isolated conversation/provider-turn profile: it neither resumes the member's
 provider thread nor replays committed chat history. Canonical context and the
@@ -2259,12 +2259,12 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   `Usage optimization audit:` prefix are excluded from the product-feedback
   query and read separately with the same window, kind allowlist, row cap,
   projection, and recipient list. Nonempty usage windows send a separate
-  `Biweekly usage reports — <day>` email with report totals and overflow counts,
+  `Monthly usage reports — <day>` email with report totals and overflow counts,
   without feature-request labels or member identifiers. The managed usage
-  optimizer runs every 14 days and requests 14 days of usage diagnostics,
+  optimizer runs every 30 days and requests 30 days of usage diagnostics,
   preserving its existing automation identity. Member cycles are staggered,
-  so the daily email sweep sends the usage email only on a fixed 14-day
-  cadence anchored on 2026-11-07, covering the full 14 days since the previous
+  so the daily email sweep sends the usage email only on a fixed 30-day
+  cadence anchored on 2026-11-07, covering the full 30 days since the previous
   cadence day, and skips empty usage windows.
   Usage delivery has its own `hosted-usage-report-digest/<day>` Resend key,
   so retries after a partial send reuse each email's original key.
@@ -2704,6 +2704,12 @@ and same-occurrence removal revisions keep the ordinary model path eligible;
 read failures use existing cron retry handling. Explicit manual runs bypass
 this automatic suppression. No additional persisted queue or marker is used.
 
+The scheduled morning Journal connected-context pass uses the same precondition
+path when the active/paused non-maintenance reminder inventory is empty and either
+global capture is opted out, or an absent/empty-account ledger plus the live
+connected-apps list proves no supported active accounts; stale accounts and any
+uncertain read keep the model turn eligible. Manual runs bypass this check.
+
 ### Clinical Records retrieval
 
 Clinical retrieval ownership is intentionally split across existing layers.
@@ -2755,19 +2761,20 @@ Private food-name search bounds indexed matches before similarity scoring,
 canonical-key deduplication, and window sorting. A literal-equality btree lane
 admits up to 250 exact names without SQL-pattern semantics, an unordered GIN
 lane admits up to 10,000 full-text matches without sorting the whole match set,
-and at most one GiST trigram branch is realized per query. A full-text search
-supplements GIN recall with up to 10,000 strict-word-nearest names only when
-the GIN set reaches its cap and may be truncated; an unsaturated set is
-exhaustive and skips that whole-catalog scan. When FTS finds nothing, typo
-recovery instead admits up to 10,000 names by whole-name distance and then
-applies the matching whole-name threshold. Strict-word matches within that
-same admitted set provide additional typo recovery, while whole-name matches
-retain ranking priority; this does not add a second GiST scan or promise
-exhaustive strict-word recall. Whole-name-eligible names precede ineligible
-names because their ordering and threshold use the same similarity.
+and no query orders the whole catalog by name distance: on the live catalog
+that scan exceeds the labels database statement timeout. A full-text set that
+reaches its cap is ranked as admitted, together with the exact names. When FTS
+finds nothing, typo recovery admits the 1,000 nearest names that pass the
+whole-name similarity threshold, with that threshold as the GiST index
+condition so the scan reads only eligible names. Strict-word recovery runs
+only when no whole name is similar; it admits up to 1,000 strict-word matches
+unordered and does not promise exhaustive strict-word recall. Whole-name
+matches therefore always outrank strict-word matches.
 Canonical-key deduplication happens only after those bounded admissions.
-The bounded admissions preserve representative choice and canonical diversity
-across the established 5,000-row boundary and ineligible-neighbor fixtures.
+The full-text admission preserves representative choice and canonical
+diversity across the established 5,000-row boundary; typo recovery ranks only
+within its nearest-name bound, which a larger group of identical names can
+fill.
 Ranking is deterministic
 within the admitted set rather than exhaustive across the full food catalog.
 Private food ranking favors query terms covered by the name and brand and

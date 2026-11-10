@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 const scenarios = ["boot", "seed", "new"];
 const metrics = { cpuMs: { ratio: 1.25, floor: 100 }, wallMs: { ratio: 1.4, floor: 250 } };
 const benchPath = "packages/core/bench";
+// Every input of computeRunnerBaseImageSourceFingerprint; the test pins the two lists together.
+export const baseImageSources = ["Dockerfile.cloudflare-hosted-runner-base", "patches/codex-public-live.patch"];
 
 export function parseLatencyRun(output) {
   const rows = output.trim().split("\n").map((line) => JSON.parse(line));
@@ -113,6 +115,29 @@ export async function bundleBenchmarkSource(build, root, contents, scratch, outf
   });
 }
 
+export async function sharesBaseImageSource(roots) {
+  for (const source of baseImageSources) {
+    const [base, candidate] = await Promise.all(roots.map((root) => readFile(path.join(root, source))));
+    if (!base.equals(candidate)) return false;
+  }
+  return true;
+}
+
+// One image serves both sides when neither revision changes the base image
+// source, so its exact native patch level cannot move the comparison. Accept
+// the newest published image for that version instead of compiling the exact
+// one, which takes about an hour while the main publisher is still building it.
+// If that image cannot carry these bundles, only the exact image can settle it.
+export async function measureSharedOrExact(shared, measure, log = console.error) {
+  if (!shared) return measure(false);
+  try {
+    return await measure(true);
+  } catch (error) {
+    log(`Measurement on the published base image failed; retrying on the exact image: ${error?.message ?? error}`);
+    return measure(false);
+  }
+}
+
 export async function inspectLatencyWorkflow(source) {
   const job = source.split("  production-runner-bundle-budget-linux:\n")[1]?.split(/^  [a-z].*:\n/mu)[0];
   assert.ok(job?.includes("          node candidate/scripts/check-container-latency-ci.mjs base candidate"),
@@ -141,25 +166,36 @@ async function main(baseArgument, candidateArgument) {
       await mkdir(directory);
       await bundleBenchmarkSource(build, root, contents, directory, path.join(directory, "import.mjs"));
       await copyFile(path.join(candidate, "scripts/container-latency-boot.mjs"), path.join(directory, "boot.mjs"));
-      // Cold native Codex compilation is setup, not a measured latency sample.
-      command("pnpm", ["--dir", path.join(root, "apps/cloudflare"), "runner:docker:base"], {
-        stdio: "inherit", timeout: 90 * 60_000,
-      });
-      const image = `murph-latency-${randomUUID()}`;
-      command("docker", ["build", "--platform", "linux/amd64", "--tag", image,
-        "--file", path.join(root, "Dockerfile.cloudflare-hosted-runner"),
-        path.join(root, "apps/cloudflare")], { stdio: "inherit" });
-      images.push(image);
     }
-    const samples = [[], []];
-    for (let round = 0; round < 3; round += 1) {
-      for (const index of round % 2 === 0 ? [0, 1] : [1, 0]) {
-        const directory = path.join(scratch, String(index));
-        const boot = runContainer(images[index], directory, "boot.mjs");
-        const imports = runContainer(images[index], directory, "import.mjs");
-        samples[index].push(`${boot}\n${imports}`);
+    // Cold native Codex compilation is setup, not a measured latency sample.
+    const prepareBaseImage = (root, args = []) => command("pnpm",
+      ["--dir", path.join(root, "apps/cloudflare"), "runner:docker:base", ...args],
+      { stdio: "inherit", timeout: 90 * 60_000 });
+    const shared = await sharesBaseImageSource(roots);
+    const samples = await measureSharedOrExact(shared, (acceptPublished) => {
+      const built = [];
+      for (const [index, root] of roots.entries()) {
+        // One preparation serves both sides, and only the candidate is sure to know the flag.
+        if (!acceptPublished) prepareBaseImage(root);
+        else if (index === 0) prepareBaseImage(candidate, ["--", "--accept-published-version"]);
+        const image = `murph-latency-${randomUUID()}`;
+        command("docker", ["build", "--platform", "linux/amd64", "--tag", image,
+          "--file", path.join(root, "Dockerfile.cloudflare-hosted-runner"),
+          path.join(root, "apps/cloudflare")], { stdio: "inherit" });
+        images.push(image);
+        built.push(image);
       }
-    }
+      const runs = [[], []];
+      for (let round = 0; round < 3; round += 1) {
+        for (const index of round % 2 === 0 ? [0, 1] : [1, 0]) {
+          const directory = path.join(scratch, String(index));
+          const boot = runContainer(built[index], directory, "boot.mjs");
+          const imports = runContainer(built[index], directory, "import.mjs");
+          runs[index].push(`${boot}\n${imports}`);
+        }
+      }
+      return runs;
+    });
     const comparisons = compareLatencyRuns(...samples);
     console.log(JSON.stringify({ samples: samples.map((runs) => runs.map(parseLatencyRun)), comparisons }, null, 2));
     assert.ok(comparisons.every((result) => result.passed), "One-vCPU latency regression; inspect scenario budgets above");

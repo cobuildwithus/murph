@@ -549,6 +549,7 @@ export async function loadEventLedgerShardsById(
     const records = await readEventLedgerShardRecords({
       vaultRoot,
       relativePath,
+      containing: [eventId],
     });
     const matchingRecords = records
       .filter((record) => isMatchingEventId(record, eventId))
@@ -626,7 +627,11 @@ export async function readOwnedEvent(
       const candidateIds = new Set<string>();
       const ownerField = input.kind === "document" ? "documentId" : "mealId";
       for (const relativePath of relativePaths) {
-        const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
+        const records = await readEventLedgerShardRecords({
+          vaultRoot: input.vaultRoot,
+          relativePath,
+          containing: [input.ownerId],
+        });
         const endSelect = startEventOwnerOperation("select");
         try {
           for (const rawRecord of records) {
@@ -659,8 +664,13 @@ export async function readOwnedEvent(
   try {
     return await withEventOwnerScanTiming(input.kind, "revisions", async () => {
       const matchesById = new Map<string, MatchedEventRecord[]>();
+      const containing = [...candidateIds];
       for (const relativePath of relativePaths) {
-        const records = await readEventLedgerShardRecords({ vaultRoot: input.vaultRoot, relativePath });
+        const records = await readEventLedgerShardRecords({
+          vaultRoot: input.vaultRoot,
+          relativePath,
+          containing,
+        });
         const endSelect = startEventOwnerOperation("select");
         try {
           for (const rawRecord of records) {

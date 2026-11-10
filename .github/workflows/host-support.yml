@@ -679,7 +679,8 @@ jobs:
         run: node candidate/scripts/check-runner-bundle-budget-ci.mjs compare base candidate
 
       - name: Check one-vCPU container latency
-        # Two bounded native source builds, then the unchanged benchmark budget.
+        # Worst case only: both revisions change the base image source, so each
+        # compiles native Codex. Otherwise one published image serves both.
         timeout-minutes: 195
         env:
           # Match the proven native permission gate while both checkouts are installed.

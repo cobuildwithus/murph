@@ -155,7 +155,9 @@ async function listOwnedRecords(input: {
   const limit = input.limit ?? DEFAULT_LIST_LIMIT
   const query = await loadQueryRuntime('document/meal query reads')
   const records = input.expectedKind === 'meal'
-    ? (await query.readCanonicalEntityFamilySource(input.vault, 'event')).filter(
+    ? (await query.readCanonicalEntityFamilySource(input.vault, 'event', {
+        eventKinds: ['meal'],
+      })).filter(
         (record) => record.kind === 'meal'
           && matchesDateRange(record.date ?? record.occurredAt, input.from, input.to),
       )

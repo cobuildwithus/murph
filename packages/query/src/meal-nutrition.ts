@@ -390,6 +390,8 @@ export async function readMealNutrientTotals(
 async function readMealNutritionModel(vaultRoot: string): Promise<VaultReadModel> {
   return createVaultReadModel({
     vaultRoot,
-    entities: await readCanonicalEntityFamilySource(vaultRoot, "event"),
+    entities: await readCanonicalEntityFamilySource(vaultRoot, "event", {
+      eventKinds: ["meal"],
+    }),
   });
 }
