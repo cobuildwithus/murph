@@ -51,7 +51,6 @@ import {
   listCanonicalSourceManifest,
   readCanonicalEntityFamilySource,
   readVaultMetadataSource,
-  readVaultSourceStrict,
   readVaultSourceTolerant,
   type VaultSourceSnapshot,
 } from "./vault-source.ts";
@@ -66,6 +65,7 @@ import {
 } from "./projection/entity-store.ts";
 import {
   emptyQueryProjectionStatus,
+  readFreshQueryProjectionSections,
   readProjectionStatus,
 } from "./projection/freshness.ts";
 import {
@@ -85,15 +85,17 @@ import {
   extractMetricPointsFromMetricRows,
 } from "./metrics/index.ts";
 import {
-  rebuildQueryProjectionFromCanonicalSource,
+  publishQueryProjectionSections,
   readFreshWearableSummaryRows,
 } from "./projection/rebuild.ts";
 import {
   searchQueryProjection,
 } from "./projection/search-store.ts";
 import {
+  QUERY_PROJECTION_SECTION_NAMES,
   currentQueryProjectionLocation,
   type QueryProjectionLocation,
+  type QueryProjectionSection,
 } from "./projection/schema.ts";
 import {
   readWearableSummaryRows,
@@ -119,8 +121,11 @@ function readStoredPublicWearableSummaryBundle(
   );
 }
 
-/** Preserve ordinary readers' existing unlocked, fully fresh global path.
- * Otherwise the focused owner validates, publishes and captures under the lock. */
+/** Ordinary wearable readers skip the lock only when every section is fresh.
+ * A matching wearable certificate alone is not permission to read unlocked: a
+ * canonical writer that queried wearables mid-write has published them for
+ * files it may still roll back. Otherwise the publisher validates, publishes
+ * wearables only and captures under the lock. */
 async function readFreshPublicWearableSummaryBundle(
   vaultRoot: string,
   filters: WearableSummaryFilters | WearableMetricSummaryFilters,
@@ -149,13 +154,22 @@ export async function getQueryProjectionStatus(
 export async function rebuildQueryProjection(
   vaultRoot: string,
 ): Promise<RebuildQueryProjectionResult> {
-  return rebuildQueryProjectionFromCanonicalSource(vaultRoot);
+  return await publishQueryProjectionSections(
+    vaultRoot,
+    QUERY_PROJECTION_SECTION_NAMES,
+    async (location) => ({
+      ...(await readProjectionStatus(location, await listCanonicalSourceManifest(vaultRoot))
+        ?? emptyQueryProjectionStatus()),
+      rebuilt: true,
+    }),
+    { force: true },
+  );
 }
 
 export async function loadProjectedVaultSource(
   vaultRoot: string,
 ): Promise<VaultSourceSnapshot> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
+  const location = await ensureFreshQueryProjectionSection(vaultRoot, "entities");
   return readStoredVaultSource(location);
 }
 
@@ -163,12 +177,14 @@ export async function listCanonicalEntitiesRuntime(
   vaultRoot: string,
   filters: QueryCanonicalEntityFilters = {},
 ): Promise<import("./canonical-entities.ts").CanonicalEntity[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
+  const location = await ensureFreshQueryProjectionSection(vaultRoot, "entities");
   return listStoredCanonicalEntities(location, filters);
 }
 
-/** No global publication for an event list; limits follow tag/experiment filters
- * in the usecase. Other collection readers keep their existing projection policy.
+/** An event list never publishes: it uses the entities section when that is
+ * fresh and otherwise reads only the event sources, so a malformed record of
+ * another family cannot fail it. Limits follow tag/experiment filters in the
+ * usecase.
  */
 export async function listCanonicalEventEntitiesRuntime(
   vaultRoot: string,
@@ -176,11 +192,11 @@ export async function listCanonicalEventEntitiesRuntime(
 ): Promise<import("./canonical-entities.ts").CanonicalEntity[]> {
   const location = currentQueryProjectionLocation(vaultRoot);
   const readFreshEntities = async () => {
-    const status = await timeCliPhase("query-freshness", async () => {
+    const fresh = await timeCliPhase("query-freshness", async () => {
       const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
-      return timeCliPhase("query-status", () => readProjectionStatus(location, manifest));
+      return timeCliPhase("query-status", () => readFreshQueryProjectionSections(location, manifest));
     });
-    return status?.fresh
+    return fresh.has("entities")
       ? listStoredCanonicalEntities(location, { ...filters, family: "event", limit: null })
       : null;
   };
@@ -192,7 +208,7 @@ export async function listCanonicalEventEntitiesRuntime(
   try {
     return await withCanonicalWriteLock(vaultRoot, async () => {
       endWait();
-      // A global reader may have published while this reader waited.
+      // An entity reader may have published while this reader waited.
       const indexed = await readFreshEntities();
       if (indexed !== null) return indexed;
       // A kind filter scopes the source read itself; the filter below still
@@ -233,7 +249,7 @@ export async function searchVaultRuntime(
   query: string,
   filters: SearchFilters = {},
 ): Promise<SearchResult> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
+  const location = await ensureFreshQueryProjectionSection(vaultRoot, "entities");
   return searchQueryProjection(location, query, filters);
 }
 
@@ -241,7 +257,7 @@ export async function listMetricPointsRuntime(
   vaultRoot: string,
   filters: QueryMetricPointFilters = {},
 ): Promise<MetricPoint[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
+  const location = await ensureFreshQueryProjectionSection(vaultRoot, "metrics");
   return listStoredMetricPoints(location, normalizeMetricPointFilters(filters));
 }
 
@@ -253,7 +269,7 @@ export async function listMetricPointsBatchRuntime(
     return [];
   }
 
-  const location = await ensureFreshQueryProjection(vaultRoot);
+  const location = await ensureFreshQueryProjectionSection(vaultRoot, "metrics");
   return listStoredMetricPointsBatch(
     location,
     filtersList.map(normalizeMetricPointFilters),
@@ -269,10 +285,16 @@ export async function listMetricPointsByPublicSourceRuntime(
     to?: string;
   },
 ): Promise<Array<{ points: MetricPoint[]; provider: string }>> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
+  // These points are derived from the stored wearable rows, not from the
+  // metric tables, so this reader needs the wearables section.
   const metricKeys = new Set(input.metricKeys);
-  return input.providers.map((provider) => {
-    const bundle = readStoredPublicWearableSummaryBundle(location, {
+  const rowSets = await timeCliPhase("query-freshness", () => publishQueryProjectionSections(
+    vaultRoot,
+    ["wearables"],
+    (location) => input.providers.map((provider) => readWearableSummaryRows(location, { providers: [provider] })),
+  ));
+  return input.providers.map((provider, index) => {
+    const bundle = composePublicWearableSummaryBundleFromStoredRows(rowSets[index]!, {
       ...(input.from ? { from: input.from } : {}),
       providers: [provider],
       ...(input.to ? { to: input.to } : {}),
@@ -380,8 +402,10 @@ export async function summarizeWearableSleepPatternRuntime(
     return { rows, readFilters, resolvedFilters, vaultTimeZone };
   };
 
-  // Keep the fresh-global path unlocked. Otherwise metadata and row capture
-  // share the focused owner's reentrant boundary, without global query work.
+  // Stored metadata belongs to the entities section, so it is used only when
+  // every section is fresh, which is also when the read may skip the lock.
+  // Otherwise the vault metadata is read from source and captured with the
+  // wearable rows under one reentrant lock, without publishing entities.
   const endWait = status?.fresh ? null : startCliPhase("query-wait");
   let captured: Awaited<ReturnType<typeof captureSleepPatternInput>>;
   try {
@@ -464,7 +488,7 @@ export async function selectMetricRuntime(input: {
 }
 
 export async function listMetricTargetsRuntime(vaultRoot: string): Promise<QueryMetricTargetRow[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot);
+  const location = await ensureFreshQueryProjectionSection(vaultRoot, "metrics");
   return listStoredMetricTargets(location);
 }
 
@@ -487,65 +511,23 @@ export async function selectMetricGoalProgressRuntime(input: {
   return selectMetricGoalProgress({ goalId: target.goalId, now: input.now, points, target: target.target });
 }
 
-async function ensureFreshQueryProjection(
+/** Entity and metric readers read unlocked once their own section is
+ * certified for the current manifest. A stale one publishes that section
+ * alone under the canonical write lock. */
+async function ensureFreshQueryProjectionSection(
   vaultRoot: string,
-  readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot> = readVaultSourceStrict,
+  section: Exclude<QueryProjectionSection, "wearables">,
 ): Promise<QueryProjectionLocation> {
   const endFreshness = startCliPhase("query-freshness");
   try {
     const location = currentQueryProjectionLocation(vaultRoot);
-    const currentManifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
-    const status = await timeCliPhase("query-status", () => readProjectionStatus(location, currentManifest));
-
-    if (!status?.fresh) {
-      await rebuildStaleQueryProjection({
-        location,
-        readSource,
-        vaultRoot,
-      });
-      const rebuiltStatus = await timeCliPhase("query-status", () => readProjectionStatus(location, currentManifest));
-
-      if (!rebuiltStatus?.fresh) {
-        const refreshedManifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
-        const refreshedStatus = await timeCliPhase("query-status", () => readProjectionStatus(location, refreshedManifest));
-
-        if (!refreshedStatus?.fresh) {
-          await rebuildStaleQueryProjection({
-            location,
-            readSource,
-            vaultRoot,
-          });
-        }
-      }
+    const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+    const fresh = await timeCliPhase("query-status", () => readFreshQueryProjectionSections(location, manifest));
+    if (!fresh.has(section)) {
+      await publishQueryProjectionSections(vaultRoot, [section], () => undefined);
     }
-
     return location;
   } finally {
     endFreshness();
-  }
-}
-
-async function rebuildStaleQueryProjection(input: {
-  location: QueryProjectionLocation;
-  readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot>;
-  vaultRoot: string;
-}): Promise<void> {
-  // Acquire the existing reentrant boundary before deciding whether to rebuild.
-  // A shared pending promise can belong to a reader waiting for our own lock.
-  const endWait = startCliPhase("query-wait");
-  try {
-    await withCanonicalWriteLock(input.vaultRoot, async () => {
-      endWait();
-      const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(input.vaultRoot));
-      const status = await timeCliPhase("query-status", () => readProjectionStatus(input.location, manifest));
-      if (status?.fresh) return;
-      await timeCliPhase("query-rebuild", () => rebuildQueryProjectionFromCanonicalSource(
-        input.vaultRoot,
-        input.location,
-        input.readSource,
-      ));
-    });
-  } finally {
-    endWait();
   }
 }

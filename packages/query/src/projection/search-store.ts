@@ -116,7 +116,7 @@ export function searchQueryProjection(
   });
 
   try {
-    assertQueryProjectionTables(database, location);
+    assertQueryProjectionTables(database, location, "entities");
 
     const whereClauses: string[] = ["query_search_fts MATCH ?"];
     const parameters: Array<string | number> = [buildFtsQuery(terms)];

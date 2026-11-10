@@ -1,3 +1,4 @@
+import * as schema from "../src/projection/schema.ts";
 import assert from "node:assert/strict";
 import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
@@ -6,7 +7,7 @@ import { withImmediateTransaction } from "@murphai/runtime-state/node";
 import { test, vi } from "vitest";
 import { addMeal, initializeVault } from "@murphai/core";
 import { rebuildQueryProjection } from "../src/query-projection.ts";
-import { currentQueryProjectionLocation, openQueryProjectionDatabase } from "../src/projection/schema.ts";
+import { currentQueryProjectionLocation, ensureQueryProjectionSectionSchema, openQueryProjectionDatabase } from "../src/projection/schema.ts";
 import { insertWearableSummaryRows, readWearableSummaryRows, type QueryWearableSummaryRow } from "../src/projection/wearable-summary-store.ts";
 import { decodeWearableSummaryJson, readWearableSummaryShapes } from "../src/projection/wearable-summary-shapes.ts";
 import * as shapeStore from "../src/projection/wearable-summary-shapes.ts";
@@ -30,6 +31,7 @@ test("shared field dictionaries preserve exact summary JSON, filtered reads and 
   const rows = Array.from({ length: 1000 }, (_, index) => summary(index));
   try {
     const database = openQueryProjectionDatabase(location);
+    ensureQueryProjectionSectionSchema(database, "wearables");
     try {
       withImmediateTransaction(database, () => insertWearableSummaryRows(database, rows));
       // Separate insertion calls share existing shapes without overwriting IDs.
@@ -76,8 +78,10 @@ test("full publication rolls back and retires summary dictionaries with their ro
     const beforeRows = readWearableSummaryRows(location).rows;
     const beforeBytes = (await readFile(location.absolutePath)).length;
     await addMeal({ vaultRoot: root, occurredAt: "2026-09-01T12:00:00Z", note: "Synthetic replacement" });
-    const fail = vi.spyOn(searchStore, "insertSearchDocuments").mockImplementationOnce(() => {
-      throw new Error("synthetic failure after wearable replacement");
+    const writeMeta = schema.writeMeta;
+    const fail = vi.spyOn(schema, "writeMeta").mockImplementation((...args) => {
+      if (args[1] === "schema_version") throw new Error("synthetic failure after wearable replacement");
+      return writeMeta(...args);
     });
     try {
       await assert.rejects(rebuildQueryProjection(root), /synthetic failure/u);
@@ -140,6 +144,7 @@ test("a concurrent publication cannot mix dictionary and row generations", async
   const root = await mkdtemp(path.join(os.tmpdir(), "murph-query-shapes-snapshot-"));
   const location = currentQueryProjectionLocation(root);
   const writer = openQueryProjectionDatabase(location);
+  ensureQueryProjectionSectionSchema(writer, "wearables");
   const first = summary(0);
   const second = { ...summary(1), summaryJson: '{"differentShape":[1,2,3]}' };
   try {

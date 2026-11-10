@@ -1,3 +1,4 @@
+import { rebuildQueryProjection } from "@murphai/query";
 import assert from "node:assert/strict";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -243,7 +244,7 @@ test("narrow reads do no global work; fresh reuse survives empty results and sta
       assertEventOnly(await timed(() => list(vault)), true);
       assert.equal((await getQueryProjectionStatus(vault)).exists, false);
     }
-    const global = await timed(() => services.query.list({ vault, requestId: "synthetic-event-list-contract", limit: 40 }));
+    const global = await timed(() => rebuildQueryProjection(vault));
     assert.deepEqual([...global.phases.filter((phase) => globalPhases.includes(phase))].sort(), [...globalPhases].sort(),
       "Positive control must observe every forbidden computation on an explicit global rebuild");
     const published = await readFile(db);

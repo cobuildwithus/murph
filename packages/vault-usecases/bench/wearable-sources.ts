@@ -69,6 +69,8 @@ async function worker(checkout: string, scenario: Scenario): Promise<WorkerResul
     await import(pathToFileURL(require.resolve("@murphai/vault-usecases/vault-services")).href);
   const core: typeof import("@murphai/core") =
     await import(pathToFileURL(require.resolve("@murphai/core")).href);
+  const query: typeof import("@murphai/query") =
+    await import(pathToFileURL(require.resolve("@murphai/query")).href);
   const root = await mkdtemp(path.join(os.tmpdir(), "wearable-sources-bench-"));
   const shards = new Map<string, string[]>();
   let sourceBytes = 0;
@@ -113,8 +115,13 @@ async function worker(checkout: string, scenario: Scenario): Promise<WorkerResul
     async function read(stage: string, operation: Sample["operation"] = "source") {
       const start = performance.now();
       const cpu = process.cpuUsage();
-      // This public activity usecase invokes the ordinary FULL query owner.
-      // Its bounded public response has deterministic, redacted provenance.
+      // Include the complete entity/metric/wearable read sequence in the
+      // measured cost; activity alone now publishes only wearables.
+      if (operation === "global") {
+        await query.listCanonicalEntities(root, { limit: 1 });
+        await query.listMetricPoints(root, { limit: 1 });
+      }
+      // The bounded public activity response has deterministic provenance.
       const result = operation === "source"
         ? await service.query.listWearableSources({ vault: root, requestId: null, limit: 50 })
         : await service.query.listWearableActivity({ vault: root, requestId: null, limit: 7 });
@@ -252,13 +259,11 @@ function inspectProjection(indexPath: string): ProjectionState {
     const globalRows = tables.map(table => hasTable(table)
       ? Number(database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()!.count) : 0);
     const globalMeta = database.prepare("SELECT * FROM query_meta WHERE key != 'wearable_source_manifest' ORDER BY key").all();
-    const manifest = hasTable("query_source_manifest")
-      ? database.prepare("SELECT * FROM query_source_manifest ORDER BY relative_path").all() : [];
     const wearable = database.prepare("SELECT value FROM query_meta WHERE key = 'wearable_source_manifest'").get();
     return {
-      globalTables: [...tables, "query_source_manifest", "query_search_fts"].filter(hasTable),
+      globalTables: [...tables, "query_search_fts"].filter(hasTable),
       globalRows,
-      globalStamp: createHash("sha256").update(JSON.stringify([globalMeta, manifest, globalRows])).digest("hex"),
+      globalStamp: createHash("sha256").update(JSON.stringify([globalMeta, globalRows])).digest("hex"),
       wearableStamp: wearable ? createHash("sha256").update(String(wearable.value)).digest("hex") : null,
       built: globalMeta.some(row => row.key === "built_at"),
       version: Number(database.prepare("PRAGMA user_version").get()!.user_version),
@@ -407,7 +412,7 @@ function validateProjectionStates(result: WorkerResult, scenario: Scenario) {
   for (const state of result.projectionStates) {
     exactKeys(state, ["globalTables", "globalRows", "globalStamp", "wearableStamp", "built", "version"]);
     assert.ok(Array.isArray(state.globalTables) && state.globalTables.every(table =>
-      ["query_entities", "query_metric_points", "query_metric_targets", "query_search_document", "query_source_manifest", "query_search_fts"].includes(table)));
+      ["query_entities", "query_metric_points", "query_metric_targets", "query_search_document", "query_search_fts"].includes(table)));
     assert.equal(new Set(state.globalTables).size, state.globalTables.length);
     assert.ok(Array.isArray(state.globalRows) && state.globalRows.length === 4 &&
       state.globalRows.every(count => Number.isSafeInteger(count) && count >= 0));
@@ -446,7 +451,7 @@ function addPair(record: PairResult, records: PairResult[]) {
   if (scenario === "source-only") {
     const [partial, full, invalidated] = after.projectionStates;
     assert.ok(partial && full && invalidated);
-    assert.equal(partial.version, 28);
+    assert.equal(partial.version, 38);
     assert.deepEqual(partial.globalTables, [], "partial replacement must fail closed for older global readers");
     assert.deepEqual(partial.globalRows, [0, 0, 0, 0], "source-only must not publish global rows");
     assert.equal(partial.built, false, "source-only must not certify a global build");
@@ -457,8 +462,8 @@ function addPair(record: PairResult, records: PairResult[]) {
     assert.equal(invalidated.globalStamp, full.globalStamp, "source-only must not refresh or certify stale global work");
     assert.notEqual(invalidated.wearableStamp, full.wearableStamp);
     assert.ok(invalidated.wearableStamp);
-    assert.equal(full.version, 28);
-    assert.equal(invalidated.version, 28);
+    assert.equal(full.version, 38);
+    assert.equal(invalidated.version, 38);
     assert.equal(invalidated.built, full.built);
     assert.deepEqual(invalidated.globalTables, full.globalTables);
     assert.deepEqual(invalidated.globalRows, full.globalRows);

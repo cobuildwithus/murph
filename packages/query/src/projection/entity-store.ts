@@ -70,7 +70,7 @@ export function readStoredVaultSource(
   });
 
   try {
-    assertQueryProjectionTables(database, location);
+    assertQueryProjectionTables(database, location, "entities");
 
     const entityRows = database.prepare(`
       SELECT entity_json
@@ -99,7 +99,7 @@ export function readStoredVaultMetadata(
   });
 
   try {
-    assertQueryProjectionTables(database, location);
+    assertQueryProjectionTables(database, location, "entities");
     return parseJsonValue<QueryRecordData | null>(readMeta(database, "metadata_json"), null);
   } finally {
     database.close();
@@ -116,7 +116,7 @@ export function listStoredCanonicalEntities(
   });
 
   try {
-    assertQueryProjectionTables(database, location);
+    assertQueryProjectionTables(database, location, "entities");
     return queryStoredCanonicalEntities(database, filters);
   } finally {
     database.close();

@@ -1,3 +1,6 @@
+import { readFreshQueryProjectionSections } from "../src/projection/freshness.ts";
+import { currentQueryProjectionLocation, QUERY_PROJECTION_SECTIONS, QUERY_PROJECTION_SECTION_NAMES } from "../src/projection/schema.ts";
+import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -87,14 +90,20 @@ async function databaseStats(scenario: string) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     const scalar = (sql: string) => Object.values(db.prepare(sql).get() ?? {})[0] ?? null;
+    const rows = (table: string) => db.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(table)
+      ? scalar(`SELECT count(*) FROM ${table}`) : null;
+    const sourceFilesBySection = Object.fromEntries(QUERY_PROJECTION_SECTION_NAMES.map(section => {
+      const certificate = db.prepare("SELECT value FROM query_meta WHERE key = ?").get(QUERY_PROJECTION_SECTIONS[section].certificateKey);
+      return [section, certificate ? JSON.parse(String(certificate.value)).length : null];
+    }));
     emit(scenario, {
       dbBytes, zstdBytes: compressedBytes(dbPath), walBytes, shmBytes, exists: true,
       pageCount: scalar("PRAGMA page_count"), freeListCount: scalar("PRAGMA freelist_count"),
       pageSize: scalar("PRAGMA page_size"), userVersion: scalar("PRAGMA user_version"),
-      entityRows: scalar("SELECT count(*) FROM query_entities"),
-      metricRows: scalar("SELECT count(*) FROM query_metric_points"),
-      sourceFiles: scalar("SELECT count(*) FROM query_source_manifest"),
-      searchRows: scalar("SELECT count(*) FROM query_search_document"),
+      entityRows: rows("query_entities"),
+      metricRows: rows("query_metric_points"),
+      sourceFilesBySection,
+      searchRows: rows("query_search_document"),
     });
   } finally { db.close(); }
 }
@@ -163,7 +172,9 @@ async function verifyAll(count: number, corrected: boolean, scenario: string) {
 async function warmReads(scenario: string) {
   let expected: string | undefined;
   const before = await getQueryProjectionStatus(vaultRoot);
-  assert.equal(before.fresh, true);
+  assert.equal((await readFreshQueryProjectionSections(
+    currentQueryProjectionLocation(vaultRoot), await listCanonicalSourceManifest(vaultRoot),
+  )).has("metrics"), true);
   // Forcing GC before each short query can consume the same CPU quota period
   // and manufacture a post-GC stall outside the operation being measured.
   for (let run = 0; run < warmRuns; run++) {
@@ -177,7 +188,10 @@ async function warmReads(scenario: string) {
     emit(`${scenario}-result-${run}`, { rows: points.length, semanticSha256: hash });
   }
   const after = await getQueryProjectionStatus(vaultRoot);
-  assert.equal(after.fresh, true);
+  assert.equal((await readFreshQueryProjectionSections(
+    currentQueryProjectionLocation(vaultRoot), await listCanonicalSourceManifest(vaultRoot),
+  )).has("metrics"), true);
+  assert.deepEqual(after, before);
   assert.equal(after.builtAt, before.builtAt);
 }
 

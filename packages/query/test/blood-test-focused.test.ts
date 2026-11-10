@@ -1,3 +1,5 @@
+import { readFreshQueryProjectionSections } from "../src/projection/freshness.ts";
+import { currentQueryProjectionLocation } from "../src/projection/schema.ts";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -44,7 +46,7 @@ async function measuredList(root: string, options: Parameters<typeof listBloodTe
   return value;
 }
 
-test("blood lists classify/filter before limit, preserve aliases, dates, ordering and full global parity", async () => {
+test("blood lists classify/filter before limit, preserve aliases, dates, ordering and stored entity parity", async () => {
   const { root, rows } = await fixture();
   const options = [{}, { text: "TARGET", limit: 1 }, { from: "2026-03-04", to: "2026-03-04" },
     { text: "target", status: "mixed", limit: 1 }, { text: "missing" }, { limit: 0 }];
@@ -57,7 +59,9 @@ test("blood lists classify/filter before limit, preserve aliases, dates, orderin
   assert.equal((await showBloodTest(root, "synthetic-alias"))?.id, "evt_target_b");
   assert.equal((await getQueryProjectionStatus(root)).exists, false);
   await listCanonicalEntities(root, { limit: null });
-  assert.equal((await getQueryProjectionStatus(root)).fresh, true);
+  assert.deepEqual([...await readFreshQueryProjectionSections(
+    currentQueryProjectionLocation(root), await source.listCanonicalSourceManifest(root),
+  )], ["entities"]);
   let database = await readFile(path.join(root, QUERY_DB_RELATIVE_PATH));
   assert.deepEqual(await Promise.all(options.map(selection => measuredList(root, selection))), cold);
   assert.deepEqual(await readFile(path.join(root, QUERY_DB_RELATIVE_PATH)), database);
@@ -71,11 +75,13 @@ test("blood lists classify/filter before limit, preserve aliases, dates, orderin
     if (revision === 2) assert.equal(corrected[0]?.title, "Corrected target");
     assert.deepEqual(await readFile(path.join(root, QUERY_DB_RELATIVE_PATH)), database);
     assert.equal((await getQueryProjectionStatus(root)).fresh, false);
-    // Explicit global work is still required, not silently certified by the list.
+    // Explicit entity publication is still required, not silently certified by the list.
     await listCanonicalEntities(root, { limit: null });
-    assert.equal((await getQueryProjectionStatus(root)).fresh, true);
+    assert.deepEqual([...await readFreshQueryProjectionSections(
+      currentQueryProjectionLocation(root), await source.listCanonicalSourceManifest(root),
+    )], ["entities"]);
     assert.equal(JSON.stringify(await measuredList(root)), JSON.stringify(corrected));
-    // Compare the next stale read against this last committed global generation.
+    // Compare the next stale read against this last committed entity generation.
     database = await readFile(path.join(root, QUERY_DB_RELATIVE_PATH));
   }
 });
@@ -138,5 +144,7 @@ test("empty blood history stays empty without creating a global projection", asy
   assert.equal((await getQueryProjectionStatus(root)).exists, false);
   await listCanonicalEntities(root);
   assert.deepEqual(await measuredList(root), []);
-  assert.equal((await getQueryProjectionStatus(root)).fresh, true);
+  assert.deepEqual([...await readFreshQueryProjectionSections(
+    currentQueryProjectionLocation(root), await source.listCanonicalSourceManifest(root),
+  )], ["entities"]);
 });

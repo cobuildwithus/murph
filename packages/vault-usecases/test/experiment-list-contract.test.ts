@@ -141,8 +141,11 @@ test("relevant canonical edits and status transitions are visible without publis
     }
     assert.equal(full.mock.calls.length, 0);
     assert.deepEqual(family.mock.calls, Array.from({ length: 3 }, () => [vault, "experiment"]));
-    const positive = await timed(() => globalRead(vault));
-    for (const phase of forbidden.filter(phase => phase !== "query-source-read")) assert.ok(positive.phases.includes(phase), phase);
+    const positive = await timed(async () => {
+      await query.rebuildQueryProjection(vault);
+      return globalRead(vault);
+    });
+    for (const phase of forbidden) assert.ok(positive.phases.includes(phase), phase);
     const db = path.join(vault, QUERY_DB_RELATIVE_PATH);
     const bytes = await readFile(db);
     for (const status of EXPERIMENT_STATUSES) {

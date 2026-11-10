@@ -1,3 +1,4 @@
+import { listCanonicalSourceManifest } from '@murphai/query'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
@@ -751,7 +752,7 @@ test('query projection status ignores inbox runtime sqlite state and rebuild lea
   }
 })
 
-test('search query rebuilds the projection automatically when canonical files change', async () => {
+test('search query refreshes its entity section automatically when canonical files change', async () => {
   const fixture = await makeRetrievalFixture()
   const journalFilePath = path.join(fixture.vaultRoot, fixture.journalPath)
 
@@ -843,7 +844,17 @@ Steady energy after saffron tea.
       true,
     )
     assert.equal(projectionStatus.ok, true)
-    assert.equal(requireData(projectionStatus).fresh, true)
+    assert.equal(requireData(projectionStatus).fresh, false)
+    const manifest = await listCanonicalSourceManifest(fixture.vaultRoot)
+    const certificate = JSON.stringify(manifest.map(({ relativePath, sizeBytes, mtimeMs }) =>
+      [relativePath, sizeBytes, mtimeMs]))
+    const database = openDatabaseSync(path.join(fixture.vaultRoot, '.runtime/projections/query.sqlite'))
+    try {
+      const meta = database.prepare('SELECT value FROM query_meta WHERE key = ?')
+      assert.equal(meta.get('entity_source_manifest')?.value, certificate)
+      assert.notEqual(meta.get('metric_source_manifest')?.value, certificate)
+      assert.notEqual(meta.get('wearable_source_manifest')?.value, certificate)
+    } finally { database.close() }
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }

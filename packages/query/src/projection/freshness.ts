@@ -7,25 +7,18 @@ import type {
 } from "../query-projection-types.ts";
 import type { QuerySourceManifestEntry } from "../vault-source.ts";
 import {
+  QUERY_PROJECTION_SECTIONS,
+  QUERY_PROJECTION_SECTION_NAMES,
   countRows,
   emptyQueryProjectionStatus as emptySchemaQueryProjectionStatus,
-  expectNumber,
-  expectString,
   type DatabaseSync,
   hasCurrentQueryProjectionSchema,
-  hasQueryProjectionTables,
+  hasQueryProjectionSectionTables,
   openQueryProjectionDatabase,
   readMeta,
-  writeMeta,
   type QueryProjectionLocation,
-  type SqliteRow,
+  type QueryProjectionSection,
 } from "./schema.ts";
-
-interface QuerySourceManifestRow {
-  mtimeMs: number;
-  relativePath: string;
-  sizeBytes: number;
-}
 
 export { emptySchemaQueryProjectionStatus as emptyQueryProjectionStatus };
 
@@ -64,130 +57,69 @@ export async function resetUnsupportedQueryProjection(
   ]);
 }
 
+/** Status of the whole projection. `fresh` means every section is certified
+ * for the current manifest; readers that need one section ask for that one. */
 export async function readProjectionStatus(
   location: QueryProjectionLocation,
   currentManifest: readonly QuerySourceManifestEntry[],
 ): Promise<QueryProjectionStatus | null> {
-  if (!(await hasLocalStatePath({ currentPath: location.absolutePath }))) {
-    return null;
-  }
-
-  let database: DatabaseSync | undefined;
-
-  try {
-    database = openQueryProjectionDatabase(location, {
-      create: false,
-      readOnly: true,
-    });
-
-    const hasGlobalTables = hasQueryProjectionTables(database);
-    if (!hasGlobalTables && !hasCurrentQueryProjectionSchema(database)) return null;
+  return await readQueryProjection(location, (database) => {
+    const hasEntities = hasQueryProjectionSectionTables(database, "entities");
+    if (!hasEntities && !hasCurrentQueryProjectionSchema(database)) return null;
 
     return {
       dbPath: location.dbPath,
       exists: true,
       schemaVersion: readMeta(database, "schema_version"),
       builtAt: readMeta(database, "built_at"),
-      entityCount: hasGlobalTables ? countRows(database, "query_entities") : 0,
-      searchDocumentCount: hasGlobalTables ? countRows(database, "query_search_document") : 0,
-      fresh:
-        hasGlobalTables &&
-        hasCurrentQueryProjectionSchema(database) &&
-        readMeta(database, "built_at") !== null &&
-        sameSourceManifest(currentManifest, readStoredSourceManifest(database)) &&
-        wearableSourceManifestMatches(database, currentManifest),
+      entityCount: hasEntities ? countRows(database, "query_entities") : 0,
+      searchDocumentCount: hasEntities ? countRows(database, "query_search_document") : 0,
+      fresh: freshSections(database, currentManifest).size === QUERY_PROJECTION_SECTION_NAMES.length,
     };
+  });
+}
+
+/** The sections whose certificate is the current canonical manifest. A section
+ * that was never published has no certificate, so it is never fresh, even for
+ * an empty manifest. */
+export async function readFreshQueryProjectionSections(
+  location: QueryProjectionLocation,
+  currentManifest: readonly QuerySourceManifestEntry[],
+): Promise<ReadonlySet<QueryProjectionSection>> {
+  return await readQueryProjection(location, (database) => freshSections(database, currentManifest))
+    ?? new Set();
+}
+
+/** Committed with a section's rows as its certificate. */
+export function encodeSourceManifest(manifest: readonly QuerySourceManifestEntry[]): string {
+  return JSON.stringify(manifest.map(({ relativePath, sizeBytes, mtimeMs }) =>
+    [relativePath, sizeBytes, mtimeMs]));
+}
+
+function freshSections(
+  database: DatabaseSync,
+  currentManifest: readonly QuerySourceManifestEntry[],
+): Set<QueryProjectionSection> {
+  if (!hasCurrentQueryProjectionSchema(database)) return new Set();
+  const certificate = encodeSourceManifest(currentManifest);
+  return new Set(QUERY_PROJECTION_SECTION_NAMES.filter((section) =>
+    hasQueryProjectionSectionTables(database, section)
+    && readMeta(database, QUERY_PROJECTION_SECTIONS[section].certificateKey) === certificate));
+}
+
+/** A missing or unreadable store answers null, never an error. */
+async function readQueryProjection<T>(
+  location: QueryProjectionLocation,
+  read: (database: DatabaseSync) => T,
+): Promise<T | null> {
+  if (!(await hasLocalStatePath({ currentPath: location.absolutePath }))) return null;
+  let database: DatabaseSync | undefined;
+  try {
+    database = openQueryProjectionDatabase(location, { create: false, readOnly: true });
+    return read(database);
   } catch {
     return null;
   } finally {
     database?.close();
   }
-}
-
-/** The same canonical manifest contract, independently certified for wearable
- * rows in the existing metadata owner. No timestamp or global freshness proxy. */
-export async function isWearableProjectionFresh(
-  location: QueryProjectionLocation,
-  currentManifest: readonly QuerySourceManifestEntry[],
-): Promise<boolean> {
-  if (!(await hasLocalStatePath({ currentPath: location.absolutePath }))) return false;
-  let database: DatabaseSync | undefined;
-  try {
-    database = openQueryProjectionDatabase(location, { create: false, readOnly: true });
-    return hasCurrentQueryProjectionSchema(database)
-      && wearableSourceManifestMatches(database, currentManifest);
-  } catch {
-    return false;
-  } finally {
-    database?.close();
-  }
-}
-
-/** Must be committed in the same transaction as the corresponding rows. */
-export function writeWearableSourceManifest(
-  database: DatabaseSync,
-  currentManifest: readonly QuerySourceManifestEntry[],
-): void {
-  writeMeta(database, "wearable_source_manifest", encodeSourceManifest(currentManifest));
-}
-
-function wearableSourceManifestMatches(
-  database: DatabaseSync,
-  currentManifest: readonly QuerySourceManifestEntry[],
-): boolean {
-  return readMeta(database, "wearable_source_manifest") === encodeSourceManifest(currentManifest);
-}
-
-function encodeSourceManifest(manifest: readonly QuerySourceManifestEntry[]): string {
-  return JSON.stringify(manifest.map(({ relativePath, sizeBytes, mtimeMs }) =>
-    [relativePath, sizeBytes, mtimeMs]));
-}
-
-function sameSourceManifest(
-  currentManifest: readonly QuerySourceManifestEntry[],
-  storedManifest: readonly QuerySourceManifestEntry[],
-): boolean {
-  if (currentManifest.length !== storedManifest.length) {
-    return false;
-  }
-
-  for (let index = 0; index < currentManifest.length; index += 1) {
-    const current = currentManifest[index];
-    const stored = storedManifest[index];
-
-    if (!stored) {
-      return false;
-    }
-
-    if (
-      current.relativePath !== stored.relativePath ||
-      current.sizeBytes !== stored.sizeBytes ||
-      current.mtimeMs !== stored.mtimeMs
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function readStoredSourceManifest(
-  database: DatabaseSync,
-): QuerySourceManifestEntry[] {
-  return database.prepare(`
-    SELECT
-      relative_path AS relativePath,
-      size_bytes AS sizeBytes,
-      mtime_ms AS mtimeMs
-    FROM query_source_manifest
-    ORDER BY relative_path ASC
-  `).all().map((row) => decodeQuerySourceManifestRow(row));
-}
-
-function decodeQuerySourceManifestRow(row: SqliteRow): QuerySourceManifestRow {
-  return {
-    relativePath: expectString(row.relativePath, "query_source_manifest.relativePath"),
-    sizeBytes: expectNumber(row.sizeBytes, "query_source_manifest.sizeBytes"),
-    mtimeMs: expectNumber(row.mtimeMs, "query_source_manifest.mtimeMs"),
-  };
 }

@@ -12,6 +12,8 @@ import {
   summarizeWearableSleepRuntime,
 } from "../src/query-projection.ts";
 import { readFreshWearableSummaryRows } from "../src/projection/rebuild.ts";
+import { readFreshQueryProjectionSections } from "../src/projection/freshness.ts";
+import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 import { currentQueryProjectionLocation } from "../src/projection/schema.ts";
 import { composePublicWearableSummaryBundleFromStoredRows } from "../src/projection/wearable-summary-compose.ts";
 import { readWearableSummaryRows } from "../src/projection/wearable-summary-store.ts";
@@ -215,6 +217,9 @@ try {
   await seed(vaultRoot);
   await cp(vaultRoot, referenceRoot, { recursive: true });
   await summarizeWearableSleepRuntime(vaultRoot, {}); // initial wearable publication
+  assert.deepEqual([...await readFreshQueryProjectionSections(
+    currentQueryProjectionLocation(vaultRoot), await listCanonicalSourceManifest(vaultRoot),
+  )], ["wearables"]);
   for (const { name, filters } of CASES) {
     const oracle = (await measure("full-rows", vaultRoot, filters)).json;
     console.log(JSON.stringify({ case: name, phase: "materialization", ...materialized(vaultRoot, filters) }));

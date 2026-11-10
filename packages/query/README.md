@@ -10,6 +10,42 @@ with a separate pending promise: a lock owner could join a reader waiting for
 that same lock. The `query-wait` timing span measures acquisition;
 `query-rebuild` measures actual rebuilding.
 
+SQLite version **38** publishes three independent sections. Their definitions
+live in `src/projection/schema.ts`:
+
+| Section | Owned tables | Certificate in `query_meta` |
+| --- | --- | --- |
+| `entities` | `query_entities`, `query_search_document`, `query_search_fts` | `entity_source_manifest` |
+| `metrics` | `query_metric_payloads`, `query_metric_points`, `query_metric_targets` | `metric_source_manifest` |
+| `wearables` | `query_wearable_summary_shapes`, `query_wearable_summaries` | `wearable_source_manifest` |
+
+Entities also own `metadata_json` and `built_at`. Opening a store creates only
+`query_meta`; each section's first publication creates its tables, inserts its
+rows and writes its certificate in one immediate transaction. Certificates
+encode the ordered canonical manifest of paths, sizes and mtimes. Missing
+certificates remain stale, even with an empty manifest or existing empty tables.
+`getQueryProjectionStatus().fresh` means all three sections are fresh; entity
+and search-document counts describe the entities section independently.
+
+`publishQueryProjectionSections()` rechecks the requested sections under the
+canonical write lock, reads one strict source snapshot, derives stale sections,
+then publishes and captures the caller's rows before releasing the lock.
+Validation and derivation finish before an unsupported cache is reset. Entity
+readers publish only entities; generic metric readers publish only metrics.
+Provider-specific metric points come from wearable rows and use locked wearable
+capture. Search summarizes display-grade samples directly when metrics are not
+being built. A combined publication shares sample summaries and collects the
+wearable dataset once for metrics and wearables.
+
+Explicit `rebuildQueryProjection()` forces all three sections, including fresh
+ones. Ordinary publication reuses requested sections whose certificates match.
+Entity and metric readers do one unlocked manifest/status check and, when stale,
+one locked recheck and publication. CLI phase names stay unchanged: entities
+record source read, search documents and publication; metrics add the dataset
+and metric phases; wearables add the dataset and summary phases. Each publication
+that replaces entities or metrics runs `VACUUM` after commit. Separate entity
+and metric reads can therefore each read source and compact the database.
+
 Query SQLite version 30 rebuilds the derived cache with a partial biomarker
 index: metric points without a biomarker key remain queryable but occupy no
 biomarker-index entries. Writable query connections enable SQLite
@@ -25,7 +61,7 @@ Version 31 creates query databases with 8 KiB pages to reduce overflow-page
 waste for JSON-heavy rows. The four standalone entity/search date indexes are
 omitted: existing date predicates use `COALESCE`/`substr`, while lexical search
 uses FTS rowids. Family/kind, metric, and wearable range indexes remain. The version reset creates this page-size layout. Runtime SQLite stores outside query retain their default page size.
-Version 32 stores identical compact metric payloads once per full publication in
+Version 32 stores identical compact metric payloads once per metric publication in
 `query_metric_payloads`; metric rows retain their indexed scalars and reference
 payloads by integer key. The existing metric query joins the payload table, using
 the same codec, filters, order and limits. Replacement deletes metric rows before
@@ -67,7 +103,7 @@ rows in `query_wearable_summary_shapes`. Tagged object/array values preserve all
 summary facts and internal composition evidence; public summary JSON is unchanged.
 Replacement clears rows and dictionaries in the same transaction. Readers load
 both under one read transaction, including when a writer publishes concurrently.
-Full rebuilds run SQLite `VACUUM` after publication, while holding the existing
+Entity and metric publications run SQLite `VACUUM` after commit, while holding the existing
 canonical writer lock, to reclaim pages and improve snapshot compression. Search
 documents use an explicit integer primary rowid so compaction preserves their
 external-content FTS references. SQLite owns compaction's atomic write; a failed
@@ -86,8 +122,8 @@ family, and exact canonical ids retain precedence over aliases. Collection
 reads that still need projection freshness should use filtered APIs such as
 `listCanonicalEntities()` rather than materializing the complete vault model.
 
-Event listing uses `listCanonicalEventEntities()` to reuse an already-fresh
-indexed projection without forcing a rebuild. If missing, stale, unsupported or
+Event listing uses `listCanonicalEventEntities()` to reuse a fresh entities
+section without forcing a rebuild. If missing, stale, unsupported or
 wearable-only, it takes the same reentrant canonical write lock, rechecks freshness,
 and reads `readCanonicalEntityFamilySource(vaultRoot, "event")` when still needed.
 The lock covers strict source capture, lifecycle collapse, visibility and selection;
@@ -104,7 +140,7 @@ filter through when it falls back to the source read.
 Event-source errors remain strict; malformed unrelated families no longer block
 this event-only read. Explicit global readers retain their existing strict errors
 and rebuild policy. No other collection endpoint changes. Manifest/status checks
-still inspect shared freshness, and repeated stale event reads reread the ledger.
+inspect the entities certificate, and repeated stale event reads reread the ledger.
 
 Experiment listing reads `readCanonicalEntityFamilySource(vaultRoot, "experiment")`
 under core's reentrant canonical write lock, including when a global index is
@@ -149,9 +185,8 @@ the existing projection owner; canonical records are unchanged.
 Day, latest, metric latest/trend, drift, activity, body and recovery runtime
 readers use the private `readFreshPublicWearableSummaryBundle()` helper. Its
 unlocked preflight uses the same `readProjectionStatus()` predicate as the old
-ordinary global path: current schema/version, complete global tables, non-null
-built-at, exact canonical manifest and matching wearable manifest. Only when
-that full predicate is fresh does it use the old stored bundle read without
+ordinary path: current schema/version and all three sections with matching
+certificates and complete tables. Only when that full predicate is fresh does it use the old stored bundle read without
 acquiring or waiting for the canonical writer lock.
 
 Otherwise `readFreshWearableSummaryRows()` remains the synchronous owner of the
@@ -192,11 +227,13 @@ all these readers. Corrections, deletions, unrelated ledger edits and timestamp-
 only manifest changes still invalidate freshness. This preserves the timestamp
 contract; it does not assert how frequently timestamp-only changes occur in
 production or introduce a restore workaround. Even an empty selected provider
-scope must validate stale canonical input. No new staleness heuristic or schema.
+scope must validate stale canonical input. Every canonical manifest change
+invalidates section freshness.
 
 Cold/stale ordinary reads publish no global metrics/targets, entities/search,
-global completion metadata or `VACUUM`. A later explicit global operation must
-still do its distinct work and compaction, reusing current wearable rows. This
+entity metadata or `VACUUM`. Later entity and metric reads still do their own
+work and compaction, reusing current wearable rows. An explicit full rebuild
+forces all sections. This
 avoids global work for wearable-only workflows and defers it for mixed workflows;
 complete mixed costs must include that later work. Fresh global rows remain
 reusable without the new lock wait introduced by the first implementation packet.
@@ -225,8 +262,10 @@ non-overlapping freshness spans on fallback, with the latter including lock wait
 and required refresh work. Manifest/status subspans remain inclusive; do not add
 them to their parent spans or omit the extra preflight from workflow costs.
 
-Sleep-pattern remains outside this patch because it also owns current timezone
-metadata capture. See the
+Sleep-pattern also captures current timezone metadata. It uses stored entity
+metadata only when all sections are fresh; otherwise it reads canonical metadata
+and captures wearable rows under one reentrant lock, without publishing entities.
+See the
 [ordinary-read and whole-rebuild proof](../vault-usecases/bench/global-projection.md)
 for the eight-reader oracle, real CLI/assistant gates, exact byte comparisons,
 phase counts and paired workflow measurement. Parent evidence is required before
@@ -236,7 +275,7 @@ claiming a measured improvement. The historical
 ### Blood-test lists and Browser Vault reuse
 
 `listBloodTests()` acquires unlimited test events through the existing
-`listCanonicalEventEntitiesRuntime()` owner. Fresh global indexed rows remain a
+`listCanonicalEventEntitiesRuntime()` owner. Fresh entity-section rows remain a
 read accelerator; otherwise that owner captures strict current events under the
 reentrant canonical lock without publishing any projection. Every stale repeat
 re-reads events; no stale facts or new cache is introduced. Blood classification,
@@ -293,30 +332,22 @@ lock. Subsequent reads reuse them without rereading canonical records or
 rebuilding provider bundles. Composition runs after capture; an outer lock owner
 retains its own lock. No reader joins a shared pending promise.
 
-Source-only publication does not extract global metrics/targets, materialize
-entities/search documents, or update their rows, `query_source_manifest`,
-`metadata_json` or `built_at`. A missing store gets only the existing wearable
-table/indexes and metadata table; global tables remain absent. Global status
-requires an actual completed global build,
-its matching source manifest, and matching wearable freshness. A partial build
-cannot certify an empty global index, even for an empty canonical manifest.
-An invalidated existing global index remains stale until its own work completes.
+Source-only publication replaces wearable rows, their shape dictionary and the
+wearable certificate. Entity and metric tables, their certificates, `metadata_json`
+and `built_at` retain their prior generation. A missing store gets only wearable
+tables and `query_meta`; full status remains stale until every section publishes.
 
-Full query rebuilds check the same wearable manifest and retain already-current
-provider rows without deriving, encoding or inserting them again. Global metrics
-still derive their distinct evidence from the full snapshot; they are not
-replaced with public wearable summaries. Both read orders, including writes,
-are covered by the composed benchmark. All refresh work remains synchronous and
-is reported through existing CLI timing phases, including `query-rebuild`.
+A non-forced publication of all sections retains current provider rows without
+deriving, encoding or inserting them again. An explicit full rebuild forces
+wearable publication too. Metrics derive their own evidence from the strict
+snapshot. Both read orders, including writes, are covered by the composed
+benchmark. All refresh work remains synchronous and uses existing timing phases.
 
-SQLite version **28** gates this partial-publication contract. Version 27 full
-rebuilders and version 28 readers use the existing unsupported-version reset
-seam when switching generations, then rebuild only derived state. Absent global
-tables also make an older in-flight global reader fail its existing table guard
-if it checked freshness before the reset. Full schema creation and publication
-share one transaction, so failed promotion cannot leave empty global tables.
-A wall-clock
-`built_at` value is a global completion marker, never generation identity.
+Version 38 uses the existing unsupported-version reset for upgrade and rollback.
+The legacy manifest table is absent, so a v37 reader already past its freshness
+check still fails its old required-table guard on a replacement store. Section
+schema creation and row publication share one transaction. `built_at` records
+entity publication time; section certificates decide freshness.
 Missing/corrupt wearable metadata is stale; unsupported/unreadable databases
 are reset. Malformed stored activity evidence fails closed through the existing
 codec. Strict canonical errors propagate unchanged, including empty provider

@@ -112,7 +112,7 @@ export function readWearableSummaryRows(
     // Dictionary and rows belong to one generation, even during a concurrent
     // publication. Closing this read-only connection ends its read transaction.
     database.exec("BEGIN");
-    assertQueryProjectionTables(database, location, "wearable");
+    assertQueryProjectionTables(database, location, "wearables");
 
     return {
       providerFilterWasProvided,

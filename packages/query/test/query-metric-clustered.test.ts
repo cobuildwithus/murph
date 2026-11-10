@@ -1,3 +1,5 @@
+import { readFreshQueryProjectionSections } from "../src/projection/freshness.ts";
+import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -13,6 +15,7 @@ import { insertMetricPoints, listStoredMetricPoints } from "../src/projection/me
 import {
   QUERY_PROJECTION_SQLITE_VERSION,
   currentQueryProjectionLocation,
+  ensureQueryProjectionSectionSchema,
   openQueryProjectionDatabase,
   type DatabaseSync,
 } from "../src/projection/schema.ts";
@@ -111,7 +114,7 @@ test("a populated v35 file rebuilds to the current schema through an ordinary me
   assert.deepEqual(listStoredMetricPoints(location, { limit: null }), expected);
   assert.equal((await getQueryProjectionStatus(root)).fresh, false);
   assert.deepEqual(await listMetricPoints(root, { limit: null }), expected);
-  assert.equal((await getQueryProjectionStatus(root)).fresh, true);
+  assert.deepEqual([...await readFreshQueryProjectionSections(location, await listCanonicalSourceManifest(root))], ["metrics"]);
   const rebuilt = openQueryProjectionDatabase(location, { readOnly: true });
   try {
     assert.equal(rebuilt.prepare("PRAGMA user_version").get()?.user_version, QUERY_PROJECTION_SQLITE_VERSION);
@@ -128,6 +131,7 @@ test("clustered metric reads match v35 byte for byte across filters, limits and 
   const points = Array.from({ length: 240 }, (_, index) => point(index));
   for (const location of [current, legacy]) {
     const database = openQueryProjectionDatabase(location);
+    ensureQueryProjectionSectionSchema(database, "metrics");
     try {
       withImmediateTransaction(database, () => insertMetricPoints(database, points));
       if (location === legacy) restoreV35MetricTable(database);
@@ -147,6 +151,7 @@ test("clustered metric reads match v35 byte for byte across filters, limits and 
     }
   }
   const database = openQueryProjectionDatabase(current, { readOnly: true });
+  ensureQueryProjectionSectionSchema(database, "metrics");
   try {
     const plan = database.prepare(`
       EXPLAIN QUERY PLAN SELECT id, metric_point_json FROM query_metric_points
@@ -166,6 +171,7 @@ test.each([
   { observedAt: "2026-09-01T18:00:00Z" },
 ])("duplicate IDs across clustered key components still abort publication: %j", async override => {
   const database = openQueryProjectionDatabase(currentQueryProjectionLocation(await tempRoot()));
+  ensureQueryProjectionSectionSchema(database, "metrics");
   try {
     const original = point(0);
     assert.throws(() => withImmediateTransaction(database, () => insertMetricPoints(database, [

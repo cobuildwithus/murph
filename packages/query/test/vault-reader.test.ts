@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -14,7 +14,7 @@ import {
 import { readVault, readVaultRawTolerant, readVaultTolerant } from "../src/model.ts";
 import {
   QUERY_PROJECTION_SCHEMA_ID,
-  ensureQueryProjectionSchema,
+  ensureQueryProjectionSectionSchema,
 } from "../src/projection/schema.ts";
 import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 
@@ -108,6 +108,7 @@ test("readVault invalidates legacy v5 projections before strict reads", async ()
     );
     await writeVaultFile(vaultRoot, assessmentPath, "0");
     await seedLegacyV5QueryProjection(vaultRoot);
+    const priorProjection = await readFile(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH));
 
     const absoluteAssessmentPath = path.join(vaultRoot, assessmentPath);
     const before = await stat(absoluteAssessmentPath);
@@ -118,6 +119,8 @@ test("readVault invalidates legacy v5 projections before strict reads", async ()
       () => readVault(vaultRoot),
       /Canonical vault source ledger\/assessments\/2026\/2026-04\.jsonl:1 is invalid/u,
     );
+    assert.deepEqual(await readFile(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH)), priorProjection,
+      "strict source failure must precede destructive version reset");
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
@@ -130,7 +133,9 @@ async function seedLegacyV5QueryProjection(vaultRoot: string): Promise<void> {
   );
 
   try {
-    ensureQueryProjectionSchema(database);
+    database.exec(`CREATE TABLE query_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE query_source_manifest (relative_path TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL, mtime_ms REAL NOT NULL);`);
+    ensureQueryProjectionSectionSchema(database, "entities");
     database.exec("PRAGMA user_version = 5;");
     database.prepare(`
       INSERT INTO query_meta (key, value)

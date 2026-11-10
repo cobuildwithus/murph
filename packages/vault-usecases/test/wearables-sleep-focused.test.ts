@@ -18,7 +18,7 @@ function globalSnapshot(root: string) {
   const database = new DatabaseSync(path.join(root, ".runtime/projections/query.sqlite"), { readOnly: true });
   try {
     const tables = ["query_entities", "query_metric_points", "query_metric_payloads", "query_metric_targets",
-      "query_source_manifest", "query_search_document", "query_search_fts"].filter(table =>
+      "query_search_document", "query_search_fts"].filter(table =>
       database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
     return {
       tables,
@@ -64,7 +64,8 @@ test("focused sleep publishes only wearables, preserves stale globals and reuses
       const global = await traceSleepRead(timing, "wearables activity list", () => readGlobalProof(services, query, root, days));
       assert.equal(global.phases["query-metric-projection"], 1);
       assert.equal(global.phases["query-search-documents"], 1);
-      assert.equal(global.phases["query-publication"], 1);
+      // This composed read requests entities and metrics independently.
+      assert.equal(global.phases["query-publication"], 2);
       assert.equal(global.phases["query-wearable-summary"] ?? 0, 0);
       assert.deepEqual(fingerprint(global.value), fingerprint(await readGlobalProof(services, query, reference, days)));
       assert.equal((await query.getQueryProjectionStatus(root)).fresh, true);

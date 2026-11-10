@@ -1,3 +1,5 @@
+import { currentQueryProjectionLocation } from "../src/projection/schema.ts";
+import { readFreshQueryProjectionSections } from "../src/projection/freshness.ts";
 import { createWearableSummaryEncoder, decodeWearableSummaryJson, readWearableSummaryShapes } from "../src/projection/wearable-summary-shapes.ts";
 import { readVaultSourceStrict } from "../src/vault-source.ts";
 import assert from "node:assert/strict";
@@ -5014,11 +5016,7 @@ test("ordinary wearable reads rebuild carried v22 sparse-body projections before
     await rebuildQueryProjection(vaultRoot);
 
     const staleBuiltAt = "2026-05-20T09:00:00.000Z";
-    let unchangedSourceManifest: Array<{
-      mtimeMs: number;
-      relativePath: string;
-      sizeBytes: number;
-    }> = [];
+    let unchangedSourceManifest: string;
     const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
     try {
       const bodyRow = staleDatabase.prepare(`
@@ -5066,19 +5064,14 @@ test("ordinary wearable reads rebuild carried v22 sparse-body projections before
       `).get() as { summaryJson: string } | undefined;
       assert.match(preservedActivity?.summaryJson ?? "", /8432/u);
       staleDatabase.exec("PRAGMA user_version = 22;");
-      unchangedSourceManifest = staleDatabase.prepare(`
-        SELECT
-          relative_path AS relativePath,
-          size_bytes AS sizeBytes,
-          mtime_ms AS mtimeMs
-        FROM query_source_manifest
-        ORDER BY relative_path ASC
-      `).all() as typeof unchangedSourceManifest;
+      unchangedSourceManifest = String(staleDatabase.prepare(
+        "SELECT value FROM query_meta WHERE key = 'wearable_source_manifest'",
+      ).get()?.value);
     } finally {
       staleDatabase.close();
     }
 
-    assert.ok(unchangedSourceManifest.length > 0);
+    assert.ok(JSON.parse(unchangedSourceManifest).length > 0);
     const staleStatus = await getQueryProjectionStatus(vaultRoot);
     assert.equal(staleStatus.exists, true);
     assert.equal(staleStatus.builtAt, staleBuiltAt);
@@ -5121,14 +5114,9 @@ test("ordinary wearable reads rebuild carried v22 sparse-body projections before
     });
     try {
       assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
-      const rebuiltManifest = reopened.prepare(`
-        SELECT
-          relative_path AS relativePath,
-          size_bytes AS sizeBytes,
-          mtime_ms AS mtimeMs
-        FROM query_source_manifest
-        ORDER BY relative_path ASC
-      `).all();
+      const rebuiltManifest = reopened.prepare(
+        "SELECT value FROM query_meta WHERE key = 'wearable_source_manifest'",
+      ).get()?.value;
       assert.deepEqual(rebuiltManifest, unchangedSourceManifest);
 
       const rebuiltRow = reopened.prepare(`
@@ -5164,6 +5152,10 @@ test("ordinary wearable reads rebuild carried v22 sparse-body projections before
       reopened.close();
     }
 
+    assert.deepEqual([...await readFreshQueryProjectionSections(
+      currentQueryProjectionLocation(vaultRoot), await listCanonicalSourceManifest(vaultRoot),
+    )], ["metrics", "wearables"]);
+    await listCanonicalEntities(vaultRoot);
     const rebuiltStatus = await getQueryProjectionStatus(vaultRoot);
     assert.equal(rebuiltStatus.fresh, true);
     assert.notEqual(rebuiltStatus.builtAt, staleBuiltAt);
@@ -8077,7 +8069,10 @@ test("searchVaultRuntime discards unsupported local stores before serving result
 
     const statusAfter = await getQueryProjectionStatus(vaultRoot);
     assert.equal(statusAfter.schemaVersion, "murph.query-projection");
-    assert.equal(statusAfter.fresh, true);
+    assert.equal(statusAfter.fresh, false);
+    assert.deepEqual([...await readFreshQueryProjectionSections(
+      currentQueryProjectionLocation(vaultRoot), await listCanonicalSourceManifest(vaultRoot),
+    )], ["entities"]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -8503,7 +8498,10 @@ Steady energy after saffron tea.
     assert.equal(searchResult.hits[0]?.recordId, "journal:2026-03-10");
 
     const statusAfterSearch = await getQueryProjectionStatus(vaultRoot);
-    assert.equal(statusAfterSearch.fresh, true);
+    assert.equal(statusAfterSearch.fresh, false);
+    assert.deepEqual([...await readFreshQueryProjectionSections(
+      currentQueryProjectionLocation(vaultRoot), await listCanonicalSourceManifest(vaultRoot),
+    )], ["entities"]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -8557,6 +8555,7 @@ test("retired oxygen analytics leave canonical evidence and member revisions int
     assert.deepEqual(points.map((point) => point.source.recordId).sort(), direct.metricPoints.map((point) => point.source.recordId).sort());
     assert.equal((await listCanonicalEntities(vaultRoot, { family: "event", limit: null })).length, 3);
     assert.equal((await searchVaultRuntime(vaultRoot, "retiredoxygentoken")).total, 0);
+    await summarizeWearableSourceHealthRuntime(vaultRoot);
     assert.equal((await getQueryProjectionStatus(vaultRoot)).fresh, true);
     assert.deepEqual(await readFile(sourcePath), originalBytes);
   } finally {
