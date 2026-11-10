@@ -158,6 +158,7 @@ const SAFE_REDACTED_METADATA_KEY_SUFFIXES = [
   "Types",
 ] as const;
 const HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS = 96;
+const HOSTED_RUNTIME_DEVICE_SYNC_PASS_MAX_KEYS = 128;
 const HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS = 16;
 const HOSTED_RUNTIME_DEVICE_SYNC_JOB_TIMING_MAX_KEYS = 32;
 const HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS = new Set([
@@ -283,6 +284,10 @@ export function parseHostedRuntimeLogEntry(
           redactedJson: parseHostedRuntimeRedactedJson(
             record.redactedJson,
             "Hosted runtime log entry redactedJson",
+            undefined,
+            record.eventCode === "device-sync.pass_finished"
+              ? HOSTED_RUNTIME_DEVICE_SYNC_PASS_MAX_KEYS
+              : HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS,
           ),
         }),
     ...(record.workspaceVersion === undefined
@@ -374,6 +379,7 @@ export function parseHostedRuntimeRedactedJson(
   value: unknown,
   label: string,
   reservedKeys?: ReadonlySet<string>,
+  maxKeys = HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS,
 ): HostedRuntimeRedactedJson | null {
   if (value === null || value === undefined) {
     return null;
@@ -386,9 +392,9 @@ export function parseHostedRuntimeRedactedJson(
   const ordinaryEntryCount = reservedKeys
     ? entries.filter(([key]) => !reservedKeys.has(key)).length
     : entries.length;
-  if (ordinaryEntryCount > HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS) {
+  if (ordinaryEntryCount > maxKeys) {
     throw new TypeError(
-      `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_JSON_MAX_KEYS} fields.`,
+      `${label} must contain at most ${maxKeys} fields.`,
     );
   }
 

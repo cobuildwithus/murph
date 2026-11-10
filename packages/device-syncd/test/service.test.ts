@@ -710,7 +710,14 @@ test("device sync service records privacy-safe job phase timings", async () => {
 
     await service.runWorkerOnce();
 
-    assert.deepEqual(service.listJobTimingDiagnostics(), [{
+    const [observedTiming] = service.listJobTimingDiagnostics();
+    assert(observedTiming);
+    const { localProgressCommitElapsedMs, snapshotImportDeferralElapsedMs,
+      snapshotNoopImportElapsedMs, ...timing } = observedTiming;
+    assert.equal(snapshotImportDeferralElapsedMs, 0);
+    assert.equal(snapshotNoopImportElapsedMs, 0);
+    assert.ok(localProgressCommitElapsedMs !== undefined && localProgressCommitElapsedMs >= 0);
+    assert.deepEqual([timing], [{
       at: "2026-08-25T10:00:05.700Z",
       attempts: 1,
       canonicalProgressCommitted: true,
@@ -820,6 +827,7 @@ test("device sync import outcomes distinguish no-ops, unknowns, and failures acr
     assert(diagnostic);
     assert.equal(diagnostic?.outcome, "failed");
     assert.equal(diagnostic?.snapshotImportCount, 6);
+    assert.ok((diagnostic?.snapshotNoopImportElapsedMs ?? -1) >= 0);
     assert.equal(diagnostic?.canonicalProgressCommitted, true);
     assert.deepEqual(diagnostic?.snapshotImportOutcomes, {
       applied: 2, noop: 2, failed: 1, unknown: 1,

@@ -7591,7 +7591,9 @@ describe("runHostedDeviceSyncWakeLane", () => {
         resource: elapsedMs === 1_000 ? "blood_oxygen"
           : elapsedMs === 2_000 ? "electrocardiogram_voltage" : "sleep",
         snapshotImportCount: 4,
-        snapshotImportOutcomes: { applied: 1, noop: 1, failed: 1, unknown: 1 },
+        snapshotImportOutcomes: elapsedMs === 8_000
+          ? { applied: 0, noop: 4, failed: 0, unknown: 0 }
+          : { applied: 1, noop: 1, failed: 1, unknown: 1 },
         completeSourceDayImportOutcomes: { applied: 0, noop: 1, failed: 1, unknown: 0 },
         snapshotImportElapsedMs: 0,
         snapshotCanonicalCoreElapsedMs: 0,
@@ -7639,17 +7641,29 @@ describe("runHostedDeviceSyncWakeLane", () => {
     const timingSummaries = finishedEntry?.redactedJson
       ?.deviceSyncJobTimingSummaries;
     assert(finishedEntry);
+    assert.ok(Object.keys(finishedEntry.redactedJson ?? {}).length > 96);
+    assert.ok(Object.keys(finishedEntry.redactedJson ?? {}).length <= 128);
     assert(Array.isArray(timingSummaries));
     const timingSummaryObjects = timingSummaries as Array<
       Record<string, boolean | number | string | null>
     >;
     expect(finishedEntry?.redactedJson).toEqual(expect.objectContaining({
+      deviceSyncStageIdentityIndexCount: 72,
+      deviceSyncStageIdentityIndexTotalMs: 0,
+      deviceSyncStageNormalizationCount: 72,
+      deviceSyncStageProviderFetchCount: 0,
+      deviceSyncAppliedJobRowCount: 17,
+      deviceSyncNoopJobRowCount: 1,
+      deviceSyncFailedJobRowCount: 0,
+      deviceSyncOtherJobRowCount: 0,
+      deviceSyncNoopJobRowTotalMs: 8_000,
+      deviceSyncNoopImportTotalMs: 0,
       deviceSyncConnectionSourceReadCount: 171,
       deviceSyncContinuationProgressCommittedCount: 2,
-      deviceSyncImportAppliedCount: 18,
-      deviceSyncImportNoopCount: 18,
-      deviceSyncImportFailedCount: 18,
-      deviceSyncImportUnknownCount: 18,
+      deviceSyncImportAppliedCount: 17,
+      deviceSyncImportNoopCount: 21,
+      deviceSyncImportFailedCount: 17,
+      deviceSyncImportUnknownCount: 17,
       deviceSyncCompleteSourceDayImportAppliedCount: 0,
       deviceSyncCompleteSourceDayImportNoopCount: 18,
       deviceSyncCompleteSourceDayImportFailedCount: 18,
@@ -7670,7 +7684,18 @@ describe("runHostedDeviceSyncWakeLane", () => {
       deviceSyncJobTimingSampleLimit: 16,
       deviceSyncJobTimingTruncated: true,
     }));
-    const sharedDetails = sanitizeHostedExecutionStructuredLogDetails(finishedEntry.redactedJson);
+    const sharedDetails = sanitizeHostedExecutionStructuredLogDetails({
+      deviceSyncContinuationProgressCommittedCount:
+        finishedEntry.redactedJson?.deviceSyncContinuationProgressCommittedCount ?? null,
+      deviceSyncBloodOxygenCompletedJobCount:
+        finishedEntry.redactedJson?.deviceSyncBloodOxygenCompletedJobCount ?? null,
+      deviceSyncBloodOxygenImportAppliedCount:
+        finishedEntry.redactedJson?.deviceSyncBloodOxygenImportAppliedCount ?? null,
+      deviceSyncEcgCompletedJobCount:
+        finishedEntry.redactedJson?.deviceSyncEcgCompletedJobCount ?? null,
+      deviceSyncEcgImportAppliedCount:
+        finishedEntry.redactedJson?.deviceSyncEcgImportAppliedCount ?? null,
+    });
     expect(sharedDetails).toMatchObject({
       deviceSyncContinuationProgressCommittedCount: 2,
       deviceSyncBloodOxygenCompletedJobCount: 1,

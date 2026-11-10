@@ -929,6 +929,9 @@ class DeviceSyncServiceController {
     let snapshotIngestInspectionElapsedMs = 0;
     let snapshotIngestInventoryCacheHitCount = 0;
     let snapshotNormalizationElapsedMs = 0;
+    let localProgressCommitElapsedMs = 0;
+    let snapshotImportDeferralElapsedMs = 0;
+    let snapshotNoopImportElapsedMs = 0;
     const finishPass = (): {
       job: DeviceSyncJobRecord;
       processedJobRows: number;
@@ -986,6 +989,9 @@ class DeviceSyncServiceController {
         snapshotIngestInspectionElapsedMs,
         snapshotIngestInventoryCacheHitCount,
         snapshotNormalizationElapsedMs,
+        localProgressCommitElapsedMs,
+        snapshotImportDeferralElapsedMs,
+        snapshotNoopImportElapsedMs,
       });
       return {
         job,
@@ -999,6 +1005,7 @@ class DeviceSyncServiceController {
       retryable: boolean,
     ): boolean => {
       const failedAt = currentNow();
+      const progressCommitStartedAt = performance.now();
       const failureTransition = this.store.failJobIfOwned(
         job.id,
         this.workerId,
@@ -1008,6 +1015,7 @@ class DeviceSyncServiceController {
         retryAt,
         retryable,
       );
+      localProgressCommitElapsedMs += performance.now() - progressCommitStartedAt;
 
       if (!failureTransition) {
         this.logger.debug?.("Device sync job side effects skipped because execution was cancelled.", {
@@ -1301,7 +1309,9 @@ class DeviceSyncServiceController {
             for (;;) {
               ensureExecutionActive();
               while (shouldDeferPreparation()) {
+                const deferredAt = performance.now();
                 await new Promise((resolve) => setTimeout(resolve, DEVICE_SYNC_JOB_YIELD_POLL_MS));
+                snapshotImportDeferralElapsedMs += performance.now() - deferredAt;
                 ensureExecutionActive();
               }
               const importDeferral = new AbortController();
@@ -1341,7 +1351,9 @@ class DeviceSyncServiceController {
                     completeSourceDayImportOutcomes[importOutcome] += 1;
                   }
                 }
-                snapshotImportElapsedMs += nonnegativeDeviceSyncDurationMs(importStartedAt, currentNow());
+                const importElapsedMs = nonnegativeDeviceSyncDurationMs(importStartedAt, currentNow());
+                snapshotImportElapsedMs += importElapsedMs;
+                if (importOutcome === "noop") snapshotNoopImportElapsedMs += importElapsedMs;
               }
             }
           };
@@ -1516,11 +1528,13 @@ class DeviceSyncServiceController {
       scheduledJobDiagnostics = summarizeDeviceSyncScheduledJobs(result, now);
 
       if (preservesAcceptedCompanionHrv && !isOriginalActiveAccountExecutionCurrent()) {
+        const progressCommitStartedAt = performance.now();
         const completed = this.store.completeJobsIfOwned(
           activeJobs.map((activeJob) => activeJob.id),
           this.workerId,
           currentNow(),
         );
+        localProgressCommitElapsedMs += performance.now() - progressCommitStartedAt;
         outcome = completed ? "completed" : "cancelled";
         durableProgressCommitted = completed;
         return finishPass();
@@ -1555,6 +1569,7 @@ class DeviceSyncServiceController {
       }
 
       const scheduledJobs = this.normalizeJobsForEnqueue(storedAccount, result.scheduledJobs ?? []);
+      const progressCommitStartedAt = performance.now();
       const completed = this.store.completeJobsMarkSyncSucceededAndEnqueueJobs({
         accountId: storedAccount.id,
         canonicalImportReceipts: [...canonicalImportReceipts.values()].sort((left, right) =>
@@ -1570,6 +1585,7 @@ class DeviceSyncServiceController {
         syncSuccessOptions: successOptions,
         workerId: this.workerId,
       });
+      localProgressCommitElapsedMs += performance.now() - progressCommitStartedAt;
 
       if (!completed) {
         releaseActiveJobsIfCurrentAccountActive(currentNow());
@@ -1643,6 +1659,7 @@ class DeviceSyncServiceController {
         return finishPass();
       }
 
+      const failureProgressStartedAt = performance.now();
       const failureTransitions = activeJobs.flatMap((activeJob) => {
         const retryAt = retainedFailureRetryable
           ? addMilliseconds(failureNow, validationRetryDelayMs ?? computeRetryDelayMs(activeJob.attempts))
@@ -1660,6 +1677,7 @@ class DeviceSyncServiceController {
         );
         return transition ? [{ activeJob, transition }] : [];
       });
+      localProgressCommitElapsedMs += performance.now() - failureProgressStartedAt;
 
       if (failureTransitions.length === 0) {
         return finishPass();
@@ -1698,6 +1716,7 @@ class DeviceSyncServiceController {
         disconnectGeneration,
         localConnectionRevision,
       };
+      const markFailedStartedAt = performance.now();
       const markedFailed = this.store.markSyncFailed(
         storedAccount.id,
         failureNow,
@@ -1706,6 +1725,7 @@ class DeviceSyncServiceController {
         failure.accountStatus,
         failureOptions,
       );
+      localProgressCommitElapsedMs += performance.now() - markFailedStartedAt;
 
       if (!markedFailed) {
         this.logger.debug?.("Device sync account failure state skipped because execution was superseded.", {
