@@ -273,6 +273,10 @@ export async function runHostedAssistantAutomationLane(input: {
             assistantResult.outboxOnlyNextWakeAt,
         }
       : {}),
+    assistantAutomationAutonomousNextWakeAt:
+      assistantResult.autonomousNextWakeAt,
+    assistantAutomationRoutingNextWakeAt:
+      assistantResult.routingNextWakeAt,
     assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
     assistantAutomationCronProcessed: assistantResult.cronProcessed,
     assistantAutomationCronStatusDeferred:
@@ -344,6 +348,8 @@ export async function runHostedAssistantAutomation(
   currentTurnDeliveryIntentIds: string[];
   cronProcessed: number;
   nextWakeAt: string | null;
+  autonomousNextWakeAt?: string | null;
+  routingNextWakeAt?: string | null;
   outboxOnlyNextWakeAt?: string;
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
@@ -701,6 +707,8 @@ export async function runHostedAssistantAutomation(
       currentTurnDeliveryIntentIds,
       cronProcessed: result.cronProcessed,
       nextWakeAt,
+      autonomousNextWakeAt: result.autonomousNextWakeAt,
+      routingNextWakeAt: result.routing.nextWakeAt,
       ...(result.outboxOnlyNextWakeAt
         ? { outboxOnlyNextWakeAt: result.outboxOnlyNextWakeAt }
         : {}),

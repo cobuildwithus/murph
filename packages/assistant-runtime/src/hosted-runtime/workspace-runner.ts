@@ -349,6 +349,7 @@ interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   runtimeProjectionCheckpointRequested?: true;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
+  nextWakeAutonomous?: true;
   redactedStatus?: HostedRuntimeRedactedJson | null;
   systemMailboxProgressed?: true;
 }
@@ -368,6 +369,7 @@ export interface HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
   checkpointReason: HostedWorkspaceCheckpointReason;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
+  nextWakeAutonomous?: true;
   redactedStatus?: HostedRuntimeRedactedJson | null;
 }
 
@@ -434,6 +436,7 @@ export interface HostedWorkspaceRunnerRuntimeStatusCheckpointInput {
   nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
+  nextWakeAutonomous?: true;
   reason: Exclude<HostedWorkspaceCheckpointReason, "idle_shutdown">;
   redactedStatus: HostedRuntimeRedactedJson | null;
   systemMailboxProgressGeneration?: string;
@@ -3971,16 +3974,19 @@ function mergeDeferredPostCheckpointWake(input: {
     }
     input.assistantPhaseResult.nextWakeAt = null;
     input.assistantPhaseResult.nextWakeReason = null;
+    delete input.assistantPhaseResult.nextWakeAutonomous;
     return;
   }
 
   const postCheckpointWake = createHostedRuntimeWakeCandidate(
     input.postCheckpoint.nextWakeAt ?? null,
     input.postCheckpoint.nextWakeReason ?? null,
+    input.postCheckpoint.nextWakeAutonomous === true,
   );
   const previousWake = createHostedRuntimeWakeCandidate(
     input.assistantPhaseResult.nextWakeAt ?? null,
     input.assistantPhaseResult.nextWakeReason ?? null,
+    input.assistantPhaseResult.nextWakeAutonomous === true,
   );
   if (previousWakeIsInvocationLocal) {
     const selectedWake = selectHostedRuntimeWakeCandidate([
@@ -4020,6 +4026,7 @@ function mergeDeferredPostCheckpointWake(input: {
 
   input.assistantPhaseResult.nextWakeAt = postCheckpointWake.at;
   input.assistantPhaseResult.nextWakeReason = postCheckpointWake.reason;
+  input.assistantPhaseResult.nextWakeAutonomous = postCheckpointWake.autonomous;
 }
 
 function appendHostedWorkspaceDurableCheckpointEffect(input: {

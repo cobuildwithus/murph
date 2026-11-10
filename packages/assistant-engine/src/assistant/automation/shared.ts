@@ -96,6 +96,7 @@ export interface AssistantAutomationPassResult {
   cronProcessed: number
   currentTurnDeliveryIntentIds: string[]
   nextWakeAt: string | null
+  autonomousNextWakeAt?: string | null
   outboxOnlyNextWakeAt?: string
   outboxAttempted: number
   passTiming?: AssistantAutomationPassTiming
