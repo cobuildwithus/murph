@@ -1112,7 +1112,7 @@ test("daily sleep summary derives stage totals from the selected sleep window in
 
 test("sleep repair skips window association when no zero sleep total exists", () => {
   const entities = makeSleepRepairWorkFixture(400);
-  const associated = vi.spyOn(sleepAssociation, "sleepMetricAssociatedWithWindow");
+  const associated = vi.spyOn(sleepAssociation, "sleepMetricBelongsToWindow");
   try {
     const dataset = collectWearableDataset(createVaultReadModel({
       entities,
@@ -1142,7 +1142,7 @@ test("unrelated positive metrics do not multiply sleep repair association work",
     entities: input,
     vaultRoot: "browser://synthetic-sleep-repair",
   }), {});
-  const associated = vi.spyOn(sleepAssociation, "sleepMetricAssociatedWithWindow");
+  const associated = vi.spyOn(sleepAssociation, "sleepMetricBelongsToWindow");
   try {
     const sparse = collect(entities);
     const sparseWork = associated.mock.calls.length;
@@ -1205,7 +1205,7 @@ test("one invalid zero total does not scan awake history for unrelated sleep win
       sourceProviderSlug: "apple-health-kit", value: 20,
     }));
   }
-  const associated = vi.spyOn(sleepAssociation, "sleepMetricAssociatedWithWindow");
+  const associated = vi.spyOn(sleepAssociation, "sleepMetricBelongsToWindow");
   try {
     const dataset = collectWearableDataset(createVaultReadModel({
       entities, vaultRoot: "browser://synthetic-sparse-sleep-repair",
@@ -1233,7 +1233,7 @@ test("non-Apple zero totals do not activate Apple sleep repair", () => {
     occurredAt: "2026-02-10T07:00:00.000Z", recordedAt: "2026-02-10T08:00:00.000Z",
     resourceId: "repair-work-window", sourceProviderSlug: "whoop", value: 0,
   }));
-  const associated = vi.spyOn(sleepAssociation, "sleepMetricAssociatedWithWindow");
+  const associated = vi.spyOn(sleepAssociation, "sleepMetricBelongsToWindow");
   try {
     const dataset = collectWearableDataset(createVaultReadModel({
       entities, vaultRoot: "browser://synthetic-provider-sleep-repair",

@@ -32,7 +32,7 @@ import { formatProviderName } from "./provider-policy.ts";
 import {
   normalizeResourceToken,
   resolveSleepCandidateProvider,
-  sleepMetricAssociatedWithWindow,
+  sleepMetricBelongsToWindow,
   sleepMetricMatchesWindow,
 } from "./sleep-association.ts";
 import {
@@ -280,6 +280,8 @@ function collectInvalidAppleZeroSleepMetricCandidates(
   );
   const invalidCandidates: WearableMetricCandidate[] = [];
 
+  // Every candidate and window below is Apple Health, so each pair needs only
+  // the association test, not another provider resolution on both sides.
   for (const window of sleepWindows) {
     if (resolveSleepCandidateProvider(window) !== APPLE_HEALTH_KIT_PROVIDER) {
       continue;
@@ -289,12 +291,12 @@ function collectInvalidAppleZeroSleepMetricCandidates(
     // its entire awake/stage history until that necessary condition holds.
     const invalidZeroTotalCandidates = zeroTotalCandidates.filter((candidate) =>
       isInvalidZeroSleepSummaryOwnedCandidate(candidate, window) &&
-      sleepMetricAssociatedWithWindow(candidate, window)
+      sleepMetricBelongsToWindow(candidate, window)
     );
     if (invalidZeroTotalCandidates.length === 0) {
       continue;
     }
-    const windowCandidates = appleRepairCandidates.filter((candidate) => sleepMetricAssociatedWithWindow(candidate, window));
+    const windowCandidates = appleRepairCandidates.filter((candidate) => sleepMetricBelongsToWindow(candidate, window));
     const awakeMinutes = firstPositiveMetricValue(windowCandidates, "awakeMinutes");
     if (
       awakeMinutes === null ||
