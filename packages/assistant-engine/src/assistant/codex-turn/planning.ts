@@ -1039,7 +1039,7 @@ export async function resolveAssistantRouteTurnPlan(
     authenticatedGroupProviderTurn,
   })
   const shouldUseCommittedTranscriptHistory =
-    input.profile.threadScope === 'session-thread' ||
+    isConversationThreadOrScheduledTurn(input, conversationProviderTurn, conversationScope) ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
     contextHandoffNotificationTurn ||
     operatorMessageNotificationTurn ||
@@ -2008,6 +2008,23 @@ function isConversationMediaTurn(
   acceptedInputIds: readonly string[],
 ): boolean {
   return (privateTurn || groupTurn) && acceptedInputIds.length > 0
+}
+
+// A reply turn reads the conversation on its own Codex thread. A scheduled
+// occurrence runs on a separate thread, so it reads the conversation as
+// transcript history. The usage optimizer reviews usage, not the conversation.
+function isConversationThreadOrScheduledTurn(
+  input: Parameters<typeof resolveAssistantRouteTurnPlan>[0],
+  conversationProviderTurn: boolean,
+  conversationScope: string,
+): boolean {
+  if (input.profile.threadScope === 'session-thread') {
+    return true
+  }
+  return conversationProviderTurn
+    && input.input.scheduledOccurrenceAt != null
+    && resolveUsageOptimizerFeedbackScope({ conversationScope, executionContext: input.executionContext,
+      messageInput: input.input }) === null
 }
 
 function hasProductFeedbackAuthority(

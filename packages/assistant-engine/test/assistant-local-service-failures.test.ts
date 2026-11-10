@@ -280,21 +280,16 @@ test('sendAssistantMessageLocal saves progress-materialized sessions after termi
         threadId: 'thread-progress-failed',
         threadIsDirect: true,
       }),
-      codexResume: {
-        assistantContractFingerprint,
-        rolloutRelativePath: codexRolloutRelativePath,
-        routeFingerprint,
-        threadId: 'provider-thread-progress-failed',
-      },
-      resumeState: {
-        assistantContractFingerprint,
-        rolloutRelativePath: codexRolloutRelativePath,
-        routeFingerprint,
-        threadId: 'provider-thread-progress-failed',
-      },
+      codexResume: baseSession.codexResume,
+      resumeState: baseSession.resumeState,
       turnCount: baseSession.turnCount,
     }),
   )
+  expect(mocks.dropAssistantSessionStaleCodexThread).toHaveBeenCalledWith({
+    error: terminalError,
+    session: materializedSession,
+    vault: '/vaults/test',
+  })
   expect(
     mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.session.binding
       .delivery,
@@ -305,12 +300,7 @@ test('sendAssistantMessageLocal saves progress-materialized sessions after termi
   expect(
     mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.session
       .resumeState,
-  ).toEqual({
-    assistantContractFingerprint,
-    rolloutRelativePath: codexRolloutRelativePath,
-    routeFingerprint,
-    threadId: 'provider-thread-progress-failed',
-  })
+  ).toEqual(baseSession.resumeState)
 })
 
 test('sendAssistantMessageLocal preserves Codex resume state after progress-materialized failures', async () => {
@@ -565,11 +555,16 @@ test('sendAssistantMessageLocal completes accepted no-reply terminal provider fa
     session: failedProviderSession,
     status: 'completed',
   })
+  expect(mocks.dropAssistantSessionStaleCodexThread).toHaveBeenCalledWith({
+    error: terminalError,
+    session: failedProviderSession,
+    vault: '/vaults/test',
+  })
   expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
     expect.objectContaining({
       assistantTranscriptText: null,
       persistUserPromptToTranscript: true,
-      providerResumeStateAction: 'persist-from-provider-turn',
+      providerResumeStateAction: 'preserve-existing',
       providerResult: expect.objectContaining({
         acceptedNoReplyDeliveryContextOrdinals: [0],
         finalAction: {
@@ -2121,6 +2116,11 @@ test.each([
 
   assert.equal(initialResult.responseDisposition, 'none')
   assert.equal(steeredResult.responseDisposition, 'none')
+  expect(mocks.dropAssistantSessionStaleCodexThread).toHaveBeenCalledWith({
+    error: terminalError,
+    session,
+    vault: '/vaults/test',
+  })
   expect(mocks.persistAssistantNoReplyTranscriptMarkers).toHaveBeenCalledWith({
     deliveryContextOrdinals: [1],
     sessionId: session.sessionId,
@@ -2138,7 +2138,7 @@ test.each([
     expect.objectContaining({
       assistantTranscriptText: null,
       persistUserPromptToTranscript: false,
-      providerResumeStateAction: 'persist-from-provider-turn',
+      providerResumeStateAction: 'preserve-existing',
       providerResult: expect.objectContaining({
         acceptedNoReplyDeliveryContextOrdinals: [1],
         finalAction: {

@@ -996,10 +996,16 @@ A private hosted monthly usage review is a managed automation pinned to
 GPT-6.1 Sol medium. Its verified private hosted occurrence uses the existing
 isolated conversation/provider-turn profile: it neither resumes the member's
 provider thread nor replays committed chat history. Canonical context and the
-ordinary tool and delivery authorities remain available. Success and terminal
-failure preserve the foreground resume binding; all isolated notification
-profiles preserve it. Other scheduled
-automations keep ordinary conversation continuity. The review reads bounded
+ordinary tool and delivery authorities remain available. Other scheduled
+automations use the same isolated profile and read committed chat history
+instead of the provider thread: a scheduled turn's tool declarations differ
+from a reply's and `thread/resume` cannot replace tools, so sharing the thread
+only made each side restart the other. The conversation's provider thread
+belongs to its reply turns. Every notification turn preserves the foreground
+resume binding on success and on failure, and its message reaches the reply
+thread as an unseen transcript entry. A provider turn that does not complete
+never saves a binding; only a saved thread that would not open is dropped, so
+the retry starts a new one. The review reads bounded
 current-member diagnostics from
 the canonical hosted AI usage ledger, preserving recorded allowance costs and
 explicit missing/truncated coverage. Existing sanitized turn profiles attribute

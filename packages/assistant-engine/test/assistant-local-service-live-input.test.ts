@@ -3635,7 +3635,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     mocks.appendAssistantTranscriptEntries.mockClear()
     mocks.appendAssistantTranscriptEntriesWithRefs.mockClear()
     mocks.appendAssistantTurnReceiptEvent.mockClear()
-    mocks.applyAssistantSessionCodexResumeStateAction.mockClear()
+    mocks.dropAssistantSessionStaleCodexThread.mockClear()
     mocks.clearAssistantSessionCodexResumeState.mockClear()
     mocks.executeCodexTurnWithRecovery.mockReset()
     mocks.deliverAssistantPrecedingReplies.mockClear()
@@ -4408,15 +4408,6 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     assert.equal(outcome.error, terminalError)
   }
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(2)
-  expect(
-    mocks.applyAssistantSessionCodexResumeStateAction,
-  ).toHaveBeenCalledWith(
-    expect.objectContaining({
-      action: 'preserve-existing',
-      codexThreadId: 'provider-thread-group-failure',
-      session: expect.objectContaining({ sessionId: session.sessionId }),
-    }),
-  )
   expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
     session: expect.objectContaining({ sessionId: session.sessionId }),
     vault: '/vaults/test',

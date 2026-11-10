@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { expect, test, vi } from 'vitest'
 
 import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
   HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
@@ -1124,8 +1125,13 @@ test('sendAssistantMessageLocal clears resume state when the provider returns no
   ).toBe('clear')
 })
 
-test('sendAssistantMessageLocal clears rejected resume state after a terminal failure without a confirmed thread', async () => {
-  const terminalError = new Error('stale resume rejected before provider start')
+test.each([
+  { name: 'drops a saved thread Codex could not resume', stale: true },
+  { name: 'keeps the saved thread after any other failure without a thread id', stale: false },
+])('sendAssistantMessageLocal $name', async ({ stale }) => {
+  const terminalError = stale
+    ? new VaultCliError('ASSISTANT_CODEX_RESUME_STALE', 'no rollout found for thread id rejected-provider-thread')
+    : new Error('app-server exited before the thread opened')
   const session = createAssistantSession({
     resumeState: {
       routeFingerprint: 'route-with-rejected-resume',
@@ -1168,10 +1174,9 @@ test('sendAssistantMessageLocal clears rejected resume state after a terminal fa
     }),
   ).rejects.toBe(terminalError)
 
-  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
-    session,
-    vault: '/vaults/test',
-  })
+  expect(mocks.clearAssistantSessionCodexResumeState.mock.calls).toEqual(
+    stale ? [[{ session, vault: '/vaults/test' }]] : [],
+  )
   expect(mocks.saveAssistantSession).not.toHaveBeenCalled()
 })
 

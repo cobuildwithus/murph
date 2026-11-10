@@ -45,7 +45,6 @@ export type Deferred<T> = {
 }
 
 type LocalServiceMockName =
-  | 'applyAssistantSessionCodexResumeStateAction'
   | 'appendAssistantTranscriptEntries'
   | 'appendAssistantTranscriptEntriesWithRefs'
   | 'appendAssistantTurnReceiptEvent'
@@ -54,6 +53,7 @@ type LocalServiceMockName =
   | 'deliverAssistantPrecedingReplies'
   | 'deliverAssistantProgressUpdate'
   | 'deliverAssistantReaction'
+  | 'dropAssistantSessionStaleCodexThread'
   | 'dispatchAssistantReply'
   | 'executeCodexTurnWithRecovery'
   | 'finalizeAssistantTurnArtifacts'
@@ -464,44 +464,18 @@ export async function loadLocalServiceModule(input?: {
         >[0],
       ) => finalizeInput.session,
     ),
-    applyAssistantSessionCodexResumeStateAction: vi.fn(
+    dropAssistantSessionStaleCodexThread: vi.fn(
       async (
-        actionInput: Parameters<
-          typeof import('../src/assistant/turn-finalizer.js').applyAssistantSessionCodexResumeStateAction
+        dropInput: Parameters<
+          typeof import('../src/assistant/turn-finalizer.js').dropAssistantSessionStaleCodexThread
         >[0],
-      ) => {
-        if (actionInput.action === 'preserve-existing') {
-          return actionInput.session
-        }
-        if (actionInput.action === 'clear') {
-          return await mocks.clearAssistantSessionCodexResumeState({
-            session: actionInput.session,
-            vault: actionInput.vault,
-          })
-        }
-        if (!actionInput.codexThreadId || !actionInput.routeFingerprint) {
-          return actionInput.session
-        }
-        const resumeState = {
-          ...(actionInput.assistantContractFingerprint
-            ? {
-                assistantContractFingerprint:
-                  actionInput.assistantContractFingerprint,
-              }
-            : {}),
-          ...(actionInput.codexRolloutRelativePath
-            ? { rolloutRelativePath: actionInput.codexRolloutRelativePath }
-            : {}),
-          routeFingerprint: actionInput.routeFingerprint,
-          threadId: actionInput.codexThreadId,
-        }
-        return await mocks.saveAssistantSession(actionInput.vault, {
-          ...actionInput.session,
-          codexResume: resumeState,
-          resumeState,
-          updatedAt: new Date().toISOString(),
-        })
-      },
+      ) =>
+        (dropInput.error as { code?: unknown } | null)?.code === 'ASSISTANT_CODEX_RESUME_STALE'
+          ? await mocks.clearAssistantSessionCodexResumeState({
+              session: dropInput.session,
+              vault: dropInput.vault,
+            })
+          : dropInput.session,
     ),
     clearAssistantSessionCodexResumeState: vi.fn(
       async (
@@ -865,8 +839,8 @@ export async function loadLocalServiceModule(input?: {
     supportsAssistantCurrentAudienceMessageReaction: vi.fn(() => false),
   }))
   vi.doMock('../src/assistant/turn-finalizer.js', () => ({
-    applyAssistantSessionCodexResumeStateAction:
-      mocks.applyAssistantSessionCodexResumeStateAction,
+    dropAssistantSessionStaleCodexThread:
+      mocks.dropAssistantSessionStaleCodexThread,
     clearAssistantSessionCodexResumeState:
       mocks.clearAssistantSessionCodexResumeState,
     persistAssistantNoReplyTranscriptMarkers:
