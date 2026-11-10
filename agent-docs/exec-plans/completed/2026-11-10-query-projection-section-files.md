@@ -1,6 +1,6 @@
 # Query projection: one immutable SQLite file per section
 
-Status: active
+Status: completed
 Updated: 2026-11-10
 
 ## Outcome
@@ -85,7 +85,7 @@ Deleted:
   `assertQueryProjectionTables`
 - `query.sqlite-wal` and `query.sqlite-shm` from the snapshot list
 - `QUERY_DB_RELATIVE_PATH` and `queryDbPath` in `@murphai/runtime-state`,
-  replaced by one function from section name to relative path
+  replaced by `QUERY_PROJECTION_SECTION_RELATIVE_PATHS`
 
 Changed outside `packages/query`:
 
@@ -171,3 +171,19 @@ wearables-first publication; a reader holding the old wearables file across a
 rename reads the whole old generation; an encrypted snapshot archive holds
 exactly the three section files and restores them still fresh; old-name files
 are ignored in both upgrade and rollback directions.
+
+## Result
+
+- Full rebuild on the real vault copy publishes `query-entities.sqlite` (10.02 MB),
+  `query-metrics.sqlite` (13.52 MB) and `query-wearables.sqlite` (9.31 MB). The
+  ordered content hash of all seven data tables and the full-text match count
+  equal main.
+- Publication 383 ms to 233 ms in the same run. The per-read freshness check
+  stays under 1 ms (three small opens instead of one).
+- One test expectation was rejected: "a current-version section file with a
+  dropped table is stale". A section file gets its tables, rows, certificate and
+  version in one transaction and is never modified, so no code path produces
+  that file and there is no table-presence check.
+- A leftover legacy `query.sqlite` is ignored and left alone; the snapshot stops
+  capturing it.
+Completed: 2026-11-10
