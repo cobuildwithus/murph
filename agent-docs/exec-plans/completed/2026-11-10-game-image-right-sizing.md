@@ -1,6 +1,6 @@
 # Right-size app image delivery and decoding
 
-Status: active
+Status: completed
 Created: 2026-11-10
 Updated: 2026-11-10
 
@@ -16,8 +16,8 @@ cache and memory-only handling of rendered health cards remain authoritative.
 - Backend PR #4808 owns the additive private 240px `gameface` and 480x640px `gamethumb` renditions,
   alongside existing 600px and 1600px renditions. History previews are 64pt high.
 - iOS PR #533 owns request selection, decoded size and queue priority.
-  Avatars are at most 76pt (228px at 3x), but currently decode at 600px.
-  A warm history read skips photo loading when Games first opens.
+  Avatars are at most 76pt (228px at 3x); they previously decoded at 600px.
+  A warm history read previously skipped photo loading when Games first opened.
 - Home's live film strip downloads full 1600px images for earlier days even
   though only tiny photos or non-image artifact indicators are displayed.
 - Meal rows are 56pt squares but decode the whole protected thumbnail on the
@@ -41,12 +41,17 @@ cache and memory-only handling of rendered health cards remain authoritative.
 
 ## Rollout and failure
 
-Cloudflare variants read succeeds, but `gameface` and `gamethumb` are absent. Create the private
-240x240 crop face and 480x640 crop photo-preview variants with metadata stripped before Worker deployment.
-Worker precedes Web, which precedes the new app. An older Worker rejects thumb;
-history preserves stable media links in that case. No production change has been
-performed by this continuation. Existing 600px/1600px definitions stay intact.
-App requests must not ship before the additive backend contract is live.
+The private 240x240 crop `gameface` and 480x640 crop `gamethumb` variants
+were provisioned and read back with metadata stripped and signed URLs required.
+Existing 600px/1600px definitions remain intact. Backend #4808 and iOS #533
+are merged. Protected hosted deployment 42902482615 succeeded with Worker-only
+rollout and production smoke checks, using backend commit
+`8cd536d936d92fc1bc875bf4c528ce4dbfcd0b7e`. Web production admission passed,
+and the production domain was verified serving that same commit. App build
+1.1.24 (95) passed both release workflows and uploaded successfully on
+2026-11-10 at 22:20:28 UTC, after the backend rollout.
+An older Worker rejects thumb; history preserves stable media links in that case.
+App requests must not ship before both additive Worker and Web contracts are live.
 
 ## Verification
 
@@ -55,7 +60,8 @@ App requests must not ship before the additive backend contract is live.
   history suites: 24 and 43 tests passed respectively.
 - Pair-board and You screen evidence: 42 tests passed on each of SE and Pro Max;
   the changed screens were inspected. MotionBuildsUITests: both tests passed.
-  Duo rendering proof is in progress; the Paper document connection is unavailable.
+  Duo closed and expanded-window rendering was inspected with Xcode 27.2.
+  Physical fold behavior was not verified; the Paper document connection is unavailable.
 - Worker image store/deploy admission: 46 tests passed. Control client: 93.
   Web media/routes/changelog: 119. All three affected TypeScript checks pass.
   Complexity guard passes; the existing client hotspots are unchanged.
@@ -70,6 +76,25 @@ App requests must not ship before the additive backend contract is live.
 - Parent review found that a 240px scale-down would soften cropped landscape
   previews. Dedicated square-face and 3:4 photo crops preserve Retina detail;
   uncropped cards and full-size opened photos retain their own renditions.
-- Required ReviewGPT and exact-head CI are pending. Production variants,
-  hosted deployment and app release have not been performed.
+- Required ReviewGPT passed on both reviewed implementation heads. Backend
+  required PR checks passed. The exact merged backend tree then hit a transaction
+  timeout in the unrelated 1,000-game activation PostgreSQL proof; rerunning the
+  failed lane without source changes passed. All required main checks passed.
+- Build 95 is reserved by iOS #534. Release CI exposed a busy-button
+  accessibility-label mismatch; test-only iOS #536 fixes the lookup and all
+  15 account-access UI tests pass. The full Games UI suite passed on the first
+  corrected candidate. A separate merged finite login timeline then failed the
+  expired-countdown resend journey; iOS #538 restores the working periodic
+  rendering, with all 15 account-access tests passing on CI's iOS 26.5 runtime.
+  Both release suites passed on final merged candidate
+  `087c912b9d3bc663a45a0ffbe6edd0132849f3ec`: native CI `42908124943`
+  attempt 2 and Games UI `42908130166`. One simulator app termination in the
+  first native CI attempt passed isolated replay and the unchanged full rerun.
+- Xcode 27.2 archived and exported build 95. The host and both extensions
+  passed App Store signature/profile, version, production endpoint, entitlement,
+  privacy-asset and Debug-exclusion checks. One guarded upload returned exit 0,
+  Apple's success marker and no ITMS errors. The iOS submission packet owns
+  the source and IPA hash receipt. Apple processing and internal-group availability
+  remain unverified because the App Store Connect browser requires sign-in.
 - Screenshots, raw diagnostic data and review responses stay out of Git.
+Completed: 2026-11-10
