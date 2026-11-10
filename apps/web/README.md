@@ -921,15 +921,17 @@ set, then prefers records with a reported package size, then keeps the existing
 relevance order. It does not claim sales or usage popularity. Supplement
 searches retain their existing ranking path. Food retrieval admits at
 most 250 literal exact-name rows and 10,000 GIN full-text matches before
-similarity scoring and canonical-key deduplication. When the
-GIN set reaches that cap and may be truncated, one GiST branch admits up to
-10,000 strict-word-nearest names to recover stronger full-text candidates. An
-unsaturated GIN set is already exhaustive and skips that whole-catalog scan.
-When FTS finds nothing, the one GiST branch instead uses whole-name distance
-and its matching whole-name threshold. That shared metric keeps eligible typo
-matches ahead of ineligible names before the cap. The bounded admissions
-preserve representative choice and canonical diversity across the established
-5,000-row boundary and ineligible-neighbor fixtures. Ranking is deterministic
+similarity scoring and canonical-key deduplication. A GIN set that reaches
+that cap is ranked as admitted; no query orders the whole catalog by name
+distance, because that scan cannot finish inside the labels database statement
+timeout on the live catalog. When FTS finds nothing, typo recovery admits the
+1,000 nearest names that pass the whole-name similarity threshold. The
+threshold is the GiST index condition, so the scan reads only eligible names.
+Strict-word recovery runs only when no whole name is similar and admits up to
+1,000 strict-word matches unordered. The full-text admission preserves
+representative choice and canonical diversity across the established
+5,000-row boundary; typo recovery ranks only within its nearest-name bound.
+Ranking is deterministic
 within the admitted set; it is intentionally not an exhaustive whole-catalog
 ranking. After deduplication and any evidence, popularity, or comparison filters,
 food-name searches apply the complete deterministic order and LIMIT/OFFSET before

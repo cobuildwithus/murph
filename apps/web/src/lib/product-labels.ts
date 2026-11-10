@@ -20,6 +20,7 @@ const PRODUCT_LABEL_GTIN_LENGTHS = new Set([8, 12, 13, 14]);
 const PRODUCT_CONTAMINANT_ALERT_LIMIT = 5;
 const PRODUCT_CONTAMINANT_OBSERVATION_LIMIT = 20;
 const PRODUCT_LABEL_SEARCH_MATCH_LIMIT = 10_000;
+const PRODUCT_LABEL_SEARCH_TYPO_MATCH_LIMIT = 1_000;
 const PRODUCT_LABEL_SEARCH_EXACT_NAME_LIMIT = 250;
 const PRODUCT_CONTAMINANT_CONCERN_RANK: Record<
   ProductContaminantConcernLevel,
@@ -1508,16 +1509,17 @@ async function searchGenericProductLabels(
   input: GenericProductLabelSearchInput,
 ): Promise<ProductLabelSearchRow[]> {
   // Supplements keep their established ranking path. Food searches use the
-  // bounded GIN and GiST candidate path so broad queries cannot rank an
+  // bounded candidate path below so no query ranks, orders, or reads an
   // unbounded share of the two-million-row table.
   if (tableSql !== "foods") {
     return await searchOriginalGenericProductLabels(client, tableSql, input);
   }
 
-  // Food-name results are ranked deterministically within separately bounded
-  // GIN full-text and GiST nearest-name sets. This retrieval contract trades
-  // exhaustive whole-catalog ranking for completion inside the labels database
-  // statement timeout; exact IDs and UPCs use separate direct paths.
+  // Food-name results are ranked deterministically within a bounded exact-name
+  // and GIN full-text set or, when full-text finds nothing, a bounded set of
+  // trigram-similar names. This retrieval contract trades exhaustive
+  // whole-catalog ranking for completion inside the labels database statement
+  // timeout; exact IDs and UPCs use separate direct paths.
   const stemmedSql = buildFoodStemmedSearchSql(input.stemmedSearch);
   // Private lookups prioritize complete product identity over partial titles
   // whose remaining query terms occur only in extended catalog text.
@@ -1592,48 +1594,6 @@ async function searchGenericProductLabels(
             AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
           LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
         ),
-        name_nearest_matches AS MATERIALIZED (
-          SELECT
-            id,
-            canonical_key,
-            data_origin,
-            data_origin_id,
-            name,
-            brand,
-            upc,
-            off_market,
-            search_text,
-            data_origin_priority
-          FROM ${tableSql}
-          WHERE
-            -- Below the FTS cap, fts_index_matches already contains every
-            -- indexed full-text match, so this whole-catalog KNN scan can add
-            -- no candidate. Only pay for it when the bounded GIN result is
-            -- saturated and may have omitted a better nearest-name match.
-            (SELECT count(*) FROM fts_index_matches) = ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
-            AND
-            ($2::boolean OR off_market = false)
-            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
-            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-          -- The mutually exclusive typo branch below owns no-FTS searches.
-          ORDER BY name <->>> $1::text
-          LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
-        ),
-        fts_nearest_matches AS MATERIALIZED (
-          SELECT
-            id,
-            canonical_key,
-            data_origin,
-            data_origin_id,
-            name,
-            brand,
-            upc,
-            off_market,
-            data_origin_priority
-          FROM name_nearest_matches
-          WHERE
-            ${stemmedSql.directMatchSql}
-        ),
         fts_matches AS MATERIALIZED (
           SELECT
             matches.*,
@@ -1646,8 +1606,6 @@ async function searchGenericProductLabels(
             SELECT * FROM fts_exact_name_matches
             UNION
             SELECT * FROM fts_index_matches
-            UNION
-            SELECT * FROM fts_nearest_matches
           ) matches
         ),
         fts_candidates AS MATERIALIZED (
@@ -1677,7 +1635,7 @@ async function searchGenericProductLabels(
             data_origin_priority
           FROM fts_matches, query
         ),
-        trigram_matches AS MATERIALIZED (
+        whole_name_typo_matches AS MATERIALIZED (
           SELECT
             id,
             canonical_key,
@@ -1688,32 +1646,48 @@ async function searchGenericProductLabels(
             upc,
             off_market,
             data_origin_priority
-          FROM (
-            SELECT
-              id,
-              canonical_key,
-              data_origin,
-              data_origin_id,
-              name,
-              brand,
-              upc,
-              off_market,
-              data_origin_priority
-            FROM ${tableSql}
-            WHERE
-              NOT EXISTS (SELECT 1 FROM fts_index_matches)
-              AND ($2::boolean OR off_market = false)
-              AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
-              AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
-            -- Whole-name distance is exactly the ordering behind the trigram
-            -- threshold below, so whole-name-eligible rows precede ineligible
-            -- rows while the GiST KNN scan remains bounded.
-            ORDER BY name <-> $1::text
-            LIMIT ${PRODUCT_LABEL_SEARCH_MATCH_LIMIT}
-            -- Strict-word recovery stays inside the existing whole-name KNN
-            -- bound; existing whole-name matches retain priority when ranking.
-          ) nearest_names
-          WHERE name % $1::text OR name %>> $1::text
+          FROM ${tableSql}
+          WHERE
+            NOT EXISTS (SELECT 1 FROM fts_index_matches)
+            -- The similarity predicate must stay an index condition so the
+            -- scan reads only eligible names, nearest first, up to the cap.
+            -- Ordering the whole catalog by distance and filtering afterwards
+            -- exceeds the statement timeout on the live labels database.
+            AND name % $1::text
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+          ORDER BY name <-> $1::text
+          LIMIT ${PRODUCT_LABEL_SEARCH_TYPO_MATCH_LIMIT}
+        ),
+        strict_word_typo_matches AS MATERIALIZED (
+          SELECT
+            id,
+            canonical_key,
+            data_origin,
+            data_origin_id,
+            name,
+            brand,
+            upc,
+            off_market,
+            data_origin_priority
+          FROM ${tableSql}
+          WHERE
+            NOT EXISTS (SELECT 1 FROM fts_index_matches)
+            -- Whole-name matches always outrank strict-word matches, so this
+            -- lossier lane runs only when no whole name is similar. It stays
+            -- unordered so the cap ends the scan early.
+            AND NOT EXISTS (SELECT 1 FROM whole_name_typo_matches)
+            AND name %>> $1::text
+            AND ($2::boolean OR off_market = false)
+            AND ${PRODUCT_LABEL_SOURCE_FILTER_SQL}
+            AND ($4::text[] IS NULL OR data_origin = ANY($4::text[]))
+          LIMIT ${PRODUCT_LABEL_SEARCH_TYPO_MATCH_LIMIT}
+        ),
+        trigram_matches AS MATERIALIZED (
+          SELECT * FROM whole_name_typo_matches
+          UNION ALL
+          SELECT * FROM strict_word_typo_matches
         ),
         trigram_candidates AS MATERIALIZED (
           SELECT
