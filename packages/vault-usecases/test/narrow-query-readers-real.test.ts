@@ -5,14 +5,14 @@ import path from "node:path";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
 import { createExperiment, initializeVault, upsertEvent } from "@murphai/core";
-import { QUERY_DB_RELATIVE_PATH } from "@murphai/runtime-state/node";
+import { QUERY_PROJECTION_SECTION_RELATIVE_PATHS } from "@murphai/runtime-state/node";
 import { test } from "vitest";
 
 import { showExperimentRecord } from "../src/usecases/experiment-journal-vault.ts";
 import { showWorkoutRecord } from "../src/usecases/workout-read.ts";
 import { createIntegratedVaultServices } from "../src/vault-services.ts";
 
-test("exact event reads ignore unrelated canonical roots and do not create query.sqlite", async () => {
+test.each(Object.values(QUERY_PROJECTION_SECTION_RELATIVE_PATHS))("exact event reads ignore unrelated canonical roots and do not create query projection files" + " (%s)", async (queryRelativePath) => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-narrow-event-read-"));
 
   try {
@@ -44,7 +44,7 @@ test("exact event reads ignore unrelated canonical roots and do not create query
       "{\n",
     );
 
-    const queryDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+    const queryDatabasePath = path.join(vaultRoot, queryRelativePath);
     await assert.rejects(
       () => stat(queryDatabasePath),
       (error): boolean => (error as NodeJS.ErrnoException).code === "ENOENT",
@@ -63,7 +63,7 @@ test("exact event reads ignore unrelated canonical roots and do not create query
   }
 });
 
-test("experiment id and slug reads stay inside the experiment family and leave query.sqlite untouched", async () => {
+test.each(Object.values(QUERY_PROJECTION_SECTION_RELATIVE_PATHS))("experiment id and slug reads stay inside the experiment family and leave query projection files untouched" + " (%s)", async (queryRelativePath) => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-narrow-experiment-read-"));
 
   try {
@@ -84,7 +84,7 @@ test("experiment id and slug reads stay inside the experiment family and leave q
       "{\n",
     );
 
-    const queryDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+    const queryDatabasePath = path.join(vaultRoot, queryRelativePath);
     await mkdir(path.dirname(queryDatabasePath), { recursive: true });
     await writeFile(queryDatabasePath, "narrow-reader-sentinel\n", "utf8");
     const beforeBytes = await readFile(queryDatabasePath);
@@ -102,7 +102,7 @@ test("experiment id and slug reads stay inside the experiment family and leave q
   }
 });
 
-test("generic show resolves the initialized vault id without creating query.sqlite", async () => {
+test.each(Object.values(QUERY_PROJECTION_SECTION_RELATIVE_PATHS))("generic show resolves the initialized vault id without creating query projection files" + " (%s)", async (queryRelativePath) => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-narrow-core-read-"));
 
   try {
@@ -111,7 +111,7 @@ test("generic show resolves the initialized vault id without creating query.sqli
       createdAt: "2026-08-20T12:00:00.000Z",
       timezone: "UTC",
     });
-    const queryDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+    const queryDatabasePath = path.join(vaultRoot, queryRelativePath);
     await assert.rejects(
       () => stat(queryDatabasePath),
       (error): boolean => (error as NodeJS.ErrnoException).code === "ENOENT",

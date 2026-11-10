@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { test } from "vitest";
 import {
-  QUERY_DB_RELATIVE_PATH,
+  QUERY_PROJECTION_SECTION_RELATIVE_PATHS,
   openSqliteRuntimeDatabase,
   readSqliteRuntimeUserVersion,
 } from "@murphai/runtime-state/node";
@@ -87,7 +87,7 @@ test("first provider-filtered read rebuilds carried v25 underscore provider rows
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-provider-v25-upgrade-"));
   const date = "2026-08-30";
   const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl");
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.wearables);
   const legacyBuiltAt = "2026-08-30T08:00:00.000Z";
 
   try {
@@ -134,17 +134,22 @@ test("first provider-filtered read rebuilds carried v25 underscore provider rows
         WHERE provider_scope_key = 'providers:future-ring'
       `).run();
       assert.ok(update.changes > 0);
-      legacyDatabase.prepare(`
-        UPDATE query_meta SET value = ? WHERE key = 'built_at'
-      `).run(legacyBuiltAt);
+
       legacyDatabase.exec("PRAGMA user_version = 25;");
     } finally {
       legacyDatabase.close();
     }
 
+    for (const section of ["entities", "metrics"] as const) {
+      const old = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS[section]));
+      try {
+        old.exec("PRAGMA user_version = 25");
+        if (section === "entities") old.prepare("UPDATE query_meta SET value = ? WHERE key = 'built_at'").run(legacyBuiltAt);
+      } finally { old.close(); }
+    }
     const staleStatus = await getQueryProjectionStatus(vaultRoot);
-    assert.equal(staleStatus.exists, true);
-    assert.equal(staleStatus.builtAt, legacyBuiltAt);
+    assert.equal(staleStatus.exists, false);
+    assert.equal(staleStatus.builtAt, null);
     assert.equal(staleStatus.fresh, false);
 
     const activity = await summarizeWearableActivityRuntime(vaultRoot, {
@@ -300,7 +305,7 @@ test("activity runtime reads bounded workout features without hydrating query en
     await rebuildQueryProjection(vaultRoot);
     assert.deepEqual(await summarizeWearableSourceHealthRuntime(vaultRoot), coldSourceHealth);
 
-    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH));
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities));
     try {
       const entityCount = database.prepare(
         "SELECT COUNT(*) AS count FROM query_entities",
@@ -392,7 +397,7 @@ test("runtime wearable provider filters do not fall back to all-provider summari
     );
     await rebuildQueryProjection(vaultRoot);
 
-    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH), {
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.wearables), {
       readOnly: true,
     });
     try {
@@ -516,7 +521,7 @@ test("runtime all-provider wearable source health recomputes provider staleness"
     );
     await rebuildQueryProjection(vaultRoot);
 
-    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH));
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.wearables));
     try {
       const alphaSourceHealthRow = database
         .prepare(`
@@ -630,7 +635,7 @@ test("provider-scoped wearable source health does not duplicate unknown rows", a
     );
     await rebuildQueryProjection(vaultRoot);
 
-    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH), {
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.wearables), {
       readOnly: true,
     });
     try {
@@ -749,7 +754,7 @@ test("provider-scoped wearable projection rows use resolved public providers", a
     );
     await rebuildQueryProjection(vaultRoot);
 
-    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH), {
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.wearables), {
       readOnly: true,
     });
     try {
@@ -865,7 +870,7 @@ test("whoop provider filter resolves Junction whoop_v2 evidence to the whoop sco
     );
     await rebuildQueryProjection(vaultRoot);
 
-    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH), {
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.wearables), {
       readOnly: true,
     });
     try {
@@ -1097,7 +1102,7 @@ test("stored RHR selects WHOOP over Apple Health while scoped reads retain each 
     assert.equal((await rhrFor(["whoop"]))?.value, 54);
     assert.equal((await rhrFor(["apple-health-kit"]))?.value, 62);
     // A carried projection must refresh even when no new canonical event arrived.
-    const old = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH), { create: false });
+    const old = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics), { create: false });
     try {
       old.exec("UPDATE query_metric_points SET value = 62, canonical_value = 62 WHERE metric_key = 'resting-heart-rate'");
       old.exec("PRAGMA user_version = 36");

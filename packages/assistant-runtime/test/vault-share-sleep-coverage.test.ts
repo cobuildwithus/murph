@@ -19,7 +19,7 @@ import {
 } from "@murphai/query";
 import {
   openSqliteRuntimeDatabase,
-  QUERY_DB_RELATIVE_PATH,
+  QUERY_PROJECTION_SECTION_RELATIVE_PATHS,
 } from "@murphai/runtime-state/node";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -117,7 +117,7 @@ it.each([
   // provider read above publishes wearable rows only, so publish the metric
   // tables before rewriting them.
   await rebuildQueryProjection(root);
-  const database = openSqliteRuntimeDatabase(join(root, QUERY_DB_RELATIVE_PATH), { create: false });
+  const database = openSqliteRuntimeDatabase(join(root, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics), { create: false });
   try {
     const update = database.prepare(`
       UPDATE query_metric_payloads
@@ -217,7 +217,7 @@ it.each([
   ]);
   const [personal] = await summarizeWearableSleepRuntime(root, { date: DATE });
   expect(personal).toMatchObject({ ...classification, summaryConfidence: { level: "low" } });
-  const database = openSqliteRuntimeDatabase(join(root, QUERY_DB_RELATIVE_PATH), { create: false });
+  const database = openSqliteRuntimeDatabase(join(root, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics), { create: false });
   try {
     database.exec("PRAGMA user_version = 28");
   } finally {

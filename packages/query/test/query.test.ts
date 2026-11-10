@@ -15,7 +15,7 @@ import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import type { MetricPoint } from "@murphai/health-metrics";
 import {
   INBOX_DB_RELATIVE_PATH,
-  QUERY_DB_RELATIVE_PATH,
+  QUERY_PROJECTION_SECTION_RELATIVE_PATHS,
   openSqliteRuntimeDatabase,
   readSqliteRuntimeUserVersion,
 } from "@murphai/runtime-state/node";
@@ -4240,14 +4240,14 @@ function createRecord(
 
 test("rebuildQueryProjection materializes the shared query projection and status stays read-only when absent", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
 
   try {
     assert.equal(existsSync(runtimeDatabasePath), false);
 
     const statusBefore = await getQueryProjectionStatus(vaultRoot);
     assert.equal(statusBefore.exists, false);
-    assert.equal(statusBefore.dbPath, QUERY_DB_RELATIVE_PATH);
+    assert.equal(statusBefore.dbPath, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
     assert.equal(existsSync(runtimeDatabasePath), false);
 
     const vault = await readVault(vaultRoot);
@@ -4255,7 +4255,7 @@ test("rebuildQueryProjection materializes the shared query projection and status
     const rebuilt = await rebuildQueryProjection(vaultRoot);
 
     assert.equal(rebuilt.exists, true);
-    assert.equal(rebuilt.dbPath, QUERY_DB_RELATIVE_PATH);
+    assert.equal(rebuilt.dbPath, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
     assert.equal(rebuilt.schemaVersion, "murph.query-projection");
     assert.equal(rebuilt.entityCount, vault.entities.length);
     assert.equal(
@@ -4325,7 +4325,7 @@ test("rebuildQueryProjection materializes the shared query projection and status
 
 test("query projection runtime goal progress resolves stored metric targets and metric-point rows", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics);
   const target = {
     biomarkerKey: "biomarker:apolipoprotein-b",
     comparator: "<",
@@ -4493,7 +4493,7 @@ test("query projection runtime goal progress resolves stored metric targets and 
 
 test("rebuildQueryProjection keeps dense provider telemetry out of default read and search paths", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
   const heartRateLedgerPath = path.join(vaultRoot, "ledger/samples/heart_rate/2026/2026-03.jsonl");
   const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");
 
@@ -4607,6 +4607,7 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
       readOnly: true,
     });
 
+    const wearables = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.wearables), { readOnly: true });
     try {
       const sampleEntityCount = database
         .prepare("SELECT COUNT(*) AS count FROM query_entities WHERE family = 'sample'")
@@ -4647,7 +4648,7 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
           )
         `)
         .get() as { count: number };
-      const wearableSummaryRow = database
+      const wearableSummaryRow = wearables
         .prepare(`
           SELECT summary_json AS summaryJson
           FROM query_wearable_summaries
@@ -4656,7 +4657,7 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
             AND summary_date = '2026-03-12'
         `)
         .get() as { summaryJson: string } | undefined;
-      const wearableSummaryCount = database
+      const wearableSummaryCount = wearables
         .prepare(`
           SELECT COUNT(*) AS count
           FROM query_wearable_summaries
@@ -4682,7 +4683,7 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
       assert.equal(denseEventSearchDocumentCount.count, 0);
       assert.equal(wearableSummaryCount.count, 1);
       assert.ok(wearableSummaryRow);
-      wearableSummaryRow.summaryJson = decodeWearableSummaryJson(wearableSummaryRow.summaryJson, readWearableSummaryShapes(database));
+      wearableSummaryRow.summaryJson = decodeWearableSummaryJson(wearableSummaryRow.summaryJson, readWearableSummaryShapes(wearables));
       // Stored rows use the compact wearable summary codec: populated
       // envelopes drop the constant candidates array entirely and empty
       // envelopes collapse to null markers.
@@ -4696,6 +4697,7 @@ test("rebuildQueryProjection keeps dense provider telemetry out of default read 
       assert.equal(ftsContentTable, undefined);
     } finally {
       database.close();
+      wearables.close();
     }
 
     const activitySummaries = await summarizeWearableActivityRuntime(vaultRoot, {
@@ -4794,7 +4796,7 @@ test("runtime wearable provider filters do not fall back to all-provider summari
 
 test("rebuildQueryProjection indexes compact structured terms without raw attribute payloads", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
   const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");
 
   try {
@@ -4868,7 +4870,7 @@ test("rebuildQueryProjection indexes compact structured terms without raw attrib
 
 test("rebuildQueryProjection recreates v24 stores without unused indexes", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
 
   try {
     await rebuildQueryProjection(vaultRoot);
@@ -4879,12 +4881,15 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
         CREATE INDEX query_entities_record_class_idx ON query_entities(record_class);
         CREATE INDEX query_entities_stream_idx ON query_entities(stream);
         CREATE INDEX query_entities_experiment_idx ON query_entities(experiment_slug);
-        CREATE INDEX query_metric_points_source_idx ON query_metric_points(source_record_id);
         PRAGMA user_version = 24;
       `);
     } finally {
       legacyDatabase.close();
     }
+
+    const legacyMetrics = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics));
+    try { legacyMetrics.exec("CREATE INDEX query_metric_points_source_idx ON query_metric_points(source_record_id); PRAGMA user_version = 24"); }
+    finally { legacyMetrics.close(); }
 
     await rebuildQueryProjection(vaultRoot);
 
@@ -4893,20 +4898,22 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
       readOnly: true,
     });
 
+    const metrics = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics), { readOnly: true });
     try {
       // The index-removal migration must invalidate v24 stores while allowing
       // later projection versions to retain the same compatibility guarantee.
       assert.ok(QUERY_PROJECTION_SQLITE_VERSION > 24);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
-      const columnRows = database
+      const columnRows = metrics
         .prepare("PRAGMA table_info(query_metric_points)")
         .all() as Array<{ name: string }>;
       const columnNames = columnRows.map((row) => row.name);
       const indexRows = database
         .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
         .all() as Array<{ name: string }>;
-      const indexNames = new Set(indexRows.map((row) => row.name));
+      const indexNames = new Set([...indexRows.map((row) => row.name),
+        ...metrics.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map(row => String(row.name))]);
 
       assert.ok(columnNames.includes("payload_id"));
       assert.equal(columnNames.includes("sort_rank"), false);
@@ -4941,6 +4948,7 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
       }
     } finally {
       database.close();
+      metrics.close();
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -4949,7 +4957,7 @@ test("rebuildQueryProjection recreates v24 stores without unused indexes", async
 
 test("ordinary wearable reads rebuild carried v22 sparse-body projections before serving them", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-body-v22-reset-"));
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.wearables);
   const bodyMetrics = [
     ["weight", 72.4, "kg", "sample"],
     ["body-fat-percentage", 18.4, "%", "sample"],
@@ -5049,14 +5057,6 @@ test("ordinary wearable reads rebuild carried v22 sparse-body projections before
         SET summary_json = ?
         WHERE id = ?
       `).run(JSON.stringify(legacyBodySummary), bodyRow.id);
-      staleDatabase.prepare(`
-        DELETE FROM query_metric_points
-        WHERE source_kind = 'wearable-summary'
-          AND metric_key IN (?, ?, ?, ?, ?)
-      `).run(...sparseBodyMetricKeys);
-      staleDatabase.prepare(`
-        UPDATE query_meta SET value = ? WHERE key = 'built_at'
-      `).run(staleBuiltAt);
       const preservedActivity = staleDatabase.prepare(`
         SELECT summary_json AS summaryJson
         FROM query_wearable_summaries
@@ -5065,16 +5065,30 @@ test("ordinary wearable reads rebuild carried v22 sparse-body projections before
       assert.match(preservedActivity?.summaryJson ?? "", /8432/u);
       staleDatabase.exec("PRAGMA user_version = 22;");
       unchangedSourceManifest = String(staleDatabase.prepare(
-        "SELECT value FROM query_meta WHERE key = 'wearable_source_manifest'",
+        "SELECT value FROM query_meta WHERE key = 'source_manifest'",
       ).get()?.value);
     } finally {
       staleDatabase.close();
     }
 
+    const oldMetrics = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics));
+    try {
+      oldMetrics.prepare(`
+        DELETE FROM query_metric_points
+        WHERE source_kind = 'wearable-summary'
+          AND metric_key IN (?, ?, ?, ?, ?)
+      `).run(...sparseBodyMetricKeys);
+      oldMetrics.exec("PRAGMA user_version = 22");
+    } finally { oldMetrics.close(); }
+    const oldEntities = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities));
+    try {
+      oldEntities.prepare("UPDATE query_meta SET value = ? WHERE key = 'built_at'").run(staleBuiltAt);
+      oldEntities.exec("PRAGMA user_version = 22");
+    } finally { oldEntities.close(); }
     assert.ok(JSON.parse(unchangedSourceManifest).length > 0);
     const staleStatus = await getQueryProjectionStatus(vaultRoot);
-    assert.equal(staleStatus.exists, true);
-    assert.equal(staleStatus.builtAt, staleBuiltAt);
+    assert.equal(staleStatus.exists, false);
+    assert.equal(staleStatus.builtAt, null);
     assert.equal(staleStatus.fresh, false);
 
     const body = await summarizeWearableBodyStateRuntime(vaultRoot);
@@ -5115,7 +5129,7 @@ test("ordinary wearable reads rebuild carried v22 sparse-body projections before
     try {
       assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
       const rebuiltManifest = reopened.prepare(
-        "SELECT value FROM query_meta WHERE key = 'wearable_source_manifest'",
+        "SELECT value FROM query_meta WHERE key = 'source_manifest'",
       ).get()?.value;
       assert.deepEqual(rebuiltManifest, unchangedSourceManifest);
 
@@ -5166,7 +5180,7 @@ test("ordinary wearable reads rebuild carried v22 sparse-body projections before
 
 test("runtime reads rebuild v17 metric identities after lab catalog semantics change", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics);
   const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");
 
   try {
@@ -5290,7 +5304,7 @@ test("runtime reads rebuild v17 metric identities after lab catalog semantics ch
 
 test("runtime reads rebuild v18 test-result identities after expanded lab-only alias curation", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics);
   const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");
 
   try {
@@ -5399,7 +5413,7 @@ test("rebuildQueryProjection stores compact metric point payloads for rich provi
       value: 45 + index,
     })),
   );
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics);
 
   try {
     await rebuildQueryProjection(vaultRoot);
@@ -7344,7 +7358,7 @@ test("listMetricPointsRuntime rebuilds v15 wearable-summary projections before s
       unit: "mg",
     },
   ]);
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics);
 
   try {
     await rebuildQueryProjection(vaultRoot);
@@ -7465,7 +7479,7 @@ test("wearable summary metric ownership keys match evidence builder output", asy
 
 test("rebuildQueryProjection resets stale v6 projections that still carry the dropped metric point columns", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics);
 
   try {
     await rebuildQueryProjection(vaultRoot);
@@ -7592,7 +7606,7 @@ function rewriteStoredWearableSummaryRowsToLegacyFullForm(
 
 test("rebuildQueryProjection resets stale v7 projections that still store full-form wearable summary rows", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-v7-reset-"));
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.wearables);
 
   try {
     await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
@@ -7666,7 +7680,7 @@ test("rebuildQueryProjection resets stale v7 projections that still store full-f
 
 test("runtime wearable summaries read identically from compact and legacy full-form stored rows", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-wearables-stored-form-equivalence-"));
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.wearables);
 
   try {
     await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
@@ -7798,7 +7812,7 @@ test("runtime wearable summaries read identically from compact and legacy full-f
 
 test("listMetricPointsRuntime reconstructs stored metric points from scalar columns and compact metadata", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.metrics);
   const point: MetricPoint = {
     biomarkerKey: "biomarker:apob",
     canonicalUnit: "mg/dL",
@@ -7868,7 +7882,7 @@ test("listMetricPointsRuntime reconstructs stored metric points from scalar colu
 
 test("rebuildQueryProjection discards unsupported local stores and recreates the current projection", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
   const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: true });
 
   try {
@@ -7966,7 +7980,7 @@ test("rebuildQueryProjection discards unsupported local stores and recreates the
 
 test("rebuildQueryProjection discards malformed local stores and recreates the current projection", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
   const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: true });
 
   try {
@@ -8010,7 +8024,7 @@ test("rebuildQueryProjection discards malformed local stores and recreates the c
 
 test("searchVaultRuntime discards unsupported local stores before serving results", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
 
   try {
     await rebuildQueryProjection(vaultRoot);
@@ -8039,7 +8053,8 @@ test("searchVaultRuntime discards unsupported local stores before serving result
     }
 
     const statusBefore = await getQueryProjectionStatus(vaultRoot);
-    assert.equal(statusBefore.schemaVersion, "murph.query-projection.unsupported");
+    assert.equal(statusBefore.schemaVersion, "murph.query-projection");
+    assert.equal(statusBefore.builtAt, null);
     assert.equal(statusBefore.fresh, false);
 
     const searchResult = await searchVaultRuntime(vaultRoot, "lab report", {
@@ -8069,10 +8084,10 @@ test("searchVaultRuntime discards unsupported local stores before serving result
 
     const statusAfter = await getQueryProjectionStatus(vaultRoot);
     assert.equal(statusAfter.schemaVersion, "murph.query-projection");
-    assert.equal(statusAfter.fresh, false);
+    assert.equal(statusAfter.fresh, true);
     assert.deepEqual([...await readFreshQueryProjectionSections(
       currentQueryProjectionLocation(vaultRoot), await listCanonicalSourceManifest(vaultRoot),
-    )], ["entities"]);
+    )], ["entities", "metrics", "wearables"]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -8080,7 +8095,7 @@ test("searchVaultRuntime discards unsupported local stores before serving result
 
 test("searchVaultRuntime rebuilds old v4 projections before serving dense or unsanitized rows", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
   const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");
 
   try {
@@ -8256,7 +8271,7 @@ test("searchVaultRuntime rebuilds old v4 projections before serving dense or uns
 
 test("searchVaultRuntime rebuilds the projection automatically and only returns sample rows when explicitly requested", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
   const malformed = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: true });
 
   try {
@@ -8314,7 +8329,7 @@ test("searchVaultRuntime rebuilds the projection automatically and only returns 
 
 test("searchVaultRuntime fails closed on malformed stored record types", async () => {
   const vaultRoot = await createFixtureVault();
-  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
 
   try {
     await rebuildQueryProjection(vaultRoot);
@@ -8344,7 +8359,7 @@ test("searchVaultRuntime fails closed on malformed stored record types", async (
 test("query projection ignores inbox runtime state and leaves inbox sqlite untouched", async () => {
   const vaultRoot = await createFixtureVault();
   const inboxDatabasePath = path.join(vaultRoot, INBOX_DB_RELATIVE_PATH);
-  const queryDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const queryDatabasePath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
 
   await mkdir(path.dirname(inboxDatabasePath), { recursive: true });
   const inboxDatabase = openDatabaseSync(inboxDatabasePath);
@@ -8357,10 +8372,10 @@ test("query projection ignores inbox runtime state and leaves inbox sqlite untou
   try {
     const statusBefore = await getQueryProjectionStatus(vaultRoot);
     assert.equal(statusBefore.exists, false);
-    assert.equal(statusBefore.dbPath, QUERY_DB_RELATIVE_PATH);
+    assert.equal(statusBefore.dbPath, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
 
     const rebuilt = await rebuildQueryProjection(vaultRoot);
-    assert.equal(rebuilt.dbPath, QUERY_DB_RELATIVE_PATH);
+    assert.equal(rebuilt.dbPath, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
     assert.equal(existsSync(queryDatabasePath), true);
 
     const queryDatabase = openDatabaseSync(queryDatabasePath, { readOnly: true });
@@ -8546,7 +8561,7 @@ test("retired oxygen analytics leave canonical evidence and member revisions int
       "evt_oxygen_corrected", "evt_oxygen_manual", "evt_oxygen_other",
     ]);
     await rebuildQueryProjection(vaultRoot);
-    const dbPath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+    const dbPath = path.join(vaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.wearables);
     // An old restored store must be invalidated even when source files are unchanged.
     const database = openSqliteRuntimeDatabase(dbPath, { create: false });
     database.exec("PRAGMA user_version = 32");

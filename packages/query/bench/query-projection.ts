@@ -1,5 +1,5 @@
 import { readFreshQueryProjectionSections } from "../src/projection/freshness.ts";
-import { currentQueryProjectionLocation, QUERY_PROJECTION_SECTIONS, QUERY_PROJECTION_SECTION_NAMES } from "../src/projection/schema.ts";
+import { currentQueryProjectionLocation, QUERY_PROJECTION_CERTIFICATE_KEY, QUERY_PROJECTION_SECTION_NAMES, queryProjectionSectionPath } from "../src/projection/schema.ts";
 import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -30,7 +30,8 @@ const noteCount = Math.ceil(seedCount / noteEvery);
 const originalVersion = "2026-01-01T00:00:00.000Z";
 const correctedVersion = "2026-01-02T00:00:00.000Z";
 const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-query-projection-bench-"));
-const dbPath = path.join(vaultRoot, ".runtime/projections/query.sqlite");
+const location = currentQueryProjectionLocation(vaultRoot);
+const dbPath = queryProjectionSectionPath(location, "metrics");
 
 function observation(index: number, version = originalVersion, corrected = false) {
   return {
@@ -83,29 +84,33 @@ async function fileBytes(filePath: string): Promise<number> {
 }
 
 async function databaseStats(scenario: string) {
-  const dbBytes = await fileBytes(dbPath);
-  const walBytes = await fileBytes(`${dbPath}-wal`);
-  const shmBytes = await fileBytes(`${dbPath}-shm`);
-  if (dbBytes === 0) { emit(scenario, { dbBytes, walBytes, shmBytes, exists: false }); return; }
-  const db = new DatabaseSync(dbPath, { readOnly: true });
-  try {
-    const scalar = (sql: string) => Object.values(db.prepare(sql).get() ?? {})[0] ?? null;
-    const rows = (table: string) => db.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(table)
-      ? scalar(`SELECT count(*) FROM ${table}`) : null;
-    const sourceFilesBySection = Object.fromEntries(QUERY_PROJECTION_SECTION_NAMES.map(section => {
-      const certificate = db.prepare("SELECT value FROM query_meta WHERE key = ?").get(QUERY_PROJECTION_SECTIONS[section].certificateKey);
-      return [section, certificate ? JSON.parse(String(certificate.value)).length : null];
-    }));
-    emit(scenario, {
-      dbBytes, zstdBytes: compressedBytes(dbPath), walBytes, shmBytes, exists: true,
-      pageCount: scalar("PRAGMA page_count"), freeListCount: scalar("PRAGMA freelist_count"),
-      pageSize: scalar("PRAGMA page_size"), userVersion: scalar("PRAGMA user_version"),
-      entityRows: rows("query_entities"),
-      metricRows: rows("query_metric_points"),
-      sourceFilesBySection,
-      searchRows: rows("query_search_document"),
-    });
-  } finally { db.close(); }
+  let totalDbBytes = 0;
+  let totalZstdBytes = 0;
+  for (const section of QUERY_PROJECTION_SECTION_NAMES) {
+    const sectionPath = queryProjectionSectionPath(location, section);
+    const dbBytes = await fileBytes(sectionPath);
+    totalDbBytes += dbBytes;
+    if (dbBytes === 0) { emit(scenario, { section, dbBytes, exists: false }); continue; }
+    const db = new DatabaseSync(sectionPath, { readOnly: true });
+    try {
+      const scalar = (sql: string) => Object.values(db.prepare(sql).get() ?? {})[0] ?? null;
+      const rows = (table: string) => db.prepare("SELECT 1 FROM sqlite_master WHERE name = ?").get(table)
+        ? scalar(`SELECT count(*) FROM ${table}`) : null;
+      const certificate = db.prepare("SELECT value FROM query_meta WHERE key = ?").get(QUERY_PROJECTION_CERTIFICATE_KEY);
+      const zstdBytes = compressedBytes(sectionPath);
+      totalZstdBytes += zstdBytes;
+      emit(scenario, {
+        section, dbBytes, zstdBytes, exists: true,
+        pageCount: scalar("PRAGMA page_count"), freeListCount: scalar("PRAGMA freelist_count"),
+        pageSize: scalar("PRAGMA page_size"), userVersion: scalar("PRAGMA user_version"),
+        entityRows: rows("query_entities"), metricRows: rows("query_metric_points"),
+        wearableRows: rows("query_wearable_summaries"), searchRows: rows("query_search_document"),
+        sourceFiles: certificate ? JSON.parse(String(certificate.value)).length : null,
+      });
+    } finally { db.close(); }
+  }
+  // Per-file compression is a layout diagnostic, not the full encrypted archive size.
+  emit(scenario, { totalDbBytes, totalZstdBytes });
 }
 
 function compressedBytes(filePath: string): number {
@@ -115,7 +120,7 @@ function compressedBytes(filePath: string): number {
 }
 
 async function compareSortedPacking() {
-  const sortedPath = path.join(vaultRoot, "sorted-query.sqlite");
+  const sortedPath = path.join(vaultRoot, "sorted-query-metrics.sqlite");
   await copyFile(dbPath, sortedPath);
   const database = new DatabaseSync(sortedPath);
   try {

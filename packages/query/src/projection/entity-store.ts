@@ -4,9 +4,8 @@ import type { QueryRecordData } from "../query-record-data.ts";
 import type { QueryCanonicalEntityFilters } from "../query-projection-types.ts";
 import type { VaultSourceSnapshot } from "../vault-source.ts";
 import {
-  assertQueryProjectionTables,
   expectString,
-  openQueryProjectionDatabase,
+  openQueryProjectionSection,
   parseJsonValue,
   readMeta,
   type DatabaseSync,
@@ -64,14 +63,9 @@ export function insertQueryEntities(
 export function readStoredVaultSource(
   location: QueryProjectionLocation,
 ): VaultSourceSnapshot {
-  const database = openQueryProjectionDatabase(location, {
-    create: false,
-    readOnly: true,
-  });
+  const database = openQueryProjectionSection(location, "entities");
 
   try {
-    assertQueryProjectionTables(database, location, "entities");
-
     const entityRows = database.prepare(`
       SELECT entity_json
       FROM query_entities
@@ -93,13 +87,9 @@ export function readStoredVaultSource(
 export function readStoredVaultMetadata(
   location: QueryProjectionLocation,
 ): QueryRecordData | null {
-  const database = openQueryProjectionDatabase(location, {
-    create: false,
-    readOnly: true,
-  });
+  const database = openQueryProjectionSection(location, "entities");
 
   try {
-    assertQueryProjectionTables(database, location, "entities");
     return parseJsonValue<QueryRecordData | null>(readMeta(database, "metadata_json"), null);
   } finally {
     database.close();
@@ -110,13 +100,9 @@ export function listStoredCanonicalEntities(
   location: QueryProjectionLocation,
   filters: QueryCanonicalEntityFilters,
 ): CanonicalEntity[] {
-  const database = openQueryProjectionDatabase(location, {
-    create: false,
-    readOnly: true,
-  });
+  const database = openQueryProjectionSection(location, "entities");
 
   try {
-    assertQueryProjectionTables(database, location, "entities");
     return queryStoredCanonicalEntities(database, filters);
   } finally {
     database.close();

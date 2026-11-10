@@ -13,11 +13,10 @@ import {
   type SearchResult,
 } from "../search-shared.ts";
 import {
-  assertQueryProjectionTables,
   expectEnumString,
   expectNullableString,
   expectString,
-  openQueryProjectionDatabase,
+  openQueryProjectionSection,
   parseJsonValue,
   type DatabaseSync,
   type QueryProjectionLocation,
@@ -110,14 +109,9 @@ export function searchQueryProjection(
     };
   }
 
-  const database = openQueryProjectionDatabase(location, {
-    create: false,
-    readOnly: true,
-  });
+  const database = openQueryProjectionSection(location, "entities");
 
   try {
-    assertQueryProjectionTables(database, location, "entities");
-
     const whereClauses: string[] = ["query_search_fts MATCH ?"];
     const parameters: Array<string | number> = [buildFtsQuery(terms)];
     const includeSamples = wantsSampleRows(filters);

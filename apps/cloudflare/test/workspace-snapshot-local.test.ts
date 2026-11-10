@@ -4,6 +4,7 @@ import { createCipheriv, createHash } from "node:crypto";
 import { access, chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, truncate, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 
 import { describe, expect, it, vi } from "vitest";
@@ -36,10 +37,14 @@ import {
 import {
   getQueryProjectionStatus,
   listBloodTests,
+  listMetricPoints,
+  searchVaultRuntime,
+  summarizeWearableSourceHealthRuntime,
   rebuildQueryProjection,
 } from "@murphai/query";
 import {
   collectHostedWorkspaceSnapshotArchivePlan,
+  QUERY_PROJECTION_SECTION_RELATIVE_PATHS,
   resolveHostedMediaReferenceCataloguePath,
   HOSTED_MEDIA_REFS_SCHEMA,
 } from "@murphai/runtime-state/node";
@@ -384,9 +389,15 @@ describe("workspace snapshot local restore", () => {
         "machine-local device sync execution cache\n",
         "utf8",
       );
-      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite"), "projection\n", "utf8");
-      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite-shm"), "projection-shm\n", "utf8");
-      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite-wal"), "projection-wal\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query-entities.sqlite"), "projection\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query-metrics.sqlite"), "projection-metrics\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query-wearables.sqlite"), "projection-wearables\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite"), "projection-wearables\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite-wal"), "projection-wearables\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query.sqlite-shm"), "projection-wearables\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query-entities.sqlite.tmp"), "projection-wearables\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query-metrics.sqlite.tmp"), "projection-wearables\n", "utf8");
+      await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "query-wearables.sqlite.tmp"), "projection-wearables\n", "utf8");
       await writeFile(path.join(sourceVaultRoot, ".runtime", "projections", "inboxd.sqlite"), "other-projection\n", "utf8");
       await writeFile(path.join(sourceVaultRoot, ".runtime", "cache", "cache.txt"), "cache\n", "utf8");
       await writeFile(path.join(sourceVaultRoot, ".git", "config"), "git config\n", "utf8");
@@ -525,12 +536,15 @@ describe("workspace snapshot local restore", () => {
         .rejects.toThrow();
       await expect(access(path.join(restoredVaultRoot, "vault-share")))
         .rejects.toThrow();
-      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite"), "utf8"))
+      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query-entities.sqlite"), "utf8"))
         .resolves.toBe("projection\n");
-      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite-shm"), "utf8"))
-        .resolves.toBe("projection-shm\n");
-      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite-wal"), "utf8"))
-        .resolves.toBe("projection-wal\n");
+      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query-metrics.sqlite"), "utf8"))
+        .resolves.toBe("projection-metrics\n");
+      await expect(readFile(path.join(restoredVaultRoot, ".runtime", "projections", "query-wearables.sqlite"), "utf8"))
+        .resolves.toBe("projection-wearables\n");
+      for (const filename of ["query.sqlite", "query.sqlite-wal", "query.sqlite-shm", "query-entities.sqlite.tmp", "query-metrics.sqlite.tmp", "query-wearables.sqlite.tmp"]) {
+        await expect(access(path.join(restoredVaultRoot, ".runtime/projections", filename))).rejects.toThrow();
+      }
       await expect(access(path.join(restoredVaultRoot, ".runtime", "projections", "inboxd.sqlite")))
         .rejects.toThrow();
       await expect(access(path.join(restoredVaultRoot, ".runtime", "cache", "cache.txt")))
@@ -544,7 +558,7 @@ describe("workspace snapshot local restore", () => {
     }
   });
 
-  it("keeps a real fractional-mtime query projection fresh across encrypted restore", async () => {
+  it.each(["sections", "legacy"] as const)("restores fractional-mtime query evidence from %s files", async (layout) => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-query-projection-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");
     const sourceVaultRoot = path.join(sourceDurableRoot, "vault");
@@ -602,18 +616,40 @@ describe("workspace snapshot local restore", () => {
       expect((await stat(eventPath)).mtimeMs % 1_000).not.toBe(0);
 
       await rebuildQueryProjection(sourceVaultRoot);
+      const sectionPaths = Object.values(QUERY_PROJECTION_SECTION_RELATIVE_PATHS);
       const sourceStatus = await getQueryProjectionStatus(sourceVaultRoot);
-      expect(sourceStatus?.fresh).toBe(true);
-
+      expect(sourceStatus.fresh).toBe(true);
+      const beforeWearables = await Promise.all(sectionPaths.slice(0, 2).map(file => readFile(path.join(sourceVaultRoot, file))));
+      // Republish only wearables with the same canonical evidence.
+      await rm(path.join(sourceVaultRoot, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.wearables));
+      await summarizeWearableSourceHealthRuntime(sourceVaultRoot);
+      expect(await Promise.all(sectionPaths.slice(0, 2).map(file => readFile(path.join(sourceVaultRoot, file))))).toEqual(beforeWearables);
+      const sectionBytes = await Promise.all(sectionPaths.map(file => readFile(path.join(sourceVaultRoot, file))));
+      const legacyPath = path.join(sourceVaultRoot, ".runtime/projections/query.sqlite");
+      const legacy = new DatabaseSync(legacyPath);
+      try { legacy.exec("CREATE TABLE legacy (value TEXT); INSERT INTO legacy VALUES ('synthetic old cache'); PRAGMA user_version = 38"); }
+      finally { legacy.close(); }
+      const legacyBytes = await readFile(legacyPath);
+      for (const file of sectionPaths) await writeFile(path.join(sourceVaultRoot, file + ".tmp"), "unfinished build");
+      for (const suffix of ["-wal", "-shm"]) await writeFile(legacyPath + suffix, "obsolete sidecar");
       const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
       const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
         durableRoot: sourceDurableRoot,
         operatorHomeRoot: sourceOperatorHomeRoot,
         vaultRoot: sourceVaultRoot,
       });
+      const expectedQueryEntries = sectionPaths.map(file => `vault/${file}`).sort();
+      expect(archivePlan.entries.filter(entry => entry.archivePath.startsWith("vault/.runtime/projections/query"))
+        .map(entry => entry.archivePath).sort()).toEqual(expectedQueryEntries);
+      // Model the old producer's explicit allowlist; restore admission must still
+      // accept that authenticated archive even though new snapshots omit it.
+      const archiveEntries = layout === "sections" ? archivePlan.entries : [
+        ...archivePlan.entries.filter(entry => !expectedQueryEntries.includes(entry.archivePath)),
+        { absolutePath: legacyPath, archivePath: "vault/.runtime/projections/query.sqlite", kind: "file" as const },
+      ];
       const encrypted = await createEncryptedWorkspaceSnapshotFile({
         aad,
-        archiveEntries: archivePlan.entries,
+        archiveEntries,
         dataKey: encodeHostedWorkspaceSnapshotV2DataKey(dataKey),
         durableRoot: sourceDurableRoot,
         ivBase64: Buffer.from(Uint8Array.from({ length: 12 }, (_, index) => index + 30))
@@ -638,11 +674,21 @@ describe("workspace snapshot local restore", () => {
 
       const restoredVaultRoot = path.join(restoredDurableRoot, "vault");
       const restoredStatus = await getQueryProjectionStatus(restoredVaultRoot);
-      expect(restoredStatus?.fresh).toBe(true);
-      expect(restoredStatus?.builtAt).toBe(sourceStatus?.builtAt);
-
-      const projectionPath = path.join(restoredVaultRoot, ".runtime", "projections", "query.sqlite");
-      const projectionMtimeBefore = (await stat(projectionPath)).mtimeMs;
+      if (layout === "sections") {
+        expect(restoredStatus).toEqual(sourceStatus);
+        expect(await Promise.all(sectionPaths.map(file => readFile(path.join(restoredVaultRoot, file))))).toEqual(sectionBytes);
+        await expect(access(path.join(restoredVaultRoot, ".runtime/projections/query.sqlite"))).rejects.toThrow();
+      } else {
+        expect(restoredStatus.exists).toBe(false);
+        expect(restoredStatus.fresh).toBe(false);
+        for (const file of sectionPaths) await expect(access(path.join(restoredVaultRoot, file))).rejects.toThrow();
+      }
+      const projectionMtimesBefore = layout === "sections"
+        ? await Promise.all(sectionPaths.map(async file => (await stat(path.join(restoredVaultRoot, file))).mtimeMs)) : [];
+      await searchVaultRuntime(restoredVaultRoot, "Apolipoprotein");
+      await listMetricPoints(restoredVaultRoot, { limit: 1 });
+      await summarizeWearableSourceHealthRuntime(restoredVaultRoot);
+      expect((await getQueryProjectionStatus(restoredVaultRoot)).fresh).toBe(true);
       const records = await listBloodTests(restoredVaultRoot, {
         limit: 1,
         text: "Apolipoprotein B",
@@ -651,7 +697,15 @@ describe("workspace snapshot local restore", () => {
       expect(records[0]?.data.results).toEqual(expect.arrayContaining([
         expect.objectContaining({ analyte: "Apolipoprotein B", value: 87 }),
       ]));
-      expect((await stat(projectionPath)).mtimeMs).toBe(projectionMtimeBefore);
+      if (layout === "sections") {
+        expect(await Promise.all(sectionPaths.map(async file => (await stat(path.join(restoredVaultRoot, file))).mtimeMs))).toEqual(projectionMtimesBefore);
+        expect(await Promise.all(sectionPaths.map(file => readFile(path.join(restoredVaultRoot, file))))).toEqual(sectionBytes);
+      } else {
+        expect(await readFile(path.join(restoredVaultRoot, ".runtime/projections/query.sqlite"))).toEqual(legacyBytes);
+      }
+      expect((await readdir(path.join(restoredVaultRoot, ".runtime/projections"))).sort()).toEqual([
+        ...sectionPaths.map(file => path.basename(file)), ...(layout === "legacy" ? ["query.sqlite"] : []),
+      ].sort());
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);

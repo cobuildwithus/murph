@@ -7,7 +7,7 @@ import { test, vi } from "vitest";
 import * as core from "@murphai/core";
 import * as query from "@murphai/query";
 import { EXPERIMENT_STATUSES } from "@murphai/contracts";
-import { QUERY_DB_RELATIVE_PATH } from "@murphai/runtime-state/node";
+import { QUERY_PROJECTION_SECTION_RELATIVE_PATHS } from "@murphai/runtime-state/node";
 import { withCliTiming, timeCliDispatch } from "@murphai/runtime-state/node/cli-timing";
 import type { CliTiming, CliTimingPhase } from "@murphai/runtime-state/cli-timing";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
@@ -146,7 +146,7 @@ test("relevant canonical edits and status transitions are visible without publis
       return globalRead(vault);
     });
     for (const phase of forbidden) assert.ok(positive.phases.includes(phase), phase);
-    const db = path.join(vault, QUERY_DB_RELATIVE_PATH);
+    const db = path.join(vault, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities);
     const bytes = await readFile(db);
     for (const status of EXPERIMENT_STATUSES) {
       await core.updateExperiment({ vaultRoot: vault, relativePath: experimentPath(0), status, title: `Synthetic ${status}` });

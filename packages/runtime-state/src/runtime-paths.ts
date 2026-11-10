@@ -17,7 +17,12 @@ export {
   RUNTIME_TEMP_ROOT_RELATIVE_PATH,
 } from "./local-state-taxonomy.ts";
 
-export const QUERY_DB_RELATIVE_PATH = `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query.sqlite`;
+/** The query projection is one write-once SQLite file per section. */
+export const QUERY_PROJECTION_SECTION_RELATIVE_PATHS = Object.freeze({
+  entities: `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query-entities.sqlite`,
+  metrics: `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query-metrics.sqlite`,
+  wearables: `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query-wearables.sqlite`,
+});
 export const INBOX_DB_RELATIVE_PATH = `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/inboxd.sqlite`;
 export const INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/inbox`;
 export const INBOX_CONFIG_RELATIVE_PATH = `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH}/config.json`;
@@ -41,7 +46,6 @@ export interface RuntimePaths {
   cacheRoot: string;
   clinicalRecordsRuntimeRoot: string;
   tempRoot: string;
-  queryDbPath: string;
   inboxDbPath: string;
   inboxRuntimeRoot: string;
   inboxConfigPath: string;
@@ -107,7 +111,6 @@ export function resolveRuntimePaths(vaultRoot: string): RuntimePaths {
       CLINICAL_RECORDS_RUNTIME_DIRECTORY_RELATIVE_PATH,
     ),
     tempRoot: path.join(absoluteVaultRoot, RUNTIME_TEMP_ROOT_RELATIVE_PATH),
-    queryDbPath: path.join(absoluteVaultRoot, QUERY_DB_RELATIVE_PATH),
     inboxDbPath: path.join(absoluteVaultRoot, INBOX_DB_RELATIVE_PATH),
     inboxRuntimeRoot: path.join(absoluteVaultRoot, INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH),
     inboxConfigPath: path.join(absoluteVaultRoot, INBOX_CONFIG_RELATIVE_PATH),

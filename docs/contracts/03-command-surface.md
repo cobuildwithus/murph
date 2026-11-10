@@ -936,9 +936,9 @@ The query text may be passed either positionally as `vault-cli search query <que
 ```json
 {
   "vault": "<path>",
-  "dbPath": ".runtime/projections/query.sqlite",
+  "dbPath": ".runtime/projections/query-entities.sqlite",
   "exists": true,
-  "schemaVersion": "murph.query-projection.v1",
+  "schemaVersion": "murph.query-projection",
   "builtAt": "2026-04-07T03:55:00.000Z",
   "entityCount": 42,
   "searchDocumentCount": 42,
@@ -946,16 +946,20 @@ The query text may be passed either positionally as `vault-cli search query <que
 }
 ```
 
-`dbPath` always reports the shared query-owned local projection at `.runtime/projections/query.sqlite`. Inbox runtime databases are separate stores and are never treated as fallbacks for query reads or lexical search; retired `gateway.sqlite` residue is ignored as machine-local projection state.
+`exists` is true when any section has the current schema version. Counts and
+`builtAt` come from the entities section and remain zero/null until that section
+is published; `fresh` requires all three sections to match the canonical manifest.
+
+`dbPath` always reports the entities section of the query-owned local projection at `.runtime/projections/query-entities.sqlite`. Inbox runtime databases are separate stores and are never treated as fallbacks for query reads or lexical search; retired `gateway.sqlite` residue is ignored as machine-local projection state.
 
 ### `query projection rebuild`
 
 ```json
 {
   "vault": "<path>",
-  "dbPath": ".runtime/projections/query.sqlite",
+  "dbPath": ".runtime/projections/query-entities.sqlite",
   "exists": true,
-  "schemaVersion": "murph.query-projection.v1",
+  "schemaVersion": "murph.query-projection",
   "builtAt": "2026-04-07T03:55:00.000Z",
   "entityCount": 42,
   "searchDocumentCount": 42,

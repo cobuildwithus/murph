@@ -1,4 +1,4 @@
-import * as schema from "../src/projection/schema.ts";
+import * as metricStore from "../src/projection/metric-store.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -12,10 +12,9 @@ import { openSqliteRuntimeDatabase, withImmediateTransaction } from "@murphai/ru
 import { test, vi } from "vitest";
 
 import { getQueryProjectionStatus, listCanonicalEntitiesRuntime, listMetricPointsRuntime, summarizeWearableSourceHealthRuntime, rebuildQueryProjection } from "../src/query-projection.ts";
-import * as searchStore from "../src/projection/search-store.ts";
 import { readProjectionStatus } from "../src/projection/freshness.ts";
 import { insertMetricPoints, listStoredMetricPoints } from "../src/projection/metric-store.ts";
-import { currentQueryProjectionLocation, ensureQueryProjectionSectionSchema, openQueryProjectionDatabase } from "../src/projection/schema.ts";
+import { currentQueryProjectionLocation, publishQueryProjectionSection, openQueryProjectionSection, queryProjectionSectionPath, QUERY_PROJECTION_SECTION_NAMES } from "../src/projection/schema.ts";
 import { insertWearableSummaryRows, readWearableSummaryRows } from "../src/projection/wearable-summary-store.ts";
 import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 
@@ -40,10 +39,8 @@ test("sparse biomarker index preserves filtered and unfiltered metric reads", as
   try {
     const points = Array.from({ length: 1000 }, (_, index) => metricPoint(index, null));
     points.push(metricPoint(1000, "biomarker:apob"));
-    const database = openQueryProjectionDatabase(location);
-    ensureQueryProjectionSectionSchema(database, "metrics");
-    try {
-      withImmediateTransaction(database, () => insertMetricPoints(database, points));
+    publishQueryProjectionSection(location, "metrics", "[]", database => {
+      insertMetricPoints(database, points);
       const indexed = database.prepare(`
         SELECT count(*) AS count FROM query_metric_points
         INDEXED BY query_metric_points_biomarker_latest_idx
@@ -55,9 +52,7 @@ test("sparse biomarker index preserves filtered and unfiltered metric reads", as
         WHERE biomarker_key = ? ORDER BY effective_date DESC, observed_at DESC, id ASC LIMIT 10
       `).all("biomarker:apob");
       assert.ok(plan.some(row => String(row.detail).includes("query_metric_points_biomarker_latest_idx")));
-    } finally {
-      database.close();
-    }
+    });
     assert.deepEqual(listStoredMetricPoints(location, { biomarkerKey: "biomarker:apob" }), [points[1000]]);
     assert.equal(listStoredMetricPoints(location, { metricKey: "steps", limit: null }).length, 1000);
     assert.equal(listStoredMetricPoints(location, { limit: null }).length, 1001);
@@ -66,45 +61,32 @@ test("sparse biomarker index preserves filtered and unfiltered metric reads", as
   }
 });
 
-test("query replacement clears retired payloads for compression and preserves rollback", async () => {
+test("replacement removes retired payload bytes while failed publication preserves the previous file", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "murph-query-retired-"));
+  const location = currentQueryProjectionLocation(root);
   const payload = Array.from({ length: 4096 }, (_, index) =>
     createHash("sha256").update(`synthetic-retired-${index}`).digest("hex")).join("");
   const summary = { id: "synthetic", providerScopeJson: "[]", providerScopeKey: "all",
     sortRank: 0, summaryDate: "2026-09-01", summaryJson: JSON.stringify({ payload }),
     summaryKind: "activity" as const };
-  const compressedBytes: number[] = [];
   try {
-    for (const clearRetired of [false, true]) {
-      const location = currentQueryProjectionLocation(path.join(root, String(clearRetired)));
-      const database = openQueryProjectionDatabase(location);
-      ensureQueryProjectionSectionSchema(database, "wearables");
-      try {
-        // The control recreates the old connection behavior.
-        if (!clearRetired) database.exec("PRAGMA secure_delete = OFF");
-        insertWearableSummaryRows(database, [summary]);
-        assert.throws(() => withImmediateTransaction(database, () => {
-          database.exec("DELETE FROM query_wearable_summaries");
-          throw new Error("synthetic publication failure");
-        }), /synthetic publication failure/u);
-        assert.equal(readWearableSummaryRows(location).rows[0]?.summaryJson, summary.summaryJson);
-        withImmediateTransaction(database, () => {
-          database.exec("DELETE FROM query_wearable_summaries");
-          insertWearableSummaryRows(database, [{ ...summary, summaryJson: "{}" }]);
-        });
-      } finally {
-        database.close();
-      }
-      assert.equal(readWearableSummaryRows(location).rows[0]?.summaryJson, "{}");
-      const bytes = await readFile(location.absolutePath);
-      assert.equal(bytes.includes(Buffer.from(payload.slice(4096, 4160))), !clearRetired);
-      compressedBytes.push(deflateSync(bytes).byteLength);
-    }
-    assert.ok(compressedBytes[1]! < compressedBytes[0]! / 4,
+    const publish = (json: string, fail = false) => publishQueryProjectionSection(location, "wearables", "[]", database => {
+      insertWearableSummaryRows(database, [{ ...summary, summaryJson: json }]);
+      if (fail) throw new Error("synthetic publication failure");
+    });
+    publish(summary.summaryJson);
+    const file = queryProjectionSectionPath(location, "wearables");
+    const before = await readFile(file);
+    assert.throws(() => publish("{}", true), /synthetic publication failure/u);
+    assert.deepEqual(await readFile(file), before);
+    assert.equal(readWearableSummaryRows(location).rows[0]?.summaryJson, summary.summaryJson);
+    publish("{}");
+    assert.equal(readWearableSummaryRows(location).rows[0]?.summaryJson, "{}");
+    const after = await readFile(file);
+    assert.equal(after.includes(Buffer.from(payload.slice(4096, 4160))), false);
+    assert.ok(deflateSync(after).length < deflateSync(before).length / 4,
       "retired high-entropy bytes should not inflate compressed snapshots");
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 for (const version of [29, 30, 31, 32, 33]) {
@@ -116,7 +98,7 @@ test(`v${version} caches rebuild once and current SQLite bytes remain reusable a
     await rebuildQueryProjection(root);
     const before = await listCanonicalEntitiesRuntime(root);
     const location = currentQueryProjectionLocation(root);
-    const database = openSqliteRuntimeDatabase(location.absolutePath, { journalMode: "DELETE" });
+    const database = openSqliteRuntimeDatabase(queryProjectionSectionPath(location, "metrics"), { journalMode: "DELETE" });
     try {
       // Recreate the physical layout of the previous cache generations.
       const pageSize = version < 31 ? 4096 : 8192;
@@ -138,20 +120,24 @@ test(`v${version} caches rebuild once and current SQLite bytes remain reusable a
             ON query_metric_points(biomarker_key, effective_date DESC, observed_at DESC);
         `);
       }
-      for (const table of version < 31 ? ["query_entities", "query_search_document"] : []) {
-        for (const column of ["date", "occurred_at"]) {
-          database.exec(`CREATE INDEX ${table}_${column}_idx ON ${table}(${column})`);
-        }
-      }
     } finally {
       database.close();
     }
+    const oldEntities = openSqliteRuntimeDatabase(queryProjectionSectionPath(location, "entities"));
+    try {
+      oldEntities.exec(`PRAGMA user_version = ${version}`);
+      for (const table of version < 31 ? ["query_entities", "query_search_document"] : []) {
+        for (const column of ["date", "occurred_at"]) {
+          oldEntities.exec(`CREATE INDEX ${table}_${column}_idx ON ${table}(${column})`);
+        }
+      }
+    } finally { oldEntities.close(); }
     assert.equal((await getQueryProjectionStatus(root)).fresh, false);
     assert.deepEqual(await listCanonicalEntitiesRuntime(root), before);
     await listMetricPointsRuntime(root);
     await summarizeWearableSourceHealthRuntime(root);
     assert.equal((await getQueryProjectionStatus(root)).fresh, true);
-    const current = openQueryProjectionDatabase(location, { readOnly: true });
+    const current = openQueryProjectionSection(location, "metrics");
     try {
       assert.equal(current.prepare("PRAGMA page_size").get()?.page_size, 8192);
       assert.ok(current.prepare("PRAGMA table_info(query_metric_points)").all()
@@ -162,8 +148,10 @@ test(`v${version} caches rebuild once and current SQLite bytes remain reusable a
       current.close();
     }
     const restored = currentQueryProjectionLocation(path.join(root, "restored"));
-    await mkdir(path.dirname(restored.absolutePath), { recursive: true });
-    await copyFile(location.absolutePath, restored.absolutePath);
+    for (const section of QUERY_PROJECTION_SECTION_NAMES) {
+      await mkdir(path.dirname(queryProjectionSectionPath(restored, section)), { recursive: true });
+      await copyFile(queryProjectionSectionPath(location, section), queryProjectionSectionPath(restored, section));
+    }
     assert.equal((await readProjectionStatus(restored, await listCanonicalSourceManifest(root)))?.fresh, true);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -187,10 +175,8 @@ test("shared metric payloads preserve full results, filters and restored SQLite 
     };
   }).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   try {
-    const database = openQueryProjectionDatabase(location);
-    ensureQueryProjectionSectionSchema(database, "metrics");
-    try {
-      withImmediateTransaction(database, () => insertMetricPoints(database, points));
+    publishQueryProjectionSection(location, "metrics", "[]", database => {
+      insertMetricPoints(database, points);
       assert.equal(database.prepare("SELECT count(*) AS count FROM query_metric_points").get()?.count, 1200);
       assert.equal(database.prepare("SELECT count(*) AS count FROM query_metric_payloads").get()?.count, 3);
       assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
@@ -201,30 +187,28 @@ test("shared metric payloads preserve full results, filters and restored SQLite 
       `).all("biomarker:apob");
       assert.ok(plan.some(row => String(row.detail).includes("query_metric_points_biomarker_latest_idx")));
       assert.ok(plan.some(row => String(row.detail).includes("INTEGER PRIMARY KEY")));
-    } finally {
-      database.close();
-    }
+    });
     assert.deepEqual(listStoredMetricPoints(location, { limit: null }), points);
     assert.deepEqual(listStoredMetricPoints(location, {
       biomarkerKey: "biomarker:apob", from: "2026-09-01", to: "2026-09-01", limit: 7,
     }), points.filter(point => point.biomarkerKey !== null).slice(0, 7));
     assert.deepEqual(listStoredMetricPoints(location, { from: "2026-09-02" }), []);
     const restored = currentQueryProjectionLocation(path.join(root, "restored"));
-    await mkdir(path.dirname(restored.absolutePath), { recursive: true });
-    await copyFile(location.absolutePath, restored.absolutePath);
+    await mkdir(path.dirname(queryProjectionSectionPath(restored, "metrics")), { recursive: true });
+    await copyFile(queryProjectionSectionPath(location, "metrics"), queryProjectionSectionPath(restored, "metrics"));
     assert.deepEqual(listStoredMetricPoints(restored, { limit: null }), points);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("full publication rolls back metric references together and clears retired payloads", async () => {
+test("failed publication preserves metric references byte-for-byte and a retry retires payloads", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "murph-query-payload-replace-"));
   const location = currentQueryProjectionLocation(root);
   try {
     await initializeVault({ vaultRoot: root });
     await rebuildQueryProjection(root);
-    const database = openQueryProjectionDatabase(location);
+    const database = openSqliteRuntimeDatabase(queryProjectionSectionPath(location, "metrics"));
     try {
       withImmediateTransaction(database, () => insertMetricPoints(database, [metricPoint(0, null)]));
       // A later insertion must never overwrite a previous call's payload ID.
@@ -235,20 +219,22 @@ test("full publication rolls back metric references together and clears retired 
       database.close();
     }
     const before = listStoredMetricPoints(location, { limit: null });
-    const writeMeta = schema.writeMeta;
-    const failPublication = vi.spyOn(schema, "writeMeta").mockImplementation((...args) => {
-      if (args[1] === "schema_version") throw new Error("synthetic publication failure");
-      return writeMeta(...args);
+    const previousBytes = await readFile(queryProjectionSectionPath(location, "metrics"));
+    const insert = metricStore.insertMetricPoints;
+    const failPublication = vi.spyOn(metricStore, "insertMetricPoints").mockImplementation((...args) => {
+      insert(...args);
+      throw new Error("synthetic publication failure");
     });
     try {
       await assert.rejects(rebuildQueryProjection(root), /synthetic publication failure/u);
     } finally {
       failPublication.mockRestore();
     }
+    assert.deepEqual(await readFile(queryProjectionSectionPath(location, "metrics")), previousBytes);
     assert.deepEqual(listStoredMetricPoints(location, { limit: null }), before);
     await rebuildQueryProjection(root);
     assert.deepEqual(listStoredMetricPoints(location, { limit: null }), []);
-    const replaced = openQueryProjectionDatabase(location, { readOnly: true });
+    const replaced = openQueryProjectionSection(location, "metrics");
     try {
       assert.equal(replaced.prepare("SELECT count(*) AS count FROM query_metric_payloads").get()?.count, 0);
       assert.equal(replaced.prepare("PRAGMA integrity_check").get()?.integrity_check, "ok");
@@ -273,13 +259,13 @@ test("cold ingest absence leaves the existing query database and freshness uncha
     const manifest = await listCanonicalSourceManifest(root);
     const status = await getQueryProjectionStatus(root);
     const location = currentQueryProjectionLocation(root);
-    const before = await readFile(location.absolutePath);
+    const before = await Promise.all(QUERY_PROJECTION_SECTION_NAMES.map(section => readFile(queryProjectionSectionPath(location, section))));
     assert.equal(status.fresh, true);
     await rm(shard);
     assert.deepEqual(await listCanonicalSourceManifest(root), manifest);
     assert.deepEqual(await getQueryProjectionStatus(root), status);
     await listCanonicalEntitiesRuntime(root);
-    assert.deepEqual(await readFile(location.absolutePath), before);
+    assert.deepEqual(await Promise.all(QUERY_PROJECTION_SECTION_NAMES.map(section => readFile(queryProjectionSectionPath(location, section)))), before);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -1,3 +1,4 @@
+import { queryProjectionSectionPath } from "../src/projection/schema.ts";
 import assert from "node:assert/strict";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -456,7 +457,7 @@ test("sleep patterns validate all stale canonical source even for empty or unkno
   const vaultRoot = await createSleepPatternVault("UTC");
   try {
     await rebuildQueryProjection(vaultRoot);
-    const dbPath = currentQueryProjectionLocation(vaultRoot).absolutePath;
+    const dbPath = queryProjectionSectionPath(currentQueryProjectionLocation(vaultRoot), "wearables");
     const before = await readFile(dbPath);
     // Outside the requested sleep window: selection must not narrow validation.
     await core.withCanonicalWriteLock(vaultRoot, () => appendFile(
@@ -474,7 +475,7 @@ test("invalid optional metadata is not ignored, including with an explicit repor
   const vaultRoot = await createSleepPatternVault("UTC");
   try {
     await rebuildQueryProjection(vaultRoot);
-    const dbPath = currentQueryProjectionLocation(vaultRoot).absolutePath;
+    const dbPath = queryProjectionSectionPath(currentQueryProjectionLocation(vaultRoot), "wearables");
     const before = await readFile(dbPath);
     for (const contents of ["{malformed metadata\n", "{}\n"]) {
       await core.withCanonicalWriteLock(vaultRoot, () => writeFile(path.join(vaultRoot, "vault.json"), contents, "utf8"));

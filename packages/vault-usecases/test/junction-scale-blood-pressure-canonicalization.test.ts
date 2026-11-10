@@ -277,7 +277,7 @@ test.each([
     const vaultRoot = path.join(parentRoot, 'vault')
     const queryProjectionPath = path.join(
       vaultRoot,
-      '.runtime/projections/query.sqlite',
+      '.runtime/projections',
     )
     const sharedOccurredAt = '2026-08-10T00:00:00.000Z'
 

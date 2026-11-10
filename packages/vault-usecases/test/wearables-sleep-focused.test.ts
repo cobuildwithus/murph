@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { existsSync, readFileSync } from "node:fs";
+import { QUERY_PROJECTION_SECTION_RELATIVE_PATHS } from "@murphai/runtime-state/node";
 import * as core from "@murphai/core";
 import * as query from "@murphai/query";
 import * as timing from "@murphai/runtime-state/node/cli-timing";
@@ -15,19 +16,10 @@ import {
 // This file belongs only to the runtime-candidate patch. Baseline proof never
 // silently skips a required candidate assertion based on a measured speed.
 function globalSnapshot(root: string) {
-  const database = new DatabaseSync(path.join(root, ".runtime/projections/query.sqlite"), { readOnly: true });
-  try {
-    const tables = ["query_entities", "query_metric_points", "query_metric_payloads", "query_metric_targets",
-      "query_search_document", "query_search_fts"].filter(table =>
-      database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
-    return {
-      tables,
-      rows: tables.map(table => database.prepare(table === "query_metric_points"
-        ? "SELECT * FROM query_metric_points ORDER BY metric_key, effective_date DESC, observed_at DESC, id"
-        : `SELECT rowid, * FROM ${table} ORDER BY rowid`).all()),
-      meta: database.prepare("SELECT * FROM query_meta WHERE key != 'wearable_source_manifest' ORDER BY key").all(),
-    };
-  } finally { database.close(); }
+  return (["entities", "metrics"] as const).flatMap(section => {
+    const file = path.join(root, QUERY_PROJECTION_SECTION_RELATIVE_PATHS[section]);
+    return existsSync(file) ? [{ section, bytes: readFileSync(file) }] : [];
+  });
 }
 function assertFocusedRebuild(phases: Record<string, number>) {
   for (const phase of ["query-rebuild", "query-source-read", "query-wearable-dataset", "query-wearable-summary", "query-publication"]) {
@@ -50,7 +42,7 @@ test("focused sleep publishes only wearables, preserves stale globals and reuses
     const cold = await traceSleepRead(timing, "wearables sleep list", () => readSleepProof(services, root, days));
     assertFocusedRebuild(cold.phases);
     assert.deepEqual(fingerprint(cold.value), fingerprint(await readSleepProof(services, reference, days)));
-    assert.deepEqual(globalSnapshot(root).tables, []);
+    assert.deepEqual(globalSnapshot(root), []);
     assert.equal((await query.getQueryProjectionStatus(root)).fresh, false);
     assert.equal((await query.getQueryProjectionStatus(root)).builtAt, null);
     const partial = globalSnapshot(root);

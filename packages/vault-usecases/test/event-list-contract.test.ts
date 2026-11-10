@@ -9,7 +9,7 @@ import * as core from "@murphai/core";
 import { addMeal, initializeVault, withCanonicalWriteLock, withHostedCanonicalWritePort } from "@murphai/core";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 import { getQueryProjectionStatus } from "@murphai/query";
-import { QUERY_DB_RELATIVE_PATH } from "@murphai/runtime-state/node";
+import { QUERY_PROJECTION_SECTION_RELATIVE_PATHS } from "@murphai/runtime-state/node";
 import { withCliTiming } from "@murphai/runtime-state/node/cli-timing";
 import type { CliTiming } from "@murphai/runtime-state/cli-timing";
 
@@ -238,7 +238,7 @@ test("a canonical lock owner can list events while an outside reader waits", asy
 
 test("narrow reads do no global work; fresh reuse survives empty results and stale reads leave the cache alone", async () => {
   const vault = await fixture([note("first")]);
-  const db = path.join(vault, QUERY_DB_RELATIVE_PATH);
+  const readProjectionFiles = () => Promise.all(Object.values(QUERY_PROJECTION_SECTION_RELATIVE_PATHS).map(file => readFile(path.join(vault, file))));
   try {
     for (let read = 0; read < 3; read++) {
       assertEventOnly(await timed(() => list(vault)), true);
@@ -247,7 +247,7 @@ test("narrow reads do no global work; fresh reuse survives empty results and sta
     const global = await timed(() => rebuildQueryProjection(vault));
     assert.deepEqual([...global.phases.filter((phase) => globalPhases.includes(phase))].sort(), [...globalPhases].sort(),
       "Positive control must observe every forbidden computation on an explicit global rebuild");
-    const published = await readFile(db);
+    const published = await readProjectionFiles();
     for (const filters of [{}, { kind: "missing" }]) {
       const warm = await timed(() => list(vault, filters));
       assertEventOnly(warm, false);
@@ -258,7 +258,7 @@ test("narrow reads do no global work; fresh reuse survives empty results and sta
     assertEventOnly(stale, true);
     assert.ok(ids(stale.result).includes(meal.mealId));
     assert.equal((await getQueryProjectionStatus(vault)).fresh, false);
-    assert.deepEqual(await readFile(db), published, "Event reads must not publish a partial cache");
+    assert.deepEqual(await readProjectionFiles(), published, "Event reads must not publish a partial cache");
     await services.query.list({ vault, requestId: "synthetic-event-list-contract", limit: 40 });
     const warm = await timed(() => list(vault));
     assertEventOnly(warm, false);

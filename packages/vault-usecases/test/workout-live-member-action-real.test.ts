@@ -897,16 +897,18 @@ test("a stale snapshot cannot re-arm a card after a hidden same-name reorder", a
 
 test.each(["absent", "unavailable"])("workout refresh, save, and replay leave an %s shared query projection untouched", async (projectionState) => {
   const fixture = await createLoggedWorkout([10, 10]);
-  const projectionPath = path.join(fixture.vault, ".runtime/projections/query.sqlite");
+  const projectionPaths = ["entities", "metrics", "wearables"].map(section => path.join(fixture.vault, `.runtime/projections/query-${section}.sqlite`));
   try {
     if (projectionState === "unavailable") {
-      await mkdir(projectionPath, { recursive: true });
+      for (const projectionPath of projectionPaths) await mkdir(projectionPath, { recursive: true });
     }
     const expectProjectionUntouched = async () => {
-      if (projectionState === "unavailable") {
-        expect((await stat(projectionPath)).isDirectory()).toBe(true);
-      } else {
-        await expect(stat(projectionPath)).rejects.toMatchObject({ code: "ENOENT" });
+      for (const projectionPath of projectionPaths) {
+        if (projectionState === "unavailable") {
+          expect((await stat(projectionPath)).isDirectory()).toBe(true);
+        } else {
+          await expect(stat(projectionPath)).rejects.toMatchObject({ code: "ENOENT" });
+        }
       }
     };
     await expectProjectionUntouched();

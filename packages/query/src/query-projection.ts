@@ -131,15 +131,24 @@ async function readFreshPublicWearableSummaryBundle(
   filters: WearableSummaryFilters | WearableMetricSummaryFilters,
 ) {
   const location = currentQueryProjectionLocation(vaultRoot);
-  const status = await timeCliPhase("query-freshness", async () => {
-    const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
-    return timeCliPhase("query-status", () => readProjectionStatus(location, manifest));
-  });
-  if (status?.fresh) return readStoredPublicWearableSummaryBundle(location, filters);
+  if (await isEveryQueryProjectionSectionFresh(vaultRoot, location)) {
+    return readStoredPublicWearableSummaryBundle(location, filters);
+  }
 
   // This preflight and the focused owner's locked recheck are separate spans.
   const rows = await readFreshWearableSummaryRows(vaultRoot, { providers: filters.providers });
   return composePublicWearableSummaryBundleFromStoredRows(rows, filters);
+}
+
+async function isEveryQueryProjectionSectionFresh(
+  vaultRoot: string,
+  location: QueryProjectionLocation,
+): Promise<boolean> {
+  const fresh = await timeCliPhase("query-freshness", async () => {
+    const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
+    return timeCliPhase("query-status", () => readFreshQueryProjectionSections(location, manifest));
+  });
+  return fresh.size === QUERY_PROJECTION_SECTION_NAMES.length;
 }
 
 export async function getQueryProjectionStatus(
@@ -377,13 +386,10 @@ export async function summarizeWearableSleepPatternRuntime(
   filters: WearableSleepPatternFilters = {},
 ): Promise<WearableSleepPatternSummary> {
   const location = currentQueryProjectionLocation(vaultRoot);
-  const status = await timeCliPhase("query-freshness", async () => {
-    const manifest = await timeCliPhase("query-manifest", () => listCanonicalSourceManifest(vaultRoot));
-    return timeCliPhase("query-status", () => readProjectionStatus(location, manifest));
-  });
+  const everySectionFresh = await isEveryQueryProjectionSectionFresh(vaultRoot, location);
   const captureSleepPatternInput = async () => {
     const metadata = filters.timeZone === undefined
-      ? status?.fresh
+      ? everySectionFresh
         ? readStoredVaultMetadata(location)
         : await readVaultMetadataSource(vaultRoot)
       : null;
@@ -396,7 +402,7 @@ export async function summarizeWearableSleepPatternRuntime(
       : filters;
     const readFilters = resolveWearableSleepPatternReadFilters(resolvedFilters);
     const rowFilters = { ...readFilters, summaryKinds: ["sleep", "source_health"] as const };
-    const rows = status?.fresh
+    const rows = everySectionFresh
       ? readWearableSummaryRows(location, rowFilters)
       : await readFreshWearableSummaryRows(vaultRoot, rowFilters);
     return { rows, readFilters, resolvedFilters, vaultTimeZone };
@@ -406,10 +412,10 @@ export async function summarizeWearableSleepPatternRuntime(
   // every section is fresh, which is also when the read may skip the lock.
   // Otherwise the vault metadata is read from source and captured with the
   // wearable rows under one reentrant lock, without publishing entities.
-  const endWait = status?.fresh ? null : startCliPhase("query-wait");
+  const endWait = everySectionFresh ? null : startCliPhase("query-wait");
   let captured: Awaited<ReturnType<typeof captureSleepPatternInput>>;
   try {
-    captured = status?.fresh
+    captured = everySectionFresh
       ? await captureSleepPatternInput()
       : await withCanonicalWriteLock(vaultRoot, () => {
         endWait?.();

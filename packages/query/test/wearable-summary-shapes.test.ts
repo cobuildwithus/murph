@@ -1,13 +1,13 @@
-import * as schema from "../src/projection/schema.ts";
+import * as wearableStore from "../src/projection/wearable-summary-store.ts";
 import assert from "node:assert/strict";
 import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { withImmediateTransaction } from "@murphai/runtime-state/node";
+import { openSqliteRuntimeDatabase, withImmediateTransaction } from "@murphai/runtime-state/node";
 import { test, vi } from "vitest";
 import { addMeal, initializeVault } from "@murphai/core";
 import { rebuildQueryProjection } from "../src/query-projection.ts";
-import { currentQueryProjectionLocation, ensureQueryProjectionSectionSchema, openQueryProjectionDatabase } from "../src/projection/schema.ts";
+import { currentQueryProjectionLocation, publishQueryProjectionSection, openQueryProjectionSection, queryProjectionSectionPath } from "../src/projection/schema.ts";
 import { insertWearableSummaryRows, readWearableSummaryRows, type QueryWearableSummaryRow } from "../src/projection/wearable-summary-store.ts";
 import { decodeWearableSummaryJson, readWearableSummaryShapes } from "../src/projection/wearable-summary-shapes.ts";
 import * as shapeStore from "../src/projection/wearable-summary-shapes.ts";
@@ -30,12 +30,10 @@ test("shared field dictionaries preserve exact summary JSON, filtered reads and 
   const location = currentQueryProjectionLocation(root);
   const rows = Array.from({ length: 1000 }, (_, index) => summary(index));
   try {
-    const database = openQueryProjectionDatabase(location);
-    ensureQueryProjectionSectionSchema(database, "wearables");
-    try {
-      withImmediateTransaction(database, () => insertWearableSummaryRows(database, rows));
+    publishQueryProjectionSection(location, "wearables", "[]", database => {
+      insertWearableSummaryRows(database, rows);
       // Separate insertion calls share existing shapes without overwriting IDs.
-      withImmediateTransaction(database, () => insertWearableSummaryRows(database, [summary(1000)]));
+      insertWearableSummaryRows(database, [summary(1000)]);
       rows.push(summary(1000));
       const shapes = readWearableSummaryShapes(database);
       assert.ok(shapes.size < 20);
@@ -44,29 +42,27 @@ test("shared field dictionaries preserve exact summary JSON, filtered reads and 
       assert.equal(Object.hasOwn(Object.prototype, "polluted"), false);
       assert.throws(() => decodeWearableSummaryJson('[0,999999]', shapes), /Invalid wearable summary/u);
       assert.throws(() => decodeWearableSummaryJson('{}', shapes), /Invalid wearable summary/u);
-    } finally {
-      database.close();
-    }
+    });
     assert.deepEqual(readWearableSummaryRows(location).rows, rows);
     assert.deepEqual(readWearableSummaryRows(location, { providers: ["oura"], from: "2026-09-01", to: "2026-09-01" }).rows, rows);
     assert.deepEqual(readWearableSummaryRows(location, { providers: ["garmin"] }).rows, []);
     assert.deepEqual(readWearableSummaryRows(location, { from: "2026-09-02" }).rows, []);
     const restored = currentQueryProjectionLocation(path.join(root, "restored"));
-    await mkdir(path.dirname(restored.absolutePath), { recursive: true });
-    await copyFile(location.absolutePath, restored.absolutePath);
+    await mkdir(path.dirname(queryProjectionSectionPath(restored, "wearables")), { recursive: true });
+    await copyFile(queryProjectionSectionPath(location, "wearables"), queryProjectionSectionPath(restored, "wearables"));
     assert.deepEqual(readWearableSummaryRows(restored).rows, rows);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("full publication rolls back and retires summary dictionaries with their rows, then repacks", async () => {
+test("failed publication preserves the previous dictionary and rows byte-for-byte, then replaces them", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "murph-query-shapes-replace-"));
   const location = currentQueryProjectionLocation(root);
   try {
     await initializeVault({ vaultRoot: root });
     await rebuildQueryProjection(root);
-    const database = openQueryProjectionDatabase(location);
+    const database = openSqliteRuntimeDatabase(queryProjectionSectionPath(location, "wearables"));
     let beforeShapes;
     try {
       withImmediateTransaction(database, () => insertWearableSummaryRows(database,
@@ -76,20 +72,21 @@ test("full publication rolls back and retires summary dictionaries with their ro
       database.close();
     }
     const beforeRows = readWearableSummaryRows(location).rows;
-    const beforeBytes = (await readFile(location.absolutePath)).length;
+    const beforeBytes = await readFile(queryProjectionSectionPath(location, "wearables"));
     await addMeal({ vaultRoot: root, occurredAt: "2026-09-01T12:00:00Z", note: "Synthetic replacement" });
-    const writeMeta = schema.writeMeta;
-    const fail = vi.spyOn(schema, "writeMeta").mockImplementation((...args) => {
-      if (args[1] === "schema_version") throw new Error("synthetic failure after wearable replacement");
-      return writeMeta(...args);
+    const insert = wearableStore.insertWearableSummaryRows;
+    const fail = vi.spyOn(wearableStore, "insertWearableSummaryRows").mockImplementation((...args) => {
+      insert(...args);
+      throw new Error("synthetic failure after wearable replacement");
     });
     try {
       await assert.rejects(rebuildQueryProjection(root), /synthetic failure/u);
     } finally {
       fail.mockRestore();
     }
+    assert.deepEqual(await readFile(queryProjectionSectionPath(location, "wearables")), beforeBytes);
     assert.deepEqual(readWearableSummaryRows(location).rows, beforeRows);
-    const failed = openQueryProjectionDatabase(location, { readOnly: true });
+    const failed = openQueryProjectionSection(location, "wearables");
     try {
       assert.deepEqual(readWearableSummaryShapes(failed), beforeShapes);
     } finally {
@@ -97,7 +94,7 @@ test("full publication rolls back and retires summary dictionaries with their ro
     }
     await rebuildQueryProjection(root);
     assert.deepEqual(readWearableSummaryRows(location).rows, []);
-    const after = openQueryProjectionDatabase(location, { readOnly: true });
+    const after = openQueryProjectionSection(location, "wearables");
     try {
       assert.equal(readWearableSummaryShapes(after).size, 0);
       assert.equal(after.prepare("PRAGMA freelist_count").get()?.freelist_count, 0);
@@ -105,57 +102,54 @@ test("full publication rolls back and retires summary dictionaries with their ro
     } finally {
       after.close();
     }
-    assert.ok((await readFile(location.absolutePath)).length < beforeBytes);
+    assert.ok((await readFile(queryProjectionSectionPath(location, "wearables"))).length < beforeBytes.length);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("repacking preserves sparse search rowids and external-content FTS results", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "murph-query-repack-search-"));
+test("republication preserves sparse search rowids and external-content FTS results", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "murph-query-republish-search-"));
   const location = currentQueryProjectionLocation(root);
   try {
     await initializeVault({ vaultRoot: root });
     await addMeal({ vaultRoot: root, occurredAt: "2026-09-01T12:00:00Z", note: "Synthetic spinach meal" });
     await addMeal({ vaultRoot: root, occurredAt: "2026-09-02T12:00:00Z", note: "Synthetic lentil meal" });
     await rebuildQueryProjection(root);
-    const database = openQueryProjectionDatabase(location);
+    const insert = searchStore.insertSearchDocuments;
+    const sparse = vi.spyOn(searchStore, "insertSearchDocuments").mockImplementation((database, documents) => {
+      insert(database, documents);
+      database.exec("UPDATE query_search_document SET rowid = rowid * 3 + 100; INSERT INTO query_search_fts(query_search_fts) VALUES ('rebuild')");
+    });
+    await rebuildQueryProjection(root);
+    const database = openQueryProjectionSection(location, "entities");
+    let beforeIds;
+    try { beforeIds = database.prepare("SELECT rowid, record_id FROM query_search_document ORDER BY rowid").all(); }
+    finally { database.close(); }
+    assert.ok(beforeIds.every(row => Number(row.rowid) > 100));
+    const before = searchStore.searchQueryProjection(location, "spinach", {});
+    assert.equal(before.hits.length, 1);
+    await rebuildQueryProjection(root);
+    const current = openSqliteRuntimeDatabase(queryProjectionSectionPath(location, "entities"));
     try {
-      database.exec(`
-        UPDATE query_search_document SET rowid = rowid + 100;
-        INSERT INTO query_search_fts(query_search_fts) VALUES ('rebuild');
-      `);
-      const beforeIds = database.prepare("SELECT rowid, record_id FROM query_search_document ORDER BY rowid").all();
-      const before = searchStore.searchQueryProjection(location, "spinach", {});
-      assert.equal(before.hits.length, 1);
-      database.exec("VACUUM");
-      assert.deepEqual(database.prepare("SELECT rowid, record_id FROM query_search_document ORDER BY rowid").all(), beforeIds);
-      database.exec("INSERT INTO query_search_fts(query_search_fts, rank) VALUES ('integrity-check', 1)");
+      assert.deepEqual(current.prepare("SELECT rowid, record_id FROM query_search_document ORDER BY rowid").all(), beforeIds);
+      current.exec("INSERT INTO query_search_fts(query_search_fts, rank) VALUES ('integrity-check', 1)");
       assert.deepEqual(searchStore.searchQueryProjection(location, "spinach", {}), before);
-    } finally {
-      database.close();
-    }
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
+    } finally { current.close(); sparse.mockRestore(); }
+  } finally { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("a concurrent publication cannot mix dictionary and row generations", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "murph-query-shapes-snapshot-"));
   const location = currentQueryProjectionLocation(root);
-  const writer = openQueryProjectionDatabase(location);
-  ensureQueryProjectionSectionSchema(writer, "wearables");
   const first = summary(0);
   const second = { ...summary(1), summaryJson: '{"differentShape":[1,2,3]}' };
   try {
-    withImmediateTransaction(writer, () => insertWearableSummaryRows(writer, [first]));
+    publishQueryProjectionSection(location, "wearables", "[]", writer => insertWearableSummaryRows(writer, [first]));
     const original = shapeStore.readWearableSummaryShapes;
     const interleave = vi.spyOn(shapeStore, "readWearableSummaryShapes").mockImplementationOnce((reader) => {
       const shapes = original(reader);
-      withImmediateTransaction(writer, () => {
-        writer.exec("DELETE FROM query_wearable_summaries; DELETE FROM query_wearable_summary_shapes;");
-        insertWearableSummaryRows(writer, [second]);
-      });
+      publishQueryProjectionSection(location, "wearables", "[]", writer => insertWearableSummaryRows(writer, [second]));
       return shapes;
     });
     try {
@@ -165,7 +159,6 @@ test("a concurrent publication cannot mix dictionary and row generations", async
       interleave.mockRestore();
     }
   } finally {
-    writer.close();
     await rm(root, { recursive: true, force: true });
   }
 });

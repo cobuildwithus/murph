@@ -38,6 +38,7 @@ import {
   type HostedBundleInlineRestoreInput,
   type HostedBundleSnapshotArchiveDiagnostics,
 } from "./hosted-bundle-node.ts";
+import { QUERY_PROJECTION_SECTION_RELATIVE_PATHS } from "./runtime-paths.ts";
 
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
 const HOSTED_CODEX_HOME_RELATIVE_PATH = ".codex-hosted";
@@ -52,11 +53,9 @@ export const HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_RELATIVE_PATH =
   "hosted-portable-workspace-delta.json";
 export const HOSTED_PORTABLE_WORKSPACE_DELTA_MANIFEST_SCHEMA =
   "murph.portable-workspace-delta.v1";
-const HOSTED_QUERY_PROJECTION_SNAPSHOT_RELATIVE_PATHS = [
-  `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query.sqlite`,
-  `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query.sqlite-shm`,
-  `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/query.sqlite-wal`,
-] as const;
+// Only published section files; a publication's `.tmp` build file is never captured.
+const HOSTED_QUERY_PROJECTION_SNAPSHOT_RELATIVE_PATHS: readonly string[] =
+  Object.values(QUERY_PROJECTION_SECTION_RELATIVE_PATHS);
 const HOSTED_CODEX_ROLLOUT_RELATIVE_PATH_PATTERN =
   /^sessions\/(\d{4})\/(\d{2})\/(\d{2})\/rollout-(\d{4})-(\d{2})-(\d{2})T[^/]+-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/u;
 const HOSTED_CODEX_DURABLE_MEMORY_READ_ARTIFACT_RELATIVE_PATHS = new Set([

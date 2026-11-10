@@ -21,12 +21,11 @@ import type {
   QueryMetricTargetRow,
 } from "../query-projection-types.ts";
 import {
-  assertQueryProjectionTables,
   expectEnumString,
   expectNullableString,
   expectNumber,
   expectString,
-  openQueryProjectionDatabase,
+  openQueryProjectionSection,
   parseJsonValue,
   type DatabaseSync,
   type QueryProjectionLocation,
@@ -182,14 +181,9 @@ export function listStoredMetricPointsBatch(
   location: QueryProjectionLocation,
   filtersList: readonly QueryMetricPointFilters[],
 ): MetricPoint[] {
-  const database = openQueryProjectionDatabase(location, {
-    create: false,
-    readOnly: true,
-  });
+  const database = openQueryProjectionSection(location, "metrics");
 
   try {
-    assertQueryProjectionTables(database, location, "metrics");
-
     const pointsById = new Map<string, MetricPoint>();
     for (const filters of filtersList) {
       for (const point of queryStoredMetricPoints(database, filters)) {
@@ -298,9 +292,8 @@ export function metricPointFiltersForGoalTarget(
 }
 
 export function listStoredMetricTargets(location: QueryProjectionLocation): QueryMetricTargetRow[] {
-  const database = openQueryProjectionDatabase(location, { create: false, readOnly: true });
+  const database = openQueryProjectionSection(location, "metrics");
   try {
-    assertQueryProjectionTables(database, location, "metrics");
     const rows = database.prepare(`
       SELECT id, goal_id AS goalId, target_json AS targetJson
       FROM query_metric_targets

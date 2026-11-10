@@ -418,7 +418,7 @@ test('search query rejects blank and conflicting input through the real CLI', as
       assert.equal(result.error?.code, 'invalid_query', JSON.stringify(input))
     }
     assert.equal(
-      existsSync(path.join(fixture.vaultRoot, '.runtime/projections/query.sqlite')),
+      existsSync(path.join(fixture.vaultRoot, '.runtime/projections/query-entities.sqlite')),
       false,
     )
   } finally {
@@ -617,7 +617,7 @@ test('timeline merges journals, events, and metric sample summaries into one des
 
 test('query projection status and rebuild expose the shared local projection without creating it early', async () => {
   const fixture = await makeRetrievalFixture()
-  const runtimeDatabasePath = path.join(fixture.vaultRoot, '.runtime/projections/query.sqlite')
+  const runtimeDatabasePath = path.join(fixture.vaultRoot, '.runtime/projections/query-entities.sqlite')
 
   try {
     assert.equal(existsSync(runtimeDatabasePath), false)
@@ -638,7 +638,7 @@ test('query projection status and rebuild expose the shared local projection wit
 
     assert.equal(initialStatus.ok, true)
     assert.equal(requireData(initialStatus).exists, false)
-    assert.equal(requireData(initialStatus).dbPath, '.runtime/projections/query.sqlite')
+    assert.equal(requireData(initialStatus).dbPath, '.runtime/projections/query-entities.sqlite')
     assert.equal(existsSync(runtimeDatabasePath), false)
 
     const rebuild = await runCli<{
@@ -659,7 +659,7 @@ test('query projection status and rebuild expose the shared local projection wit
     assert.equal(rebuild.ok, true)
     assert.equal(requireData(rebuild).exists, true)
     assert.equal(requireData(rebuild).rebuilt, true)
-    assert.equal(requireData(rebuild).dbPath, '.runtime/projections/query.sqlite')
+    assert.equal(requireData(rebuild).dbPath, '.runtime/projections/query-entities.sqlite')
     assert.equal(requireData(rebuild).entityCount > 0, true)
     assert.equal(requireData(rebuild).searchDocumentCount > 0, true)
     assert.equal(requireData(rebuild).fresh, true)
@@ -695,7 +695,7 @@ test('query projection status and rebuild expose the shared local projection wit
 
 test('query projection status ignores inbox runtime sqlite state and rebuild leaves it untouched', async () => {
   const fixture = await makeRetrievalFixture()
-  const queryDatabasePath = path.join(fixture.vaultRoot, '.runtime/projections/query.sqlite')
+  const queryDatabasePath = path.join(fixture.vaultRoot, '.runtime/projections/query-entities.sqlite')
   const inboxDatabasePath = path.join(fixture.vaultRoot, '.runtime/projections/inboxd.sqlite')
 
   try {
@@ -720,7 +720,7 @@ test('query projection status ignores inbox runtime sqlite state and rebuild lea
 
     assert.equal(status.ok, true)
     assert.equal(requireData(status).exists, false)
-    assert.equal(requireData(status).dbPath, '.runtime/projections/query.sqlite')
+    assert.equal(requireData(status).dbPath, '.runtime/projections/query-entities.sqlite')
 
     const rebuilt = await runCli<{
       exists: boolean
@@ -737,7 +737,7 @@ test('query projection status ignores inbox runtime sqlite state and rebuild lea
     assert.equal(rebuilt.ok, true)
     assert.equal(requireData(rebuilt).exists, true)
     assert.equal(requireData(rebuilt).rebuilt, true)
-    assert.equal(requireData(rebuilt).dbPath, '.runtime/projections/query.sqlite')
+    assert.equal(requireData(rebuilt).dbPath, '.runtime/projections/query-entities.sqlite')
     assert.equal(existsSync(queryDatabasePath), true)
 
     const inboxStateDatabase = openDatabaseSync(inboxDatabasePath)
@@ -848,13 +848,14 @@ Steady energy after saffron tea.
     const manifest = await listCanonicalSourceManifest(fixture.vaultRoot)
     const certificate = JSON.stringify(manifest.map(({ relativePath, sizeBytes, mtimeMs }) =>
       [relativePath, sizeBytes, mtimeMs]))
-    const database = openDatabaseSync(path.join(fixture.vaultRoot, '.runtime/projections/query.sqlite'))
-    try {
-      const meta = database.prepare('SELECT value FROM query_meta WHERE key = ?')
-      assert.equal(meta.get('entity_source_manifest')?.value, certificate)
-      assert.notEqual(meta.get('metric_source_manifest')?.value, certificate)
-      assert.notEqual(meta.get('wearable_source_manifest')?.value, certificate)
-    } finally { database.close() }
+    for (const section of ['entities', 'metrics', 'wearables']) {
+      const database = openDatabaseSync(path.join(fixture.vaultRoot, `.runtime/projections/query-${section}.sqlite`))
+      try {
+        const stored = database.prepare("SELECT value FROM query_meta WHERE key = 'source_manifest'").get()?.value
+        if (section === 'entities') assert.equal(stored, certificate)
+        else assert.notEqual(stored, certificate)
+      } finally { database.close() }
+    }
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
   }

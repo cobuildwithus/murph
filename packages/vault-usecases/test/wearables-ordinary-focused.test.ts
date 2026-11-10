@@ -5,7 +5,7 @@ import path from "node:path";
 import * as core from "@murphai/core";
 import * as query from "@murphai/query";
 import * as timing from "@murphai/runtime-state/node/cli-timing";
-import { QUERY_DB_RELATIVE_PATH } from "@murphai/runtime-state/node";
+import { QUERY_PROJECTION_SECTION_RELATIVE_PATHS } from "@murphai/runtime-state/node";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 import { test, vi } from "vitest";
 import { ordinaryReaders, readOrdinary } from "../bench/global-projection.ts";
@@ -29,8 +29,8 @@ async function reviseOrdinaryFixture(vault: string, deleted = false) {
   });
 }
 async function discardProjection(vault: string) {
-  await core.withCanonicalWriteLock(vault, () => Promise.all(["", "-wal", "-shm"].map(suffix =>
-    rm(path.join(vault, QUERY_DB_RELATIVE_PATH) + suffix, { force: true }))));
+  await core.withCanonicalWriteLock(vault, () => Promise.all(Object.values(QUERY_PROJECTION_SECTION_RELATIVE_PATHS).map(file =>
+    rm(path.join(vault, file), { force: true }))));
 }
 for (const reader of ordinaryReaders) {
   test(`${reader} public service preserves full envelopes in every projection state`, async () => {
@@ -94,11 +94,11 @@ test("all ordinary public services preserve empty results and strict malformed-s
     await rm(vault, { recursive: true, force: true });
     await seedSleepFixture(core, vault, days);
     await query.rebuildQueryProjection(vault);
-    const before = await readFile(path.join(vault, QUERY_DB_RELATIVE_PATH));
+    const before = await Promise.all(Object.values(QUERY_PROJECTION_SECTION_RELATIVE_PATHS).map(file => readFile(path.join(vault, file))));
     await core.withCanonicalWriteLock(vault, () => appendFile(path.join(vault, "ledger/events/2026/2026-01.jsonl"), "{malformed synthetic input\n"));
     for (const reader of ordinaryReaders) for (const providers of [undefined, [], ["", "  "], ["missing"]]) {
       await assert.rejects(readOrdinary(services, vault, reader, { providers }), { code: "VAULT_INVALID_JSONL" });
     }
-    assert.deepEqual(await readFile(path.join(vault, QUERY_DB_RELATIVE_PATH)), before);
+    assert.deepEqual(await Promise.all(Object.values(QUERY_PROJECTION_SECTION_RELATIVE_PATHS).map(file => readFile(path.join(vault, file)))), before);
   } finally { await rm(vault, { recursive: true, force: true }); }
 });
