@@ -669,6 +669,8 @@ export type DeviceSyncPublicIngressSourceAdmissionCandidate = Pick<
   lastSeenAt: Date | string;
 };
 
+export const DEFAULT_DEVICE_SYNC_JOB_MAX_ATTEMPTS = 5;
+
 export interface DeviceSyncJobInput {
   kind: string;
   payload?: Record<string, unknown>;

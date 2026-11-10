@@ -485,6 +485,8 @@ Implementation and review proof are recorded in the
 [retry-budget plan](exec-plans/completed/2026-10-16-junction-validation-retry-budget.md).
 Sparse calendar validation shares that cadence; cold-handoff and row-contract
 proof are recorded in [the retry-loop fix](exec-plans/completed/2026-11-10-sparse-calendar-retry-loop.md).
+General retry history now survives runner cold restore; proof and compatibility
+are recorded in [the retry-history plan](exec-plans/completed/2026-11-10-device-retry-history-cold-restore.md).
 
 Typing egress and mailbox runtime timing correlation is owned by
 [`Cloudflare private telemetry`](../apps/cloudflare/README.md#private-operational-telemetry);

@@ -1673,7 +1673,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         const recovered = (await readHostedSystemMailboxState(vaultRoot)).pending;
         assert.ok(recovered.some((item) => item.itemId === owner.id));
         const recoveredOwner = recovered.find((item) => item.itemId === owner.id);
-        assert.deepEqual(recoveredOwner?.wake.kind === "device-sync.wake" ? recoveredOwner.wake.hint?.jobs : null, futureJobs);
+        assert.deepEqual(recoveredOwner?.wake.kind === "device-sync.wake" ? recoveredOwner.wake.hint?.jobs : null,
+          futureJobs.map((job) => ({ ...job, attempts: 0 })));
         assert.equal(currentWorkspace.redactedStatus?.hostedMailboxSystemImportedSeq, "2");
         if (scenario === "followup_failure") {
           assert.equal(providerFetch.mock.calls.length, 3, "restored recording must not rerun admitted device work");
@@ -1710,7 +1711,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
       const retained = pending.find((item) => item.itemId === owner.id);
       assert.ok(retained);
-      assert.deepEqual(retained.wake.kind === "device-sync.wake" ? retained.wake.hint?.jobs : null, futureJobs);
+      assert.deepEqual(retained.wake.kind === "device-sync.wake" ? retained.wake.hint?.jobs : null,
+        futureJobs.map((job) => ({ ...job, attempts: 0 })));
       const uncovered = ["equal", "manual", "new_epoch", "other_connection"].includes(scenario);
       assert.deepEqual(pending.filter((item) => item.itemId !== owner.id).map((item) => item.itemId), uncovered ? [lateItem.id] : []);
       assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, uncovered ? "1" : "2");
@@ -1994,7 +1996,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         if (schedule === "equal") {
           assert.ok(Date.parse(pending[0]?.nextAttemptAt ?? "") > Date.parse(TEST_NOW));
         } else assert.equal(pending[0]?.nextAttemptAt, result.nextWakeAt);
-        assert.deepEqual(pending[0]?.wake.kind === "device-sync.wake" ? pending[0].wake.hint?.jobs : null, futureJobs);
+        assert.deepEqual(pending[0]?.wake.kind === "device-sync.wake" ? pending[0].wake.hint?.jobs : null,
+          futureJobs.map((job) => ({ ...job, attempts: 0 })));
         assert.deepEqual(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemDeviceSyncContinuationSeqs, ["1"]);
       } else {
         assert.deepEqual(pending, []);
@@ -2048,7 +2051,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         const continued = (await readHostedSystemMailboxState(vaultRoot)).pending;
         assert.equal(continued.length, 1);
         assert.equal(continued[0]?.itemId, deviceItem.id);
-        assert.deepEqual(continued[0]?.wake.kind === "device-sync.wake" ? continued[0].wake.hint?.jobs : null, futureJobs);
+        assert.deepEqual(continued[0]?.wake.kind === "device-sync.wake" ? continued[0].wake.hint?.jobs : null,
+          futureJobs.map((job) => ({ ...job, attempts: 0 })));
         assert.equal(providerPaths.filter((entry) => new URL(entry).searchParams.get("start_date")?.startsWith(retryAt.slice(0, 10))).length, 0);
         assert.equal(checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq, "3");
         assert.equal(canonicalNextReconcileAt, continued[0]?.wake.kind === "device-sync.wake"

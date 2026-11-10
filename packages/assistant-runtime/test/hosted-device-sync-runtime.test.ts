@@ -6577,7 +6577,8 @@ describe("hosted device-sync runtime", () => {
       assert.equal(recovery.retryAt, retryAt);
       assert.deepEqual(
         [...(recovery.wake.hint?.jobs ?? [])].sort((a, b) => a.dedupeKey!.localeCompare(b.dedupeKey!)),
-        [...jobs.slice(1), ...children].sort((a, b) => a.dedupeKey.localeCompare(b.dedupeKey)),
+        [...jobs.slice(1), ...children].map((job) => ({ ...job, attempts: 0 }))
+          .sort((a, b) => a.dedupeKey.localeCompare(b.dedupeKey)),
       );
       assert.deepEqual(parseHostedExecutionWake(JSON.parse(JSON.stringify(recovery.wake))), recovery.wake);
       const item: HostedSystemMailboxPendingItem = {
@@ -7131,8 +7132,8 @@ describe("hosted device-sync runtime", () => {
       assert.equal(await restoredService.drainWorker(1, restoredAccountId), 0);
       const terminal = restoredStore.getJobById(retainedJob.id);
       assert.equal(terminal?.status, "dead");
-      assert.equal(terminal?.attempts, 1);
-      assert.equal(terminal?.maxAttempts, 1);
+      assert.equal(terminal?.attempts, 2);
+      assert.equal(terminal?.maxAttempts, 2);
       assert.equal(executeJob.mock.calls.length, 0);
       promoteHostedCompletedDirtyPayloadAcks({
         service: restoredService,
@@ -10137,7 +10138,7 @@ describe("hosted device-sync runtime", () => {
       if (retained) {
         const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
         assert.equal(recovery?.wake.hint?.reason, "manual_reconcile");
-        assert.deepEqual(recovery?.wake.hint?.jobs?.find((job) => job.dedupeKey === retainedJob.dedupeKey), retainedJob);
+        assert.deepEqual(recovery?.wake.hint?.jobs?.find((job) => job.dedupeKey === retainedJob.dedupeKey), { ...retainedJob, attempts: 0 });
         assert.equal(recovery?.wake.hint?.jobs?.filter((job) => job.kind === "reconcile").length, 1);
         assert.ok(recovery);
         const creationCount = createScheduledJobs.mock.calls.length;
@@ -13467,7 +13468,7 @@ describe("hosted device-sync runtime", () => {
         assert.ok(coldAccountId);
         const [restored] = getStore(coldService).listPendingJobsForAccount(coldAccountId, 10);
         assert.ok(restored);
-        assert.equal(restored.attempts, 0);
+        assert.equal(restored.attempts, 1);
         assert.deepEqual(restored.payload, job.payload);
         assert.equal(restored.availableAt, retry.availableAt);
         assert.equal(await coldService.runWorkerOnce(coldAccountId), null);
@@ -13477,12 +13478,11 @@ describe("hosted device-sync runtime", () => {
         assert.equal(retry.availableAt, "2026-04-04T09:30:00.000Z");
         assert.equal(retry.maxAttempts, 5);
         assert.equal(restored.maxAttempts - restored.attempts, 5);
-        // A cold validation retry must keep the same slow cadence even though
-        // the local attempt counter was reconstructed from a remaining budget.
+        // The fixed validation cadence is independent of restored retry history.
         vi.setSystemTime(new Date(retry.availableAt));
         assert.equal((await coldService.runWorkerOnce(coldAccountId))?.id, restored.id);
         const repeated = getStore(coldService).getJobById(restored.id)!;
-        assert.equal(repeated.attempts, 1);
+        assert.equal(repeated.attempts, 2);
         assert.equal(repeated.availableAt, "2026-04-04T10:00:00.000Z");
         assert.equal(coldService.getNextJobWakeAt(), repeated.availableAt);
         assert.equal(resolveHostedDeviceSyncWakeRecovery({
@@ -13708,7 +13708,8 @@ describe("hosted device-sync runtime", () => {
       assert.equal(restoredJob.availableAt, retryAt);
       assert.equal(restoredJob.dedupeKey, scheduled.dedupeKey);
       assert.equal(restoredJob.kind, "reconcile");
-      assert.equal(restoredJob.maxAttempts, 4);
+      assert.equal(restoredJob.maxAttempts, 5);
+      assert.equal(getStore(restoredService).getJobById(restoredJob.id)?.attempts, 1);
       assert.deepEqual(JSON.parse(restoredJob.payloadJson), {
         windowEnd: "2026-04-04T00:00:00.000Z",
         windowStart: "2026-03-28T00:00:00.000Z",
@@ -13842,6 +13843,7 @@ describe("hosted device-sync runtime", () => {
             assert.ok(recovery);
             assert.equal(recovery.retryAt, new Date(Date.parse(now) + 21_600_000).toISOString());
             assert.deepEqual(recovery.wake.hint?.jobs, [{
+              attempts: 0,
               availableAt: historyRetryAt, dedupeKey: "history-waiting", kind: "backfill",
               maxAttempts: 3, payload: { windowStart: "2026-01-01T00:00:00.000Z" }, priority: 30,
             }]);
@@ -14190,6 +14192,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(recovery.retryAt, failedRetryAt);
       assert.equal(recovery.wake.hint?.reason, "manual_reconcile");
       assert.deepEqual(recovery.wake.hint?.jobs, [{
+        attempts: 1,
         availableAt: failedRetryAt,
         dedupeKey: "junction-child-window-cursor",
         kind: "reconcile",
@@ -14266,7 +14269,8 @@ describe("hosted device-sync runtime", () => {
       const [restoredChild] = restoredJobs;
       assert.equal(restoredChild?.dedupeKey, "junction-child-window-cursor");
       assert.equal(restoredChild?.availableAt, failedRetryAt);
-      assert.equal(restoredChild?.maxAttempts, 4);
+      assert.equal(restoredChild?.maxAttempts, 5);
+      assert.equal(getStore(restoredService).getJobById(restoredChild!.id)?.attempts, 1);
       assert.equal(restoredChild?.priority, 50);
       assert.deepEqual(JSON.parse(restoredChild?.payloadJson ?? "{}"), {
         sourceProviderSlug: "garmin",
@@ -16333,6 +16337,123 @@ describe("hosted device-sync runtime", () => {
     assert.equal(applied.length, 1);
   });
 
+  test.each(["transport", "retained sparse", "in-flight lease", "legacy hint"])(
+    "preserves retry timing and budget across repeated cold restore: %s",
+    async (scenario) => {
+      const start = "2026-04-04T10:00:00.000Z";
+      const legacy = scenario === "legacy hint";
+      const retained = scenario === "retained sparse";
+      const leased = scenario === "in-flight lease";
+      const providerName = retained ? "junction" : "demo";
+      const connectionId = "hosted_retry_history";
+      const provider = createFakeProvider({ provider: providerName, jobExecutor: {
+        async executeJob() {
+          throw deviceSyncError({ code: "SYNTHETIC_TRANSPORT_FAILURE", httpStatus: 503,
+            message: "Synthetic transport failure.", retryable: true });
+        },
+      } });
+      const port = createSnapshotOnlyDeviceSyncPort(buildRuntimeSnapshot({
+        connectionId, provider: providerName, externalAccountId: "synthetic-retry-history",
+      }));
+      let wake: HostedExecutionDeviceSyncWake = buildDeviceSyncWake({ connectionId, provider: providerName, occurredAt: start,
+        reason: "reconcile_due", hint: { jobs: [{ kind: "resource", dedupeKey: "retry-history",
+          maxAttempts: retained ? 1 : leased ? 8 : 7,
+          payload: retained ? { resource: "caffeine", calendarRefreshDay: "2026-04-03",
+            sourceProviderSlug: "apple_health_kit", resourceCategory: "timeseries",
+            windowStart: "2026-04-03T00:00:00.000Z", windowEnd: start } : {},
+        }] } });
+      const warmWorkspace = await createHostedRuntimeWorkspace("hosted-retry-warm-");
+      const warm = createDeviceSyncServiceForVault(warmWorkspace.vaultRoot, [provider]);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(start));
+      let leaseHandedOff = false;
+      try {
+        const warmState = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: warm, wake,
+        });
+        const warmAccount = warmState.hostedToLocalAccountIds.get(connectionId)!;
+        const warmJob = getStore(warm).listPendingJobsForAccount(warmAccount, 10)[0]!;
+        for (let failure = 1; failure <= 7; failure += 1) {
+          const coldWorkspace = await createHostedRuntimeWorkspace("hosted-retry-cold-");
+          const cold = createDeviceSyncServiceForVault(coldWorkspace.vaultRoot, [provider]);
+          try {
+            const coldState = await syncHostedDeviceSyncControlPlaneState({
+              deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: cold, wake,
+            });
+            const coldAccount = coldState.hostedToLocalAccountIds.get(connectionId)!;
+            const coldJob = getStore(cold).listPendingJobsForAccount(coldAccount, 10)[0]!;
+            if (leased && !leaseHandedOff) {
+              // Handoff includes a consumed claim whose lease has not expired.
+              assert.ok(getStore(warm).claimDueJob("synthetic-worker", start, 60_000));
+              assert.ok(getStore(cold).claimDueJob("synthetic-worker", start, 60_000));
+              const recovery = resolveHostedDeviceSyncWakeRecovery({ service: cold, state: coldState, wake });
+              assert.ok(recovery);
+              assert.equal(recovery.retryAt, "2026-04-04T10:01:00.000Z");
+              wake = recovery.wake;
+              leaseHandedOff = true;
+              // Repeat this iteration in a fresh process after the lease expires.
+              vi.setSystemTime(new Date(recovery.retryAt));
+              failure -= 1;
+              continue;
+            }
+            const dueAt = Date.parse(coldJob.availableAt);
+            if (failure > 1) {
+              vi.setSystemTime(new Date(dueAt - 1));
+              assert.equal(await cold.runWorkerOnce(coldAccount), null);
+              assert.equal(await warm.runWorkerOnce(warmAccount), null);
+            }
+            vi.setSystemTime(new Date(Math.max(Date.now(), dueAt,
+              legacy ? Date.parse(getStore(warm).getJobById(warmJob.id)!.availableAt) : 0)));
+            const failedAt = Date.now();
+            assert.ok(await warm.runWorkerOnce(warmAccount));
+            assert.ok(await cold.runWorkerOnce(coldAccount));
+            const warmFailed = getStore(warm).getJobById(warmJob.id)!;
+            const coldFailed = getStore(cold).getJobById(coldJob.id)!;
+            assert.equal(coldFailed.attempts, legacy ? 1 : warmFailed.attempts);
+            assert.equal(coldFailed.maxAttempts - coldFailed.attempts,
+              warmFailed.maxAttempts - warmFailed.attempts);
+            assert.equal(coldFailed.status, warmFailed.status);
+            if (failure === 7 && !retained) {
+              assert.equal(coldFailed.status, "dead");
+              assert.equal(resolveHostedDeviceSyncWakeRecovery({ service: cold, state: coldState, wake }), null);
+              break;
+            }
+            assert.equal(coldFailed.status, "queued");
+            if (!legacy) assert.equal(coldFailed.availableAt, warmFailed.availableAt);
+            const delays = [15_000, 60_000, 300_000, 1_800_000, 7_200_000, 7_200_000, 7_200_000];
+            assert.equal(Date.parse(coldFailed.availableAt) - failedAt,
+              delays[legacy ? 0 : Math.min(failure - 1 + (leased ? 1 : 0), delays.length - 1)]);
+            const recovery = resolveHostedDeviceSyncWakeRecovery({ service: cold, state: coldState, wake });
+            assert.ok(recovery);
+            // Persist and parse the actual journal, including its retained-wake reader.
+            await updateHostedSystemMailboxState(coldWorkspace.vaultRoot, () => ({ pending: [{
+              attemptCount: failure, itemId: "synthetic-retry-mailbox", lastAttemptAt: start,
+              lastErrorCode: null, lastErrorMessage: null, mailboxDedupeKey: "synthetic-retry-mailbox",
+              mailboxLaneSeq: "1", nextAttemptAt: recovery.retryAt, occurredAt: start,
+              postCheckpointRecord: null, preferenceCausalSeq: null, requestId: null,
+              routeAction: "run-device-sync-wake", status: "pending", wake: recovery.wake,
+            }] }));
+            const pending = (await readHostedSystemMailboxState(coldWorkspace.vaultRoot)).pending[0]!;
+            assert.equal(pending.wake.kind, "device-sync.wake");
+            if (pending.wake.kind !== "device-sync.wake") throw new Error("Expected device wake.");
+            wake = pending.wake;
+            if (legacy) {
+              // A pre-change reader rebuilds known fields, dropping attempts only.
+              wake = { ...wake, hint: { ...wake.hint, jobs: wake.hint?.jobs?.map(({ attempts: _attempts, ...job }) => job) } };
+            }
+          } finally {
+            closeHostedRuntimeDeviceSyncService(cold);
+            await coldWorkspace.cleanup();
+          }
+        }
+      } finally {
+        closeHostedRuntimeDeviceSyncService(warm);
+        await warmWorkspace.cleanup();
+        vi.useRealTimers();
+      }
+    },
+  );
+
   test("job lineage joins one failed logical job to its retry after hosted cold handoff", async () => {
     const connectionId = "hosted_conn_lineage";
     const occurredAt = "2026-04-04T10:00:00.000Z";
@@ -16447,8 +16568,8 @@ describe("hosted device-sync runtime", () => {
       const restoredAccountId = secondState.hostedToLocalAccountIds.get(connectionId);
       assert.ok(restoredAccountId);
       assert.equal(await second.drainWorker(10, restoredAccountId), 2);
-      // Restored rows restart their local counter, so attempts cannot prove a retry.
-      assert.deepEqual(second.listJobTimingDiagnostics().map((timing) => timing.attempts), [1, 1]);
+      // Consumed attempts survive the cold handoff as well as logical lineage.
+      assert.deepEqual(second.listJobTimingDiagnostics().map((timing) => timing.attempts), [2, 2]);
       const secondPass = buildHostedDeviceSyncPassLineageDiagnostics({
         hostedConnectionIds: secondState.localToHostedAccountIds,
         jobTimingDiagnostics: second.listJobTimingDiagnostics(),

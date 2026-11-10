@@ -1922,7 +1922,7 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   remains the exact owner of connection-specific and scheduled wake work while
   any job created by that wake is retryable. Before checkpoint publication the
   item is narrowed to unfinished job hints with their original kind, payload,
-  dedupe identity, next retry time, and remaining attempt limit; after terminal
+  dedupe identity, next retry time, remaining attempt limit and consumed attempts; after terminal
   success or failure, full control-plane reconciliation must be accepted before
   a checkpointed post-record with zero retained jobs may publish the retained
   provider cadence and remove the item within that same runtime admission,

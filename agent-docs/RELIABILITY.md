@@ -1770,7 +1770,7 @@ Current product admission, delivery and native runtime safety rules remain.
   mailbox item stays pending while that account has queued or running work and
   is narrowed before checkpoint publication from the actual job rows to each
   manifest-safe payload/window, dedupe identity, priority, next retry time, and
-  remaining attempt limit, including worker-created child jobs. Recovery streams
+  remaining attempt limit and consumed attempts, including worker-created child jobs. Recovery streams
   all queued/running rows for that account through one SQLite statement; it
   performs no credential decryption, external calls, concurrent reads, or writes
   while that cursor is open. Only the required manifest-safe retry hints are
@@ -1955,9 +1955,14 @@ Current product admission, delivery and native runtime safety rules remain.
   budget from that attempt, so a later retryable transport failure keeps ordinary
   bounded retries; consecutive non-validation failures consume it and terminalize
   normally unless the job independently retains accepted work until success.
-  Warm restart keeps that count; hosted cold handoff carries the remaining
-  budget as `maxAttempts` and preserves absolute `availableAt`, while rebuilding
-  local attempts from zero. The fixed validation cadence survives that reset.
+  Warm restart and hosted cold handoff keep consumed queue `attempts`, including
+  an in-flight claim. The hint still carries remaining budget as `maxAttempts`
+  and absolute `availableAt`; restore derives the local total ceiling by adding
+  consumed attempts. Legacy hints omit history and start at zero, and old readers
+  drop the additive field without changing the remaining budget. Recovery stays
+  inside the runner checkpoint; Web/Worker admission readers do not round-trip
+  retained hints. The fixed validation cadence is unchanged, and all other
+  retry timing stays owned by `computeRetryDelayMs` (capped at two hours).
   Complete-day and ECG binding validation still fail before
   canonical replacement. Numeric-zero blood-oxygen samples, including finite
   numeric-string aliases, are unusable and skipped; other invalid values and

@@ -25,6 +25,7 @@ import {
 } from "../junction-historical-backfill-progress.ts";
 import { isJunctionRetainedAcceptedWorkJob } from "../junction-resources.ts";
 import {
+  DEFAULT_DEVICE_SYNC_JOB_MAX_ATTEMPTS,
   DEVICE_SYNC_CANONICAL_IMPORT_RECEIPT_LIMIT,
   JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX,
   type DeviceSyncCanonicalImportReceipt,
@@ -35,6 +36,8 @@ import {
 } from "../types.ts";
 
 export interface DeviceSyncEnqueueJobInput extends DeviceSyncJobInput {
+  /** Restore consumed attempts without changing the total maxAttempts ceiling. */
+  attempts?: number;
   provider: string;
   accountId: string;
 }
@@ -64,7 +67,6 @@ interface StoredJobRow {
 
 const EXPIRED_JOB_LEASE_ERROR_CODE = "LEASE_EXPIRED";
 const EXPIRED_JOB_LEASE_ERROR_MESSAGE = "Device sync job lease expired before completion.";
-const DEFAULT_DEVICE_SYNC_JOB_MAX_ATTEMPTS = 5;
 // Lease recovery and dedupe share the retained validation predicate. This does
 // not grant the credential-independent authority of accepted companion work.
 function retainedJunctionValidationSql(errorCode: string): string {
@@ -1294,7 +1296,7 @@ export function enqueueDeviceSyncJobInTransaction(
       status,
       created_at,
       updated_at
-    ) values (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'queued', ?, ?)
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
   `).run(
     id,
     input.provider,
@@ -1303,6 +1305,7 @@ export function enqueueDeviceSyncJobInTransaction(
     stringifyJson(input.payload ?? {}),
     input.priority ?? 0,
     input.availableAt ?? now,
+    input.attempts ?? 0,
     input.maxAttempts ?? DEFAULT_DEVICE_SYNC_JOB_MAX_ATTEMPTS,
     input.dedupeKey ?? null,
     now,
