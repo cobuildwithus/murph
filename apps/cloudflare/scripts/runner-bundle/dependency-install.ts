@@ -52,6 +52,7 @@ export async function installPackedRunnerDependencies(
   input: {
     repoRoot: string;
     runtimePackageRoot: string;
+    offline?: boolean;
   },
 ): Promise<void> {
   const packageJsonPath = path.join(bundleDir, "package.json");
@@ -125,6 +126,7 @@ export async function installPackedRunnerDependencies(
     "utf8",
   );
   await installPinnedProductionDependencies(bundleDir, {
+    offline: input.offline,
     minimumReleaseAgeExclusions: workspaceTarballReleaseAgeExclusions,
     policy: workspaceInstallPolicy,
     repoRoot: input.repoRoot,
@@ -279,6 +281,7 @@ function resolveInstalledPackageManifestPath(
 async function installPinnedProductionDependencies(
   installRoot: string,
   input: {
+    offline?: boolean;
     minimumReleaseAgeExclusions: readonly string[];
     policy: WorkspacePnpmInstallPolicy;
     repoRoot: string;
@@ -286,6 +289,7 @@ async function installPinnedProductionDependencies(
   },
 ): Promise<void> {
   const installEnv = {
+    ...(input.offline ? { npm_config_offline: "true" } : {}),
     COREPACK_ENABLE_AUTO_PIN: "0",
     SHARP_IGNORE_GLOBAL_LIBVIPS: "1",
   };

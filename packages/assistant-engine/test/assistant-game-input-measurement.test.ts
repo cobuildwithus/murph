@@ -139,7 +139,9 @@ describe.skipIf(process.env.MURPH_MEASURE_GAME_INPUT !== '1')('group game tools 
           hostedToolContext: scope === 'group' ? context : null,
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt,
-            ...(scope === 'direct' && phase === 'head' ? [gameTools.GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE] : [])].join('\n\n'),
+            ...(scope === 'direct'
+              ? [(phase === 'base' ? baselineGame : gameTools).GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE].filter(Boolean)
+              : [])].join('\n\n'),
           prompt: [layers.dynamicTurnContextPrompt, 'Read the current games and summarize their tasks.'].join('\n\n'),
           env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
         })

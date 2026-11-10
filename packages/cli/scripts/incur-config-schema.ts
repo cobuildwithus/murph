@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -184,9 +184,17 @@ export function resolveIncurBinPathFromManifest(
 }
 
 export async function prepareBuiltCliRuntime(): Promise<void> {
-  await execFileAsync('pnpm', ['build:test-runtime:prepared'], {
-    cwd: repoDir,
-    env: process.env,
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn('pnpm', ['build:test-runtime:prepared'], {
+      cwd: repoDir,
+      env: process.env,
+      stdio: 'inherit',
+    })
+    child.once('error', reject)
+    child.once('exit', (code, signal) => {
+      if (code === 0) resolve()
+      else reject(new Error(`Prepared CLI runtime build failed (${signal ?? code}).`))
+    })
   })
 }
 

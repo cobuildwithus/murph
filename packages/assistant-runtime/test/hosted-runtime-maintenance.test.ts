@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   type HostedRuntimeLogRequest,
@@ -228,10 +228,10 @@ const DEVICE_SYNC_CONFIG = {
   publicBaseUrl: "https://device-sync.example.test",
   secret: "secret_123",
 } as const;
-const FIXED_MAINTENANCE_VAULT_ROOT = "/tmp/vault-root";
+let maintenanceVaultRoot: string;
 const DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY = "device-sync.wake:dense-raw-retention";
 
-async function readDenseRawRetentionMailboxItem(vaultRoot = FIXED_MAINTENANCE_VAULT_ROOT) {
+async function readDenseRawRetentionMailboxItem(vaultRoot = maintenanceVaultRoot) {
   const state = await readHostedSystemMailboxState(vaultRoot);
   return state.pending.find((item) =>
     item.mailboxDedupeKey === DENSE_RAW_RETENTION_MAILBOX_DEDUPE_KEY
@@ -241,7 +241,7 @@ async function readDenseRawRetentionMailboxItem(vaultRoot = FIXED_MAINTENANCE_VA
 
 async function expectDenseRawRetentionMailboxWakeAt(
   nextWakeAt: string | null,
-  vaultRoot = FIXED_MAINTENANCE_VAULT_ROOT,
+  vaultRoot = maintenanceVaultRoot,
 ): Promise<void> {
   const item = await readDenseRawRetentionMailboxItem(vaultRoot);
   if (!nextWakeAt) {
@@ -287,12 +287,13 @@ function createHostedAutomationRuntime(input: {
   };
 }
 
+afterEach(async () => {
+  await rm(maintenanceVaultRoot, { force: true, recursive: true });
+});
+
 beforeEach(async () => {
   vi.resetAllMocks();
-  await rm(FIXED_MAINTENANCE_VAULT_ROOT, {
-    force: true,
-    recursive: true,
-  });
+  maintenanceVaultRoot = await mkdtemp(path.join(tmpdir(), "maintenance-vault-"));
   mocks.closeHostedRuntimeDeviceSyncService.mockImplementation((service: { close?: () => void }) => {
     service.close?.();
   });
@@ -309,7 +310,7 @@ beforeEach(async () => {
     databasePath: ".runtime/projections/inboxd.sqlite",
     rebuiltCaptures: 0,
     runtimeDirectory: ".runtime/operations/inbox",
-    vault: "/tmp/vault-root",
+    vault: maintenanceVaultRoot,
   });
   mocks.createIntegratedInboxServices.mockReturnValue({
     init: mocks.initInboxRuntime,
@@ -449,7 +450,7 @@ describe("runHostedAssistantAutomation", () => {
     });
 
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_failure_log",
       {
         hosted: {
@@ -532,7 +533,7 @@ describe("runHostedAssistantAutomation", () => {
       return { nextWakeAt: null, progressed: true };
     });
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root", "req_skip_category",
+      maintenanceVaultRoot, "req_skip_category",
       { hosted: { memberId: "member_123", userEnvKeys: [] } },
       {
         eventId: "evt_skip_category", kind: "runtime.timer",
@@ -573,7 +574,7 @@ describe("runHostedAssistantAutomation", () => {
     });
 
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_failure_cap",
       {
         hosted: {
@@ -623,7 +624,7 @@ describe("runHostedAssistantAutomation", () => {
 
     await expect(
       runHostedAssistantAutomation(
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         "req_route_authority_failure",
         {
           hosted: {
@@ -684,7 +685,7 @@ describe("runHostedAssistantAutomation", () => {
       return { nextWakeAt: null, progressed: true };
     });
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_synthetic_reconciliation",
       { hosted: { memberId: "member_123", userEnvKeys: [] } },
       {
@@ -747,7 +748,7 @@ describe("runHostedAssistantAutomation", () => {
     });
 
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_cron_error_code",
       {
         hosted: {
@@ -807,7 +808,7 @@ describe("runHostedAssistantAutomation", () => {
       return { nextWakeAt: null, progressed: true };
     });
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_cron_provider_evidence",
       { hosted: { memberId: "member_123", userEnvKeys: [] } },
       {
@@ -866,7 +867,7 @@ describe("runHostedAssistantAutomation", () => {
       return { nextWakeAt: null, progressed: true };
     });
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_maintenance_evidence",
       { hosted: { memberId: "member_123", userEnvKeys: [] } },
       {
@@ -930,7 +931,7 @@ describe("runHostedAssistantAutomation", () => {
     });
 
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_patterns_failure_cap",
       {
         hosted: {
@@ -986,7 +987,7 @@ describe("runHostedAssistantAutomation", () => {
     });
 
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_onboarding_followup",
       {
         hosted: {
@@ -1076,7 +1077,7 @@ describe("runHostedAssistantAutomation", () => {
     });
 
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_turn_input",
       {
         hosted: {
@@ -1189,7 +1190,7 @@ describe("runHostedAssistantAutomation", () => {
     });
 
     await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_provider_bound_input",
       {
         hosted: {
@@ -1242,7 +1243,7 @@ describe("runHostedAssistantAutomation", () => {
     });
 
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_background_dynamic_context",
       {
         hosted: {
@@ -1291,7 +1292,7 @@ describe("runHostedAssistantAutomation", () => {
     });
 
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_dynamic_context_existing_pending_input",
       {
         hosted: {
@@ -1447,7 +1448,7 @@ describe("runHostedAssistantAutomation", () => {
       };
     });
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_candidate_query",
       {
         hosted: {
@@ -1537,7 +1538,7 @@ describe("runHostedAssistantAutomation", () => {
     });
 
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_queue_only_scanner",
       {
         hosted: {
@@ -1570,7 +1571,7 @@ describe("runHostedAssistantAutomation", () => {
 
     await expect(
       runHostedAssistantAutomation(
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         "req_bootstrap",
         {
           hosted: {
@@ -1650,12 +1651,12 @@ describe("runHostedAssistantAutomation", () => {
           limit: 1,
           requestId: "req_projection_show",
           sourceId: null,
-          vault: "/tmp/vault-root",
+          vault: maintenanceVaultRoot,
         });
         await passInboxServices.show({
           captureId: "cap_projection",
           requestId: "req_projection_show",
-          vault: "/tmp/vault-root",
+          vault: maintenanceVaultRoot,
         });
 
         return {
@@ -1667,7 +1668,7 @@ describe("runHostedAssistantAutomation", () => {
 
     await expect(
       runHostedAssistantAutomation(
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         "req_projection_show",
         {
           hosted: {
@@ -1711,7 +1712,7 @@ describe("runHostedAssistantAutomation", () => {
     });
 
     const result = await runHostedAssistantAutomation(
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       "req_123",
       {
         hosted: {
@@ -1789,7 +1790,7 @@ describe("runHostedAssistantAutomation", () => {
 
     const runWithInputIds = (freshAssistantInputIds: readonly string[] = []) =>
       runHostedAssistantAutomation(
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         "req_123",
         {
           hosted: {
@@ -1853,7 +1854,7 @@ describe("runHostedAssistantAutomation", () => {
 
     await expect(
       runHostedAssistantAutomation(
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         "req_123",
         {
           hosted: {
@@ -2047,7 +2048,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       null,
       null,
       45_000,
@@ -2075,7 +2076,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       null,
       45_000,
@@ -2104,7 +2105,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       {
         providerConfigs: {
           junction: {
@@ -2153,7 +2154,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       deviceSyncPort,
       45_000,
@@ -2293,7 +2294,7 @@ describe("runHostedDeviceSyncPass", () => {
 
     const result = await runHostedDeviceSyncPass(
       completionWake,
-      FIXED_MAINTENANCE_VAULT_ROOT,
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -2356,7 +2357,7 @@ describe("runHostedDeviceSyncPass", () => {
       "2026-04-08T00:00:00.000Z",
       () => runHostedDeviceSyncPass(
         completionWake,
-        FIXED_MAINTENANCE_VAULT_ROOT,
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -2434,7 +2435,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        FIXED_MAINTENANCE_VAULT_ROOT,
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         {
           ...createMaintenanceDeviceSyncPortStub(),
@@ -2536,7 +2537,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        FIXED_MAINTENANCE_VAULT_ROOT,
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         {
           ...createMaintenanceDeviceSyncPortStub(),
@@ -2612,7 +2613,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -2727,7 +2728,7 @@ describe("runHostedDeviceSyncPass", () => {
         reason: "disconnected",
         userId: "member_123",
       },
-      FIXED_MAINTENANCE_VAULT_ROOT,
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -2784,7 +2785,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -2846,7 +2847,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       {
         providerConfigs: {
           junction: {
@@ -2905,7 +2906,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       null,
       null,
       45_000,
@@ -2947,7 +2948,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -2983,7 +2984,7 @@ describe("runHostedDeviceSyncPass", () => {
             reason: "reconcile_due",
             userId: "member_123",
           },
-          "/tmp/vault-root",
+          maintenanceVaultRoot,
           DEVICE_SYNC_CONFIG,
           createMaintenanceDeviceSyncPortStub(),
           45_000,
@@ -3024,7 +3025,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -3064,7 +3065,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -3099,7 +3100,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -3176,7 +3177,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -3234,7 +3235,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -3302,7 +3303,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         passTimeoutMs,
@@ -3332,7 +3333,7 @@ describe("runHostedDeviceSyncPass", () => {
     expect(mocks.pruneWearableDenseRawTimeseries).toHaveBeenCalledWith(expect.objectContaining({
       maxBytes: 512 * 1024 * 1024,
       maxFiles: 25,
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     }));
     assert.equal(
       mocks.pruneWearableDenseRawTimeseries.mock.calls[0]?.[0]?.deadlineMs,
@@ -3356,7 +3357,7 @@ describe("runHostedDeviceSyncPass", () => {
       skippedCount: 1,
       tombstonedDenseRawArtifactCount: 2,
     });
-    assert.equal(JSON.stringify(entry).includes("/tmp/vault-root"), false);
+    assert.equal(JSON.stringify(entry).includes(maintenanceVaultRoot), false);
     assert.equal(JSON.stringify(entry).includes("sampleValues"), false);
   });
 
@@ -3399,7 +3400,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -3411,7 +3412,7 @@ describe("runHostedDeviceSyncPass", () => {
     expect(mocks.pruneWearableDenseRawTimeseries).toHaveBeenCalledWith(expect.objectContaining({
       maxBytes: 512 * 1024 * 1024,
       maxFiles: 25,
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     }));
   });
 
@@ -3536,7 +3537,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -3582,7 +3583,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         90_000,
@@ -3616,7 +3617,7 @@ describe("runHostedDeviceSyncPass", () => {
       runSchedulerOnce,
     });
     mocks.pruneWearableDenseRawTimeseries.mockRejectedValueOnce(
-      new Error("repair failed for /tmp/vault-root/raw/provider.json"),
+      new Error(`repair failed for ${maintenanceVaultRoot}/raw/provider.json`),
     );
 
     const result = await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () =>
@@ -3628,7 +3629,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -3660,7 +3661,7 @@ describe("runHostedDeviceSyncPass", () => {
     assert.ok(entry);
     assert.equal(entry.eventCode, "device-sync.dense_raw_retention");
     assert.equal(entry.level, "warn");
-    assert.equal(JSON.stringify(entry).includes("/tmp/vault-root"), false);
+    assert.equal(JSON.stringify(entry).includes(maintenanceVaultRoot), false);
     assert.deepEqual(entry.redactedJson, {
       errorSummary: "repair failed for <redacted-path>",
       failed: true,
@@ -3722,7 +3723,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -3821,7 +3822,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -3949,7 +3950,7 @@ describe("runHostedDeviceSyncPass", () => {
         reason: "connected",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -4011,7 +4012,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -4082,7 +4083,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -4159,7 +4160,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -4220,7 +4221,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -4279,7 +4280,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -4321,7 +4322,7 @@ describe("runHostedDeviceSyncPass", () => {
         triggerKind: "runtime_timer",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -4374,7 +4375,7 @@ describe("runHostedDeviceSyncPass", () => {
           triggerKind: "runtime_timer",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -4649,7 +4650,7 @@ describe("runHostedDeviceSyncPass", () => {
         reason: "webhook_hint",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -4877,7 +4878,7 @@ describe("runHostedDeviceSyncPass", () => {
         reason: "webhook_hint",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -5033,7 +5034,7 @@ describe("runHostedDeviceSyncPass", () => {
         reason: "webhook_hint",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -5158,7 +5159,7 @@ describe("runHostedDeviceSyncPass", () => {
           reason: "webhook_hint",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -5332,7 +5333,7 @@ describe("runHostedDeviceSyncPass", () => {
         reason: "webhook_hint",
         userId: "member_123",
       },
-      "/tmp/vault-root",
+      maintenanceVaultRoot,
       DEVICE_SYNC_CONFIG,
       createMaintenanceDeviceSyncPortStub(),
       45_000,
@@ -5429,7 +5430,7 @@ describe("runHostedDeviceSyncPass", () => {
           reason: "webhook_hint",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -5463,7 +5464,7 @@ describe("runHostedDeviceSyncPass", () => {
           reason: "webhook_hint",
           userId: "member_123",
         },
-        "/tmp/vault-root",
+        maintenanceVaultRoot,
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
         45_000,
@@ -5567,7 +5568,7 @@ describe("runHostedAssistantAutomationLane", () => {
         },
       }),
       runtimeAttemptId: "attempt_terminal_non_reply",
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     await vi.waitFor(() => {
@@ -5645,7 +5646,7 @@ describe("runHostedAssistantAutomationLane", () => {
       providerStartCriticalPath: {
         mailboxImportDoneAtMonotonicMs: 0,
       },
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(result).toMatchObject({
@@ -5706,10 +5707,10 @@ describe("runHostedAssistantAutomationLane", () => {
         currentWorkingDirectory: null,
         env: {
           MURPH_HOSTED_RUNTIME_PROCESS: "1",
-          VAULT: "/tmp/vault-root",
+          VAULT: maintenanceVaultRoot,
         },
       },
-      vault: "/tmp/vault-root",
+      vault: maintenanceVaultRoot,
       vaultServices: expect.anything(),
     });
     const automationPassInput =
@@ -6010,7 +6011,7 @@ describe("runHostedAssistantAutomationLane", () => {
       onProviderRequestStarted,
       requestId: "request_synthetic_concurrent",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: FIXED_MAINTENANCE_VAULT_ROOT,
+      vaultRoot: maintenanceVaultRoot,
     });
     try {
       await started;
@@ -6047,7 +6048,7 @@ describe("runHostedAssistantAutomationLane", () => {
       requestId: "req_yield",
       runtime: createHostedAutomationRuntime(),
       shouldYieldBackgroundMaintenance,
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     const automationPassInput =
@@ -6088,7 +6089,7 @@ describe("runHostedAssistantAutomationLane", () => {
       operationScope,
       requestId: "req_integrated_lane_bindings",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
       wake: {
         eventId: "evt_integrated_lane_bindings",
         kind: "runtime.timer",
@@ -6169,7 +6170,7 @@ describe("runHostedAssistantAutomationLane", () => {
       now: new Date("2026-04-08T00:00:00.000Z"),
       requestId: "req_current_foreground",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(shouldDeferCronDuringPass).toBe(true);
@@ -6234,7 +6235,7 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       requestId: "req_provider_trace",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     const providerLog = (result.redactedLogEntries ?? []).find((entry) =>
@@ -6305,7 +6306,7 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       requestId: "req_prepared_assistant_state",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(mocks.readHostedAssistantRuntimeState).not.toHaveBeenCalled();
@@ -6333,7 +6334,7 @@ describe("runHostedAssistantAutomationLane", () => {
       operatorHomeRoot,
       requestId: "req_direct_assistant_state",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(mocks.readHostedAssistantRuntimeState).toHaveBeenCalledWith({
@@ -6382,7 +6383,7 @@ describe("runHostedAssistantAutomationLane", () => {
         },
       }),
       runtimeAttemptId: "attempt_123",
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     const automationPassInput =
@@ -6445,7 +6446,7 @@ describe("runHostedAssistantAutomationLane", () => {
       runtime: createHostedAutomationRuntime({
         deviceSync: DEVICE_SYNC_CONFIG,
       }),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(result).toMatchObject({ nextWakeAt });
@@ -6512,7 +6513,7 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       requestId: "req_background_scan_limit",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
@@ -6563,7 +6564,7 @@ describe("runHostedAssistantAutomationLane", () => {
       runnerIdleTtlMs: 180_000,
       requestId: "req_multiple_due_cron",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
@@ -6626,7 +6627,7 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       requestId: "req_background_causal_batch",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
@@ -6664,7 +6665,7 @@ describe("runHostedAssistantAutomationLane", () => {
         },
         requestId: "req_123",
         runtime: createHostedAutomationRuntime(),
-        vaultRoot: "/tmp/vault-root",
+        vaultRoot: maintenanceVaultRoot,
       });
 
       expect(result).toMatchObject({
@@ -6728,7 +6729,7 @@ describe("runHostedAssistantAutomationLane", () => {
         },
         requestId: "req_assistant_backlog",
         runtime: createHostedAutomationRuntime(),
-        vaultRoot: "/tmp/vault-root",
+        vaultRoot: maintenanceVaultRoot,
       });
 
       expect(result.nextWakeAt).toBe("2026-04-08T00:00:00.000Z");
@@ -6775,7 +6776,7 @@ describe("runHostedAssistantAutomationLane", () => {
       freshAssistantInputIds: ["ain_exact_foreground"],
       requestId: "req_exact_foreground_scan",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
@@ -6826,7 +6827,7 @@ describe("runHostedAssistantAutomationLane", () => {
       freshAssistantInputIds: ["ain_foreground_with_reminder"],
       requestId: "req_foreground_with_reminder",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(result).toEqual(expect.objectContaining({
@@ -6878,7 +6879,7 @@ describe("runHostedAssistantAutomationLane", () => {
       freshAssistantInputIds: mode === "foreground" ? ["ain_foreground_retry"] : [],
       requestId: "req_foreground_retry",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(result).toEqual(expect.objectContaining({
@@ -6928,7 +6929,7 @@ describe("runHostedAssistantAutomationLane", () => {
         },
         requestId: "req_assistant_capped_backlog",
         runtime: createHostedAutomationRuntime(),
-        vaultRoot: "/tmp/vault-root",
+        vaultRoot: maintenanceVaultRoot,
       });
 
       expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
@@ -6983,7 +6984,7 @@ describe("runHostedAssistantAutomationLane", () => {
         },
         requestId: "req_assistant_capped_retry",
         runtime: createHostedAutomationRuntime(),
-        vaultRoot: "/tmp/vault-root",
+        vaultRoot: maintenanceVaultRoot,
       });
 
       expect(result.nextWakeAt).toBe("2026-04-08T00:00:30.000Z");
@@ -7010,7 +7011,7 @@ describe("runHostedAssistantAutomationLane", () => {
       requestId: "req_123",
       runtime: createHostedAutomationRuntime(),
       skipAssistantAutomation: true,
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     assert.deepEqual({ nextWakeAt: result.nextWakeAt }, { nextWakeAt: null });
@@ -7052,7 +7053,7 @@ describe("runHostedAssistantAutomationLane", () => {
       runtime: createHostedAutomationRuntime({
         deviceSync: DEVICE_SYNC_CONFIG,
       }),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(result).not.toHaveProperty("deviceSyncProcessed");
@@ -7084,7 +7085,7 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       requestId: "req_123",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(result).toMatchObject({
@@ -7135,7 +7136,7 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       requestId: "req_123",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -7174,7 +7175,7 @@ describe("runHostedAssistantAutomationLane", () => {
     } } };
     await runHostedDeviceSyncWakeLane({ wake, deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
       resolvedConfig: { deviceSync: DEVICE_SYNC_CONFIG }, retainFollowUpWakeUntilCheckpoint: true,
-      runtimeLogPlatform: platform, timeoutMs: null, vaultRoot: "/tmp/vault-root" });
+      runtimeLogPlatform: platform, timeoutMs: null, vaultRoot: maintenanceVaultRoot });
     await drainHostedRuntimeLogWritesBestEffort();
     const first = logRequests.flatMap((r) => r.entries).find((e) => e.eventCode === "device-sync.pass_finished")?.redactedJson;
     expect(first).toMatchObject({ incomingRetainedJobCount: 1, outgoingRetainedJobCount: 1,
@@ -7185,7 +7186,7 @@ describe("runHostedAssistantAutomationLane", () => {
     logRequests.length = 0;
     await runHostedDeviceSyncWakeLane({ wake: outgoingWake, deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
       resolvedConfig: { deviceSync: DEVICE_SYNC_CONFIG }, retainFollowUpWakeUntilCheckpoint: true,
-      runtimeLogPlatform: platform, timeoutMs: null, vaultRoot: "/tmp/vault-root" });
+      runtimeLogPlatform: platform, timeoutMs: null, vaultRoot: maintenanceVaultRoot });
     await drainHostedRuntimeLogWritesBestEffort();
     const second = logRequests.flatMap((r) => r.entries).find((e) => e.eventCode === "device-sync.pass_finished")?.redactedJson;
     expect(second?.incomingRetainedProgressFingerprint).toBe(first?.outgoingRetainedProgressFingerprint);
@@ -7198,7 +7199,7 @@ describe("runHostedAssistantAutomationLane", () => {
       logRequests.length = 0;
       await runHostedDeviceSyncWakeLane({ wake: changedWake, deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
         resolvedConfig: { deviceSync: DEVICE_SYNC_CONFIG }, retainFollowUpWakeUntilCheckpoint: true,
-        runtimeLogPlatform: platform, timeoutMs: null, vaultRoot: "/tmp/vault-root" });
+        runtimeLogPlatform: platform, timeoutMs: null, vaultRoot: maintenanceVaultRoot });
       await drainHostedRuntimeLogWritesBestEffort();
       const pass = logRequests.flatMap(r => r.entries).find(e => e.eventCode === "device-sync.pass_finished")?.redactedJson;
       expect(pass?.deviceSyncConnectionKey).not.toBe(first?.deviceSyncConnectionKey);
@@ -7240,7 +7241,7 @@ describe("runHostedAssistantAutomationLane", () => {
       },
       requestId: "req_123",
       runtime: createHostedAutomationRuntime(),
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
 
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
@@ -7284,7 +7285,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       runtimeLogPlatform: { logPort: { async write(request) {
         const parsed = parseHostedRuntimeLogRequest(request);
         logRequests.push(parsed); return { loggedCount: parsed.entries.length };
-      } } }, timeoutMs: null, vaultRoot: "/tmp/vault-root" });
+      } } }, timeoutMs: null, vaultRoot: maintenanceVaultRoot });
     await drainHostedRuntimeLogWritesBestEffort();
     const pass = logRequests.flatMap(request => request.entries)
       .find(entry => entry.eventCode === "device-sync.pass_finished")?.redactedJson;
@@ -7411,7 +7412,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       },
       shouldYieldDeviceSync,
       timeoutMs: 45_000,
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
     });
     await drainHostedRuntimeLogWritesBestEffort();
 
@@ -7622,7 +7623,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         },
       },
       timeoutMs: 45_000,
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
       wake: {
         eventId: "evt_device_sync_timing_sample",
         kind: "device-sync.wake",
@@ -7796,7 +7797,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         return { loggedCount: parsed.entries.length };
       } } },
       timeoutMs: 45_000,
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
       wake,
     });
     await drainHostedRuntimeLogWritesBestEffort();
@@ -8039,7 +8040,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         },
       },
       timeoutMs: 45_000,
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
       wake: {
         eventId: "evt_device_sync_local_progress",
         kind: "device-sync.wake",
@@ -8111,7 +8112,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
           },
           signal: controller.signal,
           timeoutMs: HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
-          vaultRoot: FIXED_MAINTENANCE_VAULT_ROOT,
+          vaultRoot: maintenanceVaultRoot,
           wake: {
             eventId: "evt_device_sync_long_drain",
             kind: "device-sync.wake",
@@ -8207,7 +8208,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
           },
         },
         timeoutMs: 50,
-        vaultRoot: "/tmp/vault-root",
+        vaultRoot: maintenanceVaultRoot,
         wake: {
           eventId: "evt_device_sync_worker_timeout",
           kind: "device-sync.wake",
@@ -8301,7 +8302,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
           },
         },
         timeoutMs: 45_000,
-        vaultRoot: "/tmp/vault-root",
+        vaultRoot: maintenanceVaultRoot,
         wake: {
           eventId: "evt_device_sync_nonblocking_log",
           kind: "device-sync.wake",
@@ -8408,7 +8409,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
           },
         },
         timeoutMs: 100,
-        vaultRoot: "/tmp/vault-root",
+        vaultRoot: maintenanceVaultRoot,
       });
 
       await flushHostedRuntimeLogMicrotasks();
@@ -8476,7 +8477,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         },
       },
       timeoutMs: 45_000,
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
       wake: {
         eventId: "evt_device_sync_lane_failure",
         kind: "device-sync.wake",
@@ -8538,7 +8539,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         },
       },
       timeoutMs: 45_000,
-      vaultRoot: "/tmp/vault-root",
+      vaultRoot: maintenanceVaultRoot,
       wake: {
         eventId: "evt_device_sync_late_failure",
         kind: "device-sync.wake",

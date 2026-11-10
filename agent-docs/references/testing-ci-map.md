@@ -180,7 +180,9 @@ decryption and authority proof with
 
 The live runner defaults to the pinned npm Codex binary. Select a locally built
 native binary with `--codex-command <absolute-path>`; the same executable handles
-subscription login preflight and the selected journey. Ambient
+native capability preflight, subscription login preflight, and the selected
+journey. The capability preflight rejects binaries without `--ignore-user-config`
+before login or provider work and times out after ten seconds. Ambient
 `MURPH_REAL_CODEX_COMMAND` does not override this explicit command-line choice.
 
 A rejected live selector prints up to 20 exact matching names, an omitted count,
@@ -2202,3 +2204,45 @@ scope, writable missed lore, unchanged read-only recap lore and text-only output
 Run each `group hosting parity:` missed-day live journey individually with
 `pnpm test:assistant:live -- --test "<unique name>"` and inspect its actual reply;
 blocked provider runs are Hold evidence, not successful silence.
+
+## Focused prerequisite and isolation rules
+
+Before focused Codex upgrade tests that invoke the workspace CLI, run
+`pnpm build:test-runtime:prepared`. Canonical live journeys additionally require
+a production-patched native Codex binary with `app-server --ignore-user-config`;
+pass it with `--codex-command`. Generate public-reference inputs with
+`pnpm health-commons:generate` before measuring a natural goal journey.
+Production capability comparisons also require
+`node scripts/assemble-assistant-cli-surface.mjs`.
+
+Use a loopback database named `murph_test` or `murph_test_<slug>` for focused
+PostgreSQL proof. Prepare it with `pnpm --dir apps/web prisma:migrate:deploy`,
+not `db push`, when checking migration-owned constraints. Run files sharing that
+database with `--maxWorkers=1`; runtime-cutover singleton tests cannot overlap
+other files. The canonical PostgreSQL runner already enforces this serial lane.
+
+
+### Focused native public Live verification
+
+Build the pinned patched native source and matching `codex-code-mode-host` before
+running the public Live app-server cases. On macOS, Cargo's test launch context
+can stall initialization even when the identical test executable passes directly.
+Keep the initialization deadlines intact and launch the compiled test from the
+native `codex-rs` workspace directory, explicitly selecting the candidate:
+
+```sh
+# Run inside the pinned, patched codex-rs workspace.
+cargo test --locked -p codex-app-server --test all public_live --no-run --message-format=json > target/public-live-build.jsonl
+native_test_binary="$(node -e 'const fs = require("node:fs"); const rows = fs.readFileSync("target/public-live-build.jsonl", "utf8").trim().split("\n").map(line => JSON.parse(line)); const binaries = [...new Set(rows.filter(row => row.reason === "compiler-artifact" && row.target?.name === "all" && row.profile?.test && row.executable).map(row => row.executable))]; if (binaries.length !== 1) process.exit(1); process.stdout.write(binaries[0]);')"
+native_app_server="$PWD/target/release/codex-app-server"
+test -x "$native_app_server"
+test -x "$PWD/target/release/codex-code-mode-host"
+env "CARGO_BIN_EXE_codex-app-server=$native_app_server" "$native_test_binary" public_live --list
+env "CARGO_BIN_EXE_codex-app-server=$native_app_server" "$native_test_binary" public_live --test-threads=1
+```
+
+Confirm the list contains the expected public Live cases; a zero-test run is not
+proof. Keep the app-server and helper from the same pinned build. This command
+fixes the demonstrated launch context, not the unexplained Cargo initialization
+failure. Native sandbox proof still requires native Linux; AMD64 emulation on an
+ARM host is not an equivalent sandbox verification environment.

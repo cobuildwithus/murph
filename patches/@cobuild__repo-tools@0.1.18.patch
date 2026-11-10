@@ -1,8 +1,75 @@
 diff --git a/src/committer.sh b/src/committer.sh
-index 1f1a8fa458dcd1d1c267610c3737f014c474af9b..99f20b29956bb95972e7b37bb02e2e87fcc26e36 100755
+index 1f1a8fa458dcd1d1c267610c3737f014c474af9b..09a4825da4c11c2da983cd406f92995c439c77ba 100755
 --- a/src/committer.sh
 +++ b/src/committer.sh
-@@ -409,4 +409,25 @@ else
+@@ -4,7 +4,7 @@ set -euo pipefail
+ set -f
+ 
+ usage() {
+-  printf 'Usage: %s [--force] [--allow-non-conventional] [--skip-hooks] "commit message" "file" ["file" ...]\n' "$(basename "$0")" >&2
++  printf 'Usage: %s [--force] [--allow-non-conventional] [--skip-hooks] [--amend [--no-edit]] "commit message" "file" ["file" ...]\n' "$(basename "$0")" >&2
+   exit 2
+ }
+ 
+@@ -15,8 +15,18 @@ fi
+ force_delete_lock=false
+ allow_non_conventional=false
+ skip_hooks=false
++amend=false
++no_edit=false
+ while [ "$#" -gt 0 ]; do
+   case "$1" in
++    --amend)
++      amend=true
++      shift
++      ;;
++    --no-edit)
++      no_edit=true
++      shift
++      ;;
+     --force)
+       force_delete_lock=true
+       shift
+@@ -46,13 +56,15 @@ while [ "$#" -gt 0 ]; do
+   esac
+ done
+ 
+-if [ "$#" -lt 2 ]; then
+-  usage
++if [ "$no_edit" = true ]; then
++  [ "$amend" = true ] && [ "$#" -ge 1 ] || usage
++  commit_message="$(git log -1 --format=%B)"
++else
++  [ "$#" -ge 2 ] || usage
++  commit_message=$1
++  shift
+ fi
+ 
+-commit_message=$1
+-shift
+-
+ if [[ "$commit_message" != *[![:space:]]* ]]; then
+   printf 'Error: commit message must not be empty\n' >&2
+   exit 1
+@@ -124,6 +136,17 @@ else
+   base_head=''
+ fi
+ 
++if [ "$amend" = true ]; then
++  if [ "$has_base_commit" != true ] || [[ "$branch_ref" == refs/heads/main || "$branch_ref" == refs/heads/master ]]; then
++    printf 'Error: amend requires an existing commit on an owned task branch\n' >&2
++    exit 1
++  fi
++  if [ -n "$(git for-each-ref --contains "$base_head" --format='%(refname)' refs/remotes/)" ]; then
++    printf 'Error: amend refuses a commit reachable from a remote-tracking ref\n' >&2
++    exit 1
++  fi
++fi
++
+ object_id_probe="$(git hash-object --stdin </dev/null)"
+ zero_oid="$(printf '%*s' "${#object_id_probe}" '' | tr ' ' '0')"
+ expected_old_oid="${base_head:-$zero_oid}"
+@@ -409,7 +432,28 @@ else
    GIT_INDEX_FILE="$tmp_index" git read-tree --empty
    comparison_tree="$(GIT_INDEX_FILE="$tmp_index" git write-tree)"
  fi
@@ -29,3 +96,64 @@ index 1f1a8fa458dcd1d1c267610c3737f014c474af9b..99f20b29956bb95972e7b37bb02e2e87
 +if [ "${#untracked_files[@]}" -gt 0 ]; then
 +  GIT_INDEX_FILE="$tmp_index" git -C "$repo_root" --literal-pathspecs add -A -- "${untracked_files[@]}"
 +fi
+ 
+ initial_changed_files=()
+ while IFS= read -r -d '' changed_path; do
+@@ -509,15 +553,38 @@ if [ "${#hook_removed_paths[@]}" -gt 0 ]; then
+   exit 1
+ fi
+ 
+-if [ "$has_base_commit" = true ]; then
++if [ "$amend" = true ]; then
++  commit_tree_args=(commit-tree)
++  for parent in $(git show -s --format=%P "$base_head"); do
++    commit_tree_args+=(-p "$parent")
++  done
++  new_commit="$(GIT_INDEX_FILE="$tmp_index" \
++    GIT_AUTHOR_NAME="$(git show -s --format=%an "$base_head")" \
++    GIT_AUTHOR_EMAIL="$(git show -s --format=%ae "$base_head")" \
++    GIT_AUTHOR_DATE="$(git show -s --format=%aI "$base_head")" \
++    git "${commit_tree_args[@]}" -F <(printf '%s\n' "$commit_message") "$(GIT_INDEX_FILE="$tmp_index" git write-tree)")"
++elif [ "$has_base_commit" = true ]; then
+   new_commit="$(GIT_INDEX_FILE="$tmp_index" git commit-tree -p "$base_head" -F <(printf '%s\n' "$commit_message") "$(GIT_INDEX_FILE="$tmp_index" git write-tree)")"
+ else
+   new_commit="$(GIT_INDEX_FILE="$tmp_index" git commit-tree -F <(printf '%s\n' "$commit_message") "$(GIT_INDEX_FILE="$tmp_index" git write-tree)")"
+ fi
+ 
++# Consume both selected sides of a staged rename; the destination may have
++# changed again after git mv. Unrelated partial staging remains untouched.
++selected_rename_paths=()
++while IFS= read -r -d '' rename_status; do
++  IFS= read -r -d '' rename_source || break
++  if [[ "$rename_status" == R* ]]; then
++    IFS= read -r -d '' rename_destination || break
++    if contains_path "$rename_source" "${canonical_files[@]}" && contains_path "$rename_destination" "${canonical_files[@]}"; then
++      selected_rename_paths+=("$rename_source" "$rename_destination")
++    fi
++  fi
++done < <(GIT_INDEX_FILE="$original_index_snapshot" git -C "$repo_root" diff --cached --name-status -M -z "$comparison_tree" --)
++
+ reconcile_files=()
+ for committed_file in "${committed_files[@]}"; do
+-  if [ "${#preexisting_staged_files[@]}" -eq 0 ] || ! contains_path "$committed_file" "${preexisting_staged_files[@]}"; then
++  if [ "${#preexisting_staged_files[@]}" -eq 0 ] || ! contains_path "$committed_file" "${preexisting_staged_files[@]}" || { [ "${#selected_rename_paths[@]}" -gt 0 ] && contains_path "$committed_file" "${selected_rename_paths[@]}"; }; then
+     reconcile_files+=("$committed_file")
+   fi
+ done
+@@ -534,9 +601,15 @@ if [ "${#reconcile_files[@]}" -gt 0 ]; then
+   fi
+   real_index_lock_acquired=true
+ 
++  index_semantics() {
++    GIT_INDEX_FILE="$1" git ls-files --stage -v -z
++    # Cached diff distinguishes intent-to-add from an actually staged empty blob.
++    GIT_INDEX_FILE="$1" git diff --cached --raw --no-renames --no-ext-diff --no-textconv -z "$comparison_tree" --
++  }
++
+   index_changed=false
+   if [ "$real_index_existed" = true ]; then
+-    if [ ! -f "$real_index_path" ] || ! cmp -s "$real_index_path" "$original_index_snapshot"; then
++    if [ ! -f "$real_index_path" ] || [ "$(index_semantics "$real_index_path" | git hash-object --stdin)" != "$(index_semantics "$original_index_snapshot" | git hash-object --stdin)" ]; then
+       index_changed=true
+     fi
+   elif [ -e "$real_index_path" ]; then

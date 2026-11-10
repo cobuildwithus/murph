@@ -938,7 +938,7 @@ describeRealCodex('real natural goal canary journey', () => {
     { name: 'production hosted onboarding canary goal proposal sends one early update', capabilities: 'production-hosted' as const },
   ])('$name', async ({ capabilities }) => {
     const config = await resolveRealCodexE2eConfig()
-    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities })
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities, requirePublicReferences: true })
     const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
     const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async (input) => {
       expect(input.developerInstructions).toContain('Routine onboarding/setup')
@@ -1120,7 +1120,7 @@ describeRealCodex('real natural goal canary journey', () => {
     { name: 'production hosted five-stage canary persists the accepted goal', capabilities: 'production-hosted' as const },
   ])('$name', async ({ capabilities }) => {
     const config = await resolveRealCodexE2eConfig()
-    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities })
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities, requirePublicReferences: true })
     const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
     const observer = capabilities ? vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async (input) => {
       assertProductionHostedCapabilityParity(input)

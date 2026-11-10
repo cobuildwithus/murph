@@ -15,6 +15,7 @@ async function write(root: string, file: string, text: string) {
 }
 function init(root: string) {
   git(root, ['init', '-q'])
+  git(root, ['config', 'core.hooksPath', '.git/hooks'])
   git(root, ['config', 'user.name', 'Synthetic Fixture'])
   git(root, ['config', 'user.email', 'fixture@example.invalid'])
 }
@@ -186,6 +187,7 @@ cobuild_repo_tool_bin() { printf '%s\\n' "$TEST_BASE_PACKAGER"; }
   const bytes = execFileSync('unzip', ['-p', zip, `review-gpt-pr-context/dependencies/codex-1.2.3/${target}`], { encoding: 'utf8' })
   expect(bytes).toBe('// preserved source outside patch\npub const VALUE: u8 = 2;\n')
   const round = JSON.parse(execFileSync('unzip', ['-p', zip, 'review-gpt-pr-context/review-round.json'], { encoding: 'utf8' }))
+  expect(JSON.parse(await readFile(`${zip}.review-round.json`, 'utf8'))).toEqual(round)
   expect(round.currentReviewedHead).toBe(input.head)
   expect(round.firstReviewedHead).toBe(input.head)
   expect(round.contextSensitivity).toBe('undeclared')

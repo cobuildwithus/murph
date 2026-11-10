@@ -18,6 +18,8 @@ import { markGameChatGenerationQueuedTx, reserveGameChatProposalTx, reserveGameC
 import { buildHostedLinqDeliveryId } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey, createHostedLinqDeliverySourceRefLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
+
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 if (enabled) {
@@ -74,7 +76,7 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       }
     } finally {
       await prisma.hostedLinqDelivery.deleteMany({where:{idempotencyKey:key}});
-      await prisma.game.deleteMany({where:{id:gameId}});
+      await cleanupGameFixtures(prisma, ids);
       await prisma.hostedThreadContainer.deleteMany({where:{memberId:{in:[room,alternate]}}});
       await prisma.hostedMember.deleteMany({where:{id:{in:ids}}});
       await prisma.$disconnect(); vi.unstubAllEnvs();
@@ -107,7 +109,7 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       expect(await readGameChatFundingRooms({ memberIds: [room], now, prisma })).toEqual(new Map());
     } finally {
       await prisma.hostedLinqDelivery.deleteMany({ where: { idempotencyKey: key } });
-      await prisma.game.deleteMany({ where: { id: gameId } });
+      await cleanupGameFixtures(prisma, [room, first, second]);
       await prisma.hostedThreadContainer.deleteMany({ where: { memberId: room } });
       await prisma.hostedMember.deleteMany({ where: { id: { in: [room, first, second] } } });
       await prisma.$disconnect(); vi.unstubAllEnvs();
@@ -303,9 +305,8 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       await prisma.game.update({ where: { id: gameId }, data: { chatContainerMemberId: first } });
       expect(await readActiveHostedMemberAccess({ ...input, memberId: first })).toBe(false);
     } finally {
-      await prisma.game.deleteMany({ where: { id: { in: [gameId, olderGameId, ...historicalIds] } } });
+      await cleanupGameFixtures(prisma, ids);
       await prisma.hostedThreadContainer.deleteMany({ where: { memberId: { in: [room, alternate] } } });
-      await prisma.game.deleteMany({ where: { wordsOwnerMemberId: { in: ids } } });
       await prisma.hostedMember.deleteMany({ where: { id: { in: ids } } });
       await prisma.$disconnect();
       vi.unstubAllEnvs();
