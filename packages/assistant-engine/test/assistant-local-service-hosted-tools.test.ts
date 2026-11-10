@@ -148,7 +148,7 @@ test('sendAssistantMessageLocal keeps every group prompt accepted before provide
           codexThreadId: 'provider-thread-group-pre-provider',
           response: 'The venue opens at nine, and the walk takes ten minutes.',
           responseDeliveryContextOrdinal: 0,
-          route: { routeId: 'route-group-pre-provider' },
+          route: { routeFingerprint: 'route-group-pre-provider' },
           session,
           transcriptResponse:
             'The venue opens at nine, and the walk takes ten minutes.',
@@ -336,7 +336,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
         responseDeliveryContextOrdinal: 0,
         transcriptResponse: 'assistant response',
         route: {
-          routeId: 'route-default',
+          routeFingerprint: 'route-default',
         },
         session,
       },
@@ -462,7 +462,7 @@ test('sendAssistantMessageLocal uses progress-materialized sessions for final re
         responseDeliveryContextOrdinal: 0,
         transcriptResponse: 'assistant response',
         route: {
-          routeId: 'route-default',
+          routeFingerprint: 'route-default',
         },
         session: providerSession,
       },
@@ -862,7 +862,7 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
         responseDeliveryContextOrdinal: 0,
         transcriptResponse: 'assistant response',
         route: {
-          routeId: 'route-default',
+          routeFingerprint: 'route-default',
         },
         session,
       },

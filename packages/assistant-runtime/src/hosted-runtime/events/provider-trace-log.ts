@@ -66,7 +66,6 @@ const HOSTED_ASSISTANT_ROUTE_PLANNING_STAGE_VALUES = new Set([
   "cli_bootstrap",
   "primary_instructions",
   "resume_binding",
-  "target_capabilities",
 ]);
 const HOSTED_ASSISTANT_PROVIDER_PROMPT_DIAGNOSTIC_KIND_VALUES = new Set([
   "primary",
@@ -619,7 +618,6 @@ function readHostedAssistantProviderPlanDiagnosticTrace(
     "routePlanningPrimarySystemPromptElapsedMs",
     "routePlanningResumeBindingElapsedMs",
     "routePlanningSlowestStageElapsedMs",
-    "routePlanningTargetCapabilitiesElapsedMs",
     "routePlanningUnaccountedElapsedMs",
   ] as const) {
     maybeSetHostedAssistantProviderDiagnosticDetail(

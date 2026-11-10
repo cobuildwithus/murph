@@ -393,7 +393,7 @@ async function runLivePrefixScenario(options: {
         onboardingGuidanceInjected: true,
         codexContinuation: { kind: 'explicit-structured-history' },
         codexThreadId: 'thread-prefix-provider',
-        route: { routeId: 'route-prefix' },
+        route: { routeFingerprint: 'route-prefix' },
         precedingResponseSegments: [
           { deliveryContextOrdinal: ordinal, response: 'Earlier detail.\n---\nAnother detail.',
             targetInputId: earlier.inputId },

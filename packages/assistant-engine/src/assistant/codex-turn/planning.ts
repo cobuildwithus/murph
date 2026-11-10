@@ -188,7 +188,6 @@ export interface AssistantRoutePlanningDiagnostics {
   routePlanningSlowestStageElapsedMs: number | null
   routePlanningUnaccountedElapsedMs: number
   routeResumeBindingElapsedMs: number | null
-  routeTargetCapabilitiesElapsedMs: number | null
   shouldPrepareBootstrapContext: boolean
 }
 
@@ -199,7 +198,6 @@ type AssistantRoutePlanningSpanKey =
   | 'cliBootstrapElapsedMs'
   | 'primarySystemPromptElapsedMs'
   | 'routeResumeBindingElapsedMs'
-  | 'routeTargetCapabilitiesElapsedMs'
 
 type AssistantRoutePlanningSpanMetrics = Partial<
   Record<AssistantRoutePlanningSpanKey, number>
@@ -212,7 +210,6 @@ export type AssistantRoutePlanningStage =
   | 'cli_bootstrap'
   | 'primary_instructions'
   | 'resume_binding'
-  | 'target_capabilities'
 
 const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
   key: AssistantRoutePlanningSpanKey
@@ -241,10 +238,6 @@ const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
   {
     key: 'routeResumeBindingElapsedMs',
     stage: 'resume_binding',
-  },
-  {
-    key: 'routeTargetCapabilitiesElapsedMs',
-    stage: 'target_capabilities',
   },
 ]
 const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT = 72
@@ -1456,7 +1449,6 @@ export async function resolveAssistantRouteTurnPlan(
         routePlanningSlowestSpan?.elapsedMs ?? null,
       routePlanningUnaccountedElapsedMs,
       routeResumeBindingElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'routeResumeBindingElapsedMs'),
-      routeTargetCapabilitiesElapsedMs: readRoutePlanningSpan(routePlanningSpans, 'routeTargetCapabilitiesElapsedMs'),
       shouldPrepareBootstrapContext,
     },
     resume,

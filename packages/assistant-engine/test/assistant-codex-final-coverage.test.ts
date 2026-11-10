@@ -230,7 +230,6 @@ function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagn
     routePlanningSlowestStageElapsedMs: null,
     routePlanningUnaccountedElapsedMs: 0,
     routeResumeBindingElapsedMs: null,
-    routeTargetCapabilitiesElapsedMs: null,
     shouldPrepareBootstrapContext: false,
   }
 }

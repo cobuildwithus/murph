@@ -118,7 +118,6 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
       providerRequestOrdinal: 0,
       providerRequestOutcome: 'failed',
       providerResult: {
-        attemptCount: 1,
         provider: 'codex-cli',
         providerOptions: {
           model: 'gpt-5.4',
@@ -1450,7 +1449,7 @@ test('sendAssistantMessageLocal suppresses transcript and delivery for no-reply 
         responseDeliveryContextOrdinal: 0,
         transcriptResponse: null,
         route: {
-          routeId: 'route-no-reply',
+          routeFingerprint: 'route-no-reply',
         },
         session,
       },
@@ -1528,7 +1527,7 @@ test('sendAssistantMessageLocal traces hosted reaction-only no-reply delivery ou
         responseDeliveryContextOrdinal: 0,
         transcriptResponse: null,
         route: {
-          routeId: 'route-no-reply-reaction',
+          routeFingerprint: 'route-no-reply-reaction',
         },
         session,
       },
@@ -1618,7 +1617,7 @@ test('sendAssistantMessageLocal durably records accepted no-reply markers before
         responseDeliveryContextOrdinal: 0,
         transcriptResponse: 'Visible answer.',
         route: {
-          routeId: 'route-no-reply-before-visible-final',
+          routeFingerprint: 'route-no-reply-before-visible-final',
         },
         session,
       },
@@ -1894,7 +1893,7 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
         responseDeliveryContextOrdinal: 1,
         transcriptResponse: null,
         route: {
-          routeId: 'route-live-steered-no-reply',
+          routeFingerprint: 'route-live-steered-no-reply',
         },
         session,
       },

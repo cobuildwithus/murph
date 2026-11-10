@@ -254,7 +254,7 @@ export async function loadLocalServiceModule(input?: {
           rawEvents?: unknown[]
           productFeedbackCandidate?: HostedRuntimeProductFeedbackRecord | null
           route?: {
-            routeId?: string
+            routeFingerprint?: string
           }
           response: string
           responseContextReferences?: readonly {
@@ -320,7 +320,7 @@ export async function loadLocalServiceModule(input?: {
         response: 'assistant response',
         responseDeliveryContextOrdinal: 0,
         route: {
-          routeId: 'route-default',
+          routeFingerprint: 'route-default',
         },
         session,
         transcriptResponse: 'assistant response',
