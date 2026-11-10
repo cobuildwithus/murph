@@ -279,7 +279,7 @@ If the answer is unknown, do not assume the path is safe. Add the missing guard,
 
 ## Murph Hosted Automation Engagement
 
-The 28-day inactivity pause belongs to proactive iMessage delivery, not to
+The 90-day inactivity pause belongs to proactive iMessage delivery, not to
 member-wide runtime admission. Email, Telegram and other channels remain
 runnable under their ordinary access, consent and AI-usage rules. Known SMS and
 RCS service projections bypass this pause too; an unknown Linq service retains
@@ -292,7 +292,7 @@ does not automatically replay the failed intent; later eligible scheduled
 occurrences use their ordinary delivery path. It does not hold the system mailbox
 or another channel's scheduled work behind a member-wide blocked wake.
 
-The policy keeps `hosted_linq_daily_state` and the existing 28-day window.
+The policy keeps `hosted_linq_daily_state` and the existing 90-day window.
 Accepted meal captures and Telegram/email conversations retain their existing
 qualification as explicit member engagement, including consumed or
 content-retired metadata within structural retention. Exact accepted Linq
@@ -311,12 +311,12 @@ inbound history. Cancelled, replaced or expired proposals cannot qualify;
 provider health, route, runtime access and dispatch deduplication still apply.
 Game evening room check-ins validate their frozen game and chat witness but do
 not inherit the game-proposal inactivity exemption. They stay subject to the
-28-day pause, the three-accepted-evening unanswered pause and the half-hour
+90-day pause, the three-accepted-evening unanswered pause and the half-hour
 send deadline.
 Private game evening check-ins also require saved text consent, current private
 AI access and usage, an existing deliverable direct thread, an open game not
 covered by a room check-in, and an unchanged frozen member/date/game witness.
-Their half-hour deadline, three-accepted-evening unanswered pause and 28-day
+Their half-hour deadline, three-accepted-evening unanswered pause and 90-day
 pause apply at publication and dispatch. New-person and changed-rhythm game
 offers use the same existing direct thread, wait until 09:00 local after an
 overnight start, and expire 24 hours after game start. They are bounded

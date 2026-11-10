@@ -64,7 +64,7 @@ describe("hosted Linq daily state", () => {
       },
       where: {
         dayUtc: {
-          gte: new Date("2026-06-09T00:00:00.000Z"),
+          gte: new Date("2026-04-08T00:00:00.000Z"),
         },
         inboundCount: {
           gt: 0,
@@ -72,7 +72,7 @@ describe("hosted Linq daily state", () => {
         memberId: "member-1",
       },
     });
-    expect(HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS).toBe(28);
+    expect(HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS).toBe(90);
   });
 
   it("returns false when no inbound day exists in the window", async () => {

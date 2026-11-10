@@ -5,7 +5,7 @@ type HostedLinqDailyStateClient = PrismaClient | Prisma.TransactionClient;
 
 export const HOSTED_LINQ_DAILY_TEXT_LIMIT = 100;
 export const HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT = 400;
-export const HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS = 28;
+export const HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS = 90;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
