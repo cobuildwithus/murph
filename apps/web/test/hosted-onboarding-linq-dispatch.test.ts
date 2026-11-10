@@ -834,6 +834,7 @@ type PrismaFixtureBase = {
   hostedLinqFirstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecisionFixture;
   hostedLinqGroupLineMove?: {
     findMany: MockedFunction;
+    findFirst: MockedFunction;
   };
   hostedLinqLine?: HostedLinqLineFixture;
   hostedLinqProviderEvent?: HostedLinqProviderEventFixture;
@@ -15910,6 +15911,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
 
   prisma.hostedLinqGroupLineMove ??= {
     findMany: vi.fn().mockResolvedValue([]),
+    findFirst: vi.fn().mockResolvedValue(null),
   };
   prisma.$executeRaw ??= vi.fn(async () => 0);
   prisma.$queryRaw ??= vi.fn(async (

@@ -1054,3 +1054,8 @@ Parent final review accepts the maximum-cutoff reduction and preserves both
 round-1 fixes. All accepted findings are locally resolved. The code is Ready
 for exact-head CI and merge; real-group execution remains Hold for deployment
 convergence and the separately authorized provider proof.
+
+Final-head CI found one additional narrow fixture in the dispatch suite that
+omitted `findFirst` for the latest cancellation lookup. Adding its empty-history
+response restores all 234 dispatch tests; no production behavior changes.
+The other Web shards passed. Fresh exact-head CI remains the merge gate.
