@@ -104,8 +104,7 @@ function isContainerSmokeRequest(url: string): boolean {
   return new URL(url).pathname === CONTAINER_SMOKE_PATH;
 }
 
-// The bundle-identity phase carries no feature flags; the direct R2 and live model
-// turn phases are separate later requests that must not be answered by it.
+// A container smoke request with no optional check enabled.
 function isBundleOnlyContainerSmokeRequest(url: string): boolean {
   const parsed = new URL(url);
   return parsed.pathname === CONTAINER_SMOKE_PATH
@@ -203,7 +202,7 @@ describe("resolveSmokeRunnerManifestPath", () => {
 });
 
 describe("runSmokeHostedDeploy", () => {
-  it("keeps both artifact smoke phases off serving inventory while checking provenance and model output", async () => {
+  it("keeps the artifact smoke off serving inventory while checking provenance and model output", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-artifact-smoke-"));
     const manifestPath = path.join(root, "manifest.json");
     const manifest = { buildSkipped: false, bundleFingerprint: "expected-bundle", sourceFingerprint: "expected-source" };
@@ -238,9 +237,8 @@ describe("runSmokeHostedDeploy", () => {
         },
       });
       const artifactCalls = calls.filter(url => url.pathname === "/internal/deploy/artifact-smoke");
-      expect(artifactCalls).toHaveLength(3);
-      expect(artifactCalls[1]!.searchParams.get("attempt")).toBe(artifactCalls[2]!.searchParams.get("attempt"));
-      expect(artifactCalls[2]!.searchParams.get("liveModelTurn")).toBe("1");
+      expect(artifactCalls.map(url => url.searchParams.get("attempt"))).toEqual(["1", "2"]);
+      expect(artifactCalls.every(url => url.searchParams.get("liveModelTurn") === "1")).toBe(true);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
@@ -781,7 +779,7 @@ describe("runSmokeHostedDeploy", () => {
     )).toBe(true);
   });
 
-  it("can request the deployed runner live model turn smoke", async () => {
+  it("runs the live model turn in the same container smoke request", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-live-model-turn-manifest-"));
     const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
     await mkdir(path.dirname(manifestPath), { recursive: true });
@@ -806,22 +804,6 @@ describe("runSmokeHostedDeploy", () => {
 
       if (String(url).endsWith("/health")) {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }
-
-      if (isBundleOnlyContainerSmokeRequest(String(url))) {
-        return new Response(JSON.stringify({
-          ok: true,
-          runnerContainer: {
-            codexShell: createCodexShellSmokeResult(),
-            ok: true,
-            runnerBundle: {
-              buildSkipped: false,
-              bundleFingerprint: "bundle-fingerprint",
-              sourceFingerprint: "source-fingerprint",
-            },
-            service: "cloudflare-hosted-runner-node",
-          },
-        }), { status: 200 });
       }
 
       const parsedUrl = new URL(String(url));
@@ -865,11 +847,12 @@ describe("runSmokeHostedDeploy", () => {
       },
     });
 
-    expect(fetchCalls.some((entry) => isBundleOnlyContainerSmokeRequest(entry))).toBe(true);
-    const liveCall = fetchCalls
-      .map((entry) => new URL(entry))
-      .find((entry) => entry.searchParams.get("liveModelTurn") === "1");
-    expect(liveCall).toBeDefined();
+    const containerCalls = fetchCalls
+      .filter((entry) => isContainerSmokeRequest(entry))
+      .map((entry) => new URL(entry));
+    expect(containerCalls).toHaveLength(1);
+    const liveCall = containerCalls[0];
+    expect(liveCall?.searchParams.get("liveModelTurn")).toBe("1");
     expect(liveCall?.searchParams.has("expectedBundleFingerprint")).toBe(false);
     expect(liveCall?.searchParams.has("expectedSourceFingerprint")).toBe(false);
   });
@@ -896,22 +879,6 @@ describe("runSmokeHostedDeploy", () => {
 
       if (String(url).endsWith("/health")) {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }
-
-      if (isBundleOnlyContainerSmokeRequest(String(url))) {
-        return new Response(JSON.stringify({
-          ok: true,
-          runnerContainer: {
-            codexShell: createCodexShellSmokeResult(),
-            ok: true,
-            runnerBundle: {
-              buildSkipped: false,
-              bundleFingerprint: "bundle-fingerprint",
-              sourceFingerprint: "source-fingerprint",
-            },
-            service: "cloudflare-hosted-runner-node",
-          },
-        }), { status: 200 });
       }
 
       return new Response(JSON.stringify({
@@ -978,7 +945,7 @@ describe("runSmokeHostedDeploy", () => {
     })).rejects.toThrow("runner container live model turn smoke reported no codex exec output.");
   });
 
-  it("does not retry live model turn smoke failures after the live endpoint is called", async () => {
+  it("does not retry a model turn that ran on the expected bundle and failed", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-live-model-turn-no-retry-"));
     const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
     await mkdir(path.dirname(manifestPath), { recursive: true });
@@ -1012,18 +979,11 @@ describe("runSmokeHostedDeploy", () => {
         parsedUrl.searchParams.get("liveModelTurn") === "1"
       ) {
         return new Response(JSON.stringify({
-          detail: "Codex final output was not OK.",
-          error: "Deploy container smoke failed.",
           ok: false,
-        }), { status: 500 });
-      }
-
-      if (parsedUrl.pathname === "/internal/deploy/container-smoke") {
-        return new Response(JSON.stringify({
-          ok: true,
           runnerContainer: {
             codexShell: createCodexShellSmokeResult(),
-            ok: true,
+            liveModelTurnFailure: "Codex final output was not OK.",
+            ok: false,
             runnerBundle: {
               buildSkipped: false,
               bundleFingerprint: "bundle-fingerprint",
@@ -1051,7 +1011,9 @@ describe("runSmokeHostedDeploy", () => {
         HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
         HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
       },
-    })).rejects.toThrow("runner container smoke failed with HTTP 500");
+    })).rejects.toThrow(
+      "runner container live model turn smoke failed: Codex final output was not OK.",
+    );
 
     const liveCalls = fetchCalls
       .map((entry) => new URL(entry))
@@ -1061,6 +1023,79 @@ describe("runSmokeHostedDeploy", () => {
       message.startsWith("Runner container smoke attempt") &&
       message.includes("Codex final output was not OK")
     )).toBe(false);
+  });
+
+  it("retries in a fresh container when the container carrying the model turn never starts", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-live-model-turn-start-retry-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    const manifest = {
+      buildSkipped: false,
+      bundleFingerprint: "bundle-fingerprint",
+      sourceFingerprint: "source-fingerprint",
+    };
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    const logs: string[] = [];
+    const containerCalls: URL[] = [];
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (!isContainerSmokeRequest(String(url))) {
+        throw new Error(`Unexpected smoke request: ${String(url)}`);
+      }
+      containerCalls.push(new URL(String(url)));
+      if (containerCalls.length === 1) {
+        return new Response(JSON.stringify({
+          detail: "Container request aborted.",
+          error: "Deploy container smoke failed.",
+          ok: false,
+        }), { status: 500 });
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        runnerContainer: {
+          codexShell: createCodexShellSmokeResult(),
+          liveModelTurn: {
+            durationMs: 1_234,
+            egressGrantConsumed: true,
+            model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+            stdoutBytes: 2_048,
+          },
+          ok: true,
+          runnerBundle: manifest,
+          service: "cloudflare-hosted-runner-node",
+        },
+      }), { status: 200 });
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log(message) {
+        logs.push(message);
+      },
+      source: {
+        HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "3",
+        HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "0",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    });
+
+    expect(containerCalls.map((entry) => entry.searchParams.get("attempt"))).toEqual(["1", "2"]);
+    expect(containerCalls.every((entry) => entry.searchParams.get("liveModelTurn") === "1")).toBe(true);
+    expect(logs.some((message) =>
+      message.startsWith("Runner container smoke attempt 1/3 failed") &&
+      message.includes("Container request aborted.")
+    )).toBe(true);
   });
 
   it("requires the managed-container smoke when the live model turn smoke is enabled", async () => {
@@ -1302,7 +1337,7 @@ describe("runSmokeHostedDeploy", () => {
     expect(smokeAttempts).toEqual(["1", "2"]);
   });
 
-  it("runs the live model turn against the container the bundle phase proved current", async () => {
+  it("retries a failed model turn from a pre-rollout container and passes on the current one", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-live-after-retry-"));
     const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
     await mkdir(path.dirname(manifestPath), { recursive: true });
@@ -1317,10 +1352,9 @@ describe("runSmokeHostedDeploy", () => {
       "utf8",
     );
 
-    // Attempt 1 is the pre-rollout container. Once the bundle phase converges on
-    // attempt 2, the live model turn must stay on attempt 2: its failures are
-    // non-retryable, so returning to the stale attempt-1 container would hard-fail
-    // the deploy in exactly the rollout window this is meant to survive.
+    // Attempt 1 is the pre-rollout container. Its failed model turn says nothing
+    // about this release, so it must be retried like any other rollout skew
+    // instead of hard-failing the deploy in the window retries exist to survive.
     const staleAttempts = new Set(["1"]);
     const liveAttempts: (string | null)[] = [];
     const fetchImpl = async (url: RequestInfo | URL) => {
@@ -1341,20 +1375,20 @@ describe("runSmokeHostedDeploy", () => {
         }
         const stale = attempt !== null && staleAttempts.has(attempt);
         return new Response(JSON.stringify({
-          ok: true,
+          ok: !stale,
           runnerContainer: {
             codexShell: createCodexShellSmokeResult(),
-            ...(liveModelTurn
-              ? {
+            ...(stale
+              ? { liveModelTurnFailure: "Hosted runner container live model turn smoke failed with HTTP 404." }
+              : {
                   liveModelTurn: {
                     durationMs: 1234,
                     egressGrantConsumed: true,
                     model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
                     stdoutBytes: 128,
                   },
-                }
-              : {}),
-            ok: true,
+                }),
+            ok: !stale,
             runnerBundle: stale
               ? {
                   buildSkipped: false,
@@ -1390,7 +1424,7 @@ describe("runSmokeHostedDeploy", () => {
       },
     });
 
-    expect(liveAttempts).toEqual(["2"]);
+    expect(liveAttempts).toEqual(["1", "2"]);
   });
 
   it("stops waiting for the runner container rollout once the wall-clock budget is spent", async () => {

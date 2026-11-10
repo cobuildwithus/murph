@@ -3,6 +3,7 @@ import { constants, existsSync } from "node:fs";
 import { access, copyFile, cp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -2943,7 +2944,7 @@ describe("hosted local dev stack", () => {
   });
 
   it("starts a managed Linq cloudflared tunnel and registers the local webhook target", async () => {
-    const tunnelConfigPath = path.join(process.cwd(), ".tmp", "cloudflared-linq-webhook.yml");
+    const tunnelConfigPath = fileURLToPath(new URL("../../.tmp/cloudflared-linq-webhook.yml", import.meta.url));
     resolveHostedLocalLinqWebhookSetup.mockResolvedValueOnce({
       phoneNumbers: ["+15550000001"],
       publicBaseUrl: "https://tunnel.example.test",

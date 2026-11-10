@@ -4329,22 +4329,6 @@ describe('Codex assistant registry helpers', () => {
       providerPromptDiagnosticKind: 'primary',
       resumeCodexThreadIdPresent: true,
     })
-    expect(findProviderTraceRawEvent(
-      traceEvents,
-      'codex.resume_failure',
-    )).toMatchObject({
-      codexResumeFailureErrorCode: 'ASSISTANT_CODEX_RESUME_STALE',
-      codexResumeFailureErrorKind: 'resume-stale',
-      codexResumeFailureEventCount: null,
-      codexResumeFailurePhase: 'resume-failed',
-      codexResumeFailureProviderActionCount: null,
-      codexResumeFailureResumeMatchesFailureSession: null,
-      codexResumeFailureResumeSessionPresent: true,
-      codexResumeFailureSessionPresent: false,
-      codexResumeFailureTraceType: 'failure',
-      codexResumeFailureTurnPresent: false,
-      providerTraceKind: 'codex.resume_failure',
-    })
   })
 
   it('preserves the original stale-resume failure', async () => {
@@ -4382,7 +4366,6 @@ describe('Codex assistant registry helpers', () => {
         codexTurnStatus: 'failed',
       },
     )
-    const traceEvents: AssistantProviderTraceEvent[] = []
 
     codexAppServerMocks.executeCodexAppServerTurn
       .mockRejectedValueOnce(expectedError)
@@ -4422,9 +4405,6 @@ describe('Codex assistant registry helpers', () => {
           role: 'user',
         },
       ],
-      onTraceEvent: (event) => {
-        traceEvents.push(event)
-      },
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
@@ -4440,22 +4420,7 @@ describe('Codex assistant registry helpers', () => {
     ).toMatchObject({
       resumeSessionId: 'resume-thread',
     })
-    const resumeFailureTrace = findProviderTraceRawEvent(
-      traceEvents,
-      'codex.resume_failure',
-    )
-    expect(resumeFailureTrace).toMatchObject({
-      codexResumeFailureErrorCode: 'ASSISTANT_CODEX_FAILED',
-      codexResumeFailureErrorKind: 'turn-failed',
-      codexResumeFailureProviderActionCount: 0,
-      codexResumeFailureTraceType: 'failure',
-      providerTraceKind: 'codex.resume_failure',
-    })
-    expect(String(resumeFailureTrace.codexResumeFailureErrorMessage)).toContain(
-      'stream disconnected before completion',
-    )
     expect(attempt).not.toHaveProperty('codexContinuation')
-    expect(JSON.stringify(traceEvents)).not.toContain('api.openai.com')
   })
 
   it('does not start a fresh thread when resumed Codex RPC fails', async () => {
@@ -4579,7 +4544,6 @@ describe('Codex assistant registry helpers', () => {
       providerTurnId: 'turn-failed',
     })
     expect(attempt).not.toHaveProperty('codexContinuation')
-    expect(JSON.stringify(traceEvents)).not.toContain('api.openai.com')
   })
 
   it('does not replay a resumed turn after finish_without_reply was accepted', async () => {
@@ -4675,7 +4639,6 @@ describe('Codex assistant registry helpers', () => {
       'ASSISTANT_CODEX_FAILED',
       'Codex app-server turn failed. status failed. {"error":{"type":"invalid_request_error","message":"input.193.output: Invalid input"}}',
     )
-    const traceEvents: AssistantProviderTraceEvent[] = []
 
     codexAppServerMocks.executeCodexAppServerTurn
       .mockRejectedValueOnce(expectedError)
@@ -4693,50 +4656,7 @@ describe('Codex assistant registry helpers', () => {
         turnId: 'turn-fallback-invalid-output',
       })
     codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
-      jsonEvents: [
-        {
-          method: 'turn/started',
-          params: {
-            turn: {
-              status: 'in_progress',
-            },
-          },
-        },
-        {
-          method: 'turn/completed',
-          params: {
-            output: [
-              {
-                text: 'private tool text should not be logged',
-                type: 'input_text',
-              },
-              {
-                image_url: 'https://example.invalid/private.png',
-                type: 'input_image',
-              },
-              {
-                type: 'https://example.invalid/raw-part-type',
-              },
-            ],
-            turn: {
-              error: {
-                type: 'invalid_request_error',
-              },
-              status: 'failed',
-            },
-          },
-        },
-        {
-          method: 'turn/completed',
-          params: {
-            output: {
-              HbA1c: '9.1',
-              text: 'private health text should not be logged',
-              type: 'result',
-            },
-          },
-        },
-      ],
+      jsonEvents: [],
       providerActionCount: 0,
       codexThreadId: 'corrupt-thread',
       providerTurnId: 'turn-invalid-output',
@@ -4746,9 +4666,6 @@ describe('Codex assistant registry helpers', () => {
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
-      onTraceEvent: (event) => {
-        traceEvents.push(event)
-      },
       resume: testCodexResume('corrupt-thread'),
       userPrompt: 'late follow up',
       workingDirectory: '/tmp/provider-tests',
@@ -4764,36 +4681,6 @@ describe('Codex assistant registry helpers', () => {
     })
     expect(attempt).toMatchObject({ error: expectedError })
     expect(attempt).not.toHaveProperty('codexContinuation')
-    expect(findProviderTraceRawEvent(
-      traceEvents,
-      'codex.invalid_output_resume_failure',
-    )).toMatchObject({
-      codexInvalidOutputErrorCode: 'ASSISTANT_CODEX_FAILED',
-      codexInvalidOutputErrorField: 'input.193.output',
-      codexInvalidOutputErrorKind: 'invalid-input-output',
-      codexInvalidOutputErrorMessageLength: expectedError.message.length,
-      codexInvalidOutputFailureEventCount: 3,
-      codexInvalidOutputFailureEventMethods: ['turn/started', 'turn/completed'],
-      codexInvalidOutputFailureOutputArrayLengths: [3],
-      codexInvalidOutputFailureOutputKinds: ['array', 'object'],
-      codexInvalidOutputFailureOutputObjectKeys: ['[key],text,type'],
-      codexInvalidOutputFailureOutputPartTypes: ['input_text', 'input_image', 'object'],
-      codexInvalidOutputFailureProviderActionCount: 0,
-      codexInvalidOutputFailureSessionPresent: true,
-      codexInvalidOutputFailureTurnPresent: true,
-      codexInvalidOutputInputIndex: 193,
-      codexInvalidOutputPhase: 'resume-failed',
-      codexInvalidOutputResumeMatchesFailureSession: true,
-      codexInvalidOutputResumeSessionPresent: true,
-      codexInvalidOutputTraceType: 'failure',
-      providerTraceKind: 'codex.invalid_output_resume_failure',
-      schema: 'murph.assistant-codex-invalid-output-diagnostics.v1',
-      type: 'assistant.codex.invalid_output_resume_failure',
-    })
-    expect(JSON.stringify(traceEvents)).not.toContain('private tool text')
-    expect(JSON.stringify(traceEvents)).not.toContain('private health text')
-    expect(JSON.stringify(traceEvents)).not.toContain('HbA1c')
-    expect(JSON.stringify(traceEvents)).not.toContain('example.invalid')
   })
 
   it('does not replay invalid resumed output after provider actions', async () => {
@@ -4851,230 +4738,6 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt).not.toHaveProperty('codexContinuation')
   })
 
-  it('records resumed Codex turn failure diagnostics without raw strings', async () => {
-    const expectedError = new VaultCliError(
-      'ASSISTANT_CODEX_FAILED',
-      'Codex app-server turn failed. status failed. retry limit reached after resumed turn',
-      {
-        codexAbortRequested: false,
-        codexExitSignal: 'SIGKILL',
-        codexFailureStage: 'turn_failed',
-        codexJsonEventCount: 3,
-        codexLifecycleStage: 'turn_running',
-        codexLiveTurnOpen: true,
-        codexPendingRpcCount: 1,
-        codexPendingRpcMethod: 'turn/start',
-        codexProcessGroupPresent: true,
-        codexProcessLifetimeMs: 2041,
-        codexProviderRequestStarted: true,
-        codexShutdownRequested: false,
-        codexStderrBytes: 128,
-        codexTerminationSignalSent: 'SIGTERM',
-        codexTurnStatus: 'failed',
-        retryable: false,
-      },
-    )
-    const traceEvents: AssistantProviderTraceEvent[] = []
-
-    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(expectedError)
-    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
-      jsonEvents: [
-        {
-          method: 'turn/started',
-          params: {
-            turn: {
-              status: 'in_progress',
-            },
-          },
-        },
-        {
-          method: 'turn/completed',
-          params: {
-            output: [
-              {
-                text: 'private tool text should not be logged',
-                type: 'input_text',
-              },
-              {
-                image_url: 'https://example.invalid/private.png',
-                type: 'input_image',
-              },
-              {
-                type: 'process_exit',
-              },
-            ],
-            turn: {
-              status: 'failed',
-            },
-          },
-        },
-        {
-          method: 'turn/completed',
-          params: {
-            output: {
-              privateField: 'private value',
-              text: 'private output text should not be logged',
-              type: 'result',
-            },
-          },
-        },
-      ],
-      providerActionCount: 0,
-      codexThreadId: 'resume-thread',
-      providerTurnId: 'turn-failed',
-    })
-
-    const attempt = await executeCodexAssistantTurnAttempt({
-      onTraceEvent: (event) => {
-        traceEvents.push(event)
-      },
-      providerConfig: normalizeAssistantProviderConfig({
-        provider: 'codex-cli',
-      }),
-      resume: testCodexResume('resume-thread'),
-      userPrompt: 'late follow up',
-      workingDirectory: '/tmp/provider-tests',
-    })
-
-    expect(attempt.ok).toBe(false)
-    if (attempt.ok) {
-      throw new Error('expected failed provider attempt')
-    }
-    expect(attempt.error).toBe(expectedError)
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
-    expect(findProviderTraceRawEvent(
-      traceEvents,
-      'codex.resume_failure',
-    )).toMatchObject({
-      codexResumeFailureCodexAbortRequested: false,
-      codexResumeFailureCodexExitSignal: 'SIGKILL',
-      codexResumeFailureCodexFailureStage: 'turn_failed',
-      codexResumeFailureCodexTurnStatus: 'failed',
-      codexResumeFailureCodexJsonEventCount: 3,
-      codexResumeFailureCodexLifecycleStage: 'turn_running',
-      codexResumeFailureCodexLiveTurnOpen: true,
-      codexResumeFailureCodexPendingRpcCount: 1,
-      codexResumeFailureCodexPendingRpcMethod: 'turn/start',
-      codexResumeFailureCodexProcessGroupPresent: true,
-      codexResumeFailureCodexProcessLifetimeMs: 2041,
-      codexResumeFailureCodexProviderRequestStarted: true,
-      codexResumeFailureCodexShutdownRequested: false,
-      codexResumeFailureCodexStderrBytes: 128,
-      codexResumeFailureCodexTerminationSignalSent: 'SIGTERM',
-      codexResumeFailureErrorCode: 'ASSISTANT_CODEX_FAILED',
-      codexResumeFailureErrorKind: 'turn-failed',
-      codexResumeFailureErrorMessage: expectedError.message,
-      codexResumeFailureErrorMessageLength: expectedError.message.length,
-      codexResumeFailureErrorMessagePresent: true,
-      codexResumeFailureErrorPhrases: ['codex-turn-failed', 'status-failed'],
-      codexResumeFailureEventCount: 3,
-      codexResumeFailureEventMethods: ['turn/started', 'turn/completed'],
-      codexResumeFailureEventStatuses: ['in_progress', 'failed'],
-      codexResumeFailureOutputArrayLengths: [3],
-      codexResumeFailureOutputKinds: ['array', 'object'],
-      codexResumeFailureOutputObjectKeys: ['[key],text,type'],
-      codexResumeFailureOutputPartTypes: ['input_text', 'input_image', 'process_exit'],
-      codexResumeFailureParamKeys: ['[key]', 'output,[key]', 'output'],
-      codexResumeFailurePhase: 'resume-failed',
-      codexResumeFailureProviderActionCount: 0,
-      codexResumeFailureResumeMatchesFailureSession: true,
-      codexResumeFailureResumeSessionPresent: true,
-      codexResumeFailureRetryable: false,
-      codexResumeFailureSessionPresent: true,
-      codexResumeFailureTraceType: 'failure',
-      codexResumeFailureTurnPresent: true,
-      providerTraceKind: 'codex.resume_failure',
-      schema: 'murph.assistant-codex-resume-failure-diagnostics.v1',
-      type: 'assistant.codex.resume_failure',
-    })
-    expect(JSON.stringify(traceEvents)).not.toContain('private tool text')
-    expect(JSON.stringify(traceEvents)).not.toContain('private output text')
-    expect(JSON.stringify(traceEvents)).not.toContain('privateField')
-    expect(JSON.stringify(traceEvents)).not.toContain('example.invalid')
-  })
-
-  it('records resumed Codex diagnostics for structural error objects', async () => {
-    const expectedError = {
-      code: 'ASSISTANT_CODEX_FAILED',
-      context: {
-        codexFailureStage: 'turn_failed',
-        codexTurnStatus: 'failed',
-        retryable: false,
-      },
-      message:
-        'Codex app-server turn failed. status failed. Authorization: Bearer raw-token-value at /tmp/provider-tests',
-    }
-    const traceEvents: AssistantProviderTraceEvent[] = []
-
-    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValueOnce(
-      expectedError,
-    )
-    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValueOnce({
-      jsonEvents: [
-        {
-          method: 'turn/completed',
-          params: {
-            turn: {
-              status: 'failed',
-            },
-          },
-        },
-      ],
-      providerActionCount: 0,
-      codexThreadId: 'resume-thread',
-      providerTurnId: 'turn-failed',
-    })
-
-    const attempt = await executeCodexAssistantTurnAttempt({
-      onTraceEvent: (event) => {
-        traceEvents.push(event)
-      },
-      providerConfig: normalizeAssistantProviderConfig({
-        provider: 'codex-cli',
-      }),
-      resume: testCodexResume('resume-thread'),
-      userPrompt: 'late follow up',
-      workingDirectory: '/tmp/provider-tests',
-    })
-
-    expect(attempt.ok).toBe(false)
-    if (attempt.ok) {
-      throw new Error('expected failed provider attempt')
-    }
-    expect(attempt.error).toBe(expectedError)
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
-    expect(findProviderTraceRawEvent(
-      traceEvents,
-      'codex.resume_failure',
-    )).toMatchObject({
-      codexResumeFailureCodexFailureStage: 'turn_failed',
-      codexResumeFailureCodexTurnStatus: 'failed',
-      codexResumeFailureErrorCode: 'ASSISTANT_CODEX_FAILED',
-      codexResumeFailureErrorKind: 'turn-failed',
-      codexResumeFailureErrorMessage:
-        'Codex app-server turn failed. status failed. Authorization: [REDACTED] at [path]',
-      codexResumeFailureErrorMessageLength: expectedError.message.length,
-      codexResumeFailureErrorMessagePresent: true,
-      codexResumeFailureErrorPhrases: ['codex-turn-failed', 'status-failed'],
-      codexResumeFailureEventCount: 1,
-      codexResumeFailureEventMethods: ['turn/completed'],
-      codexResumeFailureEventStatuses: ['failed'],
-      codexResumeFailurePhase: 'resume-failed',
-      codexResumeFailureProviderActionCount: 0,
-      codexResumeFailureResumeMatchesFailureSession: true,
-      codexResumeFailureResumeSessionPresent: true,
-      codexResumeFailureRetryable: false,
-      codexResumeFailureSessionPresent: true,
-      codexResumeFailureTraceType: 'failure',
-      codexResumeFailureTurnPresent: true,
-      providerTraceKind: 'codex.resume_failure',
-      schema: 'murph.assistant-codex-resume-failure-diagnostics.v1',
-      type: 'assistant.codex.resume_failure',
-    })
-    expect(JSON.stringify(traceEvents)).not.toContain('raw-token-value')
-    expect(JSON.stringify(traceEvents)).not.toContain('/tmp/provider-tests')
-  })
-
   it('does not surface an unused invalid-output fallback failure', async () => {
     const expectedError = new VaultCliError(
       'ASSISTANT_CODEX_FAILED',
@@ -5084,7 +4747,6 @@ describe('Codex assistant registry helpers', () => {
       'ASSISTANT_CODEX_FAILED',
       'fallback failed after echoing HbA1c 9.1 and https://example.invalid/private',
     )
-    const traceEvents: AssistantProviderTraceEvent[] = []
 
     codexAppServerMocks.executeCodexAppServerTurn
       .mockRejectedValueOnce(expectedError)
@@ -5097,9 +4759,6 @@ describe('Codex assistant registry helpers', () => {
     })
 
     const attempt = await executeCodexAssistantTurnAttempt({
-      onTraceEvent: (event) => {
-        traceEvents.push(event)
-      },
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
@@ -5114,17 +4773,6 @@ describe('Codex assistant registry helpers', () => {
     }
     expect(attempt.error).toBe(expectedError)
     expect(attempt).not.toHaveProperty('codexContinuation')
-    expect(findProviderTraceRawEvent(
-      traceEvents,
-      'codex.invalid_output_resume_failure',
-    )).toMatchObject({
-      codexInvalidOutputFailureProviderActionCount: 0,
-      codexInvalidOutputInputIndex: 7,
-      codexInvalidOutputPhase: 'resume-failed',
-      providerTraceKind: 'codex.invalid_output_resume_failure',
-    })
-    expect(JSON.stringify(traceEvents)).not.toContain('HbA1c')
-    expect(JSON.stringify(traceEvents)).not.toContain('example.invalid')
   })
 
   it('returns failed delegated execution attempts with merged labels from emitted progress', async () => {

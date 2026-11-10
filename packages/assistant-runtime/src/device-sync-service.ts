@@ -80,6 +80,9 @@ function createHostedRuntimeDeviceSyncImporter(
   importer: DeviceSyncImporterPort,
 ): DeviceSyncImporterPort {
   return {
+    ...(importer.withDeviceImportPass
+      ? { withDeviceImportPass: importer.withDeviceImportPass.bind(importer) }
+      : {}),
     async importDeviceProviderSnapshot(input, options) {
       try {
         return await importer.importDeviceProviderSnapshot(input, options);

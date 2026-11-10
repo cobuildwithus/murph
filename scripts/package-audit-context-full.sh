@@ -458,6 +458,7 @@ if [[ "$review_gpt_context_mode" != "same_thread_delta" ]] \
 fi
 if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
   repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
+    "patches:*.patch" \
     ".agents/skills" \
     "agent-docs/product-specs" \
     "config" \
@@ -537,6 +538,14 @@ fi
   cd "$review_gpt_invocation_dir"
   zip -q "$review_gpt_zip_path" "${review_gpt_archive_context_entries[@]}"
 )
+
+# Keep the small review identity record after callers retire the large ZIP.
+review_gpt_round_sidecar="$review_gpt_zip_path.review-round.json"
+if [[ -e "$review_gpt_round_sidecar" ]] || [[ -L "$review_gpt_round_sidecar" ]]; then
+  echo "Error: refusing to overwrite existing ReviewGPT round metadata." >&2
+  exit 1
+fi
+(umask 077; set -o noclobber; cat "$review_gpt_invocation_dir/$review_gpt_pr_context_archive_dir/review-round.json" > "$review_gpt_round_sidecar")
 
 sed -E '/^ZIP: .* \([^)]*\)$/d' "$review_gpt_package_stdout"
 review_gpt_zip_bytes="$(wc -c < "$review_gpt_zip_path" | tr -d '[:space:]')"

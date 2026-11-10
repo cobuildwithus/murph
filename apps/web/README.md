@@ -1832,6 +1832,12 @@ exercise the same signed assertion contract.
 
 ## Prisma
 
+For synthetic local proof that must not read dotenv files, set
+`MURPH_PRISMA_SKIP_ENV_FILES=1` and supply `DATABASE_URL` explicitly. This applies
+to generation, validation, and migration commands; ordinary development still
+loads the existing local env files.
+
+
 The usage allowance owner creates a missing period idempotently, then reads its
 fields with `SELECT … FOR UPDATE` in the same transaction. Period acquisition
 uses two database statements, including when the period already exists. The
@@ -3151,3 +3157,17 @@ stable occurrence key without storing member linkage or an enumerable unkeyed
 hash. Missing key configuration fails closed. Deploy Web first, then the Worker
 allowlist and runtime producer; older Web returns 404 and the producer must not
 fall back to ordinary member-linked feedback. Ordinary feedback remains unchanged.
+
+## Focused local diagnostics
+
+Run focused Web tests from the repository root with
+`pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/game-rules.test.ts`.
+The direct config also accepts an app-directory launch and honors
+`MURPH_VITEST_MAX_WORKERS`. Use one file worker for suites sharing a synthetic
+database; concurrency inside a test remains available.
+
+Use a file for Web diagnostics:
+`pnpm exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/check-vercel-machine-routes.ts`.
+Avoid `tsx --tsconfig apps/web/tsconfig.json -e`: this pinned combination can exit
+successfully without evaluating inline code. Require an explicit result from
+the diagnostic, not just a zero exit status.

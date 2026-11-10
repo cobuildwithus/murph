@@ -124,3 +124,4 @@ agent-docs/product-ideas.md
 /downloads/
 /artifacts/
 /scratch-*.mjs
+/.swc/

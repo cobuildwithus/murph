@@ -15,7 +15,7 @@ import {
   workoutSessionSchema,
 } from "@murphai/contracts";
 import * as coreRuntime from "@murphai/core";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
@@ -5912,14 +5912,14 @@ test("Junction normalizer compacts tier-1 timeseries resources into bounded dail
       implausibleValue: 20,
     },
     {
-      // Junction documents caffeine in grams; the daily SUM lands in mg.
+      // The daily SUM adds each caffeine entry after its own unit interpretation.
       resource: "caffeine",
       resourceSlug: "caffeine",
       metric: "caffeine",
       unit: "mg",
       expectedValue: 158,
       values: [0.095, 0.063],
-      implausibleValue: 3,
+      implausibleValue: 2000.5,
     },
     {
       resource: "water",
@@ -7345,32 +7345,17 @@ test("Junction Apple Health caffeine calendar validation accepts intervals and r
   assert.ok(complete.events?.some((event) =>
     event.kind === "observation" && event.fields?.metric === "caffeine" && event.fields.value === 190
   ));
-  // A documented 200 mg sample arrives as 0.2 g, including zero-duration samples.
+  // An in-range 0.2 g row keeps its 200 mg interpretation, including zero-duration samples.
   const coffee = normalizeJunctionSnapshot(snapshotFor({ value: 0.2 }));
   assert.ok(coffee.events?.some((event) =>
     event.kind === "observation" && event.fields?.metric === "caffeine" && event.fields.value === 295
   ));
-  for (const [patch, reason, valueKind, valueRange, unitKind] of [
+  for (const [patch, reason] of [
     [{ start: undefined }, "start_missing"],
     [{ start: "invalid" }, "start_invalid"],
     [{ end: undefined }, "end_missing"],
     [{ end: "invalid" }, "end_invalid"],
     [{ end: "2026-04-22T07:59:00.000Z" }, "end_before_start"],
-    [{ value: undefined }, "value_missing", "missing", undefined, "g"],
-    [{ value: null }, "value_missing", "missing", undefined, "g"],
-    [{ value: "not-a-number" }, "value_non_numeric", "non_numeric", undefined, "g"],
-    [{ value: NaN }, "value_not_finite", "non_finite", undefined, "g"],
-    [{ value: Infinity }, "value_not_finite", "non_finite", undefined, "g"],
-    [{ value: -Infinity }, "value_not_finite", "non_finite", undefined, "g"],
-    [{ value: -1 }, "value_out_of_range", "number", "below_range", "g"],
-    [{ value: 2.5 }, "value_out_of_range", "number", "above_range_up_to_10x", "g"],
-    [{ value: 20 }, "value_out_of_range", "number", "above_range_up_to_10x", "g"],
-    [{ value: 20.01 }, "value_out_of_range", "number", "above_range_10x_to_1000x", "g"],
-    [{ value: "200", unit: "mg" }, "value_out_of_range", "numeric_string", "above_range_10x_to_1000x", "mg"],
-    [{ value: 2000 }, "value_out_of_range", "number", "above_range_10x_to_1000x", "g"],
-    [{ value: 2000.01 }, "value_out_of_range", "number", "above_range_over_1000x", "g"],
-    [{ value: 200, unit: undefined }, "value_out_of_range", "number", "above_range_10x_to_1000x", "missing"],
-    [{ value: 200, unit: "synthetic-private-unit" }, "value_out_of_range", "number", "above_range_10x_to_1000x", "other"],
     [{ calendarDate: "2026-04-21" }, "day_mismatch"],
     [{ sourceProviderSlug: "garmin" }, "provider_mismatch"],
     [{ sourceType: "watch" }, "source_type_mismatch"],
@@ -7381,12 +7366,101 @@ test("Junction Apple Health caffeine calendar validation accepts intervals and r
       assert.equal(error.retryable, true);
       assert.equal(error.diagnostic.reason, `sparse_interval.${reason}`);
       assert.equal(error.diagnostic.rowOrdinal, 2);
-      assert.equal(error.diagnostic.valueKind, valueKind);
-      assert.equal(error.diagnostic.valueRange, valueRange);
-      assert.equal(error.diagnostic.unitKind, unitKind);
       assert.ok(!JSON.stringify(error.diagnostic).includes("synthetic-private"));
       return true;
     });
+  }
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    for (const [value, expectedEntry, expectedSum] of [
+      [0.095, 95, 190], [2, 2000, 2095], [8, 8, 103],
+      [95, 95, 190], [2000, 2000, 2095],
+    ] as const) {
+      warn.mockClear();
+      const snapshot = snapshotFor({ value });
+      const normalized = normalizeJunctionSnapshot(snapshot);
+      assert.ok(normalized.events?.some((event) =>
+        event.kind === "observation" && event.fields?.metric === "caffeine"
+          && event.fields.value === expectedSum
+      ));
+      const matchesEntry = (events: typeof normalized.events) => events?.some((event) =>
+        event.kind === "measurement"
+          && event.occurredAt === "2026-04-22T09:00:00.000Z"
+          && readJunctionEventMeasurements(event).some((measurement) =>
+            measurement.metric === "caffeine" && measurement.value === expectedEntry
+          )
+      );
+      assert.ok(matchesEntry(normalized.events));
+      const precise = normalizeJunctionSnapshot({ ...snapshot, timeseriesWindowKind: "precise" });
+      assert.ok(matchesEntry(precise.events));
+      assert.equal(warn.mock.calls.length, 0);
+    }
+    const distinct = snapshotFor({ value: 2000 });
+    const distinctGroup = distinct.timeseries.caffeine.groups.apple_health_kit[0];
+    const distinctRows = normalizeJunctionSnapshot({
+      ...distinct,
+      timeseries: { caffeine: { groups: { apple_health_kit: [{
+        ...distinctGroup,
+        data: [{ ...row, value: 2 }, {
+          ...row, start: "2026-04-22T09:00:00.000Z",
+          end: "2026-04-22T09:00:00.000Z", value: 2000,
+        }],
+      }] } } },
+    });
+    assert.ok(distinctRows.events?.some((event) =>
+      event.kind === "observation" && event.fields?.metric === "caffeine" && event.fields.value === 4000
+    ));
+    assert.equal(distinctRows.events?.filter((event) =>
+      event.kind === "measurement" && readJunctionEventMeasurements(event)
+        .some((measurement) => measurement.metric === "caffeine")
+    ).length, 2);
+    for (const [patch, reason, range, unitKind] of [
+      [{ value: undefined }, "sparse_interval.value_missing", undefined, "g"],
+      [{ value: "not-a-number" }, "sparse_interval.value_non_numeric", undefined, "g"],
+      [{ value: -1 }, "sparse_interval.value_out_of_range", "below_range", "g"],
+      [{ value: 2000.5 }, "sparse_interval.value_out_of_range", "above_range_up_to_10x", "g"],
+    ] as const) {
+      warn.mockClear();
+      const normalized = normalizeJunctionSnapshot(snapshotFor(patch));
+      assert.ok(normalized.events?.some((event) =>
+        event.kind === "observation" && event.fields?.metric === "caffeine" && event.fields.value === 95
+      ));
+      assert.equal(warn.mock.calls.length, 1);
+      assert.equal(warn.mock.calls[0]?.[0], "Junction sparse calendar values skipped after validation.");
+      assert.deepEqual(warn.mock.calls[0]?.[1], {
+        reason, sourceProvider: "apple-health-kit", sourceTypeKind: "app",
+        unitKind, valueRange: range, count: 1,
+      });
+    }
+  } finally {
+    warn.mockRestore();
+  }
+  const allRejected = snapshotFor({});
+  const rejectedWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    const normalized = normalizeJunctionSnapshot({
+      ...allRejected,
+      timeseries: { caffeine: { groups: { apple_health_kit: [{
+        source: { provider: "apple_health_kit", type: "app" },
+        data: [2000.5, 2000.5, 2000.5, 2000.5, -1].map((value, index) => ({
+          ...row,
+          start: `2026-04-22T${String(8 + index).padStart(2, "0")}:00:00.000Z`,
+          end: `2026-04-22T${String(8 + index).padStart(2, "0")}:00:00.000Z`,
+          value,
+        })),
+      }] } } },
+    });
+    assert.ok(!normalized.events?.some((event) =>
+      event.kind === "observation" && event.fields?.metric === "caffeine"
+    ));
+    assert.deepEqual(rejectedWarn.mock.calls.map((call) => call[1]), [
+      { reason: "sparse_interval.value_out_of_range", sourceProvider: "apple-health-kit",
+        sourceTypeKind: "app", unitKind: "g", valueRange: "above_range_up_to_10x", count: 4 },
+      { reason: "sparse_interval.value_out_of_range", sourceProvider: "apple-health-kit",
+        sourceTypeKind: "app", unitKind: "g", valueRange: "below_range", count: 1 },
+    ]);
+  } finally {
+    rejectedWarn.mockRestore();
   }
   const instanceMismatch = snapshotFor({});
   assert.throws(() => normalizeJunctionSnapshot({
@@ -7410,10 +7484,10 @@ test("Junction Apple Health caffeine calendar validation accepts intervals and r
 });
 
 test.each([
-  { resource: "caffeine" as const, max: 2, unit: "g" },
+  { resource: "caffeine" as const, max: 2000, unit: "g" },
   { resource: "water" as const, max: 10_000, unit: "ml" },
   { resource: "mindfulness_minutes" as const, max: 1440, unit: "min" },
-])("Junction sparse $resource diagnostics use the existing inclusive range", ({ resource, max, unit }) => {
+])("Junction sparse $resource skips out-of-range values with a counted diagnostic", ({ resource, max, unit }) => {
   const snapshotFor = (value: number) => ({
     accountId: "synthetic-sparse-range",
     importedAt: "2026-04-23T12:00:00.000Z",
@@ -7432,24 +7506,29 @@ test.each([
     }] },
   });
   for (const value of [0, max]) assert.doesNotThrow(() => normalizeJunctionSnapshot(snapshotFor(value)));
-  for (const [value, range] of [
-    [-1, "below_range"],
-    [max * 10, "above_range_up_to_10x"],
-    [max * 10 + 1, "above_range_10x_to_1000x"],
-    [max * 1000, "above_range_10x_to_1000x"],
-    [max * 1000 + 1, "above_range_over_1000x"],
-  ] as const) {
-    assert.throws(() => normalizeJunctionSnapshot(snapshotFor(value)), (error: unknown) => {
-      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
-      assert.equal(error.diagnostic.reason, "sparse_interval.value_out_of_range");
-      assert.equal(error.diagnostic.valueRange, range);
-      assert.equal(error.diagnostic.unitKind, unit);
-      return true;
-    });
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    for (const [value, range] of [
+      [-1, "below_range"],
+      [max * 10, "above_range_up_to_10x"],
+      [max * 10 + 1, "above_range_10x_to_1000x"],
+      [max * 1000, "above_range_10x_to_1000x"],
+      [max * 1000 + 1, "above_range_over_1000x"],
+    ] as const) {
+      warn.mockClear();
+      assert.doesNotThrow(() => normalizeJunctionSnapshot(snapshotFor(value)));
+      assert.deepEqual(warn.mock.calls[0]?.[1], {
+        reason: "sparse_interval.value_out_of_range", sourceProvider: "apple-health-kit",
+        sourceTypeKind: "app", unitKind: unit, valueRange: range, count: 1,
+      });
+      assert.equal(warn.mock.calls.length, 1);
+    }
+  } finally {
+    warn.mockRestore();
   }
 });
 
-test("Junction strict sparse calendar repairs reject mixed valid and malformed rows before import", async () => {
+test("Junction strict sparse calendar repairs retain malformed provenance and skip bad values", async () => {
   const baseSnapshot = {
     accountId: "junction-account-strict-sparse-calendar-day",
     importedAt: "2026-04-23T12:00:00.000Z",
@@ -7496,31 +7575,31 @@ test("Junction strict sparse calendar repairs reject mixed valid and malformed r
       return true;
     },
   );
-  await assert.rejects(
-    prepareDeviceProviderSnapshotImport({
-      provider: "junction",
-      vaultRoot: "/tmp/unused-strict-calendar-repair",
-      snapshot: {
-        ...baseSnapshot,
-        timeseries: {
-          water: [valid, {
-            ...valid,
-            id: "water-strict-malformed-before-core",
-            value: "not-a-number",
-          }],
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    await assert.doesNotReject(
+      prepareDeviceProviderSnapshotImport({
+        provider: "junction",
+        vaultRoot: "/tmp/unused-strict-calendar-repair",
+        snapshot: {
+          ...baseSnapshot,
+          timeseries: {
+            water: [valid, {
+              ...valid,
+              id: "water-strict-malformed-before-core",
+              value: "not-a-number",
+            }],
+          },
         },
-      },
-    }),
-    (error: unknown) => {
-      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
-      assert.equal(error.diagnostic.reason, "sparse_interval.value_non_numeric");
-      assert.equal(error.diagnostic.rowOrdinal, 2);
-      assert.equal(error.diagnostic.sourceProvider, "garmin");
-      assert.equal(error.diagnostic.timestampKind, "absolute");
-      assert.equal(error.diagnostic.timestampSemantics, "utc");
-      return true;
-    },
-  );
+      }),
+    );
+    assert.deepEqual(warn.mock.calls[0]?.[1], {
+      reason: "sparse_interval.value_non_numeric", sourceProvider: "garmin",
+      sourceTypeKind: "watch", unitKind: "missing", valueRange: undefined, count: 1,
+    });
+  } finally {
+    warn.mockRestore();
+  }
 
   const complete = normalizeJunctionSnapshot({
     ...baseSnapshot,

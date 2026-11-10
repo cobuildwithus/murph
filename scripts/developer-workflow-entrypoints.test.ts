@@ -256,6 +256,31 @@ describe("open execution plan entrypoint", () => {
     ).toEqual([]);
   });
 
+  it("rejects a filename already archived as a completed plan", () => {
+    const harness = createPlanHarness();
+    const args = ["scripts/open-exec-plan.sh", "routine-change", "Routine title"];
+    expect(spawnSync("bash", args, { cwd: harness.root }).status).toBe(0);
+    const active = path.join(harness.root, "agent-docs/exec-plans/active");
+    const completed = path.join(harness.root, "agent-docs/exec-plans/completed");
+    mkdirSync(completed);
+    const name = readdirSync(active)[0]!;
+    writeFileSync(path.join(completed, name), "immutable historical evidence\n");
+    rmSync(path.join(active, name));
+    expect(spawnSync("bash", args, { cwd: harness.root }).status).toBe(1);
+    expect(readdirSync(active)).toEqual([]);
+    expect(readFileSync(path.join(completed, name), "utf8")).toBe("immutable historical evidence\n");
+
+    writeExecutable(path.join(harness.root, "scripts/close-exec-plan.sh"),
+      readFileSync(path.join(repoRoot, "scripts/close-exec-plan.sh"), "utf8"));
+    writeFileSync(path.join(active, name), "active evidence\n");
+    const close = spawnSync("bash", ["scripts/close-exec-plan.sh", `agent-docs/exec-plans/active/${name}`],
+      { cwd: harness.root, encoding: "utf8" });
+    expect(close.status).toBe(1);
+    expect(close.stderr).toContain("Completed plan already exists");
+    expect(readFileSync(path.join(active, name), "utf8")).toBe("active evidence\n");
+    expect(readFileSync(path.join(completed, name), "utf8")).toBe("immutable historical evidence\n");
+  });
+
   it("does not overwrite an existing plan", () => {
     const harness = createPlanHarness();
     const args = ["scripts/open-exec-plan.sh", "routine-change", "Routine title"];

@@ -1729,7 +1729,7 @@ increase in failed starts, and a candidate p95 no more than one second slower
 than the prior version. A rollback must also preserve the unified-fleet
 identity compatibility floor described in the migration section.
 
-The production smoke also runs one real `gpt-6-luna` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-6-luna` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: each enabled behavioral smoke phase runs one bounded model turn; an image release checks the isolated artifact before serving replacement and retains the existing post-rollout checks; the flag remains disabled in per-PR CI and hosted-local E2E.
+The production smoke also runs one real `gpt-6-luna` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-6-luna` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: each enabled behavioral smoke phase runs one bounded model turn per attempt, and a retried attempt (a container that never started, or a pre-rollout container) can run it again; an image release checks the isolated artifact before serving replacement and retains the existing post-rollout checks; the flag remains disabled in per-PR CI and hosted-local E2E.
 
 ## Twelve-hour prompt cache rollout
 
@@ -2953,10 +2953,15 @@ no pending preparation. Incomplete inventory returns a retryable failure before
 starting the container probe. The response exposes only counts and release-match
 metadata; it never returns slot names or claims a slot. The CLI requires this
 proof when the expected mode is enabled, using `HOSTED_EXECUTION_STANDBY_TARGET`
-(default two). The separate live-model phase does not repeat this inventory
-check because foreground traffic can consume a previously verified slot. This
-proves a ready inventory snapshot; the migration checks above still own failed
-preparation recovery, drain, foreground allocation and background exclusion.
+(default two). This proves a ready inventory snapshot; the migration checks
+above still own failed preparation recovery, drain, foreground allocation and
+background exclusion.
+
+Each smoke attempt is one signed request that starts one container and runs every
+enabled check in it, including the live model turn. A request that fails before
+the model turn finishes (inventory not ready, container never started, stale
+bundle) is retried in a fresh container. A model turn that ran on the expected
+bundle and failed ends the smoke at once.
 
 Regardless of cached ready inventory, the initial smoke prepares and retires one
 synthetic unbound slot in the actual candidate namespace. Preparation returns its
@@ -2964,8 +2969,7 @@ attested image pair; smoke requires the exact candidate pair (or active pair whe
 stable), rejecting missing attestation from an older Worker. Retirement is awaited
 on success and failure. This fresh proof is independent of cached coordinator
 rows and the separate smoke application; neither proves the serving candidate
-image on its own. Artifact-only and live-model-only phases do not touch serving
-inventory.
+image on its own. The artifact-only phase does not touch serving inventory.
 
 Optional smoke env:
 

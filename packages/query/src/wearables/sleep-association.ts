@@ -27,12 +27,30 @@ export function sleepMetricAssociatedWithWindow(
 }
 
 /** The association itself, for a caller that already holds a candidate and a
- * window of one public provider and must not resolve both again per pair. */
+ * window of one public provider and must not resolve both again per pair. A
+ * caller that tests many candidates against many windows also passes the
+ * window's time test and the candidate's parsed time, so no timestamp is
+ * parsed per pair. */
 export function sleepMetricBelongsToWindow(
   candidate: WearableMetricCandidate,
   window: WearableSleepWindowCandidate,
+  insideWindow?: (occurredAtMs: number) => boolean,
+  occurredAtMs?: number,
 ): boolean {
-  return sleepMetricMatchesWindow(candidate, window) || sleepMetricOccursInsideWindow(candidate, window);
+  return sleepMetricMatchesWindow(candidate, window)
+    || (insideWindow ?? sleepWindowTimeTest(window))(occurredAtMs ?? Date.parse(candidate.occurredAt ?? ""));
+}
+
+/** The time half of the association: whether a metric that occurred at the
+ * given epoch milliseconds falls inside the window, within the session
+ * tolerance. An unparseable time on either side never matches. */
+export function sleepWindowTimeTest(
+  window: WearableSleepWindowCandidate,
+): (occurredAtMs: number) => boolean {
+  const toleranceMs = resolveMetricTolerance("sessionMinutes") * 60000;
+  const earliestMs = Date.parse(window.startAt ?? "") - toleranceMs;
+  const latestMs = Date.parse(window.endAt ?? "") + toleranceMs;
+  return (occurredAtMs) => occurredAtMs >= earliestMs && occurredAtMs <= latestMs;
 }
 
 export function sleepMetricMatchesWindow(
@@ -86,21 +104,6 @@ export function resolveSleepCandidateProvider(
   }, {
     suppressJunctionSourceInstanceFallback: true,
   });
-}
-
-function sleepMetricOccursInsideWindow(
-  candidate: WearableMetricCandidate,
-  window: WearableSleepWindowCandidate,
-): boolean {
-  const occurredAtMs = Date.parse(candidate.occurredAt ?? "");
-  const startAtMs = Date.parse(window.startAt ?? "");
-  const endAtMs = Date.parse(window.endAt ?? "");
-  if (!Number.isFinite(occurredAtMs) || !Number.isFinite(startAtMs) || !Number.isFinite(endAtMs)) {
-    return false;
-  }
-
-  const toleranceMs = resolveMetricTolerance("sessionMinutes") * 60000;
-  return occurredAtMs >= startAtMs - toleranceMs && occurredAtMs <= endAtMs + toleranceMs;
 }
 
 function sleepResourceTypesCompatible(
