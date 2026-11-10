@@ -2,6 +2,7 @@ import { linqRoster } from "./support/linq-roster";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({ container: vi.fn(), games: vi.fn(), identity: vi.fn(), route: vi.fn(), chat: vi.fn() }));
+vi.mock("../src/lib/hosted-routing/linq-group-line-move-store", () => ({ readHostedLinqGroupMoveServicePhones: async () => [] }));
 vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ hostedThreadContainer: { findUnique: m.container }, game: { findMany: m.games } }) }));
 vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: m.identity }));
 vi.mock("../src/lib/hosted-onboarding/contact-privacy", () => ({ createHostedPhoneLookupKeyReadCandidates: () => ["line-key"] }));

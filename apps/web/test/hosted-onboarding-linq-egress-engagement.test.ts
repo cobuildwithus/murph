@@ -2256,6 +2256,38 @@ describe("hosted Linq egress authority", () => {
     },
   );
 
+  it.each(["game-talk:game:note", "game-change:game:change", "game-evening:game:day", "game-missed:game:day", "game-recap:game"])("resolves the saved %s target before game validation and refuses a second route change at dispatch", async idempotencyKey => {
+    const lineKey = createHostedPhoneLookupKey("+15555550100")!;
+    const prisma = createPrismaStub({ threadRouteContainerMemberId: "member-1", threadRouteAccountLookupKey: lineKey, activeMemberAccess: true });
+    prisma.hostedLinqGroupLineMove.findMany.mockResolvedValue([{ id: "synthetic-move" }]);
+    Object.assign(prisma.hostedLinqGroupLineMove, { findFirst: vi.fn().mockResolvedValue({ id: "synthetic-move" }) });
+    const oldKeys = contactPrivacy.createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId: "chat-before" });
+    prisma.hostedThreadRoute.findMany.mockImplementation(async args => {
+      const where = args.where;
+      return where.threadIdentityLookupKey.in.some((key: string) => oldKeys.includes(key)) ? [] : [buildHostedLinqRouteRow("member-1", lineKey)];
+    });
+    vi.spyOn(await import("@/src/lib/hosted-routing/assistant-notification-destination"), "readHostedThreadContainerLinqRouteAuthorities").mockResolvedValue({
+      authorities: new Map([["member-1", { channel: "linq", accountLookupKey: lineKey, containerMemberId: "member-1", threadId: "chat-after" }]]),
+      nonLinqContainerMemberIds: new Set(), unavailableContainerMemberIds: new Set(),
+    });
+    mocks.gameCurrentOverride = async () => true;
+    mocks.getPrisma.mockReturnValue(prisma);
+    const request = (body: Record<string, unknown>) => new Request("https://internal.example.test/engagement", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ idempotencyKey, targetKind: "thread", ...body }),
+    });
+    const prepared = await postHostedLinqEgressEngagement(request({ authorityCheckOnly: true, target: "chat-before" }));
+    expect(prepared.status).toBe(200);
+    const body = await prepared.json();
+    expect(body.resolvedRoute).toMatchObject({ target: "chat-after", conversationThreadId: expect.any(String), threadIsDirect: false });
+    expect(mocks.readGameProposalDeliveryPlayers).toHaveBeenCalledWith(idempotencyKey, "member-1", "chat-after");
+    expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    const sent = await postHostedLinqEgressEngagement(request({ authorityCheckOnly: false, target: "chat-after", expectedResolvedRoute: body.resolvedRoute }));
+    expect(sent.status).toBe(200); expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
+    prisma.hostedThreadRoute.findMany.mockResolvedValue([buildHostedLinqRouteRow("another-container", lineKey)]);
+    const changed = await postHostedLinqEgressEngagement(request({ authorityCheckOnly: false, target: "chat-after", expectedResolvedRoute: body.resolvedRoute }));
+    expect(changed.status).toBe(403); expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
+  });
+
   it.each(["exact", "extra", "missing", "blocked", "departed", "provider-stale", "outside-join", "unjoined-started", "unjoined-recap", "rotation", "added-after-prepare", "shrunk-recap", "outsider-after-shrink", "rematch-current", "rematch-two-human", "rematch-stale", "rematch-legacy"])("rechecks group game authority through real Linq egress: %s", async scenario => {
     const prisma = Object.assign(createPrismaStub({ threadRouteContainerMemberId: "member-1", activeMemberAccess: true }), {
       gameBlock: { findFirst: vi.fn().mockResolvedValue(scenario === "blocked" ? { blockerMemberId: "person-b" } : null) },
@@ -3191,6 +3223,7 @@ function createPrismaStub(input: {
     hostedMailboxPayload: {
       findMany: vi.fn().mockResolvedValue([]),
     },
+    hostedLinqGroupLineMove: { findMany: vi.fn().mockResolvedValue([]) },
     hostedThreadRoute: {
       findMany: vi.fn().mockResolvedValue(input.threadRouteContainerMemberId
         ? [buildHostedLinqRouteRow(

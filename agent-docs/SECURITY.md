@@ -1894,6 +1894,15 @@ they exist and check restrictions over their union with all extant player IDs,
 including leavers. Unresolved handles are valid audience evidence and do not
 acquire account rights.
 
+During a reserved/adopted Linq line move, the existing game audience boundary
+collapses only that container's persisted, provider-inventory-verified pair of
+service numbers to the current route's sending self. Unknown handles receive
+no exemption. Complete provider evidence, human audience/consent checks and
+the game's original audience key remain authoritative. Multiple unresolved
+overlaps fail closed. An adopted/left source alias is egress-only and bound to
+the calling container; it cannot authorize ingress or translate a native reply
+or reaction. `ARCHITECTURE.md` owns the retained tombstone and rollback floor.
+
 Composer association is best-effort and accepts exactly one configured-origin
 invite token from a verified starter or seated sender. It binds only; ordinary
 join claims the seat after matching memberId or verified contact read keys and

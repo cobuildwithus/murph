@@ -1,3 +1,5 @@
+import { applyHostedLinqGroupMoveIngressTx, type PreparedHostedLinqGroupMoveIngress } from "../hosted-routing/linq-group-line-move-ingress";
+import { replaceHostedLinqGroupLineMoveRouteTx } from "../hosted-routing/thread-container-service";
 import { associateGameChatInviteTx, type prepareGameChatInvite } from "../game/chat-membership";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
@@ -1313,6 +1315,7 @@ function hasSameHostedLinqMessageEdit(
 }
 
 type HostedOnboardingLinqWebhookPlannerInput = {
+  preparedGroupLineMove?: PreparedHostedLinqGroupMoveIngress;
   preparedGameInvite?: Awaited<ReturnType<typeof prepareGameChatInvite>>;
   affirmativeReaction?: boolean;
   event: HostedLinqWebhookEvent;
@@ -1330,6 +1333,43 @@ type HostedOnboardingLinqWebhookPlannerInput = {
   requireFirstContactAdmission?: boolean;
   requiredPendingGroupSetupCandidateId?: string | null;
 };
+
+async function lockHostedLinqMessageChatOwnershipTx(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  prisma: Prisma.TransactionClient;
+}) {
+  const { messageEvent, participantContact, summary } = input.context;
+  const lockParticipant =
+    !isHostedLinqGroupChat(messageEvent)
+    && messageEvent.data.message.parts.length > 0
+    && participantContact
+    && !shouldIgnoreHostedLinqForLocalInboundGuard({
+      isFromMe: summary.isFromMe,
+      participantContact,
+    });
+  // Preserve participant -> chat -> member, including while signup holds the
+  // participant lock. The route read below gets its own post-lock snapshot.
+  await acquireHostedLinqChatOwnershipLockTx({
+    chatId: summary.chatId,
+    ...(lockParticipant ? { participantContact } : {}),
+    tx: input.prisma,
+  });
+}
+
+async function applyLinqGroupMoveForMessageTx(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  route: HostedThreadRouteSnapshot | null;
+  prepared?: PreparedHostedLinqGroupMoveIngress;
+  prisma: Prisma.TransactionClient;
+}) {
+  const { messageEvent, summary, participantContact, recipientPhoneNumber } = input.context;
+  if (!input.route && !isHostedLinqGroupChat(messageEvent)) return "continue";
+  return applyHostedLinqGroupMoveIngressTx({
+    service: messageEvent.data.service,
+    threadId: summary.chatId, recipientPhone: recipientPhoneNumber, sender: participantContact?.value ?? null,
+    text: summary.text ?? "", isFromMe: summary.isFromMe, prepared: input.prepared, prisma: input.prisma,
+  });
+}
 
 export async function planHostedOnboardingLinqWebhook(
   input: HostedOnboardingLinqWebhookPlannerInput,
@@ -1356,21 +1396,12 @@ export async function planHostedOnboardingLinqWebhook(
     summary,
   } = context;
 
-  const lockParticipant =
-    !isHostedLinqGroupChat(messageEvent)
-    && messageEvent.data.message.parts.length > 0
-    && participantContact
-    && !shouldIgnoreHostedLinqForLocalInboundGuard({
-      isFromMe: summary.isFromMe,
-      participantContact,
-    });
-  // Preserve participant -> chat -> member, including while signup holds the
-  // participant lock. The route read below gets its own post-lock snapshot.
-  await acquireHostedLinqChatOwnershipLockTx({
-    chatId: summary.chatId,
-    ...(lockParticipant ? { participantContact } : {}),
-    tx: input.prisma,
-  });
+  if (input.preparedGroupLineMove?.adoption) {
+    await replaceHostedLinqGroupLineMoveRouteTx({ prepared: input.preparedGroupLineMove.adoption, prisma: input.prisma });
+    return buildIgnoredLinqWebhookPlan("group-line-move");
+  }
+
+  await lockHostedLinqMessageChatOwnershipTx({ context, prisma: input.prisma });
 
   const directMailboxPreparationProvided = Object.prototype.hasOwnProperty.call(
     input,
@@ -1391,6 +1422,10 @@ export async function planHostedOnboardingLinqWebhook(
     prisma: input.prisma,
     threadId: summary.chatId,
   });
+  const moveAction = await applyLinqGroupMoveForMessageTx({
+    context, route: explicitThreadRoute, prepared: input.preparedGroupLineMove, prisma: input.prisma,
+  });
+  if (moveAction === "consume") return buildIgnoredLinqWebhookPlan("group-line-move");
   if (explicitThreadRoute) {
     if (directMailboxPreparationFailureProvided) {
       throw input.directMailboxPreparationFailure;
