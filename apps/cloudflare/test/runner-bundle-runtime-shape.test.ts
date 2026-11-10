@@ -6,6 +6,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  RUNNER_NODE_COMPILE_CACHE_DIR,
+  buildPortableNodeBinWrapper,
   pruneBundledRunnerDependencies,
   pruneRunnerBundle,
   rewriteRuntimeBinWrappers,
@@ -198,5 +200,26 @@ describe("runner bundle publication", () => {
     expect(execFileSync(path.join(final, "node_modules/.bin/vault-cli"), ["recovered"], {
       cwd: root, encoding: "utf8",
     }).trim()).toBe("2.0.0:recovered");
+  });
+});
+
+describe("bundled Node CLI wrapper", () => {
+  it("starts the CLI with the container-local compile cache, whatever the caller inherited", async () => {
+    const bin = await mkdtemp(path.join(tmpdir(), "murph-runner-bin-wrapper-"));
+    temporaryDirectories.push(bin);
+    // The wrapper prefers a `node` beside it; this one reports what it was given.
+    await writeFile(
+      path.join(bin, "node"),
+      '#!/bin/sh\nprintf "%s|%s|%s" "$NODE_COMPILE_CACHE" "$1" "$2"\n',
+      { mode: 0o755 },
+    );
+    await writeFile(path.join(bin, "cli"), buildPortableNodeBinWrapper("../pkg/bin.js"), { mode: 0o755 });
+
+    expect(execFileSync(path.join(bin, "cli"), ["goal"], {
+      encoding: "utf8",
+      // Node 24 never returns when asked to create a cache directory under /proc.
+      env: { ...process.env, NODE_COMPILE_CACHE: "/proc/self/compile-cache" },
+    })).toBe(`${RUNNER_NODE_COMPILE_CACHE_DIR}|${bin}/../pkg/bin.js|goal`);
+    expect(RUNNER_NODE_COMPILE_CACHE_DIR).toBe("/tmp/murph-node-compile-cache");
   });
 });
