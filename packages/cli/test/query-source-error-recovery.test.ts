@@ -10,6 +10,7 @@ import { Cli } from "incur";
 import { afterEach, test } from "vitest";
 
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
+import { registerAuditCommands } from "../src/commands/audit.js";
 import { registerSearchCommands } from "../src/commands/search.js";
 import { registerScheduledLogCommands } from "../src/commands/scheduled-log.js";
 import { registerVaultCommands } from "../src/commands/vault.js";
@@ -31,6 +32,7 @@ test.each(["plain", "brotli"] as const)("query source failures identify a safe v
     "murph-query-source-invalid-",
   );
   cleanupPaths.push(parentRoot);
+  await initializeVault({ vaultRoot });
   const relativePath = path.posix.join(
     VAULT_LAYOUT.auditDirectory,
     "2026",
@@ -47,10 +49,13 @@ test.each(["plain", "brotli"] as const)("query source failures identify a safe v
     version: "0.0.0-test",
   });
   cli.use(incurErrorBridge);
-  registerSearchCommands(cli);
+  registerAuditCommands(cli, createIntegratedVaultServices());
 
+  // The projection does not read audit records, so the command that lists
+  // them is the reader that reports a malformed audit source.
   const result = await runInProcessJsonCli(cli, [
-    "timeline",
+    "audit",
+    "list",
     "--vault",
     vaultRoot,
   ]);

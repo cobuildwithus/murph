@@ -441,7 +441,7 @@ test('batch preserves query-source recovery fields without echoing private sourc
       '--vault',
       vault,
       '--command',
-      '["timeline"]',
+      '["audit","list"]',
       '--command',
       '["memory","show"]',
       '--stopOnError',
