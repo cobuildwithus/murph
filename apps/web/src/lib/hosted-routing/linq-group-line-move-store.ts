@@ -39,13 +39,19 @@ export async function readHostedLinqGroupMovesForIngress(input: {
       { fromThreadIdentityLookupKey: { in: identities }, status: { in: ["reserved", ...adoptedLinqGroupMoveStatuses] } },
       { toThreadIdentityLookupKey: { in: identities }, status: { in: adoptedLinqGroupMoveStatuses } },
       { toAccountLookupKey: { in: createHostedPhoneLookupKeyReadCandidates(input.recipientPhone) }, status: "reserved" },
-      { toAccountLookupKey: { in: createHostedPhoneLookupKeyReadCandidates(input.recipientPhone) }, status: "cancelled",
-        updatedAt: { gte: new Date(Date.now() - HOSTED_LINQ_GROUP_MOVE_REPLAY_MS) } },
     ] }, orderBy: { id: "asc" },
   });
-  // Repeated recent cancellations and ambiguous rotated rows fail closed at the same cap.
   if (rows.length > 4) holdHostedLinqGroupLineMove("HOSTED_LINQ_GROUP_LINE_MOVE_AMBIGUOUS");
-  return rows;
+  // Cancellation grants no route authority. Only its latest cutoff matters:
+  // older history must never exhaust the active-relation ambiguity limit.
+  // Read serially so each preparation holds at most one database connection.
+  const latestCancellation = await input.prisma.hostedLinqGroupLineMove.findFirst({
+    select: linqGroupMoveSelect,
+    where: { toAccountLookupKey: { in: createHostedPhoneLookupKeyReadCandidates(input.recipientPhone) }, status: "cancelled",
+      updatedAt: { gte: new Date(Date.now() - HOSTED_LINQ_GROUP_MOVE_REPLAY_MS) } },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+  });
+  return latestCancellation ? [...rows, latestCancellation] : rows;
 }
 
 export function linqGroupMoveSourceMatches(move: Pick<HostedLinqGroupLineMove, "fromThreadIdentityLookupKey">, threadId: string): boolean {

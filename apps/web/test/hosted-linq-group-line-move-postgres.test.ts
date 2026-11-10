@@ -94,17 +94,17 @@ describe.skipIf(!enabled)("Linq group line move consumers on migrated PostgreSQL
     if (!prepared.adoption) throw new Error("Synthetic adoption was not prepared.");
     return prepared.adoption;
   }
-  it("adds exactly two bounded move reads to ordinary group ingress and to a source hold", async () => {
+  it("adds exactly four bounded move reads to ordinary group ingress and to a source hold", async () => {
     const measured = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }), log: [{ emit: "event", level: "query" }] });
     const queries: string[] = [];
     measured.$on("query", ({ query }) => { if (query.includes('"hosted_linq_group_line_move"')) queries.push(query); });
     try {
       await delivery(fromChat, phone, "Ordinary group input", source, measured)();
-      expect(queries).toHaveLength(2);
+      expect(queries).toHaveLength(4);
       for (const query of queries) expect(query).toContain("LIMIT");
       await reserve(); queries.length = 0; provider.retrieve.mockClear();
       await expect(delivery(fromChat, phone, "Held group input", source, measured)()).rejects.toMatchObject(held);
-      expect(queries).toHaveLength(2); expect(provider.retrieve).not.toHaveBeenCalled();
+      expect(queries).toHaveLength(4); expect(provider.retrieve).not.toHaveBeenCalled();
     } finally { await measured.$disconnect(); }
   });
   it("bounds reserved preparation and adoption SQL with real encryption", async () => {
@@ -126,7 +126,7 @@ describe.skipIf(!enabled)("Linq group line move consumers on migrated PostgreSQL
       await runWithHostedDomainRootProviderCallsDisabled(() => measured.$transaction(prisma => replaceHostedLinqGroupLineMoveRouteTx({ prepared: adoption, prisma })));
       const adoptionStatements = queries.filter(query => !/^\s*(BEGIN|COMMIT|ROLLBACK)\b/u.test(query)).length;
       expect({ heldStatements, adoptionPreparationStatements, adoptionStatements }).toEqual({
-        heldStatements: 5, adoptionPreparationStatements: 5, adoptionStatements: 16,
+        heldStatements: 6, adoptionPreparationStatements: 6, adoptionStatements: 16,
       });
       expect(provider.retrieve).not.toHaveBeenCalled();
     } finally { await measured.$disconnect(); }
@@ -272,14 +272,20 @@ describe.skipIf(!enabled)("Linq group line move consumers on migrated PostgreSQL
     expect(prepared.action).toBe("hold"); expect(prepared.adoption).toBeUndefined();
     expect((await row()).status).toBe("reserved"); await assertSource();
   });
-  it("bounds cancelled replay history by the provider window and fails closed at the row cap", async () => {
+  it("uses only the latest cancellation cutoff while retaining the active relation cap", async () => {
     const move = await reserve();
     await db.hostedLinqGroupLineMove.update({ where: { id: moveId }, data: { status: "cancelled" } });
     const read = () => readHostedLinqGroupMovesForIngress({ threadId: toChat, recipientPhone: target, prisma: db });
     expect(await read()).toHaveLength(1);
     await db.hostedLinqGroupLineMove.update({ where: { id: moveId }, data: { updatedAt: new Date(Date.now() - HOSTED_LINQ_GROUP_MOVE_REPLAY_MS - 1) } });
     expect(await read()).toHaveLength(0);
-    await db.hostedLinqGroupLineMove.createMany({ data: Array.from({ length: 5 }, () => ({ ...move, id: randomUUID(), status: "cancelled" })) });
+    const newest = randomUUID(), cutoff = new Date();
+    await db.hostedLinqGroupLineMove.createMany({ data: Array.from({ length: 5 }, (_, index) => ({ ...move,
+      id: index === 0 ? newest : randomUUID(), status: "cancelled", updatedAt: new Date(cutoff.getTime() - index * 1_000) })) });
+    expect(await read()).toEqual([expect.objectContaining({ id: newest, updatedAt: cutoff })]);
+    await db.hostedLinqGroupLineMove.createMany({ data: Array.from({ length: 5 }, () => ({ ...move,
+      id: randomUUID(), status: "adopted", adoptedAt: new Date(),
+      toThreadIdentityLookupKey: createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: toChat })! })) });
     await expect(read()).rejects.toMatchObject(held);
   });
   it("rolls back route and move together, then commits with provider and KMS work disabled", async () => {

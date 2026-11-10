@@ -3223,7 +3223,7 @@ function createPrismaStub(input: {
     hostedMailboxPayload: {
       findMany: vi.fn().mockResolvedValue([]),
     },
-    hostedLinqGroupLineMove: { findMany: vi.fn().mockResolvedValue([]) },
+    hostedLinqGroupLineMove: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
     hostedThreadRoute: {
       findMany: vi.fn().mockResolvedValue(input.threadRouteContainerMemberId
         ? [buildHostedLinqRouteRow(

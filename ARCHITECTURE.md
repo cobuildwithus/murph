@@ -3923,22 +3923,27 @@ container and move id. Container deletion cascades to these rows. Otherwise
 adopted/left history remains: it is both ingress tombstone and egress alias.
 There is no second roster or current-route owner.
 
-The consumer reads at most five indexed candidate rows per phase and fails
-closed on ambiguity; privacy-key read candidates apply to all lookups. Ordinary
-group ingress adds two reads (preparation and locked revalidation), and direct
-ingress adds none. Reservations protect source traffic and affected unbound
+Each ingress phase reads at most five indexed route-authority candidates and
+then the latest recent cancellation on the receiving line. Only authority rows
+count toward the ambiguity limit; any amount of cancellation history reduces
+to one replay cutoff. Both queries use privacy-key read candidates and run
+serially, with one connection at a time. Preparation and locked revalidation
+therefore add four bounded reads to ordinary group ingress; direct ingress
+adds none. Reservations protect source traffic and affected unbound
 target chats using the existing retryable-error/preparation retry boundary.
 An expired adoption deadline releases the source hold, retaining unbound-target
 admission protection. Cancelled rows grant no authority; the producer must
 verify provider cleanup before cancelling. Their immutable final `updated_at`
-fences unbound target-line events created at or before cancellation. The same
-bounded read includes cancellations from the last 30 minutes, indexed by target
-line, status and update time, covering Linq's entire
+fences unbound target-line events created at or before cancellation. The latest
+cancellation read is limited to the last 30 minutes, indexed by target line,
+status and update time, covering Linq's entire
 [retry window from event creation](https://docs.linqapp.com/channel/imessage/guides/webhooks/#delivery-guarantees).
 Without a known destination chat before adoption, this conservatively consumes
 old unbound events on that line; already-bound unrelated chats retain their
 route. Missing, invalid or future event times cannot authorize adoption and
-are consumed by a recent cancellation fence. Overflow still fails closed.
+are consumed by a recent cancellation fence. Active-authority overflow still
+fails closed. The effective cancellation cutoff is reread in the transaction
+and included in the preparation fingerprint.
 
 Silent adoption requires one reservation on the target receiving line and an
 iMessage group message created at or after the reservation's `add_started_at`,

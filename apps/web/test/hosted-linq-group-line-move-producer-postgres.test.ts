@@ -6,13 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { provisionHostedCryptoDomainRootsForUser } from "@/src/lib/hosted-crypto/domain-root-store";
-import { createHostedExternalThreadIdentityLookupKey, createHostedLinqChatLookupKey, createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { createHostedExternalThreadIdentityLookupKey, createHostedExternalThreadLookupKey, createHostedLinqChatLookupKey, createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { encryptHostedLinqLinePhoneNumber } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 import { startHostedLinqGroupLineMove, operateHostedLinqGroupLineMove } from "@/src/lib/hosted-ops/linq-group-line-move";
 import { readHostedLinqGroupLineMoveOverview } from "@/src/lib/hosted-ops/linq-group-line-move-overview";
 import { claimHostedLinqDeliveryProviderDispatchTx } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { prepareHostedLinqGroupMoveCleanup } from "@/src/lib/hosted-routing/linq-group-line-move-store";
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
+import { buildHostedThreadDeliveryRoute, sealHostedThreadDeliveryRoute } from "@/src/lib/hosted-routing/thread-delivery-route";
 import { localRosterCrypto, rosterPhoneIdentity, rosterRoute, syntheticPhone } from "./support/roster-postgres";
 
 const provider = vi.hoisted(() => ({ retrieve: vi.fn(), add: vi.fn(), remove: vi.fn(), leave: vi.fn(), send: vi.fn(), signal: vi.fn() }));
@@ -29,12 +30,13 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
   let room: string, owner: string, sender: string, sourceChat: string, targetChat: string, source: string, target: string, person: string;
   let sourceKey: string, targetKey: string, containerRef: string, targetPresent: boolean, sourcePresent: boolean, humans: number;
   let callbacks: (() => Promise<void>)[];
+  let extraRooms: string[];
   const eventBodies = new Map<string, string>();
   beforeEach(async () => {
     localRosterCrypto(); setHostedSecureBoxStringTestCodecForTests(null);
     [room, owner, sender, sourceChat, targetChat] = Array.from({ length: 5 }, () => randomUUID());
     source = syntheticPhone(); target = syntheticPhone(); person = syntheticPhone(); targetPresent = false; sourcePresent = true; humans = 2;
-    callbacks = []; eventBodies.clear();
+    callbacks = []; extraRooms = []; eventBodies.clear();
     for (const mock of Object.values(provider)) mock.mockReset();
     provider.retrieve.mockImplementation(async (id: string) => ({ is_group: true, service: "iMessage", handles: [
       ...(sourcePresent ? [{ handle: source, is_me: id === sourceChat, status: "active" }] : []),
@@ -66,7 +68,7 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     await db.game.deleteMany({ where: { chatContainerMemberId: room } });
     await db.hostedGroup.deleteMany({ where: { ownerMemberId: { in: [owner, sender] } } });
     await db.hostedThreadContainer.deleteMany({ where: { ownerMemberId: { in: [owner, sender] } } });
-    await db.hostedMember.deleteMany({ where: { id: { in: [room, owner, sender] } } });
+    await db.hostedMember.deleteMany({ where: { id: { in: [room, owner, sender, ...extraRooms] } } });
     await db.hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: { in: [sourceKey, targetKey] } } });
     vi.useRealTimers(); vi.unstubAllEnvs();
   });
@@ -99,8 +101,7 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     targetPresent = step !== "reserved";
     return id;
   }
-  async function webhook(chat = targetChat, from = source, text = "Synthetic ordinary service reply", line = target, eventId = randomUUID(), media = false) {
-    const occurredAt = new Date().toISOString();
+  async function webhook(chat = targetChat, from = source, text = "Synthetic ordinary service reply", line = target, eventId = randomUUID(), media = false, occurredAt = new Date().toISOString()) {
     const rawBody = eventBodies.get(eventId) ?? JSON.stringify({ api_version: "v3", webhook_version: "2026-02-03", created_at: occurredAt,
       event_id: eventId, event_type: "message.received", data: {
         chat: { id: chat, is_group: true, owner_handle: { handle: line, id: "synthetic-self", is_me: true, service: "iMessage" } },
@@ -304,6 +305,58 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect(await start()).toMatchObject({ status: "cancelled", code: "add_rejected_http_403", holdActive: false });
     expect(provider.send).not.toHaveBeenCalled(); expect(provider.retrieve).toHaveBeenCalledTimes(3);
     expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room, accountLookupKey: sourceKey } })).toBe(1);
+  });
+  it("keeps bound groups live and replay fenced after five rejected moves, then adopts a fresh move", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const oldTime = new Date(Date.now() - 1_000).toISOString();
+    const otherRoom = randomUUID(), otherChat = randomUUID(); extraRooms.push(otherRoom);
+    await db.hostedMember.create({ data: { id: otherRoom, billingStatus: "active" } });
+    await provisionHostedCryptoDomainRootsForUser({ userId: otherRoom, prisma: db });
+    await db.hostedThreadContainer.create({ data: { memberId: otherRoom, ownerMemberId: owner } });
+    await db.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: otherRoom, accountLookupKey: targetKey,
+      threadIdentityLookupKey: createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: otherChat })!,
+      threadLookupKey: createHostedExternalThreadLookupKey({ channel: "linq", threadId: otherChat, accountLookupKey: targetKey })!,
+      deliveryRouteEncrypted: await sealHostedThreadDeliveryRoute({ containerMemberId: otherRoom, prisma: db,
+        route: buildHostedThreadDeliveryRoute({ channel: "linq", threadId: otherChat, accountLookupKey: targetKey }) }),
+    } });
+    const retrieve = provider.retrieve.getMockImplementation()!;
+    provider.retrieve.mockImplementation(async (id: string) => id === otherChat ? {
+      is_group: true, service: "iMessage", handles: [
+        { handle: target, is_me: true, status: "active" },
+        { handle: person, is_me: false, status: "active" },
+        { handle: "synthetic-person@example.test", is_me: false, status: "active" },
+      ],
+    } : retrieve(id));
+    provider.add.mockRejectedValue(new APIError(403, {}, "synthetic rejection", new Headers()));
+    for (let attempt = 0; attempt < 5; attempt++) {
+      expect(await start()).toMatchObject({ status: "cancelled", code: "add_rejected_http_403" });
+      vi.setSystemTime(Date.now() + 1_000);
+    }
+    expect(await db.hostedLinqGroupLineMove.count({ where: { toAccountLookupKey: targetKey, status: "cancelled" } })).toBe(5);
+    const boundId = randomUUID();
+    await webhook(otherChat, person, "Synthetic unrelated group question", target, boundId);
+    await webhook(otherChat, person, "Synthetic unrelated group question", target, boundId);
+    const messages = await db.hostedMailboxItem.findMany({ where: { userId: otherRoom, kind: "conversation.message" } });
+    expect(messages).toHaveLength(1);
+    const { resolvedRoute } = await db.$transaction(prisma => assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: otherRoom, target: otherChat, targetKind: "thread", authorityCheckOnly: true, prisma,
+    }));
+    await sendHostedLinqChatMessage({ chatId: resolvedRoute.target, message: "Synthetic unrelated group answer", idempotencyKey: messages[0]!.id });
+    expect(provider.send).toHaveBeenCalledOnce(); expect(provider.send.mock.calls[0]?.[0]).toBe(otherChat);
+    const admitted = await admissionCounts();
+    const oldId = randomUUID();
+    await webhook(targetChat, person, "Synthetic old input", target, oldId, false, oldTime);
+    expect(await admissionCounts()).toEqual(admitted);
+    provider.add.mockImplementation(async () => { targetPresent = true; return { status: "queued" }; });
+    vi.setSystemTime(Date.now() + 60_001);
+    const freshMove = await start(), freshId = randomUUID();
+    await webhook(targetChat, person, "Synthetic old input", target, oldId);
+    expect((await row(freshMove.moveId)).status).toBe("reserved");
+    await expect(webhook(targetChat, person, "Synthetic fresh input", target, freshId)).rejects.toMatchObject({ httpStatus: 503 });
+    await webhook(targetChat, person, "Synthetic fresh input", target, freshId);
+    expect((await row(freshMove.moveId)).status).toBe("adopted");
+    expect(await db.hostedMailboxItem.count({ where: { userId: room, kind: "conversation.message" } })).toBe(1);
+    expect((await admissionCounts()).containers).toBe(admitted.containers);
   });
   it("disarms an ambiguous add without sending a fallback", async () => {
     provider.add.mockRejectedValue(new Error("synthetic timeout"));

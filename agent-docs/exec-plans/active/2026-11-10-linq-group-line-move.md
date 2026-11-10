@@ -20,7 +20,7 @@ with the same human roster and both service numbers during that reservation.
 
 Parent candidate review inspected the full producer and ingress changes, both
 accepted cancellation findings, the scoped migration and the production-path
-regressions. The final local result is 180 focused tests plus 872 Web files and
+regressions. The round-1 remediation result is 180 focused tests plus 872 Web files and
 14,609 Web tests passing; root typecheck, lint, complexity, docs drift and diff
 checks pass. No assistant prompt or model decision surface changes, so model
 behavior is not the evidence boundary; the composed webhook/Postgres tests
@@ -33,8 +33,9 @@ Web convergence and explicit authorization of the throwaway-group proof. The
 active plan remains open for that provider proof and the separate duplicate
 repair. Publication of the operator code does not start a move.
 
-Round 2 is required because the fixes add persisted removal receipts and a
-migration extension. It will review the stable pushed candidate alongside CI.
+Round 2 reviewed the stable pushed candidate alongside CI because the fixes
+added persisted removal receipts and a migration extension. Its sole finding
+and the focused correction are recorded at the end of this plan.
 
 ## Historical worker checkpoint: PR 4806 round 1 remediation
 
@@ -996,3 +997,60 @@ and the scoped fix are ready for the authorized local `scripts/committer` commit
 
 No push, PR edit, production access, real Linq API call, dotenv read, new
 ReviewGPT round or CI run occurred. This remains an active local checkpoint.
+
+
+## Round 2: cancellation history and unaffected groups
+
+ReviewGPT round 2 reviewed `6eba8aa37655e120cfe36ec95136bd227781d29a`
+in the existing Mountain conversation with a full guarded snapshot, confirmed
+GPT-6 Pro request and completed `REVIEW_COMPLETE` response. It found one High
+review-induced bug. Accepted: five ordinary rejected-add/cancel operations
+produce five cancellation receipts, exhausting the shared ingress cap before
+an unrelated bound route can continue. This interrupts every group on the
+target line despite those receipts granting no routing authority.
+
+The regression creates five cancellations through the real producer with a
+fake SDK returning HTTP 403. Before the fix, a human message to a separately
+bound group fails with the ambiguity error. The correction keeps the original
+five-row cap for route authority and reads only the latest recent cancellation
+using the existing target/status/update-time index. Older receipts cannot
+increase the replay cutoff, so reading them adds no information. No new state,
+migration, lifecycle or authority path is introduced.
+
+Preparation and transaction revalidation each run two serial bounded reads,
+increasing ordinary group ingress from two to four SQL reads with peak one
+connection per phase. Provider calls and transaction ownership are unchanged.
+The cancellation row remains in the prepared fingerprint, preserving locked
+revalidation. The composed proof covers one unrelated group admission/reply,
+consumption of an old unbound event, a fresh move's successful adoption, and
+continued failure for genuinely ambiguous active rows.
+
+This correction remains within the reviewed ingress/query boundary and changes
+no persisted design. Per the completion workflow, prove it and complete CI;
+a third ReviewGPT round is not required merely to confirm the fix.
+
+
+Round-2 correction verification:
+
+- Red: the new producer scenario `after five rejected moves` failed at the
+  ordinary bound-group webhook with `HOSTED_LINQ_GROUP_LINE_MOVE_AMBIGUOUS`.
+- Green: the consumer and producer Postgres suites passed all 70 tests against
+  the existing isolated local database using `MURPH_TEST_POSTGRES_CONCURRENCY=1`
+  and `pnpm exec vitest run --config apps/web/vitest.config.ts --maxWorkers 1`.
+- The thread-route, egress-engagement, mailbox-root-prewarm, move unit and ops
+  route suites passed 425 tests with the same config and two workers. Their
+  narrow no-move mocks now include the latest-cancellation lookup.
+- Root `pnpm typecheck` passed with explicit local DATABASE_URL and the existing
+  no-dotenv verification preload. Web lint passed with existing warnings;
+  `pnpm complexity:diff`, `pnpm docs:drift`, `git diff --check` and the added-line
+  privacy scan passed. The measured ingress count is four bounded move reads;
+  adoption preparation is six statements and the adoption transaction remains
+  sixteen, with provider/KMS work disabled during the transaction proof.
+- The prior full Web run passed 14,609 tests. The final correction uses focused
+  local proof above and fresh full exact-head CI; the prior full run is not
+  presented as proof of the later changed files.
+
+Parent final review accepts the maximum-cutoff reduction and preserves both
+round-1 fixes. All accepted findings are locally resolved. The code is Ready
+for exact-head CI and merge; real-group execution remains Hold for deployment
+convergence and the separately authorized provider proof.
