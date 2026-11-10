@@ -5079,14 +5079,17 @@ describe("RunnerContainer", () => {
       },
     });
 
-    const error = await container.smokeHealth({
+    // A failed turn is reported in the result so the deploy smoke can tell it
+    // from a container that never started.
+    const result = await container.smokeHealth({
       liveModelTurn: {
         model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
-    }).catch((caught: unknown) => caught);
+    });
 
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe(
+    expect(result.ok).toBe(false);
+    expect(result.liveModelTurn).toBeUndefined();
+    expect(result.liveModelTurnFailure).toBe(
       "Hosted runner container live model turn smoke did not consume the Worker egress grant.",
     );
     await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
@@ -5158,14 +5161,17 @@ describe("RunnerContainer", () => {
       },
     });
 
-    const error = await container.smokeHealth({
+    // A failed turn is reported in the result so the deploy smoke can tell it
+    // from a container that never started.
+    const result = await container.smokeHealth({
       liveModelTurn: {
         model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
-    }).catch((caught: unknown) => caught);
+    });
 
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe(
+    expect(result.ok).toBe(false);
+    expect(result.liveModelTurn).toBeUndefined();
+    expect(result.liveModelTurnFailure).toBe(
       "Hosted runner container live model turn smoke failed with HTTP 500. "
         + "Hosted live model turn smoke codex exec exited with 1. stdoutBytes=0 stderrExcerpt=\"insufficient_quota\"",
     );
@@ -5178,14 +5184,17 @@ describe("RunnerContainer", () => {
   it("fails the live model turn smoke before contacting the container when OPENAI_API_KEY is missing", async () => {
     const { container, containerFetch } = createDeploySmokeContainerDouble();
 
-    const error = await container.smokeHealth({
+    // A failed turn is reported in the result so the deploy smoke can tell it
+    // from a container that never started.
+    const result = await container.smokeHealth({
       liveModelTurn: {
         model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
-    }).catch((caught: unknown) => caught);
+    });
 
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe(
+    expect(result.ok).toBe(false);
+    expect(result.liveModelTurn).toBeUndefined();
+    expect(result.liveModelTurnFailure).toBe(
       "Hosted runner live model turn smoke requires the OPENAI_API_KEY Worker secret.",
     );
     expect(containerFetch.mock.calls.some(([url]) =>

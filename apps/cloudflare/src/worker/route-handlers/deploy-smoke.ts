@@ -129,9 +129,7 @@ export async function handleDeployContainerSmokeRoute(
       ok: false,
     }, 400);
   }
-  // The initial smoke proves inventory before running the separate live-model
-  // phase. A later foreground claim must not invalidate that model-only probe.
-  const checkServing = !artifactOnly && liveModelTurnModel === null;
+  const checkServing = !artifactOnly;
   const standbyInventory = checkServing
     ? await readDeployStandbyInventory(scopeHostedRunnerReleaseEnvironment(context.env, "candidate"))
     : null;
@@ -204,6 +202,16 @@ export async function handleDeployContainerSmokeRoute(
           });
         });
     }
+  }
+
+  if (result.liveModelTurnFailure !== undefined) {
+    emitHostedExecutionStructuredLog({
+      component: "cloudflare.worker",
+      error: new Error(result.liveModelTurnFailure),
+      level: "error",
+      message: "Deploy live model turn smoke failed.",
+      phase: "failed",
+    });
   }
 
   return json({
