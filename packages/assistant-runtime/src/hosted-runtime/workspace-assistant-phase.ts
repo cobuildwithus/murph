@@ -2559,6 +2559,13 @@ export async function runHostedWorkspaceAssistantPhase(
           vaultRoot: input.restored.vaultRoot,
         })
       : null;
+    const assistantAutomationWakeIsAutonomous = hostedAssistantAutomationWakeIsAutonomous({
+      wakeAt: assistantNextWakeAt,
+      autonomousAt: assistantMetrics.assistantAutomationAutonomousNextWakeAt,
+      selectedInputAt: assistantMetrics.assistantAutomationSelectedInputWakeAt,
+      routingAt: assistantMetrics.assistantAutomationRoutingNextWakeAt,
+      outboxAt: outboxWakeAt,
+    });
     const providerCleanupScheduledWakeAt = deliveryEffects.length === 0
       ? await resolveHostedProviderCleanupScheduledWakeAt({
           nowMs: resolveHostedAssistantPhaseNowMs(input),
@@ -2598,7 +2605,8 @@ export async function runHostedWorkspaceAssistantPhase(
       nextWake = createHostedRuntimeWakeCandidate(postDelivery.nextWakeAt, postDelivery.nextWakeReason);
     } else {
       nextWake = selectHostedRuntimeWakeCandidate([
-        createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
+        createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason,
+          assistantAutomationWakeIsAutonomous),
         assistantCronWakeAfterPassCandidate,
         deviceSyncFollowUpWake,
         createHostedRuntimeWakeCandidate(
@@ -2609,6 +2617,7 @@ export async function runHostedWorkspaceAssistantPhase(
         createHostedRuntimeWakeCandidate(
           providerCleanupScheduledWakeAt,
           HOSTED_ASSISTANT_WAKE_REASON,
+          true,
         ),
       ]);
     }
@@ -2663,6 +2672,7 @@ export async function runHostedWorkspaceAssistantPhase(
         result: mergeContinuingSystemMailboxResult({
           invocationLocalAssistantWakeAt,
           ...(nextWakeAt ? { nextWakeAt } : {}),
+          nextWakeAutonomous: nextWake.autonomous,
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
             ? { nextWakeReason: nextWake.reason }
             : {}),
@@ -2737,6 +2747,7 @@ export async function runHostedWorkspaceAssistantPhase(
               wakeStateProgressed,
             }),
       nextWakeAt,
+      nextWakeAutonomous: nextWake.autonomous,
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
         ? { nextWakeReason: nextWake.reason }
         : {}),
@@ -3558,10 +3569,12 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
     createHostedRuntimeWakeCandidate(
       input.systemMailboxResult.nextWakeAt ?? null,
       input.systemMailboxResult.nextWakeReason ?? "assistant",
+      input.systemMailboxResult.nextWakeAutonomous === true,
     ),
     createHostedRuntimeWakeCandidate(
       input.assistantResult.nextWakeAt ?? null,
       input.assistantResult.nextWakeReason ?? "assistant",
+      input.assistantResult.nextWakeAutonomous === true,
     ),
   ]);
   const redactedStatus = mergeHostedRuntimeRedactedStatus(
@@ -3649,6 +3662,7 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
           ? { systemMailboxProgressed: true as const }
           : {}),
         ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
+        nextWakeAutonomous: nextWake.autonomous,
         ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
           ? { nextWakeReason: nextWake.reason }
           : {}),
@@ -3678,6 +3692,7 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
         ? { systemMailboxProgressed: true as const }
         : {}),
       ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
+      nextWakeAutonomous: nextWake.autonomous,
       ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
         ? { nextWakeReason: nextWake.reason }
         : {}),
@@ -4187,7 +4202,9 @@ function resolveHostedAssistantCronWakeCandidate(input: {
   state: HostedAssistantCronWakeState;
 }): HostedRuntimeWakeCandidate | null {
   if (input.state.available) {
-    return input.state.wake;
+    return input.state.wake?.at
+      ? { ...input.state.wake, autonomous: true }
+      : input.state.wake;
   }
 
   return createExistingHostedAssistantWorkspaceWakeCandidate(input.phaseInput);
@@ -4230,6 +4247,7 @@ function withHostedRuntimeWakeCandidate(input: {
     ? createHostedRuntimeWakeCandidate(
         input.result.nextWakeAt ?? null,
         input.result.nextWakeReason ?? "assistant",
+        input.result.nextWakeAutonomous === true,
       )
     : null;
   const nextWake = selectHostedRuntimeWakeCandidate([
@@ -4252,9 +4270,11 @@ function withHostedRuntimeWakeCandidate(input: {
   const result = { ...input.result };
   delete result.nextWakeAt;
   delete result.nextWakeReason;
+  delete result.nextWakeAutonomous;
   const nextResult: HostedWorkspaceRunnerAssistantPhaseResult = {
     ...result,
     ...(nextWake.at ? { nextWakeAt: nextWake.at } : {}),
+    nextWakeAutonomous: nextWake.autonomous,
     ...(nextWakeReason
       ? { nextWakeReason }
       : {}),
@@ -7712,7 +7732,7 @@ async function resolveHostedDeviceSyncFollowUpWake(input: {
     skippedDeviceSyncWake,
   ]);
   return selectedDeviceSyncFollowUpWake.at
-    ? selectedDeviceSyncFollowUpWake
+    ? { ...selectedDeviceSyncFollowUpWake, autonomous: true }
     : null;
 }
 
@@ -9244,6 +9264,20 @@ function assistantMetricsProgressed(
     deliveryEffectCount > 0
     || metrics.assistantAutomationProgressed === true
   );
+}
+
+function hostedAssistantAutomationWakeIsAutonomous(input: {
+  autonomousAt?: string | null;
+  outboxAt?: string | null;
+  routingAt?: string | null;
+  selectedInputAt?: string | null;
+  wakeAt: string | null;
+}): boolean {
+  return input.wakeAt !== null
+    && input.wakeAt === input.autonomousAt
+    && input.wakeAt !== input.selectedInputAt
+    && input.wakeAt !== input.routingAt
+    && input.wakeAt !== input.outboxAt;
 }
 
 function resolveHostedAssistantAutomationNextWakeReason(input: {

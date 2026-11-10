@@ -214,6 +214,8 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationCurrentTurnDeliveryIntentIds?: string[] | null;
   assistantAutomationElapsedMs?: number | null;
   assistantAutomationOutboxOnlyNextWakeAt?: string | null;
+  assistantAutomationAutonomousNextWakeAt?: string | null;
+  assistantAutomationRoutingNextWakeAt?: string | null;
   assistantAutomationPassElapsedMs?: number | null;
   assistantAutomationPostScanTailElapsedMs?: number | null;
   assistantAutomationCommittedUsageAuditKeys?: readonly string[] | null;

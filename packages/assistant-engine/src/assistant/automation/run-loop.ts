@@ -312,6 +312,7 @@ export async function runAssistantAutomationPass(
     currentTurnDeliveryIntentIds:
       scanResult.currentTurnDeliveryIntentIds,
     nextWakeAt,
+    autonomousNextWakeAt: cronNextRunAt,
     ...(outboxOnlyNextWakeAt ? { outboxOnlyNextWakeAt } : {}),
     outboxAttempted: outboxResult.attempted,
     passTiming,
