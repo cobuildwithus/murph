@@ -832,6 +832,9 @@ type PrismaFixtureBase = {
   hostedLinqDelivery?: HostedLinqDeliveryFixture;
   hostedLinqFirstContactAdmissionBudget?: HostedLinqFirstContactAdmissionBudgetFixture;
   hostedLinqFirstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecisionFixture;
+  hostedLinqGroupLineMove?: {
+    findMany: MockedFunction;
+  };
   hostedLinqLine?: HostedLinqLineFixture;
   hostedLinqProviderEvent?: HostedLinqProviderEventFixture;
   hostedMember?: HostedMemberFixture;
@@ -15905,6 +15908,9 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   const hostedMember = prisma.hostedMember;
   const hostedMemberEmailAuthorization = prisma.hostedMemberEmailAuthorization;
 
+  prisma.hostedLinqGroupLineMove ??= {
+    findMany: vi.fn().mockResolvedValue([]),
+  };
   prisma.$executeRaw ??= vi.fn(async () => 0);
   prisma.$queryRaw ??= vi.fn(async (
     query: readonly string[] | {

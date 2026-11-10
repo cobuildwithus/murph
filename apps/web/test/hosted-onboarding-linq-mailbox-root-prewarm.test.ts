@@ -396,6 +396,9 @@ function buildPrewarmPrisma() {
       calls.push("commit");
       return result;
     }),
+    hostedLinqGroupLineMove: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     hostedMemberIdentity: {
       findUnique: vi.fn<() => Promise<unknown>>(async () => null),
     },
