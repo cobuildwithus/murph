@@ -3926,16 +3926,12 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
       expect.objectContaining({ providerRequestOrdinal: 1 }),
     )
     expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledOnce()
-    expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
-      session: expect.objectContaining({
-        sessionId: session.sessionId,
-      }),
-      vault: '/vaults/test',
-    })
+    // A completed reconsideration keeps its thread for the next turn.
+    expect(mocks.clearAssistantSessionCodexResumeState).not.toHaveBeenCalled()
     expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
       expect.objectContaining({
         precedingAssistantTranscriptTexts: [],
-        providerResumeStateAction: 'clear',
+        providerResumeStateAction: 'persist-from-provider-turn',
       }),
     )
     expect(
@@ -4641,6 +4637,65 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
   ).not.toHaveBeenCalled()
 
+  // A reconsidered result that completes but cannot be finalized is unsent
+  // too, so the failed turn gives the thread up instead of saving it.
+  resetScenario()
+  const postSelectionDraftReady = createDeferred<void>()
+  const postSelectionError = new Error(
+    'finalization failed after the reconsidered result',
+  )
+  addFirstDraft(
+    postSelectionDraftReady,
+    'provider-thread-group-post-selection-failure',
+  )
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-1',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          attemptCount: 1,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-post-selection-failure',
+          provider: 'codex-cli',
+          providerOptions: session.providerOptions,
+          response: 'Reconsidered result that is never sent.',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeFingerprint: 'route-group-review' },
+          session: providerInput.resolvedSession,
+          transcriptResponse: 'Reconsidered result that is never sent.',
+          usage: createProviderUsage({ providerRequestId: 'request-1' }),
+        },
+      }
+    },
+  )
+  mocks.finalizeAssistantTurnArtifacts.mockRejectedValueOnce(
+    postSelectionError,
+  )
+  const postSelectionTurn = await startHeldTurn({
+    firstDraftReady: postSelectionDraftReady,
+    latePrompt: 'New group input before finalization',
+  })
+  const postSelectionOutcomes = await Promise.all([
+    postSelectionTurn.initial,
+    postSelectionTurn.late,
+  ])
+  for (const outcome of postSelectionOutcomes) {
+    assert.equal(outcome.status, 'rejected')
+    assert.equal(outcome.error, postSelectionError)
+  }
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(2)
+  expect(mocks.clearAssistantSessionCodexResumeState).not.toHaveBeenCalled()
+  expect(mocks.saveAssistantSession.mock.calls.at(-1)?.[1]).toMatchObject({
+    codexResume: null,
+    resumeState: null,
+  })
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+
   resetScenario()
   const retryDraftReady = createDeferred<void>()
   const retryNoReplyAccepted = vi.fn(async () => undefined)
@@ -5080,11 +5135,11 @@ test.each([
     expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledWith(
       expect.objectContaining({ segments: [] }),
     )
-    expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledOnce()
+    expect(mocks.clearAssistantSessionCodexResumeState).not.toHaveBeenCalled()
     expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledWith(
       expect.objectContaining({
         precedingAssistantTranscriptTexts: [],
-        providerResumeStateAction: 'clear',
+        providerResumeStateAction: 'persist-from-provider-turn',
       }),
     )
   } finally {
@@ -5398,7 +5453,7 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
       providerResult: expect.objectContaining({
         responseDeliveryContextOrdinal: 2,
       }),
-      providerResumeStateAction: 'clear',
+      providerResumeStateAction: 'persist-from-provider-turn',
     }),
   )
 }, 30_000)

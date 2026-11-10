@@ -10576,6 +10576,81 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'keeps replying on the reconsidered group thread without treating the unsent draft as said',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-reconsidered-thread-e2e-'),
+      )
+
+      try {
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [],
+          env: config.env,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const draft = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'Murph, what is 17 plus 14?',
+        })
+        expect(draft.finalMessage).toMatch(/\b31\b/u)
+        const selected = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+            'Murph, what is 17 plus 14?',
+            'Scratch that, Murph. What is 8 times 9 instead?',
+          ].join('\n\n'),
+          resumeSessionId: draft.sessionId,
+        })
+        expect(selected.sessionId).toBe(draft.sessionId)
+        expect(selected.finalMessage).toMatch(/\b72\b/u)
+        expect(selected.finalMessage).not.toMatch(/\b31\b/u)
+        // The next ordinary turn resumes the same thread, which still holds
+        // the unsent draft beside the instruction that disowned it.
+        const next = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'Murph, which numbers have you actually told this chat so far? Just list them.',
+          resumeSessionId: selected.sessionId,
+        })
+        process.stdout.write(
+          `[group-reconsidered-thread-e2e] ${JSON.stringify({
+            nextMessage: next.finalMessage,
+            scenario: 'a later turn asks what the chat was told after a withdrawn draft',
+            selectedMessage: selected.finalMessage,
+          })}\n`,
+        )
+
+        expect(next.sessionId).toBe(draft.sessionId)
+        expect(next.finalMessage).toMatch(/\b72\b/u)
+        expect(next.finalMessage).not.toMatch(/\b31\b/u)
+        expect(next.finalMessage).not.toMatch(
+          /draft|held|not sent|never sent|unsent|previous response|re-?evaluat/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
     'answers a rapid group clarification once after same-thread reconsideration',
     async () => {
       const config = await resolveRealCodexE2eConfig()

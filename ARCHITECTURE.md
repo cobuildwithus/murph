@@ -1005,7 +1005,14 @@ belongs to its reply turns. Every notification turn preserves the foreground
 resume binding on success and on failure, and its message reaches the reply
 thread as an unseen transcript entry. A provider turn that does not complete
 never saves a binding; only a saved thread that would not open is dropped, so
-the retry starts a new one. The review reads bounded
+the retry starts a new one. A group turn that fails after its held draft
+entered reconsideration also drops the thread, because the thread then holds a
+draft nobody received; a completed reconsideration keeps the thread, since its
+instruction records that the draft was unsent. A reply thread's tool
+declarations must not follow live room state: the game lore tool is declared
+for every Linq game-room reply and its handler refuses when no game is live,
+because a declaration that comes and goes restarts the thread each time. The
+review reads bounded
 current-member diagnostics from
 the canonical hosted AI usage ledger, preserving recorded allowance costs and
 explicit missing/truncated coverage. Existing sanitized turn profiles attribute
