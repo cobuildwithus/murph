@@ -390,9 +390,7 @@ function createProviderAttemptResult(): AssistantProviderTurnAttemptResult {
   return {
     metadata: {
       activityLabels: [],
-      executedToolCount: 0,
       providerActionCount: 0,
-      rawToolEvents: [],
       runtimeIssueInputs: [],
     },
     ok: true,
@@ -2127,9 +2125,7 @@ describe('Codex provider routing', () => {
       error: providerError,
       metadata: {
         activityLabels: ['Run Command'],
-        executedToolCount: 0,
         providerActionCount: 3,
-        rawToolEvents: [],
         runtimeIssueInputs: [],
       },
       ok: false,
@@ -2292,9 +2288,7 @@ describe('Codex provider routing', () => {
       error: providerError,
       metadata: {
         activityLabels: ['Memory Update'],
-        executedToolCount: 0,
         providerActionCount: 2,
-        rawToolEvents: [],
         runtimeIssueInputs: [],
       },
       ok: false,

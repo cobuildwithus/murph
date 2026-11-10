@@ -2,7 +2,6 @@ import type { AssistantTranscriptEntryInput } from './store/types.js'
 import { sanitizeAssistantPortableStateString } from './redaction.js'
 import { normalizeNullableString } from './shared.js'
 
-const MAX_AUDIT_ENTRIES = 12
 const MAX_AUDIT_TEXT_LENGTH = 900
 export const ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX =
   'murph.assistant-runtime-audit.v1 '
@@ -10,114 +9,28 @@ export const ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX =
 export function buildAssistantProviderTranscriptAuditEntries(input: {
   at?: string | null
   error?: unknown
-  rawToolEvents?: readonly unknown[] | null
   routeLabel?: string | null
 }): AssistantTranscriptEntryInput[] {
-  const entries: AssistantTranscriptEntryInput[] = []
-  const createdAt = normalizeNullableString(input.at)
-
-  for (const event of input.rawToolEvents ?? []) {
-    const entry = buildAssistantToolAuditEntry({
-      createdAt,
-      event,
-    })
-    if (entry) {
-      entries.push(entry)
-    }
-    if (entries.length >= MAX_AUDIT_ENTRIES) {
-      break
-    }
-  }
-
-  const providerErrorEntry = buildAssistantProviderErrorAuditEntry({
-    createdAt,
-    error: input.error,
-    routeLabel: input.routeLabel,
-  })
-  if (providerErrorEntry && entries.length < MAX_AUDIT_ENTRIES) {
-    entries.push(providerErrorEntry)
-  }
-
-  return entries
-}
-
-function buildAssistantToolAuditEntry(input: {
-  createdAt: string | null
-  event: unknown
-}): AssistantTranscriptEntryInput | null {
-  const record = asRecord(input.event)
-  if (!record) {
-    return null
-  }
-
-  const type = readString(record, 'type')
-  if (!type?.startsWith('assistant.tool.')) {
-    return null
-  }
-
-  const eventKind = type.slice('assistant.tool.'.length)
-  if (
-    eventKind !== 'previewed' &&
-    eventKind !== 'succeeded' &&
-    eventKind !== 'failed'
-  ) {
-    return null
-  }
-
-  const tool = normalizeNullableString(readString(record, 'tool')) ?? 'unknown-tool'
-  const mode = normalizeNullableString(readString(record, 'mode')) ?? 'apply'
-  const inputKeys = listInputKeys(record.input)
-  const inputSummary = inputKeys.length > 0
-    ? ` Input keys: ${inputKeys.join(', ')}.`
-    : ''
-
-  if (eventKind === 'failed') {
-    const errorCode = normalizeNullableString(readString(record, 'errorCode'))
-    const errorMessage =
-      sanitizeAuditText(readString(record, 'errorMessage')) ??
-      'Tool execution failed.'
-    return {
-      kind: 'error',
-      text: markAssistantAuditText(
-        `Tool ${tool} failed in ${mode} mode${errorCode ? ` (${errorCode})` : ''}: ${sentence(errorMessage)}${inputSummary}`,
-      ),
-      ...(input.createdAt ? { createdAt: input.createdAt } : {}),
-    }
-  }
-
-  return {
-    kind: 'status',
-    text: markAssistantAuditText(
-      `Tool ${tool} ${eventKind} in ${mode} mode.${inputSummary}`,
-    ),
-    ...(input.createdAt ? { createdAt: input.createdAt } : {}),
-  }
-}
-
-function buildAssistantProviderErrorAuditEntry(input: {
-  createdAt: string | null
-  error: unknown
-  routeLabel?: string | null
-}): AssistantTranscriptEntryInput | null {
   if (input.error === undefined || input.error === null) {
-    return null
+    return []
   }
 
   const message = sanitizeAuditText(errorToMessage(input.error))
   if (!message) {
-    return null
+    return []
   }
 
   const code = normalizeNullableString(readNestedString(input.error, ['code']))
   const routeLabel = sanitizeAuditText(input.routeLabel ?? null)
   const routePrefix = routeLabel ? `Provider route ${routeLabel}` : 'Provider route'
-  return {
+  const createdAt = normalizeNullableString(input.at)
+  return [{
     kind: 'error',
     text: markAssistantAuditText(
       `${routePrefix} failed${code ? ` (${code})` : ''}: ${sentence(message)}`,
     ),
-    ...(input.createdAt ? { createdAt: input.createdAt } : {}),
-  }
+    ...(createdAt ? { createdAt } : {}),
+  }]
 }
 
 function sanitizeAuditText(value: string | null | undefined): string | null {
@@ -188,19 +101,6 @@ function readNestedString(
   }
 
   return null
-}
-
-function listInputKeys(value: unknown): string[] {
-  const record = asRecord(value)
-  if (!record) {
-    return []
-  }
-
-  return Object.keys(record)
-    .filter((key) => key.trim().length > 0)
-    .sort()
-    .slice(0, 12)
-    .map((key) => sanitizeAssistantPortableStateString(key, 80))
 }
 
 function readString(

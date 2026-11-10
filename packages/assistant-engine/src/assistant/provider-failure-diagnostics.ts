@@ -1,36 +1,3 @@
-export function annotateRecoveredCodexThreadIdForDiagnostics(
-  error: unknown,
-): void {
-  if (!shouldAnnotateRecoveredCodexThreadIdForDiagnostics(error)) {
-    sanitizePublicCodexThreadDiagnostics(error, {
-      recoveredCodexThreadIdPresent: false,
-    })
-    return
-  }
-
-  const codexThreadId = extractRecoveredCodexThreadId(error)
-  if (!codexThreadId) {
-    sanitizePublicCodexThreadDiagnostics(error, {
-      recoveredCodexThreadIdPresent: false,
-    })
-    return
-  }
-
-  sanitizePublicCodexThreadDiagnostics(error, {
-    recoveredCodexThreadIdPresent: true,
-  })
-}
-
-export function extractRecoveredCodexThreadId(error: unknown): string | null {
-  const context = readAssistantProviderErrorContext(error)
-  const codexThreadId = context?.codexThreadId
-  return (
-    typeof codexThreadId === 'string' && codexThreadId.trim().length > 0
-      ? codexThreadId.trim()
-      : null
-  )
-}
-
 export function isAssistantProviderConnectionLostError(
   error: unknown,
 ): boolean {
@@ -52,15 +19,6 @@ export function isAssistantProviderInterruptedError(error: unknown): boolean {
   return Boolean(context && context.interrupted === true)
 }
 
-function shouldAnnotateRecoveredCodexThreadIdForDiagnostics(
-  error: unknown,
-): boolean {
-  return (
-    isAssistantProviderConnectionLostError(error) ||
-    isAssistantProviderInterruptedError(error)
-  )
-}
-
 function readAssistantProviderErrorContext(
   error: unknown,
 ): Record<string, unknown> | null {
@@ -78,12 +36,7 @@ function readAssistantProviderErrorContext(
   )
 }
 
-function sanitizePublicCodexThreadDiagnostics(
-  error: unknown,
-  options: {
-    recoveredCodexThreadIdPresent: boolean
-  },
-): void {
+export function sanitizePublicCodexThreadDiagnostics(error: unknown): void {
   if (!error || typeof error !== 'object') {
     return
   }
@@ -100,18 +53,10 @@ function sanitizePublicCodexThreadDiagnostics(
   } = currentContext
   const codexThreadIdPresent =
     typeof codexThreadId === 'string' && codexThreadId.trim().length > 0
-  const previousRecoveredCodexThreadIdPresent =
-    typeof recoveredCodexThreadId === 'string' &&
-    recoveredCodexThreadId.trim().length > 0
-
   ;(error as { context?: Record<string, unknown> }).context = {
     ...safeContext,
     ...('codexThreadId' in currentContext
       ? { codexThreadIdPresent }
-      : {}),
-    ...(options.recoveredCodexThreadIdPresent ||
-      previousRecoveredCodexThreadIdPresent
-      ? { recoveredCodexThreadIdPresent: true }
       : {}),
   }
 }

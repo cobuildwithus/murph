@@ -19,7 +19,6 @@ import {
   flushPendingAssistantRuntimeIssueWrites,
   recordAssistantRuntimeIssueInputsBestEffort,
   recordAssistantRuntimeIssue,
-  recordAssistantToolFailureRuntimeIssues,
   resolveAssistantDiagnosticsPolicy,
 } from '../src/assistant/issue-reporting.ts'
 import { normalizeCodexEvent } from '../src/assistant-codex-events.ts'
@@ -849,15 +848,6 @@ describe('assistant product small seams', () => {
       vault: '/vaults/test',
     })
 
-    await recordAssistantToolFailureRuntimeIssues({
-      policy: disabledPolicy,
-      rawToolEvents: [
-        {
-          type: 'assistant.tool.failed',
-        },
-      ],
-      vault: '/vaults/test',
-    })
 
     expect(
       runtimeStateMocks.writePendingAssistantRuntimeIssueRecord,
@@ -1259,122 +1249,6 @@ describe('assistant product small seams', () => {
     resolveWrite()
     await flush
     expect(flushed).toBe(true)
-  })
-
-  it('extracts and classifies tool failure runtime issues from provider events', async () => {
-    runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mockResolvedValue(undefined)
-
-    const policy = resolveAssistantDiagnosticsPolicy({
-      channel: 'email',
-      env: {
-        MURPH_ASSISTANT_PRIVATE_ISSUES: 'true',
-      },
-      executionContext: null,
-    })
-
-    await recordAssistantToolFailureRuntimeIssues({
-      policy,
-      rawToolEvents: [
-        null,
-        [],
-        'not-an-event',
-        {
-          type: 'assistant.tool.started',
-        },
-        {
-          errorCode: 'SCHEMA_INVALID',
-          errorMessage: 'provider rejected invalid payload',
-          input: {
-            ' contact id ': '1',
-            'bad key!': '2',
-          },
-          mode: ' sync ',
-          sequence: 1,
-          tool: ' Lookup Contacts ',
-          type: 'assistant.tool.failed',
-        },
-        {
-          errorMessage: 'request timed out before deadline',
-          input: 'not-an-object',
-          mode: 5,
-          sequence: '2',
-          tool: '   ',
-          type: 'assistant.tool.failed',
-        },
-        {
-          errorCode: 'E_REMOTE',
-          errorMessage: 42,
-          input: {
-            z: 'last',
-            a: 'first',
-          },
-          mode: 'async',
-          sequence: 3,
-          tool: 'notes/export',
-          type: 'assistant.tool.failed',
-        },
-      ],
-      vault: '/vaults/test',
-    })
-
-    expect(
-      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord,
-    ).toHaveBeenCalledTimes(3)
-
-    const schemaCall =
-      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mock.calls[0]?.[0]
-    const timeoutCall =
-      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mock.calls[1]?.[0]
-    const genericCall =
-      runtimeStateMocks.writePendingAssistantRuntimeIssueRecord.mock.calls[2]?.[0]
-
-    expect(schemaCall).toMatchObject({
-      vault: '/vaults/test',
-      record: expect.objectContaining({
-        component: 'assistant.tool',
-        details: {
-          inputKeys: ['bad-key', 'contact-id'],
-          mode: 'sync',
-          sequence: 1,
-        },
-        errorCode: 'SCHEMA_INVALID',
-        issueKind: 'schema_rejection',
-        operation: 'Lookup-Contacts',
-        phase: 'tool_call',
-        severity: 'warning',
-        summary: 'Assistant tool Lookup-Contacts failed during provider turn.',
-      }),
-    })
-
-    expect(timeoutCall).toMatchObject({
-      vault: '/vaults/test',
-      record: expect.objectContaining({
-        details: {
-          inputKeys: [],
-          mode: null,
-          sequence: null,
-        },
-        errorCode: null,
-        issueKind: 'timeout',
-        operation: 'unknown-tool',
-        summary: 'Assistant tool unknown-tool failed during provider turn.',
-      }),
-    })
-
-    expect(genericCall).toMatchObject({
-      vault: '/vaults/test',
-      record: expect.objectContaining({
-        details: {
-          inputKeys: ['a', 'z'],
-          mode: 'async',
-          sequence: 3,
-        },
-        errorCode: 'E_REMOTE',
-        issueKind: 'tool_error',
-        operation: 'notes-export',
-        summary: 'Assistant tool notes-export failed during provider turn.',
-      }),
-    })
   })
 
   it('builds execution plans from explicit targets and rejects missing targets', async () => {

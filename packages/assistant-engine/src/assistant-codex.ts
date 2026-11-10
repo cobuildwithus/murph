@@ -6164,17 +6164,6 @@ async function runCodexAppServerTurnOnProcess(
     requiredSuffix: requiredFinalResponseSuffix,
     requiredFallback: requiredFinalResponseFallback,
   })
-  if (
-    noReplySelected &&
-    normalizeNullableString(extractedFinalMessage) !== null
-  ) {
-    emitCodexSuppressedFinalMessageTrace({
-      codexThreadId,
-      finalActionKind: 'none',
-      onTraceEvent: input.onTraceEvent,
-      suppressedTextLength: extractedFinalMessage.length,
-    })
-  }
   const filteredPrecedingAgentMessageSegments = precedingAgentMessageSegments
     .filter((segment) => !shouldSuppressDeliveryContext(
       segment.deliveryContextOrdinal,
@@ -6267,32 +6256,6 @@ function mergeAutomationRelativeDateReferenceWindows(
   return {
     earliestAt: new Date(earliestAtMs).toISOString(),
     latestAt: new Date(latestAtMs).toISOString(),
-  }
-}
-
-function emitCodexSuppressedFinalMessageTrace(input: {
-  codexThreadId: string | null
-  finalActionKind: AssistantNoReplyDisposition['kind']
-  onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
-  suppressedTextLength: number
-}): void {
-  if (!input.onTraceEvent) {
-    return
-  }
-
-  try {
-    input.onTraceEvent({
-      codexThreadId: input.codexThreadId,
-      rawEvent: {
-        schema: 'murph.assistant-codex-final-action.v1',
-        type: 'assistant.codex.final_action_suppressed_text',
-        finalActionKind: input.finalActionKind,
-        suppressedTextLength: input.suppressedTextLength,
-      },
-      updates: [],
-    })
-  } catch {
-    // Diagnostic-only.
   }
 }
 

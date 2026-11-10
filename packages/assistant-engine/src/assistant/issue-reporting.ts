@@ -113,25 +113,6 @@ export async function recordAssistantRuntimeIssue(input: {
   })
 }
 
-export async function recordAssistantToolFailureRuntimeIssues(input: {
-  policy: AssistantDiagnosticsPolicy
-  rawToolEvents: readonly unknown[]
-  vault: string
-}): Promise<void> {
-  if (!input.policy.privateIssueCaptureEnabled) {
-    return
-  }
-
-  const issues = extractAssistantToolFailureRuntimeIssues(input.rawToolEvents)
-  for (const issue of issues) {
-    await recordAssistantRuntimeIssue({
-      issue,
-      policy: input.policy,
-      vault: input.vault,
-    })
-  }
-}
-
 export function recordAssistantRuntimeIssueInputsBestEffort(input: {
   issues: readonly AssistantRuntimeIssueInput[]
   policy: AssistantDiagnosticsPolicy
@@ -219,76 +200,6 @@ function normalizeTrustedIssueIdentifier(value: unknown): string | null {
   return typeof value === 'string'
     ? normalizeAssistantRuntimeIssueIdentifier(value)
     : null
-}
-
-function extractAssistantToolFailureRuntimeIssues(
-  events: readonly unknown[],
-): AssistantRuntimeIssueInput[] {
-  return events.flatMap((event) => {
-    const issue = createAssistantToolFailureRuntimeIssue(event)
-    return issue ? [issue] : []
-  }).slice(0, 8)
-}
-
-function createAssistantToolFailureRuntimeIssue(
-  event: unknown,
-): AssistantRuntimeIssueInput | null {
-  if (!event || typeof event !== 'object' || Array.isArray(event)) {
-    return null
-  }
-
-  const record = event as Record<string, unknown>
-  if (record.type !== 'assistant.tool.failed') {
-    return null
-  }
-
-  const tool = sanitizeNullableIssueField(record.tool) ?? 'unknown-tool'
-  const errorCode = sanitizeNullableIssueField(record.errorCode)
-  const issueKind = classifyToolFailureIssueKind({
-    errorCode,
-    errorMessage: typeof record.errorMessage === 'string' ? record.errorMessage : null,
-  })
-
-  return {
-    component: 'assistant.tool',
-    details: {
-      inputKeys: listObjectKeys(record.input),
-      mode: sanitizeNullableIssueField(record.mode),
-      sequence: typeof record.sequence === 'number' ? record.sequence : null,
-    },
-    errorCode,
-    issueKind,
-    operation: tool,
-    phase: 'tool_call',
-    severity: 'warning',
-    summary: `Assistant tool ${tool} failed during provider turn.`,
-  }
-}
-
-function classifyToolFailureIssueKind(input: {
-  errorCode: string | null
-  errorMessage: string | null
-}): AssistantRuntimeIssueKind {
-  const haystack = `${input.errorCode ?? ''} ${input.errorMessage ?? ''}`.toLowerCase()
-  if (/\b(?:schema|contract|validation|invalid|parse|strict|rejected|unsupported)\b/u.test(haystack)) {
-    return 'schema_rejection'
-  }
-  if (/\b(?:timeout|timed out|deadline|abort)\b/u.test(haystack)) {
-    return 'timeout'
-  }
-  return 'tool_error'
-}
-
-function listObjectKeys(value: unknown): string[] {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return []
-  }
-
-  return Object.keys(value)
-    .map((key) => sanitizeIssueField(key))
-    .filter((key) => key.length > 0)
-    .sort()
-    .slice(0, 24)
 }
 
 function sanitizeIssueDetails(details: Record<string, unknown> | null): Record<string, unknown> {

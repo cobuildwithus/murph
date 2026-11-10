@@ -57,7 +57,7 @@ import {
 import type { CodexThreadIdentity } from './codex-thread-route.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import {
-  annotateRecoveredCodexThreadIdForDiagnostics,
+  sanitizePublicCodexThreadDiagnostics,
 } from './provider-failure-diagnostics.js'
 import { appendAssistantTranscriptEntries } from './store.js'
 import {
@@ -407,7 +407,7 @@ async function maybeRouteAssistantReaction(
   await executionPlan.onFinishWithoutReplyRecorded?.({ deliveryContextOrdinal: 0 })
   return {
     ok: true,
-    metadata: { activityLabels: [], executedToolCount: 0, providerActionCount: 1, rawToolEvents: [], runtimeIssueInputs: [] },
+    metadata: { activityLabels: [], providerActionCount: 1, runtimeIssueInputs: [] },
     result: {
       provider: 'codex-cli', providerThreadUnchanged: true,
       codexThreadId: attemptPlan.routePlan.resume?.codexThreadId ?? null,
@@ -552,9 +552,7 @@ async function executeAssistantCodexAttempt(
   const { attemptPlan, executionPlan } = input
   let attemptMetadata: AssistantProviderAttemptMetadata = {
     activityLabels: [] as readonly string[],
-    executedToolCount: 0,
     providerActionCount: 0,
-    rawToolEvents: [] as readonly unknown[],
     runtimeIssueInputs: [] as readonly AssistantRuntimeIssueInput[],
   }
   const reasoningEffort =
@@ -649,7 +647,7 @@ async function executeAssistantCodexAttempt(
   } catch (error) {
     const errorCode = readAssistantErrorCode(error)
     if (executionPlan.profile.threadScope === 'session-thread') {
-      annotateRecoveredCodexThreadIdForDiagnostics(error)
+      sanitizePublicCodexThreadDiagnostics(error)
     }
     const session = attemptPlan.session
     recordAssistantRuntimeIssueInputsBestEffort({
@@ -684,7 +682,6 @@ async function executeAssistantCodexAttempt(
         session.sessionId,
         buildAssistantProviderTranscriptAuditEntries({
           error,
-          rawToolEvents: attemptMetadata.rawToolEvents,
           routeLabel: attemptPlan.route.label,
         }),
       ).catch(() => undefined)
@@ -1059,7 +1056,6 @@ function normalizeAssistantProviderAttemptMetadata(
 ): AssistantProviderAttemptMetadata {
   return {
     ...metadata,
-    rawToolEvents: metadata.rawToolEvents ?? [],
     runtimeIssueInputs: metadata.runtimeIssueInputs ?? [],
   }
 }

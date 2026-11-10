@@ -147,7 +147,6 @@ import {
   recordAdditionalAssistantUsageEvents,
   recordAssistantUsageEvent,
 } from "../src/assistant/service-usage.ts";
-import { ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX } from "../src/assistant/transcript-audit.ts";
 import {
   ASSISTANT_GENERATED_IMAGE_DELIVERY_TRANSCRIPT_MARKER_PREFIX,
   readAssistantGeneratedImageDeliveryTranscriptMarker,
@@ -4635,74 +4634,6 @@ describe("assistant turn finalizer seam", () => {
       "provider-session-existing"
     );
     expect(saved.resumeState?.routeFingerprint).toBe("route-existing");
-  });
-
-  it("persists successful provider tool audit entries before the assistant transcript", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-08T15:45:00.000Z"));
-    runtimeState.sessions.save.mockImplementation(
-      async (session: AssistantSession) => session
-    );
-
-    const session = createAssistantSession({
-      turnCount: 2,
-    });
-
-    await persistAssistantTurnAndSession({
-      assistantTranscriptText: "The experiment exists.",
-      input: {
-        prompt: "Create the experiment.",
-        vault: "/vault",
-      },
-      plan: createSharedPlan({
-        persistUserPromptOnFailure: false,
-      }),
-      persistUserPromptToTranscript: false,
-      providerResult: createProviderResult({
-        rawEvents: [
-          {
-            input: {
-              apiKey: "synthetic-private-value",
-              command: "vault-cli experiment start",
-            },
-            mode: "apply",
-            tool: "vault.cli.run",
-            type: "assistant.tool.succeeded",
-          },
-        ],
-        route: createRoute({ routeId: "route-tool-audit" }),
-        session,
-      }),
-      providerResumeStateAction: "persist-from-provider-turn",
-      session,
-      turnCreatedAt: "2026-04-08T15:44:00.000Z",
-      turnId: "turn-finalizer-tool-audit",
-    });
-
-    expect(runtimeState.transcripts.append).toHaveBeenNthCalledWith(
-      1,
-      session.sessionId,
-      [
-        {
-          kind: "status",
-          text:
-            `${ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX}Tool vault.cli.run succeeded in apply mode. Input keys: apiKey, command.`,
-        },
-      ]
-    );
-    expect(runtimeState.transcripts.append).toHaveBeenNthCalledWith(
-      2,
-      session.sessionId,
-      [
-        {
-          kind: "assistant",
-          text: "The experiment exists.",
-        },
-      ]
-    );
-    expect(
-      JSON.stringify(runtimeState.transcripts.append.mock.calls)
-    ).not.toContain("synthetic-private-value");
   });
 
   it("persists pre-steer final answers before the final assistant entry in one transcript append", async () => {

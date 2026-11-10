@@ -301,7 +301,6 @@ export async function persistAssistantTurnAndSession(input: {
   }
 
   const auditEntries = buildAssistantProviderTranscriptAuditEntries({
-    rawToolEvents: input.providerResult.rawEvents,
     routeLabel: input.providerResult.route.label,
   })
   if (auditEntries.length > 0) {

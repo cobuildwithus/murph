@@ -313,9 +313,7 @@ export interface AssistantProviderResponseSegment {
 
 export interface AssistantProviderAttemptMetadata {
   activityLabels: readonly string[]
-  executedToolCount: number
   providerActionCount: number
-  rawToolEvents: readonly unknown[]
   runtimeIssueInputs: readonly AssistantRuntimeIssueInput[]
 }
 

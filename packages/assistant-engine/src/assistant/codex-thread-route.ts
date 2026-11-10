@@ -8,7 +8,6 @@ import {
   serializeAssistantProviderSessionOptions,
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
-import { resolveCodexAssistantLabel } from './codex-runtime.js'
 import { normalizeNullableString } from './shared.js'
 
 export interface CodexThreadIdentity {
@@ -42,7 +41,12 @@ export function buildCodexThreadIdentity(
     routeFingerprint,
     routeId: routeFingerprint,
     threadCompatibilityFingerprint,
-    label: buildCodexThreadIdentityLabel(providerConfig),
+    label: [
+      'primary',
+      'Codex app-server',
+      normalizeNullableString(providerConfig.target.model),
+      normalizeNullableString(providerConfig.target.profile),
+    ].filter((value): value is string => value !== null).join(':'),
     provider,
     providerOptions,
     codexCommand,
@@ -59,21 +63,6 @@ export function readCodexThreadCompatibilityFingerprint(
   route: CodexThreadIdentity,
 ): string {
   return route.threadCompatibilityFingerprint ?? readCodexThreadRouteFingerprint(route)
-}
-
-function buildCodexThreadIdentityLabel(
-  providerConfig: AssistantProviderConfig,
-): string {
-  const providerLabel = resolveCodexAssistantLabel(providerConfig)
-
-  const parts = [
-    'primary',
-    providerLabel,
-    normalizeNullableString(providerConfig.target.model),
-    normalizeNullableString(providerConfig.target.profile),
-  ].filter((value): value is string => value !== null)
-
-  return parts.join(':')
 }
 
 function hashCodexThreadIdentity(input: {

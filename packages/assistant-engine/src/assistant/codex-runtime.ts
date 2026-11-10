@@ -18,7 +18,6 @@ import {
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   preinitializeCodexAssistantProcess as preinitializeCodexAssistantProcessUnchecked,
   startCodexAssistantVoice,
-  resolveCodexAssistantLabel as resolveCodexAssistantConfigLabel,
 } from './providers/codex-cli.js'
 
 import type {
@@ -97,24 +96,6 @@ export function resolveCodexAssistantTargetCapabilities(
   })
 }
 
-export function resolveCodexAssistantLabel(
-  input: AssistantProviderConfigLike | null | undefined,
-): string {
-  const normalized = normalizeAssistantProviderConfig(input)
-  return resolveCodexAssistantConfigLabel(normalized)
-}
-
-export async function executeCodexAssistantTurn(
-  input: AssistantProviderTurnExecutionInput,
-): Promise<AssistantProviderTurnExecutionResult> {
-  const result = await executeCodexAssistantTurnAttempt(input)
-  if (!result.ok) {
-    throw result.error
-  }
-
-  return result.result
-}
-
 export async function executeCodexAssistantTurnAttempt(
   input: AssistantProviderTurnExecutionInput,
 ): Promise<AssistantProviderTurnAttemptResult> {
@@ -140,14 +121,6 @@ export async function executeCodexAssistantTurnAttempt(
       ok: false,
     }
   }
-}
-
-export async function executeCodexAssistantTurnFromInput(
-  input: AssistantProviderTurnInput,
-): Promise<AssistantProviderTurnExecutionResult> {
-  return await executeCodexAssistantTurn(
-    toAssistantProviderTurnExecutionInput(input),
-  )
 }
 
 export async function executeCodexAssistantTurnAttemptFromInput(
@@ -179,9 +152,7 @@ export type {
 function createEmptyAssistantProviderAttemptMetadata(): AssistantProviderAttemptMetadata {
   return {
     activityLabels: [],
-    executedToolCount: 0,
     providerActionCount: 0,
-    rawToolEvents: [],
     runtimeIssueInputs: [],
   }
 }
