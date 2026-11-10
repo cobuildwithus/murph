@@ -2379,6 +2379,14 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
     return;
   }
 
+  const skippedValues = new Map<string, {
+    reason: string;
+    sourceProvider?: string;
+    sourceTypeKind: string;
+    unitKind?: string;
+    valueRange?: string;
+    count: number;
+  }>();
   for (const [index, { entry, originFallback }] of entries.entries()) {
     const resourceContext = buildResourceContext({
       entry,
@@ -2415,22 +2423,29 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
           input.context.defaultTimeZone,
         )
       : undefined;
-    // Preserve the validation order and report only the first failed predicate.
-    const reason: JunctionCalendarRefreshNormalizationFailureReason | undefined =
-      resourceContext === null ? "sparse_interval.source_context_missing"
-      : valueDiagnostic.reason ? valueDiagnostic.reason
-      : startRaw === undefined ? "sparse_interval.start_missing"
-      : endRaw === undefined ? "sparse_interval.end_missing"
-      : startAt === undefined ? "sparse_interval.start_invalid"
-      : endAt === undefined ? "sparse_interval.end_invalid"
-      : Date.parse(endAt) < Date.parse(startAt) ? "sparse_interval.end_before_start"
-      : dayKey !== expectation.dayKey ? "sparse_interval.day_mismatch"
-      : resourceContext.sourceProviderSlug !== expectation.sourceProviderSlug ? "sparse_interval.provider_mismatch"
-      : expectation.sourceType != null && resourceContext.origin.sourceType !== expectation.sourceType
-        ? "sparse_interval.source_type_mismatch"
-      : expectation.sourceInstanceId != null && resourceContext.origin.sourceInstanceId !== expectation.sourceInstanceId
-        ? "sparse_interval.source_instance_mismatch"
-      : undefined;
+    const reason = junctionSparseCalendarRowFailureReason({
+      resourceContext, startRaw, endRaw, startAt, endAt, dayKey, expectation,
+      valueReason: valueDiagnostic.reason,
+    });
+    if (reason?.startsWith("sparse_interval.value_")) {
+      // The ordinary sparse reader already omits values it cannot normalize.
+      // Count those omissions here so a single bad value cannot retain a whole
+      // calendar job indefinitely or disappear without an operational trace.
+      const sourceType = resourceContext?.origin.sourceType;
+      const sourceTypeKind = sourceType === "app" || sourceType === "watch" || sourceType === "ring"
+        ? sourceType : "other";
+      const diagnostic = {
+        reason,
+        sourceProvider: normalizeKnownJunctionSourceProviderSlug(resourceContext?.sourceProviderSlug),
+        sourceTypeKind,
+        unitKind: valueDiagnostic.unitKind,
+        valueRange: valueDiagnostic.valueRange,
+      };
+      const key = JSON.stringify(diagnostic);
+      const previous = skippedValues.get(key);
+      skippedValues.set(key, { ...diagnostic, count: (previous?.count ?? 0) + 1 });
+      continue;
+    }
     if (reason) {
       throw junctionCalendarRefreshNormalizationError(
         reason,
@@ -2446,6 +2461,37 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
       );
     }
   }
+  for (const diagnostic of skippedValues.values()) {
+    console.warn("Junction sparse calendar values skipped after validation.", diagnostic);
+  }
+}
+
+function junctionSparseCalendarRowFailureReason(input: {
+  resourceContext: ResourceContext | null;
+  startRaw?: string;
+  endRaw?: string;
+  startAt?: string;
+  endAt?: string;
+  dayKey?: string;
+  expectation: JunctionSparseCalendarRepairExpectation;
+  valueReason?: JunctionCalendarRefreshNormalizationFailureReason;
+}): JunctionCalendarRefreshNormalizationFailureReason | undefined {
+  const { resourceContext, startRaw, endRaw, startAt, endAt, dayKey, expectation, valueReason } = input;
+  // Establish source and day authority before allowing the sparse reader to
+  // skip a bad value. Report only the first failed predicate.
+  return resourceContext === null ? "sparse_interval.source_context_missing"
+    : startRaw === undefined ? "sparse_interval.start_missing"
+    : endRaw === undefined ? "sparse_interval.end_missing"
+    : startAt === undefined ? "sparse_interval.start_invalid"
+    : endAt === undefined ? "sparse_interval.end_invalid"
+    : Date.parse(endAt) < Date.parse(startAt) ? "sparse_interval.end_before_start"
+    : dayKey !== expectation.dayKey ? "sparse_interval.day_mismatch"
+    : resourceContext.sourceProviderSlug !== expectation.sourceProviderSlug ? "sparse_interval.provider_mismatch"
+    : expectation.sourceType != null && resourceContext.origin.sourceType !== expectation.sourceType
+      ? "sparse_interval.source_type_mismatch"
+    : expectation.sourceInstanceId != null && resourceContext.origin.sourceInstanceId !== expectation.sourceInstanceId
+      ? "sparse_interval.source_instance_mismatch"
+    : valueReason;
 }
 
 function junctionSparseIntervalValueDiagnostic(
