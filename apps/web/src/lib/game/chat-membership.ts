@@ -80,7 +80,13 @@ export async function readGameChatCandidateIds(playerMemberIds: readonly string[
   if (((!multiplayer || !containerMemberId) && !sameGamePlayers(playerMemberIds, playerMemberIds)) || !isGameAudienceOn(playerMemberIds)) return [];
   const prisma = getPrisma();
   const [active, settled] = await Promise.all([
-    prisma.game.findMany({ where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), OR: [{ ...gamePairWhere(playerMemberIds), status: { in: ["negotiating", "live"] } }, addressedGameRematchWhere(playerMemberIds), ...(multiplayer && containerMemberId ? [{ chatContainerMemberId: containerMemberId, status: { in: ["invited", "negotiating", "live"] } }] : [])] },
+    prisma.game.findMany({ where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), OR: [
+      { ...gamePairWhere(playerMemberIds), status: { in: ["negotiating", "live"] } }, addressedGameRematchWhere(playerMemberIds),
+      ...(multiplayer && containerMemberId ? [{ chatContainerMemberId: containerMemberId, OR: [
+        { status: { in: ["negotiating", "live"] } },
+        { status: "invited", OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: new Date() } }] },
+      ] }] : []),
+    ] },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: GAME_MAX_OPEN_PER_PAIR, select: { id: true } }),
     prisma.game.findMany({ where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), ...(multiplayer && containerMemberId ? { OR: [gamePairWhere(playerMemberIds), { chatContainerMemberId: containerMemberId }] } : gamePairWhere(playerMemberIds)), status: "settled" },
       orderBy: [{ settledAt: "desc" }, { id: "asc" }], take: 5, select: { id: true } }),

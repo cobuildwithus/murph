@@ -1,3 +1,4 @@
+import { readGameChatCandidateIds } from "@/src/lib/game/chat-membership";
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -62,8 +63,10 @@ describe.skipIf(!enabled)("chat game setup persistence", () => {
     expect(await f.run(f.b, { operation: "approve", gameId: id, expectedTermsVersion: 1 })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     expect((await readGameChatState(f.room, [f.a, f.b])).games.map(g => g.id)).not.toContain(id);
     const expired = await appRematch(f);
+    expect(await readGameChatCandidateIds([f.a, f.b, other.a], true, f.room)).toContain(expired);
     await getPrisma().game.update({ where: { id: expired }, data: { inviteExpiresAt: new Date(0) } });
     expect((await readGameChatState(f.room, [f.a, f.b])).games.map(g => g.id)).not.toContain(expired);
+    expect(await readGameChatCandidateIds([f.a, f.b, other.a], true, f.room)).not.toContain(expired);
     expect(await f.run(f.b, { operation: "approve", gameId: expired, expectedTermsVersion: 1 })).toMatchObject({ ok: false });
     const blocked = await appRematch(other);
     await runGameCommand({ actorMemberId: other.a, command: { type: "block", memberId: other.b } });

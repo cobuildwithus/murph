@@ -1164,7 +1164,9 @@ schedule, pending proposal, daily check-in status and settled results. It never 
 photos, check-in photos, excuses or invite tokens. A live two-player game grants
 its eligible groups the normal included group usage allowance without granting
 the players personal AI access. Duplicate rooms share the primary game allowance;
-they do not create more included credit. Suspension, withdrawn health-data consent, the game
+they do not create more included credit. An expanded duplicate room proves eligibility
+from its own bound pair game, then derives its allowance beneficiary from the
+same primary-pair selector as an exact room. Suspension, withdrawn health-data consent, the game
 feature flag and member allowlist still apply. Tasks can change, with the other player's yes, until either player's Day 1
 begins, including on a live game that has not reached Day 1. The prize or dare
 can change the same way until the game is due: the new one counts for the whole
@@ -1371,7 +1373,14 @@ without its delivery link. That room message uses only room conversation and
 shared state, never app-only captions or photo details. Pair recap and missed-day
 turns keep their existing lore writes. Group missed-day turns may also replace
 their original-audience lore because they receive only room conversation and
-shared state; they never merge pair notebooks or different audiences. Deploy
+shared state; they never merge pair notebooks or different audiences. Pair
+notebooks may include app-only recap details, so ordinary and scheduled game
+reads expose their fingerprint only while the room contains exactly the pair.
+Pair recap and pair missed-day messages keep that private audience boundary at
+final provider dispatch, including text sealed or queued before a bystander
+arrives. The existing delivery retry policy owns those held messages; the app
+recap stays available to its players and shared game actions remain available.
+Group recap messages retain their room-public content rule. Deploy
 compatible runner readers before Web emits group recap or missed-day policies.
 Once new envelopes exist, keep compatible readers and final egress as the
 rollback floor. Production group admission stays dark; no old lore files are

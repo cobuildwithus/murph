@@ -2434,6 +2434,14 @@ describe("hosted Linq egress authority", () => {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ authorityCheckOnly: false, answeredMailboxItemIds: [], idempotencyKey, target: "chat-authorized-group", targetKind: "thread" }),
       }));
+      if (["recap", "regenerated-recap"].includes(scenario)) {
+        // The queued pair text may quote app-only posts. A fresh expanded
+        // audience must fail before claiming any provider dispatch.
+        expect((await dispatch()).status).toBe(500);
+        expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+        mocks.readGameProposalDeliveryPlayers.mockResolvedValue(gameNoticeAudience(["person-a", "person-b"]));
+        prisma.game.findFirst.mockClear();
+      }
       const response = await dispatch();
       if (scenario === "current" || scenario === "refusal" || ["recap", "regenerated-recap"].includes(scenario)) {
         expect(response.status).toBe(200);

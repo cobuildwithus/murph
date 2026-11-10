@@ -12,7 +12,7 @@ import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboardi
 import { gameResolutionNoticeKind, parseGameResolutionNotice, readGameChangeResolution } from "./change-resolution";
 import { currentTerms, isGameInviteExpired, parseStoredTerms } from "./rules";
 import { readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
-import { readGroupGameNoticeAuthority } from "./chat-membership";
+import { GameChatAudienceError, readGroupGameNoticeAuthority, sameGamePlayers } from "./chat-membership";
 import type { HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateEveningCheckInPolicy, HostedGamePrivateKickoffPolicy } from "@murphai/hosted-execution/runtime-control";
 import { isGroupMissedDayBatchCurrentTx } from "./group-missed-day";
 import { isEveningBatchCurrentTx } from "./evening-check-in";
@@ -127,6 +127,7 @@ async function assertGameRecapDeliveryCurrentTx(
     include: { invitees: true, players: { take: 11 } },
   });
   if (!game || game.maxPlayers === 10 && !groupGameRecapPlayers(game) || !await deliveryAudienceCurrent(input, game)) return stale();
+  requirePrivatePairNoticeAudience(input, game);
   if (!await readGameRecapEntryIdsTx(input.tx, game, input.deliveryIdempotencyKey!)) return stale();
   return true;
 }
@@ -140,6 +141,7 @@ async function assertGameMissedDeliveryCurrentTx(
   });
   if (!game || game.maxPlayers === 10 || !game.players.some(player => player.memberId === addressedMemberId && !player.leftAt)
     || !await deliveryAudienceCurrent(input, game)) return stale();
+  requirePrivatePairNoticeAudience(input, game);
   return true;
 }
 
@@ -231,4 +233,15 @@ function stale(): never {
 
 async function deliveryAudienceCurrent(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], game: Parameters<typeof readGroupGameNoticeAuthority>[0]): Promise<boolean> {
   return Boolean(input.audience && await readGroupGameNoticeAuthority(game, input.containerMemberId, input.audience, input.tx));
+}
+
+/** Pair recap and missed-day writers can read app-only pair lore. Hold their
+ * queued text while bystanders are present; never retire it as stale game work.
+ */
+function requirePrivatePairNoticeAudience(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], game: Parameters<typeof readGroupGameNoticeAuthority>[0]): void {
+  if (game.maxPlayers !== 2) return;
+  const players = game.players.map(player => player.memberId);
+  if (!input.audience || input.audience.contacts.length > 2 || !sameGamePlayers(input.audience.memberIds, players)) {
+    throw new GameChatAudienceError("participants_changed", "This pair notice requires only its players in the chat.");
+  }
 }

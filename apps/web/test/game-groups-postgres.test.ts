@@ -1009,7 +1009,7 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     expect(await readGameChatAuthority(await gameRow(gameId), room)).toBeNull();
   });
 
-  it.each([false, true])("delivers and seals a pair recap in its expanded room (registered bystander: %s)", async registered => {
+  it.each([false, true])("keeps the app recap but holds private pair text in an expanded room (registered bystander: %s)", async registered => {
     const people = [await person(), await person()], members = people.map(person => person.id);
     const bystander = registered ? await person() : { id: "", email: "bystander@example.test" };
     const room = await exactRoom(people);
@@ -1047,6 +1047,12 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     }
     expect(await sealGameRecap(sealing)).toEqual(sealing.recap);
     expect(await readGame(game.id, people[1].id)).toMatchObject({ recap: sealing.recap });
+    await expect(db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: room,
+      deliveryIdempotencyKey: `game-recap:${game.id}`, audience: authority }))).rejects.toMatchObject({ reason: "participants_changed" });
+    chatProof.rooms.set(room, people.map(person => person.email));
+    const privateAudience = await readGameChatAudience(room);
+    expect(await db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: room,
+      deliveryIdempotencyKey: `game-recap:${game.id}`, audience: privateAudience }))).toBe(true);
   });
 
   it("rechecks a pair room restriction after notice preparation before append", async () => {

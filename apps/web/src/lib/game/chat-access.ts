@@ -38,6 +38,23 @@ export async function readGameChatFundingRooms(input: {
       ) participants
       HAVING count(*) BETWEEN 1 AND ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} AND bool_and(last_seen_at >= ${cutoff})
     ) roster ON TRUE
+    LEFT JOIN LATERAL (
+      -- Room eligibility follows its own bound game. Billing still follows the
+      -- established primary for that game's pair, including duplicate rooms.
+      SELECT CASE WHEN cardinality(roster.member_ids) = 2 THEN roster.member_ids ELSE (
+        SELECT ARRAY(SELECT p.member_id FROM game_player p WHERE p.game_id = bound.id ORDER BY p.member_id)
+        FROM game bound
+        WHERE bound.max_players = 2 AND bound.chat_container_member_id = room.id
+          AND cardinality(roster.member_ids) > 2
+          AND (bound.status = 'live' OR (bound.status = 'negotiating'
+            AND (bound.invite_expires_at IS NULL OR bound.invite_expires_at > ${input.now}))
+            OR (bound.status = 'settled' AND bound.settled_at > ${settledCutoff} AND bound.settled_at <= ${input.now}))
+          AND (SELECT count(*) FROM game_player p WHERE p.game_id = bound.id) = 2
+          AND NOT EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = bound.id
+            AND (p.member_id IS NULL OR p.left_at IS NOT NULL OR NOT (p.member_id = ANY(roster.member_ids))))
+        ORDER BY bound.created_at, bound.id LIMIT 1
+      ) END AS member_ids
+    ) pair ON TRUE
     JOIN LATERAL (
       SELECT COALESCE(
         (SELECT game.id FROM game WHERE game.max_players = 10
@@ -58,34 +75,23 @@ export async function readGameChatFundingRooms(input: {
                 AND receipt.status IN ('awaiting_generation', 'generation_queued')
                 AND receipt.skipped_at IS NULL)
           ORDER BY rematch.created_at DESC, rematch.id LIMIT 1),
-        -- Expanded rooms can use only their own bound pair, never the first
-        -- two people in the room as an inferred pair.
-        (SELECT bound.id FROM game bound
-          WHERE bound.max_players = 2 AND bound.chat_container_member_id = room.id
-            AND cardinality(roster.member_ids) > 2
-            AND (bound.status = 'live' OR (bound.status = 'negotiating'
-              AND (bound.invite_expires_at IS NULL OR bound.invite_expires_at > ${input.now}))
-              OR (bound.status = 'settled' AND bound.settled_at > ${settledCutoff} AND bound.settled_at <= ${input.now}))
-            AND NOT EXISTS (SELECT 1 FROM game_player p WHERE p.game_id = bound.id
-              AND (p.member_id IS NULL OR p.left_at IS NOT NULL OR NOT (p.member_id = ANY(roster.member_ids))))
-          ORDER BY bound.created_at, bound.id LIMIT 1),
         -- Derive the pair from the indexed seats. Select one established
         -- primary room even when several games are live or still unbound.
         (SELECT active.id FROM game_player first_player
           JOIN game active ON active.id = first_player.game_id
-          WHERE cardinality(roster.member_ids) = 2 AND active.max_players = 2 AND first_player.member_id = roster.member_ids[1]
+          WHERE cardinality(pair.member_ids) = 2 AND active.max_players = 2 AND first_player.member_id = pair.member_ids[1]
             AND active.chat_container_member_id IS NOT NULL
             AND (active.status = 'live' OR (active.status = 'negotiating'
               AND (active.invite_expires_at IS NULL OR active.invite_expires_at > ${input.now})))
             AND EXISTS (SELECT 1 FROM game_player second_player
-              WHERE second_player.game_id = active.id AND second_player.member_id = roster.member_ids[2])
+              WHERE second_player.game_id = active.id AND second_player.member_id = pair.member_ids[2])
           ORDER BY active.created_at, active.id LIMIT 1),
         (SELECT recent.id FROM game_player first_player
           JOIN game recent ON recent.id = first_player.game_id
-          WHERE cardinality(roster.member_ids) = 2 AND recent.max_players = 2 AND first_player.member_id = roster.member_ids[1]
+          WHERE cardinality(pair.member_ids) = 2 AND recent.max_players = 2 AND first_player.member_id = pair.member_ids[1]
             AND recent.status = 'settled' AND recent.settled_at > ${settledCutoff} AND recent.settled_at <= ${input.now}
             AND EXISTS (SELECT 1 FROM game_player second_player
-              WHERE second_player.game_id = recent.id AND second_player.member_id = roster.member_ids[2])
+              WHERE second_player.game_id = recent.id AND second_player.member_id = pair.member_ids[2])
           ORDER BY recent.settled_at DESC, recent.id LIMIT 1),
         -- Cancellation releases its slot but keeps its already-bound room
         -- available until the reserved notice reaches provider dispatch.
@@ -144,7 +150,7 @@ export async function readGameChatFundingRooms(input: {
             AND (game.invite_expires_at IS NULL OR game.invite_expires_at > ${input.now})) OR
           (game.status = 'settled' AND game.settled_at > ${settledCutoff} AND game.settled_at <= ${input.now}) OR
           (game.status = 'void' AND game.chat_container_member_id = room.id))
-        AND ((game.max_players = 10 AND ${groupPlayers}) OR (game.max_players = 2 AND (game.chat_container_member_id = room.id OR cardinality(roster.member_ids) = 2) AND ((game.status = 'invited'
+        AND ((game.max_players = 10 AND ${groupPlayers}) OR (game.max_players = 2 AND (game.chat_container_member_id = room.id OR cardinality(pair.member_ids) = 2) AND ((game.status = 'invited'
               AND game.created_by = ANY(roster.member_ids)
               AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id AND invited.member_id = ANY(roster.member_ids) AND invited.member_id <> game.created_by))
           OR (game.status <> 'invited'

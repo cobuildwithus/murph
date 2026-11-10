@@ -2,7 +2,8 @@ Bound pair and group games tolerate bystanders while retaining current-player,
 route and restriction checks. [Architecture](../ARCHITECTURE.md),
 [Weekly Game](product-specs/weekly-game.md), and
 [the completed implementation plan](exec-plans/completed/2026-11-10-game-chat-open-room.md)
-record the contract and local evidence.
+record the contract and local evidence. The [review corrections](exec-plans/completed/2026-11-10-game-chat-review-shipping.md)
+cover primary allowance reuse, private pair lore/notices and invitation expiry.
 
 Hosted device import pass-scope forwarding is tracked in the
 [execution plan](exec-plans/completed/2026-11-10-hosted-device-pass-scope.md);

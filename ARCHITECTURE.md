@@ -6422,13 +6422,16 @@ Unresolved bystanders acquire no account rights.
 
 Runtime funding remains one database-only admission query over at most 32 fresh
 resolved participants. Every current player must be present. Expanded pair
-rooms require the game's binding; exact alternate pair rooms retain the primary
-room's single allowance beneficiary. Funding never proves content authority.
+rooms require their own game binding, then use that game's pair to retain the
+primary room's single allowance beneficiary, just like exact alternate rooms. Funding never proves content authority.
 
 After a chat mutation, tools refresh provider and route evidence and let each
 game's authority decide the response projection. They do not compare the old
-and new whole room. Player lists and pair lore use game players; a room with
-no games still exposes verified profiles for first-game setup. Group lore
+and new whole room. Player lists use game players; a room with no games still
+exposes verified profiles for first-game setup. Pair lore can contain app-only
+recap details, so its fingerprint remains private to the exact pair audience.
+Pair recap and missed-day text retain that boundary at final dispatch, even
+when queued before a bystander arrives. App recap generation remains available. Group lore
 keeps its original audience key. Legacy non-multiplayer tools stay exact.
 Group lifecycle context carries its bound room. Roomless notice lookups remain
 pair-only. Pair room reuse selects only pair games and deliberately lets a new

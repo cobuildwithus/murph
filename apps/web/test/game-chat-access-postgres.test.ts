@@ -1,3 +1,4 @@
+import { runGameChatUpdate, runGameCommand } from "@/src/lib/game/service";
 import { randomUUID } from "node:crypto";
 
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -6,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import {
+  readGameChatAllowanceBeneficiary,
   readActiveHostedMemberAccess,
   readActiveHostedMemberAccessIds,
   readActiveHostedMemberAccessState,
@@ -33,6 +35,50 @@ if (enabled) {
 }
 
 describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
+  it("keeps an expanded duplicate pair room on the exhausted primary allowance", async () => {
+    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+    const [first, second, bystander, primary, alternate] = Array.from({ length: 5 }, () => randomUUID());
+    const members = [first, second, bystander, primary, alternate];
+    const players = [first, second], now = new Date();
+    try {
+      await prisma.hostedMember.createMany({ data: members.map(id => ({ id, billingStatus: "not_started" })) });
+      for (const [seat, memberId] of players.entries()) expect(await runGameCommand({ actorMemberId: memberId,
+        command: { type: "setProfile", firstName: seat ? "Sam" : "Alex", timeZone: "UTC" } })).toMatchObject({ ok: true });
+      for (const room of [primary, alternate]) {
+        await prisma.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: first,
+          participants: { create: players.map(participantMemberId => ({ participantMemberId,
+            handleLookupKey: participantMemberId, firstSeenAt: now, lastSeenAt: now })) } } });
+        await prisma.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: room,
+          threadLookupKey: room, threadIdentityLookupKey: room } });
+        const gameId = randomUUID();
+        const created = await runGameChatUpdate({ actorMemberId: first, chatContainerMemberId: room,
+          chatPlayerMemberIds: players, beforeMutationTx: async () => {}, update: { operation: "create", gameId,
+            terms: { tasks: players.map(memberId => ({ memberId, text: "Walk" })), schedule: { count: 7 }, stakes: [{ kind: "prize", item: "Choose the film" }] } } });
+        if (!created.ok) throw new Error(JSON.stringify(created.error));
+        if (room === primary) await prisma.game.update({ where: { id: gameId }, data: { createdAt: new Date(now.getTime() - 1_000) } });
+      }
+      const fund = () => readGameChatFundingRooms({ memberIds: [primary, alternate], now, prisma });
+      expect(await fund()).toEqual(new Map([[primary, primary], [alternate, primary]]));
+      await prisma.hostedAiUsagePeriod.create({ data: { memberId: primary,
+        periodStart: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
+        periodEnd: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)),
+        billingPlanCode: "launch_monthly", limitUsdMicros: 7_500_000n, spentUsdMicros: 7_500_000n } });
+      await prisma.hostedThreadContainerParticipant.create({ data: { containerMemberId: alternate,
+        participantMemberId: bystander, handleLookupKey: bystander, firstSeenAt: now, lastSeenAt: now } });
+      expect(await fund()).toEqual(new Map([[primary, primary], [alternate, primary]]));
+      expect(await readGameChatAllowanceBeneficiary({ memberId: alternate, now, prisma })).toBe(primary);
+      expect(await readActiveHostedMemberAccess({ memberId: alternate, now, prisma })).toBe(true);
+      expect(await readHostedAiUsageGate({ memberId: alternate, now, prisma })).toMatchObject({ allowed: false, remainingUsdMicros: 0n });
+      expect(await prisma.hostedAiUsagePeriod.count({ where: { memberId: alternate } })).toBe(0);
+    } finally {
+      await cleanupGameFixtures(prisma, members);
+      await prisma.hostedThreadContainer.deleteMany({ where: { memberId: { in: members } } });
+      await prisma.hostedMember.deleteMany({ where: { id: { in: members } } });
+      await prisma.$disconnect(); vi.unstubAllEnvs();
+    }
+  });
+
   it.each([2, 10])("funds only the bound expanded room with all %i players fresh and unrestricted", async maxPlayers => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });

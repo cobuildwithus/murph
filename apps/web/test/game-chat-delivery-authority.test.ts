@@ -107,11 +107,19 @@ describe("game proposal provider dispatch authority", () => {
     setGame(null);
     await expect(assertGameProposalDeliveryCurrentTx(kickoff)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
+  it.each(["game-recap:game", "game-missed:game:person-a:2030-03-04"])("holds private pair text after a bystander joins before dispatch: %s", async key => {
+    const { input, setGame, event } = setup();
+    event.mockResolvedValue(null);
+    setGame({ ...row(), status: key.startsWith("game-recap:") ? "settled" : "live" });
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: key, audience: audience() }))
+      .rejects.toMatchObject({ reason: "participants_changed" });
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: key, audience: audience(["person-a", "person-b"]) })).resolves.toBe(true);
+  });
   it("authorizes an older settled recap for its bound pair without consulting the newest game", async () => {
     const { input, event, findFirst, setGame } = setup();
     event.mockResolvedValue(null);
     findFirst.mockResolvedValueOnce({ ...row(), status: "settled" }).mockResolvedValue({ ...row(), id: "newer" });
-    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game" })).resolves.toBe(true);
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-recap:game", audience: audience(["person-a", "person-b"]) })).resolves.toBe(true);
     expect(findFirst).toHaveBeenCalledTimes(1);
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
       id: "game", chatContainerMemberId: "room", status: "settled",
@@ -126,7 +134,7 @@ describe("game proposal provider dispatch authority", () => {
   it("allows any bound live game for missed-day delivery, with exact player authority", async () => {
     const { input, findFirst, setGame } = setup();
     setGame(row());
-    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-missed:game:person-a:2030-03-04" })).resolves.toBe(true);
+    await expect(assertGameProposalDeliveryCurrentTx({ ...input, deliveryIdempotencyKey: "game-missed:game:person-a:2030-03-04", audience: audience(["person-a", "person-b"]) })).resolves.toBe(true);
     expect(findFirst).toHaveBeenCalledTimes(1);
     findFirst.mockReset();
     setGame(null);

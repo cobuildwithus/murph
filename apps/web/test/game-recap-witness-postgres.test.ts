@@ -22,7 +22,14 @@ const publication = vi.hoisted(() => ({ signal: vi.fn(), route: vi.fn(), runtime
 vi.mock("../src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: publication.signal }));
 vi.mock("../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: publication.runtime }));
 vi.mock("../src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: publication.access }));
-vi.mock("../src/lib/game/chat-membership", async original => ({ ...await original<typeof import("../src/lib/game/chat-membership")>(), requireExactChat: async () => {}, requireExactGameChat: publication.exact, readGameChatAudience: publication.audience }));
+vi.mock("../src/lib/game/chat-membership", async original => {
+  const actual = await original<typeof import("../src/lib/game/chat-membership")>();
+  return { ...actual, requireExactChat: async () => {}, requireExactGameChat: publication.exact, readGameChatAudience: publication.audience,
+    readGroupGameNoticeAuthority: async (...[game, room, prepared, prisma]: Parameters<typeof actual.readGroupGameNoticeAuthority>) =>
+      actual.readGameChatAuthority(game, room, prepared ?? await publication.audience(room), prisma, true) };
+});
+vi.mock("../src/lib/hosted-routing/thread-route-store", async original => ({ ...await original<object>(),
+  readHostedThreadRouteByThreadIdentity: async ({ threadId }: { threadId: string }) => ({ containerMemberId: threadId }) }));
 vi.mock("../src/lib/hosted-onboarding/hosted-member-identity-store", async original => ({ ...await original<typeof import("../src/lib/hosted-onboarding/hosted-member-identity-store")>(),
   readHostedMemberIdentity: async ({ memberId }: { memberId: string }) => ({ phoneNumber: publication.phones.get(memberId), phoneNumberVerifiedAt: new Date() }) }));
 vi.mock("../src/lib/hosted-routing/assistant-notification-destination", async original => ({ ...await original<typeof import("../src/lib/hosted-routing/assistant-notification-destination")>(),
@@ -95,7 +102,10 @@ async function remove(f: Fixture, entryId = f.entries[0]!.id) {
 const story = (f: Fixture) => f.db.game.findUniqueOrThrow({ where: { id: f.gameId } });
 const receipt = (f: Fixture) => f.db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(f.eventId)! } });
 const material = (f: Fixture) => readGameRecapMaterial(f.gameId, f.room, f.players, f.eventId);
-const dispatch = (f: Fixture) => f.db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: f.room, playerMemberIds: f.players, deliveryIdempotencyKey: f.eventId }));
+const dispatch = async (f: Fixture) => {
+  const audience = await publication.audience(f.room);
+  return f.db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: f.room, audience, deliveryIdempotencyKey: f.eventId }));
+};
 // Old Web removed the entry without clearing the stored story or recording a report.
 const oldRemoval = (f: Fixture, entryId = f.entries[0]!.id) => f.db.gameEntry.update({ where: { id: entryId }, data: {
   blurHash: null, mediaKeys: [], payloadEncrypted: null, textEncrypted: null, withdrawnAt: new Date(), withdrawnReason: "removed",
@@ -134,6 +144,8 @@ describe.skipIf(!enabled)("recap moderation witness PostgreSQL proof", () => {
   beforeEach(() => {
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://recaps.murph.test");
     publication.exact.mockImplementation(async (room: string) => publication.rooms.get(room) ?? []);
+    publication.audience.mockImplementation(async (room: string) => ({ memberIds: publication.rooms.get(room) ?? [],
+      contacts: [], resolvedContacts: [], keys: { current: null, candidates: [] }, threadId: room }));
   });
   afterEach(async () => {
     vi.unstubAllEnvs();
@@ -336,7 +348,7 @@ describe.skipIf(!enabled)("recap moderation witness PostgreSQL proof", () => {
       const f = await published();
       expect(await tool(f, "write_recap")).toEqual(savedResponse(f, recap));
       expect((await f.db.$transaction(async tx => {
-        await assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: f.room, playerMemberIds: f.players, deliveryIdempotencyKey: f.eventId });
+        await assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: f.room, audience: await publication.audience(f.room), deliveryIdempotencyKey: f.eventId });
         return recordHostedLinqRuntimeProviderDispatchFenceTx({ idempotencyKey: f.eventId, linqChatId: "synthetic-chat", sourceRef: f.eventId, targetKind: "thread", prisma: tx });
       })).claimed).toBe(true);
       const claimed = JSON.stringify(await receipt(f)), settlement = await unchangedSettlement(f);
@@ -470,7 +482,7 @@ describe.skipIf(!enabled)("recap moderation witness PostgreSQL proof", () => {
     const f = await fixture();
     await sealGameRecap(f.sealInput);
     expect((await f.db.$transaction(async tx => {
-      await assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: f.room, playerMemberIds: f.players, deliveryIdempotencyKey: f.eventId });
+      await assertGameProposalDeliveryCurrentTx({ tx, containerMemberId: f.room, audience: await publication.audience(f.room), deliveryIdempotencyKey: f.eventId });
       return recordHostedLinqRuntimeProviderDispatchFenceTx({ idempotencyKey: f.eventId, linqChatId: "synthetic-chat", sourceRef: f.eventId, targetKind: "thread", prisma: tx });
     })).claimed).toBe(true);
     const claimed = await receipt(f); deliveryIds.push(claimed.id);

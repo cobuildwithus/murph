@@ -264,6 +264,13 @@ describe("game chat tool authority", () => {
       changeControls: { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null } };
     m.read.mockResolvedValue({ games: [game] });
     expect((await handleGameChatTool(read)).result).toMatchObject({ status: "ok", loreGuidance: expect.stringContaining("murph.game_lore"), loreFingerprint: gamePairLoreFingerprint([actor, "other_synthetic"]) });
+    for (const registered of [false, true]) {
+      m.audience.mockResolvedValue({ memberIds: registered ? [actor, "other_synthetic", "bystander"] : [actor, "other_synthetic"],
+        contacts: ["player-a", "player-b", "bystander"], resolvedContacts: [], keys: { current: null, candidates: [] }, threadId: "chat" });
+      const expanded = await handleGameChatTool({ ...read, multiplayer: true });
+      expect(expanded.result).toMatchObject({ status: "ok" });
+      expect(expanded.result).not.toHaveProperty("loreFingerprint");
+    }
     m.read.mockResolvedValue({ games: [{ ...game, status: "settled" }] });
     expect((await handleGameChatTool(read)).result).not.toHaveProperty("loreGuidance");
   });

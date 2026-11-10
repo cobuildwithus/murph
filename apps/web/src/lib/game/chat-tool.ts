@@ -102,12 +102,12 @@ async function gameChatToolResponse(input: Input, playerMemberIds: readonly stri
   dayOutcome: Extract<Awaited<ReturnType<typeof runGameCommand>>, { ok: true }>["dayOutcome"],
   photoResult: Awaited<ReturnType<typeof handleGameChatPhoto>> | null): Promise<HostedGameToolResponse> {
   const state = await readGameToolState(input, input.audience?.memberIds ?? playerMemberIds, actor);
-  const lore = input.request.action === "read_game" ? await readGameToolLore(state) : {};
+  const lore = input.request.action === "read_game" ? await readGameToolLore(state, input.audience) : {};
   return { action: input.request.action, result: { status: "ok", state, ...lore, ...(dayOutcome ? { dayOutcome } : {}), ...(photoResult?.photoOutcome ? { photoOutcome: photoResult.photoOutcome } : {}) } };
 }
 
 /** Resolve only authorized returned games, including non-live games; never expose audience keys. */
-async function readGameToolLore(state: HostedGameChatState): Promise<{ loreGuidance?: string; loreFingerprint?: string }> {
+async function readGameToolLore(state: HostedGameChatState, audience?: GameChatAudience): Promise<{ loreGuidance?: string; loreFingerprint?: string }> {
   if (!state.games.some(game => game.status === "live")) return {};
   const rows = await getPrisma().game.findMany({ where: { id: { in: state.games.map(game => game.id) } },
     select: { id: true, maxPlayers: true, audienceKey: true }, take: state.games.length });
@@ -115,6 +115,8 @@ async function readGameToolLore(state: HostedGameChatState): Promise<{ loreGuida
     const row = rows.find(row => row.id === game.id);
     if (row?.maxPlayers === 10) return row.audienceKey ? gameGroupLoreFingerprint(row.audienceKey) : null;
     const players = game.players.map(player => player.memberId);
+    // Pair notebooks can contain app-only recap details; never expose them to bystanders.
+    if (audience && (audience.contacts.length > 2 || !sameGamePlayers(audience.memberIds, players))) return null;
     return row?.maxPlayers === 2 && players.length === 2 ? gamePairLoreFingerprint(players) : null;
   });
   const key = keys[0];
@@ -157,7 +159,7 @@ async function handleScheduledGameRead(input: Input): Promise<HostedGameToolResp
   if (!input.multiplayer && players.length !== 2) return { action: "read_game", result: { status: "unavailable", error: "game_player_unavailable" } };
   if (!isGameOn({ players: players.map(memberId => ({ memberId })) })) return { action: "read_game", result: { status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." } };
   const state = await readGameToolState(input, players);
-  const lore = await readGameToolLore(state);
+  const lore = await readGameToolLore(state, input.audience);
   return { action: "read_game", result: { status: "ok", state, ...lore } };
 }
 
