@@ -71,6 +71,7 @@ import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
 import { canSkipManagedAutomaticMealCloseout } from '../automatic-meal-closeout-eligibility.js'
+import { canSkipManagedJournalConnectedContext } from '../journal-connected-context-eligibility.js'
 import {
   buildAssistantLinqDeliveryPosturePrompt,
 } from '../linq-delivery-posture.js'
@@ -2176,6 +2177,15 @@ async function runAssistantCronAutomationPreconditions(input: {
       vaultRoot: input.vault,
     })) {
     lifecycleSkipReason = 'No captured meals are awaiting closeout.'
+  }
+  if (lifecycleSkipReason === null && input.trigger === 'scheduled'
+    && await canSkipManagedJournalConnectedContext({
+      automationId: input.source.automationId,
+      connectedApps: input.executionContext?.hosted?.connectedApps,
+      signal: input.signal,
+      vaultRoot: input.vault,
+    })) {
+    lifecycleSkipReason = 'No reminders or eligible connected context require reconciliation.'
   }
   return lifecycleSkipReason
 }

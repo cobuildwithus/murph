@@ -2704,6 +2704,12 @@ and same-occurrence removal revisions keep the ordinary model path eligible;
 read failures use existing cron retry handling. Explicit manual runs bypass
 this automatic suppression. No additional persisted queue or marker is used.
 
+The scheduled morning Journal connected-context pass uses the same precondition
+path when the active/paused non-maintenance reminder inventory is empty and either
+global capture is opted out, or an absent/empty-account ledger plus the live
+connected-apps list proves no supported active accounts; stale accounts and any
+uncertain read keep the model turn eligible. Manual runs bypass this check.
+
 ### Clinical Records retrieval
 
 Clinical retrieval ownership is intentionally split across existing layers.
