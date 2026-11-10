@@ -105,6 +105,13 @@ import {
 import {
   HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS,
 } from "./device-sync-maintenance-limits.ts";
+import {
+  createDeviceSyncPassTimings,
+  flattenDeviceSyncPassTimings,
+  recordDeviceSyncPassTiming,
+  withDeviceSyncPassTimings,
+  type DeviceSyncPassTimings,
+} from "./device-sync-pass-timing.ts";
 
 const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_FALLBACK = "Hosted device-sync job failed.";
@@ -1370,6 +1377,15 @@ export async function runHostedDeviceSyncWakeLane(input: {
   timeoutMs: number | null;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
+  const passTimings = createDeviceSyncPassTimings();
+  return withDeviceSyncPassTimings(passTimings, () =>
+    runHostedDeviceSyncWakeLaneTimed(input, passTimings));
+}
+
+async function runHostedDeviceSyncWakeLaneTimed(
+  input: Parameters<typeof runHostedDeviceSyncWakeLane>[0],
+  passTimings: DeviceSyncPassTimings,
+): Promise<HostedMaintenanceMetrics> {
   const startedAtMs = Date.now();
   let passStage: HostedDeviceSyncPassStage = "starting";
   let processedJobs = 0;
@@ -1400,6 +1416,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
       processedJobs: 0,
       hostedConnectionIds,
       jobTimingDiagnostics,
+      passTimings,
       queueSnapshots,
       result: null,
       startedAtMs,
@@ -1412,7 +1429,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
         input.wake,
         input.vaultRoot,
         input.resolvedConfig.deviceSync,
-        input.deviceSyncPort,
+        input.deviceSyncPort ? measureHostedDeviceSyncRuntimeSnapshot(input.deviceSyncPort) : input.deviceSyncPort,
         input.timeoutMs,
         {
           onProcessedJobs: (observedProcessedJobs) => {
@@ -1456,6 +1473,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
         processedJobs,
         hostedConnectionIds,
         jobTimingDiagnostics,
+        passTimings,
         queueSnapshots,
         result: null,
         startedAtMs,
@@ -1511,6 +1529,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
       processedJobs: deviceSyncResult.processedJobs,
       hostedConnectionIds,
       jobTimingDiagnostics,
+      passTimings,
       queueSnapshots,
       result: metrics,
       startedAtMs,
@@ -1520,6 +1539,20 @@ export async function runHostedDeviceSyncWakeLane(input: {
   } finally {
     cancellation.dispose();
   }
+}
+
+function measureHostedDeviceSyncRuntimeSnapshot(
+  port: HostedRuntimeDeviceSyncPort,
+): HostedRuntimeDeviceSyncPort {
+  return {
+    ...port,
+    fetchSnapshot(request) {
+      const startedAt = performance.now();
+      return Promise.resolve(port.fetchSnapshot(request)).finally(() => {
+        recordDeviceSyncPassTiming("runtimeSnapshot", performance.now() - startedAt);
+      });
+    },
+  };
 }
 
 function resolveHostedDeviceSyncYieldReason(input: {
@@ -1561,6 +1594,64 @@ function resolveHostedDeviceSyncPassOutcome(input: {
   return "completed";
 }
 
+function recordHostedDeviceSyncJobStageTimings(
+  diagnostics: readonly DeviceSyncJobTimingDiagnostic[],
+): Record<string, number> {
+  let appliedRows = 0;
+  let noopRows = 0;
+  let failedRows = 0;
+  let otherRows = 0;
+  let noopRowTotalMs = 0;
+  let noopImportTotalMs = 0;
+  for (const diagnostic of diagnostics) {
+    noopImportTotalMs += diagnostic.snapshotNoopImportElapsedMs ?? 0;
+    const providerRequestCount = diagnostic.providerInventoryRequestCount
+      + diagnostic.providerResourceRequestCount;
+    recordDeviceSyncPassTiming(
+      "providerFetch",
+      diagnostic.providerInventoryRequestElapsedMs + diagnostic.providerResourceRequestElapsedMs,
+      providerRequestCount,
+    );
+    recordDeviceSyncPassTiming(
+      "identityIndex",
+      diagnostic.snapshotEventIdentityIndexElapsedMs,
+      diagnostic.snapshotImportCount,
+    );
+    recordDeviceSyncPassTiming(
+      "normalization",
+      diagnostic.snapshotNormalizationElapsedMs,
+      diagnostic.snapshotImportCount,
+    );
+    if (diagnostic.localProgressCommitElapsedMs) {
+      recordDeviceSyncPassTiming("localProgressCommit", diagnostic.localProgressCommitElapsedMs);
+    }
+    if (diagnostic.snapshotImportDeferralElapsedMs) {
+      recordDeviceSyncPassTiming("idleYieldWait", diagnostic.snapshotImportDeferralElapsedMs);
+    }
+    const rows = diagnostic.jobCount;
+    if (diagnostic.outcome === "failed") {
+      failedRows += rows;
+    } else if (diagnostic.snapshotImportOutcomes.applied > 0) {
+      appliedRows += rows;
+    } else if (diagnostic.outcome === "completed"
+      && diagnostic.snapshotImportOutcomes.noop > 0
+      && diagnostic.snapshotImportOutcomes.failed === 0) {
+      noopRows += rows;
+      noopRowTotalMs += diagnostic.elapsedMs;
+    } else {
+      otherRows += rows;
+    }
+  }
+  return {
+    deviceSyncAppliedJobRowCount: appliedRows,
+    deviceSyncNoopJobRowCount: noopRows,
+    deviceSyncNoopJobRowTotalMs: noopRowTotalMs,
+    deviceSyncNoopImportTotalMs: noopImportTotalMs,
+    deviceSyncFailedJobRowCount: failedRows,
+    deviceSyncOtherJobRowCount: otherRows,
+  };
+}
+
 function writeHostedDeviceSyncPassLifecycleLog(input: {
   input: Parameters<typeof runHostedDeviceSyncWakeLane>[0];
   lifecycle: "finished" | "started";
@@ -1569,6 +1660,7 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
   processedJobs: number;
   hostedConnectionIds: ReadonlyMap<string, string>;
   jobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[];
+  passTimings: DeviceSyncPassTimings;
   queueSnapshots: HostedDeviceSyncPassQueueSnapshots | null;
   result: HostedMaintenanceMetrics | null;
   startedAtMs: number;
@@ -1588,6 +1680,7 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
   const jobTimingSummary = summarizeHostedDeviceSyncJobTimings(
     input.jobTimingDiagnostics,
   );
+  const jobRowOutcomes = recordHostedDeviceSyncJobStageTimings(input.jobTimingDiagnostics);
   void writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
@@ -1608,6 +1701,8 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
         processedJobs: input.processedJobs,
         ...(input.lifecycle === "finished"
           ? {
+              ...flattenDeviceSyncPassTimings(input.passTimings),
+              ...jobRowOutcomes,
               ...summarizeJunctionMeasurementResourceOutcomes(input.jobTimingDiagnostics),
               ...buildHostedDeviceSyncPassProgressDiagnostics(input.input.wake, input.result, queueSnapshotAfter),
               pendingJobCountAfter: queueSnapshotAfter?.jobCount ?? null,

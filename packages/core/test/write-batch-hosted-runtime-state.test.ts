@@ -7,6 +7,7 @@ import {
   HostedCanonicalWriteOutcomeUnknownError,
   WriteBatch,
   persistHostedRuntimeStateAtCanonicalBoundary,
+  runCanonicalWrite,
   withHostedCanonicalWritePort,
 } from "../src/operations/write-batch.ts";
 
@@ -29,6 +30,35 @@ describe("hosted runtime-state canonical persistence", () => {
 });
 
 describe("hosted canonical publication evidence", () => {
+  it("reports local write stages without changing the persisted result", async () => {
+    const vaultRoot = await fs.mkdtemp(path.join(tmpdir(), "canonical-timing-"));
+    const stages: string[] = [];
+    try {
+      await initializeVault({ vaultRoot });
+      await withHostedCanonicalWritePort({
+        persistCanonicalWrite: async () => undefined,
+        recordDiagnosticTiming(stage, elapsedMs) {
+          expect(elapsedMs).toBeGreaterThanOrEqual(0);
+          stages.push(stage);
+        },
+      }, async () => runCanonicalWrite({
+        vaultRoot,
+        operationType: "timing_test",
+        summary: "Write synthetic evidence.",
+        mutate: async ({ batch }) => {
+          await batch.stageTextWrite("bank/timing.md", "synthetic\n");
+        },
+      }));
+      expect(stages).toEqual([
+        "localLedgerWrite", "writeLockWait", "receiptBuild", "localLedgerWrite",
+      ]);
+      expect(await fs.readFile(path.join(vaultRoot, "bank/timing.md"), "utf8"))
+        .toBe("synthetic\n");
+    } finally {
+      await fs.rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it.each([true, false])("preserves evidence only for an unknown outcome: %s", async (unknown) => {
     const vaultRoot = await fs.mkdtemp(path.join(tmpdir(), "canonical-outcome-"));
     const cause = new Error("Synthetic publication failure.");

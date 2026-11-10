@@ -35,9 +35,14 @@ test("hosted canonical receipt log accepts the final physical entry without comp
   );
   const { artifactStore, putCalls, storedBytesByHash } =
     createHostedRuntimeArtifactStoreStub(seeded.artifacts);
+  const uploadWaves: number[] = [];
 
   const update = await appendHostedCanonicalWriteReceiptToArtifactLog({
     artifactStore,
+    onArtifactUploadTiming(count, elapsedMs) {
+      assert.ok(elapsedMs >= 0);
+      uploadWaves.push(count);
+    },
     payloads: [],
     previousStatus: createReceiptLogStatus(seeded.log),
     receipt: createReceipt([], "op_final_physical_entry", 63),
@@ -45,6 +50,7 @@ test("hosted canonical receipt log accepts the final physical entry without comp
 
   assert.equal(update.entryCount, HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES);
   assert.equal(putCalls.length, 2);
+  assert.deepEqual(uploadWaves, [2]);
   const log = await readHostedCanonicalWriteReceiptLog({
     artifactStore,
     status: createReceiptLogStatus(update.logRef),

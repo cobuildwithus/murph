@@ -742,6 +742,20 @@ describe("hosted runtime log contracts", () => {
         Array.from({ length: 97 }, (_, index) => [`count${index}`, index]),
       ),
     })).toThrow(/at most 96 fields/u);
+    expect(Object.keys(parseHostedRuntimeLogEntry({
+      ...entry,
+      eventCode: "device-sync.pass_finished",
+      redactedJson: Object.fromEntries(
+        Array.from({ length: 128 }, (_, index) => [`count${index}`, index]),
+      ),
+    }).redactedJson ?? {})).toHaveLength(128);
+    expect(() => parseHostedRuntimeLogEntry({
+      ...entry,
+      eventCode: "device-sync.pass_finished",
+      redactedJson: Object.fromEntries(
+        Array.from({ length: 129 }, (_, index) => [`count${index}`, index]),
+      ),
+    })).toThrow(/at most 128 fields/u);
     expect(() => parseHostedRuntimeLogEntry({
       ...entry,
       redactedJson: {

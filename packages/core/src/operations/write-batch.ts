@@ -173,6 +173,7 @@ export class HostedCanonicalWriteOutcomeUnknownError extends Error {
 export interface HostedCanonicalWritePort {
   persistCanonicalWrite(input: HostedCanonicalWritePersistenceInput): Promise<void>;
   persistRuntimeState?(): Promise<void>;
+  recordDiagnosticTiming?(stage: "writeLockWait" | "localLedgerWrite" | "receiptBuild", elapsedMs: number): void;
 }
 
 const hostedCanonicalWritePortStorage = new AsyncLocalStorage<HostedCanonicalWritePort | null>();
@@ -1953,6 +1954,10 @@ export async function runCanonicalWrite<TResult>({
   mutate,
 }: RunCanonicalWriteInput<TResult>): Promise<TResult> {
   assertCanContinue?.();
+  const preparationStartedAt = performance.now();
+  const diagnosticPort = hostedCanonicalWritePort === undefined
+    ? resolveAmbientHostedCanonicalWritePort()
+    : hostedCanonicalWritePort;
   const batch = await WriteBatch.create({
     vaultRoot,
     operationType,
@@ -1975,6 +1980,10 @@ export async function runCanonicalWrite<TResult>({
     await batch.rollback();
     throw error;
   }
+
+  diagnosticPort?.recordDiagnosticTiming?.(
+    "localLedgerWrite", performance.now() - preparationStartedAt,
+  );
 
   await batch.commit({ assertCanContinue });
   return result;
@@ -2340,11 +2349,16 @@ export class WriteBatch {
     this.assertMutable();
     options.assertCanContinue?.();
     assertUniqueStageRelativePaths(this.record.actions);
+    const lockWaitStartedAt = performance.now();
     const lock = await acquireCanonicalWriteLock(this.vaultRoot);
+    this.recordDiagnosticTiming(
+      "writeLockWait", performance.now() - lockWaitStartedAt,
+    );
     let hostedCanonicalWriteReceipt: HostedCanonicalWriteReceipt | null = null;
 
     try {
       try {
+        const localWriteStartedAt = performance.now();
         this.record.status = "committing";
         this.record.updatedAt = nowIso();
         this.record.error = undefined;
@@ -2363,13 +2377,22 @@ export class WriteBatch {
         options.assertCanContinue?.();
         await this.persistGuardReceiptIfConfigured();
         options.assertCanContinue?.();
+        const receiptBuildStartedAt = performance.now();
         const hostedCanonicalWritePersistenceInput =
           await this.persistHostedCanonicalWriteReceiptIfConfigured();
+        const receiptBuildElapsedMs = performance.now() - receiptBuildStartedAt;
+        this.recordDiagnosticTiming(
+          "receiptBuild", receiptBuildElapsedMs,
+        );
         hostedCanonicalWriteReceipt = hostedCanonicalWritePersistenceInput?.receipt ?? null;
         this.record.status = "committed";
         this.record.updatedAt = nowIso();
         this.record.error = undefined;
         await this.persist();
+        this.recordDiagnosticTiming(
+          "localLedgerWrite",
+          performance.now() - localWriteStartedAt - receiptBuildElapsedMs,
+        );
         if (hostedCanonicalWritePersistenceInput) {
           await this.persistHostedCanonicalWriteIfConfigured(hostedCanonicalWritePersistenceInput);
         }
@@ -2451,6 +2474,13 @@ export class WriteBatch {
         `Write batch "${this.operationId}" can no longer be modified after status "${this.record.status}".`,
       );
     }
+  }
+
+  private recordDiagnosticTiming(
+    stage: "writeLockWait" | "localLedgerWrite" | "receiptBuild",
+    elapsedMs: number,
+  ): void {
+    this.hostedCanonicalWritePort?.recordDiagnosticTiming?.(stage, elapsedMs);
   }
 
   private reserveStageArtifactRelativePath(extension: "jsonl" | "raw" | "txt"): string {

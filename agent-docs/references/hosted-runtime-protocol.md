@@ -3215,6 +3215,21 @@ It omits member/account/job identifiers, payloads,
 cursors, provider responses, health values, and raw errors. The marker declares
 the total observed count, sample limit, and truncation state. The Web parser must
 accept the object-array field before a runner capable of emitting it is deployed.
+The same pass-finished row carries flat numeric count, total-millisecond, and
+maximum-millisecond fields for lock wait, local write/preparation, receipt
+construction/log work, artifact-store puts, Web status checkpoint callbacks,
+device-sync runtime snapshot reads, local SQLite progress commits, provider
+fetches, identity indexing, normalization, and foreground-yield waits. These
+totals cover every claimed job in the bounded pass, before the slowest-16 sample
+is selected. Provider fetch and importer maxima are per claimed job group;
+artifact upload maxima are per concurrent upload wave. Applied/no-op/failed/
+other job-row counts classify each claimed group by its imports and outcome;
+the no-op job elapsed total counts a wholly no-op group's wall time once, and
+the no-op import total counts every importer call that returned no-op. Nested
+stages and concurrent uploads can overlap, so their shares of pass elapsed time
+are diagnostic and must not be summed as an exclusive partition. The
+pass-finished parser permits up to 128 scalar fields; other runtime-log events
+retain the 96-field limit. Deploy the Web reader before the runner image.
 
 Hosted runtime wake projection reads unfinished job deadlines only. Provider
 cadence remains in Web's `DeviceConnection.nextReconcileAt`; completing a

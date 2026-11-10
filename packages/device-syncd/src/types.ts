@@ -276,6 +276,12 @@ export interface DeviceSyncJobTimingDiagnostic {
   snapshotIngestInspectionElapsedMs: number;
   snapshotIngestInventoryCacheHitCount: number;
   snapshotNormalizationElapsedMs: number;
+  /** Local SQLite queue/progress transition after provider execution. */
+  localProgressCommitElapsedMs?: number;
+  /** Time spent yielding import preparation to foreground work. */
+  snapshotImportDeferralElapsedMs?: number;
+  /** Importer wall time for snapshots that returned applied=false. */
+  snapshotNoopImportElapsedMs?: number;
 }
 
 export type PublicProviderDescriptor = DeviceSyncProviderDescriptor;

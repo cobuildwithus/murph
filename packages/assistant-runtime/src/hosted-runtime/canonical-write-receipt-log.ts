@@ -66,6 +66,7 @@ export interface HostedCanonicalWriteReceiptRecoveryWake {
 
 export async function appendHostedCanonicalWriteReceiptToArtifactLog(input: {
   artifactStore: HostedRuntimeArtifactStore;
+  onArtifactUploadTiming?: (count: number, elapsedMs: number) => void;
   payloads: readonly HostedCanonicalWritePayload[];
   previousStatus: HostedRuntimeRedactedJson | null | undefined;
   receipt: HostedCanonicalWriteReceipt;
@@ -150,6 +151,7 @@ export async function appendHostedCanonicalWriteReceiptToArtifactLog(input: {
       },
     ],
     artifactStore: input.artifactStore,
+    onArtifactUploadTiming: input.onArtifactUploadTiming,
   });
   lastUploadedReceiptLogs.set(input.artifactStore, {
     bytes: logArtifact.bytes,
@@ -282,17 +284,19 @@ async function uploadHostedCanonicalWriteArtifacts(input: {
     sha256: string;
   }[];
   artifactStore: HostedRuntimeArtifactStore;
+  onArtifactUploadTiming?: (count: number, elapsedMs: number) => void;
 }): Promise<void> {
   for (
     let offset = 0;
     offset < input.artifacts.length;
     offset += HOSTED_CANONICAL_WRITE_ARTIFACT_IO_CONCURRENCY
   ) {
+    const uploadStartedAt = performance.now();
+    const wave = input.artifacts.slice(offset, offset + HOSTED_CANONICAL_WRITE_ARTIFACT_IO_CONCURRENCY);
     const results = await Promise.allSettled(
-      input.artifacts
-        .slice(offset, offset + HOSTED_CANONICAL_WRITE_ARTIFACT_IO_CONCURRENCY)
-        .map((artifact) => input.artifactStore.put(artifact)),
+      wave.map((artifact) => input.artifactStore.put(artifact)),
     );
+    input.onArtifactUploadTiming?.(wave.length, performance.now() - uploadStartedAt);
     for (const result of results) {
       if (result.status === "rejected") {
         throw result.reason;

@@ -303,6 +303,15 @@ test.each([
     assert.equal(passLogs.filter((entry) => entry.redactedJson?.outcome === "yielded").length, 0);
     assert.equal(passLogs.filter((entry) => entry.redactedJson?.yieldReason === null
       && entry.redactedJson?.outcome === "completed").length, 1);
+    const passStages = passLogs[0]?.redactedJson;
+    assert.ok(passStages);
+    assert.ok(Number(passStages.deviceSyncStageWriteLockWaitCount) >= 1);
+    assert.ok(Number(passStages.deviceSyncStageLocalLedgerWriteCount) >= 1);
+    assert.ok(Number(passStages.deviceSyncStageReceiptBuildCount) >= 1);
+    assert.ok(Number(passStages.deviceSyncStageArtifactUploadCount) >= 2);
+    assert.ok(Number(passStages.deviceSyncStageRuntimeSnapshotCount) >= 1);
+    assert.ok(Number(passStages.deviceSyncStageLocalProgressCommitCount) >= 1);
+    assert.ok(Number(passStages.deviceSyncStageIdleYieldWaitTotalMs) > 0);
     const loggedTimings = passLogs[0]?.redactedJson?.deviceSyncJobTimingSummaries;
     assert.ok(Array.isArray(loggedTimings));
     const loggedDeferrals = loggedTimings.map((item) => {
