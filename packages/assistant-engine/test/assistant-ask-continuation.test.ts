@@ -43,7 +43,6 @@ describe('assistant ask continuation', () => {
     })
 
     expect(ASSISTANT_ASK_CONTINUATION_TURN_PROFILE).toEqual({
-      nativeResumePolicy: 'disabled',
       promptProfile: 'assistant-ask-continuation',
       threadScope: 'isolated-thread',
       toolProfile: 'output-only-turn',

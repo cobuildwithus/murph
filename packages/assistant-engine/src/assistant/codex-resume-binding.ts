@@ -11,17 +11,6 @@ import {
   type CodexThreadIdentity,
 } from './codex-thread-route.js'
 
-export function resolveAssistantCodexResumeThreadId(input: {
-  resumeState: unknown
-}): string | null {
-  const resumeState = normalizeCodexResumeState(input.resumeState)
-  if (!resumeState) {
-    return null
-  }
-
-  return resumeState.threadId
-}
-
 export function resolveAssistantRouteResumeBinding(input: {
   route: CodexThreadIdentity
   sessionResumeState: unknown

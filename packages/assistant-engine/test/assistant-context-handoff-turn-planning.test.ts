@@ -175,7 +175,6 @@ function createRoute(): CodexThreadIdentity {
       normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
     ),
     routeFingerprint: 'route-context-handoff-test',
-    routeId: 'route-context-handoff-test',
   }
 }
 

@@ -40,7 +40,7 @@ validation preserve the numeric fields and stage values. Skipped refreshes remai
 `null`; timing does not change follow-up expiry, authority, or resume decisions.
 
 Provider plans also carry `threadRotationReason`: `profile_isolated`,
-`native_resume_disabled`, `binding_absent`, `route_mismatch`, or
+`binding_absent`, `route_mismatch`, or
 `contract_mismatch`, or `transcript_bookmark_missing`. A resumed plan has no rotation
 reason. This metadata follows the existing trace callback to hosted logging;
 the shared engine never writes structured logs to stdout.

@@ -23,7 +23,6 @@ import type { AssistantExecutionContext } from './execution-context.js'
 import { normalizeNullableString } from './shared.js'
 
 export interface AssistantUsageProviderResult {
-  attemptCount: number
   provider: string
   providerOptions: AssistantProviderSessionOptions
   route: CodexThreadIdentity
@@ -67,14 +66,14 @@ async function recordAssistantUsageEventToCompletion(
     const record: AssistantUsageRecord = {
       schema: ASSISTANT_USAGE_SCHEMA,
       usageId: createAssistantUsageId({
-        attemptCount: input.providerResult.attemptCount,
+        attemptCount: 1,
         providerRequestOrdinal: input.providerRequestOrdinal ?? 0,
         turnId: input.turnId,
       }),
       memberId: hostedMemberId,
       sessionId: input.providerResult.session.sessionId,
       turnId: input.turnId,
-      attemptCount: input.providerResult.attemptCount,
+      attemptCount: 1,
       providerRequestOrdinal: input.providerRequestOrdinal ?? 0,
       occurredAt: normalizeAssistantUsageOccurredAt(input.occurredAt),
       provider: input.providerResult.provider,

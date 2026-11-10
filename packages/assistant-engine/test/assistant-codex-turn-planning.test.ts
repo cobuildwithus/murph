@@ -58,9 +58,6 @@ const planningMocks = vi.hoisted(() => ({
   })),
   readAssistantGroupRoomModelPrompt:
     vi.fn(async (): Promise<string | null> => null),
-  resolveCodexAssistantTargetCapabilities: vi.fn(() => ({
-    supportsNativeResume: false,
-  })),
   sendAssistantMessage: vi.fn(),
 }))
 
@@ -81,8 +78,6 @@ vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
 
 vi.mock('../src/assistant/codex-runtime.js', () => ({
   resolveCodexAssistantLabel: () => 'Codex',
-  resolveCodexAssistantTargetCapabilities:
-    planningMocks.resolveCodexAssistantTargetCapabilities,
 }))
 
 vi.mock('../src/assistant/service.js', () => ({
@@ -239,7 +234,6 @@ afterEach(() => {
   })
   planningMocks.readAssistantGroupRoomModelPrompt.mockReset()
   planningMocks.readAssistantGroupRoomModelPrompt.mockResolvedValue(null)
-  planningMocks.resolveCodexAssistantTargetCapabilities.mockReset()
   planningMocks.sendAssistantMessage.mockReset()
 })
 
@@ -260,13 +254,11 @@ describe('assistant Codex turn planning', () => {
       interactiveConversation: toolProfile === 'provider-turn',
       providerTools: toolProfile === 'provider-turn',
       onboardingGoalCheckin: false,
-      supportsNativeResume: false,
     })
     expect(result.attachmentAllowed).toBe(expected)
   })
 
   it('attributes each thread rotation without changing provider declarations', async () => {
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: true })
     const planInput: Parameters<typeof resolveAssistantRouteTurnPlan>[0] = {
       executionContext: null, input: createMessageInput(),
       profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
@@ -277,12 +269,11 @@ describe('assistant Codex turn planning', () => {
     expect(baseline.planningDiagnostics.threadRotationReason).toBe('binding_absent')
     const binding = {
       assistantContractFingerprint: baseline.assistantContractFingerprint,
-      routeFingerprint: planInput.route.routeFingerprint ?? planInput.route.routeId,
+      routeFingerprint: planInput.route.routeFingerprint,
       threadId: 'synthetic-resume-thread',
       transcriptSeenThrough: baseline.transcriptBoundary,
     }
-    for (const reason of [null, 'route_mismatch', 'contract_mismatch', 'profile_isolated', 'native_resume_disabled'] as const) {
-      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: reason !== 'native_resume_disabled' })
+    for (const reason of [null, 'route_mismatch', 'contract_mismatch', 'profile_isolated'] as const) {
       const plan = await resolveAssistantRouteTurnPlan({
         ...planInput,
         profile: { ...planInput.profile, threadScope: reason === 'profile_isolated' ? 'isolated-thread' : 'session-thread' },
@@ -382,9 +373,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const promptTimeContext = {
       currentLocalDate: '2026-08-30',
       currentTimeZone: 'America/New_York',
@@ -573,7 +561,7 @@ describe('assistant Codex turn planning', () => {
       // unrelated planner output is rebaselined or exempted by this migration.
       expect(plan.assistantContractFingerprint).toBe(fingerprintThreadDeclarations({
         dynamicTools: start.dynamicTools,
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
       }))
       const { MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: catalog, ...historicalCliEnv } = plan.cliEnv
       expect(catalog).toBe('/synthetic/hosted-models.json')
@@ -583,7 +571,7 @@ describe('assistant Codex turn planning', () => {
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           developerInstructions: plan.developerInstructions,
           dynamicTools: plan.dynamicTools,
-          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          routeFingerprint: route.routeFingerprint,
         }),
         assistantPreferredElevenLabsVoiceId:
           plan.assistantPreferredElevenLabsVoiceId,
@@ -633,9 +621,6 @@ describe('assistant Codex turn planning', () => {
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
       'VALUE_FREE_DEGRADED_SNAPSHOT',
     )
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     let refreshContinuationChecks = 0
     planningMocks.refreshAssistantContextSnapshotBestEffort.mockImplementationOnce(
       async (input?: { shouldYield?: (() => boolean) | null }) => {
@@ -752,7 +737,6 @@ describe('assistant Codex turn planning', () => {
       turnId: 'turn-utc-only-time-authority',
     })
     const attemptPlan = await buildCodexTurnAttemptPlan({
-      attemptCount: 1,
       executionPlan,
       session,
     })
@@ -777,9 +761,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const resolvePlan = (env: Readonly<Record<string, string>>) =>
       resolveAssistantRouteTurnPlan({
         executionContext: null,
@@ -844,9 +825,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const authorizeAcceptedMessageTarget = vi.fn(async () => null)
     const session = createSession()
     const executionPlan = await buildCodexTurnExecutionPlan({
@@ -862,7 +840,6 @@ describe('assistant Codex turn planning', () => {
       turnId: 'turn-message-targeting',
     })
     const attemptPlan = await buildCodexTurnAttemptPlan({
-      attemptCount: 1,
       executionPlan,
       session,
     })
@@ -877,13 +854,13 @@ describe('assistant Codex turn planning', () => {
       ]))
   })
 
-  it('resolves disabled native resume notification turns as isolated threads', async () => {
+  it('resolves isolated notification turns on their own threads', async () => {
     const plan = await buildCodexTurnExecutionPlan({
       input: createMessageInput(),
       plan: createSharedPlan(),
       profile: {
-        nativeResumePolicy: 'disabled',
         promptProfile: 'conversation',
+        threadScope: 'isolated-thread',
         toolProfile: 'provider-turn',
       },
       resolvedSession: createSession(),
@@ -906,9 +883,6 @@ describe('assistant Codex turn planning', () => {
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
       'Private context: use the member\'s current mobility prescription.',
     )
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(
       path.join(os.tmpdir(), 'assistant-ask-continuation-plan-'),
     )
@@ -994,9 +968,6 @@ describe('assistant Codex turn planning', () => {
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
       'Private context must stay unavailable.',
     )
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(
       path.join(os.tmpdir(), 'assistant-ask-group-continuation-plan-'),
     )
@@ -1064,9 +1035,6 @@ describe('assistant Codex turn planning', () => {
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
       'PRIVATE_CONTEXT_SNAPSHOT',
     )
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(
       path.join(os.tmpdir(), 'assistant-system-notification-plan-'),
     )
@@ -1163,9 +1131,6 @@ describe('assistant Codex turn planning', () => {
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
       'Context snapshot: active condition hypertension.',
     )
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const promptTimeContext = {
       currentLocalDate: '2026-05-04',
       currentTimeZone: 'Asia/Kuala_Lumpur',
@@ -1470,9 +1435,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     let imageStatus: 'pending' | 'queued' = 'pending'
     const imageGenerationLauncher = {
       launch: vi.fn(() => 'started' as const),
@@ -1858,9 +1820,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
 
     const plan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
@@ -1900,9 +1859,6 @@ describe('assistant Codex turn planning', () => {
   }) => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
@@ -1981,9 +1937,6 @@ describe('assistant Codex turn planning', () => {
       '- `assistant onboarding resume-context`: Read onboarding context.',
     ].join('\n'))
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
@@ -2046,9 +1999,6 @@ describe('assistant Codex turn planning', () => {
   it('resolves assistant voice preferences into ElevenLabs planning ids', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const vault = await mkdtemp(
       path.join(os.tmpdir(), 'assistant-route-plan-preferences-'),
     )
@@ -2084,9 +2034,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const route = createRoute()
     const common = {
       executionContext: null,
@@ -2145,7 +2092,7 @@ describe('assistant Codex turn planning', () => {
         resumeState: {
           assistantContractFingerprint:
             baseline.assistantContractFingerprint,
-          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          routeFingerprint: route.routeFingerprint,
           threadId: 'thread-before-persona-change',
         },
       }),
@@ -2188,9 +2135,6 @@ describe('assistant Codex turn planning', () => {
   it('reads sparse personality preferences without rotating the interactive thread', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(
       path.join(os.tmpdir(), 'assistant-route-plan-personality-'),
     )
@@ -2220,7 +2164,6 @@ describe('assistant Codex turn planning', () => {
         assistantVoice: null,
       })
       const initialAttemptPlan = await buildCodexTurnAttemptPlan({
-        attemptCount: 1,
         executionPlan: initialExecutionPlan,
         session,
       })
@@ -2236,7 +2179,7 @@ describe('assistant Codex turn planning', () => {
         resumeState: {
           assistantContractFingerprint:
             initialAttemptPlan.routePlan.assistantContractFingerprint,
-          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          routeFingerprint: route.routeFingerprint,
           threadId: 'thread-before-personality-change',
         },
       })
@@ -2261,7 +2204,6 @@ describe('assistant Codex turn planning', () => {
         assistantVoice: null,
       })
       const updatedAttemptPlan = await buildCodexTurnAttemptPlan({
-        attemptCount: 1,
         executionPlan: updatedExecutionPlan,
         session: resumedSession,
       })
@@ -2305,7 +2247,6 @@ describe('assistant Codex turn planning', () => {
         turnId: 'turn-personality-group',
       })
       const groupAttemptPlan = await buildCodexTurnAttemptPlan({
-        attemptCount: 1,
         executionPlan: groupExecutionPlan,
         session: groupSession,
       })
@@ -2342,7 +2283,6 @@ describe('assistant Codex turn planning', () => {
         turnId: 'turn-personality-unknown-external',
       })
       await expect(buildCodexTurnAttemptPlan({
-        attemptCount: 1,
         executionPlan: unknownExternalExecutionPlan,
         session: unknownExternalSession,
       })).rejects.toThrow(
@@ -2368,7 +2308,6 @@ describe('assistant Codex turn planning', () => {
         turnId: 'turn-personality-local',
       })
       const localAttemptPlan = await buildCodexTurnAttemptPlan({
-        attemptCount: 1,
         executionPlan: localExecutionPlan,
         session: localSession,
       })
@@ -2386,9 +2325,6 @@ describe('assistant Codex turn planning', () => {
   it('resumes Codex threads when the stored assistant contract matches', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
@@ -2419,7 +2355,7 @@ describe('assistant Codex turn planning', () => {
     const resumedSession = createSession({
       resumeState: {
         assistantContractFingerprint: initialPlan.assistantContractFingerprint,
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
         threadId: 'thread-resume',
       },
     })
@@ -2461,9 +2397,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
 
     const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-avatar-continuity-'))
     try {
@@ -2592,7 +2525,7 @@ describe('assistant Codex turn planning', () => {
           foregroundPlan.assistantContractFingerprint,
         codexRolloutRelativePath: null,
         codexThreadId: providerThreadId,
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
         session: createSession(),
         vault,
       })
@@ -2689,7 +2622,7 @@ describe('assistant Codex turn planning', () => {
             completionPlan.assistantContractFingerprint,
           codexRolloutRelativePath: null,
           codexThreadId: completionPlan.resume?.codexThreadId ?? null,
-          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          routeFingerprint: route.routeFingerprint,
           session: foregroundSession,
           vault,
         })
@@ -2727,9 +2660,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const posturePrompt = buildAssistantLinqDeliveryPosturePrompt('recover')
     if (!posturePrompt) {
       throw new Error('Expected recovery posture guidance.')
@@ -2788,7 +2718,7 @@ describe('assistant Codex turn planning', () => {
         resumeState: {
           assistantContractFingerprint:
             initialPlan.assistantContractFingerprint,
-          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          routeFingerprint: route.routeFingerprint,
           threadId: 'thread-delivery-posture',
         },
       }),
@@ -2808,9 +2738,6 @@ describe('assistant Codex turn planning', () => {
   it('starts a fresh thread once for legacy resume state without an assistant contract fingerprint', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const route = createRoute()
 
     const plan = await resolveAssistantRouteTurnPlan({
@@ -2828,7 +2755,7 @@ describe('assistant Codex turn planning', () => {
       route,
       session: createSession({
         resumeState: {
-          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          routeFingerprint: route.routeFingerprint,
           threadId: 'legacy-thread',
         },
       }),
@@ -2852,9 +2779,6 @@ describe('assistant Codex turn planning', () => {
         'bootstrap contract',
       )
       planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-        supportsNativeResume: true,
-      })
       const vault = await mkdtemp(
         path.join(os.tmpdir(), `assistant-group-contract-rotation-${label}-`),
       )
@@ -2908,7 +2832,7 @@ describe('assistant Codex turn planning', () => {
           session: createSession({ turnCount: 2 }),
         })
         const oldRouteFingerprint = legacyRoute
-          ? route.routeFingerprint ?? route.routeId
+          ? route.routeFingerprint
           : route.threadCompatibilityFingerprint!
         const preFixFingerprint = fingerprintThreadDeclarations({
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -2922,7 +2846,7 @@ describe('assistant Codex turn planning', () => {
           session: createSession({
             resumeState: {
               assistantContractFingerprint: preFixFingerprint,
-              routeFingerprint: route.routeFingerprint ?? route.routeId,
+              routeFingerprint: route.routeFingerprint,
               ...(!legacyRoute ? { threadCompatibilityFingerprint: route.threadCompatibilityFingerprint } : {}),
               threadId: `provider-thread-before-${label}`,
             },
@@ -2949,7 +2873,7 @@ describe('assistant Codex turn planning', () => {
               assistantContractFingerprint:
                 firstPostDeployPlan.assistantContractFingerprint,
               transcriptSeenThrough: firstPostDeployPlan.transcriptBoundary,
-              routeFingerprint: route.routeFingerprint ?? route.routeId,
+              routeFingerprint: route.routeFingerprint,
               threadId: replacementThreadId,
             },
             turnCount: 3,
@@ -2970,9 +2894,6 @@ describe('assistant Codex turn planning', () => {
   it('keeps the assistant contract fingerprint stable across repeated identical plans', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const route = createRoute()
     const input = {
       allowFinishWithoutReply: true,
@@ -3008,7 +2929,7 @@ describe('assistant Codex turn planning', () => {
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: false,
         }),
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
       }),
     )
   })
@@ -3231,9 +3152,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const common = {
       executionContext: null,
       profile: {
@@ -3323,9 +3241,6 @@ describe('assistant Codex turn planning', () => {
   it('exposes private style settings to email turns only with exact-turn sender authority', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const sharedInput = {
       executionContext: null,
       hostedToolContext: {
@@ -3381,9 +3296,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
 
     const plan = await resolveAssistantRouteTurnPlan({
       acceptedInputItems: [{
@@ -3435,9 +3347,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const hostedToolContext: AssistantHostedToolContext = {
       ...createHostedToolContext(),
       labsTool: { request: vi.fn() },
@@ -3540,9 +3449,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const planToolNamesFor = async (env: NodeJS.ProcessEnv) => {
       const plan = await resolveAssistantRouteTurnPlan({
         executionContext: null,
@@ -3579,9 +3485,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const acceptedInputItems = [{
       id: 'ain_calendar_link_planning',
       source: 'assistant-input' as const,
@@ -3644,9 +3547,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const acceptedInputId = 'ain_11111111111111111111111111111111'
     const planToolNamesFor = async (options: {
       acceptedInputItems?: NonNullable<
@@ -3734,9 +3634,6 @@ describe('assistant Codex turn planning', () => {
   it('co-gates message-target tools from route capability instead of the latest message', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const route = createRoute()
     const profile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
@@ -3773,7 +3670,7 @@ describe('assistant Codex turn planning', () => {
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: false,
         }),
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
       }),
     )
 
@@ -3824,7 +3721,7 @@ describe('assistant Codex turn planning', () => {
           responseCardsAvailable: true,
           calendarLinkAvailable: true,
         }),
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
       }),
     )
 
@@ -3925,7 +3822,7 @@ describe('assistant Codex turn planning', () => {
           responseCardsAvailable: true,
           calendarLinkAvailable: true,
         }),
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
       }),
     )
 
@@ -3956,7 +3853,7 @@ describe('assistant Codex turn planning', () => {
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
         }),
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
       }),
     )
 
@@ -3983,7 +3880,7 @@ describe('assistant Codex turn planning', () => {
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
         }),
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
       }),
     )
     expect(telegramInferredBindingPlan.assistantContractFingerprint).toBe(
@@ -4015,9 +3912,6 @@ describe('assistant Codex turn planning', () => {
   it('keeps hosted computer tools in the auto-reply route contract', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const route = createRoute()
     const profile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
@@ -4064,7 +3958,7 @@ describe('assistant Codex turn planning', () => {
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
           voiceMemoModelId: 'eleven_v4',
         }),
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
       }),
     )
   })
@@ -4072,9 +3966,6 @@ describe('assistant Codex turn planning', () => {
   it('gives attended and scheduled group turns the same lazy shared-read and permission-offer tools', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const groupSharedRead = vi.fn(async () => ({
       members: [] as const,
       requestedProjectionScopeKeys: ['steps-days.v0'],
@@ -4283,7 +4174,6 @@ describe('assistant Codex turn planning', () => {
   it.each([true, false])('grants anonymous scheduled feedback only to the exact weekly optimizer (%s)', async (optimizer) => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: false })
     const occurrenceAt = '2026-10-05T04:00:00.000Z'
     const plan = await resolveAssistantRouteTurnPlan({
       executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [],
@@ -4300,7 +4190,6 @@ describe('assistant Codex turn planning', () => {
   it.each([true, false])('offers usage diagnostics in a private turn only with a port (%s)', async (available) => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: false })
     const plan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
       hostedToolContext: { ...createHostedToolContext(),
@@ -4316,9 +4205,6 @@ describe('assistant Codex turn planning', () => {
   it('derives a group-scoped prompt and tool surface from the audience', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const hostedToolContext: AssistantHostedToolContext = {
       ...createHostedToolContext(),
       assistantConfigurationTool: { request: vi.fn() },
@@ -4539,9 +4425,6 @@ describe('assistant Codex turn planning', () => {
         'bootstrap contract',
       )
       planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-        supportsNativeResume: false,
-      })
       const hostedToolContext: AssistantHostedToolContext = {
         ...createHostedToolContext(),
         imessageContactTool: { ensure: vi.fn() },
@@ -4605,9 +4488,6 @@ describe('assistant Codex turn planning', () => {
         'bootstrap contract',
       )
       planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-        supportsNativeResume: false,
-      })
       const hostedToolContext: AssistantHostedToolContext = {
         ...createHostedToolContext(),
         subscriptionTool: { request: vi.fn() },
@@ -4657,9 +4537,6 @@ describe('assistant Codex turn planning', () => {
         'bootstrap contract',
       )
       planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-        supportsNativeResume: false,
-      })
       const hostedToolContext: AssistantHostedToolContext = {
         ...createHostedToolContext(),
         clinicalRecordsConnectLinkTool: { createConnectLink: vi.fn() },
@@ -4701,9 +4578,6 @@ describe('assistant Codex turn planning', () => {
   it('applies hosted room tone and voice to group notification planning only', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const sharedPlan = createSharedPlan({}, {
       channel: 'linq',
       threadIsDirect: false,
@@ -4768,9 +4642,6 @@ describe('assistant Codex turn planning', () => {
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
       'PERSONAL_CONTEXT_SNAPSHOT',
     )
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const plan = await resolveAssistantRouteTurnPlan({
       acceptedInputItems: [{
         id: 'group-email-phone-request',
@@ -4865,9 +4736,6 @@ describe('assistant Codex turn planning', () => {
       null,
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const plan = await resolveAssistantRouteTurnPlan({
       acceptedInputItems: [{
         id: 'telegram-group-phone-confirmation',
@@ -5055,9 +4923,6 @@ describe('assistant Codex turn planning', () => {
         null,
       )
       planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-        supportsNativeResume: false,
-      })
       const occurrenceAt = '2026-08-05T18:00:00.000Z'
       const plan = await resolveAssistantRouteTurnPlan({
         acceptedInputItems: [],
@@ -5146,9 +5011,6 @@ describe('assistant Codex turn planning', () => {
     async (_scope, threadIsDirect, privateTurn) => {
       planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
       planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-        supportsNativeResume: false,
-      })
       // A device-activity run is a local cron job: it has an occurrence but
       // no scheduled invocation authority.
       const plan = await resolveAssistantRouteTurnPlan({
@@ -5207,9 +5069,6 @@ describe('assistant Codex turn planning', () => {
     async (_scope, threadIsDirect, privateTurn) => {
       planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
       planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-        supportsNativeResume: false,
-      })
       const plan = await resolveAssistantRouteTurnPlan({
         acceptedInputItems: [],
         executionContext: {
@@ -5262,9 +5121,6 @@ describe('assistant Codex turn planning', () => {
   it('offers cards to an interactive private notification and a group automation run on Telegram', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(null)
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const plan = async (input: {
       channel: 'linq' | 'telegram'
       threadIsDirect: boolean
@@ -5329,9 +5185,6 @@ describe('assistant Codex turn planning', () => {
       null,
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const plan = await resolveAssistantRouteTurnPlan({
       acceptedInputItems: [{
         id: 'linq-group-phone-request',
@@ -5390,9 +5243,6 @@ describe('assistant Codex turn planning', () => {
   it('fails closed on personal prompt context and tools for an unverified external audience', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('PERSONAL_CLI_CONTRACT')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue('PERSONAL_CONTEXT_SNAPSHOT')
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const hostedToolContext: AssistantHostedToolContext = {
       ...createHostedToolContext(),
       connectedApps: { request: vi.fn() },
@@ -5443,9 +5293,6 @@ describe('assistant Codex turn planning', () => {
   })
 
   it('does not replay transcript, hidden turn, or binding context for an unverified external audience', async () => {
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(
       path.join(os.tmpdir(), 'assistant-route-plan-unverified-external-'),
     )
@@ -5504,9 +5351,6 @@ describe('assistant Codex turn planning', () => {
   it('resumes Codex threads when only the per-turn date changes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const route = createRoute()
     const oldPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
@@ -5541,7 +5385,7 @@ describe('assistant Codex turn planning', () => {
       session: createSession({
         resumeState: {
           assistantContractFingerprint: oldPlan.assistantContractFingerprint,
-          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          routeFingerprint: route.routeFingerprint,
           threadId: 'thread-date-change',
         },
       }),
@@ -5563,7 +5407,6 @@ describe('assistant Codex turn planning', () => {
     { change: { sandbox: 'read-only' as const }, resumes: false },
     { change: { model: 'gpt-6.1-sol' }, resumes: true },
   ])('preserves only compatible native routes: $change', async ({ change, resumes }) => {
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: true })
     const target = { provider: 'codex-cli' as const, model: 'gpt-6.1-terra', modelProvider: 'openai', sandbox: 'workspace-write' as const }
     const route = buildCodexThreadIdentity(normalizeAssistantProviderConfig(target))
     const common = {
@@ -5577,7 +5420,7 @@ describe('assistant Codex turn planning', () => {
       ...common, route: buildCodexThreadIdentity(normalizeAssistantProviderConfig({ ...target, ...change })),
       session: createSession({ resumeState: {
         assistantContractFingerprint: initial.assistantContractFingerprint,
-        routeFingerprint: route.routeId, threadCompatibilityFingerprint: route.threadCompatibilityFingerprint,
+        routeFingerprint: route.routeFingerprint, threadCompatibilityFingerprint: route.threadCompatibilityFingerprint,
         threadId: 'thread-route-compatibility',
       } }),
     })
@@ -5589,9 +5432,6 @@ describe('assistant Codex turn planning', () => {
     if (launch === 'local') sharedPlan.cliAccess.env = {}
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValueOnce('old bootstrap')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const route = createRoute()
     const oldPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
@@ -5627,7 +5467,7 @@ describe('assistant Codex turn planning', () => {
       session: createSession({
         resumeState: {
           assistantContractFingerprint: oldPlan.assistantContractFingerprint,
-          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          routeFingerprint: route.routeFingerprint,
           threadId: 'thread-old-contract',
         },
       }),
@@ -5642,9 +5482,6 @@ describe('assistant Codex turn planning', () => {
   it('refreshes timezone, product URL and onboarding on the same thread', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const route = createRoute()
     const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
@@ -5731,7 +5568,7 @@ describe('assistant Codex turn planning', () => {
         session: createSession({
           resumeState: {
             assistantContractFingerprint: oldPlan.assistantContractFingerprint,
-            routeFingerprint: route.routeFingerprint ?? route.routeId,
+            routeFingerprint: route.routeFingerprint,
             threadId: `thread-old-${scenario.name}`,
           },
         }),
@@ -5756,9 +5593,6 @@ describe('assistant Codex turn planning', () => {
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValueOnce(
       'Old assistant context snapshot.',
     )
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const route = createRoute()
     const oldPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
@@ -5796,7 +5630,7 @@ describe('assistant Codex turn planning', () => {
       session: createSession({
         resumeState: {
           assistantContractFingerprint: oldPlan.assistantContractFingerprint,
-          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          routeFingerprint: route.routeFingerprint,
           threadId: 'thread-old-snapshot',
         },
       }),
@@ -5819,9 +5653,6 @@ describe('assistant Codex turn planning', () => {
   it('starts a fresh thread when the exercise routine card contract changes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const route = createRoute()
     const currentPlan = await resolveAssistantRouteTurnPlan({
       executionContext: null,
@@ -5859,7 +5690,7 @@ describe('assistant Codex turn planning', () => {
     const oldToolContractFingerprint = buildAssistantCodexContractFingerprint({
       developerInstructions: currentPlan.developerInstructions,
       dynamicTools: oldDynamicTools,
-      routeFingerprint: route.routeFingerprint ?? route.routeId,
+      routeFingerprint: route.routeFingerprint,
     })
 
     const plan = await resolveAssistantRouteTurnPlan({
@@ -5878,7 +5709,7 @@ describe('assistant Codex turn planning', () => {
       session: createSession({
         resumeState: {
           assistantContractFingerprint: oldToolContractFingerprint,
-          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          routeFingerprint: route.routeFingerprint,
           threadId: 'thread-old-tools',
         },
       }),
@@ -5894,15 +5725,12 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(path.join(
       os.tmpdir(),
       'assistant-route-plan-automation-schema-transition-',
     ))
     const route = createRoute()
-    const routeFingerprint = route.routeFingerprint ?? route.routeId
+    const routeFingerprint = route.routeFingerprint
     const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
@@ -6030,7 +5858,6 @@ describe('assistant Codex turn planning', () => {
   ])('plans $name on its own thread beside the bound reply thread (reads the chat: $readsChat)', async ({ optimizer, readsChat }) => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: true })
     const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-scheduled-isolated-'))
     const route = createRoute()
     const common = {
@@ -6057,7 +5884,7 @@ describe('assistant Codex turn planning', () => {
         assistantContractFingerprint: replyPlan.assistantContractFingerprint,
         codexRolloutRelativePath: null,
         codexThreadId: 'thread-ordinary-replies',
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
         session: baseSession,
         vault,
       })
@@ -6089,15 +5916,12 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(path.join(
       os.tmpdir(),
       'assistant-route-plan-isolated-notification-gap-',
     ))
     const route = createRoute()
-    const routeFingerprint = route.routeFingerprint ?? route.routeId
+    const routeFingerprint = route.routeFingerprint
     const offer = 'Hey, you and Sam are on for 100 pushups a day. Want me to help you keep it going?'
     const buildPlan = async (session: AssistantSession, prompt: string) =>
       await resolveAssistantRouteTurnPlan({
@@ -6243,15 +6067,12 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(path.join(
       os.tmpdir(),
       'assistant-route-plan-expired-automation-transition-',
     ))
     const route = createRoute()
-    const routeFingerprint = route.routeFingerprint ?? route.routeId
+    const routeFingerprint = route.routeFingerprint
     const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
@@ -6364,9 +6185,6 @@ describe('assistant Codex turn planning', () => {
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValueOnce(
       'Cached assistant context snapshot.',
     )
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
@@ -6393,7 +6211,7 @@ describe('assistant Codex turn planning', () => {
     const resumedSession = createSession({
       resumeState: {
         assistantContractFingerprint: initialPlan.assistantContractFingerprint,
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
         threadId: 'thread-sensitive-resume',
       },
     })
@@ -6427,9 +6245,6 @@ describe('assistant Codex turn planning', () => {
   it('plans native resume without preparing committed transcript replay', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
@@ -6461,7 +6276,7 @@ describe('assistant Codex turn planning', () => {
       session: createSession({
         resumeState: {
           assistantContractFingerprint: initialPlan.assistantContractFingerprint,
-          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          routeFingerprint: route.routeFingerprint,
           threadId: 'thread-active-turn',
         },
       }),
@@ -6478,9 +6293,6 @@ describe('assistant Codex turn planning', () => {
   it('replays bounded committed transcript messages when provider-native resume is unavailable', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-transcript-'))
     const session = createSession({
       turnCount: 1,
@@ -6546,9 +6358,6 @@ describe('assistant Codex turn planning', () => {
   it('replays sixty short committed messages after a cold thread transition', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const vault = await mkdtemp(path.join(
       os.tmpdir(),
       'assistant-route-plan-deep-transcript-',
@@ -6627,9 +6436,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const vault = await mkdtemp(path.join(
       os.tmpdir(),
       'assistant-route-plan-dst-recovery-',
@@ -6720,10 +6526,6 @@ describe('assistant Codex turn planning', () => {
         entriesRedacted: 0,
         transcriptsTrimmed: 0,
       })
-
-      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-        supportsNativeResume: false,
-      })
       const freshPlan = await resolveAssistantRouteTurnPlan({
         executionContext: null,
         input: {
@@ -6744,10 +6546,6 @@ describe('assistant Codex turn planning', () => {
 
       expect(freshPlan.resume).toBeNull()
       expect(freshPlan.conversationHistoryMessages).toEqual(expectedHistory)
-
-      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-        supportsNativeResume: true,
-      })
       const staleResumePlan = await resolveAssistantRouteTurnPlan({
         executionContext: null,
         input: {
@@ -6781,9 +6579,6 @@ describe('assistant Codex turn planning', () => {
   it('marks cold conversation history incomplete after transcript text retention', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const vault = await mkdtemp(path.join(
       os.tmpdir(),
       'assistant-route-plan-retired-human-history-',
@@ -6874,9 +6669,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(path.join(
       os.tmpdir(),
       'assistant-route-plan-private-completion-history-',
@@ -7060,9 +6852,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(path.join(
       os.tmpdir(),
       'assistant-route-plan-standalone-reminder-history-',
@@ -7121,7 +6910,6 @@ describe('assistant Codex turn planning', () => {
         acceptedNoReplyDeliveryContextOrdinals: [],
         additionalUsages: [],
         assistantContractFingerprint: 'b'.repeat(64),
-        attemptCount: 1,
         codexContinuation: {
           kind: 'provider-state-optimization',
         },
@@ -7206,7 +6994,6 @@ describe('assistant Codex turn planning', () => {
   })
 
   it('plans a retired session as a fresh thread with the current canonical context snapshot', async () => {
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: true })
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue('Synthetic canonical context: prefers morning walks.')
     const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-retired-plan-'))
     try {
@@ -7237,9 +7024,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(path.join(
       os.tmpdir(),
       'assistant-route-plan-group-reconsideration-',
@@ -7269,7 +7053,6 @@ describe('assistant Codex turn planning', () => {
         acceptedNoReplyDeliveryContextOrdinals: [],
         additionalUsages: [],
         assistantContractFingerprint: 'b'.repeat(64),
-        attemptCount: 1,
         codexContinuation: { kind: 'explicit-structured-history' },
         codexRolloutRelativePath: null,
         codexThreadId: 'provider-thread-reconsidered',
@@ -7367,9 +7150,6 @@ describe('assistant Codex turn planning', () => {
   it('drops an assistant-only suffix when marker reservation removes the sole member message', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const vault = await mkdtemp(path.join(
       os.tmpdir(),
       'assistant-route-plan-bounded-history-',
@@ -7436,9 +7216,6 @@ describe('assistant Codex turn planning', () => {
   it('replays explicit no-reply transcript markers as assistant history', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-no-reply-marker-'))
     const session = createSession({
       turnCount: 1,
@@ -7494,9 +7271,6 @@ describe('assistant Codex turn planning', () => {
   it('bounds committed transcript replay by message and aggregate bytes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-transcript-bytes-'))
     const session = createSession({
       turnCount: 1,
@@ -7558,9 +7332,6 @@ describe('assistant Codex turn planning', () => {
   it('keeps image presence inside bounded fresh-thread history', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const vault = await mkdtemp(
       path.join(os.tmpdir(), 'assistant-route-plan-image-history-'),
     )
@@ -7626,26 +7397,19 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it.each([
-    ['provider route without native resume', false, 'f'.repeat(64)],
-    ['assistant contract fingerprint rotation', true, '0'.repeat(64)],
-  ] as const)(
-    'restores truthfully labeled generated capture provenance after %s',
-    async (_label, supportsNativeResume, assistantContractFingerprint) => {
+  it('restores truthfully labeled generated capture provenance after assistant contract fingerprint rotation',
+    async () => {
       planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
         'bootstrap contract',
       )
       planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-        supportsNativeResume,
-      })
       const vault = await mkdtemp(path.join(
         os.tmpdir(),
         'assistant-route-plan-generated-image-history-',
       ))
       const session = createSession({
         resumeState: {
-          assistantContractFingerprint,
+          assistantContractFingerprint: '0'.repeat(64),
           routeFingerprint: 'route-primary',
           threadId: 'thread-stale-generated-image-history',
         },
@@ -7723,9 +7487,6 @@ describe('assistant Codex turn planning', () => {
   it('does not replay an oversized committed current user prompt', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-current-prompt-'))
     const session = createSession({
       turnCount: 1,
@@ -7779,9 +7540,6 @@ describe('assistant Codex turn planning', () => {
   it('does not replay a persisted pre-provider prompt after active-turn input changes the current prompt', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-active-turn-current-'))
     const session = createSession({
       resumeState: {
@@ -7848,9 +7606,6 @@ describe('assistant Codex turn planning', () => {
   it('replays committed transcript messages for session fresh threads', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-public-transcript-'))
     const session = createSession({
       turnCount: 1,
@@ -7907,9 +7662,6 @@ describe('assistant Codex turn planning', () => {
   it('does not replay committed transcript messages for isolated fresh threads', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: false,
-    })
     const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-isolated-'))
     const session = createSession({
       turnCount: 1,
@@ -7958,9 +7710,6 @@ describe('assistant Codex turn planning', () => {
   it('does not replay committed transcript messages for native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-resume-fallback-'))
     const route = createRoute()
     const initialPlan = await resolveAssistantRouteTurnPlan({
@@ -7987,7 +7736,7 @@ describe('assistant Codex turn planning', () => {
     const session = createSession({
       resumeState: {
         assistantContractFingerprint: initialPlan.assistantContractFingerprint,
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
         threadId: 'thread-resume',
       },
       turnCount: 1,
@@ -8042,9 +7791,6 @@ describe('assistant Codex turn planning', () => {
   it.each(['route-before-model-switch', 'thread-compatible-route'])('accepts a legacy contract fingerprint during a compatible model switch: %s', async (legacyRouteFingerprint) => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const initialRoute = createRoute({
       routeFingerprint: 'route-before-model-switch',
       threadCompatibilityFingerprint: 'thread-compatible-route',
@@ -8114,9 +7860,6 @@ describe('assistant Codex turn planning', () => {
   it('does not replay committed transcript messages for notification native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-notification-public-'))
     const route = createRoute()
     const initialPlan = await resolveAssistantRouteTurnPlan({
@@ -8143,7 +7886,7 @@ describe('assistant Codex turn planning', () => {
     const session = createSession({
       resumeState: {
         assistantContractFingerprint: initialPlan.assistantContractFingerprint,
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
         threadId: 'thread-resume',
       },
       turnCount: 1,
@@ -8196,9 +7939,6 @@ describe('assistant Codex turn planning', () => {
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(
       path.join(os.tmpdir(), 'assistant-route-plan-onboarding-checkin-'),
     )
@@ -8277,9 +8017,6 @@ describe('assistant Codex turn planning', () => {
   it('does not resume or replay transcript messages for isolated notification maintenance turns', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const vault = await mkdtemp(
       path.join(os.tmpdir(), 'assistant-route-plan-notification-isolated-'),
     )
@@ -8308,7 +8045,7 @@ describe('assistant Codex turn planning', () => {
     const session = createSession({
       resumeState: {
         assistantContractFingerprint: initialPlan.assistantContractFingerprint,
-        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        routeFingerprint: route.routeFingerprint,
         threadId: 'thread-resume',
       },
       turnCount: 1,
@@ -8356,9 +8093,6 @@ describe('assistant Codex turn planning', () => {
   it('starts a fresh thread with bootstrap developer instructions when the route fingerprint changed', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
       promptProfile: 'conversation',
       threadScope: 'session-thread',
@@ -8394,9 +8128,6 @@ describe('assistant Codex turn planning', () => {
   it('keeps a pending vault approval capability out of fresh-thread history after a route change', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
-    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
-      supportsNativeResume: true,
-    })
     const approvalUrl =
       `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`
     const vault = await mkdtemp(
@@ -8568,7 +8299,6 @@ function createRoute(input?: {
       }),
     ),
     routeFingerprint,
-    routeId: routeFingerprint,
     ...(input?.threadCompatibilityFingerprint
       ? { threadCompatibilityFingerprint: input.threadCompatibilityFingerprint }
       : {}),
@@ -8590,7 +8320,6 @@ async function resolvePlannedElevenLabsVoiceId(vault: string): Promise<string | 
     turnId: 'turn-preferences',
   })
   const attemptPlan = await buildCodexTurnAttemptPlan({
-    attemptCount: 1,
     executionPlan,
     session,
   })

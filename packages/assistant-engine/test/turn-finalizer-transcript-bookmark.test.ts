@@ -23,7 +23,6 @@ async function setup() {
   const boundary = readTranscriptBoundary(await state.transcripts.list(session.sessionId))
   const providerResult = (transcriptBoundary: ExecutedAssistantProviderTurnResult['transcriptBoundary']): ExecutedAssistantProviderTurnResult => ({
     assistantContractFingerprint: 'a'.repeat(64),
-    attemptCount: 1,
     codexContinuation: { kind: 'explicit-structured-history' },
     codexThreadId: 'thread-synthetic-bookmark',
     provider: 'codex-cli',
@@ -36,7 +35,7 @@ async function setup() {
       label: 'synthetic',
       provider: 'codex-cli',
       providerOptions: session.providerOptions,
-      routeId: 'synthetic-route',
+      routeFingerprint: 'synthetic-route',
     },
     session,
     stderr: '',

@@ -233,7 +233,7 @@ test.each((['linq', 'telegram'] as const).flatMap((channel) => [
     providerTurn: {
       onboardingGuidanceInjected: false,
       codexContinuation: { kind: 'explicit-structured-history' as const },
-      codexThreadId: 'synthetic-held-thread', route: { routeId: 'synthetic-held-route' },
+      codexThreadId: 'synthetic-held-thread', route: { routeFingerprint: 'synthetic-held-route' },
       session, responseDeliveryContextOrdinal: 0,
       response: kind === 'text' ? 'Synthetic reply' : '', transcriptResponse: null,
       ...(kind === 'none' || kind === 'reaction' ? { finalAction: { kind: 'none' as const } } : {}),

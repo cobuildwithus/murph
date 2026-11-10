@@ -143,7 +143,6 @@ const assistantNotificationDecisionSchema = z.discriminatedUnion('kind', [
 const ASSISTANT_MAINTENANCE_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
-  nativeResumePolicy: 'disabled',
   promptProfile: 'maintenance',
   threadScope: 'isolated-thread',
   toolProfile: 'maintenance-turn',
@@ -151,7 +150,6 @@ const ASSISTANT_MAINTENANCE_TURN_PROFILE: Required<
 const ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
-  nativeResumePolicy: 'disabled',
   promptProfile: 'conversation',
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
@@ -159,7 +157,6 @@ const ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_TURN_PROFILE: Required<
 const ASSISTANT_OPERATOR_MESSAGE_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
-  nativeResumePolicy: 'disabled',
   promptProfile: 'operator-message',
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
@@ -167,7 +164,6 @@ const ASSISTANT_OPERATOR_MESSAGE_NOTIFICATION_TURN_PROFILE: Required<
 const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
-  nativeResumePolicy: 'disabled',
   promptProfile: 'system-notification',
   threadScope: 'isolated-thread',
   toolProfile: 'output-only-turn',
@@ -175,7 +171,6 @@ const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
 const ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
-  nativeResumePolicy: 'disabled',
   promptProfile: 'conversation',
   threadScope: 'isolated-thread',
   toolProfile: 'provider-turn',
@@ -183,7 +178,6 @@ const ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE: Required<
 const ASSISTANT_GAME_RECAP_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
-  nativeResumePolicy: 'disabled',
   promptProfile: 'conversation',
   threadScope: 'isolated-thread',
   toolProfile: 'game-host-turn',
@@ -546,7 +540,6 @@ export async function sendAssistantNotificationLocal(
               rawEvents: providerOutcome.rawEvents ?? [],
             })
           const failedProviderResult = {
-            attemptCount: providerOutcome.attemptCount,
             provider: providerOutcome.route.provider,
             providerOptions: providerOutcome.route.providerOptions,
             route: providerOutcome.route,

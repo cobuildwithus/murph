@@ -796,7 +796,6 @@ describe('notification audience authority integration', () => {
           kind: 'succeeded',
           providerTurn: {
             assistantContractFingerprint: 'a'.repeat(64),
-            attemptCount: 1,
             codexContinuation: { kind: 'explicit-structured-history' },
             codexThreadId: null,
             provider: input.route.provider,

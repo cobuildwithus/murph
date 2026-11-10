@@ -29,7 +29,6 @@ import {
 import {
   bindAssistantResumeStateToThreadCompatibility,
   doesAssistantResumeBindingMatchRoute,
-  resolveAssistantCodexResumeThreadId,
   resolveAssistantRouteResumeBinding,
 } from '../src/assistant/codex-resume-binding.ts'
 import {
@@ -78,8 +77,8 @@ describe('assistant Codex seam helpers', () => {
       }),
     )
 
-    expect(secondHostedRoute.routeId).toBe(firstHostedRoute.routeId)
-    expect(secondLocalRoute.routeId).not.toBe(firstLocalRoute.routeId)
+    expect(secondHostedRoute.routeFingerprint).toBe(firstHostedRoute.routeFingerprint)
+    expect(secondLocalRoute.routeFingerprint).not.toBe(firstLocalRoute.routeFingerprint)
   })
 
   it('keeps equivalent local Codex home spellings on the same route', () => {
@@ -112,8 +111,8 @@ describe('assistant Codex seam helpers', () => {
       }),
     )
 
-    expect(resolvedRoute.routeId).toBe(relativeRoute.routeId)
-    expect(homeRoute.routeId).toBe(tildeRoute.routeId)
+    expect(resolvedRoute.routeFingerprint).toBe(relativeRoute.routeFingerprint)
+    expect(homeRoute.routeFingerprint).toBe(tildeRoute.routeFingerprint)
   })
 
   it('keeps omitted and explicit default Codex commands on the same route', () => {
@@ -138,8 +137,8 @@ describe('assistant Codex seam helpers', () => {
       }),
     )
 
-    expect(explicitDefaultCommandRoute.routeId).toBe(defaultCommandRoute.routeId)
-    expect(customCommandRoute.routeId).not.toBe(defaultCommandRoute.routeId)
+    expect(explicitDefaultCommandRoute.routeFingerprint).toBe(defaultCommandRoute.routeFingerprint)
+    expect(customCommandRoute.routeFingerprint).not.toBe(defaultCommandRoute.routeFingerprint)
   })
 
   it('matches resume bindings only when the stored route id matches exactly', () => {
@@ -567,12 +566,6 @@ describe('assistant Codex seam helpers', () => {
     }
 
     expect(
-      resolveAssistantCodexResumeThreadId({
-        resumeState,
-      }),
-    ).toBe('provider_session_alpha')
-
-    expect(
       doesAssistantResumeBindingMatchRoute({
         resumeState,
         route: createRoute({
@@ -602,12 +595,6 @@ describe('assistant Codex seam helpers', () => {
   })
 
   it('rejects missing resume state and blank stored route ids', () => {
-    expect(
-      resolveAssistantCodexResumeThreadId({
-        resumeState: null,
-      }),
-    ).toBeNull()
-
     expect(
       doesAssistantResumeBindingMatchRoute({
         resumeState: null,
@@ -648,7 +635,6 @@ function createRoute(input?: {
     provider: 'codex-cli',
     providerOptions: createProviderOptions(input?.providerOptions),
     routeFingerprint,
-    routeId: routeFingerprint,
   }
 }
 

@@ -7,14 +7,10 @@ import {
   type AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
-  resolveStrictAssistantCodexModelProvider,
-} from '@murphai/operator-config/assistant/target-runtime'
-import {
   mergeAssistantProviderActivityLabels,
   type AssistantProviderProgressEvent,
 } from './provider-progress.js'
 import {
-  CODEX_ASSISTANT_CAPABILITIES,
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   preinitializeCodexAssistantProcess as preinitializeCodexAssistantProcessUnchecked,
   startCodexAssistantVoice,
@@ -22,7 +18,6 @@ import {
 
 import type {
   AssistantProviderAttemptMetadata,
-  AssistantProviderCapabilities,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
@@ -30,17 +25,12 @@ import type {
 } from './providers/types.js'
 import type { CodexRealtimeOptions, CodexRealtimeSession } from '../assistant-codex.js'
 
-export function resolveCodexAssistantCapabilities(): AssistantProviderCapabilities {
-  return cloneAssistantProviderCapabilities(CODEX_ASSISTANT_CAPABILITIES)
-}
-
 export interface HostedCodexAssistantProcessPreparationInput {
   env?: NodeJS.ProcessEnv
   signal?: AbortSignal | null
   target: AssistantModelTarget
   workingDirectory: string
 }
-
 export interface HostedCodexAssistantProcessPreparation {
   cancelPending(): Promise<void>
 }
@@ -80,19 +70,6 @@ export async function prepareHostedCodexAssistantProcess(
     providerConfig,
     signal: input.signal ?? undefined,
     workingDirectory: input.workingDirectory,
-  })
-}
-
-export function resolveCodexAssistantTargetCapabilities(
-  input: AssistantProviderConfigLike | null | undefined,
-): AssistantProviderCapabilities {
-  const normalized = normalizeAssistantProviderConfig(input)
-  resolveStrictAssistantCodexModelProvider(normalized.target.modelProvider)
-
-  return cloneAssistantProviderCapabilities({
-    ...CODEX_ASSISTANT_CAPABILITIES,
-    supportsNativeResume: true,
-    supportsReasoningEffort: true,
   })
 }
 
@@ -142,7 +119,6 @@ function toAssistantProviderTurnExecutionInput(
 
 export type {
   AssistantProviderAttemptMetadata,
-  AssistantProviderCapabilities,
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
@@ -180,16 +156,5 @@ function finalizeAssistantProviderAttemptMetadata(
       events: progressEvents,
       labels: metadata.activityLabels,
     }),
-  }
-}
-
-function cloneAssistantProviderCapabilities(
-  capabilities: AssistantProviderCapabilities,
-): AssistantProviderCapabilities {
-  return {
-    supportedUserMessageContentTypes: [...capabilities.supportedUserMessageContentTypes],
-    supportsNativeResume: capabilities.supportsNativeResume,
-    supportsReasoningEffort: capabilities.supportsReasoningEffort,
-    supportsRichUserMessageContent: capabilities.supportsRichUserMessageContent,
   }
 }

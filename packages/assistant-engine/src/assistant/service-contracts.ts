@@ -239,7 +239,6 @@ export interface PersistedUserTurn {
 export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTurnExecutionResult {
   assistantContractFingerprint: string
   transcriptBoundary?: import('@murphai/operator-config/assistant/codex-resume-state').TranscriptSeenThrough
-  attemptCount: number
   onboardingGuidanceInjected?: boolean
   codexContinuation: AssistantCodexContinuation
   providerOptions: AssistantProviderSessionOptions
