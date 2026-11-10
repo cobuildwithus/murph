@@ -40,6 +40,8 @@ describe("runner base image preparation", () => {
   afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     vi.clearAllMocks();
+    // Queued results a test did not consume must not shift the next test's Docker replies.
+    vi.mocked(spawnSync).mockReset();
     vi.mocked(readFile).mockImplementation(async (sourcePath, options) => {
       const encoding =
         typeof options === "string"
@@ -302,6 +304,83 @@ describe("runner base image preparation", () => {
       expect.anything(),
     );
     expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts the published version without compiling only when asked", async () => {
+    const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
+    mockDockerSyncResults([
+      { status: 1, stderr: "No such image\n" },
+      { status: 1, stderr: "manifest unknown\n" },
+      { status: 0 },
+      { status: 0, stdout: "old-fingerprint\n" },
+      { status: 0 },
+      { status: 0, stdout: "old-fingerprint\n" },
+    ]);
+
+    const result = await prepareRunnerBaseImage({ acceptPublishedVersion: true });
+
+    expect(result).toEqual({
+      fingerprint: expectedFingerprint(),
+      imageTag: hostedLocalRunnerBaseImageTag,
+      status: "published-version",
+    });
+    expect(spawnSync).toHaveBeenLastCalledWith(
+      "docker",
+      expect.arrayContaining(["image", "inspect", hostedRunnerBaseImageRemoteTag]),
+      expect.anything(),
+    );
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("prefers the exact published image when a published version is acceptable", async () => {
+    const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
+    const fingerprint = expectedFingerprint();
+    mockDockerSyncResults([
+      { status: 1, stderr: "No such image\n" },
+      { status: 0 },
+      { status: 0, stdout: `${fingerprint}\n` },
+      { status: 0 },
+      { status: 0, stdout: `${fingerprint}\n` },
+    ]);
+
+    expect((await prepareRunnerBaseImage({ acceptPublishedVersion: true })).status).toBe("pulled");
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", [{ status: 1, stderr: "manifest unknown\n" }]],
+    ["unlabeled", [{ status: 0 }, { status: 0, stdout: "<no value>\n" }]],
+  ])("builds from source when the published version is %s", async (_, published) => {
+    const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
+    mockDockerSyncResults([
+      { status: 1, stderr: "No such image\n" },
+      { status: 1, stderr: "manifest unknown\n" },
+      ...published,
+      ...published,
+    ]);
+
+    expect((await prepareRunnerBaseImage({ acceptPublishedVersion: true })).status).toBe("built");
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("never accepts a published version for a forced build", async () => {
+    const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
+
+    expect((await prepareRunnerBaseImage({ acceptPublishedVersion: true, force: true })).status).toBe("built");
+    expect(spawnSync).not.toHaveBeenCalled();
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps accepting a published version apart from forcing, pushing, and waiting", async () => {
+    const { parseRunnerBaseImageArgs } = await import("../scripts/runner-base-image.ts");
+
+    expect([...parseRunnerBaseImageArgs(["--", "--accept-published-version"])]).toEqual(["--accept-published-version"]);
+    expect([...parseRunnerBaseImageArgs(["--force"])]).toEqual(["--force"]);
+    for (const other of ["--force", "--push", "--wait-published"]) {
+      expect(() => parseRunnerBaseImageArgs(["--accept-published-version", other])).toThrow("cannot force, push, or wait");
+    }
+    expect(() => parseRunnerBaseImageArgs(["--wait-published", "--push"])).toThrow("cannot build or push");
+    expect(() => parseRunnerBaseImageArgs(["--unknown"])).toThrow("Unsupported runner base image argument");
   });
 
   it("pushes stable and fingerprinted GHCR image tags when publishing", async () => {

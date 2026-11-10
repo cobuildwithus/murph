@@ -2574,6 +2574,13 @@ Dockerfile/patch fingerprint's published Linux/AMD64 image config. It inspects
 bounded registry metadata, checks the source label, and never pulls layers or
 compiles a missing image. Application-only commits may reuse an earlier matching
 publication; an unrelated successful publisher run is not readiness evidence.
+`runner:docker:base -- --accept-published-version` prefers the exact image and
+otherwise adopts the newest published image for the same version tag, even when
+its source label is older, before it would compile. Only the one-vCPU latency
+comparison uses it, and only when base and candidate share the base image
+source, because both sides then run on the same image. It cannot be combined
+with `--force`, `--push`, or `--wait-published`, so no deploy, publication, or
+native behavior proof can adopt a stale image.
 Registry errors, stale labels, wrong platforms, and deadline exhaustion fail
 closed without weakening normal image admission or native sandbox proof.
 

@@ -511,6 +511,17 @@ and its proven first parent on native Linux AMD64; the job remains part of the
 required release aggregate. It uses each checkout's production Dockerfile and
 existing base-image preparation, without a separate service or dependency.
 
+When neither revision changes the base image source (its Dockerfile and the
+native Codex patch), one base image serves both sides, so its exact patch level
+cannot move the comparison. The check then asks the candidate's preparation for
+`--accept-published-version`: the exact published image when it exists,
+otherwise the newest published image for the same version tag. It does not
+compile Codex. That keeps unrelated pull requests at a few minutes while the
+protected-main publisher is still building a new base image, which takes about
+an hour. If the build or a container fails on that image, the check retries
+once with each checkout's exact image, as it always does when the base image
+source differs between the two revisions.
+
 Three fresh-container samples per revision run sequentially in alternating
 order. Every workload has a hard one-vCPU quota, 6 GiB memory with no swap, no
 network, and only a read-only synthetic benchmark mount. The container writable
