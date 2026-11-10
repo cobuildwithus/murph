@@ -49994,6 +49994,61 @@ describeRealCodex('real Codex isolated notification thread continuity', () => {
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }
   }, 600_000)
+
+  it('scheduled reminder between two replies leaves the reply thread in place', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-scheduled-between-replies-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const modelTarget = createAssistantModelTarget({
+      approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+      codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
+      provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
+    })
+    if (!modelTarget) throw new Error('Expected a real Codex target.')
+    const route = { actorId: null, bindingDeliveryTarget: 'synthetic-reminder-direct-thread',
+      channel: 'linq' as const, deliveryTarget: 'synthetic-reminder-direct-thread', identityId: null,
+      threadId: 'synthetic-reminder-direct-thread', threadIsDirect: true }
+    const executionContext = { hosted: { defaultTarget: modelTarget,
+      memberId: 'synthetic-reminder-member', userEnvKeys: [] } }
+    const turnEnvironment = { currentWorkingDirectory: workingDirectory, env: config.env }
+    const memberTurn = (prompt: string, inputId: string, sessionId?: string, onTraceEvent?: Parameters<typeof sendAssistantMessageLocal>[0]['onTraceEvent']) =>
+      sendAssistantMessageLocal({ ...route, acceptedTurnInput: { initialInputs: [{ id: inputId, source: 'manual',
+        acceptedAt: new Date().toISOString() }] }, deliverResponse: false, executionContext,
+        includeEarlySessionOnboarding: false, onTraceEvent, prompt, sessionId, turnEnvironment,
+        vault: workingDirectory, workingDirectory })
+
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const first = await memberTurn('I take two fish oil capsules a day with dinner.', `ain_${'c'.repeat(32)}`)
+      const threadId = first.session.codexResume?.threadId
+      expect(threadId).toBeTruthy()
+
+      // The scheduled turn runs on its own thread: it reads the chat as
+      // transcript history and leaves the reply thread bound.
+      const occurrenceAt = new Date().toISOString()
+      const eventId = `synthetic-reminder:${occurrenceAt}`
+      const reminder = await sendAssistantNotificationLocal({ ...route,
+        deliveryDedupeToken: eventId, deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId,
+        executionContext,
+        instructions: 'Send the member a one-line reminder to take the supplement they told you about. Name the supplement.',
+        scheduledOccurrenceAt: occurrenceAt, sessionId: first.session.sessionId, turnEnvironment,
+        turnTrigger: 'automation-cron', vault: workingDirectory, workingDirectory })
+      expect(reminder.response).toMatch(/fish oil/iu)
+      expect(reminder.session.codexResume?.threadId).toBe(threadId)
+
+      const traceEvents: unknown[] = []
+      const third = await memberTurn('Done. Which supplement was that reminder for?', `ain_${'d'.repeat(32)}`,
+        reminder.session.sessionId, event => traceEvents.push(event))
+      const reply = third.response.trim()
+      process.stdout.write(`[scheduled-between-replies] ${JSON.stringify({ reminder: reminder.response, reply })}\n`)
+      expect(hasCodexTimingStage(traceEvents, 'thread-resumed')).toBe(true)
+      expect(third.session.codexResume?.threadId).toBe(threadId)
+      expect(reply).toMatch(/fish oil/iu)
+    } finally {
+      await stopWarmCodexAppServer('scheduled-between-replies-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 600_000)
 })
 
 describeRealCodex('private game reminder reply', () => {

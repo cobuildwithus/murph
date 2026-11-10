@@ -1,6 +1,6 @@
 import { deliverAssistantGameBootstrapMessage, prepareAssistantGameBootstrap, recoverAssistantGameBootstrapResult } from './game-chat-bootstrap.js'
 import type { HostedGameChatBootstrapResult, HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateEveningCheckInPolicy, HostedGamePrivateKickoffPolicy } from '@murphai/hosted-execution/runtime-control'
-import { resolveUsageOptimizerFeedbackScope, type UsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
+import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import { prepareAssistantFollowUpEvaluationInput } from './follow-ups.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import type {
@@ -48,7 +48,6 @@ import {
 } from './codex-turn-runner.js'
 import { normalizeCodexEvent } from '../assistant-codex-events.js'
 import {
-  readCodexThreadCompatibilityFingerprint,
   readCodexThreadRouteFingerprint,
   type CodexThreadIdentity,
 } from './codex-thread-route.js'
@@ -57,10 +56,7 @@ import {
   recordAssistantUsageEvent,
 } from './service-usage.js'
 import {
-  applyAssistantSessionCodexResumeStateAction,
   persistAssistantTurnAndSession,
-  resolveAssistantProviderResumeStateAction,
-  type AssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { createAssistantTurnId } from './turns.js'
@@ -513,12 +509,7 @@ export async function sendAssistantNotificationLocal(
         const notificationProviderRequestStarted =
           messageInput.onProviderRequestStarted ?? null
         let notificationProviderRequestStartedAt: string | undefined
-        const notificationTurnProfile = resolveAssistantNotificationTurnProfile(
-          input,
-          resolveUsageOptimizerFeedbackScope({ conversationScope, executionContext, messageInput }),
-        )
-        const notificationThreadScope =
-          notificationTurnProfile?.threadScope ?? 'session-thread'
+        const notificationTurnProfile = resolveAssistantNotificationTurnProfile(input)
         const providerOutcome = await executeCodexTurnWithRecovery({
           allowFinishWithoutReply: false,
           input: messageInput,
@@ -541,9 +532,7 @@ export async function sendAssistantNotificationLocal(
             : undefined,
           plan: sharedPlan,
           progressDelivery,
-          ...(notificationTurnProfile
-            ? { profile: notificationTurnProfile }
-            : {}),
+          profile: notificationTurnProfile,
           resolvedSession: resolved.session,
           route,
           turnCreatedAt,
@@ -556,31 +545,12 @@ export async function sendAssistantNotificationLocal(
               input,
               rawEvents: providerOutcome.rawEvents ?? [],
             })
-          const failedSession =
-            await applyAssistantSessionCodexResumeStateAction({
-              action: resolveAssistantProviderResumeStateAction({
-                codexThreadId: providerOutcome.codexThreadId,
-                threadScope: notificationThreadScope,
-              }),
-              assistantContractFingerprint:
-                providerOutcome.assistantContractFingerprint,
-              assistantTargetOverride: input.assistantTargetOverride,
-              codexRolloutRelativePath:
-                providerOutcome.codexRolloutRelativePath,
-              codexThreadId: providerOutcome.codexThreadId,
-              routeFingerprint:
-                readCodexThreadRouteFingerprint(providerOutcome.route),
-              threadCompatibilityFingerprint:
-                readCodexThreadCompatibilityFingerprint(providerOutcome.route),
-              session: providerOutcome.session,
-              vault: input.vault,
-            })
           const failedProviderResult = {
             attemptCount: providerOutcome.attemptCount,
             provider: providerOutcome.route.provider,
             providerOptions: providerOutcome.route.providerOptions,
             route: providerOutcome.route,
-            session: failedSession,
+            session: providerOutcome.session,
             usage: providerOutcome.usage,
             usageAttribution: providerOutcome.usageAttribution,
           }
@@ -607,7 +577,7 @@ export async function sendAssistantNotificationLocal(
                 stage: 'provider',
                 input: messageInput,
                 route: providerOutcome.route,
-                session: failedSession,
+                session: providerOutcome.session,
               }),
               assistantNotificationProviderNonReplayableWork:
                 nonReplayableProviderWork,
@@ -622,11 +592,6 @@ export async function sendAssistantNotificationLocal(
             rawEvents: providerResult.rawEvents ?? [],
           })
         const selectedRoute = providerResult.route
-        const providerResumeStateAction =
-          resolveAssistantNotificationProviderResumeStateAction({
-            providerResult,
-            threadScope: notificationThreadScope,
-          })
         await recordAssistantUsageEvent({
           executionContext,
           ...(notificationProviderRequestStartedAt === undefined
@@ -734,7 +699,7 @@ export async function sendAssistantNotificationLocal(
             plan: sharedPlan,
             persistUserPromptToTranscript: false,
             providerResult,
-            providerResumeStateAction,
+            providerResumeStateAction: 'preserve-existing',
             session: providerResult.session,
             turnCreatedAt,
             turnId,
@@ -793,7 +758,7 @@ export async function sendAssistantNotificationLocal(
             plan: sharedPlan,
             persistUserPromptToTranscript: false,
             providerResult,
-            providerResumeStateAction,
+            providerResumeStateAction: 'preserve-existing',
             session: providerResult.session,
             turnCreatedAt,
             turnId,
@@ -902,7 +867,7 @@ export async function sendAssistantNotificationLocal(
               plan: sharedPlan,
               persistUserPromptToTranscript: false,
               providerResult,
-              providerResumeStateAction,
+              providerResumeStateAction: 'preserve-existing',
               session: deliveryOutcome.session,
               turnCreatedAt,
               turnId,
@@ -1820,19 +1785,6 @@ async function deliverAssistantNotificationMessage(input: {
   }
 }
 
-function resolveAssistantNotificationProviderResumeStateAction(input: {
-  providerResult: { codexThreadId?: string | null }
-  threadScope: AssistantCodexTurnThreadScopeProfile['threadScope']
-}): AssistantProviderResumeStateAction {
-  if (input.threadScope === 'isolated-thread') {
-    return 'preserve-existing'
-  }
-
-  return normalizeNullableString(input.providerResult.codexThreadId)
-    ? 'persist-from-provider-turn'
-    : 'preserve-existing'
-}
-
 function createAssistantMaintenanceNotificationResolvedSession(input: {
   boundaryDefaultTarget:
     Parameters<typeof resolveAssistantSessionTarget>[0]['boundaryDefaultTarget']
@@ -1965,8 +1917,7 @@ function isAssistantNotificationScheduledOccurrence(
 
 function resolveAssistantNotificationTurnProfile(
   input: AssistantNotificationInput,
-  usageOptimizerScope: UsageOptimizerFeedbackScope | null,
-): Required<AssistantCodexTurnThreadScopeProfile> | null {
+): Required<AssistantCodexTurnThreadScopeProfile> {
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
   }
@@ -1988,11 +1939,15 @@ function resolveAssistantNotificationTurnProfile(
   if (input.executionContext?.hosted?.gameMissedCheckInScope != null) {
     return ASSISTANT_GAME_RECAP_NOTIFICATION_TURN_PROFILE
   }
-  if (isAssistantOnboardingGoalCheckinNotification(input) || usageOptimizerScope !== null) {
+  if (isAssistantOnboardingGoalCheckinNotification(input)) {
     return ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
   }
+  // A scheduled occurrence never shares the conversation's Codex thread. Its
+  // tool list differs from a reply's and thread/resume cannot replace tools,
+  // so sharing only made each side restart the other. It reads the
+  // conversation as transcript history instead.
   return isAssistantNotificationScheduledOccurrence(input)
-    ? null
+    ? ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
     : ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE
 }
 

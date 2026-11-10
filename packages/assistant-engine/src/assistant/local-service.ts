@@ -73,8 +73,8 @@ import {
   type AssistantReplyDeliveryContext,
 } from './reply-delivery-context.js'
 import {
-  applyAssistantSessionCodexResumeStateAction,
   clearAssistantSessionCodexResumeState,
+  dropAssistantSessionStaleCodexThread,
   persistAssistantNoReplyTranscriptMarkers,
   persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
   resolveAssistantProviderResumeStateAction,
@@ -1956,31 +1956,14 @@ export async function sendAssistantMessageLocal(
                 turnId: currentUserTurn.turnId,
               })
             }
-            const failedProviderResumeStateAction =
-              providerRequestOrdinal === 1
-                ? 'preserve-existing'
-                : resolveAssistantProviderResumeStateAction({
-                    codexThreadId: providerOutcome.codexThreadId ?? null,
-                    threadScope,
-                  })
             if (progressDeliveredSessionRef.value) {
               currentSession = applyAssistantProgressDeliveredSession({
                 progressDeliveredSession: progressDeliveredSessionRef.value,
                 session: providerOutcome.session,
               })
             }
-            currentSession = await applyAssistantSessionCodexResumeStateAction({
-              action: failedProviderResumeStateAction,
-              assistantContractFingerprint:
-                providerOutcome.assistantContractFingerprint,
-              assistantTargetOverride: currentInput.assistantTargetOverride,
-              codexRolloutRelativePath:
-                providerOutcome.codexRolloutRelativePath,
-              codexThreadId: providerOutcome.codexThreadId,
-              routeFingerprint:
-                readCodexThreadRouteFingerprint(providerOutcome.route),
-              threadCompatibilityFingerprint:
-                readCodexThreadCompatibilityFingerprint(providerOutcome.route),
+            currentSession = await dropAssistantSessionStaleCodexThread({
+              error: providerOutcome.error,
               session: currentSession,
               vault: input.vault,
             })
@@ -2036,7 +2019,7 @@ export async function sendAssistantMessageLocal(
                 plan: sharedPlan,
                 precedingAssistantTranscriptTexts: [],
                 providerResult: failedNoReplyProviderResult,
-                providerResumeStateAction: failedProviderResumeStateAction,
+                providerResumeStateAction: 'preserve-existing',
                 ownTranscriptEntries: turnOwnTranscriptEntries,
                 persistUserPromptToTranscript: !userPromptPersistedToTranscript,
                 session: failedNoReplySession,

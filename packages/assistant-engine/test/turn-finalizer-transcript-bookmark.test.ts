@@ -2,10 +2,11 @@ import { expect, it } from 'vitest'
 import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.ts'
 import { fingerprintTranscriptEntry, readTranscriptBoundary } from '../src/assistant/transcript-bookmark.ts'
 import {
-  applyAssistantSessionCodexResumeStateAction,
+  dropAssistantSessionStaleCodexThread,
   persistAssistantTurnAndSession,
 } from '../src/assistant/turn-finalizer.ts'
 import { buildCodexResumeState } from '@murphai/operator-config/assistant/codex-resume-state'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { ExecutedAssistantProviderTurnResult } from '../src/assistant/service-contracts.ts'
 import { createAssistantSession, createSharedPlan, tempRoots } from './assistant-local-service-runtime.harness.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -97,13 +98,9 @@ it('saves no bookmark when the turn has no planning boundary, so the next turn r
   expect(saved.codexResume).not.toHaveProperty('transcriptSeenThrough')
 })
 
-// A provider turn that fails may never have shown Codex its history, so a
-// failed save must not mark anything seen.
-async function failedSave(input: {
-  assistantTargetOverride?: Parameters<typeof applyAssistantSessionCodexResumeStateAction>[0]['assistantTargetOverride']
-  codexThreadId: string
-  routeFingerprint: string
-}) {
+// A provider turn that fails may never have shown Codex its history, and a
+// thread it opened has no bookmark, so a failed turn never saves a binding.
+async function failedTurn(error: unknown) {
   const { boundary, session, state, vaultRoot } = await setup()
   const durable = buildCodexResumeState({
     assistantContractFingerprint: 'a'.repeat(64),
@@ -111,43 +108,31 @@ async function failedSave(input: {
     threadId: 'thread-durable',
     transcriptSeenThrough: boundary,
   })
+  const bound = await state.sessions.save({ ...session, codexResume: durable, resumeState: durable })
   // The game kickoff lands after the durable thread's bookmark.
   await state.transcripts.append(session.sessionId, [
     { kind: 'assistant', text: 'You and Zach are on for a plank. Want help keeping it going?', standaloneAssistantContext: true, createdAt: '2026-01-10T11:30:00.000Z' },
   ])
-  const saved = await applyAssistantSessionCodexResumeStateAction({
-    action: 'persist-from-provider-turn',
-    assistantContractFingerprint: 'a'.repeat(64),
-    ...(input.assistantTargetOverride ? { assistantTargetOverride: input.assistantTargetOverride } : {}),
-    codexRolloutRelativePath: null,
-    codexThreadId: input.codexThreadId,
-    routeFingerprint: input.routeFingerprint,
-    session: { ...session, codexResume: durable, resumeState: durable },
-    vault: vaultRoot,
-  })
-  return { boundary, durable, saved }
+  const saved = await dropAssistantSessionStaleCodexThread({ error, session: bound, vault: vaultRoot })
+  return { durable, saved, stored: await state.sessions.get(session.sessionId) }
 }
 
-it('keeps the bookmark when a failed turn reused the same thread', async () => {
-  const { boundary, saved } = await failedSave({ codexThreadId: 'thread-durable', routeFingerprint: 'durable-route' })
-
-  expect(saved.codexResume?.threadId).toBe('thread-durable')
-  expect(saved.codexResume?.transcriptSeenThrough).toEqual(boundary)
-})
-
-it('saves no bookmark when a failed turn opened a new thread, so the next turn rebuilds', async () => {
-  const { saved } = await failedSave({ codexThreadId: 'thread-new', routeFingerprint: 'durable-route' })
-
-  expect(saved.codexResume?.threadId).toBe('thread-new')
-  expect(saved.codexResume).not.toHaveProperty('transcriptSeenThrough')
-})
-
-it('keeps the durable binding when a failed turn ran on an override route', async () => {
-  const { durable, saved } = await failedSave({
-    assistantTargetOverride: { model: 'gpt-override' },
-    codexThreadId: 'thread-override',
-    routeFingerprint: 'override-route',
-  })
+it.each([
+  { name: 'a provider failure', error: new VaultCliError('ASSISTANT_CODEX_FAILED', 'Flex capacity unavailable.') },
+  { name: 'a failure before any thread opened', error: new VaultCliError('ASSISTANT_CODEX_APP_SERVER_TIMEOUT', 'thread/resume timed out.') },
+  { name: 'an untyped error', error: new Error('connection lost') },
+])('keeps the saved thread and its bookmark after $name', async ({ error }) => {
+  const { durable, saved, stored } = await failedTurn(error)
 
   expect(saved.codexResume).toEqual(durable)
+  expect(stored.codexResume).toEqual(durable)
+})
+
+it('drops the saved thread when Codex could not resume it, so the retry starts a new one', async () => {
+  const { saved, stored } = await failedTurn(
+    new VaultCliError('ASSISTANT_CODEX_RESUME_STALE', 'no rollout found for thread id thread-durable', { staleResume: true }),
+  )
+
+  expect(saved.codexResume).toBeNull()
+  expect(stored.codexResume).toBeNull()
 })

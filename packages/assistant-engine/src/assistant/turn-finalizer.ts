@@ -230,46 +230,22 @@ export function resolveAssistantProviderResumeStateAction(input: {
     : 'clear'
 }
 
-// Saves the binding for a provider turn that did not complete. It never
-// advances the transcript bookmark: Codex may not have accepted the turn's
-// history, so unseen entries stay unseen and are replayed on the next turn.
-export async function applyAssistantSessionCodexResumeStateAction(input: {
-  action: AssistantProviderResumeStateAction
-  assistantContractFingerprint: string
-  assistantTargetOverride?: AssistantMessageInput['assistantTargetOverride']
-  codexRolloutRelativePath: string | null
-  codexThreadId: string | null
-  routeFingerprint: string
-  threadCompatibilityFingerprint?: string | null
+// A provider turn that did not complete leaves the saved thread alone: Codex
+// may not have accepted the turn's history, and a thread the turn opened has no
+// bookmark to resume from. The one exception is a saved thread Codex could not
+// resume; it is dropped so the retry starts a new one.
+export async function dropAssistantSessionStaleCodexThread(input: {
+  error: unknown
   session: AssistantSession
   vault: string
 }): Promise<AssistantSession> {
-  const current = readAssistantCodexResume(input.session)
-  const next = resolveAssistantSessionResumeState({
-    ...input,
-    overrideDurableTarget:
-      compactAutomationAssistantTargetOverride(input.assistantTargetOverride) !== null
-        ? input.session.target
-        : null,
-    sessionResumeState: current,
-    walkedBookmark: undefined,
-  })
-  if (next === current) {
-    return input.session
-  }
-  if (next === null) {
-    return await clearAssistantSessionCodexResumeState({
-      session: input.session,
-      vault: input.vault,
-    })
-  }
-  const state = createAssistantRuntimeStateService(input.vault)
-  return await state.sessions.save({
-    ...input.session,
-    codexResume: next,
-    resumeState: next,
-    updatedAt: new Date().toISOString(),
-  })
+  const code = (input.error as { code?: unknown } | null)?.code
+  return code === 'ASSISTANT_CODEX_RESUME_STALE'
+    ? await clearAssistantSessionCodexResumeState({
+        session: input.session,
+        vault: input.vault,
+      })
+    : input.session
 }
 
 export async function persistAssistantTurnAndSession(input: {
@@ -551,9 +527,11 @@ async function walkCompletedTurnBookmark(input: {
 // The one rule for every saved thread binding.
 // - A completed provider turn adopts its thread with the bookmark walked over
 //   what that turn saw and wrote.
-// - Any other save of the same thread keeps that thread's existing bookmark; a
-//   different thread gets none, so the next turn rebuilds from the transcript.
-//   Unseen entries are replayed, never skipped.
+// - A completed turn with no planning boundary keeps the same thread's existing
+//   bookmark; a different thread gets none, so the next turn rebuilds from the
+//   transcript. Unseen entries are replayed, never skipped.
+// - A turn that did not complete never saves a binding
+//   (dropAssistantSessionStaleCodexThread).
 // - A turn-scoped target override replaces the durable binding only when its
 //   thread matches the durable route; otherwise the durable binding is kept.
 function resolveAssistantSessionResumeState(input: {

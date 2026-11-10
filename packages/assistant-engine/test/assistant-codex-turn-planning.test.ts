@@ -180,7 +180,6 @@ import {
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import { resolveAssistantTranscriptPath } from '../src/assistant/store/persistence.js'
 import {
-  applyAssistantSessionCodexResumeStateAction,
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
   persistAssistantTurnAndSession,
@@ -5973,6 +5972,66 @@ describe('assistant Codex turn planning', () => {
       expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
       expect(resumedPlan.assistantContractFingerprint)
         .toBe(transitionPlan.assistantContractFingerprint)
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it.each([
+    { name: 'a scheduled occurrence', optimizer: false, readsChat: true },
+    { name: 'the usage optimizer', optimizer: true, readsChat: false },
+  ])('plans $name on its own thread beside the bound reply thread (reads the chat: $readsChat)', async ({ optimizer, readsChat }) => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({ supportsNativeResume: true })
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-scheduled-isolated-'))
+    const route = createRoute()
+    const common = {
+      promptTimeContext: { currentLocalDate: '2026-08-21', currentTimeZone: 'UTC' },
+      route, sharedPlan: createPrivateSharedPlan(),
+    }
+
+    try {
+      const baseSession = createSession({ turnCount: 1 })
+      await appendAssistantTranscriptEntries(vault, baseSession.sessionId, [
+        { contentReceivedAt: '2026-08-21T14:44:00.000Z', createdAt: '2026-08-21T14:44:00.000Z',
+          kind: 'user', text: 'I take two fish oil capsules a day.' },
+        { createdAt: '2026-08-21T14:44:10.000Z', kind: 'assistant', text: 'Got it, two capsules a day.' },
+      ])
+      const replyPlan = await resolveAssistantRouteTurnPlan({
+        ...common, executionContext: null,
+        input: { ...createMessageInput(), prompt: 'I take two fish oil capsules a day.', vault },
+        profile: { promptProfile: 'conversation', threadScope: 'session-thread', toolProfile: 'provider-turn' },
+        session: baseSession,
+      })
+      const boundSession = await persistCompletedTurnBinding({
+        action: 'persist-from-provider-turn',
+        transcriptBoundary: replyPlan.transcriptBoundary,
+        assistantContractFingerprint: replyPlan.assistantContractFingerprint,
+        codexRolloutRelativePath: null,
+        codexThreadId: 'thread-ordinary-replies',
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        session: baseSession,
+        vault,
+      })
+
+      const occurrenceAt = '2026-08-21T18:00:00.000Z'
+      const scheduledPlan = await resolveAssistantRouteTurnPlan({
+        ...common,
+        executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [] } },
+        input: { ...createMessageInput(), prompt: 'Remind the member about their supplement.', vault,
+          turnTrigger: 'automation-cron', scheduledOccurrenceAt: occurrenceAt,
+          scheduledInvocationAuthority: { occurrenceAt,
+            automationId: optimizer ? MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION_ID : 'automation_other' } },
+        // What resolveAssistantNotificationTurnProfile returns for a scheduled occurrence.
+        profile: { promptProfile: 'conversation', threadScope: 'isolated-thread', toolProfile: 'provider-turn' },
+        session: boundSession,
+      })
+
+      expect(scheduledPlan.resume).toBeNull()
+      expect(scheduledPlan.planningDiagnostics.threadRotationReason).toBe('profile_isolated')
+      expect(JSON.stringify(scheduledPlan.conversationHistoryMessages ?? []).includes('two fish oil capsules'))
+        .toBe(readsChat)
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

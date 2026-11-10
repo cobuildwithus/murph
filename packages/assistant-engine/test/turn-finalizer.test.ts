@@ -1,30 +1,10 @@
-import { rm } from 'node:fs/promises'
-
-import { afterEach, describe, expect, it } from 'vitest'
-
-import { parseAssistantSessionRecord } from '@murphai/operator-config/assistant-cli-contracts'
+import { describe, expect, it } from 'vitest'
 
 import {
-  applyAssistantSessionCodexResumeStateAction,
   resolveAssistantProviderResumeStateAction,
   resolveAssistantResumeStateFromProviderTurn,
 } from '../src/assistant/turn-finalizer.js'
-import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.js'
 import { advanceBookmarkOverOwnEntries, fingerprintTranscriptEntry, findEntriesAfterBookmark, readTranscriptBoundary } from '../src/assistant/transcript-bookmark.js'
-import { createTempVaultContext } from './test-helpers.js'
-
-const cleanupPaths: string[] = []
-
-afterEach(async () => {
-  await Promise.all(
-    cleanupPaths.splice(0).map((target) =>
-      rm(target, {
-        force: true,
-        recursive: true,
-      }),
-    ),
-  )
-})
 
 describe('resolveAssistantProviderResumeStateAction', () => {
   it.each([
@@ -110,121 +90,5 @@ describe('transcript bookmark', () => {
     expect(advanceBookmarkOverOwnEntries({ boundary, ownEntries: [own, laterOwn], entries }))
       .toEqual(fingerprintTranscriptEntry(audit))
     expect(findEntriesAfterBookmark(entries, fingerprintTranscriptEntry(entry('user', 'missing')))).toBeNull()
-  })
-})
-
-describe('applyAssistantSessionCodexResumeStateAction', () => {
-  it('persists, preserves, and clears the provider-confirmed resume state', async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'assistant-resume-state-action-',
-    )
-    cleanupPaths.push(parentRoot)
-    const session = parseAssistantSessionRecord({
-      alias: null,
-      binding: {
-        actorId: null,
-        channel: null,
-        conversationKey: null,
-        delivery: null,
-        identityId: null,
-        threadId: null,
-        threadIsDirect: null,
-      },
-      codexResume: {
-        routeFingerprint: 'stale-route',
-        threadId: 'stale-thread',
-      },
-      codexTarget: {
-        adapter: 'codex-cli',
-        approvalPolicy: 'never',
-        codexCommand: null,
-        codexHome: null,
-        model: 'gpt-6.1-sol',
-        modelProvider: null,
-        oss: false,
-        profile: null,
-        reasoningEffort: 'medium',
-        sandbox: 'danger-full-access',
-      },
-      conversationId: 'session-resume-state-action',
-      createdAt: '2026-07-14T00:00:00.000Z',
-      lastTurnAt: null,
-      schema: 'murph.assistant-conversation.v2',
-      turnCount: 0,
-      updatedAt: '2026-07-14T00:00:00.000Z',
-    })
-    const acceptedThreadId = '00000000-0000-4000-8000-000000000123'
-    const acceptedRolloutRelativePath =
-      `sessions/2026/07/14/rollout-2026-07-14T01-02-03-${acceptedThreadId}.jsonl`
-    const actionInput = {
-      assistantContractFingerprint:
-        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      codexRolloutRelativePath: acceptedRolloutRelativePath,
-      codexThreadId: acceptedThreadId,
-      routeFingerprint: 'accepted-route',
-      vault: vaultRoot,
-    }
-
-    const persisted = await applyAssistantSessionCodexResumeStateAction({
-      ...actionInput,
-      action: 'persist-from-provider-turn',
-      session,
-    })
-    // A failed turn's new thread gets no transcript bookmark: Codex may not
-    // have accepted its history, so the next turn rebuilds from the transcript.
-    const expectedResumeState = {
-      assistantContractFingerprint:
-        actionInput.assistantContractFingerprint,
-      rolloutRelativePath: acceptedRolloutRelativePath,
-      routeFingerprint: 'accepted-route',
-      threadId: acceptedThreadId,
-    }
-    expect(persisted.codexResume).toEqual(expectedResumeState)
-    await expect(
-      createAssistantRuntimeStateService(vaultRoot).sessions.get(
-        session.sessionId,
-      ),
-    ).resolves.toMatchObject({
-      codexResume: expectedResumeState,
-      resumeState: expectedResumeState,
-    })
-
-    const preserved = await applyAssistantSessionCodexResumeStateAction({
-      ...actionInput,
-      action: resolveAssistantProviderResumeStateAction({
-        providerThreadUnchanged: true, codexThreadId: null, threadScope: 'session-thread',
-      }),
-      assistantContractFingerprint: 'b'.repeat(64),
-      codexThreadId: null,
-      codexRolloutRelativePath: null,
-      session: persisted,
-    })
-    expect(preserved).toBe(persisted)
-    await expect(
-      createAssistantRuntimeStateService(vaultRoot).sessions.get(
-        session.sessionId,
-      ),
-    ).resolves.toMatchObject({
-      codexResume: expectedResumeState,
-      resumeState: expectedResumeState,
-    })
-
-    const cleared = await applyAssistantSessionCodexResumeStateAction({
-      ...actionInput,
-      action: 'clear',
-      session: persisted,
-    })
-    expect(cleared).toMatchObject({
-      codexResume: null,
-      resumeState: null,
-    })
-    await expect(
-      createAssistantRuntimeStateService(vaultRoot).sessions.get(
-        session.sessionId,
-      ),
-    ).resolves.toMatchObject({
-      codexResume: null,
-      resumeState: null,
-    })
   })
 })
