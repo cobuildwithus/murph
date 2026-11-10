@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 import { openHostedUserSecureBoxString, sealHostedUserSecureBoxString, type HostedSecureBoxPrismaClient } from "../hosted-crypto/secure-box";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates, createHostedPhoneLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
