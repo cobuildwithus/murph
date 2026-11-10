@@ -60,6 +60,7 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
     await seedSnapshots(count);
     expect(await readHostedRuntimeRunawayHealth({ now, database })).toEqual({
       anomalous: count >= SNAPSHOTS, runawaySubjectCount: count >= SNAPSHOTS ? 1 : 0,
+      worstInvocationCount: 0,
       subjects: count >= SNAPSHOTS ? [{ subjectPrefix: "abcdef01", invocationCount: 0,
         processingAttemptCount: 0, processingRetryCount: 0, snapshotCount: count,
         snapshotSeconds: Math.round(count * 5.5), checkpointReason: "idle_shutdown",
@@ -91,6 +92,39 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
     expect(await readHostedRuntimeRunawayHealth({ now, database })).toMatchObject({
       anomalous: count >= THRESHOLD, runawaySubjectCount: count >= THRESHOLD ? 1 : 0,
     });
+  });
+
+  it("requires four populated baseline days and catches distributed fleet growth", async () => {
+    const dayMs = 24 * 60 * 60_000;
+    for (let day = 1; day <= 3; day += 1) {
+      await seed(10, { at: new Date(+now - day * dayMs) });
+    }
+    for (let member = 0; member < 6; member += 1) {
+      await seed(20, { key: member.toString(16).padStart(64, "0") });
+    }
+    expect(await readHostedRuntimeRunawayHealth({ now, database })).toEqual({
+      anomalous: false, runawaySubjectCount: 0, worstInvocationCount: 0, subjects: [],
+    });
+    await seed(10, { at: new Date(+now - 4 * dayMs) });
+    expect(await readHostedRuntimeRunawayHealth({ now, database })).toEqual({
+      anomalous: true, runawaySubjectCount: 0, worstInvocationCount: 0, subjects: [],
+      fleet: { invocationCount: 120, baselineMedian: 10 },
+    });
+  });
+
+  it("requires both the threefold and 100-invocation fleet increases", async () => {
+    const dayMs = 24 * 60 * 60_000;
+    for (let day = 1; day <= 4; day += 1) {
+      await seed(50, { at: new Date(+now - day * dayMs) });
+    }
+    for (let member = 0; member < 7; member += 1) {
+      await seed(20, { key: member.toString(16).padStart(64, "0") });
+    }
+    expect((await readHostedRuntimeRunawayHealth({ now, database })).anomalous).toBe(false);
+    await seed(10, { key: "f".repeat(64) });
+    expect((await readHostedRuntimeRunawayHealth({ now, database })).fleet)
+      .toEqual({ invocationCount: 150, baselineMedian: 50 });
+    expect((await readHostedRuntimeRunawayHealth({ now, database })).anomalous).toBe(true);
   });
 
   it("excludes old, future and unrelated events, includes the exact window boundary", async () => {
@@ -127,6 +161,17 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
     expect(JSON.stringify(health)).not.toContain(subject);
   });
 
+  it("keeps the largest invocation count when other signals fill the subject limit", async () => {
+    for (let member = 0; member < 10; member += 1) {
+      await seedSnapshots(90, { key: member.toString(16).padStart(64, "0") });
+    }
+    await seed(25);
+    const health = await readHostedRuntimeRunawayHealth({ now, database });
+    expect(health.subjects).toHaveLength(10);
+    expect(health.subjects.every(row => row.invocationCount === 0)).toBe(true);
+    expect(health.worstInvocationCount).toBe(25);
+  });
+
   it("labels the known inbox media retention wake reason", async () => {
     await seed(40, { metadata: { processingMode: "default", nextWakeReason: "inbox_media_retention" } });
     const health = await readHostedRuntimeRunawayHealth({ now, database });
@@ -158,6 +203,7 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
     await seedAccepted(count);
     expect(await readHostedRuntimeRunawayHealth({ now, database })).toEqual({
       anomalous: count >= ATTEMPTS, runawaySubjectCount: count >= ATTEMPTS ? 1 : 0,
+      worstInvocationCount: 0,
       subjects: count >= ATTEMPTS ? [{ subjectPrefix: "abcdef01", invocationCount: 0,
         processingAttemptCount: count, processingRetryCount: 0, processingMode: "system_mailbox",
         nextWakeReason: "none", processingOutcome: "runtime_processing_accepted",
@@ -171,6 +217,7 @@ describe.skipIf(!enabled)("runtime runaway PostgreSQL aggregate", () => {
     await seedAttempts(count);
     expect(await readHostedRuntimeRunawayHealth({ now, database })).toEqual({
       anomalous: count >= RETRIES, runawaySubjectCount: count >= RETRIES ? 1 : 0,
+      worstInvocationCount: 0,
       subjects: count >= RETRIES ? [{ subjectPrefix: "abcdef01", invocationCount: 0,
         processingAttemptCount: ATTEMPTS - RETRIES - 2 + count, processingRetryCount: count,
         processingMode: "system_mailbox", nextWakeReason: "none",

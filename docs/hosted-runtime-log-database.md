@@ -1308,6 +1308,10 @@ rows, or at least 20 `runner.processing_finished` rows with outcome
 `retry_later`, or at least 30 `checkpoint.snapshot_finished` rows in the
 trailing 60 minutes opens the shared operational email
 incident.
+The same incident also opens when fleet-wide invocations in the trailing hour
+reach three times the median of the same hour on at least four of the previous
+seven days and exceed that median by at least 100. Missing baseline days do not
+count toward the four-day minimum.
 Every Worker ensure-processing call writes one `runner.processing_finished` row
 and calls Web, so the second count catches retry storms that never start a run
 (normal members stay under 20 per hour). The retry count isolates waste from
@@ -1319,14 +1323,17 @@ loops inside a single invocation. Seven-day calibration across 5,904 member-hour
 found p99.9 of 20 snapshots and a non-runaway maximum of 21; runaway hours reached
 123 and 379. Thresholds and window are named constants; recipient
 and timezone configuration is shared with the latency monitor. Reminders use
-the existing six-hour interval and jitter, including quiet hours like the runtime
-progress monitor. A healthy evaluation clears the incident without a recovery
+a 30-minute interval plus jitter, including quiet hours. Each email leads with
+the current invocation rate and estimated daily cost when available. A healthy
+evaluation clears the incident without a recovery
 email. Missing local log configuration skips the monitor; read failures cannot
 clear an existing incident.
 
-Each evaluation uses one aggregate over the existing `(at, id)` time index,
+Each evaluation uses the existing subject aggregate plus one fleet aggregate
+over eight separate one-hour ranges on the `(at, id)` time index,
 including the incident owner's fresh pre-send evaluation. It returns the total
-qualifying subject count and at most ten highest-count subjects. Email and
+qualifying subject count, the highest invocation count, and at most ten
+highest-ranked subjects. Email and
 incident details contain only counts, eight-character digest prefixes, and
 dominant allowlisted `processingMode`/`nextWakeReason` labels plus the dominant
 processing outcome (`retry_later:<allowlisted reason>`, a bare outcome, or

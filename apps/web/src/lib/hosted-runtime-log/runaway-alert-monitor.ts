@@ -29,7 +29,9 @@ export const HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD = 20;
 export const HOSTED_RUNTIME_RUNAWAY_SNAPSHOT_THRESHOLD = 30;
 export const HOSTED_RUNTIME_RUNAWAY_WINDOW_MS = 60 * 60_000;
 export const HOSTED_RUNTIME_RUNAWAY_SUBJECT_LIMIT = 10;
-export const HOSTED_RUNTIME_RUNAWAY_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
+export const HOSTED_RUNTIME_RUNAWAY_REMINDER_INTERVAL_MS = 30 * 60_000;
+// 2026-11-09 measurement: mean 37 s at 6 GiB plus about 40 CPU-seconds per background invocation.
+const ESTIMATED_DOLLARS_PER_BACKGROUND_INVOCATION = 0.0017;
 
 // Wake reasons are extensible strings. Only known operational labels may leave
 // the diagnostic database in an email; missing/new values remain unknown.
@@ -60,8 +62,11 @@ type RunawaySubject = {
 type RunawayHealth = {
   anomalous: boolean;
   runawaySubjectCount: number;
+  worstInvocationCount: number;
   subjects: RunawaySubject[];
+  fleet?: { invocationCount: number; baselineMedian: number };
 };
+type FleetRow = { dayOffset: number; invocationCount: string };
 type RunawayRow = Omit<RunawaySubject,
   "invocationCount" | "processingAttemptCount" | "processingRetryCount" | "snapshotCount" | "snapshotSeconds"> & {
   invocationCount: string;
@@ -70,6 +75,7 @@ type RunawayRow = Omit<RunawaySubject,
   snapshotCount: string;
   snapshotSeconds: string;
   runawaySubjectCount: string;
+  worstInvocationCount: string;
 };
 type LogDatabase = Pick<HostedRuntimeLogSqlDatabase, "query">;
 
@@ -78,7 +84,7 @@ export async function readHostedRuntimeRunawayHealth(input: {
   database?: LogDatabase;
 }): Promise<RunawayHealth> {
   const database = input.database ?? getHostedRuntimeLogPool();
-  // One time-indexed aggregate, no member lookup or raw diagnostic payload.
+  // Time-indexed subject aggregate, no member lookup or raw diagnostic payload.
   // Window count runs after HAVING and before LIMIT, retaining the full total.
   // A subject alerts on any count; the worst ratio to its threshold ranks it.
   const result = await database.query<RunawayRow>(`
@@ -99,6 +105,7 @@ export async function readHostedRuntimeRunawayHealth(input: {
         THEN redacted_json->>'checkpointReason' ELSE 'unknown' END)
         FILTER (WHERE event_code = 'checkpoint.snapshot_finished'), 'none') AS "checkpointReason",
       count(*) OVER ()::text AS "runawaySubjectCount",
+      (max(count(*) FILTER (WHERE event_code = 'runtime.invocation_finished')) OVER ())::text AS "worstInvocationCount",
       coalesce(mode() WITHIN GROUP (ORDER BY CASE
         WHEN coalesce(redacted_json->>'processingMode',
           redacted_json->>'runtimeProcessingRequestedMode') = ANY($6::text[])
@@ -139,9 +146,34 @@ export async function readHostedRuntimeRunawayHealth(input: {
     EMAIL_WAKE_REASONS, EMAIL_RETRY_REASONS, EMAIL_PROCESSING_OUTCOMES,
     HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD, HOSTED_RUNTIME_RUNAWAY_SNAPSHOT_THRESHOLD,
     HOSTED_WORKSPACE_CHECKPOINT_REASONS]);
+  // Eight separate one-hour index ranges avoid scanning the intervening days.
+  const fleetResult = await database.query<FleetRow>(`
+    SELECT days.day_offset AS "dayOffset", counts."invocationCount"
+    FROM generate_series(0, 7) AS days(day_offset)
+    CROSS JOIN LATERAL (
+      SELECT count(*)::text AS "invocationCount"
+      FROM hosted_runtime_log
+      WHERE at >= $1::timestamptz - days.day_offset * interval '1 day'
+        AND at <= $2::timestamptz - days.day_offset * interval '1 day'
+        AND event_code = 'runtime.invocation_finished'
+    ) counts
+  `, [new Date(input.now.getTime() - HOSTED_RUNTIME_RUNAWAY_WINDOW_MS), input.now]);
+  const baseline = fleetResult.rows.filter(row => row.dayOffset > 0 && Number(row.invocationCount) > 0)
+    .map(row => Number(row.invocationCount)).sort((a, b) => a - b);
+  const middle = Math.floor(baseline.length / 2);
+  const fleet = baseline.length >= 4 ? {
+    invocationCount: Number(fleetResult.rows.find(row => row.dayOffset === 0)?.invocationCount ?? 0),
+    baselineMedian: baseline.length % 2 === 0
+      ? (baseline[middle - 1]! + baseline[middle]!) / 2 : baseline[middle]!,
+  } : undefined;
+  const fleetAnomalous = fleet !== undefined
+    && fleet.invocationCount >= 3 * fleet.baselineMedian
+    && fleet.invocationCount >= fleet.baselineMedian + 100;
   return {
-    anomalous: result.rows.length > 0,
+    anomalous: result.rows.length > 0 || fleetAnomalous,
     runawaySubjectCount: Number(result.rows[0]?.runawaySubjectCount ?? 0),
+    worstInvocationCount: Number(result.rows[0]?.worstInvocationCount ?? 0),
+    ...(fleetAnomalous ? { fleet } : {}),
     subjects: result.rows.map(row => ({
       subjectPrefix: row.subjectPrefix,
       invocationCount: Number(row.invocationCount),
@@ -178,7 +210,7 @@ export async function runHostedRuntimeRunawayAlertMonitor(input: {
     id: "hosted-runtime-runaway-monitor:v1",
     kind: "hosted_runtime_runaway_monitor",
     idempotencyScope: "murph/runtime-runaway",
-    subject: "Hosted runtime runaway activity",
+    subject: "Hosted runtime runaway still running and costing money",
     reminderIntervalMs: HOSTED_RUNTIME_RUNAWAY_REMINDER_INTERVAL_MS,
     sendDuringQuietHours: true,
     status: { healthy: "runaway_healthy", alerting: "runaway_alerting",
@@ -195,13 +227,23 @@ export async function runHostedRuntimeRunawayAlertMonitor(input: {
       schema: "murph.runtime-runaway-alert.v1", health,
       incidentId, phase, lastEvaluatedAt: now.toISOString(), message: message ?? null,
     }),
-    buildMessage: ({ health, now }) => [
-      `Runaway subjects: ${health.runawaySubjectCount}.`,
-      `Threshold: at least ${HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD} runtime.invocation_finished or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD} runner.processing_finished (or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD} of them retry_later) events or ${HOSTED_RUNTIME_RUNAWAY_SNAPSHOT_THRESHOLD} checkpoint.snapshot_finished events in the trailing ${HOSTED_RUNTIME_RUNAWAY_WINDOW_MS / 60_000} minutes.`,
-      `Top ${health.subjects.length} subjects (digest prefixes):`,
-      ...health.subjects.map(subject => `${subject.subjectPrefix}: ${subject.invocationCount} invocations; ${subject.processingAttemptCount} processing attempts (${subject.processingRetryCount} retries); ${subject.snapshotCount} snapshots (${subject.snapshotSeconds} seconds); dominant checkpointReason=${subject.checkpointReason}; dominant processingMode=${subject.processingMode}; dominant nextWakeReason=${subject.nextWakeReason}; dominant processing outcome=${subject.processingOutcome}.`),
-      `Checked ${now.toISOString()}.`,
-    ].join("\n"),
+    buildMessage: ({ health, now }) => {
+      const worstInvocations = health.worstInvocationCount;
+      const summary = worstInvocations > 0
+        ? `One member's container restarted ${worstInvocations} times in the last hour (normal is under 20). At this rate it costs about $${(worstInvocations * 24 * ESTIMATED_DOLLARS_PER_BACKGROUND_INVOCATION).toFixed(2)}/day until fixed.`
+        : health.fleet
+          ? `Member containers restarted ${health.fleet.invocationCount} times in the last hour, versus a typical ${health.fleet.baselineMedian}. The excess costs about $${((health.fleet.invocationCount - health.fleet.baselineMedian) * 24 * ESTIMATED_DOLLARS_PER_BACKGROUND_INVOCATION).toFixed(2)}/day at this rate until fixed.`
+          : "One member's container is repeatedly processing or saving work and needs attention.";
+      return [
+        summary,
+        `Runaway subjects: ${health.runawaySubjectCount}.`,
+        ...(health.fleet ? [`Fleet invocations: ${health.fleet.invocationCount}; seven-day same-hour median: ${health.fleet.baselineMedian}.`] : []),
+        `Threshold: at least ${HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD} runtime.invocation_finished or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD} runner.processing_finished (or ${HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD} of them retry_later) events or ${HOSTED_RUNTIME_RUNAWAY_SNAPSHOT_THRESHOLD} checkpoint.snapshot_finished events in the trailing ${HOSTED_RUNTIME_RUNAWAY_WINDOW_MS / 60_000} minutes.`,
+        `Top ${health.subjects.length} subjects (digest prefixes):`,
+        ...health.subjects.map(subject => `${subject.subjectPrefix}: ${subject.invocationCount} invocations; ${subject.processingAttemptCount} processing attempts (${subject.processingRetryCount} retries); ${subject.snapshotCount} snapshots (${subject.snapshotSeconds} seconds); dominant checkpointReason=${subject.checkpointReason}; dominant processingMode=${subject.processingMode}; dominant nextWakeReason=${subject.nextWakeReason}; dominant processing outcome=${subject.processingOutcome}.`),
+        `Checked ${now.toISOString()}.`,
+      ].join("\n");
+    },
   };
   const result = await runHostedOperationalEmailIncident({
     alertConfig, initialHealth: health, initialNow: now, now: input.now,
