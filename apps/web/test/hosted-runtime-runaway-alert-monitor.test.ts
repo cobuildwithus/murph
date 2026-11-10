@@ -16,6 +16,7 @@ import {
   HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD,
   HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD,
   HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD,
+  HOSTED_RUNTIME_RUNAWAY_REMINDER_INTERVAL_MS,
   HOSTED_RUNTIME_RUNAWAY_SNAPSHOT_THRESHOLD,
   HOSTED_RUNTIME_RUNAWAY_WINDOW_MS,
   runHostedRuntimeRunawayAlertMonitor,
@@ -54,6 +55,7 @@ beforeEach(() => {
 function alertRows(count = 40, processingAttempts = 0, processingRetries = processingAttempts,
   snapshotCount = 0, checkpointReason = "none", snapshotSeconds = 0) {
   return { rows: [{ subjectPrefix: "abcdef01", invocationCount: String(count),
+    worstInvocationCount: String(count),
     processingAttemptCount: String(processingAttempts), processingRetryCount: String(processingRetries),
     snapshotCount: String(snapshotCount), checkpointReason, snapshotSeconds: String(snapshotSeconds),
     runawaySubjectCount: "1", processingMode: "system_mailbox",
@@ -65,7 +67,7 @@ describe("runtime runaway incident monitor", () => {
     expect(await runHostedRuntimeRunawayAlertMonitor({ now, env, sendAlert }))
       .toMatchObject({ configured: true, outcome: "healthy", health: { anomalous: false } });
     expect(sendAlert).not.toHaveBeenCalled();
-    expect(mocks.query).toHaveBeenCalledOnce();
+    expect(mocks.query).toHaveBeenCalledTimes(2);
     expect(mocks.query.mock.calls[0]?.[1]).toEqual([
       new Date(+now - HOSTED_RUNTIME_RUNAWAY_WINDOW_MS), now,
       HOSTED_RUNTIME_RUNAWAY_INVOCATION_THRESHOLD, HOSTED_RUNTIME_RUNAWAY_PROCESSING_ATTEMPT_THRESHOLD, 10,
@@ -73,15 +75,19 @@ describe("runtime runaway incident monitor", () => {
       HOSTED_RUNTIME_RUNAWAY_PROCESSING_RETRY_THRESHOLD,
       HOSTED_RUNTIME_RUNAWAY_SNAPSHOT_THRESHOLD, expect.any(Array),
     ]);
+    expect(mocks.query.mock.calls[1]?.[1]).toEqual([
+      new Date(+now - HOSTED_RUNTIME_RUNAWAY_WINDOW_MS), now,
+    ]);
   });
 
-  it.each([40, 90, 495])("sends redacted counts at/above the threshold (%s)", async count => {
+  it.each([[40, "1.63"], [90, "3.67"], [495, "20.20"]])("sends redacted counts at/above the threshold (%s)", async (count, cost) => {
     mocks.query.mockResolvedValue(alertRows(count));
     const result = await runHostedRuntimeRunawayAlertMonitor({ now, env, sendAlert });
     expect(result.outcome).toBe("alert_sent");
-    expect(mocks.query).toHaveBeenCalledTimes(2); // Shared pre-send recheck.
+    expect(mocks.query).toHaveBeenCalledTimes(4); // Both aggregates are freshly reread before sending.
     expect(sendAlert).toHaveBeenCalledWith(expect.objectContaining({
-      text: expect.stringContaining(`abcdef01: ${count} invocations`),
+      subject: "Hosted runtime runaway still running and costing money",
+      text: expect.stringContaining(`One member's container restarted ${count} times in the last hour (normal is under 20). At this rate it costs about $${cost}/day until fixed.\n`),
       idempotencyKey: expect.stringMatching(/^murph\/runtime-runaway\/.+\/alert$/u),
     }));
     const details = state?.detailsJson as Prisma.JsonObject;
@@ -130,14 +136,40 @@ describe("runtime runaway incident monitor", () => {
     expect(sendAlert).toHaveBeenCalledOnce();
   });
 
-  it("suppresses active incidents and sends a reminder after six hours plus jitter, including quiet hours", async () => {
-    mocks.query.mockResolvedValue(alertRows());
+  it("reminds after 30 minutes plus jitter with fresh counts and clears on recovery", async () => {
+    let invocationCount = 40;
+    mocks.query.mockImplementation(async () => alertRows(invocationCount));
     await runHostedRuntimeRunawayAlertMonitor({ now, env, sendAlert });
     expect((await runHostedRuntimeRunawayAlertMonitor({ now: new Date(+now + 5 * 60_000), env, sendAlert })).outcome)
       .toBe("incident_active");
-    expect((await runHostedRuntimeRunawayAlertMonitor({ now: new Date(+now + 8 * 60 * 60_000), env, sendAlert })).outcome)
+    invocationCount = 90;
+    expect(HOSTED_RUNTIME_RUNAWAY_REMINDER_INTERVAL_MS).toBe(30 * 60_000);
+    expect((await runHostedRuntimeRunawayAlertMonitor({ now: new Date(+now + 50 * 60_000), env, sendAlert })).outcome)
       .toBe("alert_sent");
     expect(sendAlert).toHaveBeenCalledTimes(2);
+    expect(sendAlert).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      text: expect.stringContaining("restarted 90 times"),
+    }));
+    mocks.query.mockResolvedValue({ rows: [] });
+    expect((await runHostedRuntimeRunawayAlertMonitor({ now: new Date(+now + 55 * 60_000), env, sendAlert })).outcome)
+      .toBe("healthy");
+    expect(sendAlert).toHaveBeenCalledTimes(2);
+  });
+
+  it("alerts on fleet growth without any subject at the per-member threshold", async () => {
+    mocks.query.mockImplementation(async (sql: string) => sql.includes("generate_series(0, 7)")
+      ? { rows: [120, 10, 11, 9, 10, 10, 0, 0].map((count, dayOffset) => ({
+        dayOffset, invocationCount: String(count),
+      })) }
+      : { rows: [] });
+    const result = await runHostedRuntimeRunawayAlertMonitor({ now, env, sendAlert });
+    expect(result).toMatchObject({ outcome: "alert_sent", health: {
+      anomalous: true, runawaySubjectCount: 0,
+      fleet: { invocationCount: 120, baselineMedian: 10 },
+    } });
+    expect(sendAlert).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining("Member containers restarted 120 times in the last hour, versus a typical 10. The excess costs about $4.49/day"),
+    }));
   });
 
   it("does not send when the pre-send recheck recovers", async () => {
