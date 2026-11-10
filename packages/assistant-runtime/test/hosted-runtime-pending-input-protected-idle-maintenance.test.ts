@@ -190,7 +190,6 @@ describe("runHostedPendingInputProtectedIdleMaintenance", () => {
           missingArtifactPaths: new Map(),
         }),
         memberId: TEST_USER_ID,
-        model: null,
         pendingWork: false,
         providerName: null,
         recordUsage: null,

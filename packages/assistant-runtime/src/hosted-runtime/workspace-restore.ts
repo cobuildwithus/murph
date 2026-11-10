@@ -72,7 +72,6 @@ const HOSTED_CANONICAL_WRITE_RECEIPT_RESTORE_FETCH_CONCURRENCY = 8;
 const HOSTED_CODEX_THREAD_ID_PATTERN =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/u;
 
-const HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_FILE_NAME = ".hosted-workspace-live-runtime-state.json";
 const HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_FILE_NAME = ".hosted-workspace-clean-checkpoint.json";
 const HOSTED_WORKSPACE_CLEAN_CHECKPOINT_MARKER_SCHEMA =
   "murph.hosted-workspace-clean-checkpoint.v1";
@@ -137,7 +136,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     }).catch(() => undefined);
 
     await clearHostedWorkspaceRuntimeLocalRoots(restored);
-    await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
+    await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(restored.vaultRoot);
     const restoredLastKnownGood = await restoreHostedWorkspaceRuntimeJobWorkspace({
       ...input,
       workspace: input.workspace
@@ -174,7 +173,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       }
       if (isOperationalHostedReceiptReplayFailure(error)) {
         await clearHostedWorkspaceRuntimeLocalRoots(restored);
-        await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
+        await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(restored.vaultRoot);
         throw error instanceof HostedRuntimeArtifactReadError && error.retryable
           ? error.cause ?? error
           : error;
@@ -185,8 +184,6 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       };
     }
   };
-
-  await clearHostedWorkspaceLiveRuntimeStateBestEffort(restored.vaultRoot);
 
   // Current v2 restore path: restore the single direct-R2 encrypted snapshot
   // without legacy bundle, hot-layer, delta, or sidecar artifact handling.
@@ -255,7 +252,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
   }
 
   await clearHostedWorkspaceRuntimeLocalRoots(restored);
-  await clearHostedWorkspaceRestoreCachesBestEffort(restored.vaultRoot);
+  await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(restored.vaultRoot);
   const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
   if (receiptRecovery.restored) {
     return receiptRecovery.restored;
@@ -974,27 +971,6 @@ function isMissingPathError(error: unknown): boolean {
   return isPlainObject(error) && error.code === "ENOENT";
 }
 
-export async function markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort(input: {
-  snapshotRef: HostedWorkspaceState["snapshotRef"];
-  vaultRoot: string;
-}): Promise<void> {
-  void input.snapshotRef;
-  // Dirty local runtime state is valid only inside the currently owned child.
-  // A later lease may reuse only an explicitly clean checkpoint marker.
-  await Promise.all([
-    clearHostedWorkspaceLiveRuntimeStateBestEffort(input.vaultRoot),
-    clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.vaultRoot),
-  ]);
-}
-
-async function clearHostedWorkspaceLiveRuntimeStateBestEffort(vaultRoot: string): Promise<void> {
-  try {
-    await rm(resolveHostedWorkspaceLiveRuntimeStatePath(vaultRoot), { force: true });
-  } catch {
-    // The legacy marker is best-effort cleanup only.
-  }
-}
-
 export async function clearHostedWorkspaceCleanCheckpointMarkerBestEffort(
   vaultRoot: string,
 ): Promise<void> {
@@ -1003,13 +979,6 @@ export async function clearHostedWorkspaceCleanCheckpointMarkerBestEffort(
   } catch {
     // A stale marker can only affect performance; warm restore consumes it fail-closed.
   }
-}
-
-function resolveHostedWorkspaceLiveRuntimeStatePath(vaultRoot: string): string {
-  return path.join(
-    path.dirname(path.resolve(vaultRoot)),
-    HOSTED_WORKSPACE_LIVE_RUNTIME_STATE_FILE_NAME,
-  );
 }
 
 function resolveHostedWorkspaceCleanCheckpointMarkerPath(vaultRoot: string): string {
@@ -1054,7 +1023,6 @@ async function clearHostedWorkspaceRuntimeLocalRoots(
   restored: HostedRestoredExecutionContext,
 ): Promise<void> {
   await Promise.all([
-    clearHostedWorkspaceLiveRuntimeStateBestEffort(restored.vaultRoot),
     rm(restored.operatorHomeRoot, {
       force: true,
       recursive: true,
@@ -1069,12 +1037,5 @@ async function clearHostedWorkspaceRuntimeLocalRoots(
     createHostedWorkspaceRuntimePrivateDirectory(restored.operatorHomeRoot),
     createHostedWorkspaceRuntimePrivateDirectory(restored.vaultRoot),
     createHostedWorkspaceRuntimePrivateDirectory(restored.assistantStateRoot),
-  ]);
-}
-
-async function clearHostedWorkspaceRestoreCachesBestEffort(vaultRoot: string): Promise<void> {
-  await Promise.all([
-    clearHostedWorkspaceCleanCheckpointMarkerBestEffort(vaultRoot),
-    clearHostedWorkspaceLiveRuntimeStateBestEffort(vaultRoot),
   ]);
 }

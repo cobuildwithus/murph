@@ -3680,8 +3680,7 @@ a terminal import does not invent one.
 
 The runtime reads `HostedWorkspace`, validates workspace version/user metadata,
 then restores the encrypted local workspace before fetching mailbox rows. A new
-v2 foreground lease restores from durable workspace snapshot truth and clears
-the legacy dirty live-runtime marker before restore; dirty local runtime files
+v2 foreground lease restores from durable workspace snapshot truth; dirty local runtime files
 are valid only inside the currently owned write-fenced invocation and must not
 carry across leases. The
 restored `.runtime/operations/assistant/hosted-mailbox.json` file is the

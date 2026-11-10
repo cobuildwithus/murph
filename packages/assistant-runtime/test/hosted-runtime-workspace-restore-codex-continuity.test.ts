@@ -51,7 +51,7 @@ import {
 import { describe, test } from "vitest";
 
 import {
-  markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
+  clearHostedWorkspaceCleanCheckpointMarkerBestEffort,
   restoreHostedWorkspaceRuntimeJobWorkspace,
   writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
@@ -191,10 +191,7 @@ describe("hosted workspace restore Codex continuity", () => {
       );
 
       await writeFile(path.join(restoredVaultRoot, "dirty-local-mailbox-state.txt"), "seq=467\n", "utf8");
-      await markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort({
-        snapshotRef,
-        vaultRoot: restoredVaultRoot,
-      });
+      await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(restoredVaultRoot);
 
       await restoreHostedWorkspaceRuntimeJobWorkspace({
         platform: createRestorePlatform({

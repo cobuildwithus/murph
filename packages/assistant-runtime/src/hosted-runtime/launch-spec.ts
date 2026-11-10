@@ -149,7 +149,6 @@ export function buildHostedRuntimeLaunchSpec(
         input.resolvedConfig
         ?? buildHostedRuntimeResolvedConfig(resolvedConfigSource),
       userEnv: sanitizeHostedAssistantRuntimeUserEnv({
-        forwardedEnv: splitEnv.forwardedEnv,
         userEnv: input.userEnv ?? {},
       }),
     },

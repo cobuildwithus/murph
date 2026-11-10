@@ -489,24 +489,16 @@ function emitCodexPlanTraceEvent(input: {
           input.routePlanningDiagnostics.messageTargetDynamicToolsAvailable,
         routePlanningCliBootstrapElapsedMs:
           input.routePlanningDiagnostics.cliBootstrapElapsedMs,
-        routePlanningMemoryOverviewElapsedMs: null,
-        routePlanningVaultOverviewElapsedMs: null,
-        routePlanningActiveExperimentContextElapsedMs: null,
         routePlanningFollowUpContextElapsedMs:
           input.routePlanningDiagnostics.followUpContextElapsedMs,
         routePlanningAssistantContextSnapshotRefreshElapsedMs:
           input.routePlanningDiagnostics.assistantContextSnapshotRefreshElapsedMs,
         routePlanningAssistantContextSnapshotElapsedMs:
           input.routePlanningDiagnostics.assistantContextSnapshotElapsedMs,
-        routePlanningAnyBootstrapContextPrepared:
-          input.routePlanningDiagnostics.shouldPrepareBootstrapContext,
         routePlanningBootstrapContextPrepared:
           input.routePlanningDiagnostics.shouldPrepareBootstrapContext,
-        routePlanningFallbackInstructionsElapsedMs: null,
         routePlanningMeasuredElapsedMs:
           input.routePlanningDiagnostics.routePlanningMeasuredElapsedMs,
-        routePlanningPrimaryInstructionsElapsedMs:
-          input.routePlanningDiagnostics.primarySystemPromptElapsedMs,
         routePlanningPrimarySystemPromptElapsedMs:
           input.routePlanningDiagnostics.primarySystemPromptElapsedMs,
         routePlanningResumeBindingElapsedMs:

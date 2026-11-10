@@ -123,7 +123,7 @@ import {
   externalizeHostedCanonicalWriteMediaPayloads,
 } from "./canonical-write-media.ts";
 import {
-  markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
+  clearHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "./workspace-restore.ts";
 import type { HostedBackgroundMaintenanceYieldReason } from "./background-maintenance-cancellation.ts";
 
@@ -2551,10 +2551,7 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
   const runtimeLogMs = Math.round(performance.now() - runtimeLogStartedAt);
   const dirtyMarkerStartedAt = performance.now();
   if (isDeferredHostedMailboxImportDirty(result)) {
-    await markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort({
-      snapshotRef: input.input.workspace?.snapshotRef ?? null,
-      vaultRoot: input.input.vaultRoot,
-    });
+    await clearHostedWorkspaceCleanCheckpointMarkerBestEffort(input.input.vaultRoot);
   }
   emitHostedExecutionStructuredLog({
     component: "runtime", phase: "wake.running", level: "info",
