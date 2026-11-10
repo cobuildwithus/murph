@@ -87,6 +87,10 @@
       "types": "./dist/codex-lifecycle.d.ts",
       "default": "./dist/codex-lifecycle.js"
     },
+    "./group-challenge-scorecard": {
+      "types": "./dist/group-challenge-scorecard.d.ts",
+      "default": "./dist/group-challenge-scorecard.js"
+    },
     "./knowledge": {
       "types": "./dist/knowledge.d.ts",
       "default": "./dist/knowledge.js"

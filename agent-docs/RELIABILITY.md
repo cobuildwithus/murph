@@ -1941,14 +1941,18 @@ Current product admission, delivery and native runtime safety rules remain.
   scale or sentinel problems without interpreting them as valid measurements.
   Missing, nonnumeric, and nonfinite values remain distinguishable. Service and
   hosted boundaries independently allowlist these categories.
-  For Junction resource jobs, blood-oxygen incomplete-normalization failures
+  For Junction resource jobs, incomplete-normalization failures (including
+  caffeine, water, and mindfulness calendar refreshes)
   and ECG binding failures retain the existing queued job beyond its initial
   attempt allowance, rechecking after 30 minutes. `validationRetryDelayMs`
   records that policy. Each such failure leaves at least the default five-attempt
   budget from that attempt, so a later retryable transport failure keeps ordinary
   bounded retries; consecutive non-validation failures consume it and terminalize
-  normally. Warm restart keeps that count, and hosted cold handoff carries it as
-  `maxAttempts`. Complete-day and ECG binding validation still fail before
+  normally unless the job independently retains accepted work until success.
+  Warm restart keeps that count; hosted cold handoff carries the remaining
+  budget as `maxAttempts` and preserves absolute `availableAt`, while rebuilding
+  local attempts from zero. The fixed validation cadence survives that reset.
+  Complete-day and ECG binding validation still fail before
   canonical replacement. Numeric-zero blood-oxygen samples, including finite
   numeric-string aliases, are unusable and skipped; other invalid values and
   source/day validation still reject. A complete-source-day blood-oxygen response

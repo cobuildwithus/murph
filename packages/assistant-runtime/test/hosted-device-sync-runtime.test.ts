@@ -13370,7 +13370,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test.each(["blood_oxygen", "electrocardiogram_voltage"])(
+  test.each(["blood_oxygen", "electrocardiogram_voltage", "caffeine", "water", "mindfulness_minutes"])(
     "retained Junction %s validation restores from a hosted continuation with its delay, payload, and transport budget",
     async (resource) => {
       const occurredAt = "2026-04-04T09:00:00.000Z";
@@ -13389,8 +13389,8 @@ describe("hosted device-sync runtime", () => {
             throw deviceSyncError({ code: "JUNCTION_API_REQUEST_FAILED",
               message: "Synthetic provider failure.", retryable: true, httpStatus: 500 });
           }
-          if (resource === "blood_oxygen") {
-            throw new JunctionSparseCalendarRepairNormalizationError({ reason: "daily.value_out_of_range" });
+          if (resource !== "electrocardiogram_voltage") {
+            throw new JunctionSparseCalendarRepairNormalizationError({ reason: resource === "blood_oxygen" ? "daily.value_out_of_range" : "sparse_interval.row_incomplete" });
           }
           throw deviceSyncError({ code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE",
             message: "Synthetic incomplete collection.", retryable: true,
@@ -13422,7 +13422,9 @@ describe("hosted device-sync runtime", () => {
         const job = getStore(firstService).enqueueJob({
           accountId, provider: "junction", kind: "resource", maxAttempts: 1,
           availableAt: occurredAt, dedupeKey: "synthetic-validation-day",
-          payload: { resource, resourceCategory: "timeseries", sourceProviderSlug: "withings",
+          payload: { resource, resourceCategory: "timeseries", sourceProviderSlug: "apple_health_kit",
+            ...(["caffeine", "water", "mindfulness_minutes"].includes(resource)
+              ? { calendarRefreshDay: "2026-04-03" } : {}),
             windowStart: "2026-04-03T00:00:00.000Z", windowEnd: "2026-04-04T00:00:00.000Z" },
         });
         assert.equal((await firstService.runWorkerOnce(accountId))?.id, job.id);
@@ -13430,22 +13432,65 @@ describe("hosted device-sync runtime", () => {
         assert.ok(recovery);
         const retry = recovery.wake.hint?.jobs?.[0];
         assert.ok(retry);
-        assert.equal(retry.maxAttempts, 5);
-        assert.equal(retry.availableAt, "2026-04-04T09:30:00.000Z");
+        assert.equal(recovery.retryAt, retry.availableAt);
+        assert.equal(firstService.getNextJobWakeAt(), retry.availableAt);
         assert.deepEqual(retry.payload, job.payload);
         assert.deepEqual(parseHostedExecutionWake(recovery.wake), recovery.wake);
+        const retainedItem: HostedSystemMailboxPendingItem = {
+          attemptCount: 1, itemId: "synthetic-validation-mailbox",
+          lastAttemptAt: occurredAt, lastErrorCode: null, lastErrorMessage: null,
+          mailboxDedupeKey: "synthetic-validation-mailbox", mailboxLaneSeq: "1",
+          nextAttemptAt: recovery.retryAt, occurredAt,
+          postCheckpointRecord: {
+            kind: "device-sync.dirty-processed-batch", records: [],
+            nextWakeAt: retry.availableAt, retainedWake: recovery.wake,
+            retainMailboxItemUntil: recovery.retryAt,
+          },
+          preferenceCausalSeq: null, requestId: null,
+          routeAction: "run-device-sync-wake", status: "recording", wake,
+        };
+        await updateHostedSystemMailboxState(first.vaultRoot, () => ({ pending: [retainedItem] }));
+        // Elapsed checkpoint work does not replace the absolute retry deadline.
+        vi.setSystemTime(new Date(Date.parse(occurredAt) + 10_000));
+        const recorded = await recordHostedSystemMailboxItemAfterCheckpoint({
+          item: retainedItem, runtime: createDeviceSyncPostCheckpointRuntime(port), vaultRoot: first.vaultRoot,
+        });
+        assert.equal(recorded.nextWakeAt, retry.availableAt);
+        const [pendingItem] = (await readHostedSystemMailboxState(first.vaultRoot)).pending;
+        assert.ok(pendingItem);
+        assert.equal(pendingItem.nextAttemptAt, retry.availableAt);
+        assert.deepEqual(pendingItem.wake, recovery.wake);
         const coldState = await syncHostedDeviceSyncControlPlaneState({
-          deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: coldService, wake: recovery.wake,
+          deviceSyncPort: port, secret: DEVICE_SYNC_SECRET, service: coldService, wake: pendingItem.wake,
         });
         const coldAccountId = coldState.hostedToLocalAccountIds.get(connectionId);
         assert.ok(coldAccountId);
         const [restored] = getStore(coldService).listPendingJobsForAccount(coldAccountId, 10);
         assert.ok(restored);
+        assert.equal(restored.attempts, 0);
         assert.deepEqual(restored.payload, job.payload);
         assert.equal(restored.availableAt, retry.availableAt);
-        assert.equal(restored.maxAttempts - restored.attempts, 5);
         assert.equal(await coldService.runWorkerOnce(coldAccountId), null);
+        // On base this is only 5 seconds: the first 15-second backoff survives,
+        // but 10 seconds of checkpoint work have already elapsed.
+        assert.equal(Date.parse(coldService.getNextJobWakeAt()!) - Date.now(), 30 * 60_000 - 10_000);
+        assert.equal(retry.availableAt, "2026-04-04T09:30:00.000Z");
+        assert.equal(retry.maxAttempts, 5);
+        assert.equal(restored.maxAttempts - restored.attempts, 5);
+        // A cold validation retry must keep the same slow cadence even though
+        // the local attempt counter was reconstructed from a remaining budget.
         vi.setSystemTime(new Date(retry.availableAt));
+        assert.equal((await coldService.runWorkerOnce(coldAccountId))?.id, restored.id);
+        const repeated = getStore(coldService).getJobById(restored.id)!;
+        assert.equal(repeated.attempts, 1);
+        assert.equal(repeated.availableAt, "2026-04-04T10:00:00.000Z");
+        assert.equal(coldService.getNextJobWakeAt(), repeated.availableAt);
+        assert.equal(resolveHostedDeviceSyncWakeRecovery({
+          service: coldService, state: coldState, wake: recovery.wake,
+        })?.retryAt, repeated.availableAt);
+        vi.setSystemTime(new Date(Date.parse(repeated.availableAt) - 1));
+        assert.equal(await coldService.runWorkerOnce(coldAccountId), null);
+        vi.setSystemTime(new Date(repeated.availableAt));
         outcome = "transport";
         assert.equal((await coldService.runWorkerOnce(coldAccountId))?.id, restored.id);
         const pending = getStore(coldService).getJobById(restored.id);

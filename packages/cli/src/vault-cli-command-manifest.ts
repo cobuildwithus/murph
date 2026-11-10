@@ -136,7 +136,7 @@ import {
 } from './supplement-labels.js'
 import {
   groupChallengeScoreResultSchema,
-} from '@murphai/assistant-engine'
+} from '@murphai/assistant-engine/group-challenge-scorecard'
 import {
   knowledgeIndexRebuildResultSchema,
   knowledgeLintResultSchema,

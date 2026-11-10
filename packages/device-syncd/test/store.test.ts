@@ -4091,8 +4091,8 @@ test("device sync store preserves retained calendar work across account cleanup 
     ), {
       attempts: 1,
       disposition: "queued",
-      maxAttempts: 5,
-      remainingAttempts: 4,
+      maxAttempts: 6,
+      remainingAttempts: 5,
     });
 
     const database = openSqliteRuntimeDatabase(store.databasePath);

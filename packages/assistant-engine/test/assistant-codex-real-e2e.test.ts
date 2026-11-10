@@ -47073,7 +47073,7 @@ describeRealCodex('real Codex canonical game selfplay e2e', () => {
       { seat: 1, name: 'Sam', message: 'Yes, breakfast in bed works for me.', operation: 'approve' },
       { seat: 0, name: 'Maya', message: 'Change my reading task to 20 pushups.', operation: null },
       { seat: 0, name: 'Maya', message: "I posted yesterday, but I didn't actually finish my chapter. Mark yesterday incomplete.", operation: 'mark_incomplete' },
-      { seat: 0, name: 'Maya', message: 'Correction: I did finish that chapter yesterday. Restore my completion for yesterday.', operation: 'restore_day' },
+      { seat: 0, name: 'Maya', message: 'Correction: I did finish that chapter yesterday. Restore my completion for yesterday.', operation: 'mark_complete' },
     ] as const
     try {
       for (const [index, turn] of turns.entries()) {
@@ -48756,7 +48756,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
             if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games } } }
             if (request.action !== 'update_game') throw new Error('Unexpected action')
             if (request.update.operation === 'mark_incomplete') return { action: 'update_game', result: { status: 'ok', dayOutcome: { date: request.update.date ?? '2030-03-05', status: 'marked_incomplete' } } }
-            if (request.update.operation === 'restore_day') return { action: 'update_game', result: { status: 'ok', dayOutcome: { date: request.update.date ?? '2030-03-04', status: request.update.gameId === 'game_steps' ? 'restored' : 'already_complete' } } }
+            if (request.update.operation === 'mark_complete') return { action: 'update_game', result: { status: 'ok', dayOutcome: { date: request.update.date ?? '2030-03-04', status: request.update.gameId === 'game_steps' ? 'restored' : 'already_complete' } } }
             return { action: 'update_game', result: { status: 'rejected', error: 'SYNTHETIC_UNEXPECTED_WRITE' } }
           } }, currentUserActionScope: () => ({ conversationId: 'synthetic-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send.') } },
@@ -48770,7 +48770,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       if (kind === 'restore') {
         // Only the steps game shows yesterday unposted, so it is the one day the undo can mean.
         expect(writes).toHaveLength(1)
-        expect(writes[0]).toMatchObject({ origin: { assistantInputId: inputId }, update: { operation: 'restore_day', gameId: 'game_steps', date: '2030-03-04' } })
+        expect(writes[0]).toMatchObject({ origin: { assistantInputId: inputId }, update: { operation: 'mark_complete', gameId: 'game_steps', date: '2030-03-04' } })
         expect(reply).toMatch(/steps/iu)
         expect(reply).not.toContain('?')
       } else if (kind === 'one-post') {
@@ -48933,11 +48933,18 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
     { name: 'game incomplete day preserves yesterday across delayed processing', message: 'Murph, I only read half the chapter yesterday. Mark yesterday as not done.', operation: 'mark_incomplete', outcome: 'marked_incomplete', delayed: true },
     { name: 'game incomplete day marks yesterday truthfully', message: 'Murph, I only read half the chapter yesterday. Mark yesterday as not done.', operation: 'mark_incomplete', outcome: 'marked_incomplete' },
     { name: 'game incomplete day reports an unposted day truthfully', message: 'Murph, mark yesterday as not done. I did not finish my reading.', operation: 'mark_incomplete', outcome: 'no_artifact' },
-    { name: 'game incomplete day restores a self-marked day truthfully', message: 'Murph, correction: I actually finished my chapter yesterday. Undo my not-done mark for yesterday.', operation: 'restore_day', outcome: 'restored' },
+    { name: 'game incomplete day restores a self-marked day truthfully', message: 'Murph, correction: I actually finished my chapter yesterday. Undo my not-done mark for yesterday.', operation: 'mark_complete', outcome: 'restored' },
+    { name: 'game missed day asks what the post should say before counting', message: 'Murph, I never posted yesterday but I did read my chapter. Can you count it?', operation: 'mark_complete', outcome: 'words_needed' },
+    { name: 'game missed day takes a plain claim without asking for proof', message: 'Oh no, I never checked in yesterday. I really did read the chapter though.', operation: 'mark_complete', outcome: 'words_needed' },
+    { name: 'game missed day posts the words the player gives', message: 'Murph, I never posted yesterday but I did read. Count it, and make my post say: Finished chapter nine on the train', operation: 'mark_complete', outcome: 'credited', words: 'Finished chapter nine on the train' },
+    { name: 'game missed day posts the answer for the day Murph asked about', message: 'Finished chapter nine on the train', operation: 'mark_complete', outcome: 'credited', words: 'Finished chapter nine on the train',
+      earlier: 'Earlier in this chat:\n- Maya: Murph, I never posted yesterday but I did read my chapter. Can you count it?\n- Murph: Sure, Maya. What do you want your March 5 post to say?\n\n' },
+    { name: 'game missed day refuses to count the other player’s day', message: 'Murph, Sam never posted yesterday but he did his walk. Count yesterday for Sam.', operation: null, outcome: 'other_player' },
     { name: 'game incomplete day refuses to change the other player', message: 'Murph, mark Sam as not done yesterday. Sam did not finish the walk.', operation: null, outcome: 'other_player' },
     { name: 'game incomplete day asks once for an ambiguous date', message: 'Murph, I did not finish my chapter one day. Mark that day as not done.', operation: null, outcome: null },
   ])('$name', async (scenario) => {
     const { message, operation, outcome } = scenario
+    const words = 'words' in scenario ? scenario.words : null
     const delayed = 'delayed' in scenario
     const expectedDate = delayed ? '2030-03-04' : '2030-03-05'
     const occurredAt = delayed ? '2030-03-06T07:59:00.000Z' : '2030-03-06T16:00:00.000Z'
@@ -48952,7 +48959,7 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
       id: 'game_synthetic', status: 'live' as const, lengthDays: 7, startsOn: '2030-03-04',
       terms: { n: 1, fromDay: 0, checkInKind: 'any' as const, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Walk' }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize' as const, item: 'Pick movie night' }] },
       players: [{ memberId: 'player_maya', seat: 0, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'America/New_York' }, ...('group' in scenario ? [{ memberId: 'player_ava', seat: 2, firstName: 'Ava', dayOne: '2030-03-04', timeZone: 'America/New_York' }] : [])],
-      progress: { checkedAt: processingAt, players: [{ memberId: 'player_maya', score: 1, target: 7, currentDayIndex: 2, currentEntryId: null, attemptsRemaining: 2, days: [{ dayIndex: 1, date: '2030-03-05', status: outcome === 'no_artifact' ? 'missed' as const : 'posted' as const }] }] },
+      progress: { checkedAt: processingAt, players: [{ memberId: 'player_maya', score: 1, target: 7, currentDayIndex: 2, currentEntryId: null, attemptsRemaining: 2, days: [{ dayIndex: 1, date: '2030-03-05', status: outcome === 'no_artifact' || outcome === 'credited' || outcome === 'words_needed' ? 'missed' as const : 'posted' as const }] }] },
       pendingChange: null,
       changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: true, editableFromDay: 3 },
     }
@@ -48982,15 +48989,18 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
             calls.push(request)
             if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [game] } } }
             if (request.action !== 'update_game' || !operation || !outcome) throw new Error('No mutation authorized for this journey.')
-            expect(request.update).toEqual({ operation, gameId: game.id, date: expectedDate })
+            // The post is the player's exact words: nothing added, tidied or shortened beyond closing punctuation.
+            const { text, ...update } = request.update as typeof request.update & { text?: string }
+            expect(update).toEqual({ operation, gameId: game.id, date: expectedDate })
+            expect(text?.replace(/[.!]$/u, '')).toBe(words ?? undefined)
             expect(request.origin.assistantInputId).toBe(inputId)
-            return { action: 'update_game', result: { status: 'ok', state: { games: [game] }, dayOutcome: { date: expectedDate, status: outcome as 'marked_incomplete' | 'no_artifact' | 'restored' } } }
+            return { action: 'update_game', result: { status: 'ok', state: { games: [game] }, dayOutcome: { date: expectedDate, status: outcome as 'marked_incomplete' | 'no_artifact' | 'restored' | 'credited' | 'words_needed' } } }
           } },
           currentUserActionScope: () => ({ conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session', conversationScope: 'group' }),
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
         },
         model: config.model, modelProvider: config.modelProvider,
-        prompt: promptResult.prompt,
+        prompt: ('earlier' in scenario ? scenario.earlier : '') + promptResult.prompt,
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
       const reply = result.finalMessage ?? ''
@@ -49002,7 +49012,17 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
         expect(calls.length).toBeLessThanOrEqual(3)
         expect(reply).toMatch(delayed ? /March 4|Mar(?:ch)?\.? 4|4 March|Monday|2030-03-04/iu : /March 5|Mar(?:ch)?\.? 5|5 March|Tuesday|2030-03-05/iu)
         if (outcome === 'no_artifact') expect(reply).toMatch(/already|no (?:post|artifact|check.in)|nothing|wasn[’']?t posted|not posted/iu)
-        else if (outcome === 'restored') expect(reply).toMatch(/restored|undid|undone|cleared|removed|done|complete/iu)
+        else if (outcome === 'restored') expect(reply).toMatch(/restored|undid|undone|cleared|removed|done|complete|counts again/iu)
+        else if (outcome === 'words_needed') {
+          // Nothing is counted yet: one question for their own words, with no proof asked and no vote.
+          expect(reply).toMatch(/\?/u)
+          expect(reply).toMatch(/say|write|words|post/iu)
+          expect(reply).not.toMatch(/now counts|is counted|counted it|restor|photo|proof|prove/iu)
+        } else if (outcome === 'credited') {
+          // Counted on their word, in their words: no proof asked, no vote, no further question.
+          expect(reply).toMatch(/count|posted|done|complete/iu)
+          expect(reply).not.toMatch(/restor|photo|proof|prove|\?/iu)
+        }
         else expect(reply).toMatch(/not done|incomplete|missed/iu)
       } else if (outcome === 'other_player') {
         expect(calls.every((call) => call.action === 'read_game')).toBe(true)

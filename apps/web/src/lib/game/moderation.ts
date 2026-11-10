@@ -56,12 +56,19 @@ export function gameCommandTexts(command: GameCommand): GameText[] {
       if (command.kind === "text") texts.push({ kind: "words", text: command.text });
       break;
     case "post":
-      if (command.text) texts.push({ kind: command.kind === "excuse" ? "excuse" : "words", text: command.text });
+    case "setDayCompletion":
+      texts.push(...postText(command));
       break;
     default:
       break;
   }
   return texts;
+}
+
+/** The line a post shows: an excuse, a written check-in, or the player's words for a day counted late. */
+function postText(command: Extract<GameCommand, { type: "post" | "setDayCompletion" }>): GameText[] {
+  if (!command.text) return [];
+  return [{ kind: command.type === "post" && command.kind === "excuse" ? "excuse" : "words", text: command.text }];
 }
 
 // Money: a currency sign, an amount in dollars or bucks, or a payment app.

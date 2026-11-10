@@ -483,6 +483,8 @@ Retained Junction validation jobs keep a bounded transport retry budget in the e
 [`RELIABILITY.md`](RELIABILITY.md) owns the retry and cold-handoff contract.
 Implementation and review proof are recorded in the
 [retry-budget plan](exec-plans/completed/2026-10-16-junction-validation-retry-budget.md).
+Sparse calendar validation shares that cadence; cold-handoff and row-contract
+proof are recorded in [the retry-loop fix](exec-plans/completed/2026-11-10-sparse-calendar-retry-loop.md).
 
 Typing egress and mailbox runtime timing correlation is owned by
 [`Cloudflare private telemetry`](../apps/cloudflare/README.md#private-operational-telemetry);
@@ -1153,7 +1155,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/product-specs/hosted-usage-topups.md` | Hosted billing/product spec, including 80% top-up usage grants, preserved historical purchase terms, and migration-first sponsorship compatibility. | Hosted billing/product spec | High | 2026-09-22 |
 | `agent-docs/product-specs/hosted-usage-referrals.md` | Hosted growth/product spec. | Hosted growth/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/physical-notes.md` | Hosted physical-note product spec. | Hosted physical-note product spec | High | 2026-08-21 |
-| `agent-docs/product-specs/ios-game.md` | iOS game group Prove it and pre-join Talk contracts, off-day refusal and optional member-addressed recap superlatives JSON, validation and legacy fallback. | iOS game API contract | High | 2026-11-05 |
+| `agent-docs/product-specs/ios-game.md` | iOS game group Prove it and pre-join Talk contracts, a missed day counted as a post in the player's own words, off-day refusal and optional member-addressed recap superlatives JSON, validation and legacy fallback. | iOS game API contract | High | 2026-11-10 |
 | `agent-docs/product-specs/weekly-game.md` | Private pair and group habit games in the Murph app, shipped dark, including group Prove it and pre-join Talk: invite link previews, recap and invite universal links, live games per opponent, bounded settled-game history grouped by opponent, one shared Day 1 date across time zones, picked start dates, Start now, photo and heart-rate graph post-to-unlock, sealed hosted image storage, synced self profile photos with private overrides and export separation, retakes, daily-capped iPhone post alerts with copy based on post-to-unlock, transcript-only excuses, offline grace and refused stale captures, settle on read, tickets with use-by dates, addressed rematches and rounds, evidence-based recap stories with optional legacy score lines, retries, report recovery from accepted receipts with frozen alert inputs, and deferred scope. | Weekly game product spec | High | 2026-11-06 |
 | `agent-docs/product-specs/hosted-support-escalation.md` | Hosted support product spec. | Hosted support product spec | High | 2026-08-05 |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted billing/product spec. | Hosted billing/product spec | High | 2026-08-10 |

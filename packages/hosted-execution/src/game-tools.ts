@@ -33,6 +33,8 @@ export const hostedGameUpdateSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("create"), gameId, terms: hostedGameCreateTermsSchema, previousGameId: gameId.optional(), groupWord: z.string().trim().min(1).max(40).optional() }).strict(),
   z.object({ operation: z.literal("edit_terms"), gameId, proposalId: gameId.optional(), expectedTermsVersion: z.number().int().min(1), terms: hostedGameCreateTermsSchema.extend({ defaultTask: z.string().min(1).max(200), tasks: z.array(hostedGameCreateTermsSchema.shape.tasks.element).min(1).max(10) }) }).strict(),
   z.object({ operation: z.enum(["mark_incomplete", "restore_day"]), gameId, date }).strict(),
+  // Also counts a closed day with no post, as a post in the speaker's own words; restore_day stays for runtimes that predate it.
+  z.object({ operation: z.literal("mark_complete"), gameId, date, text: z.string().min(1).max(140).optional() }).strict(),
   z.object({ operation: z.literal("propose"), gameId, proposalId: gameId, expectedTermsVersion: z.number().int().min(1), change: hostedGameChangeSchema }).strict(),
   z.object({ operation: z.literal("approve"), gameId, proposalId: gameId.optional(), expectedTermsVersion: z.number().int().min(1).optional() }).strict().refine(value => (value.proposalId !== undefined) !== (value.expectedTermsVersion !== undefined), "Approval needs proposalId or expectedTermsVersion."),
   z.object({ operation: z.enum(["decline", "cancel"]), gameId, proposalId: gameId }).strict(),
@@ -139,7 +141,7 @@ export const hostedGameToolResponseSchema = z.object({
     status: z.enum(["ok", "unavailable", "rejected"]),
     state: hostedGameChatStateSchema.optional(),
     error: z.string().max(128).optional(),
-    dayOutcome: z.object({ date, status: z.enum(["marked_incomplete", "restored", "already_incomplete", "already_complete", "no_artifact"]) }).strict().optional(),
+    dayOutcome: z.object({ date, status: z.enum(["marked_incomplete", "restored", "already_incomplete", "already_complete", "no_artifact", "credited", "words_needed"]) }).strict().optional(),
     photoOutcome: z.enum(["offer", "suppressed", "saved", "dismissed"]).optional(),
     recapGame: z.unknown().optional(),
     recapOutcome: z.string().optional(),

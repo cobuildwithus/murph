@@ -88,8 +88,22 @@ no incomplete flag and no challenge badge. Server eligibility remains final.
 Visible entries, including the accused's own, carry `challenge: {status:
 "open"|"stood", deadlineAt, byYou}`. Preserve `409 CHALLENGE_USED`; refresh
 stale cases. Only the accused's accepted chat message can mark their day
-incomplete with `update_game mark_incomplete`; `restore_day` restores score
+incomplete with `update_game mark_incomplete`; `mark_complete` restores score
 without undoing the concession. No app concession route is added.
+
+## Missed day counted on a player's word
+
+In the game's chat a player can tell Murph they did a day they never posted.
+Murph asks what they want the post to say, then `update_game mark_complete`
+adds one `words` post for that closed day in their name, holding their own
+words: one line of at most 140 characters. Nothing is written until they
+answer, and Murph never writes the words for them. It scores like any post and
+unlocks that day for them. Other players see it as that player's words post,
+and it cannot be put to Prove it because it is not a photo. The same player
+can take it back with
+`mark_incomplete`. No app change: the entry uses the existing `words` kind and
+no new view field. An open day, a day off and a photo or heart-rate game are
+refused, and nobody can count a day for someone else.
 
 Authenticated group invite previews include optional `canTalk`; absence means
 unavailable. Submit the existing `/invites/:token/negotiate` request with

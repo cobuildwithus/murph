@@ -134,8 +134,10 @@ function negotiate(input: Record<string, unknown>): Extract<GameCommand, { type:
 }
 
 function dayCompletion(input: Record<string, unknown>): Extract<GameCommand, { type: "setDayCompletion" }> {
-  if (typeof input.date !== "string" || !isStrictIsoDate(input.date) || typeof input.incomplete !== "boolean" || "memberId" in input || "entryId" in input) reject("INVALID_REQUEST", "Choose your own game day by date.");
-  return { type: "setDayCompletion", gameId: clientId(input.gameId, "gameId"), date: input.date, incomplete: input.incomplete };
+  if (typeof input.date !== "string" || !isStrictIsoDate(input.date) || typeof input.incomplete !== "boolean" || "memberId" in input || "entryId" in input
+    || (input.credit !== undefined && (input.credit !== true || input.incomplete)) || (input.text !== undefined && !input.credit)) reject("INVALID_REQUEST", "Choose your own game day by date.");
+  return { type: "setDayCompletion", gameId: clientId(input.gameId, "gameId"), date: input.date, incomplete: input.incomplete,
+    ...(input.credit ? { credit: true } : {}), ...(input.text === undefined ? {} : { text: oneLineWords(input.text) }) };
 }
 
 function create(input: Record<string, unknown>): Extract<GameCommand, { type: "createGame" }> {
