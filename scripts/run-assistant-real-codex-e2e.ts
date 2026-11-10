@@ -18,6 +18,7 @@ export interface AssistantRealCodexCommandRequest {
   command: string
   env: NodeJS.ProcessEnv
   stdio: 'capture' | 'ignore' | 'inherit'
+  timeoutMs?: number
 }
 
 export interface AssistantRealCodexCommandResult {
@@ -217,7 +218,12 @@ export function requireSingleAssistantRealCodexTest(
 ): string {
   let listed: unknown
   try {
-    listed = JSON.parse(listOutput)
+    // pnpm can precede the JSON with engine warnings. Accept only its finite
+    // warning lines; arbitrary stdout still fails closed.
+    const json = listOutput.split('\n').filter((line) =>
+      !/^\s*(?:\S+\s+)?(?:WARN|WARN\u2009|\u2009WARN\u2009)\s+Unsupported engine:/.test(line),
+    ).join('\n')
+    listed = JSON.parse(json)
   } catch {
     throw new Error('Vitest returned an unreadable focused-test list.')
   }
@@ -284,6 +290,18 @@ export function executeAssistantRealCodexRun(
     const message = error instanceof Error ? error.message : String(error)
     dependencies.writeStderr(`${message}\n`)
     return 2
+  }
+
+  const nativeHelp = dependencies.runCommand({
+    args: ['app-server', '--help'],
+    timeoutMs: 10_000,
+    command: options.codexCommand ?? ASSISTANT_REAL_CODEX_COMMAND,
+    env: buildAssistantRealCodexLoginEnv(dependencies.sourceEnv, options.codexHome),
+    stdio: 'capture',
+  })
+  if (nativeHelp.status !== 0 || !nativeHelp.stdout?.includes('--ignore-user-config')) {
+    dependencies.writeStderr('Live journeys require the Murph native patch. Select its binary with --codex-command before starting a provider run.\n')
+    return 1
   }
 
   if (options.authMode === 'subscription') {
@@ -399,6 +417,7 @@ function runAssistantRealCodexCommand(
   const result = request.stdio === 'capture'
     ? spawnSync(request.command, request.args, {
         encoding: 'utf8',
+        timeout: request.timeoutMs,
         env: request.env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })

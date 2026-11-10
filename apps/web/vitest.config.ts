@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { defineProject } from "vitest/config";
 
-import { resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
+import { resolveMurphAppVitestMaxWorkers, resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 import { murphVitestTempGlobalSetup } from "../../config/vitest-temp-lifecycle.js";
 
@@ -16,6 +16,7 @@ const appDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(appDir, "../..");
 
 export default defineProject({
+  root: repoRoot,
   resolve: {
     alias: [
       {
@@ -34,6 +35,7 @@ export default defineProject({
     environment: "node",
     globalSetup: [murphVitestTempGlobalSetup],
     ...resolveMurphVitestConcurrency(),
+    maxWorkers: resolveMurphAppVitestMaxWorkers(),
     include: ["apps/web/test/**/*.test.ts", "apps/web/test/**/*.test.tsx"],
     setupFiles: [path.join(appDir, "test", "setup-env.ts")],
   },

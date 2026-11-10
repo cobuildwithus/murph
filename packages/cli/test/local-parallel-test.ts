@@ -39,12 +39,6 @@ export function resolveLocalCliSuiteConcurrency(
   return false
 }
 
-const localParallelCliTestBase = ((...args: Parameters<typeof test>) =>
-  resolveLocalCliSuiteConcurrency()
-    ? test.concurrent(...args)
-    : test(...args)) as typeof test
-
-export const localParallelCliTest: typeof test = Object.assign(
-  localParallelCliTestBase,
-  test,
-)
+export const localParallelCliTest: typeof test | typeof test.concurrent = resolveLocalCliSuiteConcurrency()
+  ? test.concurrent
+  : test

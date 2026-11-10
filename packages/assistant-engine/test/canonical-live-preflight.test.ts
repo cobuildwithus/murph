@@ -118,3 +118,12 @@ it('executes the actual automation dynamic tool with the fixture port and reject
     expect(requests).toEqual([request.request])
   } finally { await fixture.close() }
 })
+
+
+it.each([1, 2])('rejects missing public reference artifact %s before allocating the natural-goal fixture', async (artifactIndex) => {
+  for (let index = 0; index < artifactIndex; index++) vi.mocked(access).mockResolvedValueOnce(undefined)
+  vi.mocked(access).mockRejectedValueOnce(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+  await expect(createCanonicalLiveFixture(config, 'linq', { requirePublicReferences: true })).rejects.toThrow('pnpm health-commons:generate')
+  expect(mkdtemp).not.toHaveBeenCalled()
+  expect(sendAssistantMessageLocal).not.toHaveBeenCalled()
+})

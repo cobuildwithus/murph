@@ -98,7 +98,7 @@ describe("runner bundle dependency pinning", () => {
 });
 
 describe("runner bundle pnpm install config", () => {
-  it("installs packed runner dependencies with the repo package manager and local tarball release-age exclusions", async () => {
+  it.each([false, true])("installs packed runner dependencies with release-age exclusions (offline: %s)", async (offline) => {
     const repoRoot = await createRuntimePackageRoot();
     const bundleDir = await createRuntimePackageRoot();
     const runtimePackageRoot = await createRuntimePackageRoot();
@@ -239,6 +239,7 @@ describe("runner bundle pnpm install config", () => {
         "  writeFileSync(`${dir}/package.json`, JSON.stringify(manifest), 'utf8');",
         "};",
         "const command = process.argv.slice(2).join(' ');",
+        `if (process.argv[2] === 'install' && (process.env.npm_config_offline === 'true') !== ${offline}) throw new Error('offline policy lost');`,
         "appendFileSync(logPath, `${command} SHARP_IGNORE_GLOBAL_LIBVIPS=${process.env.SHARP_IGNORE_GLOBAL_LIBVIPS ?? ''}\\n`, 'utf8');",
         "if (process.argv.includes('list')) {",
         "  console.log(JSON.stringify([{ dependencies: { jose: { version: '6.2.2' }, incur: { version: '0.5.1' }, 'runtime-wrapper': { version: '1.0.0' } } }]));",
@@ -307,6 +308,7 @@ describe("runner bundle pnpm install config", () => {
         {
           repoRoot,
           runtimePackageRoot,
+          offline,
         },
       );
     } finally {

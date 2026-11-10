@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -74,6 +75,96 @@ afterEach(() => {
 });
 
 describe("repo-tools scoped committer staging", () => {
+  it("amends an unpublished task commit with its message, trailer, and unrelated staging intact", () => {
+    const repository = createRepository();
+    runGit(repository, ["checkout", "-qb", "task"]);
+    writeFileSync(path.join(repository, "selected.txt"), "before\n");
+    runGit(repository, ["add", "."]);
+    runGit(repository, ["commit", "-qm", "fix(test): original\n\nEvidence: synthetic"]);
+    const message = runGit(repository, ["show", "-s", "--format=%B"]);
+    const author = runGit(repository, ["show", "-s", "--format=%an <%ae> %aI"]);
+    writeFileSync(path.join(repository, "selected.txt"), "after\n");
+    writeFileSync(path.join(repository, "other.txt"), "unrelated\n");
+    runGit(repository, ["add", "other.txt"]);
+    const result = spawnSync("bash", [committerPath, "--skip-hooks", "--amend", "--no-edit", "selected.txt"],
+      { cwd: repository, encoding: "utf8" });
+    expect(result.status, result.stderr).toBe(0);
+    expect(runGit(repository, ["rev-list", "--count", "HEAD"])).toBe("1");
+    expect(runGit(repository, ["show", "-s", "--format=%B"])).toBe(message);
+    expect(runGit(repository, ["show", "-s", "--format=%an <%ae> %aI"])).toBe(author);
+    expect(runGit(repository, ["show", "HEAD:selected.txt"])).toBe("after");
+    expect(runGit(repository, ["diff", "--cached", "--name-only"])).toBe("other.txt");
+    runGit(repository, ["update-ref", "refs/remotes/origin/task", "HEAD"]);
+    writeFileSync(path.join(repository, "selected.txt"), "third\n");
+    const published = spawnSync("bash", [committerPath, "--skip-hooks", "--amend", "--no-edit", "selected.txt"],
+      { cwd: repository, encoding: "utf8" });
+    expect(published.status).not.toBe(0);
+    expect(published.stderr).toContain("reachable from a remote-tracking ref");
+  });
+
+  it("consumes both selected sides of an edited staged rename", () => {
+    const repository = createRepository();
+    writeFileSync(path.join(repository, "old.txt"), "original\n");
+    runGit(repository, ["add", "."]);
+    runGit(repository, ["commit", "-qm", "baseline"]);
+    runGit(repository, ["mv", "old.txt", "new.txt"]);
+    writeFileSync(path.join(repository, "new.txt"), "edited\n");
+    writeFileSync(path.join(repository, "other.txt"), "unrelated staged\n");
+    runGit(repository, ["add", "other.txt"]);
+    const result = runCommitter(repository, "old.txt", "new.txt");
+    expect(result.status, result.stderr).toBe(0);
+    expect(runGit(repository, ["show", "HEAD:new.txt"])).toBe("edited");
+    expect(runGit(repository, ["diff", "--cached", "--name-only"])).toBe("other.txt");
+    expect(runGit(repository, ["diff", "--name-only"])).toBe("");
+  });
+
+  it.each([false, true])("distinguishes a stat refresh from staged content mutation (%s)", (mutate) => {
+    const repository = createRepository();
+    for (const name of ["selected.txt", "other.txt"]) writeFileSync(path.join(repository, name), "before\n");
+    runGit(repository, ["add", "."]);
+    runGit(repository, ["commit", "-qm", "baseline"]);
+    const before = runGit(repository, ["rev-parse", "HEAD"]);
+    writeFileSync(path.join(repository, "selected.txt"), "after\n");
+    mkdirSync(path.join(repository, ".no-hooks"));
+    const hook = path.join(repository, ".no-hooks/pre-commit");
+    writeFileSync(hook, `#!/bin/sh
+unset GIT_INDEX_FILE
+${mutate ? 'printf "changed\\n" > other.txt\ngit add other.txt' : 'touch -t 200001010000 other.txt\ngit status --porcelain >/dev/null'}
+`);
+    chmodSync(hook, 0o755);
+    const result = spawnSync("bash", [committerPath, "fix(test): scoped change", "selected.txt"],
+      { cwd: repository, encoding: "utf8" });
+    if (mutate) {
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("repository index changed");
+      expect(runGit(repository, ["rev-parse", "HEAD"])).toBe(before);
+      expect(runGit(repository, ["show", ":other.txt"])).toBe("changed");
+    } else {
+      expect(result.status, result.stderr).toBe(0);
+      expect(runGit(repository, ["status", "--short"])).toBe("?? .no-hooks/");
+    }
+  });
+
+  it("rejects concurrent promotion of intent-to-add to a staged empty file", () => {
+    const repository = createRepository();
+    writeFileSync(path.join(repository, "selected.txt"), "before\n");
+    runGit(repository, ["add", "selected.txt"]);
+    runGit(repository, ["commit", "-qm", "baseline"]);
+    const before = runGit(repository, ["rev-parse", "HEAD"]);
+    writeFileSync(path.join(repository, "selected.txt"), "after\n");
+    writeFileSync(path.join(repository, "empty.txt"), "");
+    runGit(repository, ["add", "-N", "empty.txt"]);
+    mkdirSync(path.join(repository, ".no-hooks"));
+    const hook = path.join(repository, ".no-hooks/pre-commit");
+    writeFileSync(hook, "#!/bin/sh\nunset GIT_INDEX_FILE\ngit add empty.txt\n");
+    chmodSync(hook, 0o755);
+    const result = spawnSync("bash", [committerPath, "fix(test): scoped change", "selected.txt"], { cwd: repository, encoding: "utf8" });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("repository index changed");
+    expect(runGit(repository, ["rev-parse", "HEAD"])).toBe(before);
+    expect(runGit(repository, ["diff", "--cached", "--name-only"])).toBe("empty.txt");
+  });
+
   it("updates a tracked file beneath a locally ignored parent", () => {
     const repository = createRepository();
     const selectedPath = "evidence/result.md";

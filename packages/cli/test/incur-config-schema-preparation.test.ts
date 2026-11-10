@@ -2,27 +2,15 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { afterEach, test, vi } from 'vitest'
+import { EventEmitter } from 'node:events'
+import { afterEach, vi } from 'vitest'
+import { localParallelCliTest as test } from './local-parallel-test.js'
 
-const execFileMock = vi.hoisted(() =>
-  vi.fn((...args: unknown[]) => {
-    const callback = args[args.length - 1]
-
-    if (typeof callback === 'function') {
-      callback(null, '', '')
-    }
-  }),
-)
+const spawnMock = vi.hoisted(() => vi.fn())
 
 vi.mock('node:child_process', async () => {
-  const actual = await vi.importActual<typeof import('node:child_process')>(
-    'node:child_process',
-  )
-
-  return {
-    ...actual,
-    execFile: execFileMock,
-  }
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process')
+  return { ...actual, spawn: spawnMock }
 })
 
 import {
@@ -37,14 +25,20 @@ afterEach(() => {
 })
 
 test('prepares the dependency-aware CLI runtime before schema generation', async () => {
+  spawnMock.mockImplementationOnce(() => {
+    const child = new EventEmitter()
+    queueMicrotask(() => child.emit('exit', 0, null))
+    return child
+  })
   await prepareBuiltCliRuntime()
 
-  assert.equal(execFileMock.mock.calls.length, 1)
-  assert.equal(execFileMock.mock.calls[0]?.[0], 'pnpm')
-  assert.deepEqual(execFileMock.mock.calls[0]?.[1], [
+  assert.equal(spawnMock.mock.calls.length, 1)
+  assert.equal(spawnMock.mock.calls[0]?.[0], 'pnpm')
+  assert.deepEqual(spawnMock.mock.calls[0]?.[1], [
     'build:test-runtime:prepared',
   ])
-  const execOptions = execFileMock.mock.calls[0]?.[2]
+  assert.equal(spawnMock.mock.calls[0]?.[2].stdio, 'inherit')
+  const execOptions = spawnMock.mock.calls[0]?.[2]
   assert.ok(
     typeof execOptions === 'object' && execOptions !== null && 'cwd' in execOptions,
   )
@@ -91,4 +85,13 @@ test('keeps the declared Incur generator inside its package', () => {
     () => resolveIncurBinPathFromManifest(packageDirectory, { bin: {} }),
     /must declare bin\.incur/u,
   )
+})
+
+test.each([1, 17])('propagates prepared-runtime exit %s', async (code) => {
+  spawnMock.mockImplementationOnce(() => {
+    const child = new EventEmitter()
+    queueMicrotask(() => child.emit('exit', code, null))
+    return child
+  })
+  await assert.rejects(prepareBuiltCliRuntime(), new RegExp(`failed \\(${code}\\)`))
 })

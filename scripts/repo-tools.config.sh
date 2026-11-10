@@ -50,7 +50,7 @@ required_files=(
 repo_tools_join_lines COBUILD_DRIFT_REQUIRED_FILES "${required_files[@]}"
 export COBUILD_DRIFT_CODE_CHANGE_PATTERN='^(src/|app/|apps/|contracts/|scripts/|\.github/workflows/|package\.json$|README\.md$|ARCHITECTURE\.md$|AGENTS\.md$)'
 export COBUILD_DRIFT_CODE_CHANGE_LABEL='Code/process covered by the documentation guard'
-export COBUILD_DRIFT_LARGE_CHANGE_THRESHOLD='10'
+export COBUILD_DRIFT_LARGE_CHANGE_THRESHOLD="${COBUILD_DRIFT_LARGE_CHANGE_THRESHOLD:-10}"
 export COBUILD_DRIFT_CHANGED_COUNT_EXCLUDE_PATTERN='^agent-docs/generated/|^agent-docs/exec-plans/(active|completed)/|^pnpm-lock\.yaml$'
 export COBUILD_DRIFT_ALLOW_RELEASE_ARTIFACTS_ONLY='0'
 export COBUILD_DOC_GARDENING_EXCLUDE_PATTERN='^agent-docs/exec-plans/completed/'
@@ -79,6 +79,11 @@ audit_context_binary_exclude_globs=(
   "**/*.tif"
   "**/*.tiff"
   "**/*.heic"
+  "**/*.zip"
+  "**/*.tgz"
+  "**/*.tar"
+  "**/*.tar.gz"
+  "**/*.7z"
   "apps/*/public/design-assets/**"
   "apps/*/public/audio/**"
   "apps/*/public/legal/*.pdf"
@@ -155,6 +160,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "vitest.config.ts" \
   ".gitignore"
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
+  "patches:*.patch" \
   "agent-docs" \
   "config" \
   "packages" \

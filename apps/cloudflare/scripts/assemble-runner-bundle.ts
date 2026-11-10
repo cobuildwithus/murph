@@ -44,12 +44,13 @@ const runnerBundleDeployRoot = path.join(
 const runnerBundleDisplayRoot =
   path.relative(appDir, runnerBundleDeployRoot) || runnerBundleDeployRoot;
 const shouldSkipBuild = process.argv.includes("--skip-build");
-const shouldSkipBundleOnlyDependencies = process.argv.includes(
-  "--skip-bundle-only-dependencies",
-);
 const shouldSkipPackPreflights =
   process.argv.includes("--skip-pack-preflights") ||
   process.env.MURPH_RUNNER_BUNDLE_SKIP_PACK_PREFLIGHTS === "1";
+
+if (process.argv.includes("--skip-bundle-only-dependencies")) {
+  throw new Error("--skip-bundle-only-dependencies cannot assemble a runnable bundle: the vault CLI is required. Use the full runner:bundle command.");
+}
 
 await assembleRunnerBundle();
 
@@ -59,7 +60,7 @@ async function assembleRunnerBundle(): Promise<void> {
   );
   const stagingBundleDir = path.join(stagingRoot, runnerBundleDirectoryName);
   const tarballsDir = path.join(stagingRoot, "tarballs");
-  const includeBundleOnlyDependencies = !shouldSkipBundleOnlyDependencies;
+  const includeBundleOnlyDependencies = true;
   const hostedRunnerWorkspacePackageNames = resolveHostedRunnerWorkspacePackageNames({
     includeBundleOnlyDependencies,
   });
@@ -79,9 +80,7 @@ async function assembleRunnerBundle(): Promise<void> {
 
     await stageHostedRunnerRuntimeArtifact(stagingBundleDir, {
       appDir,
-      bundleOnlyDependencyNames: includeBundleOnlyDependencies
-        ? hostedRunnerBundleOnlyDependencyNames
-        : [],
+      bundleOnlyDependencyNames: hostedRunnerBundleOnlyDependencyNames,
     });
     await mkdir(tarballsDir, { recursive: true });
     const tarballPaths = await packWorkspacePackageArtifacts(
@@ -101,6 +100,7 @@ async function assembleRunnerBundle(): Promise<void> {
       {
         repoRoot,
         runtimePackageRoot: appDir,
+        offline: process.argv.includes("--offline"),
       },
     );
     await assertInstalledRunnerHealthCommonsRuntimeImport(stagingBundleDir);

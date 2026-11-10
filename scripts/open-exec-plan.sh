@@ -29,7 +29,8 @@ fi
 date_stamp="$(date +%Y-%m-%d)"
 plan_path="agent-docs/exec-plans/active/${date_stamp}-${slug}.md"
 
-if [[ -e "$plan_path" ]]; then
+completed_path="agent-docs/exec-plans/completed/${date_stamp}-${slug}.md"
+if [[ -e "$plan_path" || -e "$completed_path" ]]; then
   echo "Plan already exists: $plan_path"
   exit 1
 fi

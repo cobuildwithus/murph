@@ -2039,3 +2039,5 @@ proof and local verification are recorded in
 
 The [chat reliability release plan](exec-plans/completed/2026-11-07-chat-reliability-release.md)
 tracks combined verification and release of prompt checkpointing and unique foreground usage identities.
+
+Frog backlog resolution and verification: [execution record](exec-plans/completed/2026-11-10-frog-backlog.md).

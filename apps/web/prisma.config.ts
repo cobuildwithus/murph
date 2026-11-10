@@ -21,7 +21,7 @@ if (
   );
 }
 
-for (const envPath of [".env.local", ".env"]) {
+for (const envPath of process.env.MURPH_PRISMA_SKIP_ENV_FILES === "1" ? [] : [".env.local", ".env"]) {
   const absoluteEnvPath = path.join(CONFIG_DIR, envPath);
 
   if (existsSync(absoluteEnvPath)) {
