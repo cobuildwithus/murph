@@ -44,9 +44,13 @@ Exact-event and meal/document owner lookups lazily load
 `@murphai/core/event-read` inside the existing `event-core-load` span. They retain
 the same readers, visibility checks, error mappings and owner-scan spans. Other
 runtime loaders continue to use their current surfaces. The native package
-export is required because `loadRuntimeModule` uses a variable import; the
-production CLI bundle cannot replace that lookup with a statically bundled
-module. Core's manifest and emitted entry ship together in the runner artifact.
+export is required because `loadRuntimeModule` uses a variable import, which
+unbundled callers resolve from the installed package. The production CLI
+bundler rewrites the helper so each listed specifier is a literal import inside
+the one bundled graph (`VAULT_CLI_BUNDLE_RUNTIME_IMPORT_SPECIFIERS` in
+`apps/cloudflare/scripts/runner-bundle/bundle-cli.ts`); add a new specifier
+there when a command starts loading another runtime module by name. Core's
+manifest and emitted entry ship together in the runner artifact.
 
 Experiment progress and outcome analysis share one canonical evidence snapshot
 through `readExperimentQuerySource()`, deriving the selected metrics without

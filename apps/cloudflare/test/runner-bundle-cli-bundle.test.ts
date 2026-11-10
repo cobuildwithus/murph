@@ -185,6 +185,85 @@ const STDERR_DIVERGENT_CLI_SOURCE = [
   "",
 ].join("\n");
 
+// The by-name runtime import helper exactly as the owning packages emit it.
+const RUNTIME_IMPORT_HELPER_SOURCE = [
+  "var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExtension) || function (path) {",
+  "    return path;",
+  "};",
+  "export function loadRuntimeModule(specifier) {",
+  "    return import(__rewriteRelativeImportExtension(specifier));",
+  "}",
+  "//# sourceMappingURL=runtime-import.js.map",
+  "",
+].join("\n");
+const RUNTIME_IMPORT_MARKER_PREFIX = "synthetic-runtime-module:";
+const VAULT_READ_PROBE_CONDITION =
+  "args.join(' ') === 'wearables day 2026-01-01 --format json' && vault.length > 0";
+
+// The synthetic installed package's helper subpath. Assembled from parts
+// because it exists only inside the staged fixture, not as a workspace
+// entrypoint this test file imports.
+const RUNTIME_IMPORT_HELPER_SPECIFIER = ["@murphai", "vault-usecases", "runtime-import"].join("/");
+
+// Reads `@murphai/query` through the owning package's helper, only on the
+// vault-backed read probe.
+const RUNTIME_IMPORT_FAKE_CLI_SOURCE = `${FAKE_CLI_SOURCE}
+if (${VAULT_READ_PROBE_CONDITION}) {
+  const { loadRuntimeModule } = await import(${JSON.stringify(RUNTIME_IMPORT_HELPER_SPECIFIER)});
+  console.log((await loadRuntimeModule('@murphai/query')).marker);
+}
+`;
+
+// Same read, but through a private variable import the bundler cannot see.
+const ESCAPED_RUNTIME_IMPORT_FAKE_CLI_SOURCE = `${FAKE_CLI_SOURCE}
+if (${VAULT_READ_PROBE_CONDITION}) {
+  const loadByName = (specifier) => import(specifier);
+  console.log((await loadByName('@murphai/query')).marker);
+}
+`;
+
+async function stageRuntimeImportFixture(
+  bundleDir: string,
+  helperSource = RUNTIME_IMPORT_HELPER_SOURCE,
+): Promise<void> {
+  const scopeRoot = path.join(bundleDir, "node_modules", "@murphai");
+  const stagePackage = async (
+    name: string,
+    files: Record<string, string>,
+    exports: Record<string, string>,
+  ) => {
+    const root = path.join(scopeRoot, name);
+    await mkdir(path.join(root, "dist"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), JSON.stringify({
+      name: `@murphai/${name}`, type: "module", exports,
+    }));
+    await Promise.all(Object.entries(files).map(([file, source]) =>
+      writeFile(path.join(root, "dist", file), source)));
+  };
+  const marker = (specifier: string) =>
+    `export const marker = ${JSON.stringify(RUNTIME_IMPORT_MARKER_PREFIX + specifier)};\n`;
+
+  await stagePackage("vault-usecases", { "runtime-import.js": helperSource }, {
+    "./runtime-import": "./dist/runtime-import.js",
+  });
+  await stagePackage("core", {
+    "index.js": marker("@murphai/core"),
+    "event-read.js": marker("@murphai/core/event-read"),
+  }, { ".": "./dist/index.js", "./event-read": "./dist/event-read.js" });
+  await stagePackage("health-commons", {
+    "runtime.js": marker("@murphai/health-commons/runtime"),
+  }, { "./runtime": "./dist/runtime.js" });
+  await stagePackage("importers", {
+    "index.js": marker("@murphai/importers"),
+    "clinical-records.js": marker("@murphai/importers/clinical-records"),
+  }, { ".": "./dist/index.js", "./clinical-records": "./dist/clinical-records.js" });
+  for (const name of ["parsers", "query", "runtime-state"]) {
+    await stagePackage(name, { "index.js": marker(`@murphai/${name}`) }, {
+      ".": "./dist/index.js",
+    });
+  }
+}
+
 async function stageFakeInstalledCli(cliSource: string): Promise<string> {
   const bundleDir = await mkdtemp(path.join(tmpdir(), "murph-runner-cli-bundle-"));
   temporaryDirectories.push(bundleDir);
@@ -587,6 +666,53 @@ describe("runner bundle vault-cli esbuild step", () => {
 
     await expect(bundleInstalledVaultCliBinary(bundleDir)).rejects.toThrow(
       /Bundled vault-cli output diverged/,
+    );
+  });
+
+  it("bundles by-name runtime imports into the one graph", async () => {
+    const bundleDir = await stageFakeInstalledCli(RUNTIME_IMPORT_FAKE_CLI_SOURCE);
+    await stageRuntimeImportFixture(bundleDir);
+
+    await bundleInstalledVaultCliBinary(bundleDir);
+
+    // The installed copy is gone, so only a bundled module can answer.
+    await rm(path.join(bundleDir, "node_modules", "@murphai", "query"), {
+      force: true, recursive: true,
+    });
+    const vaultRoot = path.join(bundleDir, "vault-read-home", "vault");
+    await createInitializedVaultCliMemoryFixture({ includeMemory: false, vaultRoot });
+    const result = spawnSync(process.execPath, [
+      path.join(bundleDir, "node_modules", "@murphai", "murph", ".bundle", "bin.js"),
+      "wearables", "day", "2026-01-01", "--format", "json",
+    ], {
+      cwd: vaultRoot, encoding: "utf8", timeout: 10_000,
+      env: { ...process.env, HOME: path.dirname(vaultRoot), VAULT: vaultRoot },
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`${RUNTIME_IMPORT_MARKER_PREFIX}@murphai/query`);
+  });
+
+  it("fails the assembly when a vault-backed read loads an installed runtime package", async () => {
+    const bundleDir = await stageFakeInstalledCli(ESCAPED_RUNTIME_IMPORT_FAKE_CLI_SOURCE);
+    await stageRuntimeImportFixture(bundleDir);
+
+    await expect(bundleInstalledVaultCliBinary(bundleDir)).rejects.toThrow(
+      /vault-read probe `wearables day 2026-01-01 --format json` loaded installed packages at run time: @murphai\/query/u,
+    );
+  });
+
+  it("fails the assembly when the runtime-import helper changes shape", async () => {
+    const bundleDir = await stageFakeInstalledCli(RUNTIME_IMPORT_FAKE_CLI_SOURCE);
+    await stageRuntimeImportFixture(bundleDir, [
+      "export function loadRuntimeModule(specifier) {",
+      "    return import(specifier).then((module) => module.default ?? module);",
+      "}",
+      "",
+    ].join("\n"));
+
+    await expect(bundleInstalledVaultCliBinary(bundleDir)).rejects.toThrow(
+      /cannot rewrite .*runtime-import\.js/u,
     );
   });
 
