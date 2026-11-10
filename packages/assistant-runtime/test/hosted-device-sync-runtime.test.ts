@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -60,6 +61,7 @@ import {
   type DeviceConnectionSourceResourceAvailabilitySummary,
   type DeviceSyncAccount,
   type DeviceSyncJobRecord,
+  type DeviceSyncImporterPort,
   type DeviceSyncProvider,
   type ProviderAuthTokens,
   type StoredDeviceSyncAccount,
@@ -293,6 +295,88 @@ function createTestJsonResponse(body: unknown, status = 200): Response {
 function readTestUrl(input: RequestInfo | URL): string {
   return typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 }
+
+test.each(["completed", "yielded", "unscoped"] as const)(
+  "hosted import pass scope survives the real service drain: %s",
+  async (mode) => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-import-pass-");
+    await initializeVault({ vaultRoot, createdAt: "2026-04-01T00:00:00.000Z" });
+    const scope = new AsyncLocalStorage<number>();
+    const observedScopes: (number | undefined)[] = [];
+    let scopesStarted = 0;
+    let scopesFinished = 0;
+    let yieldRequested = false;
+    const importer: DeviceSyncImporterPort = {
+      async importDeviceProviderSnapshot() {
+        await Promise.resolve();
+        observedScopes.push(scope.getStore());
+        return { applied: false, events: [] };
+      },
+      ...(mode === "unscoped" ? {} : {
+        async withDeviceImportPass<T>(work: () => Promise<T>): Promise<T> {
+          assert.equal(this, importer);
+          return scope.run(++scopesStarted, async () => {
+            try { return await work(); }
+            finally { scopesFinished += 1; }
+          });
+        },
+      }),
+    };
+    const service = createHostedRuntimeDeviceSyncService({
+      secret: DEVICE_SYNC_SECRET,
+      config: {
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        vaultRoot,
+        shouldYieldJobExecution: () => yieldRequested,
+      },
+      importer,
+      providers: [createFakeProvider({
+        jobExecutor: {
+          async executeJob(context) {
+            await context.importSnapshot({ kind: "synthetic-pass" });
+            return {};
+          },
+        },
+      })],
+    });
+    try {
+      const store = requireHostedRuntimeDeviceSyncStore(service);
+      const account = store.upsertAccount({
+        provider: "demo",
+        externalAccountId: "synthetic-pass-account",
+        connectedAt: "2026-04-01T00:00:00.000Z",
+        credential: { kind: "none", credentialMetadata: {} },
+        scopes: [],
+        status: "active",
+      });
+      const jobs = [0, 1].map((index) => store.enqueueJob({
+        accountId: account.id,
+        provider: "demo",
+        kind: "resource",
+        payload: { resource: `synthetic-${index}` },
+        availableAt: "2026-04-01T00:00:00.000Z",
+      }));
+      assert.equal(await service.drainWorker(2, account.id, {
+        onProcessedJobRows() { yieldRequested = mode === "yielded"; },
+      }), mode === "yielded" ? 1 : 2);
+      assert.deepEqual(observedScopes, mode === "unscoped"
+        ? [undefined, undefined] : mode === "yielded" ? [1] : [1, 1]);
+      assert.equal(scopesStarted, mode === "unscoped" ? 0 : 1);
+      assert.equal(scopesFinished, scopesStarted);
+      assert.equal(scope.getStore(), undefined);
+      if (mode === "yielded") {
+        assert.equal(jobs.filter((job) => store.getJobById(job.id)?.status === "queued").length, 1);
+        yieldRequested = false;
+        assert.equal(await service.drainWorker(2, account.id), 1);
+        assert.deepEqual(observedScopes, [1, 2]);
+        assert.equal(scopesFinished, 2);
+      }
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  },
+);
 
 function createDeviceSyncServiceForVault(
   vaultRoot: string,

@@ -1,3 +1,7 @@
+Hosted device import pass-scope forwarding is tracked in the
+[execution plan](exec-plans/active/2026-11-10-hosted-device-pass-scope.md);
+the [runtime owner](../packages/assistant-runtime/README.md) owns cache composition.
+
 Linq group line moves retain container identity through a move-aware ingress
 rollback floor, an egress-only retired-target alias and verified service-number
 normalization for games. [Architecture](../ARCHITECTURE.md#linq-group-line-moves)

@@ -135,6 +135,35 @@ test("hosted runtime device-sync preserves bounded import execution options", as
   }, { signal });
 });
 
+test("hosted runtime device-sync preserves the import-pass receiver, result, and errors", async () => {
+  const expectedError = new HostedRuntimeArtifactReadError({
+    cause: new Error("Synthetic pass failure"),
+    retryable: true,
+  });
+  const source: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot() { return {}; },
+    async withDeviceImportPass(work) {
+      assert.equal(this, source);
+      return await work();
+    },
+  };
+  const importer = captureHostedDeviceSyncImporter(source);
+  assert.ok(importer.withDeviceImportPass);
+  const result = { completed: true };
+  assert.equal(await importer.withDeviceImportPass(async () => result), result);
+  await assert.rejects(
+    importer.withDeviceImportPass(async () => { throw expectedError; }),
+    (error) => error === expectedError,
+  );
+});
+
+test("hosted runtime device-sync leaves import-pass support absent for legacy importers", () => {
+  const importer = captureHostedDeviceSyncImporter({
+    async importDeviceProviderSnapshot() { return {}; },
+  });
+  assert.equal(importer.withDeviceImportPass, undefined);
+});
+
 function captureHostedDeviceSyncImporter(
   importer: DeviceSyncImporterPort,
 ): DeviceSyncImporterPort {
