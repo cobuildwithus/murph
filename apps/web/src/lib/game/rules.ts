@@ -324,10 +324,7 @@ export function completedEntry(entries: RuleEntries, memberId: string, dayIndex:
   return entry && !entry.incomplete ? entry : null;
 }
 
-/** The whole post for a day counted late on its player's word: there is no check-in to show. */
-export const GAME_CREDITED_DAY_TEXT = "Did it. Counted late, on my word.";
-
-export function decideDayCompletion(state: RuleState, input: { memberId: string; date: string; incomplete: boolean; credit?: boolean; now: Date }): { dayIndex: number; changed: boolean; outcome: GameDayOutcome } {
+export function decideDayCompletion(state: RuleState, input: { memberId: string; date: string; incomplete: boolean; credit?: boolean; hasWords?: boolean; now: Date }): { dayIndex: number; changed: boolean; outcome: GameDayOutcome } {
   const player = requireLivePlayer(state, input.memberId);
   if (isGameDue(state, input.now)) reject("GAME_NOT_LIVE", "This game has ended.");
   const dayIndex = daysBetween(player.dayOne!, input.date);
@@ -336,7 +333,8 @@ export function decideDayCompletion(state: RuleState, input: { memberId: string;
   const entry = liveEntry(state.entries, input.memberId, dayIndex);
   if (!entry && input.credit && !input.incomplete) {
     assertCreditableDay(state, player, dayIndex, today);
-    return { dayIndex, changed: true, outcome: { date: input.date, status: "credited" } };
+    // The post is the player's own words: until they give them, the day is only known to be countable.
+    return { dayIndex, changed: input.hasWords === true, outcome: { date: input.date, status: input.hasWords ? "credited" : "words_needed" } };
   }
   const status = !entry ? "no_artifact" : input.incomplete
     ? entry.incomplete ? "already_incomplete" : "marked_incomplete"

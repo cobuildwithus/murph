@@ -33,8 +33,9 @@ function codeOf(run: () => unknown): string {
 it("counts a day on the speaker's word only as their own completion, never with a target", () => {
   const day = { type: "setDayCompletion", gameId: "game_day_credit", date: "2030-04-01" };
   expect(parseGameCommand({ ...day, incomplete: false, credit: true })).toEqual({ ...day, incomplete: false, credit: true });
+  expect(parseGameCommand({ ...day, incomplete: false, credit: true, text: "  Read a chapter " })).toEqual({ ...day, incomplete: false, credit: true, text: "Read a chapter" });
   expect(parseGameCommand({ ...day, incomplete: false })).toEqual({ ...day, incomplete: false });
-  for (const extra of [{ incomplete: true, credit: true }, { incomplete: false, credit: false }, { incomplete: false, credit: "yes" }, { incomplete: false, credit: true, memberId: "other" }, { incomplete: false, credit: true, entryId: "entry_other" }]) {
+  for (const extra of [{ incomplete: false, text: "Read a chapter" }, { incomplete: false, credit: true, text: "" }, { incomplete: false, credit: true, text: "two\nlines" }, { incomplete: false, credit: true, text: "x".repeat(141) }, { incomplete: true, credit: true }, { incomplete: false, credit: false }, { incomplete: false, credit: "yes" }, { incomplete: false, credit: true, memberId: "other" }, { incomplete: false, credit: true, entryId: "entry_other" }]) {
     expect(() => parseGameCommand({ ...day, ...extra })).toThrow(GameRuleError);
   }
 });

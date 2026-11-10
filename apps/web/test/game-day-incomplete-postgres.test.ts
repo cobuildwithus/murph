@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
 import { devSettleNow, readGame, runGameCommand } from "@/src/lib/game/service";
-import { GAME_CREDITED_DAY_TEXT } from "@/src/lib/game/rules";
 import { addDays, gameLocalDate } from "@/src/lib/game/time";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -70,10 +69,14 @@ describe.skipIf(!enabled)("self-reported game days against PostgreSQL", () => {
     expect((await readGame(f.gameId, f.a))?.players.find((p) => p.isMe)?.score).toBe(1);
   });
 
-  it("counts a missed day on the speaker's word as one words post, once, and lets them take it back", async () => {
+  it("counts a missed day as one post in the speaker's own words, once, and lets them take it back", async () => {
     const f = await setup(), db = getPrisma();
     await f.post(f.b);
-    const count = (date = f.yesterday, actor = f.a, chat = f.room, extra = {}) => f.correct(false, date, actor, chat, { credit: true, ...extra });
+    const words = "Read chapter nine on the train";
+    const count = (date = f.yesterday, actor = f.a, chat = f.room, extra = {}) => f.correct(false, date, actor, chat, { credit: true, text: `  ${words} `, ...extra });
+    // Until they say what the post should read, the day is countable but nothing is written.
+    expect(await count(f.yesterday, f.a, f.room, { text: undefined })).toMatchObject({ ok: true, dayOutcome: { status: "words_needed" } });
+    expect(await db.gameEntry.count({ where: { gameId: f.gameId, memberId: f.a } })).toBe(0);
     const results = await Promise.all([count(), count()]);
     expect(results.map((r) => r.ok && r.dayOutcome?.status).sort()).toEqual(["already_complete", "credited"]);
     const entries = await db.gameEntry.findMany({ where: { gameId: f.gameId, memberId: f.a } });
@@ -82,8 +85,8 @@ describe.skipIf(!enabled)("self-reported game days against PostgreSQL", () => {
     expect(await db.gameEvent.findMany({ where: { gameId: f.gameId, type: "day_credited" }, select: { actor: true, payload: true } })).toEqual([{ actor: f.a, payload: { v: 1, dayIndex: 0, entryId: entries[0].id } }]);
     expect(await db.gameEvent.count({ where: { gameId: f.gameId, actor: f.a, type: "posted" } })).toBe(0);
     const mine = await readGame(f.gameId, f.a), partner = await readGame(f.gameId, f.b);
-    expect(mine?.days[0].mine).toMatchObject({ entryId: entries[0].id, kind: "words", text: GAME_CREDITED_DAY_TEXT });
-    expect(partner?.days[0].others[0].entry).toMatchObject({ entryId: entries[0].id, kind: "words", text: GAME_CREDITED_DAY_TEXT });
+    expect(mine?.days[0].mine).toMatchObject({ entryId: entries[0].id, kind: "words", text: words });
+    expect(partner?.days[0].others[0].entry).toMatchObject({ entryId: entries[0].id, kind: "words", text: words });
     expect(mine?.players.find((p) => p.isMe)).toMatchObject({ score: 1 });
     // It is their post now: the same two corrections take it back and return it without a second post.
     expect(await f.correct()).toMatchObject({ ok: true, dayOutcome: { status: "marked_incomplete" } });
@@ -93,12 +96,18 @@ describe.skipIf(!enabled)("self-reported game days against PostgreSQL", () => {
 
   it("never counts an open day, another player's day, or a day outside the game's own chat", async () => {
     const f = await setup(), db = getPrisma();
-    const count = (date = f.yesterday, actor = f.a, chat = f.room, extra = {}) => f.correct(false, date, actor, chat, { credit: true, ...extra });
+    const count = (date = f.yesterday, actor = f.a, chat = f.room, extra = {}) => f.correct(false, date, actor, chat, { credit: true, text: "Read a chapter", ...extra });
+    // An open day is refused with or without words, so nobody is asked to write a post that cannot land.
+    expect(await count(f.today, f.a, f.room, { text: undefined })).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: expect.stringContaining("still open") } });
+    // The words follow the same rules as any written check-in: one short line, and nothing the game refuses.
+    for (const text of ["two\nlines", "x".repeat(141), "   "]) expect(await count(f.yesterday, f.a, f.room, { text })).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    expect(await count(f.yesterday, f.a, f.room, { text: "Read a chapter, go die" })).toMatchObject({ ok: false, error: { code: "CONTENT_NOT_ALLOWED" } });
     expect(await count(f.today)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: expect.stringContaining("still open") } });
     expect((await count(f.yesterday, f.a, f.room, { memberId: f.b })).ok).toBe(false);
     expect(await count(f.yesterday, f.a, f.b)).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     expect(await runGameCommand({ actorMemberId: f.a, command: { type: "setDayCompletion", gameId: f.gameId, date: f.yesterday, incomplete: false, credit: true } })).toMatchObject({ ok: false });
     expect((await f.correct(true, f.yesterday, f.a, f.room, { credit: true })).ok).toBe(false);
+    expect((await f.correct(false, f.yesterday, f.a, f.room, { text: "Read a chapter" })).ok).toBe(false);
     expect(await db.gameEntry.count({ where: { gameId: f.gameId } })).toBe(0);
     await devSettleNow(f.gameId, f.a);
     expect(await count()).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });

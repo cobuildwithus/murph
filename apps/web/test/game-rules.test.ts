@@ -854,8 +854,8 @@ describe("self-reported incomplete days", () => {
 });
 
 describe("a missed day counted on the player's word", () => {
-  const count = (state: RuleState, dayIndex: number, now: Date, incomplete = false) => decideDayCompletion(state, {
-    memberId: LEO, date: addDays(playerFor(state, LEO)!.dayOne!, dayIndex), incomplete, credit: true, now });
+  const count = (state: RuleState, dayIndex: number, now: Date, incomplete = false, hasWords = true) => decideDayCompletion(state, {
+    memberId: LEO, date: addDays(playerFor(state, LEO)!.dayOne!, dayIndex), incomplete, credit: true, hasWords, now });
 
   it("counts a closed scheduled day that never had a post, and nothing else", () => {
     const state = live(invited(), NYC);
@@ -864,6 +864,10 @@ describe("a missed day counted on the player's word", () => {
     state.game.terms.versions[0] = { ...state.game.terms.versions[0], checkInKind: "any", schedule: { days: ([0, 1, 2, 3, 4, 5, 6] as const).filter((day) => day !== offDay) } };
     const now = at(state, LEO, 3, 12);
     expect(count(state, 0, now)).toEqual({ dayIndex: 0, changed: true, outcome: { date: playerFor(state, LEO)!.dayOne, status: "credited" } });
+    // Without the player's own words the day is only known to be countable; nothing is written.
+    expect(count(state, 0, now, false, false)).toEqual({ dayIndex: 0, changed: false, outcome: { date: playerFor(state, LEO)!.dayOne, status: "words_needed" } });
+    // A day that can't be counted is refused before anyone is asked for words.
+    expect(() => count(state, 3, now, false, false)).toThrow("still open");
     // Marking not done, and the older restore, still find nothing to change.
     expect(count(state, 0, now, true).outcome.status).toBe("no_artifact");
     expect(decideDayCompletion(state, { memberId: LEO, date: playerFor(state, LEO)!.dayOne!, incomplete: false, now }).outcome.status).toBe("no_artifact");

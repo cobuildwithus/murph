@@ -165,7 +165,11 @@ it.each(["mark_incomplete", "restore_day", "mark_complete"])("accepts %s only wi
   for (const extra of [{ memberId: "another" }, { proposalId: "proposal_synthetic" }, { date: "yesterday" }]) {
     expect(hostedGameToolRequestSchema.safeParse({ ...request, update: { ...request.update, ...extra } }).success).toBe(false);
   }
-  for (const status of ["marked_incomplete", "credited"]) {
+  // Only the newer correction carries the speaker's own words for a counted day's post.
+  const words = { ...request, update: { ...request.update, text: "Read a chapter" } };
+  expect(hostedGameToolRequestSchema.safeParse(words).success).toBe(operation === "mark_complete");
+  expect(hostedGameToolRequestSchema.safeParse({ ...words, update: { ...words.update, text: "x".repeat(141) } }).success).toBe(false);
+  for (const status of ["marked_incomplete", "credited", "words_needed"]) {
     const payload = { action: "update_game", result: { status: "ok", state: { games: [game] }, dayOutcome: { date: "2030-04-01", status } } };
     expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
   }

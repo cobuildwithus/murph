@@ -70,7 +70,6 @@ import {
   decideLeave,
   remainingPlayers,
   decideDayCompletion,
-  GAME_CREDITED_DAY_TEXT,
   decideDevAdvance,
   decideJoin,
   decideNegotiationStart,
@@ -346,7 +345,8 @@ export async function runGameChatUpdate(input: Omit<Parameters<typeof runGameCom
     } else if (update.operation === "cancel_game") {
       command = { type: "cancelInvite", gameId: update.gameId };
     } else if ("date" in update) {
-      command = { type: "setDayCompletion", gameId: update.gameId, date: update.date, incomplete: update.operation === "mark_incomplete", ...(update.operation === "mark_complete" ? { credit: true } : {}) };
+      command = { type: "setDayCompletion", gameId: update.gameId, date: update.date, incomplete: update.operation === "mark_incomplete",
+        ...(update.operation === "mark_complete" ? { credit: true, ...(update.text === undefined ? {} : { text: update.text }) } : {}) };
     } else {
       command = { type: "respondChange", gameId: update.gameId, proposalId: update.proposalId!, decision: update.operation };
     }
@@ -1557,12 +1557,12 @@ async function challenge(context: CommandContext, command: Extract<GameCommand, 
 
 async function setDayCompletion(context: CommandContext, command: Extract<GameCommand, { type: "setDayCompletion" }>): Promise<{ gameId: string; dayOutcome: GameDayOutcome }> {
   let dayOutcome: GameDayOutcome | undefined;
-  // A counted day is a words post in its player's name; its fixed line is sealed before the game lock.
+  // A counted day is a words post saying what its player told Murph; the line is sealed before the game lock.
   const creditEntryId = randomUUID();
-  const creditText = command.credit ? await seal({ memberId: context.actor, rowId: creditEntryId, table: "game_entry", field: "text" }, GAME_CREDITED_DAY_TEXT) : null;
+  const creditText = command.text ? await seal({ memberId: context.actor, rowId: creditEntryId, table: "game_entry", field: "text" }, command.text) : null;
   await runLocked(command.gameId, context, async ({ clock, loaded, now, tx }) => {
     if (!context.chatContainerMemberId || loaded.row.chatContainerMemberId !== context.chatContainerMemberId) reject("NOT_A_PLAYER", "Use the group chat bound to this game.");
-    const decision = decideDayCompletion(loaded.state, { memberId: context.actor, date: command.date, incomplete: command.incomplete, credit: command.credit, now });
+    const decision = decideDayCompletion(loaded.state, { memberId: context.actor, date: command.date, incomplete: command.incomplete, credit: command.credit, hasWords: creditText !== null, now });
     dayOutcome = decision.outcome;
     if (!decision.changed) return [];
     if (decision.outcome.status === "credited") {

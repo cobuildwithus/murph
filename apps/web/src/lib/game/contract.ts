@@ -282,7 +282,7 @@ export interface GameChangeControls {
 }
 
 /** Receipt for a speaker-owned day correction in the bound game chat. */
-export type GameDayOutcome = { date: string; status: "marked_incomplete" | "restored" | "already_incomplete" | "already_complete" | "no_artifact" | "credited" };
+export type GameDayOutcome = { date: string; status: "marked_incomplete" | "restored" | "already_incomplete" | "already_complete" | "no_artifact" | "credited" | "words_needed" };
 
 export type ReplyToPostBody = { replyId: string } & (
   | { kind: "text"; text: string }
@@ -313,8 +313,8 @@ export type GameCommand =
   /** POST /games/:id/recap-watched: you finished its recap. Settled games only; safe to repeat. */
   | { type: "watchRecap"; gameId: string }
   | ({ type: "editTerms"; gameId: string } & EditGameTermsBody)
-  /** `credit` also counts a closed day with no post, on the player's word. */
-  | { type: "setDayCompletion"; gameId: string; date: string; incomplete: boolean; credit?: true }
+  /** `credit` also counts a closed day with no post, as a post saying `text`: the player's own words. */
+  | { type: "setDayCompletion"; gameId: string; date: string; incomplete: boolean; credit?: true; text?: string }
   /** DELETE /games/:id cancels an unstarted invite. */
   | { type: "cancelInvite"; gameId: string }
   | ({ type: "proposeChange"; gameId: string } & ProposeGameChangeBody)

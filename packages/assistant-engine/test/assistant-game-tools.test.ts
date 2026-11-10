@@ -485,9 +485,19 @@ it('offers Murph one way to count a day as done, on the player’s word', () => 
   expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.operation.enum).toContain('mark_complete')
   expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.operation.enum).not.toContain('restore_day')
   expect(MURPH_UPDATE_GAME_TOOL.description).not.toContain('restore_day')
-  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('counts a closed game day they never posted on')
+  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('counts a closed game day they never posted on as a post in their own words')
   expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Take their word; never ask for proof or put it to the other players, and never offer it unasked')
-  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('credited confirms the missed day now counts on their word')
+  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ask once what they want that day’s post to say, then mark_complete the same date with text set to their answer')
+  expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.text.description).toContain('Never write or edit them; omit until they give them.')
+})
+
+it('passes the speaker’s own words for a counted day only on mark_complete', async () => {
+  port.mockClear()
+  const args = { messageRef: inputId, operation: 'mark_complete', gameId: 'game_synthetic', date: '2030-04-01', text: 'Read a chapter' }
+  expect((await execute(args)).rpcResult.success).toBe(true)
+  expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation: 'mark_complete', gameId: 'game_synthetic', date: '2030-04-01', text: 'Read a chapter' } })
+  expect(parse('update_game', { ...args, operation: 'mark_incomplete' })?.kind).toBe('invalid-game-arguments')
+  expect(parse('update_game', { ...args, text: 'x'.repeat(141) })?.kind).toBe('invalid-game-arguments')
 })
 
 it('cancels a not-yet-started game for the current speaker with no proposal or extra selector', async () => {
