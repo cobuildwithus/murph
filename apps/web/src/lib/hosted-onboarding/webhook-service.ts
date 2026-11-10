@@ -1,4 +1,4 @@
-import { prepareHostedLinqGroupMoveIngress, readHostedLinqGroupMoveNoticeText, type PreparedHostedLinqGroupMoveIngress } from "../hosted-routing/linq-group-line-move-ingress";
+import { prepareHostedLinqGroupMoveIngress, type PreparedHostedLinqGroupMoveIngress } from "../hosted-routing/linq-group-line-move-ingress";
 import { prepareGameChatInvite } from "../game/chat-membership";
 import { queueHostedLinqHomeContactCardAfterDelivery } from "./linq-contact-card-delivery";
 import { maybeScheduleHostedLinqAckReaction } from "./linq-ack-reaction";
@@ -653,7 +653,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           prepare: async ({ attempt }) => {
             const preparation = await prepareHostedLinqThreadRoutingCrypto({
               requirePrivateRouting: attempt > 0,
-              groupMoveNoticeText: readHostedLinqGroupMoveNoticeText(event),
               ...(attempt === 0 && directPreparationMemberId
                 ? { directPreparationMemberId }
                 : {}),
@@ -934,6 +933,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       wakeUserPresent: Boolean(plan.wakeHandoffs?.some((handoff) => handoff.userId)),
     });
 
+    finishHostedLinqGroupMoveAdoption({ plan, prisma, scheduleAfterResponse: input.scheduleAfterResponse });
     await reconcileHostedLinqGroupRostersAfterCommitBestEffort({
       reconciles: plan.postCommitGroupRosterReconciles ?? [],
       requestLocalRoster: planningResolution.requestLocalGroupRoster,
@@ -2432,23 +2432,47 @@ async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
   return deliveryRouteResult.value;
 }
 
+function finishHostedLinqGroupMoveAdoption(input: {
+  plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
+  prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}) {
+  const { plan, prisma } = input;
+  if (plan.postCommitGroupLineMoveId && input.scheduleAfterResponse) {
+    const moveId = plan.postCommitGroupLineMoveId;
+    input.scheduleAfterResponse(async () => {
+      try {
+        const { operateHostedLinqGroupLineMove } = await import("../hosted-ops/linq-group-line-move");
+        await operateHostedLinqGroupLineMove({ operation: "retry_leave", moveId, prisma });
+      } catch {
+        console.warn("Hosted group line move leave remains pending.", { code: "leave_unconfirmed" });
+      }
+    });
+  }
+  // Adoption is committed. Leave is scheduled, but a person's event is not
+  // acknowledged: provider redelivery now finds the ordinary bound route.
+  if (plan.retryAfterGroupLineMoveAdoption) throw hostedOnboardingError({
+    code: "HOSTED_LINQ_GROUP_LINE_MOVE_PENDING", httpStatus: 503, retryable: true,
+    message: "The group route moved. Retry this message on its new route.",
+  });
+}
+
 async function prepareLinqGroupMoveForContext(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   route: HostedThreadRouteSnapshot | null;
-  text?: string | null;
   prisma: PrismaClient;
 }) {
   const { context } = input;
   if (!input.route && context.messageEvent.data.chat?.is_group !== true) return undefined;
   return prepareHostedLinqGroupMoveIngress({
     service: context.messageEvent.data.service, threadId: context.summary.chatId,
+    eventCreatedAt: context.messageEvent.created_at,
     recipientPhone: context.recipientPhoneNumber, sender: context.participantContact?.value ?? null,
-    text: input.text ?? null, isFromMe: context.summary.isFromMe, route: input.route, prisma: input.prisma,
+    isFromMe: context.summary.isFromMe, route: input.route, prisma: input.prisma,
   });
 }
 
 async function prepareHostedLinqThreadRoutingCrypto(input: {
-  groupMoveNoticeText?: string | null;
   requirePrivateRouting?: boolean;
   directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
@@ -2477,7 +2501,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
       })
     : input.threadRoute;
   const preparedGroupLineMove = await prepareLinqGroupMoveForContext({
-    context, route: threadRoute, text: input.groupMoveNoticeText, prisma: input.prisma,
+    context, route: threadRoute, prisma: input.prisma,
   });
   if (preparedGroupLineMove && preparedGroupLineMove.action !== "continue") return { preparedGroupLineMove };
   if (threadRoute) {

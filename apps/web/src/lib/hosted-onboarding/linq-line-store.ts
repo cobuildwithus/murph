@@ -266,7 +266,7 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
   return line;
 }
 
-async function acquireHostedLinqLinePhoneLockTx(input: {
+export async function acquireHostedLinqLinePhoneLockTx(input: {
   phoneNumber: string;
   prisma: HostedLinqLineClient;
 }): Promise<void> {

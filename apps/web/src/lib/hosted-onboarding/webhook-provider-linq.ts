@@ -1367,7 +1367,7 @@ async function applyLinqGroupMoveForMessageTx(input: {
   return applyHostedLinqGroupMoveIngressTx({
     service: messageEvent.data.service,
     threadId: summary.chatId, recipientPhone: recipientPhoneNumber, sender: participantContact?.value ?? null,
-    text: summary.text ?? "", isFromMe: summary.isFromMe, prepared: input.prepared, prisma: input.prisma,
+    isFromMe: summary.isFromMe, prepared: input.prepared, prisma: input.prisma,
   });
 }
 
@@ -1398,7 +1398,8 @@ export async function planHostedOnboardingLinqWebhook(
 
   if (input.preparedGroupLineMove?.adoption) {
     await replaceHostedLinqGroupLineMoveRouteTx({ prepared: input.preparedGroupLineMove.adoption, prisma: input.prisma });
-    return buildIgnoredLinqWebhookPlan("group-line-move");
+    return { ...buildIgnoredLinqWebhookPlan("group-line-move"), postCommitGroupLineMoveId: input.preparedGroupLineMove.adoption.move.id,
+      retryAfterGroupLineMoveAdoption: input.preparedGroupLineMove.retryAfterAdoption };
   }
 
   await lockHostedLinqMessageChatOwnershipTx({ context, prisma: input.prisma });

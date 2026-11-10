@@ -11,11 +11,14 @@ import { readHostedLinqLinePhoneNumberByLookupKey } from "../hosted-onboarding/l
 export const linqGroupMoveSelect = {
   id: true, containerMemberId: true, fromAccountLookupKey: true, toAccountLookupKey: true,
   fromThreadIdentityLookupKey: true, toThreadIdentityLookupKey: true, sourceCleanupEncrypted: true,
-  noticeTextHash: true, status: true, adoptionDeadlineAt: true,
+  status: true, adoptionDeadlineAt: true, addStartedAt: true, updatedAt: true,
 } satisfies Prisma.HostedLinqGroupLineMoveSelect;
 export type HostedLinqGroupLineMove = Prisma.HostedLinqGroupLineMoveGetPayload<{ select: typeof linqGroupMoveSelect }>;
 type MoveClient = Pick<Prisma.TransactionClient, "hostedLinqGroupLineMove">;
 export const adoptedLinqGroupMoveStatuses = ["adopted", "left"];
+// Linq retries for 30 minutes from event creation:
+// https://docs.linqapp.com/channel/imessage/guides/webhooks/#delivery-guarantees
+export const HOSTED_LINQ_GROUP_MOVE_REPLAY_MS = 30 * 60_000;
 const cleanupSchema = z.object({ schema: z.literal("murph.linq-group-line-move.v1"),
   sourceChatId: z.string().trim().min(1).max(4096), sourcePhone: z.string(), targetPhone: z.string(),
 }).strict();
@@ -26,7 +29,7 @@ export function holdHostedLinqGroupLineMove(code = "HOSTED_LINQ_GROUP_LINE_MOVE_
     message: "The group line move is pending. Retry this webhook after the move settles." });
 }
 
-/** One bounded indexed read, independent of the total move history. Cancelled rows grant nothing. */
+/** Cancelled rows grant no authority, but fence pending target retries for the provider's entire window. */
 export async function readHostedLinqGroupMovesForIngress(input: {
   threadId: string; recipientPhone: string | null; prisma: MoveClient;
 }): Promise<HostedLinqGroupLineMove[]> {
@@ -38,12 +41,20 @@ export async function readHostedLinqGroupMovesForIngress(input: {
       { toAccountLookupKey: { in: createHostedPhoneLookupKeyReadCandidates(input.recipientPhone) }, status: "reserved" },
     ] }, orderBy: { id: "asc" },
   });
-  // Ordinarily at most three relations match. Ambiguous rotated rows fail closed.
   if (rows.length > 4) holdHostedLinqGroupLineMove("HOSTED_LINQ_GROUP_LINE_MOVE_AMBIGUOUS");
-  return rows;
+  // Cancellation grants no route authority. Only its latest cutoff matters:
+  // older history must never exhaust the active-relation ambiguity limit.
+  // Read serially so each preparation holds at most one database connection.
+  const latestCancellation = await input.prisma.hostedLinqGroupLineMove.findFirst({
+    select: linqGroupMoveSelect,
+    where: { toAccountLookupKey: { in: createHostedPhoneLookupKeyReadCandidates(input.recipientPhone) }, status: "cancelled",
+      updatedAt: { gte: new Date(Date.now() - HOSTED_LINQ_GROUP_MOVE_REPLAY_MS) } },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+  });
+  return latestCancellation ? [...rows, latestCancellation] : rows;
 }
 
-export function linqGroupMoveSourceMatches(move: HostedLinqGroupLineMove, threadId: string): boolean {
+export function linqGroupMoveSourceMatches(move: Pick<HostedLinqGroupLineMove, "fromThreadIdentityLookupKey">, threadId: string): boolean {
   return createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId }).includes(move.fromThreadIdentityLookupKey);
 }
 export function linqGroupMoveDestinationMatches(move: HostedLinqGroupLineMove, threadId: string): boolean {
@@ -71,7 +82,9 @@ export async function prepareHostedLinqGroupMoveCleanup(input: {
   return encrypted;
 }
 
-export async function openHostedLinqGroupMoveCleanup(move: HostedLinqGroupLineMove, prisma: HostedSecureBoxPrismaClient): Promise<HostedLinqGroupMoveCleanup> {
+export async function openHostedLinqGroupMoveCleanup(move: Pick<HostedLinqGroupLineMove,
+  "id" | "containerMemberId" | "sourceCleanupEncrypted" | "fromAccountLookupKey" | "toAccountLookupKey" | "fromThreadIdentityLookupKey">,
+prisma: HostedSecureBoxPrismaClient): Promise<HostedLinqGroupMoveCleanup> {
   const value = await openHostedUserSecureBoxString({ aad: cleanupAad(move), lane: "hosted-member-private-field",
     scope: "linq-group-line-move-cleanup:v1", userId: move.containerMemberId, prisma, value: move.sourceCleanupEncrypted });
   const cleanup = cleanupSchema.parse(JSON.parse(value ?? "null"));

@@ -398,6 +398,7 @@ function buildPrewarmPrisma() {
     }),
     hostedLinqGroupLineMove: {
       findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
     },
     hostedMemberIdentity: {
       findUnique: vi.fn<() => Promise<unknown>>(async () => null),
