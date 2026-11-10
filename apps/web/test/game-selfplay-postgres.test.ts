@@ -109,7 +109,7 @@ describe.skipIf(!enabled)("canonical game self-play", () => {
         [0, { operation: "propose", gameId, proposalId, expectedTermsVersion: 1, change: { kind: "edit", stakes: [{ kind: "prize", item: "Breakfast in bed" }], stakesApplyToWholeGame: true } }],
         [1, { operation: "approve", gameId, proposalId }],
         [0, { operation: "mark_incomplete", gameId, date: yesterday }],
-        [0, { operation: "restore_day", gameId, date: yesterday }],
+        [0, { operation: "mark_complete", gameId, date: yesterday }],
       ] as const) {
         const request = hostedGameToolRequestSchema.parse({ action: "update_game", origin, update });
         expect((await tool(seat, request)).result.status).toBe("ok");

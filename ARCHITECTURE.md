@@ -5970,6 +5970,27 @@ requires clarification. Once corrections exist, flag-aware Web is the rollback
 floor: older scoring could freeze incorrect settlement. Use compatible forward
 fixes; runtime rollback alone cannot make old Web safe.
 
+`update_game mark_complete` is the chat's one way to count a day as done, under
+the same speaker, bound-chat and game-lock rules. With a flagged post it clears
+the flag like `restore_day`. With no post it counts the day on the player's
+word: `decideDayCompletion` allows only a closed, scheduled day that never had
+an attempt, in a game whose check-in kind is `any`. The post is the player's
+own words, never text Murph or the server writes. A request without `text`
+checks eligibility and returns `words_needed` with no write, so Murph asks what
+the post should say; the next request carries their answer as `text`, one line
+of at most 140 characters under the same parsing and moderation as any written
+check-in. The credit is then an ordinary attempt-1 `words` entry with that
+sealed text, plus one `day_credited` event and receipt status `credited`; it
+sends no post push. No schema or view change is needed, so score, streak,
+settlement, unlock, recap and older apps treat it as any words post, and
+`mark_incomplete` can take it back. An open day, a day off, a day whose post
+was withdrawn or removed, and a game that requires a photo or heart rate are
+refused before any words are asked for. Murph is offered only
+`mark_complete`; `restore_day` still parses for runtimes and resumed threads
+that predate it. Deploy Web before the runtime: an older Web rejects the new
+operation, and only the new operation returns the new receipt status. Rollback
+is safe because the entry is ordinary data.
+
 `runGameCommand` is the single write path, for the routes now and Murph's tools
 later. It validates the command (`command.ts`), checks uploads, seals words,
 then locks the game row, reads the database clock, asks a pure rule, and writes
