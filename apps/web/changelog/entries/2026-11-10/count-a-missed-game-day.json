@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 200,
+  "item": {
+    "id": "count-a-missed-game-day",
+    "kind": "feature",
+    "priority": 2,
+    "title": "Count a game day you forgot to post",
+    "summary": "Did the task but never checked in? Tell Murph in your game chat and it counts that missed day on your word.",
+    "details": "The day appears to the other players as a short written post that says it was counted late. It works for your own days that have already closed, and you can ask Murph to take it back. Games that require a photo or heart-rate check-in still need one.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4777]
+  }
+}

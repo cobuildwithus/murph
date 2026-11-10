@@ -1,6 +1,6 @@
 # Count a missed game day on the player's word
 
-Status: active
+Status: completed
 Created: 2026-11-10
 Updated: 2026-11-10
 
@@ -87,3 +87,17 @@ player's own not-done flag and answered `no_artifact` for a day with no post.
 - Real-Codex journeys: count on explicit ask, count from a plain claim, refuse
   another player's day, restore a self-marked day.
 - Full provider-input measurement at base and head.
+
+## Progress
+
+- Implemented as planned in PR 4777; no schema, view or app change was needed.
+- Rules, command, contract, tool, skew and transport tests pass. PostgreSQL
+  proof passes on an isolated database: 262 cases across the four game suites.
+- Five real-Codex journeys reviewed Ready on gpt-6.1-sol with local subscription
+  auth: count on an explicit ask, count from a plain claim, refuse another
+  player's day, restore a self-marked day, and the four-games selection case.
+- Provider input: group +400 bytes (164620 to 165020, +0.243%). The individual
+  +52 bytes is the measurement harness's known head-only line.
+- Changelog entry added for 2026-11-10. Final ReviewGPT and exact-head CI run on
+  the PR; their outcome is recorded there.
+Completed: 2026-11-10
