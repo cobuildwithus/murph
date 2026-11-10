@@ -33,6 +33,7 @@ import {
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedExternalThreadLookupKey,
   createHostedExternalThreadLookupKeyReadCandidates,
+  createHostedPhoneLookupKeyReadCandidates,
   normalizeHostedOpaqueInput,
 } from "../hosted-onboarding/contact-privacy";
 import {
@@ -67,6 +68,83 @@ import {
 import type {
   HostedThreadRouteSnapshot,
 } from "./thread-route-store";
+
+import { acquireHostedLinqChatOwnershipLockTx } from "./linq-chat-ownership-lock";
+import { holdHostedLinqGroupLineMove, linqGroupMoveSelect, type HostedLinqGroupLineMove, type HostedLinqGroupMoveCleanup } from "./linq-group-line-move-store";
+
+export interface PreparedHostedLinqGroupLineMoveAdoption {
+  move: HostedLinqGroupLineMove;
+  cleanup: HostedLinqGroupMoveCleanup;
+  expected: HostedThreadRouteSnapshot;
+  destination: PreparedHostedThreadContainerDeliveryRoute;
+  verifiedAt: Date;
+}
+
+function assertPreparedLinqGroupMoveAuthority(prepared: PreparedHostedLinqGroupLineMoveAdoption) {
+  const { move, cleanup, expected, destination } = prepared;
+  const state = expected.deliveryRouteState;
+  const route = destination.deliveryRoute;
+  if (route.channel !== "linq" || expected.channel !== "linq" || !state?.deliveryRouteEncrypted
+    || expected.containerMemberId !== move.containerMemberId || move.status !== "reserved"
+    || destination.observedDeliveryRouteEncrypted !== state.deliveryRouteEncrypted
+    || route.threadId === cleanup.sourceChatId
+    || !createHostedPhoneLookupKeyReadCandidates(cleanup.sourcePhone).includes(expected.accountLookupKey ?? "")
+    || !createHostedPhoneLookupKeyReadCandidates(cleanup.sourcePhone).includes(move.fromAccountLookupKey)
+    || !createHostedPhoneLookupKeyReadCandidates(cleanup.targetPhone).includes(move.toAccountLookupKey)
+    || !createHostedPhoneLookupKeyReadCandidates(cleanup.targetPhone).includes(route.accountLookupKey)
+    || !createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId: cleanup.sourceChatId }).includes(move.fromThreadIdentityLookupKey)
+    || !createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId: cleanup.sourceChatId }).includes(state.threadIdentityLookupKey)
+    || !createHostedExternalThreadLookupKeyReadCandidates({ channel: "linq", threadId: cleanup.sourceChatId, accountLookupKey: expected.accountLookupKey }).includes(state.threadLookupKey)) {
+    throw new TypeError("Group line move does not match its prepared route authority.");
+  }
+  assertPreparedHostedThreadDeliveryRoute({ containerMemberId: move.containerMemberId, deliveryRoute: route, prepared: destination });
+  return { state, route };
+}
+
+/** Explicit replacement is the only line-transfer writer. Caller has not taken a single-chat lock. */
+export async function replaceHostedLinqGroupLineMoveRouteTx(input: {
+  prepared: PreparedHostedLinqGroupLineMoveAdoption;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const { move, cleanup, expected, destination, verifiedAt } = input.prepared;
+  const { state, route } = assertPreparedLinqGroupMoveAuthority(input.prepared);
+  // Acquire chat ownership before route ownership. Multiple chats use raw-ID order,
+  // which is independent of privacy-key versions. No provider or crypto work follows BEGIN.
+  const chats = [cleanup.sourceChatId, route.threadId].sort();
+  for (const chatId of chats) await acquireHostedLinqChatOwnershipLockTx({ chatId, tx: input.prisma });
+  for (const threadId of chats) await acquireHostedThreadContainerRouteWriteLockTx({ channel: "linq", threadId, prisma: input.prisma });
+  const current = await input.prisma.hostedLinqGroupLineMove.findUnique({ where: { id: move.id }, select: linqGroupMoveSelect });
+  if (!current || JSON.stringify(current) !== JSON.stringify(move)
+    || current.adoptionDeadlineAt.getTime() <= Date.now() || Date.now() - verifiedAt.getTime() > 30_000 || verifiedAt.getTime() > Date.now())
+    holdHostedLinqGroupLineMove();
+  const destinationIdentities = createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId: route.threadId });
+  const rows = await input.prisma.hostedThreadRoute.findMany({
+    where: { OR: [{ containerMemberId: move.containerMemberId }, { channel: "linq", threadIdentityLookupKey: { in: destinationIdentities } }] },
+    select: { channel: true, containerMemberId: true, accountLookupKey: true, threadIdentityLookupKey: true, threadLookupKey: true, deliveryRouteEncrypted: true }, take: 3,
+  });
+  const source = rows[0];
+  if (rows.length !== 1 || !source || source.channel !== "linq" || source.containerMemberId !== move.containerMemberId
+    || source.threadIdentityLookupKey !== state.threadIdentityLookupKey || source.threadLookupKey !== state.threadLookupKey
+    || source.accountLookupKey !== expected.accountLookupKey || source.deliveryRouteEncrypted !== state.deliveryRouteEncrypted)
+    holdHostedLinqGroupLineMove("HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED");
+  // Retired destinations cannot be recycled. Settle the previous overlap before another move.
+  if (await input.prisma.hostedLinqGroupLineMove.findFirst({ where: { OR: [
+    { fromThreadIdentityLookupKey: { in: destinationIdentities }, status: { in: ["reserved", "adopted", "left"] } },
+    { containerMemberId: move.containerMemberId, status: "adopted" },
+  ] }, select: { id: true } }))
+    holdHostedLinqGroupLineMove();
+  await demoteHostedMemberLinqGroupChatBindingsTx({ enforceProviderDispatchFence: true, linqChatId: route.threadId, prisma: input.prisma });
+  const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: route.threadId });
+  const threadLookupKey = createHostedExternalThreadLookupKey({ channel: "linq", threadId: route.threadId, accountLookupKey: route.accountLookupKey });
+  if (!threadIdentityLookupKey || !threadLookupKey) throw new TypeError("Group line move destination is invalid.");
+  await input.prisma.hostedThreadRoute.delete({ where: { channel_threadIdentityLookupKey: { channel: "linq", threadIdentityLookupKey: state.threadIdentityLookupKey } } });
+  // A new row deliberately drops both pending participant and reaction context.
+  await createHostedThreadRouteRowTx({ channel: "linq", containerMemberId: move.containerMemberId, accountLookupKey: route.accountLookupKey,
+    threadIdentityLookupKey, threadLookupKey, deliveryRouteEncrypted: destination.deliveryRouteEncrypted, prisma: input.prisma });
+  const adopted = await input.prisma.hostedLinqGroupLineMove.updateMany({ where: { id: move.id, status: "reserved", sourceCleanupEncrypted: move.sourceCleanupEncrypted,
+    adoptionDeadlineAt: { gt: new Date() } }, data: { status: "adopted", toThreadIdentityLookupKey: threadIdentityLookupKey, adoptedAt: new Date(), lastErrorCode: null } });
+  if (adopted.count !== 1) holdHostedLinqGroupLineMove();
+}
 
 export const HOSTED_THREAD_CONTAINER_DEFAULT_MONTHLY_USAGE_LIMIT_USD_MICROS =
   7_500_000n;

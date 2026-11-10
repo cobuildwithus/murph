@@ -1,3 +1,4 @@
+vi.mock("../src/lib/hosted-routing/linq-group-line-move-store", () => ({ readHostedLinqGroupMoveServicePhones: async () => [] }));
 import { linqRoster } from "./support/linq-roster";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GameChange, GamePendingChange } from "../src/lib/game/contract";

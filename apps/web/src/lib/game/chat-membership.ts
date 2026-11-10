@@ -1,4 +1,5 @@
 import "server-only";
+import { readHostedLinqGroupMoveServicePhones } from "../hosted-routing/linq-group-line-move-store";
 import { reconcileHostedThreadContainerParticipants } from "../hosted-groups/thread-container-participants";
 import type { Prisma } from "@prisma/client";
 import { assertHostedThreadRouteEgressAuthority, readHostedThreadRouteByThreadIdentity } from "../hosted-routing/thread-route-store";
@@ -137,12 +138,27 @@ export function isExactGameChat(chat: HostedLinqChatSummary, phones: readonly st
     && people.every((phone): phone is string => phone !== null) && sameGameMembers(people, phones.map(normalizeChatHandle).filter((handle): handle is string => handle !== null));
 }
 
+/** Collapse only this move's verified service numbers to the canonical sending self. */
+export function normalizeGameChatMoveAudience(chat: HostedLinqChatSummary, servicePhones: readonly string[], accountLookupKey: string): HostedLinqChatSummary {
+  if (servicePhones.length === 0) return chat;
+  const sendingPhone = servicePhones.find(phone => createHostedPhoneLookupKeyReadCandidates(phone).includes(accountLookupKey));
+  if (!sendingPhone || servicePhones.length !== 2) throw new Error("Game move service identity is unavailable.");
+  const handles = chat.handles.filter(handle => {
+    const phone = normalizePhoneNumber(handle.handle);
+    return !phone || !servicePhones.includes(phone) || phone === sendingPhone;
+  }).map(handle => normalizePhoneNumber(handle.handle) === sendingPhone ? { ...handle, isMe: true } : handle);
+  return { ...chat, handles, handleCount: handles.length };
+}
+
 export async function exactChat(containerMemberId: string, phones: readonly string[]) {
   const prisma = getPrisma();
   const routes = await readHostedThreadContainerLinqRouteAuthorities({ containerMemberIds: [containerMemberId], prisma });
   const route = routes.authorities.get(containerMemberId);
   if (!route) return null;
-  const chat = await getHostedLinqChatSummary({ chatId: route.threadId, timeoutMs: 3_000 });
+  const observed = await getHostedLinqChatSummary({ chatId: route.threadId, timeoutMs: 3_000 });
+  if (route.channel !== "linq") return null;
+  const phonesForMove = await readHostedLinqGroupMoveServicePhones({ containerMemberId, threadId: route.threadId, prisma });
+  const chat = normalizeGameChatMoveAudience(observed, phonesForMove, route.accountLookupKey ?? "");
   if (!isExactGameChat(chat, phones)) return null;
   const self = chat.handles.find((handle) => handle.isMe && (handle.status === null || handle.status.toLowerCase() === "active"));
   const line = await readHostedLinqIncomingLineState({ phoneNumberLookupKeys: createHostedPhoneLookupKeyReadCandidates(self?.handle), prisma });
@@ -206,12 +222,15 @@ export async function readGameChatAudience(containerMemberId: string) {
   // "Unavailable" includes a failed open (database or KMS), which proves nothing about the room.
   if (!route) throw routes.unavailableContainerMemberIds.has(containerMemberId)
     ? new Error("Game chat route is unavailable.") : new GameChatAudienceError("route_unavailable", "Game chat route is unavailable.");
-  return { ...await readGameChatHandleAudience(route.threadId, containerMemberId), route };
+  return { ...await readGameChatHandleAudience(route.threadId, containerMemberId, route.channel === "linq" ? route.accountLookupKey ?? undefined : undefined), route };
 }
 
-async function readGameChatHandleAudience(threadId: string, containerMemberId?: string) {
+async function readGameChatHandleAudience(threadId: string, containerMemberId?: string, accountLookupKey?: string) {
   const prisma = getPrisma();
-  const chat = await getHostedLinqChatSummary({ chatId: threadId, timeoutMs: 3_000 });
+  const observed = await getHostedLinqChatSummary({ chatId: threadId, timeoutMs: 3_000 });
+  const phonesForMove = containerMemberId && accountLookupKey
+    ? await readHostedLinqGroupMoveServicePhones({ containerMemberId, threadId, prisma }) : [];
+  const chat = normalizeGameChatMoveAudience(observed, phonesForMove, accountLookupKey ?? "");
   const active = chat.handles.filter(handle => handle.status === null || handle.status.toLowerCase() === "active");
   const handles = active.filter(handle => !handle.isMe).map(handle => handle.handle);
   // An unreadable payload proves nothing about the room; only a readable mismatch is a room fact.

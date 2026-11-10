@@ -1,3 +1,4 @@
+import { prepareHostedLinqGroupMoveIngress, readHostedLinqGroupMoveNoticeText, type PreparedHostedLinqGroupMoveIngress } from "../hosted-routing/linq-group-line-move-ingress";
 import { prepareGameChatInvite } from "../game/chat-membership";
 import { queueHostedLinqHomeContactCardAfterDelivery } from "./linq-contact-card-delivery";
 import { maybeScheduleHostedLinqAckReaction } from "./linq-ack-reaction";
@@ -572,6 +573,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             const planPreparedWebhook = () =>
               planHostedOnboardingLinqWebhook({
                 affirmativeReaction,
+                preparedGroupLineMove: preparation.preparedGroupLineMove,
                 event: planningEvent,
                 firstContactAdmissionDecision,
                 ...(planningResolution.initialGroupDisplayName
@@ -651,6 +653,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           prepare: async ({ attempt }) => {
             const preparation = await prepareHostedLinqThreadRoutingCrypto({
               requirePrivateRouting: attempt > 0,
+              groupMoveNoticeText: readHostedLinqGroupMoveNoticeText(event),
               ...(attempt === 0 && directPreparationMemberId
                 ? { directPreparationMemberId }
                 : {}),
@@ -2361,6 +2364,7 @@ type HostedDirectTelegramRoutingCryptoPreparation =
   | HostedDirectTelegramMemberRoutingCryptoPreparation;
 
 interface HostedThreadRoutingCryptoPreparation {
+  preparedGroupLineMove?: PreparedHostedLinqGroupMoveIngress;
   preparedGameInvite?: Awaited<ReturnType<typeof prepareGameChatInvite>>;
   directMailboxPreparationFailure?: unknown;
   pendingGroupSetupPreparationFailure?: unknown;
@@ -2428,7 +2432,23 @@ async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
   return deliveryRouteResult.value;
 }
 
+async function prepareLinqGroupMoveForContext(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  route: HostedThreadRouteSnapshot | null;
+  text?: string | null;
+  prisma: PrismaClient;
+}) {
+  const { context } = input;
+  if (!input.route && context.messageEvent.data.chat?.is_group !== true) return undefined;
+  return prepareHostedLinqGroupMoveIngress({
+    service: context.messageEvent.data.service, threadId: context.summary.chatId,
+    recipientPhone: context.recipientPhoneNumber, sender: context.participantContact?.value ?? null,
+    text: input.text ?? null, isFromMe: context.summary.isFromMe, route: input.route, prisma: input.prisma,
+  });
+}
+
 async function prepareHostedLinqThreadRoutingCrypto(input: {
+  groupMoveNoticeText?: string | null;
   requirePrivateRouting?: boolean;
   directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
@@ -2456,6 +2476,10 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
         threadId: context.summary.chatId,
       })
     : input.threadRoute;
+  const preparedGroupLineMove = await prepareLinqGroupMoveForContext({
+    context, route: threadRoute, text: input.groupMoveNoticeText, prisma: input.prisma,
+  });
+  if (preparedGroupLineMove && preparedGroupLineMove.action !== "continue") return { preparedGroupLineMove };
   if (threadRoute) {
     if (!accountLookupKey) {
       throw new TypeError(
@@ -2480,7 +2504,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
           threadRoute,
         }),
       });
-    return { preparedThreadDeliveryRoute };
+    return { preparedThreadDeliveryRoute, preparedGroupLineMove };
   }
 
   if (context.messageEvent.data.chat?.is_group === true) {
@@ -2504,11 +2528,12 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
           }
         : {};
     if (!admission.shouldPrepareThreadContainer || !accountLookupKey) {
-      return pendingGroupPreparation;
+      return { ...pendingGroupPreparation, preparedGroupLineMove };
     }
     try {
       return {
         ...pendingGroupPreparation,
+        preparedGroupLineMove,
         preparedThreadContainerCreation:
           await prepareHostedThreadContainerCreation({
             accountLookupKey,
@@ -2521,6 +2546,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
       if (admission.preparedPendingGroupSetup) {
         return {
           ...pendingGroupPreparation,
+          preparedGroupLineMove,
           threadContainerPreparationFailure: error,
         };
       }

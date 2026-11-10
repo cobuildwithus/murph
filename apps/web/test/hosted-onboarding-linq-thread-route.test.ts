@@ -1151,6 +1151,7 @@ function createPrisma(input: {
     hostedThreadContainer,
     hostedThreadContainerParticipant,
     hostedThreadRoute,
+    hostedLinqGroupLineMove: { findMany: vi.fn().mockResolvedValue([]) },
     hostedWorkspace,
     readAccountLookupKeyProjection: () => accountLookupKeyProjection,
     readDeliveryRouteEncrypted: () => deliveryRouteEncrypted,
@@ -1629,6 +1630,7 @@ function createStatefulThreadRoutePrisma() {
     hostedThreadContainer,
     hostedThreadContainerParticipant,
     hostedThreadRoute,
+    hostedLinqGroupLineMove: { findMany: vi.fn().mockResolvedValue([]) },
     hostedWorkspace,
     seedActiveManagedLinqLine(phoneNumber: string, overrides: Partial<{
       egressPolicy: string;

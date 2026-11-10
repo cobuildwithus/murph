@@ -13,6 +13,7 @@ import {
 import { isHostedGroupCurrentSenderPrivateLinqCompletionTx } from "@/src/lib/hosted-groups/group-current-sender-assistant-ask";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
+  prepareHostedLinqGroupMoveEgressAlias,
   hasLaterHostedLinqMemberMessage,
   isHostedLinqProactivityPaused,
   resolveHostedLinqEgressPolicyForRuntime,
@@ -71,6 +72,20 @@ function gameProposalBypassesPause(requested: boolean, key: string | null): bool
   return requested && !key?.startsWith("game-evening:") && !key?.startsWith("game-evening-private:") && !key?.startsWith("game-dm:");
 }
 
+async function prepareGroupMoveEgressRequest(input: {
+  authorityCheckOnly: boolean; expectedResolvedRoute: HostedExecutionResolvedLinqDeliveryRoute | null;
+  replyToMessageId: string | null; targetKind: string | null; deliveryPurpose: unknown;
+} & Parameters<typeof prepareHostedLinqGroupMoveEgressAlias>[0]) {
+  const alias = input.authorityCheckOnly && !input.expectedResolvedRoute && !input.replyToMessageId
+    && input.targetKind !== "participant" && input.deliveryPurpose !== "reaction" && input.deliveryPurpose !== "typing"
+    ? await prepareHostedLinqGroupMoveEgressAlias(input) : null;
+  return {
+    groupMoveAlias: alias,
+    gameTarget: alias?.authority.threadId ?? input.expectedResolvedRoute?.target ?? input.target,
+    lockTarget: alias?.authority.threadId ?? input.target,
+  };
+}
+
 const HOSTED_LINQ_EGRESS_ENGAGEMENT_BODY_LIMIT_BYTES = 8 * 1024;
 const HOSTED_LINQ_ENGAGEMENT_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
 
@@ -115,7 +130,11 @@ export const POST = withJsonError(async (request: Request) => {
     }) });
   }
 
-  const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId, expectedResolvedRoute?.target ?? target);
+  const { groupMoveAlias, gameTarget, lockTarget } = await prepareGroupMoveEgressRequest({
+    authorityCheckOnly, expectedResolvedRoute, replyToMessageId, targetKind,
+    deliveryPurpose: body.deliveryPurpose, memberId: userId, target, prisma,
+  });
+  const gameChatPlayers = await readGameProposalDeliveryPlayers(idempotencyKey, userId, gameTarget);
   const rematchTermsVersion = await readGameRematchDeliveryRevision(idempotencyKey, userId);
   const privateEveningPolicy = idempotencyKey?.startsWith("game-evening-private:")
     ? await readPrivateEveningDeliveryAuthority(idempotencyKey, userId) : null;
@@ -130,9 +149,10 @@ export const POST = withJsonError(async (request: Request) => {
     ? { playerMemberIds: gameChatPlayers.memberIds, audience: gameChatPlayers } : { playerMemberIds: gameChatPlayers };
 
   const assertion = await prisma.$transaction(async (tx) => {
-    await lockGameEgressRouteTx({ tx, targetKind, expectedResolvedRoute, target, userId });
+    await lockGameEgressRouteTx({ tx, targetKind, expectedResolvedRoute, target: lockTarget, userId });
 
     const asserted = await assertHostedLinqRecentInboundEngagementForRuntime({
+      groupMoveAlias,
       answeredMailboxItemIds,
       authorityCheckOnly,
       directRecipientPhoneNumber,

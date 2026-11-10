@@ -10,6 +10,7 @@ import type {
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 import {
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
@@ -56,6 +57,28 @@ import {
   hasHostedMailboxAutomationEngagementSince,
   resolveHostedMailboxPayloadRef,
 } from "../hosted-mailbox/store";
+
+import { buildHostedThreadNotificationDestination, readHostedThreadContainerLinqRouteAuthorities } from "../hosted-routing/assistant-notification-destination";
+import { buildHostedThreadDeliveryRoute } from "../hosted-routing/thread-delivery-route";
+
+export type HostedLinqGroupMoveEgressAlias = { moveId: string; sourceTarget: string; authority: HostedExecutionLinqExternalThreadRouteAuthority };
+
+/** Egress-only historical relation. Ingress and exact authorization never follow it. */
+export async function prepareHostedLinqGroupMoveEgressAlias(input: {
+  memberId: string; target: string | null; prisma: PrismaClient;
+}): Promise<HostedLinqGroupMoveEgressAlias | null> {
+  if (!input.target) return null;
+  const moves = await input.prisma.hostedLinqGroupLineMove.findMany({ where: {
+    containerMemberId: input.memberId, status: { in: ["adopted", "left"] },
+    fromThreadIdentityLookupKey: { in: createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId: input.target }) },
+  }, select: { id: true }, take: 2 });
+  if (!moves.length || await readHostedThreadRouteByThreadIdentity({ channel: "linq", threadId: input.target, prisma: input.prisma })) return null;
+  if (moves.length !== 1) throwHostedLinqRouteAuthorityMismatch("durable_thread_container_mismatch");
+  const current = await readHostedThreadContainerLinqRouteAuthorities({ containerMemberIds: [input.memberId], prisma: input.prisma });
+  const authority = current.authorities.get(input.memberId);
+  if (!authority || authority.channel !== "linq") throwHostedLinqRouteAuthorityMismatch("durable_target_missing");
+  return { moveId: moves[0]!.id, sourceTarget: input.target, authority: { ...authority, channel: "linq" } };
+}
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
 export type HostedLinqRuntimeEgressAssertionResult = {
@@ -203,10 +226,44 @@ export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
   };
 }
 
+async function assertLinqGroupMoveAliasTx(input: Parameters<typeof assertHostedLinqRecentInboundEngagementForRuntime>[0]) {
+  const alias = input.groupMoveAlias;
+  if (alias) {
+    if (input.authorityCheckOnly !== true || input.replyToMessageId || alias.sourceTarget !== input.target
+      || alias.authority.containerMemberId !== input.memberId) throwHostedLinqRouteAuthorityMismatch("durable_thread_container_mismatch");
+    const move = await input.prisma.hostedLinqGroupLineMove.findFirst({ where: { id: alias.moveId, containerMemberId: input.memberId,
+      status: { in: ["adopted", "left"] }, fromThreadIdentityLookupKey: { in: createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId: input.target }) } }, select: { id: true } });
+    if (!move || await readHostedThreadRouteByThreadIdentity({ channel: "linq", threadId: input.target, prisma: input.prisma }))
+      throwHostedLinqRouteAuthorityMismatch("durable_thread_container_mismatch");
+  }
+}
+
+async function resolveGroupMoveConversationThreadId(input: {
+  alias?: HostedLinqGroupMoveEgressAlias | null;
+  expectedResolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
+  memberId: string; target: string; accountLookupKey?: string | null;
+  prisma: HostedLinqEngagementClient;
+}) {
+  if (!input.alias && !input.expectedResolvedRoute?.conversationThreadId) return null;
+  // Preserve the old exact-route response when no move exists. A final dispatch
+  // may retain the locator only for a persisted adopted destination.
+  if (!input.alias) {
+    const moves = await input.prisma.hostedLinqGroupLineMove.findMany({ where: {
+      containerMemberId: input.memberId, status: { in: ["adopted", "left"] },
+      toThreadIdentityLookupKey: { in: createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId: input.target }) },
+    }, select: { id: true }, take: 1 });
+    if (!moves.length) return null;
+  }
+  return buildHostedThreadNotificationDestination({ containerMemberId: input.memberId,
+    deliveryRoute: buildHostedThreadDeliveryRoute({ channel: "linq", threadId: input.target,
+      accountLookupKey: input.accountLookupKey }) }).route.threadId;
+}
+
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   authorityCheckOnly: boolean;
   directRecipientPhoneNumber?: string | null;
+  groupMoveAlias?: HostedLinqGroupMoveEgressAlias | null;
   expectedResolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
@@ -234,10 +291,12 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     prisma: input.prisma,
   });
 
+  const alias = input.groupMoveAlias;
+  await assertLinqGroupMoveAliasTx(input);
   const targetThreadRoute = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma: input.prisma,
-    threadId: input.target,
+    threadId: alias?.authority.threadId ?? input.target,
   });
   if (targetThreadRoute) {
     // The route's container member is the canonical owner of this durable
@@ -249,10 +308,15 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       throwHostedLinqRouteAuthorityMismatch("durable_thread_container_mismatch");
     }
 
-    const target = normalizeNullable(input.target);
+    const target = normalizeNullable(alias?.authority.threadId ?? input.target);
     if (!target) {
       throwHostedLinqRouteAuthorityMismatch("durable_target_missing");
     }
+    if (alias && targetThreadRoute.accountLookupKey !== alias.authority.accountLookupKey)
+      throwHostedLinqRouteAuthorityMismatch("durable_thread_container_mismatch");
+    const conversationThreadId = await resolveGroupMoveConversationThreadId({ alias, prisma: input.prisma,
+      expectedResolvedRoute: input.expectedResolvedRoute, memberId: input.memberId,
+      target, accountLookupKey: targetThreadRoute.accountLookupKey });
     const fromPhoneNumber = await readHostedLinqLinePhoneNumberByLookupKey({
       phoneNumberLookupKey: targetThreadRoute.accountLookupKey,
       prisma: input.prisma,
@@ -263,7 +327,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
         ? { linePhoneNumberLookupKey: targetThreadRoute.accountLookupKey }
         : {}),
       resolvedRoute: {
-        conversationThreadId: null,
+        conversationThreadId,
         directRecipientPhoneNumber: null,
         fromPhoneNumber,
         target,
@@ -272,6 +336,8 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       },
     };
   }
+
+  if (alias) throwHostedLinqRouteAuthorityMismatch("durable_target_missing");
 
   const persistedDirectInbound = await readMatchingPersistedHostedLinqInbound({
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],

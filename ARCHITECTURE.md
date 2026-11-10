@@ -3912,6 +3912,52 @@ from the request-scoped cache. Winner, ciphertext, or root drift rolls back into
 the existing one-retry preparation path; provider, root, envelope, and
 authentication failures never consume the row.
 
+### Linq group line moves
+
+`hosted_linq_group_line_move` is hosted control truth owned beside thread
+routing, not member memory or runner state. It retains one reservation's
+source/destination blind keys, exact notice hash, adoption deadline and progress
+receipts. Its versioned cleanup envelope contains only the source chat and two
+provider-inventory-verified service numbers, authenticated to the retained
+container and move id. Container deletion cascades to these rows. Otherwise
+adopted/left history remains: it is both ingress tombstone and egress alias.
+There is no second roster or current-route owner.
+
+The consumer reads at most five indexed candidate rows per phase and fails
+closed on ambiguity; privacy-key read candidates apply to all lookups. Ordinary
+group ingress adds two reads (preparation and locked revalidation), and direct
+ingress adds none. Reservations protect source traffic and affected unbound
+target chats using the existing retryable-error/preparation retry boundary.
+An expired adoption deadline never releases that protection. Cancelled rows
+grant no authority; the producer must verify provider cleanup before cancelling.
+
+Automatic adoption requires the exact single signed text part, source sender,
+target receiving line and iMessage service, plus two complete provider rosters
+with equal active human handle sets, including unknown phone/email contacts.
+Both service numbers must be active on the destination; each chat must identify
+its own line as self. Reads use a three-second timeout and a 32-handle bound.
+Evidence must be at most 30 seconds old when the transaction runs. The explicit
+replacement primitive in `thread-container-service.ts` locks both chats in
+raw-id order, then their route locks, compares the exact source and reserved
+move, and atomically replaces the route and adopts. It clears pending reaction
+and participant context. Provider reads and envelope preparation stay outside
+the transaction. Occupied or retired destinations fail closed; a previous
+adopted overlap must reach `left` before another move can adopt.
+
+Web egress alone follows a retired source alias for its owning container,
+before game target validation, returning the current chat and conversation
+locator. Native replies/reactions and already resolved dispatches keep exact
+route checks. General route reads never follow aliases. Game normalization
+recognizes only the current reservation/adoption's two verified service
+numbers, leaving the human audience and stored audience key unchanged.
+
+With no move rows these consumers are inert. They must be deployed and older
+Web producers drained before the first reservation/provider effect. This is
+the rollback floor even with no saved schedules: rollback below it requires
+disabling and draining affected ingress as well as dealing with retired saved
+targets. PR A supplies consumers only; provider add/remove/leave, reservations,
+notice delivery and operator recovery belong to the separately gated producer.
+
 A private accepted text turn may arm one expiring
 `HostedPendingGroupSetup` for a person member's current managed Linq line. The
 row is only a one-use transfer envelope: it stores the owner, blinded line key,
