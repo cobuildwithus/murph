@@ -7345,25 +7345,105 @@ test("Junction Apple Health caffeine calendar validation accepts intervals and r
   assert.ok(complete.events?.some((event) =>
     event.kind === "observation" && event.fields?.metric === "caffeine" && event.fields.value === 190
   ));
-  // All these distinct failures can have the same absolute/UTC diagnostic.
-  // The provider schema has no numeric maximum; the 2 g cap is Murph policy.
-  for (const patch of [
-    { end: undefined },
-    { end: "invalid" },
-    { end: "2026-04-22T07:59:00.000Z" },
-    { value: undefined },
-    { value: "not-a-number" },
-    { value: -1 },
-    { value: 2.5 },
-    { calendarDate: "2026-04-21" },
-    { sourceType: "watch" },
-  ]) {
+  // A documented 200 mg sample arrives as 0.2 g, including zero-duration samples.
+  const coffee = normalizeJunctionSnapshot(snapshotFor({ value: 0.2 }));
+  assert.ok(coffee.events?.some((event) =>
+    event.kind === "observation" && event.fields?.metric === "caffeine" && event.fields.value === 295
+  ));
+  for (const [patch, reason, valueKind, valueRange, unitKind] of [
+    [{ start: undefined }, "start_missing"],
+    [{ start: "invalid" }, "start_invalid"],
+    [{ end: undefined }, "end_missing"],
+    [{ end: "invalid" }, "end_invalid"],
+    [{ end: "2026-04-22T07:59:00.000Z" }, "end_before_start"],
+    [{ value: undefined }, "value_missing", "missing", undefined, "g"],
+    [{ value: null }, "value_missing", "missing", undefined, "g"],
+    [{ value: "not-a-number" }, "value_non_numeric", "non_numeric", undefined, "g"],
+    [{ value: NaN }, "value_not_finite", "non_finite", undefined, "g"],
+    [{ value: Infinity }, "value_not_finite", "non_finite", undefined, "g"],
+    [{ value: -Infinity }, "value_not_finite", "non_finite", undefined, "g"],
+    [{ value: -1 }, "value_out_of_range", "number", "below_range", "g"],
+    [{ value: 2.5 }, "value_out_of_range", "number", "above_range_up_to_10x", "g"],
+    [{ value: 20 }, "value_out_of_range", "number", "above_range_up_to_10x", "g"],
+    [{ value: 20.01 }, "value_out_of_range", "number", "above_range_10x_to_1000x", "g"],
+    [{ value: "200", unit: "mg" }, "value_out_of_range", "numeric_string", "above_range_10x_to_1000x", "mg"],
+    [{ value: 2000 }, "value_out_of_range", "number", "above_range_10x_to_1000x", "g"],
+    [{ value: 2000.01 }, "value_out_of_range", "number", "above_range_over_1000x", "g"],
+    [{ value: 200, unit: undefined }, "value_out_of_range", "number", "above_range_10x_to_1000x", "missing"],
+    [{ value: 200, unit: "synthetic-private-unit" }, "value_out_of_range", "number", "above_range_10x_to_1000x", "other"],
+    [{ calendarDate: "2026-04-21" }, "day_mismatch"],
+    [{ sourceProviderSlug: "garmin" }, "provider_mismatch"],
+    [{ sourceType: "watch" }, "source_type_mismatch"],
+  ] as const) {
     assert.throws(() => normalizeJunctionSnapshot(snapshotFor(patch)), (error: unknown) => {
       assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
-      assert.equal(error.diagnostic.reason, "sparse_interval.row_incomplete");
+      assert.equal(error.code, "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION");
+      assert.equal(error.retryable, true);
+      assert.equal(error.diagnostic.reason, `sparse_interval.${reason}`);
       assert.equal(error.diagnostic.rowOrdinal, 2);
-      assert.equal(error.diagnostic.timestampKind, "absolute");
-      assert.equal(error.diagnostic.timestampSemantics, "utc");
+      assert.equal(error.diagnostic.valueKind, valueKind);
+      assert.equal(error.diagnostic.valueRange, valueRange);
+      assert.equal(error.diagnostic.unitKind, unitKind);
+      assert.ok(!JSON.stringify(error.diagnostic).includes("synthetic-private"));
+      return true;
+    });
+  }
+  const instanceMismatch = snapshotFor({});
+  assert.throws(() => normalizeJunctionSnapshot({
+    ...instanceMismatch,
+    strictSparseCalendarRepair: {
+      ...instanceMismatch.strictSparseCalendarRepair,
+      sourceInstanceId: "source-000000000000000000000000",
+    },
+  }), (error: unknown) => {
+    assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+    assert.equal(error.diagnostic.reason, "sparse_interval.source_instance_mismatch");
+    return true;
+  });
+  assert.throws(() => normalizeJunctionSnapshot({
+    ...snapshotFor({}), timeseries: { caffeine: [row] },
+  }), (error: unknown) => {
+    assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+    assert.equal(error.diagnostic.reason, "sparse_interval.source_context_missing");
+    return true;
+  });
+});
+
+test.each([
+  { resource: "caffeine" as const, max: 2, unit: "g" },
+  { resource: "water" as const, max: 10_000, unit: "ml" },
+  { resource: "mindfulness_minutes" as const, max: 1440, unit: "min" },
+])("Junction sparse $resource diagnostics use the existing inclusive range", ({ resource, max, unit }) => {
+  const snapshotFor = (value: number) => ({
+    accountId: "synthetic-sparse-range",
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseriesWindowKind: "calendar_day" as const,
+    strictSparseCalendarRepair: {
+      dayKey: "2026-04-22", resource, sourceProviderSlug: "apple-health-kit",
+      sourceType: "app", sourceInstanceId: "source-000000000000000000000001",
+    },
+    windowStart: "2026-04-22T00:00:00.000Z",
+    windowEnd: "2026-04-23T00:00:00.000Z",
+    timeseries: { [resource]: [{
+      sourceProviderSlug: "apple-health-kit", sourceType: "app",
+      sourceInstanceId: "source-000000000000000000000001",
+      start: "2026-04-22T08:00:00.000Z", end: "2026-04-22T08:00:00.000Z",
+      value, unit,
+    }] },
+  });
+  for (const value of [0, max]) assert.doesNotThrow(() => normalizeJunctionSnapshot(snapshotFor(value)));
+  for (const [value, range] of [
+    [-1, "below_range"],
+    [max * 10, "above_range_up_to_10x"],
+    [max * 10 + 1, "above_range_10x_to_1000x"],
+    [max * 1000, "above_range_10x_to_1000x"],
+    [max * 1000 + 1, "above_range_over_1000x"],
+  ] as const) {
+    assert.throws(() => normalizeJunctionSnapshot(snapshotFor(value)), (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.equal(error.diagnostic.reason, "sparse_interval.value_out_of_range");
+      assert.equal(error.diagnostic.valueRange, range);
+      assert.equal(error.diagnostic.unitKind, unit);
       return true;
     });
   }
@@ -7408,7 +7488,7 @@ test("Junction strict sparse calendar repairs reject mixed valid and malformed r
       assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
       assert.equal(error.code, "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION");
       assert.equal(error.retryable, true);
-      assert.equal(error.diagnostic.reason, "sparse_interval.row_incomplete");
+      assert.equal(error.diagnostic.reason, "sparse_interval.start_missing");
       assert.equal(error.diagnostic.rowOrdinal, 2);
       assert.equal(error.diagnostic.sourceProvider, "garmin");
       assert.equal(error.diagnostic.timestampKind, "missing");
@@ -7433,7 +7513,7 @@ test("Junction strict sparse calendar repairs reject mixed valid and malformed r
     }),
     (error: unknown) => {
       assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
-      assert.equal(error.diagnostic.reason, "sparse_interval.row_incomplete");
+      assert.equal(error.diagnostic.reason, "sparse_interval.value_non_numeric");
       assert.equal(error.diagnostic.rowOrdinal, 2);
       assert.equal(error.diagnostic.sourceProvider, "garmin");
       assert.equal(error.diagnostic.timestampKind, "absolute");

@@ -1,5 +1,7 @@
 The [synthetic game self-play QA map](references/game-selfplay-qa.md) records reachable game states, local native gameplay, real-model chat edits and explicit coverage gaps, with a [machine-readable native scenario inventory](references/game-selfplay-scenarios.json).
 
+Sparse calendar diagnostic refinement: [execution plan](exec-plans/completed/2026-11-10-sparse-row-incomplete-diagnostic.md).
+
 Device-first per-day wearable selection and complete private RHR history are owned by
 [Query](../packages/query/README.md#device-readings-and-health-store-copies) and
 [private numbers](product-specs/ios-meals.md#private-numbers). Implementation evidence

@@ -2432,9 +2432,10 @@ export function readSafeJunctionNormalizationDiagnostics(
     normalizationValueKind: allowed(input.normalizationValueKind,
       ["missing", "non_numeric", "non_finite", "numeric_string", "number"]),
     normalizationValueRange: allowed(input.normalizationValueRange,
-      ["negative", "zero", "fraction", "percentage", "above_percentage"]),
+      ["negative", "zero", "fraction", "percentage", "above_percentage",
+        "below_range", "above_range_up_to_10x", "above_range_10x_to_1000x", "above_range_over_1000x"]),
     normalizationUnitKind: allowed(input.normalizationUnitKind,
-      ["missing", "percent", "ratio", "other"]),
+      ["missing", "percent", "ratio", "other", "g", "mg", "ml", "l", "min", "s"]),
   });
 }
 
