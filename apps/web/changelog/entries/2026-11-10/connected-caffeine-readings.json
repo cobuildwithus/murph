@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 100,
+  "item": {
+    "id": "connected-caffeine-readings",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More complete caffeine readings",
+    "summary": "Murph now includes some connected caffeine entries that were previously left out because their reported amount looked too large.",
+    "details": "For affected entries, Murph reads the reported amount as milligrams. Smaller entries keep their previous interpretation.",
+    "relevanceTags": ["wearables", "caffeine"],
+    "sourcePullRequests": [4803]
+  }
+}
