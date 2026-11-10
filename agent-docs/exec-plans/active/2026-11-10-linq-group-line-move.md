@@ -405,6 +405,10 @@ behavior until a separately shipped producer creates a reservation.
   boundary. A retired source chat cannot be recycled as a destination.
   Open product question for PR B: confirm these sequential-move limits and the
   30-second/32-handle bounds before exposing operator recovery.
+- The shared replacement primitive also enforces the adoption deadline for
+  future explicit ops callers. Open question for PR B: should exact-destination
+  recovery renew that deadline after fresh proof? Automatic notice authority
+  must never be renewed merely because a delayed marker arrived.
 - Egress aliases apply only to initial thread-send preparation. Native replies,
   reactions, typing and dispatches already bound to an exact resolved route
   are not translated. A final dispatch retains the conversation locator only
@@ -446,6 +450,8 @@ not the entire webhook or an additive delta against ordinary admission. A roster
 mismatch adds one conditional diagnostic UPDATE. Existing request-scoped root
 metadata reuse can lower crypto-read counts. Existing demotion work can vary
 with pre-existing personal bindings; no new per-participant SQL loop is added.
+Separate from webhook costs, eligible egress preparation and game audience
+reads each add one bounded lookup when the move table is empty.
 The pre-existing direct planner 20-statement pin still passes. Move reads cap at
 five rows, the route replacement at three, and game overlap at three; ambiguity
 fails closed rather than reading unbounded history.
