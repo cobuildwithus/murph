@@ -536,7 +536,10 @@ The derivation rules are:
   and source `lastSeenAt` generation. It never combines status or timestamps
   from different connection or source generations.
 - `status` is one of `connected`, `needs-attention`, `needs-reconnect`,
-  `disconnected`, or `setting-up`.
+  `disconnected`, or `setting-up`. `needs-reconnect` covers a connection that
+  requires reauthorization and a source whose sign-in can no longer be
+  refreshed, by the same rule that asks for a reconnect on the member's own
+  connection screen. Any other source error stays `needs-attention`.
 - `statusObservedAt` says when the owner observed the projected coarse status.
 - `connectionSyncJobCompletedAt` is nullable and names exactly what it means:
   a connection-wide sync job completed. One connection can back several

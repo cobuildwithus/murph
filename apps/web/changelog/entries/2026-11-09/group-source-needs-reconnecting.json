@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-09",
+  "order": 100,
+  "item": {
+    "id": "group-source-needs-reconnecting",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Murph tells a group when a wearable needs reconnecting",
+    "summary": "When someone's wearable sign-in has lapsed and its data stops showing up in a group, Murph can now say that it needs reconnecting instead of only that it needs attention.",
+    "details": "This applies only when that person shares their health source connection status with the group. Murph names the wearable and points them to their private chat to reconnect it. The error behind the lapse is never shared.",
+    "relevanceTags": ["groups", "wearables"],
+    "sourcePullRequests": [4771]
+  }
+}

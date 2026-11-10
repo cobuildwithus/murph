@@ -15950,6 +15950,168 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
   )
 
   it(
+    'sends a lapsed group wearable source to a private reconnect',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-source-reconnect-e2e-'),
+      )
+      const sharedRequests: unknown[] = []
+      const statusProjection = (sources: { label: string, status: 'connected' | 'needs-reconnect' }[]) => ({
+        dataStatus: 'available' as const,
+        grantedAt: '2026-07-20T12:00:00.000Z',
+        grantStatus: 'granted' as const,
+        projectionScope: { projectionKind: 'device-sync-status.v0' as const },
+        projectionScopeKey: 'device-sync-status.v0',
+        records: [{
+          data: {
+            observedAt: '2026-07-29T00:00:00.000Z',
+            sources: sources.map((source) => ({
+              ...source,
+              connectionSyncJobCompletedAt: '2026-07-29T09:00:00.000Z',
+              statusObservedAt: '2026-07-29T12:58:00.000Z',
+            })),
+          },
+          occurredAt: '2026-07-29T00:00:00.000Z',
+          recordKey: 'device-sync-status',
+        }],
+      })
+      const sleepProjection = (source: { label: string, source: string }, minutes: number) => ({
+        dataStatus: 'available' as const,
+        grantedAt: '2026-07-20T12:00:00.000Z',
+        grantStatus: 'granted' as const,
+        projectionScope: { projectionKind: 'sleep-duration-days.v0' as const },
+        projectionScopeKey: 'sleep-duration-days.v0',
+        records: ['2026-07-27', '2026-07-28'].map((date) => ({
+          data: { date, metricKey: 'total-sleep-minutes', unit: 'minutes', value: minutes },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: `${date}.${source.source}`,
+          source,
+        })),
+      })
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildHostedGroupStatusDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return {
+                  members: [{
+                    currentTurnHandles: [],
+                    displayName: 'Rowan',
+                    memberId: 'member_source_reconnect',
+                    participantId: 'participant_source_reconnect',
+                    // The watch still shares sleep; the ring's authorization lapsed.
+                    projections: [
+                      sleepProjection({ label: 'Garmin', source: 'garmin' }, 431),
+                      statusProjection([
+                        { label: 'Garmin', status: 'connected' },
+                        { label: 'Oura', status: 'needs-reconnect' },
+                      ]),
+                    ],
+                  }, {
+                    currentTurnHandles: [],
+                    displayName: 'Ellis',
+                    memberId: 'member_source_steady',
+                    participantId: 'participant_source_steady',
+                    projections: [
+                      sleepProjection({ label: 'Oura', source: 'oura' }, 455),
+                      statusProjection([{ label: 'Oura', status: 'connected' }]),
+                    ],
+                  }],
+                  requestedProjectionScopeKeys: [
+                    'sleep-duration-days.v0',
+                    'device-sync-status.v0',
+                  ],
+                  status: 'ok' as const,
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Current group message:',
+            '"The last report had no Oura sleep for Rowan. Did Rowan lose access or something?"',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const sharedReads = readCapabilityRoutingActions(
+          result.jsonEvents,
+        ).filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_SHARED_READ_TOOL.name
+        )
+
+        process.stdout.write(
+          `[group-source-reconnect-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            sharedReads,
+          })}\n`,
+        )
+        expect(sharedReads).toHaveLength(1)
+        const sharedRead = sharedReads[0]
+        if (sharedRead?.kind !== 'dynamic') {
+          throw new Error('Expected one dynamic shared-data read.')
+        }
+        expect(sharedRead).toMatchObject({
+          argumentsValue: {
+            action: 'read_shared',
+            projectionScopes: expect.arrayContaining([
+              { projectionKind: 'sleep-duration-days.v0' },
+              { projectionKind: 'device-sync-status.v0' },
+            ]),
+          },
+        })
+        expect(sharedRequests).toHaveLength(1)
+        expect(result.finalMessage).toMatch(/Rowan/u)
+        expect(result.finalMessage).toMatch(/Oura/u)
+        expect(result.finalMessage).toMatch(/reconnect/iu)
+        expect(result.finalMessage).toMatch(/private|direct|1:1|one-on-one|own chat|\bDM\b/iu)
+        // Group sharing is intact and the watch still reports; neither is implied broken.
+        expect(result.finalMessage).not.toMatch(
+          /Ellis[^.!?\n]{0,120}reconnect|Garmin[^.!?\n]{0,60}(?:needs|reconnect)/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /https?:\/\/|token|needs-reconnect|device-sync-status|(?:will|should) (?:come back|return|be restored|fix (?:it|this))|share (?:it )?again|re-?share|grant (?:it )?again/iu,
+        )
+        expect(result.finalMessage.trim().split(/\s+/u).length).toBeLessThan(80)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'rereads shared sleep inside a detached group consultation',
     async () => {
       const config = await resolveRealCodexE2eConfig()

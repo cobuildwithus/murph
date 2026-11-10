@@ -1021,6 +1021,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           select: {
             firstSeenAt: true,
             lastDataAt: true,
+            lastErrorCode: true,
             sourceProviderSlug: true,
             status: true,
             updatedAt: true,
@@ -2253,6 +2254,10 @@ it.each([
   { provider: "oura", arrivalHours: 96, firstSeenHours: 240, status: "connected", expected: "connected" },
   { provider: "garmin", arrivalHours: 40, firstSeenHours: 240, status: "disconnected", expected: "disconnected" },
   { provider: "garmin", arrivalHours: 40, firstSeenHours: 240, status: "reauthorization_required", expected: "needs-reconnect" },
+  { provider: "oura", arrivalHours: 400, firstSeenHours: 2_000, status: "error", lastErrorCode: "TOKEN_REFRESH_FAILED", expected: "needs-reconnect" },
+  { provider: "oura", arrivalHours: 400, firstSeenHours: 2_000, status: "error", lastErrorCode: "DEREGISTERED_PER_PROVIDER", expected: "needs-attention" },
+  { provider: "oura", arrivalHours: 400, firstSeenHours: 2_000, status: "error", expected: "needs-attention" },
+  { provider: "oura", arrivalHours: 1, firstSeenHours: 240, status: "connected", lastErrorCode: "TOKEN_REFRESH_FAILED", expected: "connected" },
 ])("reports delivery attention independently of successful polling: $provider/$arrivalHours/$status", async (scenario) => {
   installCiphertexts({});
   const now = Date.now();
@@ -2260,6 +2265,7 @@ it.each([
   const source = {
     firstSeenAt: new Date(now - scenario.firstSeenHours * 3_600_000),
     lastDataAt: scenario.arrivalHours === null ? null : new Date(now - scenario.arrivalHours * 3_600_000),
+    lastErrorCode: "lastErrorCode" in scenario ? scenario.lastErrorCode ?? null : null,
     sourceProviderSlug: scenario.provider, status: scenario.status, updatedAt: recent,
   };
   const { prisma, deviceConnectionFindMany } = createPrisma({
@@ -2276,12 +2282,12 @@ it.each([
   expect(result.members[0]?.projections[0]?.records[0]?.data).toMatchObject({
     sources: [{ status: scenario.expected, connectionSyncJobCompletedAt: recent.toISOString() }],
   });
-  expect(JSON.stringify(result)).not.toMatch(/lastDataAt|firstSeenAt|sourceProviderSlug/);
+  expect(JSON.stringify(result)).not.toMatch(/lastDataAt|firstSeenAt|sourceProviderSlug|lastErrorCode|TOKEN_REFRESH|DEREGISTERED/);
   expect(deviceConnectionFindMany).toHaveBeenCalledTimes(1);
   expect(deviceConnectionFindMany.mock.calls[0]?.[0]).toMatchObject({
-    select: { sources: { select: { lastDataAt: true, firstSeenAt: true } } },
+    select: { sources: { select: { lastDataAt: true, firstSeenAt: true, lastErrorCode: true } } },
   });
-  if (scenario.expected === "needs-attention") {
+  if (scenario.expected === "needs-attention" && scenario.status === "connected") {
     source.lastDataAt = recent;
     const recovered = await read();
     expect(recovered.status).toBe("ok");

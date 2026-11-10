@@ -91,7 +91,15 @@ function countSourceResources(source: HostedDeviceConnectionSource): number {
   ).length;
 }
 
-function requiresConnectionSourceReconnect(source: HostedDeviceConnectionSource): boolean {
+/**
+ * The one Web rule for "this source's authorization lapsed". The member's own
+ * connection screen and the consented group status both read it, so a group
+ * never reports a weaker state than the member already sees.
+ */
+export function requiresConnectionSourceReconnect(source: {
+  lastErrorCode: string | null;
+  status: string;
+}): boolean {
   return source.status === "error"
     && source.lastErrorCode !== null
     && CONNECTION_SOURCE_RECONNECT_ERROR_CODES.has(source.lastErrorCode);
