@@ -140,7 +140,7 @@ test("DeviceSyncCompletionDialog strips an unverified marker before its close re
     closeRefreshLocations.push(firstRender.window.location.href);
   });
   const continueButton = [...firstRender.container.querySelectorAll("button")]
-    .find((button) => button.textContent?.trim() === "Continue to Settings");
+    .find((button) => button.textContent?.trim() === "Continue");
   expect(continueButton).not.toBeNull();
 
   await act(async () => {
@@ -190,7 +190,7 @@ test("DeviceSyncCompletionDialog refreshes plain Home after the result closes", 
   );
   expect(mocks.routerRefresh).not.toHaveBeenCalled();
   const continueButton = [...render.container.querySelectorAll("button")]
-    .find((button) => button.textContent?.trim() === "Continue to Settings");
+    .find((button) => button.textContent?.trim() === "Continue");
   expect(continueButton).not.toBeNull();
 
   await act(async () => {
@@ -287,7 +287,8 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
   expect(continueLink?.getAttribute("rel")).toBe("noopener noreferrer");
   expect(continueLink?.getAttribute("target")).toBe("_blank");
   expect(continueLink?.textContent).toContain("Continue with Murph");
-  expect(render.container.innerHTML).not.toContain("Continue to Settings");
+  expect([...render.container.querySelectorAll("button")]
+    .some((button) => button.textContent?.trim() === "Continue")).toBe(false);
   expect(
     render.container.querySelector("audio[src='/audio/whoop-sync-memos/grandpa.mp3']"),
   ).not.toBeNull();

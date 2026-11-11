@@ -139,7 +139,7 @@ function renderGroupJoin(input: {
     return (
       <LinkPageScreen
         actions={
-          <Link className={LINK_PAGE_PILL_CLASS} href="/settings">
+          <Link className={LINK_PAGE_PILL_CLASS} href="/home">
             Open Murph
           </Link>
         }

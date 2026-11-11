@@ -159,7 +159,7 @@ test("checkout-stage success page reconciles the returned session once and redir
     }),
     method: "POST",
   }));
-  expect(view.routerReplace).toHaveBeenCalledWith("/settings");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
   expect(view.locationAssign).not.toHaveBeenCalled();
 
   await view.cleanup();
@@ -192,7 +192,7 @@ test("checkout-stage success page waits for returned session reconciliation befo
 
   await act(async () => {});
 
-  expect(view.routerReplace).toHaveBeenCalledWith("/settings");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
 
   await view.cleanup();
 });
@@ -244,7 +244,7 @@ test("active success page reconciles the returned session when the invite is alr
     }),
     method: "POST",
   }));
-  expect(view.routerReplace).toHaveBeenCalledWith("/settings");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
 
   await view.cleanup();
 });
@@ -265,7 +265,7 @@ test("active success page redirects to Settings without waiting for returned ses
   await act(async () => {});
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(view.routerReplace).toHaveBeenCalledWith("/settings");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
   expect(view.container.textContent ?? "").toBe("");
 
   resolveFetch(
@@ -291,7 +291,7 @@ test("active success page redirects to Settings even when returned session recon
   await flushJoinInviteSuccessClientEffects();
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(view.routerReplace).toHaveBeenCalledWith("/settings");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
 
   await view.cleanup();
 });
@@ -350,17 +350,17 @@ test("active success page redirects to Settings without a returned checkout sess
   });
   await flushJoinInviteSuccessClientEffects();
 
-  expect(view.routerReplace).toHaveBeenCalledWith("/settings");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
   expect(view.locationAssign).not.toHaveBeenCalled();
 
   view.routerReplace.mockClear();
-  const continueButton = findButtonByText(view.container, /Open Settings/);
+  const continueButton = findButtonByText(view.container, /Open home/);
 
   await act(async () => {
     continueButton.click();
   });
 
-  expect(view.routerReplace).toHaveBeenCalledWith("/settings");
+  expect(view.routerReplace).toHaveBeenCalledWith("/home");
   expect(view.locationAssign).not.toHaveBeenCalled();
 
   await view.cleanup();
@@ -383,7 +383,7 @@ test("active success page with an unmatched session keeps the invite fallback gu
 
   expect(view.routerReplace).not.toHaveBeenCalled();
 
-  const continueButton = findButtonByText(view.container, /Open Settings/);
+  const continueButton = findButtonByText(view.container, /Open home/);
 
   await act(async () => {
     continueButton.click();
@@ -405,7 +405,7 @@ test("preview active success page stays on the success page", async () => {
 
   expect(view.routerReplace).not.toHaveBeenCalled();
   assert.match(view.container.textContent ?? "", /You’re all set/);
-  assert.match(view.container.textContent ?? "", /Open Settings/);
+  assert.match(view.container.textContent ?? "", /Open home/);
 
   await view.cleanup();
 });

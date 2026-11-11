@@ -320,7 +320,7 @@ export function buildHostedWebNextConfig(
     },
     webpack: (config, context) => configureHostedWebWebpack(config, context, environment),
     // Redirect before account layouts or client auth mount; Next preserves queries.
-    redirects: async () => ["/home", "/training", "/history", "/journal", "/labs", "/overview"].map((source) => ({
+    redirects: async () => ["/training", "/history", "/journal", "/labs", "/overview"].map((source) => ({
       source,
       destination: "/settings",
       permanent: true,

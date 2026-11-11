@@ -37,7 +37,7 @@ export function ComputerHandoffManagedRetryScreen({ href }: { href: string }) {
 export function ComputerHandoffManagedFailedScreen() {
   return (
     <LinkPageScreen
-      actions={<a className={LINK_PAGE_PILL_CLASS} href="/settings">Return to Murph</a>}
+      actions={<a className={LINK_PAGE_PILL_CLASS} href="/home">Return to Murph</a>}
       detail="The secure sign-in provider could not connect. Return to Murph and ask for a live browser link."
       title={SECURE_SIGN_IN_FAILED_TITLE}
     />

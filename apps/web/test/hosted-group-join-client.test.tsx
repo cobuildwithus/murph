@@ -225,13 +225,13 @@ test("renders a not-now escape link with the group join legal consent gate", asy
     createElement(GroupJoinLegalConsentGate, {
       detail: "4 people. They’ll see your name, and anything you choose to share.",
       initialStatus: null,
-      notNowHref: "/settings",
+      notNowHref: "/home",
       title: "Join Sunday Sleep Crew.",
     }),
   );
 
   expect(markup).toContain('data-consent-card="true"');
-  expect(markup).toContain('href="/settings"');
+  expect(markup).toContain('href="/home"');
   expect(markup).toContain("Not now");
 });
 
@@ -244,12 +244,12 @@ test("keeps the home destination on the consent gate not-now link", async () => 
     createElement(GroupJoinLegalConsentGate, {
       detail: "4 people. They’ll see your name, and anything you choose to share.",
       initialStatus: null,
-      notNowHref: "/settings",
+      notNowHref: "/home",
       title: "Join Sunday Sleep Crew.",
     }),
   );
 
-  expect(markup).toContain('href="/settings"');
+  expect(markup).toContain('href="/home"');
   expect(markup).toContain("Not now");
 });
 
@@ -275,7 +275,7 @@ test("renders optional sharing cards with visible keyboard focus treatment", asy
         projectionScopeKey: "device-sync-status.v0",
       }],
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
 
@@ -302,7 +302,7 @@ test("keeps every exact description one tap away in Details", async () => {
       memberCount: 4,
       permissions: comprehensiveGroupJoinPermissions,
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -348,7 +348,7 @@ test("says the name is shared before joining an invite with no optional choices"
       memberCount: 4,
       permissions: [],
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
     { requireButton: false },
   );
@@ -385,7 +385,7 @@ test("keeps a comprehensive default checklist bounded and keyboard-scrollable", 
       memberCount: 4,
       permissions: comprehensiveGroupJoinPermissions,
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
 
@@ -436,7 +436,7 @@ test("clears, retries, and selectively restores comprehensive optional sharing",
       memberCount: 4,
       permissions: comprehensiveGroupJoinPermissions,
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -522,7 +522,7 @@ test("clears every visible optional grant for an existing member", async () => {
       memberCount: 4,
       permissions: comprehensiveGroupJoinPermissions,
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -580,7 +580,7 @@ test.each([false, true])(
         memberCount: 4,
         permissions: projectHostedVaultShareProjectionDisplays(offer.projectionScopes),
         postJoinContactOption: null,
-        postJoinDestination: "/settings",
+        postJoinDestination: "/home",
       }),
     );
     cleanupRender = cleanup;
@@ -652,7 +652,7 @@ test("discloses and submits source-aware sleep metadata on the link-only join pa
         },
       ],
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -720,7 +720,7 @@ test.each([
           projectionScopeKey: "deep-sleep-sources-days.v1",
         }],
         postJoinContactOption: null,
-        postJoinDestination: "/settings",
+        postJoinDestination: "/home",
       }),
     );
     cleanupRender = cleanup;
@@ -873,7 +873,7 @@ test("renders one Daily macros card that toggles every macro scope together", as
         },
       ],
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -965,7 +965,7 @@ test("shows revocable individual macro cards for an existing mixed macro grant",
         macro("fiber-days.v0", "fiber"),
       ],
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -1090,7 +1090,7 @@ test("offers same-link account recovery for a mismatched phone-bound invite", as
       memberCount: 4,
       permissions: [],
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -1141,7 +1141,7 @@ test("returns to the dashboard through a real link once membership succeeds", as
       memberCount: 4,
       permissions: [],
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -1167,7 +1167,7 @@ test("returns to the dashboard through a real link once membership succeeds", as
     (candidate) => candidate.textContent?.includes("Back to Murph"),
   );
   expect(returnLink).toBeTruthy();
-  expect(returnLink?.getAttribute("href")).toBe("/settings");
+  expect(returnLink?.getAttribute("href")).toBe("/home");
   expect(mocks.routerPush).not.toHaveBeenCalled();
   expect(mocks.routerReplace).not.toHaveBeenCalled();
 });
@@ -1199,7 +1199,7 @@ test("continues an incomplete account into canonical setup after membership succ
 
   const setupEscape = container.querySelector('a[href="/join"]');
   expect(setupEscape?.textContent).toContain("Finish setting up Murph");
-  expect(container.textContent).not.toContain("Go to Settings");
+  expect(container.textContent).not.toContain("Go home");
 
   await act(async () => {
     button.dispatchEvent(new window.Event("click", { bubbles: true }));
@@ -1245,7 +1245,7 @@ test("hands a messaging member back to the channel Murph reaches them on", async
         rel: "noopener noreferrer",
         target: "_blank",
       },
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -1263,7 +1263,7 @@ test("hands a messaging member back to the channel Murph reaches them on", async
   expect(returnLink?.getAttribute("aria-label")).toBe(
     "Back to Murph in Telegram (opens in a new tab)",
   );
-  expect(container.querySelector('a[href="/settings"]')).toBeNull();
+  expect(container.querySelector('a[href="/home"]')).toBeNull();
 });
 
 test("uses the canonical home destination when no completed-member contact return is projected", async () => {
@@ -1282,7 +1282,7 @@ test("uses the canonical home destination when no completed-member contact retur
       memberCount: 4,
       permissions: [],
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -1295,7 +1295,7 @@ test("uses the canonical home destination when no completed-member contact retur
   const returnLink = Array.from(container.querySelectorAll("a")).find(
     (candidate) => candidate.textContent?.includes("Back to Murph"),
   );
-  expect(returnLink?.getAttribute("href")).toBe("/settings");
+  expect(returnLink?.getAttribute("href")).toBe("/home");
   expect(container.querySelector('a[href^="sms:"]')).toBeNull();
 });
 
@@ -1315,7 +1315,7 @@ test("binds an existing-member sharing update to the rendered membership id", as
       memberCount: 4,
       permissions: [],
       postJoinContactOption: null,
-      postJoinDestination: "/settings",
+      postJoinDestination: "/home",
     }),
   );
   cleanupRender = cleanup;
@@ -1375,7 +1375,7 @@ test("confirms the provider boundary before leaving and returns home", async () 
     url: "/api/groups/join/JOIN123/leave",
   });
   await vi.waitFor(() => {
-    expect(mocks.routerPush).toHaveBeenCalledWith("/settings");
+    expect(mocks.routerPush).toHaveBeenCalledWith("/home");
   });
 });
 
@@ -1444,10 +1444,10 @@ test("lets Leave group take the quiet place, unless setup is still owed", async 
   };
 
   const settled = renderToStaticMarkup(
-    createElement(GroupJoinAcceptForm, { ...member, postJoinDestination: "/settings" }),
+    createElement(GroupJoinAcceptForm, { ...member, postJoinDestination: "/home" }),
   );
   expect(settled).toContain("Leave group");
-  expect(settled).not.toContain("Go to Settings");
+  expect(settled).not.toContain("Go home");
 
   const setupOwed = renderToStaticMarkup(
     createElement(GroupJoinAcceptForm, { ...member, postJoinDestination: "/join" }),

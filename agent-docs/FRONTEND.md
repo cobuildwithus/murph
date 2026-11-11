@@ -57,11 +57,16 @@ const badgeVariants = cva("rounded-full px-2 py-0.5 text-xs font-medium", {
 
 ## Authenticated product scope
 
-Settings is the authenticated Web destination. Devices, billing, consent,
-export and sign-in/onboarding handoffs support account control. Home, Training
-and the older health dashboard routes redirect to Settings. Do not reintroduce
-Browser Vault page providers, caches or polling for retired dashboard views;
-shared replica APIs and explicit export still serve native and account flows.
+Home is the normal authenticated destination, retaining contact onboarding,
+first-message guidance, device/lab actions and usage recovery. Settings owns
+account control and connection callbacks; old Home completion markers remain
+usable. Training and older health dashboard routes redirect to Settings.
+Home's optional lab-presence projection reads published core data once on the
+server with a two-second deadline, without refresh work, cache or polling.
+Missing replica preserves empty onboarding; failed reads preserve unknown.
+Do not reintroduce the retired Browser Vault provider or metric-demand hooks.
+Shared replica APIs and explicit export still serve native and account flows.
+
 
 ## Stack
 

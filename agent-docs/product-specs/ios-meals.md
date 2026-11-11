@@ -295,7 +295,7 @@ The replica Meals reader inventory is:
 
 | Reader | Pre-reader behavior when a meal carries `fiberGrams` |
 | --- | --- |
-| Web server: `browser-vault/loader.ts`, used by companion Meals list/detail/removal, Journal, numbers, demographics, and the production canary | Full and core parsers call the strict Meals schema and reject the key, even when null. Meals maps this failure to `MEALS_PROJECTION_UNAVAILABLE`; other core consumers also fail decoding. |
+| Web server: `browser-vault/loader.ts`, used by companion Meals list/detail/removal, Journal, numbers, demographics, Home lab presence, and the production canary | Full and core parsers call the strict Meals schema and reject the key, even when null. Meals maps this failure to `MEALS_PROJECTION_UNAVAILABLE`; other core consumers also fail decoding. |
 | Browser readers: Settings data export through `export.ts`; older open tabs may retain the retired dashboard loader bundle | The same strict full/core parsers reject it. An already-open tab keeps its old reader after Web promotion. |
 | Hosted Cloudflare Worker: `browser-vault-store.ts` `encodeBrowserVaultReplicaChildren`, reached by runner outbound replica writes | Strictly parses the full replica before splitting and encrypting it; an old Worker rejects a new runner's fiber output. Ciphertext session delivery itself does not parse Meals. |
 | Hosted runner: `hosted-runtime/browser-vault-replica.ts` through `buildCompanionMealsProjection` | Validates its own built projection with the strict schema, but does not consume the saved replica Meals section. An old runner reads existing canonical fiber and omits it from its output, so it does not reject a new saved replica. |

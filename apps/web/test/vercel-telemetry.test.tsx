@@ -479,7 +479,7 @@ test("redactPrivateAnalyticsUrl canonicalizes allowlisted routes", () => {
   mocks.pathname = "/";
   assert.equal(shouldSuppressVercelTelemetryForPathname("/searching"), true);
   assert.equal(shouldSuppressVercelTelemetryForPathname("/settings/"), false);
-  for (const retired of ["/home", "/training", "/history", "/journal", "/labs", "/overview"]) {
+  for (const retired of ["/training", "/history", "/journal", "/labs", "/overview"]) {
     assert.equal(shouldSuppressVercelTelemetryForPathname(retired), true);
   }
   assert.equal(

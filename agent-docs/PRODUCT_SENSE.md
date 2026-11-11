@@ -49,12 +49,13 @@ Last verified: 2026-09-09
 - A member with no current goal is not a failed onboarding case. Murph may
   offer one optional baseline review, then remain available without inventing
   a problem.
-- The authenticated website is Settings and its supporting account flows:
-  sign-in, onboarding, billing, family/group handoffs, devices, consent and
-  export. Accessible members land at `/settings`. `/home`, `/training`,
-  `/overview`, `/history`, `/journal` and `/labs` redirect there; old Home
-  connection callback parameters remain usable. Health review stays in native
-  apps and conversations. The public marketing site remains public.
+- Accessible members land at `/home`, which retains contact-card onboarding,
+  first-message guidance, device/lab actions and usage recovery. Settings and
+  supporting sign-in, billing, family/group, devices, consent and export flows
+  remain. `/training`, `/overview`, `/history`, `/journal` and `/labs` redirect
+  to Settings. New connection callbacks land in Settings; old Home callback
+  parameters remain usable on Home. Private health review stays in native apps
+  and conversations. The public marketing site remains public.
 - The public changelog opens on a bounded seven-day window of dated editions.
   Every edition remains a stable cursor, and API or digest links to an older
   item resolve to the exact archive window and anchor that contains it.

@@ -364,7 +364,7 @@ function shouldResumeCurrentSettingsPlanChangeUrl(
 }
 
 // Someone returning from Stripe's payment-method page lands on /settings with
-// the payment-return params. Sending them to plain /settings instead would strand the
+// the payment-return params. Sending them to /home instead would strand the
 // plan choice they just added a card to complete.
 function shouldResumeCurrentSettingsGroupPaymentUrl(
   payload: HostedAuthenticationCompletionPayload,

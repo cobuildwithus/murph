@@ -13,7 +13,7 @@ Some arrive with a clear change in mind; others want help understanding where to
 focus.
 
 The default relationship is a private direct conversation on the phone, where
-people already communicate. The website is an account Settings surface for billing, connected devices,
+people already communicate. The website retains Home for setup and messaging, with Settings for billing, connected devices,
 consent, and data export; private health review lives in the conversation and
 native apps. Friend and group conversations are optional support
 Murph can suggest when they fit the member's need and the member explicitly

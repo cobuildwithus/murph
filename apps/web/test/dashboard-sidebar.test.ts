@@ -177,13 +177,14 @@ beforeEach(() => {
   mocks.setOpenMobile.mockClear();
 });
 
-test("Sidebar exposes only Settings as its account destination", () => {
+test("Sidebar exposes Home and Settings without retired destinations", () => {
   mocks.usePathname.mockReturnValue("/biomarkers");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
+  assert.match(markup, /href="\/home"[^>]*>\s*<svg/);
   assert.match(markup, /href="\/settings"[^>]*>\s*<svg/);
-  assert.doesNotMatch(markup, /href="\/(?:home|training|connect)"/);
+  assert.doesNotMatch(markup, /href="\/(?:training|connect)"/);
   assert.doesNotMatch(markup, /href="\/journal"/);
   assert.doesNotMatch(markup, />Journal<\/a>/);
   assert.doesNotMatch(markup, /href="\/voice"/);
@@ -389,7 +390,7 @@ test("Sidebar surfaces a visible error when sign out fails", async () => {
   assert.equal(container.querySelector('[role="alert"]'), null);
 });
 
-test.each(["/connect", "/settings", "/settings/billing"])(
+test.each(["/home", "/home/example", "/connect", "/settings", "/settings/billing"])(
   "Sidebar highlights the direct account destination for %s",
   (pathname) => {
     mocks.usePathname.mockReturnValue(pathname);
@@ -398,10 +399,11 @@ test.each(["/connect", "/settings", "/settings/billing"])(
         initialAuth: { authenticated: true, label: null },
       }),
     );
-    const href = "/settings";
+    const href = pathname.startsWith("/home") ? "/home" : "/settings";
     assert.match(markup, new RegExp(`data-active="true"><a[^>]*href="${href}"`));
     assert.equal((markup.match(/href="\/connect"/g) ?? []).length, 0);
-    assert.equal((markup.match(/href="\/settings"/g) ?? []).length, 2);
+    assert.equal((markup.match(/href="\/home"/g) ?? []).length, 2);
+    assert.equal((markup.match(/href="\/settings"/g) ?? []).length, 1);
     assert.match(markup, /Sign out/);
   },
 );

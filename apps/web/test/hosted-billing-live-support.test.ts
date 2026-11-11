@@ -176,7 +176,7 @@ describe("hosted billing live browser support", () => {
     expect(subscriptionWaitFor).not.toHaveBeenCalled();
   });
 
-  it("waits for the enrolled Settings tree to commit before another navigation", async () => {
+  it("waits for the enrolled Home tree to commit before opening settings", async () => {
     const enrollmentResponse = createApiResponse({
       method: "POST",
       ok: true,
@@ -187,17 +187,17 @@ describe("hosted billing live browser support", () => {
     const waitForURL = vi.fn(async (
       predicate: (url: URL) => boolean,
     ) => {
-      expect(predicate(new URL("https://app.example.test/settings"))).toBe(true);
+      expect(predicate(new URL("https://app.example.test/home"))).toBe(true);
     });
-    let releaseSettingsCommit!: () => void;
-    const settingsCommitted = new Promise<void>((resolve) => {
-      releaseSettingsCommit = resolve;
+    let releaseHomeCommit!: () => void;
+    const homeCommitted = new Promise<void>((resolve) => {
+      releaseHomeCommit = resolve;
     });
-    const settingsHeadingWaitFor = vi.fn(() => settingsCommitted);
+    const homeHeadingWaitFor = vi.fn(() => homeCommitted);
     const getByRole = vi.fn((role: string, options: unknown) => {
       expect(role).toBe("heading");
-      expect(options).toEqual({ exact: true, name: "Your account" });
-      return { waitFor: settingsHeadingWaitFor };
+      expect(options).toEqual({ exact: true, name: "Welcome to Murph" });
+      return { waitFor: homeHeadingWaitFor };
     });
     const page = {
       getByRole,
@@ -226,10 +226,10 @@ describe("hosted billing live browser support", () => {
     });
 
     await vi.waitFor(() => {
-      expect(settingsHeadingWaitFor).toHaveBeenCalledOnce();
+      expect(homeHeadingWaitFor).toHaveBeenCalledOnce();
     });
     expect(activationSettled).toBe(false);
-    releaseSettingsCommit();
+    releaseHomeCommit();
     await activation;
 
     expect(page.goto).toHaveBeenCalledWith(
@@ -237,8 +237,8 @@ describe("hosted billing live browser support", () => {
       { waitUntil: "commit" },
     );
     expect(waitForURL).toHaveBeenCalledOnce();
-    expect(settingsHeadingWaitFor).toHaveBeenCalledOnce();
-    expect(settingsHeadingWaitFor.mock.invocationCallOrder[0]).toBeGreaterThan(
+    expect(homeHeadingWaitFor).toHaveBeenCalledOnce();
+    expect(homeHeadingWaitFor.mock.invocationCallOrder[0]).toBeGreaterThan(
       waitForURL.mock.invocationCallOrder[0] ?? 0,
     );
   });

@@ -64,7 +64,7 @@ export default async function JoinResumePage(input: {
 
   // Billing recovery is a destination decision, not a generic accessible stage.
   // Send members with a retained provider subscription directly to Subscription;
-  // Active Starter, paid, or sponsored members continue to Settings.
+  // /home stays for active Starter, paid, or sponsored access.
   if (
     !sponsoredAccessActive
     && stage !== "blocked"
@@ -77,7 +77,7 @@ export default async function JoinResumePage(input: {
   }
 
   if (stage === "active") {
-    redirect("/settings");
+    redirect("/home");
   }
 
   redirect("/");

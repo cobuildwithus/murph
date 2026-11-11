@@ -23,7 +23,7 @@ export function DashboardSidebarStudy() {
           } as React.CSSProperties
         }
       >
-        <SidebarPrimaryNavigation pathname="/settings" />
+        <SidebarPrimaryNavigation pathname="/home" />
       </SidebarProvider>
     </div>
   );

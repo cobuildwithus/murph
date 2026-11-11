@@ -5,7 +5,7 @@ import { resolveConnectedAppCompletionDialogModel } from "@/src/lib/connected-ap
 import { resolveDeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion";
 import type { HostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-member-store";
 
-/** Connection callbacks remain account flows even after the dashboard retires. */
+/** Render connection-return confirmation in Settings. Home preserves its own precedence with onboarding. */
 export async function renderConnectionCompletion(input: {
   member: HostedMemberCoreState | null;
   searchParams: Record<string, string | string[] | undefined>;

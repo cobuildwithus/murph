@@ -1,3 +1,7 @@
+Home restoration and Training retirement are recorded in the
+[follow-up plan](exec-plans/completed/2026-11-11-restore-home-after-training-retirement.md);
+[Frontend](FRONTEND.md#authenticated-product-scope) owns the retained surface.
+
 Bound pair and group games tolerate bystanders while retaining current-player,
 route and restriction checks. [Architecture](../ARCHITECTURE.md),
 [Weekly Game](product-specs/weekly-game.md), and
@@ -1125,7 +1129,7 @@ Package verifier worker-exit result preservation is tracked in
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
 | `ARCHITECTURE.md` | Current runtime architecture, including channel-welcome reader compatibility and bounded contextual greetings, hosted media identity, reference-only preservation, checkpoint cleanup, receipt recovery, clinical document enrichment, retired member shell-hint transport, and separate founder-email eligibility alongside Murph channel greetings. | Current runtime architecture | High | 2026-11-02 |
 | `agent-docs/ARCHITECTURE_GUIDANCE.md` | Architecture planning guidance. | Architecture planning guidance | High | 2026-08-24 |
-| `PRODUCT.md` | Strategic design context: register, users, account-only Web Settings, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
+| `PRODUCT.md` | Strategic design context: register, users, Web Home setup and Settings, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
 | `DESIGN.md` | Visual design system. | Visual design system | High | 2026-07-22 |
 | `docs/architecture.md` | Concise architecture summary, repo-shape overview, package-boundary hygiene notes, and hosted ownership baseline. | Current architectural baseline | High | 2026-05-13 |
 | `docs/contracts/` | Frozen contract docs for vault layout, schemas, commands, and cross-cutting invariants. | Canonical vault interface decisions | High | 2026-07-20 |
@@ -1146,7 +1150,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/strategy.md` | Current product strategy. | Current product strategy | High | 2026-07-15 |
 | `agent-docs/PRODUCT_SENSE.md` | Product posture, account-only Web scope, member workspace troubleshooting, and complete unfiltered private workspace archives. | Current product behavior | High | 2026-09-17 |
 | `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules. | Product principles | High | 2026-07-15 |
-| `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`, including account-only Settings, retired dashboard lifecycles, inert auth studies and isolated browser proof. | Current frontend implementation guidance | Medium | 2026-10-16 |
+| `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`, including Home setup, Settings, retired Training and browser cache lifecycles, inert auth studies and isolated browser proof. | Current frontend implementation guidance | Medium | 2026-10-16 |
 | `agent-docs/exec-plans/completed/2026-09-28-viewport-animation-csp.md` | Viewport animation setup and CSP regression proof. | Historical browser proof implementation | Low | 2026-09-28 |
 | `agent-docs/product-marketing-context.md` | Product/marketing decisions and account-only Web scope. | Product/marketing decisions | High | 2026-07-15 |
 | `agent-docs/user-interviews.md` | User research method. | User research method | Medium | 2026-07-12 |

@@ -425,7 +425,7 @@ test("LandingAuthActions sends completed homepage signups through the initial-vi
   });
 
   expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith(
-    "/settings",
+    "/home",
   );
 });
 
@@ -452,7 +452,7 @@ test("LandingAuthActions sends completed existing homepage logins to home withou
     completeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
-  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith("/settings");
+  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith("/home");
 });
 
 test("LandingAuthActions sends existing split login completions to home without the initial-visit dialog", async () => {
@@ -483,7 +483,7 @@ test("LandingAuthActions sends existing split login completions to home without 
     completeButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
-  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith("/settings");
+  expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith("/home");
 });
 
 test("LandingAuthActions sends new split login completions through the initial-visit home dialog", async () => {
@@ -515,7 +515,7 @@ test("LandingAuthActions sends new split login completions through the initial-v
   });
 
   expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith(
-    "/settings",
+    "/home",
   );
 });
 
@@ -548,7 +548,7 @@ test("LandingAuthActions sends split signup completions through the initial-visi
   });
 
   expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledWith(
-    "/settings",
+    "/home",
   );
 });
 
@@ -658,7 +658,7 @@ test("LandingAuthActions split CTAs open the same unified auth modal", async () 
   ).toBeTruthy();
 });
 
-test("LandingAuthActions shows only an Open settings link for authenticated users", async () => {
+test("LandingAuthActions shows only a Home link for authenticated users", async () => {
   const { cleanup, container } = await renderClientComponent(
     createElement(
       "div",
@@ -675,7 +675,7 @@ test("LandingAuthActions shows only an Open settings link for authenticated user
 
   const links = Array.from(container.querySelectorAll("a"));
   expect(links).toHaveLength(1);
-  expect(links[0]?.getAttribute("href")).toBe("/settings");
+  expect(links[0]?.getAttribute("href")).toBe("/home");
   expect(links[0]?.getAttribute("data-next-link")).toBe("true");
   expect(links[0]?.getAttribute("data-prefetch")).toBe("false");
   expect(links[0]?.textContent).toContain("Start your first experiment");

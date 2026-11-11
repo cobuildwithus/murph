@@ -1,3 +1,6 @@
+import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
+import { HomeLoadStateStudy } from "./home-load-state-study";
+
 import { ModelSettingsHoverPreview } from "./model-settings-hover-preview";
 
 import { AsksGridSection } from "@/src/components/homepage/asks-section";
@@ -105,6 +108,17 @@ export function SectionsContent({
       </h1>
 
       <Separator />
+
+      {category === "home" ? (
+        <>
+          <StudySection title="Home onboarding and completed setup">
+            <HomeOnboardingStepsStudy />
+          </StudySection>
+          <StudySection title="Home unavailable details and retry">
+            <HomeLoadStateStudy />
+          </StudySection>
+        </>
+      ) : null}
 
       {category === "home" ? (
         <>

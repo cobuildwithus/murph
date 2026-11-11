@@ -277,8 +277,8 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
   switch (status.stage) {
     case "active":
       return {
-        buttonLabel: "Open Settings",
-        description: "Opening Settings.",
+        buttonLabel: "Open home",
+        description: "Opening your home page.",
         pending: false,
         title: "You’re all set.",
       };

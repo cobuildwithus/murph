@@ -411,7 +411,7 @@ describe("computer handoff route and page", () => {
 
     assert.match(markup, /Secure sign-in could not start/);
     assert.match(markup, /Return to Murph/);
-    assert.match(markup, /href="\/settings"/);
+    assert.match(markup, /href="\/home"/);
     assert.equal(markup.includes("Saving your progress"), false);
     assert.equal(markup.includes("managed-login"), false);
     assert.equal(markup.includes("Try again"), false);

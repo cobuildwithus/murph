@@ -55,7 +55,7 @@ test.each([
   ["the ordinary hub", { pathname: "/connect" }],
   ["a source card", { hash: "#oura", pathname: "/connect" }],
   ["a malformed claim", { hash: "#deviceConnectIntent=nope&connectSource=oura", pathname: "/connect" }],
-  ["plain Home", { pathname: "/settings" }],
+  ["plain Home", { pathname: "/home" }],
   ["a claim on another page", { hash: `#deviceConnectIntent=${CLAIM}`, pathname: "/settings" }],
 ])("leaves %s alone", (_label, location) => {
   expect(runVeil(location).appended).toHaveLength(0);

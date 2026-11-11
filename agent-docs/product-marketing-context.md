@@ -18,7 +18,7 @@ your health while remembering the context that would otherwise get lost.
 **Product category:** Personal health assistant.
 
 **Product type:** Conversation-first assistance through existing messaging
-channels, with a website for account Settings, billing, connected devices,
+channels, with Home for setup and messaging, plus website Settings for billing, connected devices,
 consent, and export. Native apps and conversations provide private health
 review. No dedicated mobile app is required for the main relationship.
 
@@ -135,7 +135,7 @@ the machinery exists.
   confounders, and outcomes
 - plans, reminders, and action-oriented assistant support
 - group conversations and challenge behavior
-- account controls on the website and public Health Commons reference pages
+- Home setup and account controls on the website, plus public Health Commons reference pages
 
 Do not imply that every integration, action, or health need is supported
 without checking its actual product path. “Broad assistant” means broad entry
@@ -265,7 +265,7 @@ forced universal-winner verdict are not.
 | “I can ask a general AI.” | General AI is capable. Murph is designed to remember relevant health context, connect authorized data, act through health-specific tools, and use the history again later. The context advantage remains a hypothesis to prove. |
 | “I already have Oura, WHOOP, or another health app.” | Murph does not replace the source. It helps interpret the data alongside the rest of the member's life and turn it into a useful decision or action. |
 | “I do not have a health goal.” | A member does not need to invent one. Murph can help with whatever comes up or offer one optional baseline review. |
-| “I do not want another app.” | The main relationship works through existing messaging. The website provides account controls when needed. |
+| “I do not want another app.” | The main relationship works through existing messaging. The website provides setup and account controls when needed. |
 | “I do not want my health data shared.” | Direct signup is private by default. Any friend, group, or public sharing is explicit and scoped. |
 | “I do not want constant nudges.” | Murph's outreach should be personal, purposeful, and controllable. Members can tune, pause, or stop it, and Murph should change a support loop that becomes noise instead of repeating it. |
 | “Is this medical advice?” | Murph supports understanding, decisions, and follow-through; it does not diagnose or replace clinicians. It should identify uncertainty and escalate when appropriate. |
@@ -346,7 +346,7 @@ surfaces, wearable integrations, and AI providers.
 **Surface hierarchy:**
 
 1. private conversation in the member's existing messaging channel
-2. native apps for private health review; the website for account Settings
+2. native apps for private health review; the website for Home setup and account Settings
 3. group conversation when the member explicitly chooses social support
 
 **Design rule:** make the next useful action easy without making health feel

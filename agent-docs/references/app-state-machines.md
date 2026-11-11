@@ -306,9 +306,14 @@ Inspected; no confirmed defect.
 
 ### W4. Retired Browser Vault page lifecycle
 
-The authenticated Web product is now Settings. Home and Training redirect there;
-the global React provider, warm cache, shard demand, refresh polling and
-homepage preparation have no remaining product consumer and were deleted.
+Home remains, but its only replica fact is lab presence. The global React
+provider, warm cache, shard demand, refresh polling and homepage preparation
+were deleted. `home-labs.ts` performs one authorized server core read with a
+two-second total deadline; it cannot schedule refresh work. Missing replica
+is the existing empty onboarding state; malformed/unreadable/timeout is unknown,
+which hides the labs action and exposes the existing retry alert. Abort guards
+prevent late results from starting a decode after the deadline. Other Home
+projections retain failure isolation, callback precedence and contact setup.
 Shared `loader.ts`, `authority.ts`, `session-handler.ts`, `export.ts` and replica
 publication remain for native APIs and explicit account export. The auth
 provider still consumes `session-invalidation.ts` to fence cross-tab cookie

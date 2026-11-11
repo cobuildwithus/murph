@@ -316,7 +316,7 @@ describe.skipIf(!runPostgresProof)(
           prisma,
           source: "companion_onboarding",
         })).resolves.toEqual({
-          redirectPath: "/settings",
+          redirectPath: "/home",
           status: "enrolled",
         });
 

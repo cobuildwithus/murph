@@ -449,7 +449,7 @@ export function ComponentsContent() {
 
         <Section title="Account primary navigation">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-            The Settings destination in their standard visual hierarchy.
+            Home and Settings in their standard visual hierarchy.
           </p>
           <DashboardSidebarStudy />
         </Section>

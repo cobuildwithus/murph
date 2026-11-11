@@ -8,7 +8,7 @@ const r1 = { "--dot-delay": "0.08s", "--dot-scale": "1.08" } as CSSProperties;
 const r2 = { "--dot-delay": "0.16s", "--dot-scale": "1.12", "--dot-opacity": "0.4", "--dot-opacity-peak": "0.7" } as CSSProperties;
 const r3 = { "--dot-delay": "0.24s", "--dot-scale": "1.08", "--dot-opacity": "0.2", "--dot-opacity-peak": "0.55" } as CSSProperties;
 
-export function BrandMark({ href = "/settings", className }: { href?: string; className?: string }) {
+export function BrandMark({ href = "/home", className }: { href?: string; className?: string }) {
   return (
     <Link href={href} aria-label="Murph" className={cn("group/brand flex items-center px-2 py-1", className)}>
       <svg fill="none" viewBox="0 0 197 44" xmlns="http://www.w3.org/2000/svg" className="h-6 w-auto">

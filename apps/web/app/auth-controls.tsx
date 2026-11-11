@@ -184,7 +184,7 @@ export function LandingAuthActions({
     return (
       <div className={styles.container}>
         <Link
-          href="/settings"
+          href="/home"
           prefetch={false}
           className={cn(
             styles.settings,

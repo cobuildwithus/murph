@@ -37,11 +37,11 @@ test.each(["checkout", "blocked"] as const)(
 test("maps only bounded handoff markers to fixed internal destinations", () => {
   expect(resolveGroupJoinPostJoinDestination(
     readGroupJoinPostAuthHandoff("initial-visit"),
-  )).toBe("/settings");
+  )).toBe("/home");
   expect(resolveGroupJoinPostJoinDestination(
     readGroupJoinPostAuthHandoff(["setup", "initial-visit"]),
   )).toBe("/join");
   expect(resolveGroupJoinPostJoinDestination(
     readGroupJoinPostAuthHandoff("https://example.test"),
-  )).toBe("/settings");
+  )).toBe("/home");
 });

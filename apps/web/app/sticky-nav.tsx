@@ -33,8 +33,8 @@ function getStickyNavAuthLabel(
   unauthenticatedAuthLabel: string | undefined,
 ): string {
   return authenticated
-    ? "Settings"
-    : unauthenticatedAuthLabel ?? "Settings";
+    ? "Home"
+    : unauthenticatedAuthLabel ?? "Home";
 }
 
 export function StickyNav({

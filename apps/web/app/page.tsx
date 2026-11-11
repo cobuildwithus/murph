@@ -112,7 +112,7 @@ export default async function HomePage() {
     ? {
         body: "Manage billing and connected wearables from one place.",
         metaItems: ["Subscription and billing", "Wearable connections"],
-        signupLabel: "Go to Settings",
+        signupLabel: "Go to Home",
         title: "You’re already set up.",
       }
     : {

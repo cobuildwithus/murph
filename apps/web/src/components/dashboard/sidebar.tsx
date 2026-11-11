@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ChevronsUpDown,
+  Home,
   Settings,
 } from "lucide-react";
 import {
@@ -60,7 +61,6 @@ const sidebarThemeStyle = {
   "--sidebar-border": "rgba(255, 255, 255, 0.1)",
   "--sidebar-ring": "rgba(255, 255, 255, 0.3)",
 } as CSSProperties;
-
 
 function SidebarAuthActions() {
   const { openAuthDialog } = useAuth();
@@ -295,6 +295,19 @@ export function SidebarPrimaryNavigation({
 }) {
   return (
     <SidebarMenu className="mb-12 gap-3 md:gap-3">
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          isActive={pathname === "/home" || pathname.startsWith("/home/")}
+          size="lg"
+          className={SIDEBAR_NAV_ITEM_CLASS}
+          render={
+            <Link href="/home">
+              <Home className={SIDEBAR_NAV_ICON_CLASS} />
+              Home
+            </Link>
+          }
+        />
+      </SidebarMenuItem>
       <SidebarMenuItem>
         <SidebarMenuButton
           isActive={pathname.startsWith("/settings") || pathname.startsWith("/connect")}

@@ -73,7 +73,7 @@ test("an accessible member still lands on home without a destination", async () 
   try {
     mocks.onCompleted?.(completionPayload({ stage: "active" }));
     expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledExactlyOnceWith(
-      "/settings",
+      "/home",
     );
   } finally {
     await rendered.cleanup();
