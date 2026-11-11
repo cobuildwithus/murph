@@ -3881,6 +3881,16 @@ either-side rollback fails closed. This is a read-only interpretation of history
 never a success claim or ledger rewrite. Mailbox and locked route checks still
 apply, and later dispatches retain the existing move-aware route fence.
 
+Linq participant adds are queued. A complete roster without the destination
+immediately after a successful add leaves `reserved` with `add_pending`, without
+confirming presence or starting cleanup. Later Ops resumes read one fresh roster;
+a claimed add is never dispatched again, including after interruption. Presence
+confirms the add; absence retains the existing immutable deadline and reservation.
+Explicit cancellation, rejected/ambiguous provider calls, and confirmation-read
+failures retain their cleanup behavior. Source fallback and expiry still disarm
+adoption permanently. No polling loop, new state column, or ingress change is
+required. See the [provider add contract](https://docs.linqapp.com/channel/imessage/api/resources/chats/subresources/participants/methods/add/).
+
 Cancellation claims `remove_started_at` once under the source-chat lock before
 dispatch and records `remove_accepted_at` only after a successful provider
 return. Replays reconcile roster absence; they never repeat removal. Until
