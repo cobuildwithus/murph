@@ -1,3 +1,4 @@
+import { generatedMediaFailureResult } from './generated-media-failure.js'
 import { readMaterializeVaultMediaToolRequest, materializeVaultMedia } from './dynamic-tools/materialize-vault-media.js'
 import { sleepSummaryCardRequestSchema } from '@murphai/contracts'
 import { resolveTrustedSleepSummaryCard } from './dynamic-tools/sleep-summary-card.js'
@@ -8695,12 +8696,14 @@ function readAnalyzeVideoDynamicToolRequest(value: unknown): MurphDynamicToolReq
 async function maybeExecuteRecapImage(input: ExecuteMurphDynamicToolRequestInput,
   request: Extract<MurphDynamicToolRequest, { kind: 'generate-image' }>): Promise<MurphDynamicToolExecutionResult | null> {
   if (request.args.output === 'file') {
-    const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'image', args: request.args }, input.fetchImpl)
-    if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
-    const result = await executeGenerateImageTool({ args: request.args, fileRuntime,
-      abortSignal: input.abortSignal, env: input.env, fetchImpl: input.fetchImpl,
-      providerRequestOrdinal: input.nextUsageOrdinal() }).finally(() => fileRuntime.finish?.())
-    return { ...toolTextResult(result.rpcSuccess, result.rpcText), usageDraft: result.usageDraft ?? null }
+    try {
+      const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'image', args: request.args }, input.fetchImpl)
+      if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
+      const result = await executeGenerateImageTool({ args: request.args, fileRuntime,
+        abortSignal: input.abortSignal, env: input.env, fetchImpl: input.fetchImpl,
+        providerRequestOrdinal: input.nextUsageOrdinal() }).finally(() => fileRuntime.finish?.())
+      return { ...toolTextResult(result.rpcSuccess, result.rpcText), ...toolFailureMetadata(result), usageDraft: result.usageDraft ?? null }
+    } catch (error) { return recapMediaToolFailure(error) }
   }
   if (input.hostedToolContext?.currentGameRecapScope?.()?.show) return toolTextResult(false, 'Recap media requires output=file.', 'authority_rejected')
   return null
@@ -8708,9 +8711,11 @@ async function maybeExecuteRecapImage(input: ExecuteMurphDynamicToolRequestInput
 
 async function executeSongToolRequest(input: ExecuteMurphDynamicToolRequestInput & { request: Extract<MurphDynamicToolRequest, { kind: 'generate-song' }> }): Promise<MurphDynamicToolExecutionResult> {
       if (input.request.args.output === 'file') {
-        const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'song', args: input.request.args }, input.fetchImpl)
-        if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
-        return executeGenerateSongDynamicTool({ args: input.request.args, env: input.env, fileRuntime, abortSignal: input.abortSignal }).finally(() => fileRuntime.finish?.())
+        try {
+          const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'song', args: input.request.args }, input.fetchImpl)
+          if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
+          return await executeGenerateSongDynamicTool({ args: input.request.args, env: input.env, fileRuntime, abortSignal: input.abortSignal }).finally(() => fileRuntime.finish?.())
+        } catch (error) { return recapMediaToolFailure(error) }
       }
       if (input.hostedToolContext?.currentGameRecapScope?.()?.show) return toolTextResult(false, 'Recap media requires output=file.', 'authority_rejected')
       if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
@@ -8723,4 +8728,9 @@ async function executeSongToolRequest(input: ExecuteMurphDynamicToolRequestInput
         recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
+}
+
+function recapMediaToolFailure(error: unknown): MurphDynamicToolExecutionResult {
+  const result = generatedMediaFailureResult(error)
+  return { ...toolTextResult(false, result.rpcText), ...toolFailureMetadata(result) }
 }

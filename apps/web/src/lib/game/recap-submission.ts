@@ -1,3 +1,4 @@
+import { RecapControlError } from '@murphai/contracts/recap-admission';
 import { readGameRecapMaterial } from './service';
 import 'server-only';
 import { createHash } from 'node:crypto';
@@ -30,7 +31,7 @@ export async function prepareRecapSubmission(input: Identity & { draft: GameReca
     const hash = recapDraftHash(input.draft);
     const prior = await tx.gameEvent.findUnique({ where: { commandKey: recapSelectionKey(input.eventId) }, select: { payload: true } });
     if (prior && !input.trustedFallback) {
-      if (recapSelectionSchema.parse(prior.payload).hash !== hash) throw new Error('This submission is already frozen. Retry the same draft.');
+      if (recapSelectionSchema.parse(prior.payload).hash !== hash) throw new RecapControlError('recap_submission_frozen');
       return { prepared: true, draftHash: hash };
     }
     const admission = await readRecapAdmissionTx(tx, input.eventId);

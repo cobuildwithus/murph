@@ -12,13 +12,13 @@ function requireReferenceHashes(photos: ReadonlyMap<string, Buffer>, descriptor:
   if (descriptor.kind === 'image' && referenceIds.some((id, index) => !photos.has(id) || hash(photos.get(id)!) !== descriptor.referenceHashes[index])) throw new Error('Unapproved synthetic photo.')
 }
 
-/** Synthetic provider boundary shared by the live-model and hosted-container lanes. No media
- * request leaves this process. The model still uses the production file tools,
+/** Synthetic provider boundary shared by the live-model and hosted-container lanes. Media requests stay in process unless the sanctioned live test explicitly supplies mediaFetch. The model still uses the production file tools,
  * real byte decoders, reservation reducer, preview and submission dispatcher. */
 export async function createRecapShowLiveProviders(input: {
   game: unknown; players: { name: string; memberId: string }[];
   entries: RecapMaterial['entries']; result: RecapMaterial['result'];
   chat: { playerName: string; text: string }[];
+  mediaFetch?: typeof fetch;
 }) {
   const photos = new Map<string, Buffer>()
   const references: RecapMaterial['references'] = []
@@ -92,6 +92,7 @@ export async function createRecapShowLiveProviders(input: {
     if (!reservation || reservation.consumed || descriptor.requestHash !== reservation.descriptor.requestHash) throw new Error('Synthetic provider rejected unreserved media.')
     reservation.consumed = true
     providerCalls.push(descriptor)
+    if (input.mediaFetch) return input.mediaFetch(url, init)
     return descriptor.kind === 'song' ? new Response(song, { headers: { 'content-type': 'audio/mpeg' } })
       : Response.json({ data: [{ b64_json: image.toString('base64') }], usage: { input_tokens: 100, output_tokens: 100, total_tokens: 200 } })
   }
@@ -109,3 +110,8 @@ export async function createRecapShowLiveProviders(input: {
     },
   }
 }
+
+// Composed provider-boundary probes use the production host and file tool.
+export { createRecapMediaRuntime, recapRunAdmissionSchema } from './assistant/recap-media-runtime.js'
+export { materializeRecapWorkspace } from './assistant/recap-workspace.js'
+export { executeGenerateSongTool } from './assistant-codex/generate-voice-memo-tool.js'

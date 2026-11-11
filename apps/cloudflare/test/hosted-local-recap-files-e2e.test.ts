@@ -19,14 +19,14 @@ const root = fileURLToPath(new URL('../../../', import.meta.url));
 const exec = promisify(execFile);
 const containerFlag = 'MURPH_RECAP_CONTAINER_PROOF';
 
-it('accepts a recap show through the production hosted Linux sandbox', async () => {
+it.each([false, true])('accepts a recap show through the production hosted Linux sandbox (mediaFails=%s)', async mediaFails => {
   if (process.env[containerFlag] !== '1') {
     const image = `murph-recap-files-proof:${createHash('sha256').update(root).digest('hex').slice(0, 12)}`;
     try {
       await exec('docker', ['build', '--platform', 'linux/amd64', '-f', path.join(root, 'Dockerfile.cloudflare-hosted-runner'), '-t', image, path.join(root, 'apps/cloudflare')], { maxBuffer: 16 * 1024 * 1024 });
       const running = exec('docker', ['run', '--rm', '--platform', 'linux/amd64', '--network', 'none', '--security-opt', 'seccomp=unconfined', '--security-opt', 'apparmor=unconfined',
         '--user', `${process.getuid!()}:${process.getgid!()}`, '--mount', `type=bind,source=${root},target=/workspace`, '--workdir', '/workspace', '-e', `${containerFlag}=1`, '--entrypoint', 'node', image,
-        '/workspace/node_modules/vitest/vitest.mjs', 'run', '--pool=forks', '--config', 'apps/cloudflare/vitest.e2e.config.ts', 'apps/cloudflare/test/hosted-local-recap-files-e2e.test.ts'], { maxBuffer: 16 * 1024 * 1024 });
+        '/workspace/node_modules/vitest/vitest.mjs', 'run', '--pool=forks', '--config', 'apps/cloudflare/vitest.e2e.config.ts', 'apps/cloudflare/test/hosted-local-recap-files-e2e.test.ts', '-t', `mediaFails=${mediaFails}`], { maxBuffer: 16 * 1024 * 1024 });
       running.child.stdout?.pipe(process.stdout);
       running.child.stderr?.pipe(process.stderr);
       await running;
@@ -46,11 +46,12 @@ it('accepts a recap show through the production hosted Linux sandbox', async () 
   const gameId = 'synthetic-linux';
   const relativeRoot = `.runtime/tmp/recap/${createHash('sha256').update(eventId).digest('hex').slice(0, 32)}`;
   const command = `cat ${relativeRoot}/inputs/writing-guide.md ${relativeRoot}/inputs/game.json ${relativeRoot}/inputs/chat.jsonl`;
-  const fixture = await createHostedRecapFixture(gameId);
+  const fixture = await createHostedRecapFixture(gameId, mediaFails);
   const draftPath = `${relativeRoot}/drafts/show.json`;
   const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
   const draftCommand = (revised: boolean) => {
     const story = structuredClone(fixture.story);
+    if (mediaFails) delete story.song;
     if (revised) story.pages[3]!.blocks[0]!.text = 'Mission control found the missing sock';
     const draft = { story, files: fixture.receipts.map(receipt => ({ slot: receipt.mediaType === 'image/jpeg' ? 'scene-0' : 'song', receipt })) };
     return buildAssistantProviderShellCommandCall(`printf '%s' ${quote(JSON.stringify(draft))} > ${draftPath}`);
@@ -121,7 +122,11 @@ it('accepts a recap show through the production hosted Linux sandbox', async () 
     expect([...observed].some(output => output.includes('Process exited with code 0') && output.includes(gameId))).toBe(true);
     expect([...observed].some(output => output.includes('RECAP_CONFINEMENT_OK') && output.includes('Process exited with code 0'))).toBe(true);
     expect([...observed].some(output => output.includes('RECAP_PREVIEW_READ_OK') && output.includes('Process exited with code 0'))).toBe(true);
-    expect(fixture.receipts).toHaveLength(2);
+    expect(fixture.receipts).toHaveLength(mediaFails ? 0 : 2);
+    if (mediaFails) {
+      expect([...observed].some(output => output.includes('Media failed (provider_http)'))).toBe(true);
+      expect(fixture.saved[0]?.song).toBeUndefined();
+    }
     expect(fixture.providerCalls.map(call => call.kind)).toEqual(['image', 'song']);
     expect(fixture.phases).toEqual(['prepare', 'accept']);
     expect(fixture.saved).toHaveLength(1);
@@ -136,7 +141,7 @@ it('accepts a recap show through the production hosted Linux sandbox', async () 
       const png = await readFile(path.join(vault, relativeRoot, 'previews', preview.name, 'page-01.png'));
       expect(png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
     }
-    process.stdout.write(`Synthetic Linux recap accepted: inputs read; confinement preserved; image + song files; 2 preview drafts; 1 chat line/link; 0 chat media.\n`);
+    process.stdout.write(`Synthetic Linux recap accepted: inputs read; confinement preserved; ${mediaFails ? 'provider failures recovered without media' : 'image + song files'}; 2 preview drafts; 1 chat line/link; 0 chat media.\n`);
   } catch (error) {
     process.stdout.write(`Synthetic Linux command: ${command}\nSynthetic Linux tool outputs: ${JSON.stringify([...observed])}\n`);
     throw error;

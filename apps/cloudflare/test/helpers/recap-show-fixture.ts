@@ -5,12 +5,12 @@ import type { HostedGameToolResponse, HostedRuntimeGroupToolRequest } from '@mur
 // Reuse the sanctioned live lane's synthetic media and real reservation/byte checks.
 import { createRecapShowLiveProviders } from '@murphai/assistant-engine/recap-show-testkit';
 
-export async function createHostedRecapFixture(gameId: string) {
+export async function createHostedRecapFixture(gameId: string, mediaFails = false) {
   const players = [{ memberId: 'synthetic-a', name: 'Player A' }, { memberId: 'synthetic-b', name: 'Player B' }];
   const entries = [{ entryId: 'synthetic-photo-a', playerName: 'Player A', kind: 'photo', text: 'Purple mat', visibleToBoth: true }];
   const result = players.map((player, index) => ({ ...player, score: 3 - index }));
   const chat = [{ playerName: 'Player B', text: 'The laundry basket supervises.' }];
-  const providers = await createRecapShowLiveProviders({ game: { id: gameId, maxPlayers: 2, recapShow: true }, players, entries, result, chat });
+  const providers = await createRecapShowLiveProviders({ game: { id: gameId, maxPlayers: 2, recapShow: true }, players, entries, result, chat, ...(mediaFails ? { mediaFetch: async () => Response.json({ error: { message: 'Synthetic provider unavailable' } }, { status: 503 }) } : {}) });
   const receipts: RecapFileReceipt[] = [];
   const saved: GameRecapStory[] = [];
   const phases: string[] = [];

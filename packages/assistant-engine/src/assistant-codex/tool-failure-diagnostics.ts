@@ -1,3 +1,4 @@
+import type { MediaFailureDetails } from './generated-media-failure.js'
 import { HostedCanonicalWriteOutcomeUnknownError } from '@murphai/core'
 import { AssistantWorkspaceArtifactMaterializationError } from '../assistant/execution-context.js'
 import { types } from 'node:util'
@@ -14,7 +15,7 @@ import type {
 } from './dynamic-tools.js'
 
 /** Private metadata only. Never serialize this alongside model/RPC content. */
-export interface ToolFailureDiagnostic {
+export interface ToolFailureDiagnostic extends Partial<MediaFailureDetails> {
   failureStage: 'admission' | 'execution' | 'result' | 'validation' | 'delivery'
   failureReason: ToolFailureReason
   errorCategory?: ToolErrorCategory
