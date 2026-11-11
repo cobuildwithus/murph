@@ -1,6 +1,6 @@
-# Review and release the simplicity cleanup
+# Prepared and reviewed the simplicity release
 
-Status: active
+Status: completed
 Created: 2026-11-11
 Updated: 2026-11-11
 
@@ -70,9 +70,9 @@ skip gates, use local production secrets or perform an unapproved rollback.
 ## Progress
 
 - Partition and branch preparation: complete. All six initial component trees compose exactly to the reconciled checkpoint; later changelog provenance is scoped to each owning PR.
-- Per-PR focused verification: fresh builds/typechecks and focused owner proof passed; the games PostgreSQL invocation was corrected to match canonical serial CI execution. ReviewGPT and exact-head CI are in progress.
-- Merges: pending.
-- Single Cloudflare deployment and post-deploy evidence: pending.
+- Per-PR focused verification: fresh builds/typechecks and focused owner proof passed; the games PostgreSQL invocation was corrected to match canonical serial CI execution. All six GPT-6 Pro reviews are valid and resolved. Exact-head CI is in progress.
+- Merges at this snapshot: data PR #4861 merged as `a8b55825091f72ebc5e41d7718fdc4014eb7126f`; remaining components await exact-head CI and ordered merge.
+- Single Cloudflare deployment and post-deploy evidence: pending. The original completion owner continues delivery; final merge and release receipts are recorded on [PR #4866](https://github.com/cobuildwithus/murph/pull/4866). This archived code-preparation record does not claim deployment completion.
 
 ## Pull requests
 
@@ -113,8 +113,28 @@ actual pushed heads, including changelog provenance.
 - Tooling: add the audit to the canonical documentation index. Doc gardening
   reports zero issues.
 
-Data, devices and runtime have validated GPT-6 Pro review receipts. The initial
-other three answers were recovered against their exact accepted turns, but
-model attestation remained unavailable. They do not count as passes; preserve
-those receipts and retry round one on the corrected stable candidates. The
-separate early-response attestation gap is recorded in the task's Frog entry.
+The initial authority, experience and tooling responses were recovered but failed model attestation. They were excluded; replacement round-one reviews below passed. Original captures remain unchanged. The separate early-response attestation gap is recorded in the task's Frog entry.
+
+## Validated review receipts
+
+| Component | Reviewed head | Outcome | Review |
+| --- | --- | --- | --- |
+| data | `84d7c098a05371c64eacd01d90586d910e86bede` | One finding accepted, fixed and verified | [GPT-6 Pro](https://chatgpt.com/c/6af4eede-9694-83ea-92fd-634484985fcb) |
+| devices | `97c8e2633ddb4c289f15884b910db41fbdab1136` | One finding accepted, fixed and verified | [GPT-6 Pro](https://chatgpt.com/c/6af4ef27-0d48-8326-b34c-2358ae7f50a6) |
+| runtime | `078947d6a225657a758946ab67f37287b66d83fe` | One finding accepted, fixed and verified | [GPT-6 Pro](https://chatgpt.com/c/6af4eeb7-faf0-832a-b485-74b440c82075) |
+| authority | `8be2b06725fe46c82141202e9b93d99f6b73db16` | PASS; no qualifying findings | [GPT-6 Pro](https://chatgpt.com/c/6af4f686-0584-8332-b398-0df7ce0d6f0c) |
+| experience | `5da4d6c0e01bd5514b757f2f2c891d8989e9cd50` | PASS; no qualifying findings | [GPT-6 Pro](https://chatgpt.com/c/6af4f684-f2e8-83ea-ae7e-843467136dd9) |
+| tooling | `43c660229ccfb6aebdd62f959dd7662f03b1b4d0` | PASS; no qualifying findings | [GPT-6 Pro](https://chatgpt.com/c/6af4f6c0-a1e4-832f-999f-56b5b66e4cc7) |
+
+The final combined source passed a fresh prepared build, full workspace typecheck
+and scenario-integrity check after prerequisite fixes and current main were
+merged. The last documentation commit records this evidence and closes the
+implementation plan; it adds no behavior and requires no new review round.
+
+The release candidate at `43c660229ccfb6aebdd62f959dd7662f03b1b4d0`, compared
+with pre-merge main `1485217c1942e8ea938f4c993c572617590c0ca3`, removes 68,623 net
+lines across 462 paths: 62,114 test/fixture lines and 6,258 source lines under
+the report's classification. Final documentation closure may change doc counts.
+The requested 500,000-test-line target remains unmet. Retained behavioral proof
+and current product requirements govern deletions.
+Completed: 2026-11-11

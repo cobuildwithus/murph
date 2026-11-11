@@ -1,7 +1,7 @@
 # Architecture, bug and test audit
 
 Date: 2026-11-11
-Status: verified checkpoint split into six PRs; review and release in progress
+Status: six reviewed PRs; accepted findings resolved; final CI and release in progress
 Audit base: main `d519978569e3443aabe4dfb17690d3cc30883649`
 Integrated main: `978a415b771cff9810d2e1b7d5fd2adce0126d24`
 Task: `codex/radical-simplicity`
@@ -32,7 +32,7 @@ particular test is unnecessary. No deletion is justified solely by file size,
 its age, a `coverage` filename, or an estimate from a reviewer. The execution plan
 records measured totals and remaining verification.
 
-## Measured result
+## Initial checkpoint measured result
 
 The implemented diff against integrated main `978a415b771c` removes **62,003 net
 test lines**: 85,830 deleted and 23,827 added, including replacement fixtures.
@@ -248,3 +248,33 @@ its review and merge status must be checked separately. The full Docker smoke an
 also remain unrun. Rendered component tests and native local-Codex journeys
 prove their respective boundaries, not those external checks. Product/release
 readiness remains **Hold** until applicable missing evidence is supplied.
+
+
+## Reviewed release candidate
+
+All six PRs received valid GPT-6 Pro review. Three accepted findings were fixed:
+remove unused collector family buckets; restore the smoke runner's existing
+home-directory contract; and use canonical document manifest paths so member
+files named `manifest.json` cannot block preservation. The last fix also removes
+the unused document-promotion API and its speculative generic machinery.
+Retained real-file and CLI proofs preserve default replay rejection and explicit
+same-byte re-import after deletion. No new state or authority owner was added.
+
+CI also identified three stale CSV scenario strings, redundant Connect effect
+setters, a missing documentation index row and six PostgreSQL fixtures without
+an activation transport. The corrections preserve product behavior and prove
+real mailbox ownership at the mocked external acknowledgement boundary.
+
+The reviewed combined candidate `43c660229ccfb6aebdd62f959dd7662f03b1b4d0`
+against pre-merge main `1485217c1942e8ea938f4c993c572617590c0ca3` removes
+**68,623 net lines**, including **62,114 test/fixture lines** and **6,258 source
+lines**, across 462 paths. These are net counts after replacements and review
+fixes; final documentation closure can change the doc total. The 500,000-test-line
+target remains unmet. Fresh combined build, full workspace typecheck and scenario
+integrity passed. Exact-head CI, ordered merges and the single Cloudflare release
+remain distinct completion gates.
+
+The [review record](../exec-plans/completed/2026-11-11-simplicity-pr-release.md)
+contains validated heads, review links and proof. [PR #4866](https://github.com/cobuildwithus/murph/pull/4866)
+tracks final merge and deployment receipts; this report does not claim a deployment
+before that live evidence exists.
