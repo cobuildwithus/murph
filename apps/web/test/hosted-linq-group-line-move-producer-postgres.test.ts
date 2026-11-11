@@ -305,10 +305,10 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect(provider.add).toHaveBeenCalledTimes(step === "reserved" ? 1 : 0);
     expect((await row(id)).status).toBe("reserved");
   });
-  it("disarms an interrupted unknown add without repeating or falsely settling it", async () => {
+  it("reconciles an interrupted add without repeating it and still permits explicit cancellation", async () => {
     const id = await reserve("add_started"); targetPresent = false;
-    expect(await operate(id)).toMatchObject({ status: "reserved", code: "add_unconfirmed", adoptionExpired: true });
-    expect(await operate(id, "cancel")).toMatchObject({ status: "reserved", code: "add_unconfirmed" });
+    expect(await operate(id)).toMatchObject({ status: "reserved", code: "add_pending", addConfirmedAt: null, adoptionExpired: false });
+    expect(await operate(id, "cancel")).toMatchObject({ status: "reserved", code: "add_pending", adoptionExpired: true });
     targetPresent = true;
     expect(await operate(id, "cancel")).toMatchObject({ status: "cancelled" });
     expect(provider.add).not.toHaveBeenCalled();
@@ -376,10 +376,31 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect(await start()).toMatchObject({ status: "reserved", code: "add_unconfirmed", adoptionExpired: true });
     expect(provider.add).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
   });
-  it("does not falsely settle a queued add whose complete confirmation read is absent", async () => {
-    provider.add.mockResolvedValue({ status: "queued" });
-    expect(await start()).toMatchObject({ status: "reserved", code: "add_unconfirmed", adoptionExpired: true });
-    expect(provider.add).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
+  it("waits for a queued add across resumes, then adopts without repeating or undoing the add", async () => {
+    provider.add.mockResolvedValue({ status: "accepted", message: "Participant addition queued" });
+    const result = await start();
+    expect(result).toMatchObject({ status: "reserved", code: "add_pending", addConfirmedAt: null, adoptionExpired: false });
+    expect(await operate(result.moveId)).toMatchObject({ code: "add_pending", addConfirmedAt: null, adoptionDeadlineAt: result.adoptionDeadlineAt });
+    expect(provider.remove).not.toHaveBeenCalled();
+    targetPresent = true;
+    expect(await operate(result.moveId)).toMatchObject({ status: "reserved", code: null, adoptionExpired: false });
+    expect((await row(result.moveId)).addConfirmedAt).not.toBeNull();
+    await webhook();
+    for (const callback of callbacks) await callback();
+    expect((await row(result.moveId)).status).toBe("left");
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room, accountLookupKey: targetKey } })).toBe(1);
+    expect(provider.add).toHaveBeenCalledOnce(); expect(provider.remove).not.toHaveBeenCalled();
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+  it("does not renew a queued add after its adoption deadline and cleans up its late arrival", async () => {
+    provider.add.mockResolvedValue({ status: "accepted" });
+    const result = await start();
+    await db.hostedLinqGroupLineMove.update({ where: { id: result.moveId }, data: { adoptionDeadlineAt: new Date(0) } });
+    targetPresent = true;
+    expect(await operate(result.moveId)).toMatchObject({ code: "adoption_deadline_elapsed", adoptionExpired: true });
+    expect((await row(result.moveId)).addConfirmedAt).toBeNull();
+    expect(await operate(result.moveId, "cancel")).toMatchObject({ status: "cancelled" });
+    expect(provider.add).toHaveBeenCalledOnce(); expect(provider.remove).toHaveBeenCalledOnce();
   });
   it.each(["unavailable", "incomplete"])("disarms adoption when the add confirmation roster is %s", async failure => {
     const read = provider.retrieve.getMockImplementation()!;
