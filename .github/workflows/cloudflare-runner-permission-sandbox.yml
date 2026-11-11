@@ -17,6 +17,10 @@ on:
       - "packages/assistant-engine/src/assistant-ask.ts"
       - "packages/assistant-engine/src/assistant-codex.ts"
       - "packages/assistant-engine/src/assistant-codex/**"
+      - "packages/assistant-engine/src/assistant/turn-plan.ts"
+      - "packages/assistant-engine/src/assistant/codex-turn-runner.ts"
+      - "apps/cloudflare/test/hosted-local-recap-files-e2e.test.ts"
+      - "packages/hosted-local-harness/src/e2e.ts"
       - "packages/assistant-engine/test/assistant-codex-native-voice.test.ts"
       - "packages/assistant-engine/test/assistant-codex-scripted-runtime.test.ts"
       - "packages/assistant-engine/test/assistant-codex-websocket-stall.test.ts"
@@ -47,6 +51,10 @@ on:
       - "packages/assistant-engine/src/assistant-ask.ts"
       - "packages/assistant-engine/src/assistant-codex.ts"
       - "packages/assistant-engine/src/assistant-codex/**"
+      - "packages/assistant-engine/src/assistant/turn-plan.ts"
+      - "packages/assistant-engine/src/assistant/codex-turn-runner.ts"
+      - "apps/cloudflare/test/hosted-local-recap-files-e2e.test.ts"
+      - "packages/hosted-local-harness/src/e2e.ts"
       - "packages/assistant-engine/test/assistant-codex-native-voice.test.ts"
       - "packages/assistant-engine/test/assistant-codex-scripted-runtime.test.ts"
       - "packages/assistant-engine/test/assistant-codex-websocket-stall.test.ts"
@@ -128,6 +136,9 @@ jobs:
         run: |
           sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0
           test "$(sysctl --values kernel.apparmor_restrict_unprivileged_userns)" = "0"
+
+      - name: Prove recap files in the native hosted runner
+        run: pnpm hosted-local e2e recap-show-files --no-bundle
 
       - name: Prove native Codex permission confinement
         run: pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base
