@@ -210,10 +210,13 @@ const AVAILABILITY_CONFLICT_INSTRUCTIONS = [
   AVAILABILITY_CONFLICT_BLOCK_END,
 ].join('\n')
 
+const listNotificationPriorDeliveries = vi.fn<() => Promise<ReturnType<typeof notificationHistoryIntent>[]>>()
+
 beforeEach(() => {
+  listNotificationPriorDeliveries.mockReset().mockResolvedValue([])
   vi.doMock('../src/assistant/outbox/store.js', async (importOriginal) => ({
     ...await importOriginal<typeof import('../src/assistant/outbox/store.js')>(),
-    listAssistantOutboxIntentsForAutoReplyRoute: vi.fn(async () => []),
+    listAssistantOutboxIntentsForAutoReplyRoute: listNotificationPriorDeliveries,
   }))
 })
 
@@ -6367,10 +6370,7 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/runtime-state-service.js', () => ({
     createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
   }))
-  vi.doMock('../src/assistant/outbox/store.js', async (importOriginal) => ({
-    ...await importOriginal<typeof import('../src/assistant/outbox/store.js')>(),
-    listAssistantOutboxIntentsForAutoReplyRoute: vi.fn(async () => input.priorDeliveries ?? []),
-  }))
+  listNotificationPriorDeliveries.mockResolvedValue(input.priorDeliveries ?? [])
   vi.doMock('../src/assistant/outbox.js', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../src/assistant/outbox.js')>()
     return {
@@ -6642,6 +6642,8 @@ test.each([
   sharedPlan.conversationPolicy.audience = { ...sharedPlan.conversationPolicy.audience,
     channel: 'linq', threadId: 'synthetic-room', threadIsDirect: false,
     explicitTarget: 'synthetic-room', deliveryPolicy: 'explicit-target-override' }
+  // A prior import must retain the same mock when this harness supplies history.
+  await import('../src/assistant/notification-history.ts')
   const harness = await loadNotificationTurnHarness({ providerResult, sharedPlan,
     priorDeliveries: [notificationHistoryIntent()], turnId: 'turn-history' })
   await harness.sendAssistantNotificationLocal({ channel: 'linq', threadId: 'synthetic-room',
