@@ -4381,8 +4381,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("drains delivery effects created by system mailbox notifications after checkpoint", async () => {
+  it.each([false, true])("drains system notification delivery before the next background decision (cron becomes due: %s)", async (cronBecomesDue) => {
     const logRequests: HostedRuntimeLogRequest[] = [];
+    let generated = false;
+    if (cronBecomesDue) mocks.getAssistantCronStatus.mockImplementation(async () => ({
+      dueJobs: generated ? 1 : 0, enabledJobs: 1, runningJobs: 0, totalJobs: 1,
+      nextRunAt: generated ? "2026-04-27T00:00:00.000Z" : "2099-01-01T00:00:00.000Z",
+    }));
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_notification",
@@ -4394,9 +4399,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       status: "processed",
     });
-    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
-      createDeliveryEffect(),
-    ]);
+    mocks.collectHostedAssistantDeliverySideEffects.mockImplementationOnce(async () => {
+      generated = true;
+      return [createDeliveryEffect()];
+    });
     mocks.resolveHostedAssistantOutboxNextWakeAt
       .mockResolvedValueOnce("2026-04-27T00:20:00.000Z")
       .mockResolvedValueOnce(null);
@@ -4425,6 +4431,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       logRequests,
     }));
 
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(result.checkpointReason).toBe("outbox_sending");
     expect(result.nextWakeAt).toBe("2026-04-27T00:20:00.000Z");
     expect(result.redactedStatus).toEqual(expect.objectContaining({

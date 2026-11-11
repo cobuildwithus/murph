@@ -1,4 +1,6 @@
 Bound pair and group games tolerate bystanders while retaining current-player,
+
+Shared reminder awareness is owned by the [assistant engine](../packages/assistant-engine/README.md) and [assistant runtime](../packages/assistant-runtime/README.md); the [execution plan](exec-plans/active/2026-11-10-reminder-awareness.md) records the implementation and proof.
 route and restriction checks. [Architecture](../ARCHITECTURE.md),
 [Weekly Game](product-specs/weekly-game.md), and
 [the completed implementation plan](exec-plans/completed/2026-11-10-game-chat-open-room.md)

@@ -560,7 +560,12 @@ resulting avatar. No private photo is shared with the subject or other players.
   current players in the bound room, with known current game-profile time zones
   and a widest clock gap strictly under three hours. Bystanders may receive the
   message but are not addressed and their time zones do not gate the check-in. A player switched off for a game is not addressed.
-  Murph stays quiet about someone who already said they will or will not do it.
+  Murph omits a task someone already said they will or will not do, or an
+  equivalent question already sent for that person and local date by another
+  reminder. Other uncovered tasks and players remain eligible. A reminder or
+  stated intention never counts as completion. Shared notification context uses
+  bounded accepted outgoing messages from this exact room; pending output is
+  not evidence of a prior send.
   Three consecutive accepted scheduled evening sends without a player message
   pause future evenings until someone writes. Skips and failures do not count.
   The 90-day iMessage inactivity pause still applies. The feature is off unless
