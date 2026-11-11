@@ -66,12 +66,12 @@ it('reads recap inputs through the production hosted Linux sandbox', async () =>
     await mkdir(path.join(vault, 'games'), { recursive: true });
     await writeFile(path.join(vault, 'games/lore-0123456789abcdef0123456789abcdef.md'), '# Synthetic game lore\n');
     await writeFile(path.join(home, 'config.toml'), [
-      'model = "gpt-6.1-sol"', 'model_provider = "synthetic"', 'approval_policy = "never"', 'sandbox_mode = "workspace-write"', 'allow_login_shell = false',
+      'model = "gpt-6.1-sol"', 'model_provider = "hosted-openai"', 'approval_policy = "never"', 'sandbox_mode = "workspace-write"', 'allow_login_shell = false',
       `model_catalog_json = "/usr/local/share/murph/codex-model-catalog.openai-flex.json"`,
-      '[model_providers.synthetic]', 'name = "Synthetic loopback"', `base_url = "http://127.0.0.1:${address.port}/v1"`, 'env_key = "OPENAI_API_KEY"', 'wire_api = "responses"', 'requires_openai_auth = false', 'request_max_retries = 0', 'stream_max_retries = 0',
+      '[model_providers.hosted-openai]', 'name = "Synthetic loopback"', `base_url = "http://127.0.0.1:${address.port}/v1"`, 'env_key = "OPENAI_API_KEY"', 'wire_api = "responses"', 'requires_openai_auth = false', 'request_max_retries = 0', 'stream_max_retries = 0',
       ...buildMurphHostedPermissionProfileTomlLines(),
     ].join('\n'));
-    const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: '/usr/local/bin/codex', codexHome: home, model: 'gpt-6.1-sol', modelProvider: 'synthetic', provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' });
+    const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: '/usr/local/bin/codex', codexHome: home, model: 'gpt-6.1-sol', modelProvider: 'hosted-openai', provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' });
     if (!target) throw new Error('Expected synthetic target.');
     const scope = { gameId, eventId, pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const };
     const events: unknown[] = [];
