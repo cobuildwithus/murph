@@ -1,3 +1,4 @@
+import { seedStoredAccount } from "./store-test-helpers.ts";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
@@ -6,7 +7,7 @@ import { buildJunctionScheduleTimeHistoryDedupeKey } from "../src/junction-histo
 const NOW = "2026-06-12T12:00:00.000Z";
 function fixture() {
   const store = new SqliteDeviceSyncStore(":memory:");
-  const account = store.upsertAccount({
+  const account = seedStoredAccount(store, {
     provider: "junction", externalAccountId: "synthetic-history-account", scopes: [],
     credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
     connectedAt: NOW,

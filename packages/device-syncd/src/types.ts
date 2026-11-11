@@ -50,10 +50,7 @@ export interface DeviceSyncLogger {
 
 export interface DeviceSyncServiceConfig {
   vaultRoot: string;
-  publicBaseUrl: string;
-  allowedReturnOrigins?: string[];
   stateDatabasePath?: string;
-  sessionTtlMs?: number;
   workerLeaseMs?: number;
   // Number of durable job rows per drain tick. A provider batch may complete
   // multiple compatible rows in one worker pass, and each row counts here.
@@ -1325,8 +1322,6 @@ export interface DeviceSyncServiceSummary {
   jobsQueued: number;
   jobsRunning: number;
   jobsDead: number;
-  oauthStates: number;
-  webhookTraces: number;
 }
 
 export interface DeviceSyncImporterPort {

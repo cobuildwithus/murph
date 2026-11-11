@@ -1,19 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { isDeviceSyncConnectionSetupPending } from "./public-account.ts";
-import { toIsoTimestamp } from "./shared.ts";
 
 import {
   applySqliteRuntimeMigrations,
   openSqliteRuntimeDatabase,
   withImmediateTransaction,
 } from "@murphai/runtime-state/node";
-
-import {
-  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
-  decideJunctionSourceCallbackAdmission,
-} from "./junction-source-reconnect.ts";
-import { stringifyJson } from "./shared.ts";
 
 import {
   decodeDeviceSyncSummaryRow,
@@ -27,11 +19,9 @@ import {
   listAccounts as listStoredAccounts,
   patchAccount as patchStoredAccount,
   updateAccountTokens as updateStoredAccountTokens,
-  upsertAccount as upsertStoredAccount,
 } from "./store/accounts.ts";
 import type {
   AccountPatchInput,
-  AccountUpsertInput,
 } from "./store/accounts.ts";
 import {
   hydrateHostedAccount as hydrateStoredHostedAccount,
@@ -59,47 +49,23 @@ import {
   readNextDeviceSyncJobWakeAt,
   readNextDeviceSyncJobWakeAtForAccount,
   releaseDeviceSyncJobIfOwned,
-  wakeRetainedDeviceSyncJobsForAccount,
 } from "./store/jobs.ts";
-import {
-  consumeOAuthState,
-  createOAuthState,
-  deleteExpiredOAuthStates,
-  discardUnconsumedOAuthState,
-  resolveOAuthStateWithoutProviderAuthority,
-} from "./store/oauth-states.ts";
 import {
   DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION,
   ensureDeviceSyncStoreSchema,
 } from "./store/schema.ts";
 import {
   listConnectionSources as listStoredConnectionSources,
-  markConnectionSourceDataReceived as markStoredConnectionSourceDataReceived,
-  prepareConnectionSourceWriteInTransaction,
   upsertConnectionSource as upsertStoredConnectionSource,
-  upsertPreparedConnectionSourceInTransaction as upsertPreparedStoredConnectionSourceInTransaction,
 } from "./store/sources.ts";
 import {
-  clearOAuthCredentialAfterConfirmedRevoke as clearStoredOAuthCredentialAfterConfirmedRevoke,
   markSyncFailed as markStoredSyncFailed,
-  markConnectionSetupFailed as markStoredConnectionSetupFailed,
   markSyncStarted as markStoredSyncStarted,
   markSyncSucceeded as markStoredSyncSucceeded,
   markSyncSucceededInTransaction as markStoredSyncSucceededInTransaction,
-  markWebhookReceived as markStoredWebhookReceived,
   readNextActiveReconcileAt as readNextStoredActiveReconcileAt,
 } from "./store/sync-state.ts";
-import {
-  claimDeviceSyncWebhookTrace,
-  completeDeviceSyncWebhookTrace,
-  releaseDeviceSyncWebhookTrace,
-} from "./store/webhook-traces.ts";
-
 import type {
-  ClaimDeviceSyncWebhookTraceInput,
-  ConsumeOAuthStateResult,
-  DiscardUnconsumedOAuthStateResult,
-  DeviceSyncWebhookTraceClaimResult,
   DeviceSyncAccountStatus,
   DeviceSyncCanonicalImportReceipt,
   DeviceSyncJobFailureTransition,
@@ -108,8 +74,6 @@ import type {
   DeviceSyncServiceSummary,
   ListDeviceConnectionSourcesInput,
   ListDeviceSyncAccountsInput,
-  OAuthStateRecord,
-  OAuthStateConsumeClaim,
   ProviderAuthTokens,
   StoredDeviceConnectionSource,
   StoredDeviceSyncAccount,
@@ -120,13 +84,6 @@ class DeviceSyncSuccessFenceRejectedError extends Error {
   constructor() {
     super("Device sync success fence rejected.");
     this.name = "DeviceSyncSuccessFenceRejectedError";
-  }
-}
-
-class DeviceConnectionSourceAdmissionRejectedError extends Error {
-  constructor() {
-    super("Device connection source admission was rejected.");
-    this.name = "DeviceConnectionSourceAdmissionRejectedError";
   }
 }
 
@@ -169,9 +126,7 @@ export class SqliteDeviceSyncStore {
         (select count(*) from device_connection where status = 'active') as accounts_active,
         (select count(*) from device_job where status = 'queued') as jobs_queued,
         (select count(*) from device_job where status = 'running') as jobs_running,
-        (select count(*) from device_job where status = 'dead') as jobs_dead,
-        (select count(*) from oauth_state) as oauth_states,
-        (select count(*) from webhook_trace) as webhook_traces
+        (select count(*) from device_job where status = 'dead') as jobs_dead
     `).get();
     if (!row) {
       throw new Error("Failed to summarize device sync store.");
@@ -184,45 +139,7 @@ export class SqliteDeviceSyncStore {
       jobsQueued: decodedRow.jobs_queued,
       jobsRunning: decodedRow.jobs_running,
       jobsDead: decodedRow.jobs_dead,
-      oauthStates: decodedRow.oauth_states,
-      webhookTraces: decodedRow.webhook_traces,
     };
-  }
-
-  createOAuthState(input: OAuthStateRecord): OAuthStateRecord {
-    return createOAuthState(this.database, input);
-  }
-
-  deleteExpiredOAuthStates(now: string): number {
-    return deleteExpiredOAuthStates(this.database, now);
-  }
-
-  consumeOAuthState(
-    state: string,
-    now: string,
-    expectedProvider?: string,
-    expectedOwnerId?: string,
-  ): ConsumeOAuthStateResult {
-    return consumeOAuthState(this.database, state, now, expectedProvider, expectedOwnerId);
-  }
-
-  discardUnconsumedOAuthState(
-    state: string,
-    now: string,
-    expectedProvider?: string,
-    expectedOwnerId?: string,
-  ): DiscardUnconsumedOAuthStateResult {
-    return discardUnconsumedOAuthState(
-      this.database,
-      state,
-      now,
-      expectedProvider,
-      expectedOwnerId,
-    );
-  }
-
-  resolveOAuthStateWithoutProviderAuthority(claim: OAuthStateConsumeClaim): boolean {
-    return resolveOAuthStateWithoutProviderAuthority(this.database, claim);
   }
 
   listAccounts(input: ListDeviceSyncAccountsInput | string = {}): StoredDeviceSyncAccount[] {
@@ -261,17 +178,6 @@ export class SqliteDeviceSyncStore {
       connectedAt,
     );
     return account ? this.hydrateAccountSources(account) : null;
-  }
-
-  upsertAccount(input: AccountUpsertInput): StoredDeviceSyncAccount {
-    const account = upsertStoredAccount(this.database, input);
-    if (account.status === "active" && !isDeviceSyncConnectionSetupPending(account)) {
-      wakeRetainedDeviceSyncJobsForAccount(this.database, {
-        accountId: account.id,
-        now: input.connectedAt,
-      });
-    }
-    return account;
   }
 
   patchAccount(accountId: string, patch: AccountPatchInput): StoredDeviceSyncAccount {
@@ -331,47 +237,6 @@ export class SqliteDeviceSyncStore {
     return disconnectStoredAccount(this.database, accountId, now);
   }
 
-  disconnectAccountAndMarkPendingJobsDeadIfConnectedAt(input: {
-    accountId: string;
-    code: string;
-    expectedConnectedAt: string;
-    message: string;
-    now: string;
-  }): StoredDeviceSyncAccount | null {
-    return withImmediateTransaction(this.database, () => {
-      const existing = getStoredAccountById(this.database, input.accountId);
-      if (!existing) {
-        return null;
-      }
-      if (existing.connectedAt !== input.expectedConnectedAt) {
-        return null;
-      }
-
-      const disconnected = existing.status === "disconnected"
-        ? existing
-        : disconnectStoredAccountIfCurrentInTransaction(
-            this.database,
-            input.accountId,
-            input.now,
-            null,
-            null,
-            input.expectedConnectedAt,
-          );
-
-      if (!disconnected) {
-        return null;
-      }
-
-      markPendingDeviceSyncJobsDeadForAccount(this.database, {
-        accountId: input.accountId,
-        code: input.code,
-        message: input.message,
-        now: input.now,
-      });
-      return disconnected;
-    });
-  }
-
   disconnectAccountAndMarkPendingJobsDeadIfCurrent(input: {
     accountId: string;
     code: string;
@@ -387,7 +252,6 @@ export class SqliteDeviceSyncStore {
         input.now,
         input.expectedLocalConnectionRevision,
         input.expectedStatus,
-        null,
       );
 
       if (!disconnected) {
@@ -402,18 +266,6 @@ export class SqliteDeviceSyncStore {
       });
       return disconnected;
     });
-  }
-
-  markWebhookReceived(accountId: string, now: string): void {
-    markStoredWebhookReceived(this.database, accountId, now);
-  }
-
-  markConnectionSourceDataReceived(input: {
-    connectionId: string;
-    now: string;
-    sourceProviderSlug: string;
-  }): number {
-    return markStoredConnectionSourceDataReceived(this.database, input);
   }
 
   markSyncStarted(accountId: string, now: string): void {
@@ -449,193 +301,10 @@ export class SqliteDeviceSyncStore {
     return markStoredSyncFailed(this.database, accountId, now, code, message, status, options);
   }
 
-  markConnectionSetupFailed(
-    accountId: string,
-    expectedConnectedAt: string | null,
-    now: string,
-    code: string,
-    message: string,
-    oauthClaim?: OAuthStateConsumeClaim,
-  ): {
-    account: StoredDeviceSyncAccount | null;
-    applied: boolean;
-    blockedByRefreshLease: boolean;
-    oauthTokenVersion: number | null;
-  } {
-    return markStoredConnectionSetupFailed(
-      this.database,
-      accountId,
-      expectedConnectedAt,
-      now,
-      code,
-      message,
-      oauthClaim,
-    );
-  }
-
-  clearOAuthCredentialAfterConfirmedRevoke(
-    accountId: string,
-    expectedConnectedAt: string,
-    expectedTokenVersion: number,
-    now: string,
-  ): boolean {
-    return clearStoredOAuthCredentialAfterConfirmedRevoke(
-      this.database,
-      accountId,
-      expectedConnectedAt,
-      expectedTokenVersion,
-      now,
-    );
-  }
-
   enqueueJob(input: DeviceSyncEnqueueJobInput): DeviceSyncJobRecord {
     return withImmediateTransaction(this.database, () =>
       enqueueDeviceSyncJobInTransaction(this.database, input)
     );
-  }
-
-  commitConnectionEstablished(input: {
-    accountId: string;
-    expectedSourceLastSeenAt?: string | null;
-    jobs: readonly DeviceSyncJobInput[];
-    provider: string;
-    source?: UpsertDeviceConnectionSourceInput | null;
-  }): DeviceSyncJobRecord[] | null {
-    try {
-      return withImmediateTransaction(this.database, () => {
-        if (input.source) {
-          const establishedSource = input.provider === "junction"
-            ? listStoredConnectionSources(this.database, {
-                connectionId: input.accountId,
-                sourceProviderSlug: input.source.sourceProviderSlug,
-              })[0] ?? null
-            : null;
-          const preparedSource = prepareConnectionSourceWriteInTransaction(
-            this.database,
-            establishedSource
-              ? {
-                  ...input.source,
-                  sourceInstanceKey: establishedSource.sourceInstanceKey,
-                  sourceProviderSlug: establishedSource.sourceProviderSlug,
-                }
-              : input.source,
-          );
-          const source = preparedSource.input;
-          const existingSource = input.provider === "junction" && source.status === "connected"
-            ? establishedSource ?? preparedSource.existing
-            : null;
-          const sourceAdmission = input.provider === "junction" && source.status === "connected"
-            ? decideJunctionSourceCallbackAdmission({
-                connectionStartedAt: input.expectedSourceLastSeenAt,
-                currentSource: existingSource,
-              })
-            : "new_source";
-          if (sourceAdmission === "reject") {
-            throw new DeviceConnectionSourceAdmissionRejectedError();
-          }
-          const advancesJunctionSourceLifecycle = sourceAdmission === "advance_lifecycle";
-          let advancedLifecycleEpoch: number | undefined;
-
-          if (advancesJunctionSourceLifecycle) {
-            if (!existingSource) {
-              throw new TypeError("Existing Junction source lifecycle was not found.");
-            }
-            advancedLifecycleEpoch = existingSource.lifecycleEpoch + 1;
-            const account = getStoredAccountById(this.database, input.accountId);
-            if (!account) {
-              throw new TypeError(`Unknown account ${input.accountId}`);
-            }
-            const metadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
-              metadata: account.metadata,
-              providerSlug: source.sourceProviderSlug,
-            });
-            this.database.prepare(`
-              update device_connection
-              set metadata_json = ?, updated_at = ?
-              where id = ?
-            `).run(
-              stringifyJson(metadata),
-              source.lastSeenAt,
-              input.accountId,
-            );
-            this.database.prepare(`
-              update device_observation_state
-              set local_connection_revision = local_connection_revision + 1,
-                  updated_at = ?
-              where account_id = ?
-            `).run(source.lastSeenAt, input.accountId);
-          }
-
-          upsertPreparedStoredConnectionSourceInTransaction(
-            this.database,
-            preparedSource,
-            {
-              ...source,
-              ...(advancedLifecycleEpoch !== undefined
-                ? { lifecycleEpoch: advancedLifecycleEpoch }
-                : {}),
-            },
-          );
-        }
-
-        wakeRetainedDeviceSyncJobsForAccount(this.database, {
-          accountId: input.accountId,
-          now: input.source?.lastSeenAt ?? toIsoTimestamp(new Date()),
-        });
-
-        return input.jobs.map((job) =>
-          enqueueDeviceSyncJobInTransaction(this.database, {
-            provider: input.provider,
-            accountId: input.accountId,
-            kind: job.kind,
-            payload: job.payload ?? {},
-            priority: job.priority ?? 0,
-            availableAt: job.availableAt,
-            maxAttempts: job.maxAttempts,
-            dedupeKey: job.dedupeKey,
-          })
-        );
-      });
-    } catch (error) {
-      if (error instanceof DeviceConnectionSourceAdmissionRejectedError) {
-        return null;
-      }
-      throw error;
-    }
-  }
-
-  enqueueJobsAndCompleteWebhookTrace(input: {
-    accountId: string;
-    provider: string;
-    traceId: string;
-    claimToken: string;
-    jobs: readonly DeviceSyncJobInput[];
-  }): DeviceSyncJobRecord[] {
-    return withImmediateTransaction(this.database, () => {
-      const queuedJobs = input.jobs.map((job) =>
-        enqueueDeviceSyncJobInTransaction(this.database, {
-          provider: input.provider,
-          accountId: input.accountId,
-          kind: job.kind,
-          payload: job.payload ?? {},
-          priority: job.priority ?? 0,
-          availableAt: job.availableAt,
-          maxAttempts: job.maxAttempts,
-          dedupeKey: job.dedupeKey,
-        }),
-      );
-
-      const completed = completeDeviceSyncWebhookTrace(
-        this.database,
-        input.provider,
-        input.traceId,
-        input.claimToken,
-      );
-      if (!completed) {
-        throw new Error("Device sync webhook trace claim was lost before job enqueue completed.");
-      }
-      return queuedJobs;
-    });
   }
 
   getJobById(jobId: string): DeviceSyncJobRecord | null {
@@ -861,17 +530,6 @@ export class SqliteDeviceSyncStore {
     return markPendingDeviceSyncJobsDeadForAccountIfCurrent(this.database, input);
   }
 
-  claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult {
-    return claimDeviceSyncWebhookTrace(this.database, input);
-  }
-
-  completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean {
-    return completeDeviceSyncWebhookTrace(this.database, provider, traceId, claimToken);
-  }
-
-  releaseWebhookTrace(provider: string, traceId: string, claimToken: string): void {
-    releaseDeviceSyncWebhookTrace(this.database, provider, traceId, claimToken);
-  }
 }
 
 const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([

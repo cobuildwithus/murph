@@ -7,15 +7,6 @@ import {
   createHostedDeviceSyncControlPlaneContext,
   type HostedDeviceSyncControlPlaneContext,
 } from "./control-plane-context";
-import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
-import {
-  type HostedAgentSessionRecord,
-} from "./prisma-store";
-import {
-  HostedDeviceSyncAgentSessionService,
-  type HostedTokenBundleExportResponse,
-  type HostedTokenBundleRefreshResponse,
-} from "./agent-session-service";
 
 export class HostedDeviceSyncControlPlane {
   readonly request: Request;
@@ -25,22 +16,16 @@ export class HostedDeviceSyncControlPlane {
   readonly publicIngressBaseUrlSource:
     HostedDeviceSyncControlPlaneContext["publicIngressBaseUrlSource"];
   readonly allowedReturnOrigins: string[];
-  readonly agentSessions: HostedDeviceSyncAgentSessionService;
-  private readonly context: HostedDeviceSyncControlPlaneContext;
   private authenticatedUserPromise: Promise<AuthenticatedHostedUser> | null = null;
 
   constructor(request: Request) {
     this.request = request;
-    this.context = createHostedDeviceSyncControlPlaneContext(request);
-    this.env = this.context.env;
-    this.store = this.context.store;
-    this.publicIngressBaseUrl = this.context.publicIngressBaseUrl;
-    this.publicIngressBaseUrlSource = this.context.publicIngressBaseUrlSource;
-    this.allowedReturnOrigins = this.context.allowedReturnOrigins;
-    this.agentSessions = new HostedDeviceSyncAgentSessionService({
-      request,
-      store: this.store,
-    });
+    const context = createHostedDeviceSyncControlPlaneContext(request);
+    this.env = context.env;
+    this.store = context.store;
+    this.publicIngressBaseUrl = context.publicIngressBaseUrl;
+    this.publicIngressBaseUrlSource = context.publicIngressBaseUrlSource;
+    this.allowedReturnOrigins = context.allowedReturnOrigins;
   }
 
   requireAuthenticatedUser(): Promise<AuthenticatedHostedUser> {
@@ -58,44 +43,6 @@ export class HostedDeviceSyncControlPlane {
       ...this.env,
       allowedReturnOrigins: this.allowedReturnOrigins,
     });
-  }
-
-  async pairAgent(user: AuthenticatedHostedUser, label: string | null): Promise<{
-    agent: { id: string; label: string | null; createdAt: string; expiresAt: string };
-    token: string;
-  }> {
-    return this.agentSessions.createAgentSession(user, label);
-  }
-
-  async requireAgentSession() {
-    return this.agentSessions.requireAgentSession();
-  }
-
-  async exportTokenBundle(
-    session: HostedAgentSessionRecord,
-    connectionId: string,
-  ): Promise<HostedTokenBundleExportResponse> {
-    return this.agentSessions.exportTokenBundle(session, connectionId);
-  }
-
-  async refreshTokenBundle(
-    session: HostedAgentSessionRecord,
-    connectionId: string,
-    options: { expectedTokenVersion?: number | null; force?: boolean } = {},
-  ): Promise<HostedTokenBundleRefreshResponse> {
-    return this.agentSessions.refreshTokenBundle(session, connectionId, options);
-  }
-
-  async revokeAgentSession(session: HostedAgentSessionRecord) {
-    return this.agentSessions.revokeAgentSession(session);
-  }
-
-  async recordLocalHeartbeat(
-    userId: string,
-    connectionId: string,
-    patch: HostedLocalHeartbeatPatch,
-  ) {
-    return this.agentSessions.recordLocalHeartbeat(userId, connectionId, patch);
   }
 }
 

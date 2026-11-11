@@ -24,16 +24,13 @@ import {
   JUNCTION_CALENDAR_REFRESH_JOB_INVALID_CODE,
   JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE,
 } from "./junction-resources.ts";
-import { buildJunctionProviderSourceInstanceKey } from "./config/junction-connect-sources.ts";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT,
   sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
 } from "./hosted-runtime.ts";
-import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
 import {
   isDeviceSyncConnectionSetupPending,
-  isDeviceSyncSourceDisconnectFenced,
   toRedactedPublicDeviceSyncAccount,
 } from "./public-account.ts";
 import { createDeviceSyncRegistry } from "./registry.ts";
@@ -42,9 +39,6 @@ import {
   computeRetryDelayMs,
   defaultStateDatabasePath,
   generatePrefixedId,
-  normalizeString,
-  normalizeOriginList,
-  normalizePublicBaseUrl,
   sha256Text,
   stringifyJson,
   toIsoTimestamp,
@@ -52,13 +46,10 @@ import {
 import { SqliteDeviceSyncStore } from "./store.ts";
 import {
   DEVICE_SYNC_CANONICAL_IMPORT_RECEIPT_LIMIT,
-  DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
 } from "./types.ts";
 
 import type { DeviceSyncError } from "./errors.ts";
 import type {
-  BeginConnectionResult,
-  CompleteConnectionResult,
   DeviceConnectionHandler,
   DeviceJobBatchExecutor,
   DeviceJobExecutor,
@@ -77,11 +68,6 @@ import type {
   DeviceSyncServiceConfig,
   DeviceSyncServiceSummary,
   DeviceSyncJobFailureDiagnostic,
-  DisconnectAccountResult,
-  DeviceAccountCredential,
-  HandleConnectionCallbackInput,
-  HandleOAuthCallbackInput,
-  HandleWebhookResult,
   ListDeviceSyncAccountsInput,
   ProviderAuthTokens,
   ProviderJobConnectionSource,
@@ -90,9 +76,7 @@ import type {
   ProviderJobResult,
   ProviderSnapshotImportReceipt,
   PublicDeviceSyncAccount,
-  PublicProviderDescriptor,
   QueueManualReconcileResult,
-  StartConnectionInput,
   StoredDeviceSyncAccount,
 } from "./types.ts";
 
@@ -145,8 +129,6 @@ export const DEVICE_SYNC_JOB_TIMING_DIAGNOSTIC_LIMIT = Math.max(
   100,
   HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT,
 );
-const DEVICE_SYNC_CONNECTION_MUTATION_MAX_PENDING = 1;
-const DEVICE_SYNC_CONNECTION_MUTATION_WAIT_TIMEOUT_MS = 15_000;
 const DEFAULT_PROVIDER_JOB_BATCH_MAX_JOBS = 50;
 const DEFAULT_PROVIDER_JOB_BATCH_MAX_ESTIMATED_BYTES = 2 * 1024 * 1024;
 const DEFAULT_PROVIDER_JOB_BATCH_CANDIDATE_SCAN_LIMIT = 200;
@@ -236,28 +218,18 @@ export interface DeviceSyncTickMutex {
   runIfIdle<T>(operation: () => Promise<T>): Promise<T | undefined>;
 }
 
-
 export interface DeviceSyncService {
   readonly vaultRoot: string;
-  readonly publicBaseUrl: string;
-  readonly allowedReturnOrigins: string[];
   readonly registry: DeviceSyncRegistry;
-  describeProviders(): PublicProviderDescriptor[];
-  describeProvider(providerName: string | DeviceSyncProvider): PublicProviderDescriptor;
   summarize(): DeviceSyncServiceSummary;
   listAccounts(input?: ListDeviceSyncAccountsInput): PublicDeviceSyncAccount[];
   getAccount(accountId: string): PublicDeviceSyncAccount | null;
   listJobFailureDiagnostics(): DeviceSyncJobFailureDiagnostic[];
   listJobTimingDiagnostics(): DeviceSyncJobTimingDiagnostic[];
   close(): void;
-  startConnection(input: StartConnectionInput): Promise<BeginConnectionResult>;
-  handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult>;
-  handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult>;
-  handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult>;
   queueManualReconcile(
     accountId: string,
   ): QueueManualReconcileResult;
-  disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
   getNextJobWakeAt(): string | null;
   getNextWakeAt(now?: string): string | null;
   runSchedulerOnce(accountId?: string, options?: { reconcileBefore?: string }): Promise<DeviceSyncJobRecord[]>;
@@ -297,15 +269,12 @@ function createDeviceSyncTickMutex(): DeviceSyncTickMutex {
 
 class DeviceSyncServiceController {
   readonly vaultRoot: string;
-  readonly publicBaseUrl: string;
-  readonly allowedReturnOrigins: string[];
   readonly registry: DeviceSyncRegistry;
 
   private readonly logger: DeviceSyncLogger;
   private readonly importer: DeviceSyncImporterPort;
   private readonly listConnectionSourcesForJob: CreateDeviceSyncServiceInput["listConnectionSourcesForJob"];
   private readonly store: SqliteDeviceSyncStore;
-  private readonly publicIngress: DeviceSyncPublicIngress;
   private readonly codec: ReturnType<typeof createSecretCodec>;
   private readonly clock: DeviceSyncClock;
   private readonly schedulerMutex: DeviceSyncTickMutex;
@@ -317,15 +286,8 @@ class DeviceSyncServiceController {
   private readonly ownsStore: boolean;
   private readonly jobFailureDiagnostics: DeviceSyncJobFailureDiagnostic[] = [];
   private readonly jobTimingDiagnostics: DeviceSyncJobTimingDiagnostic[] = [];
-  private readonly connectionMutationStates = new Map<string, {
-    activeAndWaiting: number;
-    tail: Promise<void>;
-  }>();
-
   constructor(input: CreateDeviceSyncServiceInput) {
     this.vaultRoot = input.config.vaultRoot;
-    this.publicBaseUrl = normalizePublicBaseUrl(input.config.publicBaseUrl);
-    this.allowedReturnOrigins = normalizeOriginList(input.config.allowedReturnOrigins);
     this.registry = input.registry ?? createDeviceSyncRegistry(input.providers ?? []);
     this.importer = input.importer ?? createDefaultImporterPort();
     this.listConnectionSourcesForJob = input.listConnectionSourcesForJob;
@@ -341,261 +303,6 @@ class DeviceSyncServiceController {
       input.store ?? new SqliteDeviceSyncStore(input.config.stateDatabasePath ?? defaultStateDatabasePath(this.vaultRoot));
     this.ownsStore = !input.store;
     this.codec = createSecretCodec(input.secret);
-    this.publicIngress = createDeviceSyncPublicIngress({
-      publicBaseUrl: this.publicBaseUrl,
-      allowedReturnOrigins: this.allowedReturnOrigins,
-      registry: this.registry,
-      sessionTtlMs: input.config.sessionTtlMs,
-      store: {
-        deleteExpiredOAuthStates: (now) => this.store.deleteExpiredOAuthStates(now),
-        createOAuthState: (record) => this.store.createOAuthState(record),
-        consumeOAuthState: (state, now, expectedProvider, expectedOwnerId) =>
-          this.store.consumeOAuthState(state, now, expectedProvider, expectedOwnerId),
-        discardUnconsumedOAuthState: (state, now, expectedProvider, expectedOwnerId) =>
-          this.store.discardUnconsumedOAuthState(
-            state,
-            now,
-            expectedProvider,
-            expectedOwnerId,
-          ),
-        resolveOAuthStateWithoutProviderAuthority: (claim) =>
-          this.store.resolveOAuthStateWithoutProviderAuthority(claim),
-        upsertConnection: (record) =>
-          this.toPublicAccount(
-            this.store.upsertAccount({
-              provider: record.provider,
-              externalAccountId: record.externalAccountId,
-              displayName: record.displayName ?? null,
-              status: record.status,
-              setupPhase: record.setupPhase,
-              setupExpiresAt: record.setupExpiresAt,
-              scopes: record.scopes,
-              credential: this.toStoredConnectionCredential(
-                {
-                  externalAccountId: record.externalAccountId,
-                  provider: record.provider,
-                },
-                record.credential,
-                record.tokens,
-              ),
-              metadata: record.metadata,
-              existingAccountGuard: record.existingAccountGuard ?? null,
-              existingAccountPolicy: record.existingAccountPolicy,
-              connectedAt: record.connectedAt,
-              nextReconcileAt: record.nextReconcileAt ?? null,
-              oauthClaim: record.oauthClaim,
-            }),
-          ),
-        markConnectionSetupFailed: (record) => {
-          const result = this.store.markConnectionSetupFailed(
-            record.accountId,
-            record.expectedConnectedAt,
-            record.now,
-            record.code,
-            record.message,
-            record.oauthClaim,
-          );
-          return {
-            account: result.account ? this.toPublicAccount(result.account) : null,
-            applied: result.applied,
-            blockedByRefreshLease: result.blockedByRefreshLease,
-            oauthTokenVersion: result.oauthTokenVersion,
-          };
-        },
-        clearOAuthCredentialAfterConfirmedRevoke: (record) =>
-          this.store.clearOAuthCredentialAfterConfirmedRevoke(
-            record.accountId,
-            record.expectedConnectedAt,
-            record.expectedTokenVersion,
-            record.now,
-          ),
-        getOAuthCleanupAccount: (record) => {
-          const account = this.store.getAccountById(record.accountId);
-          if (
-            !account
-            || account.connectedAt !== record.expectedConnectedAt
-            || account.localTokenRevision !== record.expectedTokenVersion
-            || account.status !== "reauthorization_required"
-            || account.setupPhase !== "failed"
-            || account.credential.kind !== "oauth_tokens"
-          ) {
-            return null;
-          }
-          return this.toDecryptedAccount(account);
-        },
-        getConnectionById: (accountId) => {
-          const account = this.store.getAccountById(accountId);
-          return account ? this.toPublicAccount(account) : null;
-        },
-        getConnectionByExternalAccount: (provider, externalAccountId) => {
-          const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
-          return account ? this.toPublicAccount(account) : null;
-        },
-        getWebhookConnectionByExternalAccount: (provider, externalAccountId) => {
-          const account = this.store.getAccountByExternalAccount(provider, externalAccountId);
-          return account
-            ? {
-                account: this.toPublicAccount(account),
-                connectionOwnerId: null,
-              }
-            : null;
-        },
-        upsertConnectionSource: (input, options) =>
-          this.store.upsertConnectionSource(input, options),
-        listConnectionSources: (input) => this.store.listConnectionSources(input),
-        resolveConnectionSourceAdmissionCandidate: (input) =>
-          this.store.listConnectionSources(input)
-            .sort((left, right) => {
-              const leftExact = input.sourceInstanceKey !== undefined
-                && left.sourceInstanceKey === input.sourceInstanceKey;
-              const rightExact = input.sourceInstanceKey !== undefined
-                && right.sourceInstanceKey === input.sourceInstanceKey;
-              const leftAdmitted = left.status === "connected"
-                && !isDeviceSyncSourceDisconnectFenced(left);
-              const rightAdmitted = right.status === "connected"
-                && !isDeviceSyncSourceDisconnectFenced(right);
-              return Number(rightExact) - Number(leftExact)
-                || Number(rightAdmitted) - Number(leftAdmitted)
-                || Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)
-                || left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
-                || left.id.localeCompare(right.id);
-            })[0] ?? null,
-        claimWebhookTrace: (record) => this.store.claimWebhookTrace(record),
-        completeWebhookTrace: (provider, traceId, claimToken) =>
-          this.store.completeWebhookTrace(provider, traceId, claimToken),
-        releaseWebhookTrace: (provider, traceId, claimToken) =>
-          this.store.releaseWebhookTrace(provider, traceId, claimToken),
-        markWebhookReceived: (accountId, now) => this.store.markWebhookReceived(accountId, now),
-        markConnectionSourceDataReceived: (input) =>
-          this.store.markConnectionSourceDataReceived(input),
-      },
-      hooks: {
-        runConnectionMutation: ({ provider }, operation) =>
-          this.runProviderConnectionMutation(provider, operation),
-        onConnectionEstablished: async ({
-          account,
-          connection,
-          connectionStartedAt,
-          now,
-          provider,
-          sourceProviderSlug,
-        }) => {
-          const sourceInstanceKey = provider.provider === "junction" && sourceProviderSlug
-            ? buildJunctionProviderSourceInstanceKey({
-                connectionId: account.id,
-                sourceProviderSlug,
-              })
-            : null;
-          const committed = this.store.commitConnectionEstablished({
-            accountId: account.id,
-            expectedSourceLastSeenAt: connectionStartedAt,
-            jobs: this.normalizeJobsForEnqueue(account, connection.initialJobs ?? []),
-            provider: account.provider,
-            source: sourceInstanceKey && sourceProviderSlug
-              ? {
-                  connectionId: account.id,
-                  sourceInstanceKey,
-                  sourceProviderSlug,
-                  status: "connected",
-                  firstSeenAt: now,
-                  lastSeenAt: now,
-                }
-              : null,
-          });
-          if (sourceInstanceKey && committed === null) {
-            throw deviceSyncError({
-              code: "CONNECTION_SOURCE_START_STALE",
-              message: "Device source state changed while its connection link was starting. Start again.",
-              retryable: false,
-              httpStatus: 409,
-            });
-          }
-          await this.ensureWebhookAdminUpkeepAfterConnectionEstablished(provider);
-          return {
-            sourceAdmissionCommitted: true,
-          };
-        },
-        onWebhookAccepted: async ({ account, claimToken, traceId, webhook }) => {
-          this.store.enqueueJobsAndCompleteWebhookTrace({
-            accountId: account.id,
-            provider: account.provider,
-            traceId,
-            claimToken,
-            jobs: webhook.jobs,
-          });
-          return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;
-        },
-      },
-      log: this.logger,
-    });
-  }
-
-  private async runProviderConnectionMutation<Result>(
-    provider: string,
-    operation: () => Promise<Result>,
-  ): Promise<Result> {
-    const existingState = this.connectionMutationStates.get(provider);
-    if (
-      existingState
-      && existingState.activeAndWaiting >= DEVICE_SYNC_CONNECTION_MUTATION_MAX_PENDING + 1
-    ) {
-      throw connectionMutationBusyError();
-    }
-
-    const state = existingState ?? {
-      activeAndWaiting: 0,
-      tail: Promise.resolve(),
-    };
-    const previous = state.tail;
-    let releaseCurrent!: () => void;
-    const current = new Promise<void>((resolve) => {
-      releaseCurrent = resolve;
-    });
-    const tail = previous.then(() => current);
-    state.activeAndWaiting += 1;
-    state.tail = tail;
-    this.connectionMutationStates.set(provider, state);
-    let waitTimeout: ReturnType<typeof setTimeout> | null = null;
-
-    try {
-      await Promise.race([
-        previous,
-        new Promise<never>((_resolve, reject) => {
-          waitTimeout = setTimeout(
-            () => reject(connectionMutationBusyError()),
-            DEVICE_SYNC_CONNECTION_MUTATION_WAIT_TIMEOUT_MS,
-          );
-        }),
-      ]);
-      if (waitTimeout) {
-        clearTimeout(waitTimeout);
-        waitTimeout = null;
-      }
-      return await operation();
-    } finally {
-      if (waitTimeout) {
-        clearTimeout(waitTimeout);
-      }
-      releaseCurrent();
-      state.activeAndWaiting -= 1;
-      void tail.then(() => {
-        if (
-          state.activeAndWaiting === 0
-          && state.tail === tail
-          && this.connectionMutationStates.get(provider) === state
-        ) {
-          this.connectionMutationStates.delete(provider);
-        }
-      });
-    }
-  }
-
-  describeProviders(): PublicProviderDescriptor[] {
-    return this.publicIngress.describeProviders();
-  }
-
-  describeProvider(providerName: string | DeviceSyncProvider): PublicProviderDescriptor {
-    return this.publicIngress.describeProvider(providerName);
   }
 
   summarize(): DeviceSyncServiceSummary {
@@ -636,22 +343,6 @@ class DeviceSyncServiceController {
     if (this.ownsStore) {
       this.store.close();
     }
-  }
-
-  async startConnection(input: StartConnectionInput): Promise<BeginConnectionResult> {
-    return await this.publicIngress.startConnection(input);
-  }
-
-  async handleOAuthCallback(input: HandleOAuthCallbackInput): Promise<CompleteConnectionResult> {
-    return this.handleConnectionCallback(input);
-  }
-
-  async handleConnectionCallback(input: HandleConnectionCallbackInput): Promise<CompleteConnectionResult> {
-    return this.publicIngress.handleConnectionCallback(input);
-  }
-
-  async handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult> {
-    return this.publicIngress.handleWebhook(providerName, headers, rawBody);
   }
 
   queueManualReconcile(
@@ -732,74 +423,11 @@ class DeviceSyncServiceController {
     };
   }
 
-  async disconnectAccount(
-    accountId: string,
-    expectedConnectedAt: string,
-  ): Promise<DisconnectAccountResult> {
-    const normalizedExpectedConnectedAt = normalizeString(expectedConnectedAt);
-    if (!normalizedExpectedConnectedAt) {
-      throw connectionGenerationRequiredError();
-    }
-
-    const account = this.requireStoredAccount(accountId);
-    return await this.runProviderConnectionMutation(account.provider, () =>
-      this.disconnectAccountAfterConnectionMutation(accountId, normalizedExpectedConnectedAt)
-    );
-  }
-
-  private async disconnectAccountAfterConnectionMutation(
-    accountId: string,
-    expectedConnectedAt: string,
-  ): Promise<DisconnectAccountResult> {
-    const account = this.requireStoredAccount(accountId);
-    if (account.connectedAt !== expectedConnectedAt) {
-      throw connectionChangedDuringDisconnectError();
-    }
-    const provider = this.requireProvider(account.provider);
-    const now = this.nowIso();
-
-    if (account.status !== "disconnected") {
-      try {
-        const decrypted = this.toDecryptedAccount(account);
-        await provider.connectionHandler?.revokeAccess?.(decrypted);
-      } catch (error) {
-        this.logger.warn?.("Provider revoke access failed during disconnect; continuing local disconnect.", {
-          provider: provider.provider,
-          accountId: account.id,
-          failureCode: "DEVICE_SYNC_DISCONNECT_REVOKE_FAILED",
-          error: summarizeError(error),
-        });
-      }
-    }
-
-    const disconnected = this.store.disconnectAccountAndMarkPendingJobsDeadIfConnectedAt({
-      accountId: account.id,
-      code: "ACCOUNT_DISCONNECTED",
-      expectedConnectedAt,
-      message: "Device account disconnected.",
-      now,
-    });
-
-    if (!disconnected) {
-      throw connectionChangedDuringDisconnectError();
-    }
-
-    return {
-      account: this.toPublicAccount(disconnected),
-    };
-  }
-
   getNextWakeAt(_now = this.nowIso()): string | null {
-    const nextWakeAt = earliestIsoTimestamp(
+    return earliestIsoTimestamp(
       this.store.readNextActiveReconcileAt(),
       this.store.readNextJobWakeAt(),
     );
-
-    if (!nextWakeAt) {
-      return null;
-    }
-
-    return nextWakeAt;
   }
 
   getNextJobWakeAt(): string | null {
@@ -2068,37 +1696,6 @@ class DeviceSyncServiceController {
     };
   }
 
-  private toStoredConnectionCredential(
-    account: Pick<StoredDeviceSyncAccount, "externalAccountId" | "provider">,
-    credential: DeviceAccountCredential | undefined,
-    legacyTokens: ProviderAuthTokens | undefined,
-  ): DeviceAccountCredential {
-    if (!credential) {
-      if (!legacyTokens) {
-        throw deviceSyncError({
-          code: "CONNECTION_CREDENTIAL_MISSING",
-          message: "Device sync connection did not provide account credentials.",
-          retryable: false,
-          httpStatus: 500,
-        });
-      }
-
-      return {
-        kind: "oauth_tokens",
-        tokens: this.encryptTokens(account, legacyTokens),
-      };
-    }
-
-    if (credential.kind !== "oauth_tokens") {
-      return credential;
-    }
-
-    return {
-      kind: "oauth_tokens",
-      tokens: this.encryptTokens(account, credential.tokens),
-    };
-  }
-
   private enqueueJobs(
     account: Pick<PublicDeviceSyncAccount, "id" | "provider">,
     jobs: readonly DeviceSyncJobInput[],
@@ -2125,30 +1722,6 @@ class DeviceSyncServiceController {
     return jobs.map((job) => normalizeConfiguredDeviceSyncJobInput(account.provider, job, "enqueue"));
   }
 
-  private async ensureWebhookAdminUpkeepAfterConnectionEstablished(provider: DeviceSyncProvider): Promise<void> {
-    if (provider.provider !== "oura") {
-      return;
-    }
-
-    const ensureSubscriptions = provider.webhookAdmin?.ensureSubscriptions;
-
-    if (!ensureSubscriptions) {
-      return;
-    }
-
-    try {
-      await ensureSubscriptions({
-        publicBaseUrl: this.publicBaseUrl,
-      });
-    } catch (error) {
-      this.logger.warn?.("Failed to ensure device-sync webhook admin upkeep after connection establishment.", {
-        provider: provider.provider,
-        reason: "connection-established",
-        failureCode: "DEVICE_SYNC_WEBHOOK_ADMIN_UPKEEP_FAILED",
-        error: summarizeError(error),
-      });
-    }
-  }
 }
 
 export function createDefaultImporterPort(): DeviceSyncImporterPort {
@@ -2171,24 +1744,14 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
   const controller = new DeviceSyncServiceController(input);
   const service = Object.freeze({
     vaultRoot: controller.vaultRoot,
-    publicBaseUrl: controller.publicBaseUrl,
-    allowedReturnOrigins: [...controller.allowedReturnOrigins],
     registry: controller.registry,
-    describeProviders: () => controller.describeProviders(),
-    describeProvider: (providerName) => controller.describeProvider(providerName),
     summarize: () => controller.summarize(),
     listAccounts: (input) => controller.listAccounts(input),
     getAccount: (accountId) => controller.getAccount(accountId),
     listJobFailureDiagnostics: () => controller.listJobFailureDiagnostics(),
     listJobTimingDiagnostics: () => controller.listJobTimingDiagnostics(),
     close: () => controller.close(),
-    startConnection: (startConnectionInput) => controller.startConnection(startConnectionInput),
-    handleConnectionCallback: (callbackInput) => controller.handleConnectionCallback(callbackInput),
-    handleOAuthCallback: (callbackInput) => controller.handleOAuthCallback(callbackInput),
-    handleWebhook: (providerName, headers, rawBody) => controller.handleWebhook(providerName, headers, rawBody),
     queueManualReconcile: (accountId) => controller.queueManualReconcile(accountId),
-    disconnectAccount: (accountId, expectedConnectedAt) =>
-      controller.disconnectAccount(accountId, expectedConnectedAt),
     getNextJobWakeAt: () => controller.getNextJobWakeAt(),
     getNextWakeAt: (now) => controller.getNextWakeAt(now),
     runSchedulerOnce: (accountId, options) => controller.runSchedulerOnce(accountId, options),
@@ -2390,33 +1953,6 @@ function isDeviceSyncJobAbortError(error: unknown, signal: AbortSignal, depth = 
 
   const cause = "cause" in error ? (error as { cause?: unknown }).cause : undefined;
   return cause !== undefined && isDeviceSyncJobAbortError(cause, signal, depth + 1);
-}
-
-function connectionMutationBusyError(): DeviceSyncError {
-  return deviceSyncError({
-    code: "CONNECTION_MUTATION_BUSY",
-    message: "Another device connection update is still in progress. Retry shortly.",
-    retryable: true,
-    httpStatus: 503,
-  });
-}
-
-function connectionGenerationRequiredError(): DeviceSyncError {
-  return deviceSyncError({
-    code: "CONNECTION_GENERATION_REQUIRED",
-    message: "Device account disconnect requires the expected connection generation.",
-    retryable: false,
-    httpStatus: 400,
-  });
-}
-
-function connectionChangedDuringDisconnectError(): DeviceSyncError {
-  return deviceSyncError({
-    code: "CONNECTION_CHANGED_DURING_DISCONNECT",
-    message: "Device sync connection changed before disconnect could start. Retry with the current account.",
-    retryable: true,
-    httpStatus: 409,
-  });
 }
 
 function isRetainedJunctionValidationFailure(job: DeviceSyncJobRecord, code: string): boolean {

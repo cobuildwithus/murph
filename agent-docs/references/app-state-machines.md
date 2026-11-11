@@ -716,7 +716,7 @@ Invariant: funding authority and benefit eligibility are scoped to their payer/t
 ### B07 — Device OAuth intent and credential generation
 
 Sources: `apps/web/src/lib/device-sync/prisma-store/{oauth-sessions,connections,sources}.ts`; `DeviceConnectIntent`, `DeviceOauthSession`, `DeviceConnection`, `DeviceConnectionSource`.
-States: intent unstarted/started/expired; OAuth unconsumed/consumed/replayed/discarded/expired; connection active/reauthorization_required/disconnected (with provider/source error projections); refresh claimed/in_progress/version_changed/stale.
+States: intent unstarted/started/expired; OAuth unconsumed/consumed/replayed/discarded/expired; connection active/reauthorization_required/disconnected (with provider/source error projections); historical refresh leases may remain until cleanup.
 Invariant: provider, authenticated owner, state and redirect proof are bound before credential publication. Session consumption and credential generation fences prevent replay or stale refresh from restoring disconnected credentials.
 
 | From | Event / guard | To / effect |
@@ -726,7 +726,7 @@ Invariant: provider, authenticated owner, state and redirect proof are bound bef
 | Consumed OAuth | Exact retry in replay window | Replayed result, no second ownership transfer |
 | Active connection | Auth revoked/expired proof | Reauthorization_required |
 | Active/reauth required | Authorized disconnect | Disconnected, credential authority retired |
-| Current credential | Refresh CAS claim | Claimed; stale/version-mismatched writer rejected |
+| Historical refresh lease | Hosted disconnect or privacy cleanup | Wait for active lease; stale ambiguity fails closed |
 
 ### B08 — Device webhook and dirty-sync progress
 
@@ -746,13 +746,13 @@ Invariant: an acknowledged revision cannot cover newer accepted work; webhook pr
 ### B09 — Clinical connection and retrieval
 
 Sources: `apps/web/src/lib/clinical-records/{connect-intents,connections,retrieval}.ts`; `ClinicalRecordOauthSession`, `ClinicalRecordRetrievalRun`.
-States: intent unclaimed/started/expired; connection `active`, `error`, `needs_reauth`, `disconnected`; run `queued`, `retrieving`, `importing`, `complete`, `partial`, `failed`, `needs_reauth`, `canceled`.
+States: intent unclaimed/started/expired; connection `active`, `error`, `needs_reauth`, `disconnected`; run `queued`, `retrieving`, `complete`, `partial`, `failed`, `needs_reauth`, `canceled`.
 Invariant: connection retrieval generation fences every read and terminal outcome; authorization failure is distinct from an empty record set; disconnect cancels active work and invalidates old tokens/cursors.
 
 | From | Event / guard | To / effect |
 | --- | --- | --- |
 | Connect intent | Bound provider/consent-authorized start | OAuth session, then active connection |
-| Queued | Valid generation and provider page request | Retrieving/importing |
+| Queued | Valid generation and provider page request | Retrieving |
 | Active retrieval | Runtime preempted | Queued; retain restartable accepted work |
 | Active retrieval | Valid exact outcome and snapshot evidence | Complete/partial/failed |
 | Active connection/run | Provider auth failure | Needs_reauth |

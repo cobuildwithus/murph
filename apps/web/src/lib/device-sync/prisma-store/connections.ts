@@ -57,10 +57,8 @@ import {
   sanitizeHostedConnectionLastErrorMessage,
   generateHostedRandomPrefixedId,
 } from "../shared";
-import type { HostedLocalHeartbeatStateUpdate } from "../local-heartbeat";
 import type {
   HostedDeviceSyncDueReconcileConnectionRecord,
-  HostedConnectionRefreshLeaseClaimResult,
   HostedPrismaTransactionClient,
 } from "./types";
 import {
@@ -789,40 +787,6 @@ export class PrismaHostedConnectionStore {
     });
   }
 
-  async syncDurableConnectionLocalHeartbeatState(
-    account: Pick<PublicDeviceSyncAccount, "externalAccountId" | "id">,
-    localState: HostedLocalHeartbeatStateUpdate,
-    tx?: HostedPrismaTransactionClient,
-  ): Promise<PublicDeviceSyncAccount | null> {
-    const prisma = tx ?? this.prisma;
-    const update = await prisma.deviceConnection.updateMany({
-      where: {
-        id: account.id,
-        status: { not: "reauthorization_required" },
-      },
-      data: buildHostedLocalHeartbeatUpdateData(localState),
-    });
-    if (update.count === 0) {
-      return null;
-    }
-
-    const record = await prisma.deviceConnection.findFirst({
-      where: { id: account.id },
-      ...hostedConnectionRecordArgs,
-    });
-    if (!record) {
-      return null;
-    }
-
-    return await this.buildDurableConnectionRecord(
-      record,
-      {
-        externalAccountId: account.externalAccountId,
-      },
-      prisma,
-    );
-  }
-
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
     const records = await this.listConnectionRecordsForUser(userId);
     return Promise.all(records.map((record) => this.buildDurableConnectionRecord(record)));
@@ -954,90 +918,6 @@ export class PrismaHostedConnectionStore {
       testCodec: this.testCodec,
       tokenConnectionIds: input.tokenConnectionIds,
     });
-  }
-
-  async claimConnectionRefreshLease(input: {
-    connectionId: string;
-    userId: string;
-    tokenVersion: number;
-    leaseOwner: string;
-    leaseExpiresAt: string;
-    now: string;
-    tx?: HostedPrismaTransactionClient;
-  }): Promise<HostedConnectionRefreshLeaseClaimResult> {
-    const prisma = input.tx ?? this.prisma;
-    const claim = await prisma.deviceConnection.updateMany({
-      where: {
-        id: input.connectionId,
-        userId: input.userId,
-        tokenVersion: input.tokenVersion,
-        status: "active",
-        refreshLeaseExpiresAt: null,
-        refreshLeaseOwner: null,
-        refreshLeaseTokenVersion: null,
-      },
-      data: {
-        refreshLeaseExpiresAt: new Date(input.leaseExpiresAt),
-        refreshLeaseOwner: input.leaseOwner,
-        refreshLeaseTokenVersion: input.tokenVersion,
-      },
-    });
-
-    if (claim.count > 0) {
-      return { status: "claimed" };
-    }
-
-    const record = await prisma.deviceConnection.findFirst({
-      where: {
-        id: input.connectionId,
-        userId: input.userId,
-      },
-      select: {
-        id: true,
-        refreshLeaseExpiresAt: true,
-        refreshLeaseOwner: true,
-        refreshLeaseTokenVersion: true,
-        tokenVersion: true,
-      },
-    });
-
-    if (!record || record.tokenVersion !== input.tokenVersion) {
-      return { status: "version_changed" };
-    }
-
-    if (record.refreshLeaseOwner && record.refreshLeaseExpiresAt) {
-      if (record.refreshLeaseExpiresAt.getTime() > Date.parse(input.now)) {
-        return {
-          status: "in_progress",
-          leaseExpiresAt: record.refreshLeaseExpiresAt.toISOString(),
-        };
-      }
-
-      return { status: "stale" };
-    }
-
-    return { status: "stale" };
-  }
-
-  async clearConnectionRefreshLease(input: {
-    connectionId: string;
-    leaseOwner: string;
-    tx?: HostedPrismaTransactionClient;
-  }): Promise<boolean> {
-    const prisma = input.tx ?? this.prisma;
-    const result = await prisma.deviceConnection.updateMany({
-      where: {
-        id: input.connectionId,
-        refreshLeaseOwner: input.leaseOwner,
-      },
-      data: {
-        refreshLeaseExpiresAt: null,
-        refreshLeaseOwner: null,
-        refreshLeaseTokenVersion: null,
-      },
-    });
-
-    return result.count > 0;
   }
 
   async clearStaleConnectionRefreshLease(input: {
@@ -1881,34 +1761,6 @@ function buildHostedCredentialMetadata(
   }
 
   return sanitizeHostedDeviceSyncCredentialMetadata(subjectMetadata);
-}
-
-function buildHostedLocalHeartbeatUpdateData(
-  localState: HostedLocalHeartbeatStateUpdate,
-): {
-  lastErrorCode?: string | null;
-  lastErrorMessage?: string | null;
-  lastSyncCompletedAt?: Date | null;
-  lastSyncErrorAt?: Date | null;
-  lastSyncStartedAt?: Date | null;
-} {
-  return {
-    ...("lastSyncStartedAt" in localState
-      ? { lastSyncStartedAt: maybeDate(localState.lastSyncStartedAt ?? null) }
-      : {}),
-    ...("lastSyncCompletedAt" in localState
-      ? { lastSyncCompletedAt: maybeDate(localState.lastSyncCompletedAt ?? null) }
-      : {}),
-    ...("lastSyncErrorAt" in localState
-      ? { lastSyncErrorAt: maybeDate(localState.lastSyncErrorAt ?? null) }
-      : {}),
-    ...("lastErrorCode" in localState
-      ? { lastErrorCode: normalizeNullableString(localState.lastErrorCode ?? null) }
-      : {}),
-    ...("lastErrorMessage" in localState
-      ? { lastErrorMessage: sanitizeHostedConnectionLastErrorMessage(localState.lastErrorMessage ?? null) }
-      : {}),
-  };
 }
 
 // The preflight is advisory. Call again after the member lock before mutation.

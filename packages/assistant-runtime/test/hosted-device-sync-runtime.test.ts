@@ -210,6 +210,65 @@ function getStore(service: DeviceSyncService) {
   return requireHostedRuntimeDeviceSyncStore(service);
 }
 
+// These scenarios exercise worker hydration/checkpointing; Web owns OAuth admission.
+async function seedDeviceConnection(service: DeviceSyncService, input: { provider: string; code: string }) {
+  const provider = service.registry.get(input.provider);
+  assert.ok(provider?.connectionHandler);
+  const now = new Date().toISOString();
+  const connection = await provider.connectionHandler.completeConnection({
+    callbackUrl: `https://sync.example.test/device-sync/oauth/${input.provider}/callback`,
+    state: "synthetic-hosted-worker-setup",
+    query: new URLSearchParams({ code: input.code }),
+    grantedScopes: [],
+    now,
+  });
+  const codec = createSecretCodec(DEVICE_SYNC_SECRET);
+  const credential = connection.credential
+    ?? (connection.tokens ? { kind: "oauth_tokens" as const, tokens: connection.tokens } : { kind: "none" as const });
+  const encryptedCredential = credential.kind !== "oauth_tokens" ? credential : {
+    kind: "oauth_tokens" as const,
+    tokens: {
+      ...credential.tokens,
+      accessTokenEncrypted: codec.encrypt(credential.tokens.accessToken, buildDeviceSyncTokenCipherOptions({
+        externalAccountId: connection.externalAccountId, provider: input.provider, purpose: "device-sync-access-token",
+      })),
+      refreshTokenEncrypted: credential.tokens.refreshToken ? codec.encrypt(credential.tokens.refreshToken, buildDeviceSyncTokenCipherOptions({
+        externalAccountId: connection.externalAccountId, provider: input.provider, purpose: "device-sync-refresh-token",
+      })) : null,
+    },
+  };
+  const store = getStore(service);
+  const stored = store.hydrateHostedAccount({
+    connection: {
+      provider: input.provider,
+      externalAccountId: connection.externalAccountId,
+      connectedAt: now,
+      displayName: connection.displayName ?? null,
+      scopes: connection.scopes ?? [],
+      metadata: connection.metadata ?? {},
+      status: "active",
+      setupPhase: connection.setupPhase ?? null,
+      setupExpiresAt: connection.setupExpiresAt ?? null,
+      updatedAt: now,
+    },
+    credential: encryptedCredential,
+    hostedObservedUpdatedAt: null,
+    hostedObservedTokenVersion: null,
+    localState: {
+      lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+      lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+      nextReconcileAt: connection.nextReconcileAt ?? null,
+    },
+  });
+  assert.ok(stored);
+  for (const job of connection.initialJobs ?? []) {
+    store.enqueueJob({ ...job, accountId: stored.id, provider: input.provider });
+  }
+  const account = service.getAccount(stored.id);
+  assert.ok(account);
+  return { account };
+}
+
 function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): DeviceSyncProvider {
   const baseProvider: DeviceSyncProvider = {
     provider: "demo",
@@ -325,7 +384,6 @@ test.each(["completed", "yielded", "unscoped"] as const)(
     const service = createHostedRuntimeDeviceSyncService({
       secret: DEVICE_SYNC_SECRET,
       config: {
-        publicBaseUrl: "https://sync.example.test/device-sync",
         vaultRoot,
         shouldYieldJobExecution: () => yieldRequested,
       },
@@ -341,14 +399,27 @@ test.each(["completed", "yielded", "unscoped"] as const)(
     });
     try {
       const store = requireHostedRuntimeDeviceSyncStore(service);
-      const account = store.upsertAccount({
-        provider: "demo",
-        externalAccountId: "synthetic-pass-account",
-        connectedAt: "2026-04-01T00:00:00.000Z",
+      const account = store.hydrateHostedAccount({
+        connection: {
+          provider: "demo",
+          externalAccountId: "synthetic-pass-account",
+          connectedAt: "2026-04-01T00:00:00.000Z",
+          displayName: null,
+          scopes: [],
+          metadata: {},
+          status: "active",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+        },
         credential: { kind: "none", credentialMetadata: {} },
-        scopes: [],
-        status: "active",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      assert.ok(account);
       const jobs = [0, 1].map((index) => store.enqueueJob({
         accountId: account.id,
         provider: "demo",
@@ -385,7 +456,6 @@ function createDeviceSyncServiceForVault(
   return createHostedRuntimeDeviceSyncService({
     secret: DEVICE_SYNC_SECRET,
     config: {
-      publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
       vaultRoot,
     },
@@ -1070,18 +1140,30 @@ describe("hosted device-sync runtime", () => {
       const observedTokenVersions = new Map<string, number | null>();
 
       for (let index = 0; index < updateCount; index += 1) {
-        const account = store.upsertAccount({
-          connectedAt: "2026-04-06T09:00:00.000Z",
+        const account = store.hydrateHostedAccount({
+          connection: {
+            provider: "demo",
+            externalAccountId: `external_${index}`,
+            connectedAt: "2026-04-06T09:00:00.000Z",
+            displayName: `Device ${index}`,
+            scopes: [],
+            metadata: {},
+            status: "active",
+            updatedAt: "2026-04-06T09:00:00.000Z",
+          },
           credential: {
             credentialMetadata: {},
             kind: "none",
           },
-          displayName: `Device ${index}`,
-          externalAccountId: `external_${index}`,
-          provider: "demo",
-          scopes: [],
-          status: "active",
+          hostedObservedUpdatedAt: null,
+          hostedObservedTokenVersion: null,
+          localState: {
+            lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+            lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+            nextReconcileAt: null,
+          },
         });
+        assert.ok(account);
         const hostedConnectionId = `hosted_conn_${index}`;
         localToHostedAccountIds.set(account.id, hostedConnectionId);
         hostedToLocalAccountIds.set(hostedConnectionId, account.id);
@@ -1259,11 +1341,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({ provider: "demo" });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "source-arrival",
         provider: "demo",
-        state: begin.state,
       });
       const buildSnapshotWith = (lastDataAt: string | null, lastSeenAt: string) =>
         buildRuntimeSnapshot({
@@ -1471,11 +1552,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({ provider: "demo" });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "source-hydration",
         provider: "demo",
-        state: begin.state,
       });
       let snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_source_hydration",
@@ -2575,7 +2655,6 @@ describe("hosted device-sync runtime", () => {
     const deviceSyncPort = createSnapshotOnlyDeviceSyncPort(hostedSnapshot);
     const service = createHostedRuntimeDeviceSyncService({
       config: {
-        publicBaseUrl: "https://sync.example.test/device-sync",
         stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
         vaultRoot,
       },
@@ -2762,7 +2841,6 @@ describe("hosted device-sync runtime", () => {
     };
     const service = createHostedRuntimeDeviceSyncService({
       config: {
-        publicBaseUrl: "https://sync.example.test/device-sync",
         stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
         vaultRoot,
       },
@@ -3033,7 +3111,6 @@ describe("hosted device-sync runtime", () => {
     };
     const service = createHostedRuntimeDeviceSyncService({
       config: {
-        publicBaseUrl: "https://sync.example.test/device-sync",
         stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
         vaultRoot,
       },
@@ -3587,7 +3664,6 @@ describe("hosted device-sync runtime", () => {
       assert.ok(provider);
       const service = createHostedRuntimeDeviceSyncService({
         config: {
-          publicBaseUrl: "https://sync.example.test/device-sync",
           stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
           vaultRoot,
         },
@@ -3773,7 +3849,6 @@ describe("hosted device-sync runtime", () => {
     });
     const service = createHostedRuntimeDeviceSyncService({
       config: {
-        publicBaseUrl: "https://sync.example.test/device-sync",
         stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
         vaultRoot,
       },
@@ -3850,7 +3925,6 @@ describe("hosted device-sync runtime", () => {
     });
     const service = createHostedRuntimeDeviceSyncService({
       config: {
-        publicBaseUrl: "https://sync.example.test/device-sync",
         stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
         vaultRoot,
       },
@@ -3868,11 +3942,10 @@ describe("hosted device-sync runtime", () => {
     });
 
     try {
-      const begin = await service.startConnection({ provider: "demo" });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "artifact-write-classification",
         provider: "demo",
-        state: begin.state,
       });
       const job = getStore(service).enqueueJob({
         accountId: connected.account.id,
@@ -3928,11 +4001,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({ provider: "demo" });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "source-disconnect-hydration",
         provider: "demo",
-        state: begin.state,
       });
       getStore(service).upsertConnectionSource({
         connectionId: connected.account.id,
@@ -4056,11 +4128,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({ provider: "demo" });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "source-arrival-projection",
         provider: "demo",
-        state: begin.state,
       });
       const baselineSource = {
         displayName: null,
@@ -4113,10 +4184,10 @@ describe("hosted device-sync runtime", () => {
       // Only the arrival advances; everything else matches the baseline. If the
       // outbound comparator ignored lastDataAt this would be dropped as a no-op
       // and the hosted row would keep a stale arrival.
-      getStore(service).markConnectionSourceDataReceived({
+      getStore(service).upsertConnectionSource({
+        ...baselineSource,
         connectionId: connected.account.id,
-        now: "2026-04-06T10:08:00.000Z",
-        sourceProviderSlug: "garmin",
+        lastDataAt: "2026-04-06T10:08:00.000Z",
       });
 
       await reconcileHostedDeviceSyncControlPlaneState({
@@ -4244,9 +4315,10 @@ describe("hosted device-sync runtime", () => {
       );
       assert.equal(hydratedSource?.lifecycleEpoch, hostedLifecycleEpoch ?? 1);
 
-      getStore(service).markConnectionSourceDataReceived({
-        connectionId: localAccountId,
-        now: "2026-04-06T10:08:00.000Z",
+      assert.ok(hydratedSource);
+      getStore(service).upsertConnectionSource({
+        ...hydratedSource,
+        lastDataAt: "2026-04-06T10:08:00.000Z",
         sourceProviderSlug: "apple_health_kit",
       });
       await reconcileHostedDeviceSyncControlPlaneState({
@@ -4285,13 +4357,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "source-projection",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         capabilities: {
@@ -4381,13 +4450,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "seed",
         provider: "demo",
-        state: begin.state,
       });
       const pendingJob = getStore(service).enqueueJob({
         accountId: connected.account.id,
@@ -4503,13 +4569,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "reconnect-after-clear",
         provider: "demo",
-        state: begin.state,
       });
 
       let currentSnapshot = buildRuntimeSnapshot({
@@ -4821,13 +4884,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "provider-config",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_provider_config",
@@ -4926,13 +4986,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "redacted-oauth",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_redacted_oauth",
@@ -5020,7 +5077,6 @@ describe("hosted device-sync runtime", () => {
     const service = createHostedRuntimeDeviceSyncService({
       secret: DEVICE_SYNC_SECRET,
       config: {
-        publicBaseUrl: "https://sync.example.test/device-sync",
         stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
         vaultRoot,
       },
@@ -5048,13 +5104,10 @@ describe("hosted device-sync runtime", () => {
     });
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "failure-diagnostic",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_failure_diagnostic",
@@ -5139,13 +5192,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "wake",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_wake",
@@ -5278,13 +5328,10 @@ describe("hosted device-sync runtime", () => {
     }> = [];
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "dirty-wake",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_dirty_wake",
@@ -5531,13 +5578,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "provider-key",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_provider_key",
@@ -5667,11 +5711,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({ provider: "demo" });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "deduped-timing",
         provider: "demo",
-        state: begin.state,
       });
       const store = getStore(service);
       const enqueue = () => store.enqueueJob({
@@ -5769,11 +5812,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({ provider: "demo" });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "mixed-source-timing",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_mixed_source_timing",
@@ -5866,21 +5908,15 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const firstBegin = await service.startConnection({
-        provider: "demo",
-      });
-      const firstConnected = await service.handleOAuthCallback({
+
+      const firstConnected = await seedDeviceConnection(service, {
         code: "dirty-batch-first",
         provider: "demo",
-        state: firstBegin.state,
       });
-      const secondBegin = await service.startConnection({
-        provider: "demo",
-      });
-      const secondConnected = await service.handleOAuthCallback({
+
+      const secondConnected = await seedDeviceConnection(service, {
         code: "dirty-batch-second",
         provider: "demo",
-        state: secondBegin.state,
       });
       const firstSnapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_dirty_batch_1",
@@ -7286,11 +7322,10 @@ describe("hosted device-sync runtime", () => {
     let firstClosed = false;
 
     try {
-      const begin = await service.startConnection({ provider: "demo" });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "demo-retry",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId,
@@ -7526,19 +7561,31 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
 
     try {
-      const account = getStore(service).upsertAccount({
-        connectedAt: "2026-04-04T09:00:00.000Z",
+      const account = getStore(service).hydrateHostedAccount({
+        connection: {
+          provider: "junction",
+          externalAccountId: "junction-retryable-companion-payload",
+          connectedAt: "2026-04-04T09:00:00.000Z",
+          displayName: "Junction",
+          scopes: [],
+          metadata: {},
+          status: "active",
+          updatedAt: "2026-04-04T09:00:00.000Z",
+        },
         credential: {
           credentialMetadata: {},
           kind: "provider_config",
           providerConfigKey: "junction",
         },
-        displayName: "Junction",
-        externalAccountId: "junction-retryable-companion-payload",
-        provider: "junction",
-        scopes: [],
-        status: "active",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      assert.ok(account);
       const companionObservationJson = serializeCompanionHrvRmssdObservation({
         schema: COMPANION_HRV_RMSSD_SCHEMA,
         methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
@@ -7613,18 +7660,30 @@ describe("hosted device-sync runtime", () => {
 
     try {
       const store = getStore(service);
-      const account = store.upsertAccount({
-        connectedAt: "2026-08-20T09:00:00.000Z",
+      const account = store.hydrateHostedAccount({
+        connection: {
+          provider: "demo",
+          externalAccountId: "demo-canonical-import-boundary",
+          connectedAt: "2026-08-20T09:00:00.000Z",
+          displayName: "Demo",
+          scopes: [],
+          metadata: {},
+          status: "active",
+          updatedAt: "2026-08-20T09:00:00.000Z",
+        },
         credential: {
           credentialMetadata: {},
           kind: "none",
         },
-        displayName: "Demo",
-        externalAccountId: "demo-canonical-import-boundary",
-        provider: "demo",
-        scopes: [],
-        status: "active",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      assert.ok(account);
       const job = store.enqueueJob({
         accountId: account.id,
         availableAt: "2026-08-20T09:00:00.000Z",
@@ -7720,18 +7779,30 @@ describe("hosted device-sync runtime", () => {
 
     try {
       const store = getStore(service);
-      const account = store.upsertAccount({
-        connectedAt: "2026-08-20T09:00:00.000Z",
+      const account = store.hydrateHostedAccount({
+        connection: {
+          provider: "junction",
+          externalAccountId: "junction-unrelated-child",
+          connectedAt: "2026-08-20T09:00:00.000Z",
+          displayName: "Junction",
+          scopes: [],
+          metadata: {},
+          status: "active",
+          updatedAt: "2026-08-20T09:00:00.000Z",
+        },
         credential: {
           credentialMetadata: {},
           kind: "none",
         },
-        displayName: "Junction",
-        externalAccountId: "junction-unrelated-child",
-        provider: "junction",
-        scopes: [],
-        status: "active",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      assert.ok(account);
       const parent = store.enqueueJob({
         accountId: account.id,
         availableAt: "2026-08-20T09:00:00.000Z",
@@ -7832,19 +7903,31 @@ describe("hosted device-sync runtime", () => {
     const store = getStore(service);
 
     try {
-      const account = getStore(service).upsertAccount({
-        connectedAt: "2026-04-04T09:00:00.000Z",
+      const account = getStore(service).hydrateHostedAccount({
+        connection: {
+          provider: "junction",
+          externalAccountId: "junction-invalid-companion-payload",
+          connectedAt: "2026-04-04T09:00:00.000Z",
+          displayName: "Junction",
+          scopes: [],
+          metadata: {},
+          status: "active",
+          updatedAt: "2026-04-04T09:00:00.000Z",
+        },
         credential: {
           credentialMetadata: {},
           kind: "provider_config",
           providerConfigKey: "junction",
         },
-        displayName: "Junction",
-        externalAccountId: "junction-invalid-companion-payload",
-        provider: "junction",
-        scopes: [],
-        status: "active",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      assert.ok(account);
       const job = getStore(service).enqueueJob({
         accountId: account.id,
         kind: "resource",
@@ -8016,19 +8099,31 @@ describe("hosted device-sync runtime", () => {
     });
 
     const syncFreshRuntime = async (service: DeviceSyncService) => {
-      const account = getStore(service).upsertAccount({
-        connectedAt: "2026-04-04T09:00:00.000Z",
+      const account = getStore(service).hydrateHostedAccount({
+        connection: {
+          provider: "junction",
+          externalAccountId: "junction-companion-cold-restore",
+          connectedAt: "2026-04-04T09:00:00.000Z",
+          displayName: "Junction",
+          scopes: [],
+          metadata: {},
+          status: "active",
+          updatedAt: "2026-04-04T09:00:00.000Z",
+        },
         credential: {
           credentialMetadata: {},
           kind: "provider_config",
           providerConfigKey: "junction",
         },
-        displayName: "Junction",
-        externalAccountId: "junction-companion-cold-restore",
-        provider: "junction",
-        scopes: [],
-        status: "active",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      assert.ok(account);
       const snapshot = buildRuntimeSnapshot({
         connectionId,
         credential: {
@@ -8126,18 +8221,30 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const account = getStore(service).upsertAccount({
-        connectedAt: "2026-04-04T09:00:00.000Z",
+      const account = getStore(service).hydrateHostedAccount({
+        connection: {
+          provider: "demo",
+          externalAccountId: "demo-skipped-dirty-payload",
+          connectedAt: "2026-04-04T09:00:00.000Z",
+          displayName: "Demo",
+          scopes: [],
+          metadata: {},
+          status: "disconnected",
+          updatedAt: "2026-04-04T09:00:00.000Z",
+        },
         credential: {
           credentialMetadata: {},
           kind: "none",
         },
-        displayName: "Demo",
-        externalAccountId: "demo-skipped-dirty-payload",
-        provider: "demo",
-        scopes: [],
-        status: "disconnected",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      assert.ok(account);
       const job = getStore(service).enqueueJob({
         accountId: account.id,
         kind: "resource",
@@ -8254,13 +8361,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "dirty-payload",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_dirty_payload",
@@ -8372,13 +8476,10 @@ describe("hosted device-sync runtime", () => {
       const service = createDeviceSyncServiceForVault(vaultRoot);
 
       try {
-        const begin = await service.startConnection({
-          provider: "demo",
-        });
-        const connected = await service.handleOAuthCallback({
+
+        const connected = await seedDeviceConnection(service, {
           code: `terminal-wake-${status}`,
           provider: "demo",
-          state: begin.state,
         });
         const snapshot = buildRuntimeSnapshot({
           connectionId: `hosted_conn_terminal_wake_${status}`,
@@ -8440,13 +8541,10 @@ describe("hosted device-sync runtime", () => {
       const service = createDeviceSyncServiceForVault(vaultRoot);
 
       try {
-        const begin = await service.startConnection({
-          provider: "demo",
-        });
-        const connected = await service.handleOAuthCallback({
+
+        const connected = await seedDeviceConnection(service, {
           code: `terminal-stale-wake-${scenario.snapshotStatus}`,
           provider: "demo",
-          state: begin.state,
         });
         const pendingJob = getStore(service).enqueueJob({
           accountId: connected.account.id,
@@ -8529,13 +8627,10 @@ describe("hosted device-sync runtime", () => {
     const pendingRequests: Array<{ limit?: number | null }> = [];
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "dirty-pending",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_dirty_pending",
@@ -8620,13 +8715,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "dirty-reconcile",
         provider: "demo",
-        state: begin.state,
       });
       const dirtyState = buildDirtyState({
         connectionId: "hosted_conn_dirty_reconcile",
@@ -8700,13 +8792,10 @@ describe("hosted device-sync runtime", () => {
     const pendingRequests: Array<{ limit?: number | null }> = [];
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "dirty-supported-after-missing",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_dirty_supported",
@@ -8969,13 +9058,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "dirty-provider-mismatch",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_dirty_provider_mismatch",
@@ -9057,13 +9143,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "dirty-reauth",
         provider: "demo",
-        state: begin.state,
       });
       getStore(service).markSyncFailed(
         connected.account.id,
@@ -9155,13 +9238,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "dirty-disconnected",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_dirty_disconnected",
@@ -9258,19 +9338,31 @@ describe("hosted device-sync runtime", () => {
       const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
 
       try {
-        const account = getStore(service).upsertAccount({
-          connectedAt: "2026-04-04T09:00:00.000Z",
+        const account = getStore(service).hydrateHostedAccount({
+          connection: {
+            provider: "junction",
+            externalAccountId: `junction-terminal-${status}`,
+            connectedAt: "2026-04-04T09:00:00.000Z",
+            displayName: "Junction",
+            scopes: [],
+            metadata: {},
+            status: status,
+            updatedAt: "2026-04-04T09:00:00.000Z",
+          },
           credential: {
             credentialMetadata: {},
             kind: "provider_config",
             providerConfigKey: "junction",
           },
-          displayName: "Junction",
-          externalAccountId: `junction-terminal-${status}`,
-          provider: "junction",
-          scopes: [],
-          status,
+          hostedObservedUpdatedAt: null,
+          hostedObservedTokenVersion: null,
+          localState: {
+            lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+            lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+            nextReconcileAt: null,
+          },
         });
+        assert.ok(account);
         const connectionId = `hosted_conn_companion_hrv_${status}`;
         const snapshot = buildRuntimeSnapshot({
           connectionId,
@@ -9568,19 +9660,31 @@ describe("hosted device-sync runtime", () => {
 
       try {
         const externalAccountId = `junction-reconnect-${activeFirst ? "active-first" : "terminal-first"}`;
-        const original = getStore(service).upsertAccount({
-          connectedAt: "2026-07-13T01:00:00.000Z",
+        const original = getStore(service).hydrateHostedAccount({
+          connection: {
+            provider: "junction",
+            externalAccountId: externalAccountId,
+            connectedAt: "2026-07-13T01:00:00.000Z",
+            displayName: "Original Junction",
+            scopes: [],
+            metadata: {},
+            status: "active",
+            updatedAt: "2026-07-13T01:00:00.000Z",
+          },
           credential: {
             credentialMetadata: {},
             kind: "provider_config",
             providerConfigKey: "junction",
           },
-          displayName: "Original Junction",
-          externalAccountId,
-          provider: "junction",
-          scopes: [],
-          status: "active",
+          hostedObservedUpdatedAt: null,
+          hostedObservedTokenVersion: null,
+          localState: {
+            lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+            lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+            nextReconcileAt: null,
+          },
         });
+        assert.ok(original);
         const originalConnectionId = `hosted-reconnect-a-${activeFirst}`;
         const reconnectedConnectionId = `hosted-reconnect-b-${activeFirst}`;
         const originalActiveSnapshot = buildRuntimeSnapshot({
@@ -9706,19 +9810,31 @@ describe("hosted device-sync runtime", () => {
 
     try {
       const externalAccountId = "junction-reconnect-without-terminal";
-      const original = getStore(service).upsertAccount({
-        connectedAt: "2026-07-13T01:00:00.000Z",
+      const original = getStore(service).hydrateHostedAccount({
+        connection: {
+          provider: "junction",
+          externalAccountId: externalAccountId,
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          displayName: "Original Junction",
+          scopes: [],
+          metadata: {},
+          status: "active",
+          updatedAt: "2026-07-13T01:00:00.000Z",
+        },
         credential: {
           credentialMetadata: {},
           kind: "provider_config",
           providerConfigKey: "junction",
         },
-        displayName: "Original Junction",
-        externalAccountId,
-        provider: "junction",
-        scopes: [],
-        status: "active",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      assert.ok(original);
       const originalConnectionId = "hosted-reconnect-without-terminal-a";
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort: createSnapshotOnlyDeviceSyncPort(buildRuntimeSnapshot({
@@ -9804,32 +9920,56 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
 
     try {
-      const account = getStore(service).upsertAccount({
-        connectedAt: "2026-07-13T01:00:00.000Z",
+      const account = getStore(service).hydrateHostedAccount({
+        connection: {
+          provider: "junction",
+          externalAccountId: "junction-account-before-terminal-scrub",
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          displayName: "Junction",
+          scopes: [],
+          metadata: {},
+          status: "active",
+          updatedAt: "2026-07-13T01:00:00.000Z",
+        },
         credential: {
           credentialMetadata: {},
           kind: "provider_config",
           providerConfigKey: "junction",
         },
-        displayName: "Junction",
-        externalAccountId: "junction-account-before-terminal-scrub",
-        provider: "junction",
-        scopes: [],
-        status: "active",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      assert.ok(account);
       const connectionId = "hosted-connection-terminal-scrub";
-      const fork = getStore(service).upsertAccount({
-        connectedAt: "2026-07-13T01:00:00.000Z",
+      const fork = getStore(service).hydrateHostedAccount({
+        connection: {
+          provider: "junction",
+          externalAccountId: `opaque:${connectionId}`,
+          connectedAt: "2026-07-13T01:00:00.000Z",
+          displayName: "Junction",
+          scopes: [],
+          metadata: {},
+          status: "disconnected",
+          updatedAt: "2026-07-13T01:00:00.000Z",
+        },
         credential: {
           credentialMetadata: {},
           kind: "none",
         },
-        displayName: "Junction",
-        externalAccountId: `opaque:${connectionId}`,
-        provider: "junction",
-        scopes: [],
-        status: "disconnected",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      assert.ok(fork);
       const activeSnapshot = buildRuntimeSnapshot({
         connectedAt: "2026-07-13T01:00:00.000Z",
         connectionId,
@@ -9935,13 +10075,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "double-wake",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_double_wake",
@@ -10032,13 +10169,10 @@ describe("hosted device-sync runtime", () => {
     let dirtyPendingFetches = 0;
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "legacy-dirty-pending",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_legacy_wake",
@@ -10098,13 +10232,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "same-next-reconcile",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_same_next_reconcile",
@@ -10159,19 +10290,31 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
 
     try {
-      const account = getStore(service).upsertAccount({
-        connectedAt: "2026-04-04T09:00:00.000Z",
+      const account = getStore(service).hydrateHostedAccount({
+        connection: {
+          provider: "junction",
+          externalAccountId: "manual-reconcile",
+          connectedAt: "2026-04-04T09:00:00.000Z",
+          displayName: "Junction",
+          scopes: [],
+          metadata: {},
+          status: "active",
+          updatedAt: "2026-04-04T09:00:00.000Z",
+        },
         credential: {
           credentialMetadata: {},
           kind: "provider_config",
           providerConfigKey: "junction",
         },
-        displayName: "Junction",
-        externalAccountId: "manual-reconcile",
-        provider: "junction",
-        scopes: [],
-        status: "active",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      assert.ok(account);
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_manual_reconcile",
         credential: {
@@ -10401,11 +10544,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot, [ouraProvider]);
 
     try {
-      const begin = await service.startConnection({ provider: "oura" });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "tombstone-reconnect",
         provider: "oura",
-        state: begin.state,
       });
       const connectionId = "hosted_conn_tombstone_reconnect";
       const dirtyPayloadId = "dsp_tombstone_reconnect";
@@ -10552,11 +10694,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({ provider: "demo" });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "disconnect-wake-replacement",
         provider: "demo",
-        state: begin.state,
       });
       const store = getStore(service);
       const runningJob = store.enqueueJob({
@@ -10732,11 +10873,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({ provider: "demo" });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "legacy-disconnect-wake",
         provider: "demo",
-        state: begin.state,
       });
       const pendingJob = getStore(service).enqueueJob({
         accountId: connected.account.id,
@@ -10808,13 +10948,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "disconnect-wake",
         provider: "demo",
-        state: begin.state,
       });
       const pendingJob = getStore(service).enqueueJob({
         accountId: connected.account.id,
@@ -10885,13 +11022,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "reauthorize",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_reauth",
@@ -10944,13 +11078,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "reauthorize",
         provider: "demo",
-        state: begin.state,
       });
       getStore(service).enqueueJob({
         accountId: connected.account.id,
@@ -11028,13 +11159,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "local-error",
         provider: "demo",
-        state: begin.state,
       });
       getStore(service).markSyncFailed(
         connected.account.id,
@@ -11094,13 +11222,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "forward-next-reconcile",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_forward_next_reconcile",
@@ -11141,13 +11266,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "wake-without-hint",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_no_hint",
@@ -11186,13 +11308,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "clear-local-error",
         provider: "demo",
-        state: begin.state,
       });
       getStore(service).markSyncFailed(
         connected.account.id,
@@ -11252,13 +11371,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "stale-hosted-state",
         provider: "demo",
-        state: begin.state,
       });
       const snapshot = buildRuntimeSnapshot({
         connectionId: "hosted_conn_stale_state",
@@ -11334,13 +11450,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "stale-hosted-disconnect",
         provider: "demo",
-        state: begin.state,
       });
 
       await syncHostedDeviceSyncControlPlaneState({
@@ -11502,13 +11615,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "same-snapshot-hosted-disconnect",
         provider: "demo",
-        state: begin.state,
       });
 
       await syncHostedDeviceSyncControlPlaneState({
@@ -11679,13 +11789,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "same-wake-replay-baseline",
         provider: "demo",
-        state: begin.state,
       });
 
       let currentSnapshot = buildRuntimeSnapshot({
@@ -11830,13 +11937,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "keep-local-next-reconcile",
         provider: "demo",
-        state: begin.state,
       });
 
       await syncHostedDeviceSyncControlPlaneState({
@@ -11910,13 +12014,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "invalid-local-next-reconcile",
         provider: "demo",
-        state: begin.state,
       });
 
       await syncHostedDeviceSyncControlPlaneState({
@@ -11990,13 +12091,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "invalid-hosted-next-reconcile",
         provider: "demo",
-        state: begin.state,
       });
 
       await syncHostedDeviceSyncControlPlaneState({
@@ -12135,7 +12233,7 @@ describe("hosted device-sync runtime", () => {
         },
         scopes: ["offline", "heartrate"],
       });
-      getStore(service).markWebhookReceived(localAccountId, "2026-04-02T13:05:00.000Z");
+
       getStore(service).markSyncStarted(localAccountId, "2026-04-02T13:06:00.000Z");
 
       const codec = createSecretCodec(DEVICE_SYNC_SECRET);
@@ -12202,7 +12300,6 @@ describe("hosted device-sync runtime", () => {
           lastSyncCompletedAt: "2026-04-02T13:07:00.000Z",
           lastSyncErrorAt: null,
           lastSyncStartedAt: "2026-04-02T13:06:00.000Z",
-          lastWebhookAt: "2026-04-02T13:05:00.000Z",
           nextReconcileAt: "2026-04-02T14:00:00.000Z",
         },
         observedTokenVersion: 7,
@@ -13033,13 +13130,10 @@ describe("hosted device-sync runtime", () => {
     let fakeTimersEnabled = false;
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "empty-backfill-retry",
         provider: "demo",
-        state: begin.state,
       });
       let hostedSnapshot = buildRuntimeSnapshot({
         connectionId,
@@ -14796,13 +14890,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "full-metadata-backfill-race",
         provider: "demo",
-        state: begin.state,
       });
       let hostedSnapshot = buildRuntimeSnapshot({
         connectionId,
@@ -14923,13 +15014,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "completed-backfill-race",
         provider: "demo",
-        state: begin.state,
       });
       let hostedSnapshot = buildRuntimeSnapshot({
         connectionId,
@@ -15048,13 +15136,10 @@ describe("hosted device-sync runtime", () => {
     const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
 
     try {
-      const begin = await service.startConnection({
-        provider: "demo",
-      });
-      const connected = await service.handleOAuthCallback({
+
+      const connected = await seedDeviceConnection(service, {
         code: "newer-backfill-progress",
         provider: "demo",
-        state: begin.state,
       });
       let hostedSnapshot = buildRuntimeSnapshot({
         connectionId,
@@ -15314,7 +15399,7 @@ describe("hosted device-sync runtime", () => {
       assert.ok(localAccountId);
 
       const store = getStore(service);
-      store.markWebhookReceived(localAccountId, "2026-04-06T09:36:00.000Z");
+
       store.markSyncStarted(localAccountId, "2026-04-06T09:37:00.000Z");
       assert.equal(store.markSyncSucceeded(localAccountId, "2026-04-06T09:38:00.000Z"), true);
       store.upsertConnectionSource({
@@ -15624,7 +15709,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("reconciliation sends explicit null observed fences when the hosted baseline has no versioned state yet", async () => {
+  test("reconciliation keeps null connection fences without restoring cleared credentials", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -15687,16 +15772,19 @@ describe("hosted device-sync runtime", () => {
         },
       };
 
-      const seeded = getStore(service).upsertAccount({
-        connectedAt: "2026-04-04T09:00:00.000Z",
-        displayName: "Hosted Demo",
-        externalAccountId: "demo-null-fence",
-        metadata: {
-          hosted: true,
+      const seeded = getStore(service).hydrateHostedAccount({
+        connection: {
+          provider: "demo",
+          externalAccountId: "demo-null-fence",
+          connectedAt: "2026-04-04T09:00:00.000Z",
+          displayName: "Hosted Demo",
+          scopes: ["offline", "read:data"],
+          metadata: {
+            hosted: true,
+          },
+          status: "active",
+          updatedAt: "2026-04-04T09:00:00.000Z",
         },
-        provider: "demo",
-        scopes: ["offline", "read:data"],
-        status: "active",
         tokens: {
           accessToken: "seed-access-token",
           accessTokenEncrypted: "enc:seed-access-token",
@@ -15704,7 +15792,15 @@ describe("hosted device-sync runtime", () => {
           refreshToken: "seed-refresh-token",
           refreshTokenEncrypted: "enc:seed-refresh-token",
         },
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      assert.ok(seeded);
 
       const state = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -15723,15 +15819,7 @@ describe("hosted device-sync runtime", () => {
       const codec = createSecretCodec(DEVICE_SYNC_SECRET);
       const storedLocalAccount = getStore(service).getAccountById(localAccountId);
       assert.ok(storedLocalAccount);
-      const updated = getStore(service).upsertAccount({
-        connectedAt: storedLocalAccount.connectedAt,
-        displayName: "Local Null Fence",
-        externalAccountId: storedLocalAccount.externalAccountId,
-        metadata: storedLocalAccount.metadata,
-        provider: storedLocalAccount.provider,
-        scopes: storedLocalAccount.scopes,
-        status: storedLocalAccount.status,
-        tokens: {
+      const updated = getStore(service).updateAccountTokens(localAccountId, {
           accessToken: "local-first-access",
           accessTokenEncrypted: codec.encrypt(
             "local-first-access",
@@ -15751,9 +15839,8 @@ describe("hosted device-sync runtime", () => {
               purpose: "device-sync-refresh-token",
             }),
           ),
-        },
-      });
-      assert.ok(updated);
+        });
+      assert.equal(updated, null, "hosted credential removal must block a stale local token write");
 
       await reconcileHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -15771,19 +15858,8 @@ describe("hosted device-sync runtime", () => {
         localState: {
           lastSyncStartedAt: "2026-04-06T09:40:00.000Z",
         },
-        observedTokenVersion: null,
         observedConnectedAt: "2026-04-04T09:00:00.000Z",
         observedUpdatedAt: null,
-        credential: {
-          kind: "oauth_tokens",
-          tokenBundle: {
-            accessToken: "local-first-access",
-            accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-            keyVersion: "local-runtime",
-            refreshToken: "local-first-refresh",
-            tokenVersion: 1,
-          },
-        },
       });
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
@@ -16143,7 +16219,6 @@ describe("hosted device-sync runtime", () => {
     const service = createHostedRuntimeDeviceSyncService({
       clock: { now: () => new Date(currentNow) },
       config: {
-        publicBaseUrl: "https://sync.example.test/device-sync",
         stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
         vaultRoot,
       },
@@ -17022,7 +17097,6 @@ describe("hosted device-sync runtime", () => {
     const buildService = (vaultRoot: string) => createHostedRuntimeDeviceSyncService({
       clock: { now: () => new Date(now) },
       config: {
-        publicBaseUrl: "https://sync.example.test/device-sync",
         stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
         vaultRoot,
       },
@@ -17180,7 +17254,6 @@ describe("hosted device-sync runtime", () => {
     const importerInputs: unknown[] = [];
     const service = createHostedRuntimeDeviceSyncService({
       config: {
-        publicBaseUrl: "https://sync.example.test/device-sync",
         stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
         vaultRoot,
       },
@@ -17402,7 +17475,6 @@ describe("hosted device-sync runtime", () => {
       deviceSyncPort: createSnapshotOnlyDeviceSyncPort(snapshot),
       secret: DEVICE_SYNC_SECRET,
       config: {
-        publicBaseUrl: "https://sync.example.test/device-sync",
         shouldYieldJobExecution: () => shouldYield,
         stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
         vaultRoot,

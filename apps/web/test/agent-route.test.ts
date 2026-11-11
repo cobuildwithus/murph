@@ -4,32 +4,22 @@ import {
 import { Prisma } from "@prisma/client";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createBearerRequest, createJsonPostRequest, createRouteContext } from "./route-test-helpers";
+import { createJsonPostRequest, createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncAgentSessionContext: vi.fn(),
-  createHostedDeviceSyncAgentSessionService: vi.fn(),
   assertBrowserMutationOrigin: vi.fn(),
-  createHostedDeviceSyncProviderAgentSessionService: vi.fn(),
-  createHostedDeviceSyncControlPlane: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
-  exportTokenBundle: vi.fn(),
   enqueueHostedDeviceWebhook: vi.fn(),
   handleWebhook: vi.fn(),
   pairAgent: vi.fn(),
   prepareWebhookForDurableEnqueue: vi.fn(),
   prepareHostedDeviceWebhookQueueTransport: vi.fn(),
   readWebhookRawBody: vi.fn(),
-  refreshTokenBundle: vi.fn(),
   resolveWebhookPreflight: vi.fn(),
-  requireAgentSession: vi.fn(),
   requireAuthenticatedUser: vi.fn(),
-  requireRegistry: vi.fn(),
 }));
 
-vi.mock("@/src/lib/device-sync/control-plane", () => ({
-  createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
-}));
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
   createHostedDeviceSyncPublicIngressService: mocks.createHostedDeviceSyncPublicIngressService,
 }));
@@ -40,57 +30,31 @@ vi.mock("@/src/lib/device-sync/webhook-queue", () => ({
 }));
 vi.mock("@/src/lib/device-sync/agent-session-service", () => ({
   createHostedDeviceSyncAgentSessionContext: mocks.createHostedDeviceSyncAgentSessionContext,
-  createHostedDeviceSyncAgentSessionService: mocks.createHostedDeviceSyncAgentSessionService,
-}));
-vi.mock("@/src/lib/device-sync/agent-session-provider-service", () => ({
-  createHostedDeviceSyncProviderAgentSessionService: mocks.createHostedDeviceSyncProviderAgentSessionService,
 }));
 vi.mock("@/src/lib/device-sync/auth", () => ({
   assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
   requireAuthenticatedHostedUser: mocks.requireAuthenticatedUser,
 }));
 
-type ExportRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
 type PairRouteModule = typeof import("../app/api/device-sync/agents/pair/route");
-type RefreshRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/refresh-token-bundle/route");
 type WebhookRouteModule = typeof import("../app/api/device-sync/webhooks/[provider]/route");
 
-let exportRoute: ExportRouteModule;
 let pairRoute: PairRouteModule;
-let refreshRoute: RefreshRouteModule;
 let webhookRoute: WebhookRouteModule;
 
 describe("hosted device-sync agent and webhook routes", () => {
   beforeAll(async () => {
-    exportRoute = await import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
     pairRoute = await import("../app/api/device-sync/agents/pair/route");
-    refreshRoute = await import("../app/api/device-sync/agent/connections/[connectionId]/refresh-token-bundle/route");
     webhookRoute = await import("../app/api/device-sync/webhooks/[provider]/route");
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
-      pairAgent: mocks.pairAgent,
-      requireAuthenticatedUser: mocks.requireAuthenticatedUser,
-      requireRegistry: mocks.requireRegistry,
-    });
     mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
       handleWebhook: mocks.handleWebhook,
       prepareWebhookForDurableEnqueue: mocks.prepareWebhookForDurableEnqueue,
       readWebhookRawBody: mocks.readWebhookRawBody,
       resolveWebhookPreflight: mocks.resolveWebhookPreflight,
-    });
-    mocks.createHostedDeviceSyncAgentSessionService.mockReturnValue({
-      exportTokenBundle: mocks.exportTokenBundle,
-      refreshTokenBundle: mocks.refreshTokenBundle,
-      requireAgentSession: mocks.requireAgentSession,
-    });
-    mocks.createHostedDeviceSyncProviderAgentSessionService.mockReturnValue({
-      exportTokenBundle: mocks.exportTokenBundle,
-      refreshTokenBundle: mocks.refreshTokenBundle,
-      requireAgentSession: mocks.requireAgentSession,
     });
     mocks.createHostedDeviceSyncAgentSessionContext.mockReturnValue({
       agentSessions: {
@@ -104,10 +68,6 @@ describe("hosted device-sync agent and webhook routes", () => {
       id: "user-123",
       name: "Person",
       source: "trusted-header",
-    });
-    mocks.requireAgentSession.mockResolvedValue({
-      id: "dsa_current",
-      userId: "user-123",
     });
     mocks.readWebhookRawBody.mockResolvedValue(Buffer.from('{"event":"sleep.updated"}', "utf8"));
     mocks.resolveWebhookPreflight.mockResolvedValue(null);
@@ -207,113 +167,6 @@ describe("hosted device-sync agent and webhook routes", () => {
       },
       token: "device-sync-agent-token",
     });
-  });
-
-  it("rejects export-token-bundle when the bearer token has expired", async () => {
-    mocks.requireAgentSession.mockRejectedValue(
-      deviceSyncError({
-        code: "AGENT_AUTH_EXPIRED",
-        message: "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
-        httpStatus: 401,
-      }),
-    );
-
-    const response = await exportRoute.POST(
-      createBearerRequest(
-        "https://example.test/api/device-sync/agent/connections/dsc_123/export-token-bundle",
-        "expired-session-token",
-        { method: "POST" },
-      ),
-      createRouteContext({ connectionId: "dsc_123" }),
-    );
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "AGENT_AUTH_EXPIRED",
-        message: "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
-        retryable: false,
-      },
-    });
-    expect(mocks.exportTokenBundle).not.toHaveBeenCalled();
-  });
-
-  it("exports token bundles through the authenticated session owner", async () => {
-    mocks.exportTokenBundle.mockResolvedValueOnce({
-      connection: {
-        id: "dsc_123",
-        provider: "oura",
-      },
-      tokenBundle: {
-        accessToken: "bundle-token-test",
-        refreshToken: null,
-        tokenVersion: 7,
-      },
-    });
-
-    const response = await exportRoute.POST(
-      createBearerRequest(
-        "https://example.test/api/device-sync/agent/connections/dsc_123/export-token-bundle",
-        "valid-session-token",
-        { method: "POST" },
-      ),
-      createRouteContext({ connectionId: "dsc_123" }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.createHostedDeviceSyncAgentSessionService).toHaveBeenCalledTimes(1);
-    expect(mocks.createHostedDeviceSyncProviderAgentSessionService).not.toHaveBeenCalled();
-    expect(mocks.exportTokenBundle).toHaveBeenCalledWith({
-      id: "dsa_current",
-      userId: "user-123",
-    }, "dsc_123");
-    await expect(response.json()).resolves.toEqual({
-      connection: {
-        id: "dsc_123",
-        provider: "oura",
-      },
-      tokenBundle: {
-        accessToken: "bundle-token-test",
-        refreshToken: null,
-        tokenVersion: 7,
-      },
-    });
-  });
-
-  it("rejects refresh-token-bundle when the bearer token has expired", async () => {
-    mocks.requireAgentSession.mockRejectedValue(
-      deviceSyncError({
-        code: "AGENT_AUTH_EXPIRED",
-        message: "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
-        httpStatus: 401,
-      }),
-    );
-
-    const response = await refreshRoute.POST(
-      createJsonPostRequest(
-        "https://example.test/api/device-sync/agent/connections/dsc_123/refresh-token-bundle",
-        {
-          expectedTokenVersion: 7,
-          force: true,
-        },
-        {
-          headers: {
-            authorization: "Bearer expired-session-token",
-          },
-        },
-      ),
-      createRouteContext({ connectionId: "dsc_123" }),
-    );
-
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "AGENT_AUTH_EXPIRED",
-        message: "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
-        retryable: false,
-      },
-    });
-    expect(mocks.refreshTokenBundle).not.toHaveBeenCalled();
   });
 
   it("returns Oura webhook verification challenges as JSON", async () => {

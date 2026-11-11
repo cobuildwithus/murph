@@ -28,8 +28,12 @@ two trillion years; no new counter cap or retry-budget policy is introduced.
 Contributing a new wearable provider? Start with `docs/device-provider-contribution-kit.md` in the repo root, then use the scaffolds listed in `docs/templates/README.md`.
 
 Web owns authenticated device control and connection authority. The runner consumes
-shared hosted-runtime contracts and finite scheduler/worker passes. Local daemon
-entrypoints, listeners, launchers, and wearable fixture capture are retired.
+shared hosted-runtime contracts and finite scheduler/worker passes. The worker
+service exposes account reads, scheduling and execution; connection starts,
+callbacks, webhooks and member disconnects enter through Web. SQLite schema v12
+removes its obsolete OAuth-state and webhook-receipt tables while retaining
+accounts, credentials, source epochs and pending jobs. Local daemon entrypoints,
+listeners, launchers, and wearable fixture capture are retired.
 
 `@murphai/device-syncd/public-ingress` owns OAuth state, callbacks and webhook
 preflight/dispatch. Configured provider assembly remains on

@@ -2,12 +2,8 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
-import { deviceSyncError } from "../errors.ts";
-import { mergeGuardedJunctionHistoricalBackfillMetadata } from "../junction-historical-backfill-progress.ts";
 import { resolveDeviceProviderMatchKeys } from "../provider-match.ts";
-import { shouldPreserveEstablishedDeviceSyncConnection } from "../public-account.ts";
 import {
-  generatePrefixedId,
   isBlockedStoredDeviceSyncMetadataKey,
   maybeParseJsonObject,
   sanitizeStoredDeviceSyncMetadata,
@@ -15,7 +11,6 @@ import {
   toIsoTimestamp,
 } from "../shared.ts";
 import type {
-  DeviceAccountCredential,
   DeviceAccountCredentialKind,
   DeviceSyncAccountSetupPhase,
   DeviceSyncAccountStatus,
@@ -23,11 +18,7 @@ import type {
   StoredDeviceSyncAccountCredential,
   StoredDeviceSyncAccount,
   ListDeviceSyncAccountsInput,
-  OAuthStateConsumeClaim,
-  UpsertPublicDeviceSyncExistingAccountGuard,
-  UpsertPublicDeviceSyncExistingAccountPolicy,
 } from "../types.ts";
-import { resolveOAuthStateWithoutProviderAuthority } from "./oauth-states.ts";
 
 type SqliteRow = Record<string, unknown>;
 
@@ -35,28 +26,6 @@ type EncryptedProviderAuthTokens = ProviderAuthTokens & {
   accessTokenEncrypted: string;
   refreshTokenEncrypted?: string | null;
 };
-
-type StorageDeviceAccountCredential = DeviceAccountCredential & {
-  credentialMetadata?: Record<string, unknown>;
-};
-
-export interface AccountUpsertInput {
-  provider: string;
-  externalAccountId: string;
-  displayName?: string | null;
-  status?: DeviceSyncAccountStatus;
-  setupPhase?: DeviceSyncAccountSetupPhase | null;
-  setupExpiresAt?: string | null;
-  scopes?: string[];
-  tokens?: EncryptedProviderAuthTokens;
-  credential?: StorageDeviceAccountCredential;
-  metadata?: Record<string, unknown>;
-  existingAccountGuard?: UpsertPublicDeviceSyncExistingAccountGuard | null;
-  existingAccountPolicy?: UpsertPublicDeviceSyncExistingAccountPolicy;
-  connectedAt: string;
-  nextReconcileAt?: string | null;
-  oauthClaim?: OAuthStateConsumeClaim;
-}
 
 export interface AccountPatchInput {
   displayName?: string | null;
@@ -110,8 +79,6 @@ export interface DeviceSyncSummaryRow {
   jobs_queued: number;
   jobs_running: number;
   jobs_dead: number;
-  oauth_states: number;
-  webhook_traces: number;
 }
 
 export interface NextReconcileRow {
@@ -344,111 +311,6 @@ function parseCredentialMetadataJson(
   return sanitizeStoredCredentialMetadata(kind, maybeParseJsonObject(value));
 }
 
-function buildCredentialMetadata(credential: StorageDeviceAccountCredential): Record<string, unknown> {
-  const metadata = sanitizeCredentialMetadata(credential.credentialMetadata ?? {});
-
-  if (credential.kind !== "provider_config") {
-    return metadata;
-  }
-
-  const subject = sanitizeCredentialSubject(credential.subject);
-  return Object.keys(subject).length > 0
-    ? {
-        ...metadata,
-        subject,
-      }
-    : metadata;
-}
-
-interface ResolvedAccountCredentialColumns {
-  credentialKind: DeviceAccountCredentialKind;
-  providerConfigKey: string | null;
-  accessTokenEncrypted: string | null;
-  refreshTokenEncrypted: string | null;
-  accessTokenExpiresAt: string | null;
-  credentialMetadataJson: string;
-}
-
-function hasEncryptedProviderAuthTokens(
-  tokens: ProviderAuthTokens,
-): tokens is EncryptedProviderAuthTokens {
-  const accessTokenEncrypted = Reflect.get(tokens, "accessTokenEncrypted");
-  const refreshTokenEncrypted = Reflect.get(tokens, "refreshTokenEncrypted");
-
-  return typeof accessTokenEncrypted === "string"
-    && (
-      refreshTokenEncrypted === undefined
-      || refreshTokenEncrypted === null
-      || typeof refreshTokenEncrypted === "string"
-    );
-}
-
-function requireEncryptedProviderAuthTokens(
-  tokens: ProviderAuthTokens,
-  message: string,
-): EncryptedProviderAuthTokens {
-  if (hasEncryptedProviderAuthTokens(tokens)) {
-    return tokens;
-  }
-
-  throw new TypeError(message);
-}
-
-function resolveAccountCredentialInput(input: AccountUpsertInput): ResolvedAccountCredentialColumns {
-  const credential = input.credential
-    ?? (input.tokens
-      ? {
-          kind: "oauth_tokens",
-          tokens: input.tokens,
-        } satisfies StorageDeviceAccountCredential
-      : null);
-
-  if (!credential) {
-    throw new TypeError("Device sync account upsert requires tokens or a credential.");
-  }
-
-  if (credential.kind === "oauth_tokens") {
-    const tokens = requireEncryptedProviderAuthTokens(
-      credential.tokens,
-      "OAuth token device account credentials require encrypted access token fields.",
-    );
-
-    return {
-      credentialKind: "oauth_tokens",
-      providerConfigKey: null,
-      accessTokenEncrypted: tokens.accessTokenEncrypted,
-      refreshTokenEncrypted: tokens.refreshTokenEncrypted ?? null,
-      accessTokenExpiresAt: tokens.accessTokenExpiresAt ?? null,
-      credentialMetadataJson: stringifyJson(buildCredentialMetadata(credential)),
-    };
-  }
-
-  if (credential.kind === "provider_config") {
-    const providerConfigKey = credential.providerConfigKey.trim();
-    if (!providerConfigKey) {
-      throw new TypeError("Provider-config device account credentials require providerConfigKey.");
-    }
-
-    return {
-      credentialKind: "provider_config",
-      providerConfigKey,
-      accessTokenEncrypted: null,
-      refreshTokenEncrypted: null,
-      accessTokenExpiresAt: null,
-      credentialMetadataJson: stringifyJson(buildCredentialMetadata(credential)),
-    };
-  }
-
-  return {
-    credentialKind: "none",
-    providerConfigKey: null,
-    accessTokenEncrypted: null,
-    refreshTokenEncrypted: null,
-    accessTokenExpiresAt: null,
-    credentialMetadataJson: stringifyJson(buildCredentialMetadata(credential)),
-  };
-}
-
 function validateStoredCredentialRow(row: StoredAccountRow): void {
   if (row.credential_kind === "oauth_tokens") {
     if (row.provider_config_key !== null || !row.access_token_encrypted) {
@@ -651,8 +513,6 @@ export function decodeDeviceSyncSummaryRow(row: SqliteRow): DeviceSyncSummaryRow
     jobs_queued: expectNumber(row.jobs_queued, "device_sync_summary.jobs_queued"),
     jobs_running: expectNumber(row.jobs_running, "device_sync_summary.jobs_running"),
     jobs_dead: expectNumber(row.jobs_dead, "device_sync_summary.jobs_dead"),
-    oauth_states: expectNumber(row.oauth_states, "device_sync_summary.oauth_states"),
-    webhook_traces: expectNumber(row.webhook_traces, "device_sync_summary.webhook_traces"),
   };
 }
 
@@ -879,254 +739,6 @@ export function consolidateLegacyHostedAccount(
   database.prepare("delete from device_connection where id = ?").run(legacyAccountId);
 }
 
-export function upsertAccount(
-  database: DatabaseSync,
-  input: AccountUpsertInput,
-): StoredDeviceSyncAccount {
-  return withImmediateTransaction(database, () => {
-    const existing = getAccountByExternalAccount(database, input.provider, input.externalAccountId);
-    const now = input.connectedAt;
-    const status = input.status ?? existing?.status ?? "active";
-    const setupPhase = Object.prototype.hasOwnProperty.call(input, "setupPhase")
-      ? input.setupPhase ?? null
-      : existing?.setupPhase ?? null;
-    const setupExpiresAt = Object.prototype.hasOwnProperty.call(input, "setupExpiresAt")
-      ? input.setupExpiresAt ?? null
-      : existing?.setupExpiresAt ?? null;
-    const scopesJson = stringifyJson(input.scopes ?? []);
-    const replacementMetadata = sanitizeStoredDeviceSyncAccountMetadata(input.metadata ?? {});
-
-    if (existing) {
-      assertAccountUpsertExistingGuard(existing, input.existingAccountGuard ?? null);
-      if (
-        shouldPreserveEstablishedDeviceSyncConnection(
-          existing,
-          input.existingAccountPolicy ?? "replace",
-        )
-      ) {
-        requireExactOAuthClaimResolution(database, input.oauthClaim);
-        return existing;
-      }
-      const credential = resolveAccountCredentialInput(input);
-      const metadata = input.provider === "junction" && input.existingAccountGuard
-        ? mergeGuardedJunctionHistoricalBackfillMetadata({
-            existingMetadata: existing.metadata,
-            replacementMetadata,
-          })
-        : replacementMetadata;
-      const metadataJson = stringifyJson(sanitizeStoredDeviceSyncAccountMetadata(metadata));
-
-      database.prepare(`
-        update device_connection
-        set display_name = ?,
-            status = ?,
-            setup_phase = ?,
-            setup_expires_at = ?,
-            scopes_json = ?,
-            metadata_json = ?,
-            connected_at = ?,
-            updated_at = ?
-        where id = ?
-      `).run(
-        input.displayName ?? null,
-        status,
-        setupPhase,
-        setupExpiresAt,
-        scopesJson,
-        metadataJson,
-        input.connectedAt,
-        now,
-        existing.id,
-      );
-
-      database.prepare(`
-        update device_credential_state
-        set credential_kind = ?,
-            provider_config_key = ?,
-            access_token_encrypted = ?,
-            refresh_token_encrypted = ?,
-            access_token_expires_at = ?,
-            credential_metadata_json = ?,
-            updated_at = ?
-        where account_id = ?
-      `).run(
-        credential.credentialKind,
-        credential.providerConfigKey,
-        credential.accessTokenEncrypted,
-        credential.refreshTokenEncrypted,
-        credential.accessTokenExpiresAt,
-        credential.credentialMetadataJson,
-        now,
-        existing.id,
-      );
-
-      database.prepare(`
-        update device_observation_state
-        set next_reconcile_at = ?,
-            local_connection_revision = ?,
-            local_token_revision = ?,
-            last_sync_error_at = null,
-            last_error_code = null,
-            last_error_message = null,
-            updated_at = ?
-        where account_id = ?
-      `).run(
-        input.nextReconcileAt ?? null,
-        existing.localConnectionRevision + 1,
-        existing.localTokenRevision + 1,
-        now,
-        existing.id,
-      );
-
-      const updated = getAccountById(database, existing.id)!;
-      requireExactOAuthClaimResolution(database, input.oauthClaim);
-      return updated;
-    }
-
-    assertAccountUpsertExistingGuard(null, input.existingAccountGuard ?? null);
-    const credential = resolveAccountCredentialInput(input);
-    const metadataJson = stringifyJson(replacementMetadata);
-
-    const id = generatePrefixedId("dsa");
-    database.prepare(`
-      insert into device_connection (
-        id,
-        provider,
-        external_account_id,
-        display_name,
-        status,
-        setup_phase,
-        setup_expires_at,
-        scopes_json,
-        metadata_json,
-        connected_at,
-        created_at,
-        updated_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      input.provider,
-      input.externalAccountId,
-      input.displayName ?? null,
-      status,
-      setupPhase,
-      setupExpiresAt,
-      scopesJson,
-      metadataJson,
-      input.connectedAt,
-      now,
-      now,
-    );
-
-    database.prepare(`
-      insert into device_credential_state (
-        account_id,
-        credential_kind,
-        provider_config_key,
-        access_token_encrypted,
-        refresh_token_encrypted,
-        access_token_expires_at,
-        credential_metadata_json,
-        created_at,
-        updated_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      credential.credentialKind,
-      credential.providerConfigKey,
-      credential.accessTokenEncrypted,
-      credential.refreshTokenEncrypted,
-      credential.accessTokenExpiresAt,
-      credential.credentialMetadataJson,
-      now,
-      now,
-    );
-
-    database.prepare(`
-      insert into device_observation_state (
-        account_id,
-        hosted_observed_updated_at,
-        hosted_observed_connection_revision,
-        hosted_observed_token_version,
-        hosted_observed_token_revision,
-        local_connection_revision,
-        local_token_revision,
-        last_webhook_at,
-        last_sync_started_at,
-        last_sync_completed_at,
-        last_sync_error_at,
-        last_error_code,
-        last_error_message,
-        next_reconcile_at,
-        created_at,
-        updated_at
-      ) values (?, null, 0, null, 0, 0, 0, null, null, null, null, null, null, ?, ?, ?)
-    `).run(
-      id,
-      input.nextReconcileAt ?? null,
-      now,
-      now,
-    );
-
-    const created = getAccountById(database, id)!;
-    requireExactOAuthClaimResolution(database, input.oauthClaim);
-    return created;
-  });
-}
-
-function requireExactOAuthClaimResolution(
-  database: DatabaseSync,
-  claim: OAuthStateConsumeClaim | undefined,
-): void {
-  if (!claim) {
-    return;
-  }
-  if (!resolveOAuthStateWithoutProviderAuthority(database, claim)) {
-    throw deviceSyncError({
-      code: "OAUTH_STATE_CHANGED",
-      message: "OAuth callback ownership changed before its durable connection outcome committed.",
-      retryable: true,
-      httpStatus: 409,
-    });
-  }
-}
-
-function assertAccountUpsertExistingGuard(
-  existing: StoredDeviceSyncAccount | null,
-  guard: UpsertPublicDeviceSyncExistingAccountGuard | null,
-): void {
-  if (!guard) {
-    return;
-  }
-
-  if (!existing || existing.id !== guard.expectedAccountId) {
-    throw deviceSyncError({
-      code: "CONNECTION_SEEDED_ACCOUNT_MISMATCH",
-      message: "Device sync connection callback referenced an unexpected seeded account.",
-      retryable: false,
-      httpStatus: 400,
-    });
-  }
-
-  if (guard.rejectIfDisconnected && existing.status === "disconnected") {
-    throw deviceSyncError({
-      code: "CONNECTION_ALREADY_DISCONNECTED",
-      message: "Device sync connection callback was received after the seeded account was disconnected.",
-      retryable: false,
-      httpStatus: 409,
-    });
-  }
-
-  if (existing.connectedAt !== guard.expectedConnectedAt) {
-    throw deviceSyncError({
-      code: "CONNECTION_SEEDED_ACCOUNT_CHANGED",
-      message: "Device sync connection changed after this connection flow started.",
-      retryable: false,
-      httpStatus: 409,
-    });
-  }
-}
-
 export function patchAccount(
   database: DatabaseSync,
   accountId: string,
@@ -1267,7 +879,6 @@ export function disconnectAccountIfCurrentInTransaction(
   now: string,
   expectedLocalConnectionRevision: number | null,
   expectedStatus: DeviceSyncAccountStatus | null,
-  expectedConnectedAt: string | null,
 ): StoredDeviceSyncAccount | null {
   const connectionResult = database.prepare(`
     update device_connection
@@ -1278,7 +889,6 @@ export function disconnectAccountIfCurrentInTransaction(
         updated_at = ?
     where id = ?
       and (? is null or status = ?)
-      and (? is null or connected_at = ?)
       and (? is null or exists (
         select 1
         from device_observation_state
@@ -1290,8 +900,6 @@ export function disconnectAccountIfCurrentInTransaction(
     accountId,
     expectedStatus,
     expectedStatus,
-    expectedConnectedAt,
-    expectedConnectedAt,
     expectedLocalConnectionRevision,
     expectedLocalConnectionRevision,
   ) as { changes: number };
@@ -1338,6 +946,6 @@ export function disconnectAccount(
   now: string,
 ): StoredDeviceSyncAccount {
   return withImmediateTransaction(database, () =>
-    disconnectAccountIfCurrentInTransaction(database, accountId, now, null, null, null)
+    disconnectAccountIfCurrentInTransaction(database, accountId, now, null, null)
   )!;
 }

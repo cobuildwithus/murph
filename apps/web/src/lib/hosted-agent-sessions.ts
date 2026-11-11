@@ -83,9 +83,8 @@ export class HostedAgentSessionService {
       throw createHostedAgentAuthRequiredError(this.pairPath, this.messages.required);
     }
 
-    // Device-agent sessions can export provider credentials. Never let another
-    // scoped bearer that happens to share the backing session table cross this
-    // authority boundary.
+    // Scoped bearer namespaces share a backing session table. Keep their
+    // authentication boundaries distinct.
     if (!token.startsWith(HOSTED_AGENT_BEARER_TOKEN_PREFIX)) {
       throw createHostedAgentAuthInvalidError(this.messages.invalid);
     }

@@ -1,12 +1,12 @@
 /**
  * Device-sync schema bootstrap owns the SQLite migration boundary so the main
- * store file does not also carry table layout and account/job/webhook logic.
+ * store file does not also carry table layout and account/job logic.
  */
 
 import type { DatabaseSync } from "node:sqlite";
 
-// v11: exact canonical source/resource import receipts on completed jobs.
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 11;
+// v12: public OAuth and webhook admission live exclusively in hosted Web.
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 12;
 
 interface SqliteTableColumn {
   name?: unknown;
@@ -38,16 +38,8 @@ function readDeviceConnectionColumns(database: DatabaseSync): SqliteTableColumn[
   return database.prepare("pragma table_info(device_connection)").all() as SqliteTableColumn[];
 }
 
-function readOAuthStateColumns(database: DatabaseSync): SqliteTableColumn[] {
-  return database.prepare("pragma table_info(oauth_state)").all() as SqliteTableColumn[];
-}
-
 function readConnectionSourceColumns(database: DatabaseSync): SqliteTableColumn[] {
   return database.prepare("pragma table_info(device_connection_source)").all() as SqliteTableColumn[];
-}
-
-function readWebhookTraceColumns(database: DatabaseSync): SqliteTableColumn[] {
-  return database.prepare("pragma table_info(webhook_trace)").all() as SqliteTableColumn[];
 }
 
 function readDeviceJobColumns(database: DatabaseSync): SqliteTableColumn[] {
@@ -245,31 +237,6 @@ function ensureConnectionSourceLifecycleEpochColumn(database: DatabaseSync): voi
   }
 }
 
-function ensureWebhookTraceClaimTokenColumn(database: DatabaseSync): void {
-  if (!tableExists(database, "webhook_trace")) {
-    return;
-  }
-
-  const names = columnNames(readWebhookTraceColumns(database));
-  if (!names.has("claim_token")) {
-    database.exec("alter table webhook_trace add column claim_token text");
-  }
-}
-
-function ensureOAuthStateColumns(database: DatabaseSync): void {
-  if (!tableExists(database, "oauth_state")) {
-    return;
-  }
-
-  const names = columnNames(readOAuthStateColumns(database));
-  if (!names.has("owner_id")) {
-    database.exec("alter table oauth_state add column owner_id text");
-  }
-  if (!names.has("consumed_at")) {
-    database.exec("alter table oauth_state add column consumed_at text");
-  }
-}
-
 function clearLegacyEmptyTokenCredentials(database: DatabaseSync): void {
   if (!tableExists(database, "device_credential_state")) {
     return;
@@ -294,20 +261,6 @@ function clearLegacyEmptyTokenCredentials(database: DatabaseSync): void {
 
 export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
   database.exec(`
-      create table if not exists oauth_state (
-        state text primary key,
-        provider text not null,
-        owner_id text,
-        return_to text,
-        metadata_json text not null,
-        created_at text not null,
-        expires_at text not null,
-        consumed_at text
-      );
-
-      create index if not exists oauth_state_expires_idx
-      on oauth_state (expires_at);
-
       create table if not exists device_connection (
         id text primary key,
         hosted_connection_id text,
@@ -408,28 +361,13 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
       create index if not exists device_job_account_running_idx
       on device_job (account_id, status, lease_expires_at);
 
-      create table if not exists webhook_trace (
-        provider text not null,
-        trace_id text not null,
-        external_account_id text not null,
-        event_type text not null,
-        received_at text not null,
-        payload_json text not null,
-        status text not null default 'processed',
-        processing_expires_at text,
-        claim_token text,
-        primary key (provider, trace_id)
-      );
-
-      create index if not exists webhook_trace_received_idx
-      on webhook_trace (received_at desc);
+      drop table if exists oauth_state;
+      drop table if exists webhook_trace;
     `);
 
   ensureDeviceCredentialStateSchema(database);
-  ensureOAuthStateColumns(database);
   ensureDeviceConnectionSetupColumns(database);
   ensureHostedConnectionIdentityColumn(database);
-  ensureWebhookTraceClaimTokenColumn(database);
   ensureConnectionSourceLastDataColumn(database);
   ensureConnectionSourceLifecycleEpochColumn(database);
   ensureDeviceJobCanonicalImportReceiptsColumn(database);

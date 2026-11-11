@@ -1,3 +1,4 @@
+import { seedStoredAccount } from "./store-test-helpers.ts";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -159,7 +160,7 @@ test("reader accepts a supplied hourly job through service enqueue, cold restore
     const store = new SqliteDeviceSyncStore(stateDatabasePath);
     const service = createDeviceSyncService({
       secret: "synthetic-device-sync-secret",
-      config: { vaultRoot, stateDatabasePath, publicBaseUrl: "https://sync.example.test",
+      config: { vaultRoot, stateDatabasePath,
         log: { warn() {}, error() {} } },
       store, providers: [f.provider], clock: { now: () => new Date(now) },
       importer: { async importDeviceProviderSnapshot(input) {
@@ -171,7 +172,7 @@ test("reader accepts a supplied hourly job through service enqueue, cold restore
   };
   let runtime = open();
   try {
-    const account = runtime.store.upsertAccount({
+    const account = seedStoredAccount(runtime.store, {
       provider: "junction", externalAccountId: "junction-user-1", scopes: [],
       credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
       connectedAt: now, nextReconcileAt: null,

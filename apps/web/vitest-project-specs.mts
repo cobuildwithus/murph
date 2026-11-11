@@ -40,7 +40,6 @@ export const hostedWebVitestProjectSpecs = resolveVitestBucketFiles(
         "hosted-billing-settings.test.tsx",
         "hosted-device-sync-*.test.ts",
         "join-*.test.ts",
-        "local-heartbeat-route.test.ts",
         "settings-*.test.ts",
       ],
     },
