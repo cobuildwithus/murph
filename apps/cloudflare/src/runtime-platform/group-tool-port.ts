@@ -71,7 +71,7 @@ export function createHostedRuntimeGroupToolPort(input: {
         fetchImpl: input.fetchImpl,
         route: bindHostedRunnerWebControlRoutePath(
           HOSTED_RUNNER_WEB_CONTROL_ROUTES.groupTool,
-          buildHostedRuntimeGroupToolPath(request.action === "read_game" && request.recapRead?.kind === "stage"),
+          buildHostedRuntimeGroupToolPath(request.action === "read_game" && request.recapRead?.kind === "upload"),
         ),
         replayOnceOnRetryableFailure: isHostedReplaySafeGroupToolRequest(request),
         ...(request.action === "read_game" && request.origin.kind === "game_recap" ? { sensitiveResponseBody: { maxBytes: 6 * 1024 * 1024 } } : {}),

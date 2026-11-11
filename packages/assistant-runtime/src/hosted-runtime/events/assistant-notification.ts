@@ -452,7 +452,6 @@ export async function executeHostedAssistantNotificationWake(input: {
   }
   let notificationDecisionKind: string | null = null;
   let deliveryIntentIds: string[] = [];
-  let recapCheckpoint: HostedMailboxOutcome["postCheckpointRecord"] = null;
   const effectsPort = input.effectsPort ?? {};
   const operatorTask = requireHostedOperatorMessageNotification(input.wake);
 
@@ -476,7 +475,6 @@ export async function executeHostedAssistantNotificationWake(input: {
       ...await resolveHostedConnectedChannelGreetingPolicy(input),
     });
     notificationDecisionKind = notificationResult?.decision.kind ?? null;
-    recapCheckpoint = recapNotificationCheckpoint(input.wake, notificationResult);
     const deliveryOutcome = notificationResult?.deliveryOutcome ?? null;
     const deliveryIntentId =
       deliveryOutcome && "intentId" in deliveryOutcome
@@ -578,7 +576,6 @@ export async function executeHostedAssistantNotificationWake(input: {
 
   return createNoopMailboxEffect({
     conversationMetrics: null, deliveryIntentIds, mailboxLane: "assistant-notification", redactedLogEntries,
-    postCheckpointRecord: recapCheckpoint,
   });
 }
 
@@ -675,7 +672,7 @@ function emitHostedAssistantNotificationLifecycleLog(input: {
     ...input,
     details: {
       ...buildHostedAssistantNotificationLogDetails(input.wake),
-      ...(input.extraDetails ?? {}),
+      ...input.extraDetails,
     },
   });
 }
@@ -692,7 +689,7 @@ function emitHostedMemberActivationSignupWelcomeLifecycleLog(input: {
     ...input,
     details: {
       ...buildHostedMemberActivationSignupWelcomeLogDetails(input.wake),
-      ...(input.extraDetails ?? {}),
+      ...input.extraDetails,
     },
   });
 }
@@ -743,7 +740,7 @@ function emitHostedNotificationLifecycleLog(input: {
     phase: input.phase,
     redacted: {
       ...input.details,
-      ...(extractHostedAssistantNotificationRedactedDetails(input.error) ?? {}),
+      ...extractHostedAssistantNotificationRedactedDetails(input.error),
       ...(input.error === undefined ? {} : { errorCode: deriveHostedExecutionErrorCode(input.error) }),
     },
   };
@@ -1503,12 +1500,4 @@ function resolveHostedNotificationTerminalNoSend(error: unknown): {
     extraDetails: { eventCode: "assistant.notification.operator_task_terminal_no_send", terminalDisposition: deriveHostedExecutionErrorCode(error) },
   };
   return null;
-}
-
-function recapNotificationCheckpoint(wake: HostedExecutionAssistantNotificationRequestedWake,
-  result: Awaited<ReturnType<typeof sendAssistantNotification>> | undefined): HostedMailboxOutcome['postCheckpointRecord'] {
-  const policy = wake.notification.responsePolicy;
-  if (policy?.kind !== 'require_game_recap' || !policy.show || !result?.recapLoreCheckpointed?.length) return null;
-  return { kind: 'game.recap-lore-checkpointed', gameId: policy.gameId, eventId: policy.eventId,
-    generationIds: result.recapLoreCheckpointed, resume: result.recapLoreRepairOnly === true };
 }

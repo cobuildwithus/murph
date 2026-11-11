@@ -80,17 +80,6 @@ export async function readRecapTranscriptPage(input: {
 }
 
 /** Quote validation reads the same canonical pages; local exports grant no evidence. */
-export async function readRecapTranscriptForValidation(input: Omit<Parameters<typeof readRecapTranscriptPage>[0], "after">) {
-  const messages: RecapTranscriptPage["messages"] = [];
-  let after: string | undefined;
-  for (let page = 0; page < 500; page += 1) {
-    const result = await readRecapTranscriptPage({ ...input, after });
-    messages.push(...result.messages);
-    if (result.next === null) return messages;
-    after = result.next;
-  }
-  throw new RangeError("Recap transcript exceeds the bounded export; use canonical posts without chat quotes.");
-}
 
 function readRecapMessageEvidence(payload: unknown, containerMemberId: string) {
     const wake = parseHostedExecutionWake(payload);

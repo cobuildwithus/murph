@@ -3,13 +3,17 @@ import * as z from "./zod-runtime.ts";
 const ref = z.string().min(1).max(128);
 export const recapBlockSchema = z.object({
   kind: z.enum(["photo", "photoPair", "contactSheet", "headline", "kicker", "quote", "stat", "scene"]),
-  scene: z.object({ cast: z.array(z.string().min(1).max(200)).min(1).max(2), murph: z.literal(true).optional(), prompt: z.string().min(80).max(700) }).strict().optional(),
+  scene: z.object({ cast: z.array(z.string().min(1).max(200)).min(1).max(2), murph: z.literal(true).optional(), prompt: z.string().min(1).max(4000) }).strict().optional(),
   entryIds: z.array(ref).optional(),
   style: z.enum(["print", "fullBleed"]).optional(),
   text: z.string().optional(),
   statValue: z.string().optional(),
   quote: z.object({ who: z.string(), text: z.string(), date: z.string().optional() }).strict().optional(),
 }).strict();
+const showSuperlatives = z.array(z.object({
+  memberId: ref, title: z.string().trim().min(1).max(200), line: z.string().trim().min(1).max(1000),
+}).strict()).max(10);
+
 const recapSuperlatives = z.array(z.object({
   memberId: ref,
   title: z.string().trim().min(1).max(80).refine((title) => {
@@ -34,24 +38,17 @@ export const gameRecapWriterSchema = z.object({
 }).strict();
 export type GameRecapStory = z.infer<typeof gameRecapWriterSchema>;
 
-/** Local candidates are untrusted selections, never storage or provider authority. */
-export const recapFileReceiptSchema = z.object({
-  operationId: ref,
-  path: z.string().min(1).max(512),
-  hash: z.string().regex(/^[a-f0-9]{64}$/u),
-  mediaType: z.enum(["image/jpeg", "audio/mpeg"]),
-  byteLength: z.number().int().positive().max(2 * 1024 * 1024),
-  width: z.number().int().positive().optional(),
-  height: z.number().int().positive().optional(),
-  durationMs: z.number().int().positive().optional(),
-}).strict();
-export type RecapFileReceipt = z.infer<typeof recapFileReceiptSchema>;
+/** Local selections carry paths; the host owns hashes, bytes and source lineage. */
+export const recapShowWriterSchema = gameRecapWriterSchema.extend({
+  pages: z.array(gameRecapWriterSchema.shape.pages.element.extend({ blocks: z.array(recapBlockSchema).min(1).max(4) })).min(1).max(7),
+  superlatives: showSuperlatives.max(2).refine(cards => new Set(cards.map(card => card.memberId)).size === cards.length).optional(),
+  song: z.object({ title: z.string().trim().min(1).max(200), style: z.string().trim().min(1).max(2000), lyrics: z.array(z.string().trim().min(1).max(500)).min(1).max(20) }).strict().optional(),
+  chatLine: z.string().trim().min(1).max(1000),
+});
 export const gameRecapDraftSchema = z.object({
-  story: gameRecapWriterSchema,
-  files: z.array(z.object({
-    slot: z.string().regex(/^(scene-[0-6]|song)$/u),
-    receipt: recapFileReceiptSchema,
-  }).strict()).max(5).refine(files => new Set(files.map(file => file.slot)).size === files.length),
+  story: recapShowWriterSchema,
+  files: z.array(z.object({ slot: z.string().regex(/^(scene-[0-6]|song)$/u), path: z.string().min(1).max(512) }).strict()).max(5)
+    .refine(files => new Set(files.map(file => file.slot)).size === files.length),
 }).strict();
 export type GameRecapDraft = z.infer<typeof gameRecapDraftSchema>;
 
@@ -79,13 +76,14 @@ export const recapAssetSchema = z.object({
 }).strict();
 export type RecapAsset = z.infer<typeof recapAssetSchema>;
 export const gameRecapEnvelopeSchema = z.object({
-  version: z.literal(1), generationId: ref, story: gameRecapStorySchema,
+  version: z.literal(1), generationId: ref, story: recapShowWriterSchema.extend({ song: recapShowWriterSchema.shape.song.catch(undefined) }),
   acceptedAt: instant,
   assets: z.array(recapAssetSchema).max(5),
   preview: z.object({ token: z.string().min(32).max(128), expiresAt: instant }).strict(),
 }).strict();
 export type GameRecapEnvelope = z.infer<typeof gameRecapEnvelopeSchema>;
 export const storedGameRecapEnvelopeSchema = gameRecapEnvelopeSchema.extend({
+  story: gameRecapEnvelopeSchema.shape.story.extend({ superlatives: recapShowWriterSchema.shape.superlatives.catch(undefined) }),
   assets: z.array(z.unknown()).max(5).transform(values => values.flatMap(value => {
     const asset = recapAssetSchema.safeParse(value);
     return asset.success ? [asset.data] : [];

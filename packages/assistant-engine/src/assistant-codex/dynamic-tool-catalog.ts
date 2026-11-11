@@ -1,6 +1,6 @@
 import { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL, VAULT_MEDIA_EXPORT_GUIDANCE } from './dynamic-tools/materialize-vault-media.js'
 export { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from './dynamic-tools/materialize-vault-media.js'
-import { MURPH_PREVIEW_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, MURPH_MY_GAME_REMINDERS_TOOL } from './dynamic-tools/games.js'
+import { MURPH_WRITE_RECAP_FILE_TOOL, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, MURPH_MY_GAME_REMINDERS_TOOL } from './dynamic-tools/games.js'
 import { MURPH_GET_SENDER_CONTACT_TOOL } from './dynamic-tools/sender-contact.js'
 import { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 export { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
@@ -390,13 +390,12 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   name: 'generate_image',
   deferLoading: true,
   description:
-    `For an authorized recap, output=file writes a JPEG receipt and attaches nothing; use authorized reference IDs and a stable operationId. Generate one GPT Image 2 image when requested, a known preference supports visual help, or a skill/product flow explicitly marks images welcome and privacy-safe. Use ordered vault refs and explain their roles; include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, when Murph appears. Vault outputs persist under raw/captures/**. Hosted accepted-message turns start generation in the background and finish through trusted private media. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response; that image consumes one of the same ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} final-response media slots, so leave a slot before calling. Local runs stay synchronous with the same slot rule and save under CODEX_HOME/generated_images. Requested graphs, charts, and trend lines: render them with this tool when no chart or card tool fits; put the chart type, labeled axes, and the plotted values in the prompt. Treat those values as plotting data, not visible labels. Explicitly ask the renderer to omit numeric labels on individual points and bars unless the user requests them. Use sparse, rounded axis ticks and a compact legend; keep annotations rare and round any displayed values to useful precision. Include these exact palette and font specifications in chart prompts for Murph's warm lab-notebook style: cream paper (#f5f0e8), slate text (#2d3436), solid sage data lines (#7a8c6e), dashed sand reference lines (#d4c4a8). Use only these colors for chart marks: sage and slate for separate data series, distinguished by markers. Use Fraunces-style serif titles and numbers, DM Sans body text, and DM Mono labels; keep charts flat and legible without gradients or decorative shadows.`,
+    `For an authorized recap, output=file returns a local file path and attaches nothing; use authorized reference IDs. Generate one GPT Image 2 image when requested, a known preference supports visual help, or a skill/product flow explicitly marks images welcome and privacy-safe. Use ordered vault refs and explain their roles; include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, when Murph appears. Vault outputs persist under raw/captures/**. Hosted accepted-message turns start generation in the background and finish through trusted private media. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response; that image consumes one of the same ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} final-response media slots, so leave a slot before calling. Local runs stay synchronous with the same slot rule and save under CODEX_HOME/generated_images. Requested graphs, charts, and trend lines: render them with this tool when no chart or card tool fits; put the chart type, labeled axes, and the plotted values in the prompt. Treat those values as plotting data, not visible labels. Explicitly ask the renderer to omit numeric labels on individual points and bars unless the user requests them. Use sparse, rounded axis ticks and a compact legend; keep annotations rare and round any displayed values to useful precision. Include these exact palette and font specifications in chart prompts for Murph's warm lab-notebook style: cream paper (#f5f0e8), slate text (#2d3436), solid sage data lines (#7a8c6e), dashed sand reference lines (#d4c4a8). Use only these colors for chart marks: sage and slate for separate data series, distinguished by markers. Use Fraunces-style serif titles and numbers, DM Sans body text, and DM Mono labels; keep charts flat and legible without gradients or decorative shadows.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       output: { type: 'string', enum: ['chat', 'file'] },
-      operationId: { type: 'string', pattern: '^[a-zA-Z0-9_-]{1,80}$' },
       prompt: {
         type: 'string',
         minLength: 1,
@@ -1845,11 +1844,6 @@ export const MURPH_DYNAMIC_TOOLS = [
   ...MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
 ] as const
 
-export const MURPH_RECAP_IMAGE_TOOL = { ...MURPH_GENERATE_IMAGE_TOOL,
-  description: 'Generate a recap scene into a local file. Follow the task writing guide. Set output=file, a unique stable operationId, JPEG, low or medium quality and manifest reference IDs. Returns a verified file receipt; sends nothing to chat.' } as const
-export const MURPH_RECAP_SONG_TOOL = { ...MURPH_GENERATE_SONG_TOOL,
-  description: 'Generate the recap theme song into a local file. Follow the task writing guide. Set output=file, a unique stable operationId, durationSeconds=20, instrumental=false and a prompt with style and lyrics. Returns a verified file receipt; sends nothing to chat.' } as const
-
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
   | typeof MURPH_EXPRESSIVE_VOICE_MEMO_TOOL
@@ -1858,9 +1852,6 @@ export type MurphDynamicTool =
   | typeof MURPH_MEMBER_MEMORY_TOOL
   | typeof MURPH_READ_GAME_RECAP_TOOL
   | typeof MURPH_WRITE_RECAP_TOOL
-  | typeof MURPH_RECAP_IMAGE_TOOL
-  | typeof MURPH_RECAP_SONG_TOOL
-  | typeof MURPH_PREVIEW_RECAP_TOOL
   | typeof MURPH_WRITE_RECAP_FILE_TOOL
   | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
   | typeof MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL

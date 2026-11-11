@@ -7,7 +7,6 @@ export type GameRecapCanonicalScore = { memberId: string; name: string; score: n
 const VISUAL = new Set(["photo", "route", "heartRate", "reps"]);
 const BACKGROUNDS = new Set(["night", "paper", "sage", "sienna", "slate"]);
 const BLOCK_KINDS = new Set(["photo", "photoPair", "contactSheet", "headline", "kicker", "quote", "stat", "scene"]);
-const PICTURE_KINDS = new Set(["photo", "photoPair", "contactSheet", "scene"]);
 const BANNED = /\b(ticket|tickets|bet|bets|wager|stake|stakes|winnings)\b/iu;
 const PRONOUN = /\b(he|she|him|her|his|hers)\b/iu;
 const SECOND_PERSON = /\b(you|your|yours)\b/iu;
@@ -93,44 +92,6 @@ function validateRecapBlock(input: { block: RecapBlock; blockIndex: number; chat
   }
 }
 
-function validatePicturePage(page: HostedGameRecap["pages"][number], index: number, players: readonly string[], errors: string[]): void {
-  const pictures = page.blocks.filter(block => PICTURE_KINDS.has(block.kind));
-  if (!pictures.length && index !== 0) return;
-  const kinds = page.blocks.map(block => block.kind).join(",");
-  if (index === 0) {
-    if (kinds !== "headline,scene,kicker") errors.push("page 1: use title, one scene, then prize kicker in that order.");
-    const cast = pictures[0]?.scene?.cast ?? [];
-    if (cast.length !== players.length || players.some(name => !cast.includes(name))) errors.push("page 1: the cover must feature both players.");
-  } else if (!/^(kicker,)?headline,(scene|photo|photoPair|contactSheet),(headline|quote)$/u.test(kinds)) {
-    errors.push(`page ${index + 1}: use optional kicker, setup headline, one picture, then payoff headline or quote.`);
-  }
-  const limit = index === 0 ? 28 : 45;
-  for (const block of page.blocks) {
-    if (block.kind === "headline" && (block.text?.length ?? 0) > limit) errors.push(`page ${index + 1}: picture headline limit is ${limit} characters.`);
-    if (["photo", "photoPair", "contactSheet"].includes(block.kind) && block.style !== "print") errors.push(`page ${index + 1}: real photos use print with the whole image visible.`);
-  }
-}
-
-function validateRecapShow(input: RecapValidationInput, errors: string[]): void {
-  const { recap, players, entries } = input;
-  if (recap.treatment && input.usedTreatments?.some(used => normalizeTreatment(used) === normalizeTreatment(recap.treatment!))) errors.push("treatment: this genre was already used; choose a new genre, not a cosmetic variant.");
-  if (!recap.treatment?.trim() || recap.treatment.length > 60) errors.push("treatment: choose a genre label of 1 to 60 characters.");
-  if (recap.pages.length < 5) errors.push("pages: pair shows need 5 to 7 authored pages.");
-  const scenes = recap.pages.flatMap(page => page.blocks.filter(block => block.kind === "scene"));
-  const photoCount = new Set(entries.filter(entry => entry.visibleToBoth && entry.kind === "photo").map(entry => entry.entryId)).size;
-  const maximum = photoCount < 3 ? 4 : 3;
-  if (scenes.length < 2 || scenes.length > maximum) errors.push(`scenes: use 2 to ${maximum}; a fourth requires fewer than 3 real photos.`);
-  recap.pages.forEach((page, index) => validatePicturePage(page, index, players, errors));
-  if (recap.superlatives && !withValidGameSuperlatives(recap, input.result?.map(player => player.memberId) ?? [], false).superlatives) errors.push("superlatives: choose zero, one or two unique eligible players.");
-  const song = recap.song;
-  if (song) {
-    checkText("song title", song.title, 30, errors);
-    if (!song.style.trim() || song.style.length > 220) errors.push("song style: one nonempty sentence, at most 220 characters.");
-    if (song.lyrics.length < 4 || song.lyrics.length > 6) errors.push(`song lyrics: ${song.lyrics.length} lines; write 4 to 6.`);
-    song.lyrics.forEach((line, index) => { if (!line.trim() || line.length > 60 || EMOJI.test(line) || BANNED.test(line)) errors.push(`song lyrics line ${index + 1}: nonempty, at most 60 characters, no emoji or banned prize words.`); });
-  }
-}
-
 function wordGrams(value: string): Set<string> {
   const words = value.toLowerCase().match(/[a-z']+/gu) ?? [];
   return new Set(words.slice(0, -2).map((_, index) => words.slice(index, index + 3).join(" ")));
@@ -197,13 +158,12 @@ function validateScoreLine(
   }
 }
 
-type RecapValidationInput = { recap: HostedGameRecap; players: readonly string[]; entries: readonly GameRecapEntry[]; chatMessages?: readonly GameRecapChatMessage[]; priorChatLines?: readonly string[]; result?: readonly GameRecapCanonicalScore[]; group?: boolean; show?: boolean; usedTreatments?: readonly string[] };
+type RecapValidationInput = { recap: HostedGameRecap; players: readonly string[]; entries: readonly GameRecapEntry[]; chatMessages?: readonly GameRecapChatMessage[]; priorChatLines?: readonly string[]; result?: readonly GameRecapCanonicalScore[]; group?: boolean };
 
-function blockLimit(input: RecapValidationInput): number { return input.show && !input.group ? 4 : 3; }
 
 function validateRecapPolicy(input: RecapValidationInput, errors: string[]): void {
   const pages = input.recap.pages;
-  if ((!input.show || input.group) && (input.recap.treatment !== undefined || input.recap.song !== undefined || pages.some(page => page.blocks.some(block => block.kind === "scene" || block.scene !== undefined)))) errors.push("Show fields require an enabled pair show generation.");
+  if ((input.recap.treatment !== undefined || input.recap.song !== undefined || pages.some(page => page.blocks.some(block => block.kind === "scene" || block.scene !== undefined)))) errors.push("Show fields require an enabled pair show generation.");
   if (input.group) {
     const expected = input.result?.map(player => player.memberId) ?? [];
     if (!input.recap.superlatives || !withValidGameSuperlatives(input.recap, expected, true).superlatives) errors.push("superlatives: include exactly one kind superlative per eligible player.");
@@ -211,7 +171,6 @@ function validateRecapPolicy(input: RecapValidationInput, errors: string[]): voi
     if (/\b(slacker|lazy|no.show|didn.t post|did not post|behind everyone)\b/iu.test(copy)) errors.push("Group recaps must not shame or single out missing people.");
     if (input.recap.scoreLine) errors.push("scoreLine: omit for groups; the result card owns standings and prize parties.");
   }
-  if (input.show && !input.group) validateRecapShow(input, errors);
 }
 
 export function validateGameRecap(input: RecapValidationInput): string[] {
@@ -223,7 +182,7 @@ export function validateGameRecap(input: RecapValidationInput): string[] {
   pages.forEach((page, pageIndex) => {
     const number = pageIndex + 1;
     if (!BACKGROUNDS.has(page.background)) errors.push(`page ${number}: background must be one of ['night', 'paper', 'sage', 'sienna', 'slate'].`);
-    if (page.blocks.length < 1 || page.blocks.length > blockLimit(input)) errors.push(`page ${number}: ${page.blocks.length} blocks; use 1 to ${blockLimit(input)}.`);
+    if (page.blocks.length < 1 || page.blocks.length > 3) errors.push(`page ${number}: ${page.blocks.length} blocks; use 1 to ${3}.`);
     page.blocks.forEach((block, blockIndex) => validateRecapBlock({ block, blockIndex: blockIndex + 1, chatMessages: input.chatMessages ?? [], entries, errors, pageIndex: number, players: input.players }));
   });
 
@@ -255,5 +214,3 @@ export function withValidGameSuperlatives(recap: HostedGameRecap, memberIds: rea
     && superlatives.every((item) => memberIds.includes(item.memberId))
     ? { ...story, superlatives } : story;
 }
-
-function normalizeTreatment(value: string): string { return value.normalize("NFKC").trim().toLocaleLowerCase("en-US").replace(/\s+/gu, " "); }

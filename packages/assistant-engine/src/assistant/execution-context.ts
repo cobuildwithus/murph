@@ -1,4 +1,3 @@
-import type { RecapRunAdmission } from './recap-media-runtime.js'
 import type { CompanionPresence } from "@murphai/hosted-execution/companion-presence";
 import { gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantCurrentDeliveryRoute } from '@murphai/operator-config/assistant/current-delivery-route'
@@ -607,7 +606,6 @@ export type AssistantWorkspaceArtifactMaterializer = (
 ) => Promise<AssistantWorkspaceArtifactMaterializationResult>
 
 export interface AssistantHostedExecutionContext {
-  gameRecapAdmission?: RecapRunAdmission | null
   gameRecapScope?: { gameId: string; eventId: string; pairFingerprint: string; loreAccess?: 'read'; show?: true } | null
   gameMissedCheckInScope?: HostedGameGroupMissedCheckInPolicy | { gameId: string; eventId: string; memberId: string; firstMissedDate: string; pairFingerprint: string } | null
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
@@ -842,7 +840,6 @@ export function normalizeAssistantExecutionContext(
       ...optionalHostedField('groupSharedReader', groupSharedReader),
       ...optionalHostedField('groupTool', hosted.groupTool),
       ...optionalHostedField('gameRecapScope', gameRecapScope),
-      ...optionalHostedField('gameRecapAdmission', hosted.gameRecapAdmission),
       ...optionalHostedField('gameMissedCheckInScope', gameMissedCheckInScope),
       ...optionalHostedField('labsTool', labsTool),
       ...optionalHostedField('planUsageTool', planUsageTool),
@@ -1334,7 +1331,7 @@ export function resolveAssistantExecutionOperatorDefaults(input: {
   }
 
   return {
-    ...(input.defaults ?? {}),
+    ...input.defaults,
     identityId: input.defaults?.identityId ?? null,
     selfDeliveryTargets: input.defaults?.selfDeliveryTargets ?? null,
     backend: hostedDefaultTarget,

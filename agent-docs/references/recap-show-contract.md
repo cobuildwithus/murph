@@ -48,5 +48,7 @@ at most thirty days and subject to current authorization. It grants no private
 API, transcript, source-photo or audio access. The media visibility switch hides
 generated media and cover previews while retaining readable text.
 
-Native layout and audio acceptance belong to the iOS owner. Local PNG previews
-are composition evidence, not proof of native visual parity.
+The authoring preview tool is removed. Native layout and audio acceptance belong
+to the iOS owner; this refactor preserves the payload and decoder fixtures.
+A failed regeneration keeps the current generation. A first-time failure uses
+the historical plain-story representation.

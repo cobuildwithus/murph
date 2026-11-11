@@ -20,6 +20,7 @@ export interface RunnerProviderAuthority extends RunnerInvocationIdentity, Runne
   userId: string;
   settlementPending: boolean;
   retiring: boolean;
+  recapMediaScoped?: boolean;
 }
 
 export interface RunnerInvocationReceipt extends RunnerInvocationIdentity {

@@ -5718,35 +5718,28 @@ rechecks ownership and revision fences, then purges outside its transaction.
 The runtime-orphan kind constraint is unchanged.
 
 
-Pair shows use the existing recap notification on GPT-6.1 Sol. The parent reads
-an authorized local material bundle, generates JPEG scenes and a twenty-second
-MP3 with the existing tools in file mode, previews and revises the draft, then
-submits selected immutable files through `write_recap`. One accepted story owns
-one chat line plus link; recap media never enters the chat outbox. The Web route
-remains an app handoff. Groups retain their existing prompt, tools and payload.
+Pair shows use the existing recap notification on GPT-6.1 Sol with the normal
+hosted group turn sandbox, cwd and tool surface. `read_game` returns scoped game
+material, shared chat and lore directly; the host resolves reference-photo IDs.
+The agent generates JPEG scenes and an optional twenty-second song in file mode,
+then calls `write_recap` once. The host uploads selected bytes and Web publishes
+through the canonical transaction, retaining the current source authorization,
+asset retirement and replay owners. One accepted story owns one chat line plus
+link with no chat media. Groups retain their existing writer rules and payload.
 The [native contract](agent-docs/references/recap-show-contract.md) owns decoder
-fixtures; no capability header or older-client show projection remains.
+fixtures; the iOS presentation is unchanged.
 
-`recap-admission.ts` uses the existing GameEvent owner for a twenty-minute deadline,
-two model runs, six image attempts, one song, two concurrent images and a $3.00
-prospective media cap. Reservations are never refunded. The nullable
-`hosted_runtime_owner.recap_media_scope` survives game deletion and fences exact
-runtime attempts. The outbound Worker inspects the actual request and consumes
-one matching reservation before forwarding media requests carrying a recap
-reservation header. Requests without that header, including ordinary images,
-songs and voice, never consult recap admission; provider errors pass through.
-Ordinary Responses, websocket upgrades and Live also have no admission round trip. Recap turns
-disable Codex native image generation; file tools own their media calls.
-Reference images fit within 1024 pixels per edge, with at most three references;
-the default input estimate is 36,847 tokens with an optional operator override.
-The estimate is not a provider-guaranteed Flare bound. The task shell reads its
-bundle and writes drafts, media and previews, with network disabled. Recap shows
-use the same concrete restored vault for their shell cwd and workspace grants,
-avoiding the procfs alias that failed under the original recap profile. The restricted profile starts from an empty filesystem and mounts the input
-leaf read-only plus the three writable leaves. It must not explicitly deny the
-workspace ancestor: the pinned Linux sandbox masks read-only descendants after
-binding them, then restores only writable children. File-mode song credentials come from the host-owned media runtime,
-not the sanitized Codex child environment; the shell still receives no audio key.
+An authenticated material response sets a tiny native in-memory recap scope.
+The existing egress boundary counts up to six forwarded media requests in that
+scope and skips ordinary subscription/allowance vetoes for that media. Neither
+model arguments nor request headers can grant scope. Container restart may reset
+the count. Ordinary Responses, websocket upgrades and Live add no recap calls.
+Existing bounded media recipes and Worker-owned credentials remain; keys never
+enter the shell. No reservation, price estimate, submission freeze, preview or
+lore acknowledgement is required. Initial failure publishes plain text; failed
+regeneration preserves the existing recap, retires its lifecycle receipt and
+sends nothing. A later regeneration ID remains eligible. Deploy Web then runner;
+drop the obsolete runtime-owner column via the post-deploy contract migration.
 Ordinary turns and plain/group recaps retain the stable provider cwd.
 
 Submission validates canonical material, freezes the draft and selected receipts,

@@ -1,5 +1,8 @@
-import { prepareRecapGeneration } from "./recap-generation";
-import { canAcceptRecapUsageTx, reserveRecapUsageTx } from "./recap-lore";
+import { buildRecapFallback } from './recap-fallback';
+import { gameRecapEnvelopeSchema, type GameRecapEnvelope, type RecapAsset } from '@murphai/contracts/recap-show';
+import { recapGenerationId, readRecapMedia } from './recap-media';
+import { retainRecapAssetTx } from './recap-retirement';
+import { recapReferencesCurrent } from './recap-asset-access';
 import { recapPostedAt } from "./time";
 import { isPairRecapShowEnabled, isRecapMediaVisible } from "./access";
 import { presentGameRecap, storedGameRecapSchema, readGameRecapStory } from "@murphai/contracts/recap-show";
@@ -2760,16 +2763,16 @@ export async function sealGameRecap(input: {
   gameId: string;
   playerMemberIds: readonly string[];
   recap: HostedGameRecap | null;
-  files?: import("@murphai/contracts/recap-show").GameRecapDraft["files"];
+  assets?: RecapAsset[];
 }): Promise<HostedGameRecap | null> {
   const prisma = getPrisma();
   const row = await prisma.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled" } });
   if (!row || row.maxPlayers !== 10 && !sameGamePlayers(input.playerMemberIds, input.playerMemberIds)) return null;
   const audience = await readGameChatAudience(input.containerMemberId);
-  const generation = input.recap ? await prepareRecapGeneration({ row, story: input.recap, eventId: input.eventId, playerMemberIds: input.playerMemberIds, files: input.files, beforeMutationTx: input.beforeMutationTx }) : null;
+  const generation = await selectedRecapEnvelope(row, input);
   const recapEncrypted = input.recap === null
     ? null
-    : await seal(gameTarget(row, "recap"), JSON.stringify(generation?.envelope ?? input.recap));
+    : await seal(gameTarget(row, "recap"), JSON.stringify(generation ?? input.recap));
   const scope = parseGameRecapEventId(input.eventId);
   if (scope?.gameId !== input.gameId) return null;
   const sourceRef = scope.regenerationId ? `${input.gameId}:${scope.regenerationId}` : input.gameId;
@@ -2796,18 +2799,29 @@ export async function sealGameRecap(input: {
   return readGameRecapStory(JSON.parse(plain ?? "null"));
 }
 
-async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: Parameters<typeof sealGameRecap>[0], current: Game, recapEncrypted: string | null, regenerationId?: string, generation?: Awaited<ReturnType<typeof prepareRecapGeneration>>): Promise<string | null> {
-  const show = input.recap?.treatment !== undefined;
+async function selectedRecapEnvelope(row: Game, input: Parameters<typeof sealGameRecap>[0]) {
+  const generation = input.recap && input.assets ? gameRecapEnvelopeSchema.parse({ version: 1,
+    generationId: recapGenerationId(input.eventId), story: input.recap, assets: input.assets, acceptedAt: new Date().toISOString(),
+    preview: { token: randomBytes(32).toString('base64url'), expiresAt: new Date(Date.now() + 30 * 86400_000).toISOString() } }) : null;
+  for (const asset of generation?.assets ?? []) {
+    if (asset.storageKey !== `recap/${generation!.generationId}/${asset.hash}.${asset.mediaType === 'image/jpeg' ? 'jpg' : 'mp3'}`) throw new Error('Wrong recap media identity.');
+    const stored = await readRecapMedia({ storageKey: asset.storageKey, ownerMemberId: row.wordsOwnerMemberId });
+    if (!stored || stored.hash !== asset.hash) throw new Error('Selected media is unavailable.');
+  }
+  return generation;
+}
+
+async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: Parameters<typeof sealGameRecap>[0], current: Game, recapEncrypted: string | null, regenerationId?: string, generation?: GameRecapEnvelope | null): Promise<string | null> {
   const acceptedKey = `${input.eventId}:accepted`;
   if (regenerationId) {
     const requested = await tx.gameEvent.findUnique({ where: { commandKey: input.eventId }, select: { gameId: true, type: true } });
     if (requested?.gameId !== input.gameId || requested.type !== "recap_regeneration_requested") return null;
     if (await tx.gameEvent.findUnique({ where: { commandKey: acceptedKey }, select: { id: true } })) return current.recapEncrypted;
   } else if (current.recapEncrypted) return current.recapEncrypted;
-  if (!recapEncrypted || show && !await canAcceptRecapUsageTx(tx, input)) return null;
+  if (!recapEncrypted) return null;
   if (regenerationId) {
     // Keep the old story until its replacement and cleanup ownership commit.
-    await retireGameRecapAssetsTx(tx, input.gameId, current.wordsOwnerMemberId, new Date(), generation?.envelope.generationId);
+    await retireGameRecapAssetsTx(tx, input.gameId, current.wordsOwnerMemberId, new Date(), generation?.generationId);
     await tx.game.update({ where: { id: input.gameId }, data: { recapEncrypted } });
     await tx.gameEvent.create({ data: { gameId: input.gameId, actor: "system", type: "recap_regeneration_accepted", commandKey: acceptedKey, payload: {} } });
   } else {
@@ -2815,8 +2829,11 @@ async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: Parameters
     const changed = await tx.game.updateMany({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled", recapEncrypted: null }, data: { recapEncrypted } });
     if (changed.count !== 1) return null;
   }
-  if (show) await reserveRecapUsageTx(tx, input.gameId, input.eventId);
-  await generation?.publish(tx);
+  if (generation) {
+    if (!await recapReferencesCurrent(tx, input.gameId, generation.assets)) throw new Error('A selected source was revoked.');
+    for (const asset of generation.assets) if (!await retainRecapAssetTx(tx, { gameId: input.gameId,
+      generationId: generation.generationId, ownerMemberId: current.wordsOwnerMemberId, storageKey: asset.storageKey, now: new Date() })) throw new Error('Selected media was retired.');
+  }
   return recapEncrypted;
 }
 
@@ -3822,7 +3839,9 @@ async function buildViewInputs(
       hiddenMemberIds,
       now: gameNow(clock, game.row),
       result,
-      recap: recapAt[index] === null ? null : presentGameRecap({
+      recap: recapAt[index] === null
+        ? unwrittenRecapPresentation(game.row, result, names, clock, history)
+        : presentGameRecap({
         stored: storedGameRecapSchema.parse(JSON.parse(plain[recapAt[index]!] ?? "null")),
         mediaVisible: isRecapMediaVisible(),
         permittedPhotoIds: new Set(game.entries.filter(entry => entry.kind === "photo" && !hiddenEntryIds.has(entry.id) && !hiddenMemberIds.has(entry.memberId)).map(entry => entry.id)),
@@ -3908,4 +3927,12 @@ async function readTalkDeliveryViews(gameIds: readonly string[], viewerId: strin
     return [talk.gameId, status === "failed" || status === "skipped" ? "failed"
       : status === "accepted" || status === "delivered" || status === "sent_no_receipt_expected" ? "sent" : "pending"];
   }));
+}
+
+function unwrittenRecapPresentation(game: Game & { players: { leftAt: Date | null }[] }, result: StoredResult | null,
+  names: ReadonlyMap<string, string>, clock: Date, history: boolean) {
+  if (history || !isPairRecapShowEnabled(game.maxPlayers) || game.status !== 'settled' || game.recapEncrypted
+    || !result || game.players.some(player => player.leftAt) || !game.settledAt
+    || clock.getTime() - game.settledAt.getTime() < GAME_RECAP_UI_WAIT_MS) return null;
+  return presentGameRecap({ stored: buildRecapFallback(result.scores.map(player => ({ name: names.get(player.memberId) ?? 'Player', score: player.score }))), permittedPhotoIds: new Set(), mediaUrl: () => '' });
 }

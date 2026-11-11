@@ -1,3 +1,5 @@
+> Superseded implementation design: [pair recap simplification](2026-11-11-recap-show-simplify.md). The presentation contract remains current. Earlier amendments below are historical implementation evidence.
+
 # Pair game recap as a show (agentic)
 
 Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the owner's direction that Murph makes the recap with its existing composable tools and files. It replaces an earlier pipeline plan the owner rejected. The parent agent's amendments below override the plan text.

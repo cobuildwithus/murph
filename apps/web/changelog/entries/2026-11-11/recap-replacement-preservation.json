@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 200,
+  "item": {
+    "id": "recap-replacement-preservation",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Keep your recap when a refresh fails",
+    "summary": "Your pair game keeps its published recap if a replacement cannot finish.",
+    "details": "An unsuccessful refresh sends no extra group message. Games receiving their first recap still get a readable text recap when the show cannot finish.",
+    "relevanceTags": [
+      "games",
+      "recaps"
+    ],
+    "sourcePullRequests": []
+  }
+}

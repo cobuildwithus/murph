@@ -1,6 +1,4 @@
-import { recapUsageSchema } from './game-recap-lore.js'
 import { recordAcceptedRecap } from '../assistant-codex/dynamic-tools/games.js'
-import { admitRecapRun, finishRecapRun } from './recap-media-runtime.js'
 import { deliverAssistantGameBootstrapMessage, prepareAssistantGameBootstrap, recoverAssistantGameBootstrapResult } from './game-chat-bootstrap.js'
 import type { HostedGameChatBootstrapResult, HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateEveningCheckInPolicy, HostedGamePrivateKickoffPolicy } from '@murphai/hosted-execution/runtime-control'
 import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
@@ -310,8 +308,6 @@ export interface AssistantNotificationInput
 }
 
 export interface AssistantNotificationResult {
-  recapLoreCheckpointed?: string[]
-  recapLoreRepairOnly?: true
   decision: AssistantNotificationDecision
   deliveryOutcome?: AssistantDeliveryOutcome | null
   postTurnDeliveryExpectations?: AssistantNotificationPostTurnDeliveryExpectations | null
@@ -361,7 +357,6 @@ export async function sendAssistantNotificationLocal(
         input,
         maintenanceEvidencePrompt,
       )
-      const recapLoreCheckpointed = new Set<string>()
       let groupEmailSendResult:
         | AssistantNotificationPostTurnDeliveryExpectations['groupEmailSendResult']
         | null = null
@@ -396,7 +391,6 @@ export async function sendAssistantNotificationLocal(
       })
       const withPostTurnDeliveryExpectations = (result: AssistantNotificationResult): AssistantNotificationResult => ({
         ...result,
-        ...(recapLoreCheckpointed.size ? { recapLoreCheckpointed: [...recapLoreCheckpointed] } : {}),
         ...(groupEmailSendResult ? { postTurnDeliveryExpectations: {
           ...(result.postTurnDeliveryExpectations ?? {}),
           ...(groupEmailPendingDeliveryIntentId ? { groupEmailPendingDeliveryIntentId } : {}), groupEmailSendResult,
@@ -460,9 +454,7 @@ export async function sendAssistantNotificationLocal(
       const hostedToolContext = hostedExecutionContext
         ? createAssistantHostedToolContext({
             beforeToolExecution: input.beforeToolExecution
-              ? async () => {
-                  await input.beforeToolExecution?.()
-                }
+              ? async () => { await input.beforeToolExecution?.() }
               : undefined,
             computerToolsAvailable:
               typeof hostedExecutionContext.providerFetch === 'function',
@@ -483,7 +475,6 @@ export async function sendAssistantNotificationLocal(
               groupEmailPendingDeliveryIntentId = intentId
               input.onGroupEmailPendingDeliveryIntentId?.(intentId)
             },
-            recordGameRecapUsageStamped: generationId => { recapLoreCheckpointed.add(generationId) },
             ...buildAssistantGameRecapToolContextFields({
               enabled: gameRecapTurn,
               recordSavedChatLine: (chatLine) => {
@@ -500,7 +491,7 @@ export async function sendAssistantNotificationLocal(
       let typingIndicator: ReturnType<typeof startAssistantNotificationTyping> = null
 
       try {
-        const recapPreparation = await prepareRecapNotification(hostedExecutionContext, hostedToolContext, messageInput)
+        const recapPreparation = await prepareRecapNotification(hostedExecutionContext, hostedToolContext)
         if (recapPreparation.kind !== 'continue') return withPostTurnDeliveryExpectations(await completePreparedRecapNotification(recapPreparation, {
           firstContactDocIds, input, messageInput, resolved, sharedPlan }))
         const notificationProviderRequestStarted =
@@ -617,8 +608,7 @@ export async function sendAssistantNotificationLocal(
           providerResult.providerAuthoredResponse ?? providerResult.response
         const runtimeOwnsFinalPresentation = runtimeOwnsNotificationPresentation(providerResult, groupMissedTurn)
         const hasAppendOnlyRuntimePresentation =
-          (providerResult.responseCard === null ||
-            providerResult.responseCard === undefined) &&
+          providerResult.responseCard == null &&
           providerAuthoredResponse.length > 0 &&
           providerResult.response !== providerAuthoredResponse &&
           providerResult.response.startsWith(providerAuthoredResponse)
@@ -917,8 +907,11 @@ export async function sendAssistantNotificationLocal(
           response: responseText,
           session: committedDeliveryOutcome.session,
         })
+      } catch (error) {
+        const completed = await completeFailedRecap(error, hostedExecutionContext, hostedToolContext, savedGameRecapChatLine)
+        return withPostTurnDeliveryExpectations(await completePreparedRecapNotification(completed, {
+          firstContactDocIds, input, messageInput, resolved, sharedPlan }))
       } finally {
-        await finishRecapRun(hostedExecutionContext).catch(() => {})
         await stopAssistantChannelTypingIndicator(typingIndicator, {
           providerStop: !assistantDeliveryOutcomeSupersedesTypingIndicator(
             committedDeliveryOutcomeKind,
@@ -1931,7 +1924,7 @@ function resolveAssistantNotificationTurnProfile(
     return ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE
   }
   if (input.executionContext?.hosted?.gameRecapScope != null) {
-    return ASSISTANT_GAME_RECAP_NOTIFICATION_TURN_PROFILE
+    return input.executionContext.hosted.gameRecapScope.show ? ASSISTANT_INTERACTIVE_NOTIFICATION_TURN_PROFILE : ASSISTANT_GAME_RECAP_NOTIFICATION_TURN_PROFILE
   }
   if (input.executionContext?.hosted?.gameMissedCheckInScope != null) {
     return ASSISTANT_GAME_RECAP_NOTIFICATION_TURN_PROFILE
@@ -2280,42 +2273,39 @@ function assertVerifiedNotificationAudience(scope: ReturnType<typeof resolveAssi
     'ASSISTANT_AUDIENCE_UNVERIFIED', 'Notification audience could not be verified as direct or group.')
 }
 
-async function completePreparedRecapNotification(prepared: { kind: 'repair' } | { kind: 'recovered'; text: string },
+async function completePreparedRecapNotification(prepared: { kind: 'retired' } | { kind: 'recovered'; text: string },
   input: Omit<Parameters<typeof sendAssistantExactTextNotificationLocal>[0], 'responseText' | 'session' | 'privateCompletionContinuitySessionId'> & {
     resolved: { session: AssistantSession; privateCompletionContinuitySessionId?: string | null }
   }): Promise<AssistantNotificationResult> {
-  if (prepared.kind === 'repair') return {
-    decision: { kind: 'skip', privateSummary: 'Accepted recap usage repaired.' },
-    deliveryOutcome: null, response: null, session: input.resolved.session, recapLoreRepairOnly: true }
+  if (prepared.kind === 'retired') return {
+    decision: { kind: 'skip', privateSummary: 'Recap generation retired.' },
+    deliveryOutcome: null, response: null, session: input.resolved.session }
   return sendAssistantExactTextNotificationLocal({ ...input, responseText: prepared.text,
     session: input.resolved.session, privateCompletionContinuitySessionId: input.resolved.privateCompletionContinuitySessionId ?? null })
 }
 
 async function prepareRecapNotification(hosted: AssistantHostedExecutionContext | null | undefined,
   context: ReturnType<typeof createAssistantHostedToolContext> | null,
-  messageInput: { abortSignal?: AbortSignal | null }): Promise<{ kind: 'continue' } | { kind: 'repair' } | { kind: 'recovered'; text: string }> {
+  failed = false): Promise<{ kind: 'continue' } | { kind: 'retired' } | { kind: 'recovered'; text: string }> {
   const scope = hosted?.gameRecapScope
   if (!scope?.show || !hosted?.groupTool) return { kind: 'continue' }
   const origin = { kind: 'game_recap' as const, gameId: scope.gameId, eventId: scope.eventId }
-  // Checkpoint repaired usage before another model run or chat send.
-  const repair = await hosted.groupTool.request({ action: 'read_game', origin })
-  if (repair.result.status !== 'ok') throw new Error('Recap lore repair authority is unavailable.')
-  const game = 'recapGame' in repair.result ? repair.result.recapGame : null
-  const pending = game && typeof game === 'object' && 'pendingRecapUsages' in game
-    ? z.array(recapUsageSchema).max(20).parse(game.pendingRecapUsages) : []
-  if (pending.length) {
-    if (!context?.appendGameRecapUsage) throw new Error('Trusted recap lore is unavailable.')
-    for (const usage of pending) await context.appendGameRecapUsage(usage)
-    return { kind: 'repair' }
+  const recovered = await hosted.groupTool.request({ action: 'read_game', origin, recapRead: { kind: 'recover', ...(failed ? { failed: true } : {}) } })
+  if (recovered.result.status !== 'ok') {
+    if ('error' in recovered.result && recovered.result.error === 'recap_generation_retired') return { kind: 'retired' }
+    throw new Error('Recap completion is unavailable.')
   }
-  const recovered = await hosted.groupTool.request({ action: 'read_game', origin, recapRead: { kind: 'recover' } })
-  if (recovered.result.status !== 'ok') throw new Error('Recap recovery authority is unavailable.')
   if ('chatLine' in recovered.result && recovered.result.chatLine) {
     await recordAcceptedRecap({ context, origin: scope }, recovered.result, true)
     return { kind: 'recovered', text: recovered.result.chatLine }
   }
-  hosted.gameRecapAdmission = await admitRecapRun(hosted)
-  const remaining = Math.max(1, Date.parse(hosted.gameRecapAdmission!.deadline) - Date.now())
-  messageInput.abortSignal = AbortSignal.any([...(messageInput.abortSignal ? [messageInput.abortSignal] : []), AbortSignal.timeout(remaining)])
   return { kind: 'continue' }
+}
+
+async function completeFailedRecap(error: unknown, hosted: AssistantHostedExecutionContext | null | undefined,
+  context: ReturnType<typeof createAssistantHostedToolContext> | null, savedChatLine: string | null) {
+  if (!hosted?.gameRecapScope?.show || savedChatLine !== null) throw error
+  const completed = await prepareRecapNotification(hosted, context, true)
+  if (completed.kind === 'continue') throw error
+  return completed
 }
