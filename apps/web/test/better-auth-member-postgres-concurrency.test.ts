@@ -1345,7 +1345,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     try {
       await prisma.$transaction((tx) => upsertHostedMemberIdentity({
         ...buildHostedMemberPhoneIdentityFields(phone), memberId, phoneNumberVerifiedAt: new Date(),
-        signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null,
+        signupPhoneNumber: null,
         preparedControlRoot: { domain: "control", userId: memberId, rootKeyId: "synthetic-root" }, prisma: tx,
       }));
       await run(memberId, phone);

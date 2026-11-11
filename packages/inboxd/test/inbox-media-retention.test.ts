@@ -473,7 +473,7 @@ test("runInboxMediaRetention retires a correlated document after out-of-line tex
   });
   assert.equal(earlyMedia.expiredAttachments, 0);
   const textRetention = await runInboxTextRetention({
-    now: "2026-06-15T00:00:00.000Z",
+    now: "2026-07-01T00:00:00.000Z",
     vaultRoot,
   });
   assert.equal(textRetention.expiredCaptures, 1);
@@ -481,7 +481,7 @@ test("runInboxMediaRetention retires a correlated document after out-of-line tex
   assert.equal(await fileExists(vaultRoot, inboxPath), true);
 
   const documentRetention = await runInboxMediaRetention({
-    now: "2026-06-16T00:00:00.000Z",
+    now: "2026-07-02T00:00:00.000Z",
     vaultRoot,
   });
   assert.equal(documentRetention.expiredAttachments, 1);
@@ -493,7 +493,7 @@ test("runInboxMediaRetention retires a correlated document after out-of-line tex
 test("runInboxMediaRetention continues a bounded correlated capture after text retirement", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-document-retention-bounded-redacted");
   const occurredAt = "2026-06-01T00:00:00.000Z";
-  const now = "2026-06-15T00:00:00.000Z";
+  const now = "2026-07-01T00:00:00.000Z";
   await initializeVault({ vaultRoot, createdAt: occurredAt });
 
   const persisted = await persistCanonicalInboxCapture({

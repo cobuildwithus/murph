@@ -84,7 +84,9 @@ describe("createCloudflareHostedControlClient", () => {
       "purgeRuntimeResource",
       "putGameImage",
       "putGameMedia",
+      "putRecapMedia",
       "readGameMedia",
+      "readRecapMedia",
       "reconcileRuntimeHealthDataConsent",
       "sendTelegramUsageLimitNotice",
       "stageMealPhoto",
@@ -1824,6 +1826,24 @@ describe("createCloudflareHostedControlClient", () => {
       const missing = gameMediaClient(() => createJsonResponse({}, { status: 404 }));
       await expect(missing.client.gameImageDelivery({ mediaId, userId: "user_123", variant: "photo" })).resolves.toBeNull();
       await expect(missing.client.statGameImage({ mediaId, userId: "user_123" })).resolves.toBeNull();
+    });
+
+    it("binds recap storage to its owner and preserves storage failures", async () => {
+      const sealed = JSON.stringify(envelope), hash = "a".repeat(64), recapId = `recap/${"b".repeat(32)}/scene-0.jpg`;
+      const staged = gameMediaClient(() => createJsonResponse({ stored: true }));
+      await staged.client.putRecapMedia({ envelope: sealed, hash, mediaId: recapId, userId: "user_123" });
+      const request = observed(staged.fetchImpl);
+      expect(request.url).toBe("https://runner.example.test/internal/users/user_123/recap-media/stage");
+      expect(request.headers.get("x-hosted-execution-user-id")).toBe("user_123");
+      expect(request.headers.get("x-murph-recap-media-id")).toBe(recapId);
+      expect(request.headers.get("x-murph-recap-hash")).toBe(hash);
+      expect(request.init.body).toBe(sealed);
+      const found = gameMediaClient(() => createJsonResponse({ envelope: sealed, hash }));
+      await expect(found.client.readRecapMedia({ mediaId: recapId, userId: "user_123" })).resolves.toEqual({ envelope: sealed, hash });
+      const missing = gameMediaClient(() => createJsonResponse({}, { status: 404 }));
+      await expect(missing.client.readRecapMedia({ mediaId: recapId, userId: "user_123" })).resolves.toBeNull();
+      const failed = gameMediaClient(() => createJsonResponse({ stored: false }));
+      await expect(failed.client.putRecapMedia({ envelope: sealed, hash, mediaId: recapId, userId: "user_123" })).rejects.toThrow("not confirmed");
     });
 
     it("stages a sealed envelope bound to the owner and the photo's name", async () => {

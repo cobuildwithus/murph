@@ -1,3 +1,15 @@
+export const MURPH_RECAP_PERMISSION_PROFILE = "murph-recap" as const;
+
+export function buildMurphRecapPermissionProfileTomlLines(): readonly string[] {
+  return [
+    "# Restricted filesystem: only the host-granted task leaves are visible.",
+    "# Do not deny their ancestor: Linux masking would hide read-only leaves.",
+    `[permissions.${MURPH_RECAP_PERMISSION_PROFILE}.filesystem]`,
+    '":minimal" = "read"', '"/app" = "read"', "glob_scan_max_depth = 1", "",
+    `[permissions.${MURPH_RECAP_PERMISSION_PROFILE}.network]`, "enabled = false", "",
+  ];
+}
+
 export const MURPH_GROUP_READ_PERMISSION_PROFILE = "murph-group-read" as const;
 export const MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE =
   "murph-operator-diagnostic-read" as const;
@@ -134,6 +146,7 @@ export function buildMurphMemberWorkspacePermissionProfileTomlLines(): readonly 
 export function buildMurphHostedPermissionProfileTomlLines(): readonly string[] {
   return [
     ...buildMurphGameHostPermissionProfileTomlLines(),
+    ...buildMurphRecapPermissionProfileTomlLines(),
     ...buildMurphGroupReadPermissionProfileTomlLines(),
     ...buildMurphOperatorDiagnosticReadPermissionProfileTomlLines(),
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),

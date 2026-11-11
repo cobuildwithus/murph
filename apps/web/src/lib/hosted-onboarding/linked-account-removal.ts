@@ -76,9 +76,6 @@ async function removeHostedMemberPhoneProjectionTx(input: {
       phoneLookupKey: true,
       phoneNumberEncrypted: true,
       phoneNumberVerifiedAt: true,
-      signupPhoneCodeSendAttemptId: true,
-      signupPhoneCodeSendAttemptStartedAt: true,
-      signupPhoneCodeSentAt: true,
       signupPhoneNumberEncrypted: true,
     },
   });
@@ -113,9 +110,6 @@ async function removeHostedMemberPhoneProjectionTx(input: {
         phoneLookupKey: null,
         phoneNumberEncrypted: null,
         phoneNumberVerifiedAt: null,
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: null,
       },
     });

@@ -38,7 +38,7 @@ async function withMember(run: (input: { memberId: string; email: string; phone:
     await prisma.$transaction(async (tx) => {
       await upsertHostedMemberEmailAuthorization({ memberId, prisma: tx, verifiedEmail: { address: email, verifiedAt: new Date() } });
       await upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(phone), memberId, prisma: tx, phoneNumberVerifiedAt: new Date(),
-        signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null });
+        signupPhoneNumber: null });
     });
     await issueHostedAppSession({ memberId });
     await run({ memberId, email, phone, prisma });

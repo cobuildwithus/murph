@@ -1,3 +1,4 @@
+import { notificationHistoryIntent } from './notification-history-fixtures.ts'
 import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath } from '@murphai/runtime-state/node'
 import { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import { REMINDER_LANGUAGE_CASES, runReminderLanguageJourney } from './support/reminder-language-journey.js'
@@ -48110,11 +48111,14 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     }
   }, 360_000)
   it.each([
-    { name: 'game recap notification writes one sealed story and queues its saved chat line exactly', weekendsOff: false, regeneration: false, superlatives: false },
-    { name: 'game recap notification with weekends off', weekendsOff: true, regeneration: false, superlatives: false },
-    { name: 'game recap notification regeneration', weekendsOff: true, regeneration: true, superlatives: false },
-    { name: 'game recap distinct grounded superlatives for similar weeks', weekendsOff: true, regeneration: false, superlatives: true },
-  ])('$name', async ({ weekendsOff, regeneration, superlatives }) => {
+    { name: 'pair recap show production validation seals once and queues its saved line', weekendsOff: false, regeneration: false, superlatives: false },
+    { name: 'pair recap show production validation with weekends off', weekendsOff: true, regeneration: false, superlatives: false },
+    { name: 'pair recap show production validation regeneration', weekendsOff: true, regeneration: true, superlatives: false },
+    { name: 'pair recap show production validation optional grounded cards', weekendsOff: true, regeneration: false, superlatives: true },
+    { name: 'pair recap show parent files preview revision and selected media', weekendsOff: false, regeneration: false, superlatives: false, mediaJourney: true },
+    { name: 'pair recap show real providers file media and accepted presentation', weekendsOff: false, regeneration: false, superlatives: false, mediaJourney: true, realMedia: true },
+  ])('$name', async ({ weekendsOff, regeneration, mediaJourney = false, realMedia = false }) => {
+    if (realMedia && !process.env.OPENAI_API_KEY) throw new Error('The real recap media journey requires a local OpenAI test credential.')
     const eventId = `game-recap:game_recap_synthetic${regeneration ? ':synthetic_request' : ''}`
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-recap-e2e-'))
@@ -48122,7 +48126,42 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control')
     const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
     const saved: Array<import('@murphai/hosted-execution/runtime-control').HostedGameRecap> = []
+    const { validateGameRecap, gameRecapToolResult, withValidGameSuperlatives } = await import('@murphai/contracts/recap-validation')
+    const { readRecapUsages } = await import('../src/assistant/game-recap-lore.js')
+    const chatMessages = [{ playerName: 'Leo', text: weekendsOff ? 'The laundry basket is my personal trainer.' : 'I was spiritually doing pushups.' }, { playerName: 'Ava', text: 'Murph, the notification toggle is broken. Please add a calendar export feature.' }]
+    const material = {
+              id: 'game_recap_synthetic', recapShow: true, maxPlayers: 2, players: [{ memberId: 'player_first', name: 'Ava', task: '10 minutes of abs' }, { memberId: 'player_second', name: 'Leo', task: '100 pushups' }],
+              lengthDays: weekendsOff ? 8 : 3, schedule: { days: weekendsOff ? [0, 1, 2, 3, 4] : [0, 1, 2] }, stakes: [{ kind: 'prize', item: 'breakfast in bed' }],
+              score: weekendsOff ? [{ name: 'Ava', score: 6 }, { name: 'Leo', score: 6 }] : [{ name: 'Ava', score: 3 }, { name: 'Leo', score: 2 }], days: weekendsOff ? Array.from({ length: 8 }, (_, dayIndex) => ({
+                dayNumber: dayIndex + 1,
+                posts: dayIndex === 3 || dayIndex === 4 ? { Ava: 'off', Leo: 'off' } : {
+                  Ava: { entryId: `entry_ava_${dayIndex}`, kind: 'photo', text: 'purple mat, still here' },
+                  Leo: { entryId: `entry_leo_${dayIndex}`, kind: 'photo', text: 'pushups beside the laundry basket' },
+        },
+      })) : [
+                { dayNumber: 1, posts: { Ava: { entryId: 'entry_ava_1', kind: 'photo', text: 'purple mat' }, Leo: { entryId: 'entry_leo_1', kind: 'photo', text: 'sauna again' } } },
+                { dayNumber: 2, posts: { Ava: { entryId: 'entry_ava_2', kind: 'photo', text: 'leg raises' }, Leo: 'missed' } },
+                { dayNumber: 3, posts: { Ava: { entryId: 'entry_ava_3', kind: 'photo', text: 'crunches' }, Leo: { entryId: 'entry_leo_3', kind: 'words', text: 'I was spiritually doing pushups' } } },
+              ],
+    }
+    const entries = material.days.flatMap(day => Object.entries(day.posts).flatMap(([playerName, post]) =>
+      typeof post === 'object' && post ? [{ entryId: post.entryId, kind: post.kind, text: post.text, playerName, visibleToBoth: true }] : []))
+    const scores = material.score.map((score, index) => ({ ...score, memberId: material.players[index]!.memberId }))
+    const { createRecapShowLiveProviders } = await import('@murphai/assistant-engine/recap-show-testkit')
+    const providerResponses: { kind: string; status: number }[] = []
+    const realSong = realMedia && Boolean(process.env.ELEVENLABS_API_KEY)
+    const providers = await createRecapShowLiveProviders({ game: material, players: material.players, entries, result: scores, chat: chatMessages,
+      ...(realMedia ? { mediaFetch: async (url, init) => {
+        const request = new Request(url, init)
+        if (!['api.openai.com', 'api.elevenlabs.io'].includes(new URL(request.url).hostname)) throw new Error('Unexpected live media destination.')
+        request.headers.delete('x-murph-recap-reservation')
+        const response = await fetch(request)
+        providerResponses.push({ kind: new URL(request.url).hostname === 'api.openai.com' ? 'image' : 'song', status: response.status })
+        return response
+      } } : {}) })
+    const events: unknown[] = []
     let rejectedWrites = 0
+    let conflictingTreatment: string | undefined
     try {
       await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
       await mkdir(path.join(workingDirectory, 'games'), { recursive: true })
@@ -48139,52 +48178,33 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
         deliveryIdempotencyKey: eventId,
         deliveryDedupeToken: eventId,
         executionContext: { hosted: {
-          defaultTarget: modelTarget,
-          gameRecapScope: { gameId: 'game_recap_synthetic', eventId, pairFingerprint: '0123456789abcdef0123456789abcdef' },
+          defaultTarget: modelTarget, providerFetch: providers.providerFetch,
+          gameRecapScope: { gameId: 'game_recap_synthetic', eventId, pairFingerprint: '0123456789abcdef0123456789abcdef', show: true },
           groupTool: { request: async (request): Promise<import('@murphai/hosted-execution/runtime-control').HostedGameToolResponse> => {
             calls.push(request)
-            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', recapGame: {
-              id: 'game_recap_synthetic', players: [{ ...(superlatives ? { memberId: 'player_first' } : {}), name: 'Ava', task: '10 minutes of abs' }, { ...(superlatives ? { memberId: 'player_second' } : {}), name: 'Leo', task: '100 pushups' }],
-              lengthDays: weekendsOff ? 8 : 3, schedule: { days: weekendsOff ? [0, 1, 2, 3, 4] : [0, 1, 2] }, stakes: [{ kind: 'prize', item: 'breakfast in bed' }],
-              score: weekendsOff ? [{ name: 'Ava', score: 6 }, { name: 'Leo', score: 6 }] : [{ name: 'Ava', score: 3 }, { name: 'Leo', score: 2 }], days: weekendsOff ? Array.from({ length: 8 }, (_, dayIndex) => ({
-                dayNumber: dayIndex + 1,
-                posts: dayIndex === 3 || dayIndex === 4 ? { Ava: 'off', Leo: 'off' } : {
-                  Ava: { entryId: `entry_ava_${dayIndex}`, kind: 'photo', text: 'purple mat, still here' },
-                  Leo: { entryId: `entry_leo_${dayIndex}`, kind: 'photo', text: 'pushups beside the laundry basket' },
-                },
-              })) : [
-                { dayNumber: 1, posts: { Ava: { entryId: 'entry_ava_1', kind: 'photo', text: 'purple mat' }, Leo: { entryId: 'entry_leo_1', kind: 'photo', text: 'sauna again' } } },
-                { dayNumber: 2, posts: { Ava: { entryId: 'entry_ava_2', kind: 'photo', text: 'leg raises' }, Leo: 'missed' } },
-                { dayNumber: 3, posts: { Ava: { entryId: 'entry_ava_3', kind: 'photo', text: 'crunches' }, Leo: { entryId: 'entry_leo_3', kind: 'words', text: 'I was spiritually doing pushups' } } },
-              ],
-            } } }
+            if (request.action === 'read_game') return providers.control(request)
             if (request.action === 'write_recap') {
-              // Model the server's fixed corrections for this synthetic story;
-              // only an accepted write is a seal, and it is never overwritten.
-              const corrections: string[] = []
-              if (request.recap.scoreLine !== undefined && !['Ava', 'Leo'].some((name) => request.recap.scoreLine?.includes(name))) corrections.push('scoreLine: name who owes whom.')
-              if (weekendsOff && request.recap.scoreLine !== undefined && /\b(?:owe|owes|owed|owing)\b/iu.test(request.recap.scoreLine)) corrections.push('scoreLine: the settled result is a tie; name the players and describe the tie without owe, owes, owed or owing.')
-              request.recap.pages.forEach((page, index) => {
-                if (page.blocks.length < 1 || page.blocks.length > 3) corrections.push(`page ${index + 1}: ${page.blocks.length} blocks; use 1 to 3.`)
-                for (const block of page.blocks) {
-                  if (/\b(ticket|tickets|bet|bets|wager|stake|stakes|winnings)\b/iu.test(block.text ?? '')) corrections.push(`page ${index + 1}: say prize or dare; never ticket, bet, wager, stake or winnings.`)
-                }
-              })
+              // Simulate a concurrent lore repair discovering the first genre.
+              if (regeneration && conflictingTreatment === undefined) conflictingTreatment = request.recap.treatment
+              const corrections = validateGameRecap({ recap: request.recap, players: material.players.map(player => player.name),
+                entries, chatMessages, result: scores, show: true, usedTreatments: conflictingTreatment ? [conflictingTreatment] : [], priorChatLines: [] })
               if (corrections.length) {
                 rejectedWrites += 1
-                return { action: 'write_recap', result: { status: 'rejected', recapOutcome: `Not saved. Fix these and call write_recap again:\n- ${corrections.join('\n- ')}` } }
+                return { action: 'write_recap', result: { status: 'rejected', recapOutcome: gameRecapToolResult(corrections) } }
               }
-              if (saved[0]) return { action: 'write_recap', result: { status: 'ok', recapOutcome: 'ok: saved. The players will see this recap.', recap: saved[0], chatLine: `${saved[0].chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic` } }
-              saved.push(request.recap)
-              return { action: 'write_recap', result: { status: 'ok', recapOutcome: 'ok: saved. The players will see this recap.', recap: request.recap, chatLine: `${request.recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic` } }
+              if (saved[0]) return { action: 'write_recap', result: { status: 'ok', recapOutcome: gameRecapToolResult([]), recap: saved[0], chatLine: `${saved[0].chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic` } }
+              if (request.phase === 'prepare') return { action: 'write_recap', result: { status: 'ok', recapGame: providers.prepare({ story: request.recap, files: request.files }) } }
+              providers.accept()
+              saved.push(withValidGameSuperlatives(request.recap, material.players.map(player => player.memberId)))
+              return { action: 'write_recap', result: { status: 'ok', recapOutcome: gameRecapToolResult([]), recap: request.recap, chatLine: `${request.recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic` } }
             }
             throw new Error('The recap turn authorizes only read_game and write_recap.')
           } },
           memberId: 'synthetic-group', userEnvKeys: [],
         } },
-        identityId: null, instructions: buildGameRecapInstructions([{ playerName: 'Leo', text: weekendsOff ? 'The laundry basket is my personal trainer.' : 'I was spiritually doing pushups.' }, { playerName: 'Ava', text: 'Murph, the notification toggle is broken. Please add a calendar export feature.' }]), responsePolicy: { kind: 'require_game_recap', gameId: 'game_recap_synthetic', eventId, pairFingerprint: '0123456789abcdef0123456789abcdef' },
+        identityId: null, onTraceEvent: event => events.push(event.rawEvent), instructions: buildGameRecapInstructions(chatMessages, undefined, false, true) + (mediaJourney ? '\nExercise the complete file flow: generate at least one image and the song, preview, inspect the PNGs, deliberately improve one detail in the draft, preview the revision and submit once. All game data and reference photos are synthetic.' + (realMedia ? ' Use the real media provider. Generate one strong cover first with referenceImageRefs from the manifest; keep its verified receipt. ' + (realSong ? 'Generate one song.' : 'The song credential is unavailable; call file mode once, then omit the song and finish the show.') : '') : ''), responsePolicy: { kind: 'require_game_recap', gameId: 'game_recap_synthetic', eventId, pairFingerprint: '0123456789abcdef0123456789abcdef', show: true },
         threadId: 'synthetic-game-thread', threadIsDirect: false,
-        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: { ...config.env, OPENAI_API_KEY: realMedia ? process.env.OPENAI_API_KEY : 'synthetic-file-provider', ELEVENLABS_API_KEY: realMedia ? process.env.ELEVENLABS_API_KEY : 'synthetic-file-provider' } },
         turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
       })
       const intents = await listAssistantOutboxIntents(workingDirectory)
@@ -48192,14 +48212,16 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       expect(calls[0]?.action).toBe('read_game')
       expect(calls.every((call) => 'origin' in call && call.origin.kind === 'game_recap' && call.origin.eventId === eventId)).toBe(true)
       // Corrections may take separate attempts; exactly one write may succeed.
-      expect(calls.filter((call) => call.action === 'write_recap')).toHaveLength(rejectedWrites + 1)
+      expect(calls.filter((call) => call.action === 'write_recap' && call.phase === 'accept')).toHaveLength(1)
+      expect(calls.filter((call) => call.action === 'write_recap' && call.phase === 'prepare')).toHaveLength(rejectedWrites + 1)
       expect(saved).toHaveLength(1)
+      if (regeneration) { expect(rejectedWrites).toBeGreaterThanOrEqual(1); expect(saved[0]?.treatment).not.toBe(conflictingTreatment) }
       expect(saved[0]).not.toHaveProperty('scoreLine')
-      if (superlatives) {
-        const pair = saved[0].superlatives
-        expect(pair).toHaveLength(2)
-        expect(pair?.map((item) => item.memberId).sort()).toEqual(['player_first', 'player_second'])
-        expect(new Set(pair?.map((item) => item.title.toLowerCase())).size).toBe(2)
+      {
+        const pair = saved[0].superlatives ?? []
+        expect(pair.length).toBeLessThanOrEqual(2)
+        expect(new Set(pair.map(item => item.memberId)).size).toBe(pair.length)
+        expect(new Set(pair.map(item => item.title.toLowerCase())).size).toBe(pair.length)
         for (const item of pair ?? []) {
           expect(item.title.split(/\s+/u).length).toBeGreaterThanOrEqual(2)
           expect(item.title.split(/\s+/u).length).toBeLessThanOrEqual(6)
@@ -48209,9 +48231,11 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
           expect(item.title + ' ' + item.line).not.toMatch(/lazy|fat|weight|ugly|loser|pathetic|body|bodies/iu)
         }
         process.stdout.write('[game-recap superlatives] ' + JSON.stringify(pair) + '\n')
-      } else expect(saved[0].superlatives).toBeUndefined()
+      }
 
-      expect(saved[0]?.pages.length).toBeGreaterThanOrEqual(3)
+      expect(saved[0]?.pages.length).toBeGreaterThanOrEqual(5)
+      expect(saved[0]?.pages.length).toBeLessThanOrEqual(7)
+      expect(saved[0]?.treatment).toBeTruthy()
       expect(JSON.stringify(saved[0])).not.toMatch(/notification toggle|calendar export|feature request/iu)
       if (weekendsOff) {
         expect(JSON.stringify(saved[0])).not.toMatch(/(?:weekend|saturday|sunday|days? (?:4|5|four|five)).{0,40}(?:missed|skipped|no.show)|(?:missed|skipped).{0,40}(?:weekend|saturday|sunday)/iu)
@@ -48221,6 +48245,41 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       expect(intents).toHaveLength(1)
       expect(result.response).toBe(`${saved[0]?.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic`)
       expect(intents[0]?.message).toBe(result.response)
+      expect(intents[0]?.media ?? []).toEqual([])
+      if (mediaJourney) {
+        expect(providers.providerCalls.some(call => call.kind === 'image')).toBe(true)
+        for (const call of providers.providerCalls.filter(call => call.kind === 'image')) {
+          expect(call).toMatchObject({ quality: 'high', size: '1024x1536' })
+        }
+        expect(providers.providerCalls.filter(call => call.kind === 'song')).toHaveLength(realMedia && !realSong ? 0 : 1)
+        if (realMedia) {
+          expect(providerResponses.some(response => response.kind === 'image' && response.status === 200)).toBe(true)
+          expect(providers.providerCalls.some(call => call.kind === 'image' && call.referenceHashes.length > 0)).toBe(true)
+          expect(providers.accept().files.some(file => file.receipt.mediaType === 'image/jpeg')).toBe(true)
+          if (realSong) expect(providers.accept().files.some(file => file.slot === 'song')).toBe(true)
+        }
+        const actions = readCapabilityRoutingActions(events)
+        const previews = actions.filter(action => action.kind === 'dynamic' && /(?:^|[.])preview_recap$/u.test(action.tool) && action.success)
+        expect(previews.length).toBeGreaterThanOrEqual(2)
+        const hashes = previews.flatMap(action => action.kind === 'dynamic' ? [JSON.parse(action.output).draftHash] : [])
+        expect(new Set(hashes).size).toBeGreaterThanOrEqual(2)
+        expect(actions.some(action => action.kind === 'command' && /chat[.]jsonl|writing-guide[.]md/u.test(action.command ?? ''))).toBe(true)
+        const { recapTaskDirectory } = await import('../src/assistant/recap-workspace.js')
+        const artifactRoot = fileURLToPath(new URL(realMedia ? '../../../audit-packages/recap-show-real-providers/' : '../../../audit-packages/recap-show-live/', import.meta.url))
+        await mkdir(artifactRoot, { recursive: true })
+        await cp(path.join(recapTaskDirectory(workingDirectory, eventId), 'previews'), path.join(artifactRoot, 'previews'), { recursive: true })
+        const { presentGameRecap } = await import('@murphai/contracts/recap-show')
+        const accepted = providers.accept(), now = new Date().toISOString()
+        const presentation = presentGameRecap({ stored: { version: 1, generationId: 'synthetic-accepted', story: accepted.story,
+          acceptedAt: now, preview: { token: 'synthetic-capability'.repeat(3), expiresAt: now },
+          assets: accepted.files.map(({ slot, receipt }) => ({ slot, recipeId: receipt.operationId, storageKey: slot, references: [],
+            kind: receipt.mediaType === 'image/jpeg' ? 'image' : 'song', hash: receipt.hash, mediaType: receipt.mediaType, byteLength: receipt.byteLength,
+            width: receipt.width, height: receipt.height, durationMs: receipt.durationMs })) },
+          permittedPhotoIds: new Set(entries.map(entry => entry.entryId)), mediaUrl: slot => `/api/game/v1/games/synthetic-game/recap-assets/${slot}?generation=synthetic-accepted` })
+        await writeFile(path.join(artifactRoot, 'accepted-presentation.json'), JSON.stringify(presentation, null, 2) + '\n')
+        await writeFile(path.join(artifactRoot, 'verification.json'), JSON.stringify({ model: config.model, mediaProviders: realMedia ? { image: 'real OpenAI', song: realSong ? 'real ElevenLabs' : 'credential absent' } : 'synthetic in-process fixtures', providerResponses,
+          accepted: saved.length, chatMessages: intents.length, chatMedia: 0, previewDrafts: [...new Set(hashes)], providerCalls: providers.providerCalls.map(call => ({ kind: call.kind, ...(call.kind === 'image' ? { referenceCount: call.referenceHashes.length } : {}) })) }, null, 2) + '\n')
+      }
       expect(saved[0]?.chatLine).not.toMatch(/https?:\/\//iu)
       expect(saved[0]?.chatLine.length).toBeLessThan(160)
       const chatLine = saved[0]?.chatLine ?? ''
@@ -48230,11 +48289,20 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       process.stdout.write(`[game-recap chatLine] ${JSON.stringify({ weekendsOff, regeneration, chatLine })}\n`)
 
       const lore = await readFile(path.join(workingDirectory, 'games', 'lore-0123456789abcdef0123456789abcdef.md'), 'utf8')
-      expect(lore).toContain(`Chat line used: ${saved[0]?.chatLine}`)
+      expect(readRecapUsages(lore)).toEqual([{ generationId: eventId, treatment: saved[0]?.treatment, chatLine: saved[0]?.chatLine }])
       expect(lore).not.toContain('Watch the recap:')
       expect(lore).not.toContain('https://recaps.murph.test')
     } catch (error) {
-      process.stdout.write(`[game-recap failure] ${JSON.stringify({ weekendsOff, regeneration, actions: calls.map((call) => call.action), seals: saved.length })}\n`)
+      process.stdout.write(`[game-recap failure] ${JSON.stringify({ weekendsOff, regeneration, providerResponses, actions: calls.map((call) => call.action), seals: saved.length })}\n`)
+      const diagnostics = events.flatMap(event => {
+        const row = readRecord(event), params = readRecord(row?.params), item = readRecord(params?.item), turn = readRecord(params?.turn)
+        if (row?.method === 'item/completed' && item?.type === 'agentMessage') return [{ kind: 'reply', text: String(item.text).replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>').slice(-3000) }]
+        if (row?.method === 'turn/completed') return [{ kind: 'turn', text: String(turn?.status) }]
+        if (row?.method === 'item/completed' || /error|warn/iu.test(String(row?.method))) return [{ kind: String(row?.method), text: JSON.stringify(params).replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>').slice(-1200) }]
+        return []
+      })
+      process.stdout.write(`[game-recap diagnostics] ${JSON.stringify({ diagnostics, actions: readCapabilityRoutingActions(events).map(action => action.kind === 'command' ? { kind: action.kind, command: action.command.slice(0, 300), ok: action.ok, output: action.output.slice(-600) } : { kind: action.kind, tool: action.tool, success: action.success, output: action.output.slice(-600) }) })}\n`)
+
       throw error
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
@@ -50228,6 +50296,82 @@ describeRealCodex('ordinary input replay reminder journeys', () => {
       process.stdout.write(`[automation-input-replay-e2e] ${JSON.stringify({ journey: name, saves: saves.length, reply: result.finalMessage })}\n`)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+
+describeRealCodex('shared reminder awareness', () => {
+  it.each([
+    { name: 'private ordinary reminder shares sent context', evening: false, prior: 'sent', task: 'walk', skip: true, direct: true },
+    { name: 'evening after ordinary reminder', evening: true, prior: 'sent', task: 'walk', skip: true },
+    { name: 'ordinary after evening reminder', evening: false, prior: 'sent', task: 'walk', skip: true },
+    { name: 'partial coverage keeps another task', evening: true, prior: 'sent', task: 'walk and stretch', skip: false },
+    { name: 'requested repeat is preserved', evening: false, prior: 'sent', task: 'repeat', skip: false },
+    { name: 'pending reminder is not accepted', evening: false, prior: 'pending', task: 'walk', skip: false },
+    { name: 'different date is preserved', evening: false, prior: 'sent', task: 'tomorrow', skip: false },
+    { name: 'ordinary safety cue is preserved', evening: false, prior: 'sent', task: 'safety', skip: false },
+  ] as const)('shared reminder awareness: $name', async scenario => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-reminder-awareness-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameEveningCheckInInstructions, gameEveningCheckInPolicySchema } = await import('@murphai/hosted-execution/runtime-control')
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const threadIsDirect = 'direct' in scenario && scenario.direct
+      const prior = notificationHistoryIntent({ status: scenario.prior, threadIsDirect })
+      await saveAssistantOutboxIntent(workingDirectory, prior)
+      const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never',
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const date = '2030-03-04'
+      const tasks = [{ gameId: 'game_walk', task: 'a walk' },
+        ...(scenario.task === 'walk and stretch' ? [{ gameId: 'game_stretch', task: 'five minutes of stretching' }] : [])]
+      const eventId = `game-evening:synthetic-group:${date}`
+      const policy = gameEveningCheckInPolicySchema.parse({ kind: 'game_evening_check_in', roomId: 'synthetic-group',
+        eventId, date, expiresAt: '2030-03-04T20:30:00.000Z', conversationLaneSeq: '0',
+        batch: tasks.map(task => ({ gameId: task.gameId, termsVersion: 1, memberIds: ['player_ava'], dayIndex: 0 })) })
+      const instructions = scenario.evening
+        ? buildGameEveningCheckInInstructions({ date, transcript: [], players: [{ memberId: 'player_ava', playerName: 'Ava', tasks }] })
+        : scenario.task === 'repeat'
+          ? 'It is March 4, 2030 at 20:05 UTC. Ava explicitly requested a second reminder five minutes after the first even if unanswered. Remind her about her walk today.'
+          : scenario.task === 'tomorrow'
+            ? 'It is March 5, 2030 at 20:00 UTC. Ask Ava about her walk today, March 5.'
+            : scenario.task === 'safety'
+              ? 'It is March 4, 2030 at 20:05 UTC. The air-quality alert for the group area now advises avoiding outdoor exercise. Send one useful safety message to keep today’s walk indoors.'
+              : 'It is March 4, 2030 at 20:05 UTC. Ask Ava whether she is taking her walk today.'
+      const events: unknown[] = []
+      let providerRequests = 0
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: 'synthetic-room', channel: 'linq', identityId: null,
+        deliveryTarget: 'synthetic-room', threadId: 'synthetic-room', threadIsDirect,
+        deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
+        instructions, responsePolicy: scenario.evening ? policy : { kind: 'allow_send_or_skip' },
+        ...(!scenario.evening ? { scheduledOccurrenceAt: scenario.task === 'tomorrow' ? '2030-03-05T20:00:00.000Z' : '2030-03-04T20:05:00.000Z' } : {}),
+        onTraceEvent: event => events.push(event.rawEvent),
+        onProviderRequestStarted: () => { providerRequests += 1 },
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: scenario.evening ? 'manual-deliver' : 'automation-cron', vault: workingDirectory, workingDirectory,
+      })
+      const newIntents = (await listAssistantOutboxIntents(workingDirectory)).filter(intent => intent.intentId !== prior.intentId)
+      expect(providerRequests).toBe(1)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+      expect(result.decision.kind).toBe(scenario.skip ? 'skip' : 'send_message')
+      expect(newIntents).toHaveLength(scenario.skip ? 0 : 1)
+      if (scenario.skip) expect(result.response).toBeNull()
+      else {
+        expect(newIntents[0]!.message).toBe(result.response)
+        expect(result.response).not.toMatch(/you (?:already )?(?:completed|finished)|you(?:'ve| have) already|outbox|receipt|automation|game_/iu)
+        expect(result.response).toMatch(scenario.task === 'walk and stretch' ? /stretch/iu : scenario.task === 'safety' ? /indoors?|inside/iu : /walk/iu)
+        if (scenario.task === 'walk and stretch') expect(result.response).not.toMatch(/walk/iu)
+      }
+      if (scenario.evening) expect(readCapabilityRoutingActions(events)).toEqual([])
+      process.stdout.write(`[reminder-awareness] ${JSON.stringify({ scenario: scenario.name, decision: result.decision.kind, reply: result.response, sends: newIntents.length, providerRequests })}\n`)
+    } finally {
+      await stopWarmCodexAppServer('reminder-awareness-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }
   }, 360_000)
 })

@@ -469,9 +469,6 @@ beforeEach(() => {
     phoneNumber: null,
     phoneNumberVerifiedAt: null,
 
-    signupPhoneCodeSendAttemptId: null,
-    signupPhoneCodeSendAttemptStartedAt: null,
-    signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
 
 
@@ -5549,9 +5546,6 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
     memberId,
     phoneNumber: null,
 
-    signupPhoneCodeSendAttemptId: null,
-    signupPhoneCodeSendAttemptStartedAt: null,
-    signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
   });
   const stripeCheckoutSessionId = overrides?.stripeCheckoutSessionId ?? null;

@@ -269,6 +269,7 @@ export type HostedExecutionAssistantNotificationResponsePolicy =
       gameId: string;
       pairFingerprint: string;
       loreAccess?: "read";
+      show?: true;
     }
   | {
       kind: "game_missed_check_in";
@@ -912,6 +913,7 @@ export interface HostedExecutionClinicalRecordsSyncRequestedWake
 }
 
 /** Local durable work points to retained clinical evidence, never provider credentials. */
+
 export interface HostedExecutionClinicalEnrichmentRequestedWake
   extends HostedExecutionBaseWake {
   jobId: string;

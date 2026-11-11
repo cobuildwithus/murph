@@ -1,5 +1,4 @@
 import { commandHostedRuntimeOwner } from "../../runtime-owner-client.ts";
-import { readRuntimeTargetAdapter } from "../../runtime-target-adapter.ts";
 
 import {
   json,
@@ -154,11 +153,7 @@ async function beginActiveHostedLocalTestRunnerGracefulStop(input: {
   fallbackRunnerContainerName: string;
   userId: string;
 }): Promise<{ ok: true }> {
-  const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
-    exactUser: input.context.env.RUNNER_CONTAINER,
-    next: input.context.env.NEXT_RUNNER_CONTAINER,
-    standby: input.context.env.STANDBY_RUNNER_CONTAINER ?? null,
-  });
+  const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter(input.context.env);
   if (!runnerContainerNamespace) {
     throw new Error("Hosted runner container binding is unavailable.");
   }
@@ -387,12 +382,7 @@ export async function handleTestContainerActivityExpiredRoute(
   }
 
   const runnerContainerName = await readLocalRuntimeTarget(context, userId);
-  const namespace = createHostedRunnerContainerNamespaceRouter({
-    exactUser: context.env.RUNNER_CONTAINER,
-    next: context.env.NEXT_RUNNER_CONTAINER,
-    small: context.env.SMALL_RUNNER_CONTAINER,
-    standby: context.env.STANDBY_RUNNER_CONTAINER ?? null,
-  });
+  const namespace = createHostedRunnerContainerNamespaceRouter(context.env);
   if (!namespace) throw new Error("Hosted runner container binding is unavailable.");
   const stub = namespace.getByName(runnerContainerName);
   if (!hasHostedLocalTestRunnerContainerActivityControl(stub)) {
@@ -692,7 +682,7 @@ async function readLocalRuntimeTarget(context: WorkerRouteContext, userId: strin
 }
 
 function requireLocalRuntimeTargetAdapter(context: WorkerRouteContext, target: string) {
-  const adapter = readRuntimeTargetAdapter(context.env, target);
+  const adapter = createHostedRunnerContainerNamespaceRouter(context.env)?.getByName(target);
   if (!adapter) throw new Error("Local runtime test target binding is unavailable.");
   return adapter;
 }

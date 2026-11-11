@@ -58,74 +58,49 @@ owned by resource cleanup; deleting the importer does not delete their cleanup.
 Native DO receipt/provider-context compatibility is independent of the finished
 legacy-to-Postgres campaign and remains intact.
 
-### Deferred schema contract cleanup
+### Runtime schema contract cleanup
 
-No schema object is dropped in this release. No dedicated enum exists. All
-column defaults and NOT NULL constraints remain. Retained objects are:
+The runtime cutover campaign has finished. The current Prisma client no longer
+exposes its inventory models, owner migration fields or account-cleanup enrollment
+cursor, and owner creation no longer writes a migration phase. These values grant
+no current runtime authority.
 
-- `hosted_runtime_cutover`, all columns (`id`, `phase`, `namespace_id`,
-  `worker_version`, `inventory_after`, `inventory_hash`, `inventory_count`,
-  `inventory_sealed_at`, `selected_object_id`, `namespace_probe_id`,
-  `discovery_completed_at`, `creation_closed_at`, `activated_at`, `updated_at`),
-  its primary key and `hosted_runtime_cutover_id_check` /
-  `hosted_runtime_cutover_phase_check` constraints.
-- `hosted_runtime_legacy_import`, all columns (`object_id`, `inventory_class`,
-  `admitted_user_id`, `user_id`, `generation`, `next_cursor`, `last_cursor`,
-  `last_hash`, `completed_at`), its primary key, unique indexes
-  `hosted_runtime_legacy_import_user_id_key` and
-  `hosted_runtime_legacy_import_admitted_user_id_key`, indexes
-  `hosted_runtime_legacy_import_completed_at_object_id_idx` and
-  `hosted_runtime_legacy_import_inventory_class_object_id_idx`, and
-  `hosted_runtime_legacy_import_inventory_class_check`.
-- `hosted_runtime_owner.migration_phase` and `.migration_id`, index
-  `hosted_runtime_owner_migration_phase_user_id_idx`, and constraint
-  `hosted_runtime_owner_migration_phase_check`. Current creation still writes
-  constant `postgres` to preserve the historical diagnostic value; the existing
-  database default is `legacy`. These fields grant no authority.
-- `hosted_account_deletion_cleanup.runtime_migration_next_index` and index
-  `hosted_cleanup_runtime_enrollment_idx`.
-- Triggers `hosted_runtime_member_enrollment` and
-  `hosted_runtime_deleted_member_enrollment` on `hosted_member`, with functions
-  `enroll_hosted_runtime_member()` and `retain_hosted_runtime_member_for_migration()`;
-  trigger `hosted_account_deletion_cleanup_runtime_enrollment_delete_guard` and
-  function `prevent_unenrolled_runtime_cleanup_receipt_delete()`. They still take
-  a short shared gate read lock and require its row for member creation/deletion;
-  at production's terminal phase they do not enroll owners or block cleanup.
-  Preserve that table and singleton until these triggers are removed.
-- Eight `hosted_ai_usage` columns: `stripe_meter_source`, `stripe_meter_status`,
-  `stripe_meter_attempt_count`, `stripe_meter_last_attempted_at`,
-  `stripe_meter_next_attempt_at`, `stripe_metered_at`, `stripe_meter_identifier`,
-  `stripe_meter_error`; index `hosted_ai_usage_stripe_meter_due_idx`. Source,
-  status and attempts already default to `murph`, `skipped`, and zero; the other
-  columns allow null. No new default or compatibility write is necessary.
+Physical schema cleanup is deferred. Deployment-pinned Vercel workflows can
+resume with an older generated Prisma client after ordinary functions drain.
+The current Web alias and a bounded function drain do not establish that every
+older workflow has settled. Keep the two campaign tables, the owner migration
+fields, the account-cleanup enrollment cursor, and all three historical enrollment
+triggers/functions until their runnable client floor is proved. The terminal
+campaign singleton remains necessary while those triggers exist; at `postgres`
+they do not enroll owners or block cleanup.
 
-Follow-up is a separate contract release under
-[Hosted Web Contract Migrations](../../apps/web/prisma/contract-migrations/README.md).
-First remove these Prisma models/fields/index declarations and the owner creation
-constant, regenerate the client, and deploy that switched Web reader/writer.
-Confirm Web, Worker and warm runner convergence and no supported rollback reader
-needs them. Add a timestamped `contract-migrations/<id>/migration.sql` in that
-later release, never a destructive predeploy Prisma migration. Drop the three
-triggers, then their functions, then obsolete indexes/constraints/columns and the
-two entire tables; preserve every live owner/resource/usage/allowance object.
-Use explicit idempotent drops, not CASCADE. Do not alter historical migration SQL.
+The actual-history PostgreSQL regression applies all historical migrations and
+proves current runtime admission, member creation/deletion and encrypted cleanup
+with the switched client against this retained physical schema. Exact owner
+generation and physical targets, pending PUT drains, and the live runtime-log and
+Temporal deletion guards are preserved.
 
-The existing workflow proves the exact current-main production deployment and
-all aliases, waits the configured prior-function drain (300 seconds by default,
-maximum 600), and repeats deployment proof before SQL. Its runner uses the
-`hosted_web_contract_migrations` advisory transaction lock, 5-second lock timeout,
-30-second statement timeout and checksum ledger `_hosted_web_contract_migration`.
-A lock failure is retried through that workflow, never local production SQL.
-After cleanup, the switched schema/client release is the rollback floor; restoring
-an older reader requires re-expansion or a forward fix. No follow-up SQL is
-included in this removal.
+A later [Hosted Web Contract Migration](../../apps/web/prisma/contract-migrations/README.md)
+may remove the three enrollment triggers first, then their functions, obsolete
+indexes/constraints/columns and the two campaign tables. Require an explicit
+inventory and settled floor for deployment-pinned workflows and every supported
+rollback reader first. Then use the existing exact-deployment/alias proof and
+prior-function drain workflow with its short lock/statement timeouts and checksum
+ledger. Use explicit idempotent drops without CASCADE; never alter historical
+migration SQL or run destructive cleanup as a predeploy migration. No physical
+drop SQL is included here. After eventual cleanup, older clients require schema
+re-expansion or a forward fix.
+
+The eight retired `hosted_ai_usage` Stripe-meter columns and their due index are
+an independent billing-owned contract cleanup. Runtime cleanup does not remove
+those columns or any live financial fact.
 
 ## Local initialization and fault controls
 
 Fresh local runtime admission needs no application cutover initialization script.
-Historical SQL migrations still create a singleton required by their retained
-member triggers; keep it until contract cleanup. Prisma db-push environments
-without those triggers need no singleton. Local E2E stale-attempt injection still requires an idle member
+Historical SQL migrations create a singleton required by their member triggers;
+keep it until the postdeploy contract cleanup removes both. Prisma db-push
+environments without those triggers need no singleton. Local E2E stale-attempt injection still requires an idle member
 in a guarded loopback `murph_e2e_*` database, preserves the physical target and
 increments generation. Test nudges use ordinary ensure-processing admission;
 legacy alarm and run-until-idle controls remain unavailable.

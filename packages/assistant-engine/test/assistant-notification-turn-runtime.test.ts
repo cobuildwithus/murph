@@ -1,3 +1,4 @@
+import { notificationHistoryIntent } from './notification-history-fixtures.ts'
 import { SYNTHETIC_SLEEP_CARD } from './support/sleep-card-fixture.js'
 import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from '../src/assistant/weekly-usage-optimizer.ts'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
@@ -6,7 +7,7 @@ import path from 'node:path'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import type {
   AssistantProviderSessionOptions,
@@ -209,6 +210,13 @@ const AVAILABILITY_CONFLICT_INSTRUCTIONS = [
   AVAILABILITY_CONFLICT_BLOCK_END,
 ].join('\n')
 
+beforeEach(() => {
+  vi.doMock('../src/assistant/outbox/store.js', async (importOriginal) => ({
+    ...await importOriginal<typeof import('../src/assistant/outbox/store.js')>(),
+    listAssistantOutboxIntentsForAutoReplyRoute: vi.fn(async () => []),
+  }))
+})
+
 afterEach(() => {
   vi.resetModules()
   vi.unstubAllEnvs()
@@ -219,6 +227,7 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/runtime-state-service.js')
   vi.doUnmock('../src/assistant/execution-context.js')
   vi.doUnmock('../src/assistant/outbox.js')
+  vi.doUnmock('../src/assistant/outbox/store.js')
   vi.doUnmock('../src/assistant/store.js')
   vi.doUnmock('../src/assistant/session-resolution.js')
   vi.doUnmock('../src/assistant/turn-plan.js')
@@ -4435,6 +4444,31 @@ test.each(['send_message', 'skip'] as const)('group missed-day notifications iso
   } }))
 })
 
+test('recap recovery delivers one accepted fallback line and link without another model turn', async () => {
+  const eventId = 'game-recap:game_synthetic'
+  const chatLine = 'The morning walks made the week.\nWatch the recap: https://recaps.murph.test/recap/game_synthetic'
+  const request = vi.fn()
+    .mockResolvedValueOnce({ result: { status: 'ok', recapGame: { pendingRecapUsages: [] } } })
+    .mockResolvedValueOnce({ result: { status: 'ok', chatLine } })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    providerResult: createProviderResult({ response: 'The model must not run.' }),
+    turnId: 'turn-recovered-recap',
+  })
+  const scope = { eventId, gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const }
+  const result = await sendAssistantNotificationLocal({
+    channel: 'linq', deliveryIdempotencyKey: eventId, deliveryTarget: 'synthetic-game-thread',
+    executionContext: { hosted: { gameRecapScope: scope, groupTool: { request }, memberId: 'synthetic-group', userEnvKeys: [] } },
+    instructions: 'Recover and announce the game recap.',
+    responsePolicy: { kind: 'require_game_recap', ...scope },
+    threadId: 'synthetic-game-thread', threadIsDirect: false, vault: '/synthetic-vault',
+  })
+  expect(result.response).toBe(chatLine)
+  expect(request).toHaveBeenCalledTimes(2)
+  expect(request).toHaveBeenLastCalledWith({ action: 'read_game', origin: { kind: 'game_recap', gameId: scope.gameId, eventId }, recapRead: { kind: 'recover' } })
+  expect(deliverMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: chatLine, card: null, media: [] }))
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+})
+
 test.each(['game-recap:game_synthetic', 'game-recap:game_synthetic:synthetic_request'])('game recap notifications deliver and persist the accepted chat line exactly: %s', async (eventId) => {
   const savedChatLine = '  Ava won the mat jurisdiction case, 3–2.  \nWatch the recap: https://recaps.murph.test/recap/game_synthetic'
   const beforeDelivery = vi.fn()
@@ -6214,6 +6248,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
 }
 
 async function loadNotificationTurnHarness(input: {
+  priorDeliveries?: ReturnType<typeof notificationHistoryIntent>[]
   realChannelTyping?: boolean
   onExecuteCodexTurnWithRecovery?: (
     providerInput: NotificationTurnProviderInput,
@@ -6311,6 +6346,10 @@ async function loadNotificationTurnHarness(input: {
   }))
   vi.doMock('../src/assistant/runtime-state-service.js', () => ({
     createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
+  }))
+  vi.doMock('../src/assistant/outbox/store.js', async (importOriginal) => ({
+    ...await importOriginal<typeof import('../src/assistant/outbox/store.js')>(),
+    listAssistantOutboxIntentsForAutoReplyRoute: vi.fn(async () => input.priorDeliveries ?? []),
   }))
   vi.doMock('../src/assistant/outbox.js', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../src/assistant/outbox.js')>()
@@ -6572,3 +6611,28 @@ test.each(['note', 'blank', 'malformed', 'skip'] as const)(
     expect(expected).not.toMatch(/privateSummary|Synthetic private reasoning|malformed decision/u)
   },
 )
+
+test.each([
+  { kind: 'allow_send_or_skip', scheduled: false },
+  { kind: 'allow_send_or_skip', scheduled: true },
+  { kind: 'require_send', scheduled: false },
+] as const)('notification $kind (scheduled: $scheduled) receives only its allowed accepted-delivery context', async ({ kind, scheduled }) => {
+  const providerResult = createProviderResult({ response: JSON.stringify({ kind: 'send_message', text: 'A useful new question?', privateSummary: 'Uncovered task.' }) })
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience = { ...sharedPlan.conversationPolicy.audience,
+    channel: 'linq', threadId: 'synthetic-room', threadIsDirect: false,
+    explicitTarget: 'synthetic-room', deliveryPolicy: 'explicit-target-override' }
+  const harness = await loadNotificationTurnHarness({ providerResult, sharedPlan,
+    priorDeliveries: [notificationHistoryIntent()], turnId: 'turn-history' })
+  await harness.sendAssistantNotificationLocal({ channel: 'linq', threadId: 'synthetic-room',
+    threadIsDirect: false, deliveryTarget: 'synthetic-room', responsePolicy: { kind },
+    ...(scheduled ? { scheduledOccurrenceAt: '2030-03-04T20:05:00.000Z' } : {}),
+    instructions: 'Ask one useful question.', vault: '/tmp/synthetic-notification-vault' })
+  const call = harness.mocks.executeCodexTurnWithRecovery.mock.calls[0]![0]
+  if (kind === 'allow_send_or_skip') {
+    expect(call.input.prompt).toContain('Ava, are you taking your walk today?')
+    expect(call.input.prompt).toContain('explicitly requested repeats')
+  } else expect(call.input.prompt).not.toContain('Accepted messages')
+  expect(call.profile).toEqual({ promptProfile: scheduled ? 'conversation' : 'system-notification',
+    threadScope: 'isolated-thread', toolProfile: scheduled ? 'provider-turn' : 'output-only-turn' })
+})

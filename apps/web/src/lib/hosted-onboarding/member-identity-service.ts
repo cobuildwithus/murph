@@ -188,9 +188,6 @@ export async function ensureHostedMemberForPhoneResolutionTx(input: {
     ...phoneIdentityFields,
     memberId,
     prisma: input.prisma,
-    signupPhoneCodeSendAttemptId: null,
-    signupPhoneCodeSendAttemptStartedAt: null,
-    signupPhoneCodeSentAt: null,
     signupPhoneNumber: input.phoneNumber,
   });
 
@@ -320,9 +317,6 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
     phoneNumber: null,
     phoneNumberVerifiedAt: null,
     prisma: input.prisma,
-    signupPhoneCodeSendAttemptId: null,
-    signupPhoneCodeSendAttemptStartedAt: null,
-    signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
   });
 
@@ -396,9 +390,6 @@ async function refreshHostedMemberForPhoneTx(input: {
     phoneNumberVerifiedAt:
       input.phoneNumberVerifiedAt ?? input.currentIdentity?.phoneNumberVerifiedAt ?? null,
     prisma: input.prisma,
-    signupPhoneCodeSendAttemptId: null,
-    signupPhoneCodeSendAttemptStartedAt: null,
-    signupPhoneCodeSentAt: null,
     signupPhoneNumber: input.phoneNumber,
   });
   return input.member;

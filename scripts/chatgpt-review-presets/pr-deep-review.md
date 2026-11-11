@@ -4,8 +4,9 @@ evidence and report findings; do not edit files or take external actions.
 
 # Finding bar
 
-Report only findings introduced or materially worsened by this PR under one of
-the two bars below.
+Report serious bugs introduced or materially worsened by this PR. Complexity
+Collapse also covers existing complexity in the directly adjacent architecture
+under the bounded scope below.
 
 ## Serious bugs
 
@@ -50,6 +51,19 @@ correction is insufficient. Group symptoms of one root cause into one finding.
 
 Report a material opportunity to preserve the same required behavior with fewer
 concepts, branches, states, or ownership paths. A bug is not required.
+
+Review the surrounding subsystem as well as the diff: follow the touched flow
+through its existing owners, callers, state, and recovery paths. Consider whether
+the combined design can become simpler, including pre-existing machinery the
+change exposes or could make unnecessary. Do not restrict simplification to
+new lines or preserve an awkward boundary merely because it predates the PR.
+
+Stay within that connected flow. Prefer a small cohesive correction that is
+reasonable to ship and verify with this change. Do not turn the review into a
+repository-wide cleanup, require unrelated rewrites, or propose a replacement
+framework. Stop when the connected owners and plausible simplifications are
+understood; there is no cleanup quota.
+
 Name the exact code or concepts that can be removed, show the smaller
 ownership/data-flow shape, and prove that it preserves the stated outcome,
 success and recovery paths, and applicable invariants.
@@ -105,9 +119,12 @@ fanout and connection use at admitted cardinality before claiming a load bug.
 For user-facing work, trace whether the intended result reaches the right
 person or surface. Do not claim rendered proof without readable visual evidence.
 
-Exclude findings equivalent on the base. Label findings `ORIGINAL_PR` or
-`REVIEW_INDUCED` according to their actual cause. In a correction round, report
-a qualifying original finding only if encountered in a directly affected path;
+Exclude bugs equivalent on the base. Label PR-caused findings `ORIGINAL_PR` or
+`REVIEW_INDUCED` according to their actual cause. Label a qualifying pre-existing
+adjacent Complexity Collapse `ADJACENT_EXISTING`; identify the touched flow that
+makes it relevant and why its implementation and verification fit this change.
+In a correction round, report a qualifying finding only if encountered in a
+directly affected path;
 do not expand into unrelated code. Unresolved accepted findings retain their
 original cause. Reassess prior findings against this finding
 bar; do not keep rejected or now-out-of-scope observations as merge blockers.
@@ -120,11 +137,13 @@ Start with `Checked: PR #123 @ abc1234`, using the supplied target.
 For each finding include:
 
 1. Critical, High, or Complexity Collapse; origin; and a short title.
-2. The file/symbol and causing diff hunk.
+2. The file/symbol and causing diff hunk, or the explicit connection to the
+   touched flow for `ADJACENT_EXISTING`.
 3. For a bug: realistic trigger, end-to-end failure path, serious impact, and
    existing mitigation considered.
 4. For Complexity Collapse: expected net deletion or concepts/owners removed,
-   the smaller target shape, and evidence of preserved behavior and invariants.
+   the smaller target shape, evidence of preserved behavior and invariants, and
+   why the scope and migration cost are proportionate to this PR.
 5. The smallest safe correction and focused regression proof.
 
 If no finding qualifies, say so briefly. Do not append an improvement backlog.

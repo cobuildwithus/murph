@@ -2027,8 +2027,9 @@ export async function runHostedWorkspaceAssistantPhase(
         systemMailboxResult: systemMailboxMaintenance.result,
       });
     }
-    const managedAutomationsResult = hasFreshConversationInput
-      || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
+    // Dispatch queued output before preparing another background decision.
+    const managedAutomationsResult = hasAssistantInputAtPassStart
+      || hasPostCheckpointAssistantDelivery(systemMailboxMaintenance.result)
       ? null
       : mergeHostedAssistantPhaseResults(
           await applyHostedManagedAutomationsBestEffort({
@@ -2436,7 +2437,7 @@ export async function runHostedWorkspaceAssistantPhase(
     preForegroundTiming.turnTimingProviderCleanupPlanningMs =
       performance.now() - providerCleanupPlanningStartedAt;
     const providerCleanupOwnedByPostCheckpointDelivery =
-      postCheckpointDeliveryResultOwnsProviderCleanup(continuingSystemMailboxResult);
+      hasPostCheckpointAssistantDelivery(continuingSystemMailboxResult);
     const currentLinqDeliveryContexts = resolveHostedCurrentLinqDeliveryContexts(
       input,
       initialLinqDeliveryContexts,
@@ -3549,7 +3550,7 @@ function withHostedRuntimeProjectionCheckpointRequest(input: {
     : input.result;
 }
 
-function postCheckpointDeliveryResultOwnsProviderCleanup(
+function hasPostCheckpointAssistantDelivery(
   result: HostedWorkspaceRunnerAssistantPhaseResult | null,
 ): boolean {
   return result?.checkpointReason === "outbox_sending";
@@ -3722,7 +3723,7 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
   const result = input.result;
   if (
     !providerCleanupPlan.requiresCheckpoint
-    || postCheckpointDeliveryResultOwnsProviderCleanup(result)
+    || hasPostCheckpointAssistantDelivery(result)
   ) {
     return result;
   }
@@ -5664,6 +5665,7 @@ async function runSystemMailboxMaintenancePhase(
     shouldYieldAfterSystemMailboxPreparation,
     systemMailboxPreparation,
   });
+  const systemMailboxDeliveryOwnsThisPass = systemMailboxDeliveryEffects.length > 0;
   const foregroundCausalDeliveryOwnsThisPass =
     isForegroundCausalSystemMailboxPreparation(systemMailboxPreparation)
     && systemMailboxDeliveryEffectsForDispatch.length > 0;
@@ -5841,7 +5843,7 @@ async function runSystemMailboxMaintenancePhase(
       ? false
       : !modelFreeSystemMailboxOwnerDue
         && !modelFreeSystemMailboxSuccessorOwnerDue
-        && !foregroundCausalDeliveryOwnsThisPass
+        && !systemMailboxDeliveryOwnsThisPass
         && (
           foregroundCausalAttempted
           || foregroundCausalPreparationCompletedWithoutDelivery

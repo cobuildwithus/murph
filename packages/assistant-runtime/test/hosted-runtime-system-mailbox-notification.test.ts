@@ -284,6 +284,36 @@ describe("game recap generation retirement", () => {
   const response = (error?: string) => ({ action: "read_game" as const,
     result: error ? { status: "unavailable" as const, error } : { status: "ok" as const, state: { games: [] } } });
 
+  it.each([false, true])("acknowledges durable lore before completing or resuming the same recap: resume=%s", async resume => {
+    const workspace = await createHostedRuntimeWorkspace("recap-checkpoint-");
+    const request = vi.fn<NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]>().mockResolvedValue(response());
+    const runtime = createRuntime({ groupToolPort: { request } });
+    const generationIds = ["game-recap:synthetic_prior"];
+    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({ bootstrapResult: null, conversationMetrics: null,
+      mailboxLane: "assistant-notification", nextWakeAt: null, redactedLogEntries: [], deliveryIntentIds: [],
+      postCheckpointRecord: { kind: "game.recap-lore-checkpointed", gameId: "synthetic_game", eventId, generationIds, resume } });
+    try {
+      await enqueueHostedSystemMailboxItem({ item: createResolvedNotificationItem({ dedupeKey: eventId }), wake: wake(), vaultRoot: workspace.vaultRoot });
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({ executionContext: null, now: () => FIXED_NOW,
+        runtime, runtimeEnv: {}, vaultRoot: workspace.vaultRoot });
+      assert.equal(prepared?.status, "processed");
+      expect(request.mock.calls.some(([call]) => call.action === "read_game" && call.recapRead?.kind === "lore_checkpointed")).toBe(false);
+      const persisted = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending[0];
+      assert.ok(persisted);
+      request.mockRejectedValueOnce(new Error("Synthetic checkpoint acknowledgment outage"));
+      expect(await recordHostedSystemMailboxItemAfterCheckpoint({ item: persisted, runtime, vaultRoot: workspace.vaultRoot })).toMatchObject({ failed: 1, recorded: 0 });
+      const retry = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending[0];
+      assert.ok(retry);
+      expect(retry.status).toBe("recording");
+      expect(await recordHostedSystemMailboxItemAfterCheckpoint({ item: retry, runtime, vaultRoot: workspace.vaultRoot })).toMatchObject({ failed: 0, recorded: 1 });
+      expect(request).toHaveBeenLastCalledWith({ action: "read_game", origin: { kind: "game_recap", gameId: "synthetic_game", eventId },
+        recapRead: { kind: "lore_checkpointed", generationIds } }, { signal: null });
+      const remaining = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+      expect(remaining).toEqual(resume ? [expect.objectContaining({ itemId: persisted.itemId, status: "pending", postCheckpointRecord: null })] : []);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
+    } finally { await workspace.cleanup(); }
+  });
+
   it.each(["retired", "unavailable", "ok", "missing", "other", "mismatch"] as const)("prepares %s recap work before model execution", async scenario => {
     const request = vi.fn<NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]>().mockResolvedValue(
       response(scenario === "retired" ? "recap_generation_retired" : scenario === "unavailable" ? "recap_authority_unavailable" : undefined));

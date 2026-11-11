@@ -194,6 +194,21 @@ export function requireHostedGameMediaId(value: string): string {
   return normalized;
 }
 
+/** Immutable generation and content identities, including historical slot keys. */
+export function requireHostedRecapMediaId(value: string): string {
+  if (!/^recap\/[a-f0-9]{32}\/(?:scene-[0-6]\.jpg|song\.mp3|[a-f0-9]{64}\.(?:jpg|mp3))$/u.test(value)) throw new TypeError("Recap media identity is invalid.");
+  return value;
+}
+
+export function hostedRecapMediaUserPrefix(input: { userId: string }): string {
+  // Deliberately outside account-prefix removal: permanent tombstones must survive it.
+  return `hosted-recap-media/${resolveHostedStorageNamespaceId(input)}/`;
+}
+
+export function hostedRecapMediaObjectKey(input: { userId: string; mediaId: string }): string {
+  return `${hostedRecapMediaUserPrefix(input)}${requireHostedRecapMediaId(input.mediaId)}.json.enc`;
+}
+
 // Retired capture cleanup only. Remove with its R2 lifecycle rule after both
 // production and preview buckets are verified empty under this prefix.
 export async function hostedEnvironmentVoiceUserPrefix(input: {

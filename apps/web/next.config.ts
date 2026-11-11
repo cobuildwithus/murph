@@ -188,7 +188,11 @@ function hasOptionalModule(specifier: string): boolean {
 }
 
 export function buildHostedWebTurbopackConfig(): NextConfig["turbopack"] {
-  const resolveAlias: Record<string, string> = {};
+  const resolveAlias: Record<string, string> = {
+    // The recap song check's MP3 decoder imports a worker shim Turbopack can't
+    // bundle (a dynamic `import(mod)`); it is never constructed on the server.
+    "@eshaz/web-worker": "./src/lib/server-web-worker.ts",
+  };
 
   if (!hasOptionalModule("@farcaster/mini-app-solana")) {
     resolveAlias["@farcaster/mini-app-solana"] = "./src/lib/empty-module.ts";
@@ -196,7 +200,7 @@ export function buildHostedWebTurbopackConfig(): NextConfig["turbopack"] {
 
   return {
     root: path.resolve(appDir, "../.."),
-    ...(Object.keys(resolveAlias).length > 0 ? { resolveAlias } : {}),
+    resolveAlias,
   };
 }
 
@@ -291,6 +295,7 @@ export function buildHostedWebNextConfig(
       webpackMemoryOptimizations: true,
     },
     outputFileTracingIncludes: {
+      "/api/internal/hosted-execution/groups/tool": ["../../agent-docs/assets/murph-character-sheet-v1.png"],
       "/measurement-methods/[measurementMethodId]": [
         "../../packages/health-commons/generated/web/routes/index.json",
         "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",

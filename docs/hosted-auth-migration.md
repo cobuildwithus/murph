@@ -2,6 +2,25 @@
 
 Status: first-party-only Web is live; legacy schema and project configuration are retired as of 2026-10-21. Native SDK removals are merged. Store publication and deletion of the downgraded vendor app are separate, unfinished actions; see the rollout record below. This document owns the rollout from Privy to Better Auth.
 
+## Retired invite phone-code lifecycle
+
+Current browser and native clients send and verify codes through the first-party
+OTP routes. The former invite `send-code`, `confirm` and `abort` routes and their
+attempt/cooldown state are retired; old SDK clients must refresh or update.
+Canonical saved signup-phone identity remains available to current invite and
+identity readers. Better Auth verification and rate-limit records own code delivery.
+
+The three nullable code-send columns remain in the physical database for older
+deployment-pinned Stripe Workflows. Their generated Prisma clients select every
+identity column during paid activation, including these retired fields. An ordinary
+Web function drain does not prove those workflows have settled; dropping the columns
+could turn a delayed payment retry into a permanently poisoned receipt.
+
+The application and current Prisma model no longer use the fields. Do not add their
+DROP to automatic contract migrations until all older Stripe Workflow executions
+capable of that full identity read have settled. A later cleanup must establish that
+evidence and a compatible rollback floor; this release makes no physical schema change.
+
 ## Target and boundaries
 
 Better Auth owns supported primary authentication and product sessions. Murph keeps canonical member IDs, authorization, contact/linking policy, consent, billing, vaults, groups, devices, and deletion. Approval passkeys belong to the existing sensitive-action owner. They approve one bound action; they are not an alternative primary-login system.
