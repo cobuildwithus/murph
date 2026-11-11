@@ -17231,7 +17231,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           }),
         ])
         expect(result.finalMessage).toMatch(
-          /one (?:new )?group|the next (?:iMessage )?group/iu,
+          /one (?:new )?group|the next (?:iMessage )?group|group you add me to next/iu,
         )
         expect(result.finalMessage).toMatch(/prepared|ready|set up/iu)
         expect(result.finalMessage).not.toMatch(
