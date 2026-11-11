@@ -70,3 +70,11 @@ export function dayStartInstant(date: string, timeZone: string): Date {
   }
   return new Date(after);
 }
+
+/** Receipt time, not capture time or the game's scheduled date. Offset disambiguates DST folds. */
+export function recapPostedAt(instant: Date, timeZone: string): { local: string; timeZone: string; instant: string } {
+  const parts = new Intl.DateTimeFormat("sv-SE", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZoneName: "longOffset" }).formatToParts(instant);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? "";
+  const offset = value("timeZoneName").replace("GMT", "").replace("−", "-") || "+00:00";
+  return { local: `${value("year")}-${value("month")}-${value("day")}T${value("hour")}:${value("minute")}:${value("second")}${offset}`, timeZone, instant: instant.toISOString() };
+}

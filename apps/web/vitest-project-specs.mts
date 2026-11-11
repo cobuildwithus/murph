@@ -11,7 +11,6 @@ export const hostedWebVitestProjectSpecs = resolveVitestBucketFiles(
     {
       name: "hosted-web-onboarding-integrations",
       patterns: [
-        "hosted-onboarding-invite-send-code.test.ts",
         "hosted-onboarding-linq-*.test.ts",
         "hosted-onboarding-privy*.test.ts",
         "hosted-onboarding-telegram-dispatch.test.ts",

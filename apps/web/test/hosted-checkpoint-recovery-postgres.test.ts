@@ -27,19 +27,15 @@ describe.skipIf(!enabled)("protected checkpoint recovery PostgreSQL publication"
   let db: PrismaClient;
   let concurrent: PrismaClient;
   const members: string[] = [];
-  let phase: string;
   beforeAll(async () => {
     db = createPrismaClient({ databaseUrl, poolMax: 1 });
     concurrent = createPrismaClient({ databaseUrl, poolMax: 1 });
-    phase = (await db.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).phase;
-    await db.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "postgres" } });
   });
   afterAll(async () => {
     if (db) {
       await db.hostedRuntimeOrphan.deleteMany({ where: { userId: { in: members } } });
       await db.hostedRuntimeOwner.deleteMany({ where: { userId: { in: members } } });
       await db.hostedMember.deleteMany({ where: { id: { in: members } } });
-      await db.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase } });
     }
     await Promise.all([db?.$disconnect(), concurrent?.$disconnect()]);
   });

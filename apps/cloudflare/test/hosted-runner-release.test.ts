@@ -87,7 +87,7 @@ describe("staged runner release", () => {
     const primaryGet = vi.fn();
     const nextGet = vi.fn();
     const router = createHostedRunnerContainerNamespaceRouter({
-      exactUser: { getByName: primaryGet }, next: { getByName: nextGet }, standby: null,
+      RUNNER_CONTAINER: { getByName: primaryGet }, NEXT_RUNNER_CONTAINER: { getByName: nextGet }, STANDBY_RUNNER_CONTAINER: null,
     })!;
     const oldName = createHostedRunnerSlotName(primary.id);
     const newName = createHostedRunnerSlotName(next.id);

@@ -479,6 +479,21 @@
       ],
       "@murphai/device-syncd/*": [
         "./packages/device-syncd/src/*.ts"
+      ],
+      "@murphai/contracts/recap-admission": [
+        "./packages/contracts/src/recap-admission.ts"
+      ],
+      "@murphai/contracts/recap-show": [
+        "./packages/contracts/src/recap-show.ts"
+      ],
+      "@murphai/contracts/recap-renderer": [
+        "./packages/contracts/src/recap-renderer.ts"
+      ],
+      "@murphai/contracts/recap-material": [
+        "./packages/contracts/src/recap-material.ts"
+      ],
+      "@murphai/contracts/recap-validation": [
+        "./packages/contracts/src/recap-validation.ts"
       ]
     },
     "types": [

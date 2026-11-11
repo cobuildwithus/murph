@@ -4,6 +4,8 @@ import { APIError } from "@linqapp/sdk";
 import { createHmac, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
+import { readHostedMailboxProgress } from "@/src/lib/hosted-mailbox/projection";
+import { advanceHostedMailboxConsumedSeqByLane } from "@/src/lib/hosted-mailbox/store";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { provisionHostedCryptoDomainRootsForUser } from "@/src/lib/hosted-crypto/domain-root-store";
 import { createHostedExternalThreadIdentityLookupKey, createHostedExternalThreadLookupKey, createHostedLinqChatLookupKey, createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -86,6 +88,9 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
   }
   async function settleSourceWork() {
     await db.hostedMailboxItem.updateMany({ where: { userId: room }, data: { consumedAt: new Date() } });
+    const progress = await readHostedMailboxProgress({ userId: room, prisma: db });
+    await advanceHostedMailboxConsumedSeqByLane({ userId: room, prisma: db,
+      lanes: progress.maxSeqByLane.map(row => ({ lane: row.lane, consumedSeq: row.maxSeq })) });
     vi.setSystemTime(Date.now() + 60_001);
   }
   async function reserve(step: "reserved" | "add_started" | "add_confirmed") {
@@ -114,8 +119,10 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
       signature: createHmac("sha256", "synthetic-roster-secret").update(`${timestamp}.${rawBody}`).digest("hex"),
       scheduleAfterResponse: work => { callbacks.push(work); } });
   }
-  it("starts, holds a person's source message, adopts an ordinary service reply and leaves only after response", async () => {
+  it.each([false, true])("starts, holds, adopts and leaves with missing account projection=%s", async missingProjection => {
+    if (missingProjection) await db.hostedThreadRoute.updateMany({ where: { containerMemberId: room }, data: { accountLookupKey: null } });
     const result = await start(); expect(result.status).toBe("reserved"); expect(result.addConfirmedAt).not.toBeNull();
+    expect((await db.hostedThreadRoute.findFirstOrThrow({ where: { containerMemberId: room } })).accountLookupKey).toBe(sourceKey);
     expect(result.adoptionDeadlineAt).toBeDefined();
     expect(provider.send).not.toHaveBeenCalled();
     await expect(webhook(sourceChat, person, "Synthetic human handoff message", source)).rejects.toMatchObject({ httpStatus: 503, retryable: true });
@@ -438,18 +445,69 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect(provider.send).not.toHaveBeenCalled(); expect((await operate(id, "cancel")).status).toBe("cancelled");
   });
   it("serializes concurrent starts and rejects another reservation on the same source/target", async () => {
+    await db.hostedThreadRoute.updateMany({ where: { containerMemberId: room }, data: { accountLookupKey: null } });
     const results = await Promise.allSettled([start(), start()]);
     expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
     expect(await db.hostedLinqGroupLineMove.count({ where: { containerMemberId: room } })).toBe(1);
     expect(provider.add).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
   });
   it.each(["inbound", "runtime", "delivery"])("rejects %s work before reservation or add", async kind => {
+    await db.hostedThreadRoute.updateMany({ where: { containerMemberId: room }, data: { accountLookupKey: null } });
     if (kind === "inbound") await db.hostedLinqProviderEvent.create({ data: { eventId: randomUUID(), eventType: "message.received",
       receivedAt: new Date(), providerCreatedAt: new Date(), linqChatLookupKey: createHostedLinqChatLookupKey(sourceChat), phoneNumberLookupKey: sourceKey } });
     if (kind === "runtime") await db.hostedRuntimeOwner.create({ data: { userId: room, phase: "starting", attemptId: randomUUID(), allocationId: randomUUID(), processingMode: "default" } });
     if (kind === "delivery") await claimHostedLinqDeliveryProviderDispatchTx({ idempotencyKey: randomUUID(), source: "synthetic", linqChatId: sourceChat, phoneNumber: source, prisma: db });
     await expect(start()).rejects.toMatchObject({ httpStatus: 409 }); expect(provider.add).not.toHaveBeenCalled();
     expect(await db.hostedLinqGroupLineMove.count({ where: { containerMemberId: room } })).toBe(0);
+    expect((await db.hostedThreadRoute.findFirstOrThrow({ where: { containerMemberId: room } })).accountLookupKey).toBeNull();
+  });
+  it.each(["acknowledged", "unacknowledged", "expired"])("uses canonical lane progress for %s system work", async state => {
+    const id = randomUUID(), earlier = new Date(Date.now() - 120_000);
+    await db.hostedMailboxItem.create({ data: { id, userId: room, lane: "system", laneSeq: 1n,
+      dedupeKey: randomUUID(), kind: "assistant.notification.requested", occurredAt: earlier,
+      createdAt: earlier, payloadSchema: "synthetic", expiresAt: state === "expired" ? earlier : null } });
+    await db.hostedMailboxLaneCounter.create({ data: { userId: room, lane: "system", nextSeq: 2n } });
+    if (state === "acknowledged") await advanceHostedMailboxConsumedSeqByLane({ userId: room, prisma: db,
+      lanes: [{ lane: "system", consumedSeq: "1" }] });
+    expect((await db.hostedMailboxItem.findUniqueOrThrow({ where: { id } })).consumedAt).toBeNull();
+    if (state === "unacknowledged") {
+      await expect(start()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_WORK_PENDING" });
+      expect(provider.add).not.toHaveBeenCalled();
+    } else {
+      expect(await start()).toMatchObject({ status: "reserved", code: null });
+      expect(provider.add).toHaveBeenCalledOnce();
+    }
+    expect((await db.hostedMailboxItem.findUniqueOrThrow({ where: { id } })).consumedAt).toBeNull();
+  });
+  it("keeps the quietness window for an acknowledged recent conversation", async () => {
+    await db.hostedMailboxItem.create({ data: { id: randomUUID(), userId: room, lane: "conversation", laneSeq: 1n,
+      dedupeKey: randomUUID(), kind: "conversation.message", occurredAt: new Date(), payloadSchema: "synthetic" } });
+    await db.hostedMailboxLaneCounter.create({ data: { userId: room, lane: "conversation", nextSeq: 2n } });
+    await advanceHostedMailboxConsumedSeqByLane({ userId: room, prisma: db,
+      lanes: [{ lane: "conversation", consumedSeq: "1" }] });
+    await expect(start()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_WORK_PENDING" });
+    expect(provider.add).not.toHaveBeenCalled();
+  });
+  it.each(["projection", "thread"])("rejects inconsistent %s authority without repairing or adding", async kind => {
+    await db.hostedThreadRoute.updateMany({ where: { containerMemberId: room }, data: kind === "projection"
+      ? { accountLookupKey: targetKey } : { accountLookupKey: null, threadLookupKey: "synthetic-mismatched-thread" } });
+    await expect(start()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_ROUTE_CHANGED" });
+    expect(provider.retrieve).not.toHaveBeenCalled(); expect(provider.add).not.toHaveBeenCalled();
+    expect(await db.hostedLinqGroupLineMove.count({ where: { containerMemberId: room } })).toBe(0);
+    expect((await db.hostedThreadRoute.findFirstOrThrow({ where: { containerMemberId: room } })).accountLookupKey)
+      .toBe(kind === "projection" ? targetKey : null);
+  });
+  it("does not overwrite a legacy projection changed during roster preparation", async () => {
+    await db.hostedThreadRoute.updateMany({ where: { containerMemberId: room }, data: { accountLookupKey: null } });
+    const retrieve = provider.retrieve.getMockImplementation()!;
+    provider.retrieve.mockImplementationOnce(async (id: string) => {
+      await db.hostedThreadRoute.updateMany({ where: { containerMemberId: room }, data: { accountLookupKey: targetKey } });
+      return retrieve(id);
+    });
+    await expect(start()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_ROUTE_CHANGED" });
+    expect(provider.add).not.toHaveBeenCalled();
+    expect(await db.hostedLinqGroupLineMove.count({ where: { containerMemberId: room } })).toBe(0);
+    expect((await db.hostedThreadRoute.findFirstOrThrow({ where: { containerMemberId: room } })).accountLookupKey).toBe(targetKey);
   });
   it.each(["sms", "target_disabled", "source_flagged", "target_present"])("fails closed for %s", async kind => {
     if (kind === "sms") provider.retrieve.mockResolvedValue({ is_group: true, service: "SMS", handles: [

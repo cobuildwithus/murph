@@ -18,7 +18,6 @@ import { hostedOnboardingError } from "./errors";
 import {
   buildHostedMemberIdentityPrivateColumns,
   HOSTED_MEMBER_LINQ_PARTICIPANT_CONTACT_FIELD,
-  readHostedMemberIdentityPhoneNumbers,
   readHostedMemberIdentityPrivateState,
 } from "./member-private-codecs";
 import {
@@ -41,9 +40,6 @@ export interface HostedMemberIdentityState {
   memberId: string;
   phoneNumber: string | null;
   phoneLookupKey: string | null;
-  signupPhoneCodeSendAttemptId: string | null;
-  signupPhoneCodeSendAttemptStartedAt: Date | null;
-  signupPhoneCodeSentAt: Date | null;
   signupPhoneNumber: string | null;
   phoneNumberVerifiedAt: Date | null;
 }
@@ -105,9 +101,6 @@ export interface HostedMemberIdentityWriteInput {
   preparedControlRoot?: PreparedHostedDomainRootForWeb;
   prisma: Prisma.TransactionClient;
   phoneNumber: string | null;
-  signupPhoneCodeSendAttemptId: string | null;
-  signupPhoneCodeSendAttemptStartedAt: Date | null;
-  signupPhoneCodeSentAt: Date | null;
   signupPhoneNumber: string | null;
 }
 
@@ -143,15 +136,6 @@ export async function commitPreparedHostedMemberIdentityWriteTx(input: {
     update: input.prepared.update,
     where: { memberId: input.memberId },
   });
-}
-
-export interface HostedMemberSignupPhoneStateWriteInput {
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-  signupPhoneCodeSendAttemptId?: string | null;
-  signupPhoneCodeSendAttemptStartedAt?: Date | null;
-  signupPhoneCodeSentAt?: Date | null;
-  signupPhoneNumber?: string | null;
 }
 
 export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
@@ -335,50 +319,6 @@ export async function readHostedMemberIdentityRecord(input: {
   });
 }
 
-export async function prepareHostedMemberInvitePhoneIdentity(input: {
-  memberId: string;
-  prisma: HostedOnboardingReadClient;
-}) {
-  const identityRecord = await readHostedMemberIdentityRecord(input);
-  if (!identityRecord) {
-    return null;
-  }
-  const phoneNumbers = await readHostedMemberIdentityPhoneNumbers(
-    identityRecord,
-    input.prisma,
-  );
-
-  return {
-    identityRecord,
-    identityState: {
-      maskedPhoneNumberHint: identityRecord.maskedPhoneNumberHint,
-      ...phoneNumbers,
-    },
-  } as const;
-}
-
-export async function readHostedMemberSignupPhoneCodeAttempt(input: {
-  memberId: string;
-  prisma: HostedOnboardingReadClient;
-}): Promise<{ signupPhoneCodeSendAttemptId: string | null } | null> {
-  const identity = await input.prisma.hostedMemberIdentity.findUnique({
-    where: {
-      memberId: input.memberId,
-    },
-    select: {
-      signupPhoneCodeSendAttemptId: true,
-    },
-  });
-
-  return identity
-    ? {
-        signupPhoneCodeSendAttemptId: normalizeNullableString(
-          identity.signupPhoneCodeSendAttemptId,
-        ),
-      }
-    : null;
-}
-
 export async function lockHostedMemberIdentityStateTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
@@ -400,9 +340,6 @@ const HOSTED_MEMBER_IDENTITY_RECORD_KEYS = [
   "phoneLookupKey",
   "phoneNumberEncrypted",
   "phoneNumberVerifiedAt",
-  "signupPhoneCodeSendAttemptId",
-  "signupPhoneCodeSendAttemptStartedAt",
-  "signupPhoneCodeSentAt",
   "signupPhoneNumberEncrypted",
   "updatedAt",
 ] as const satisfies readonly (keyof HostedMemberIdentityRecord)[];
@@ -554,48 +491,6 @@ function hostedLinqEmailHandleIdentityConflict() {
   });
 }
 
-export async function writeHostedMemberSignupPhoneState(
-  input: HostedMemberSignupPhoneStateWriteInput,
-): Promise<void> {
-  const data: Prisma.HostedMemberIdentityUncheckedUpdateInput = {};
-
-  if (input.signupPhoneCodeSendAttemptId !== undefined) {
-    data.signupPhoneCodeSendAttemptId = normalizeNullableString(input.signupPhoneCodeSendAttemptId);
-  }
-  if (input.signupPhoneCodeSendAttemptStartedAt !== undefined) {
-    data.signupPhoneCodeSendAttemptStartedAt = input.signupPhoneCodeSendAttemptStartedAt;
-  }
-  if (input.signupPhoneCodeSentAt !== undefined) {
-    data.signupPhoneCodeSentAt = input.signupPhoneCodeSentAt;
-  }
-  if (input.signupPhoneNumber !== undefined) {
-    await resolveHostedMemberIdentityControlRootTx({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
-    data.signupPhoneNumberEncrypted = (await buildHostedMemberIdentityPrivateColumns({
-      memberId: input.memberId,
-      phoneNumber: null,
-      prisma: input.prisma,
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumber: input.signupPhoneNumber,
-    })).signupPhoneNumberEncrypted;
-  }
-
-  if (Object.keys(data).length === 0) {
-    throw new TypeError("Hosted member signup phone updates require at least one field.");
-  }
-
-  await input.prisma.hostedMemberIdentity.update({
-    where: {
-      memberId: input.memberId,
-    },
-    data,
-  });
-}
-
 export async function projectHostedMemberIdentityState(
   identity: HostedMemberIdentity,
   prisma?: HostedOnboardingReadClient,
@@ -607,9 +502,6 @@ export async function projectHostedMemberIdentityState(
     memberId: identity.memberId,
     phoneNumber: privateState.phoneNumber,
     phoneLookupKey: identity.phoneLookupKey,
-    signupPhoneCodeSendAttemptId: privateState.signupPhoneCodeSendAttemptId,
-    signupPhoneCodeSendAttemptStartedAt: privateState.signupPhoneCodeSendAttemptStartedAt,
-    signupPhoneCodeSentAt: privateState.signupPhoneCodeSentAt,
     signupPhoneNumber: privateState.signupPhoneNumber,
     phoneNumberVerifiedAt: identity.phoneNumberVerifiedAt,
   };
@@ -629,9 +521,6 @@ async function projectHostedMemberIdentityLookup(
       memberId: identityState.memberId,
       phoneNumber: identityState.phoneNumber,
       phoneNumberVerifiedAt: identityState.phoneNumberVerifiedAt,
-      signupPhoneCodeSendAttemptId: identityState.signupPhoneCodeSendAttemptId,
-      signupPhoneCodeSendAttemptStartedAt: identityState.signupPhoneCodeSendAttemptStartedAt,
-      signupPhoneCodeSentAt: identityState.signupPhoneCodeSentAt,
       signupPhoneNumber: identityState.signupPhoneNumber,
     },
     matchedBy,
@@ -737,9 +626,6 @@ async function buildHostedMemberIdentityMutationData(
     phoneNumber: input.phoneNumber,
     preparedRoot,
     prisma: input.prisma,
-    signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId,
-    signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
-    signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
     signupPhoneNumber: input.signupPhoneNumber,
   });
 

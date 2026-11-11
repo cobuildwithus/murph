@@ -38,9 +38,9 @@ type RuntimeProcessingInput = HostedRuntimeEnsureProcessingRequest & {
   userId: string;
 };
 
-type RuntimeProcessingSource = Pick<WorkerEnvironmentSource, "BUNDLES" | "RUNNER_CONTAINER" | "NEXT_RUNNER_CONTAINER" | "STANDBY_RUNNER_CONTAINER" | "STANDBY_COORDINATOR"> & Readonly<Record<string, unknown>>;
+type RuntimeProcessingSource = Pick<WorkerEnvironmentSource, "BUNDLES" | "RUNNER_CONTAINER" | "NEXT_RUNNER_CONTAINER" | "SMALL_RUNNER_CONTAINER" | "STANDBY_RUNNER_CONTAINER" | "STANDBY_COORDINATOR"> & Readonly<Record<string, unknown>>;
 type ProcessingContext = ReturnType<typeof createProcessingContext> & {
-  namespace: NonNullable<ReturnType<typeof createHostedRunnerContainerNamespaceRouter>>;
+  namespace: NonNullable<ReturnType<typeof createProcessingContext>["namespace"]>;
 };
 
 type RuntimeProcessingOperation =
@@ -165,8 +165,7 @@ function createProcessingContext(source: RuntimeProcessingSource, input: Runtime
   };
   const command = (value: HostedRuntimeOwnerCommand) => step(`owner_${value.operation}`, () => commandHostedRuntimeOwner({ source, userId: input.userId, command: value,
     timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget, stepTimeoutMs: env.webControlTimeoutMs }) }), env.webControlTimeoutMs);
-  const namespace = createHostedRunnerContainerNamespaceRouter({ exactUser: source.RUNNER_CONTAINER,
-    next: source.NEXT_RUNNER_CONTAINER, standby: source.STANDBY_RUNNER_CONTAINER ?? null });
+  const namespace = createHostedRunnerContainerNamespaceRouter(source);
   return { source, input, env, budget, step, command, namespace, diagnostics, latency, mode: input.processingMode ?? "default" };
 }
 

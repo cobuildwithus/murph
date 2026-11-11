@@ -388,7 +388,7 @@ test.sequential('document import preserves the exact current inbox attachment th
       await readdir(path.join(vaultRoot, 'raw/documents'), { recursive: true })
     ).filter((entry) => /^manifest(?:\.[^.]+)?\.json$/u.test(path.basename(entry)))
     const textRetention = await runInboxTextRetention({
-      now: '2026-09-20T12:00:00.000Z',
+      now: '2026-10-06T12:00:00.000Z',
       vaultRoot,
     })
     assert.equal(textRetention.expiredCaptures, 1)

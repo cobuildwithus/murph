@@ -93,3 +93,9 @@ external-retention HTTP cron use the current Web deployment; no deployment-pinne
 Workflow owns this field. Handoff and browser ownership remain unchanged. This
 Web deployment is the rollback floor; older generated clients require the
 nullable column to be re-expanded before rollback.
+
+The retired invite code-send attempt/cooldown columns are deliberately absent from
+this lane. Older deployment-pinned Stripe Workflows still select them during paid
+activation. Retain the physical nullable columns until every older execution capable
+of that read has settled; the ordinary function drain and production-alias check do
+not establish this. See `docs/hosted-auth-migration.md` for the contraction gate.

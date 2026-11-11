@@ -2177,8 +2177,8 @@ describe("selectHostedAssistantInputIds", () => {
         itemId: "item_overdue_background",
         laneSeq: "9",
         messageId: "msg_overdue_background",
-        occurredAt: "2026-04-16T00:00:01.000Z",
-        receivedAt: "2026-04-16T00:00:02.000Z",
+        occurredAt: "2026-03-31T00:00:01.000Z",
+        receivedAt: "2026-03-31T00:00:02.000Z",
         text: "private overdue background input",
       }),
     });

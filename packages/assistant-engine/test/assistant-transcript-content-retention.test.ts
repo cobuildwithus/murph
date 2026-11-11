@@ -30,7 +30,7 @@ describe('assistant transcript content retention', () => {
   it('clears inbound text past the window and leaves recent text alone', () => {
     const result = redactExpiredAssistantTranscriptEntries(
       [
-        entry({ kind: 'user', createdAt: isoDaysAgo(20), text: 'an old message body' }),
+        entry({ kind: 'user', createdAt: isoDaysAgo(40), text: 'an old message body' }),
         entry({ kind: 'user', createdAt: isoDaysAgo(3), text: 'a recent message body' }),
       ],
       NOW,
@@ -60,7 +60,7 @@ describe('assistant transcript content retention', () => {
 
   it('is idempotent so a transcript is not rewritten every checkpoint', () => {
     const first = redactExpiredAssistantTranscriptEntries(
-      [entry({ kind: 'user', createdAt: isoDaysAgo(30), text: 'an old message body' })],
+      [entry({ kind: 'user', createdAt: isoDaysAgo(31), text: 'an old message body' })],
       NOW,
     )
     const second = redactExpiredAssistantTranscriptEntries(first.entries, NOW)
@@ -87,7 +87,7 @@ describe('assistant transcript content retention', () => {
       [
         entry({
           kind: 'user',
-          contentReceivedAt: isoDaysAgo(14),
+          contentReceivedAt: isoDaysAgo(31),
           createdAt: isoDaysAgo(1),
           text: 'a delayed accepted message',
         }),
@@ -101,7 +101,7 @@ describe('assistant transcript content retention', () => {
 
   it('preserves unstamped legacy text until the phase-two cutover', () => {
     const legacyEntry = {
-      createdAt: isoDaysAgo(30),
+      createdAt: isoDaysAgo(31),
       kind: 'user',
       schema: 'murph.assistant-transcript-entry.v1',
       text: 'legacy text without a retained receipt',
