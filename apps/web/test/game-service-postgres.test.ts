@@ -629,7 +629,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       await db.gameRecapAsset.deleteMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
     }
   });
-  it("reserves once, freezes selected files, uploads before acceptance and creates no generator wake", async () => {
+  it.each([0, 1, 2])("reserves once, freezes selected files and accepts %i cards with same-draft retries", async cardCount => {
     const a = await member("PlayerA", "UTC", true), b = await member("PlayerB", "UTC", true);
     const room = await member("Room", "UTC", true), db = getPrisma();
     const { gameId } = await startGame(a, b);
@@ -639,8 +639,14 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await markGameChatGenerationQueuedTx(eventId, db, room);
     const { recordGameRecapWitnessTx } = await import("@/src/lib/game/recap-witness");
     await db.$transaction(tx => recordGameRecapWitnessTx(tx, gameId, eventId));
-    const recap = { treatment: "Courtroom drama", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
-      scene: { cast: ["PlayerA", "PlayerB"], prompt: "A synthetic paper courtroom stage with a rolled mat on a witness stand, with warm lighting and simple wooden benches." } }] }], chatLine: "The mat entered evidence." };
+    const cards = [
+      { memberId: a, title: "Cross examine mats", line: "PlayerA calls the mat as a witness." },
+      { memberId: b, title: "Object to burpees", line: "PlayerB files a motion for recess." },
+    ].slice(0, cardCount);
+    const { gameRecapWriterSchema } = await import('@murphai/contracts/recap-show');
+    const { withValidGameSuperlatives } = await import('@murphai/contracts/recap-validation');
+    const recap = gameRecapWriterSchema.parse({ ...(cards.length ? { superlatives: cards } : {}), treatment: "Courtroom drama", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
+      scene: { cast: ["PlayerA", "PlayerB"], prompt: "A synthetic paper courtroom stage with a rolled mat on a witness stand, with warm lighting and simple wooden benches." } }] }], chatLine: "The mat entered evidence." });
     const scope = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [a, b] };
     vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
     vi.stubEnv("MURPH_GAME_RECAP_MEDIA_DIR", path.join(mediaDir, "recap"));
@@ -713,10 +719,18 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       await expect(stageRecapSubmissionFile({ ...identity, receipt, bytes: bytes.toString("base64") })).rejects.toThrow("revoked");
       await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: profile.photoKey } });
       await stageRecapSubmissionFile({ ...identity, receipt, bytes: bytes.toString("base64") });
-      expect(await sealGameRecap({ ...scope, recap, files })).toEqual(recap);
+      const normalizedRecap = withValidGameSuperlatives(recap, [a, b], false);
+      expect(normalizedRecap.superlatives ?? []).toEqual(cards);
+      expect(await prepareRecapSubmission({ ...identity, draft: { story: normalizedRecap, files } })).toEqual(
+        await prepareRecapSubmission({ ...identity, draft: { story: recap, files } }));
+      expect(await sealGameRecap({ ...scope, recap: normalizedRecap, files })).toEqual(recap);
+      expect(await sealGameRecap({ ...scope, recap: normalizedRecap, files })).toEqual(recap);
       expect(await sealGameRecap({ ...scope, recap: null })).toEqual(recap);
       const { readRecapEnvelope, readAuthorizedRecapAsset } = await import("@/src/lib/game/recap-asset-access");
       const accepted = (await readRecapEnvelope(gameId))!;
+      expect(accepted.envelope.story.superlatives ?? []).toEqual(cards);
+      expect(await db.gameEvent.count({ where: { commandKey: `${eventId}:selection` } })).toBe(1);
+      expect(accepted.envelope.assets).toHaveLength(1);
       expect(accepted.envelope.assets[0]).toMatchObject({ status: "ready", hash: receipt.hash });
       expect(await db.hostedMailboxItem.count({ where: { userId: room } })).toBe(0);
       expect((await readGame(gameId, a))?.recap?.show?.pages[0]?.media?.status).toBe("ready");

@@ -18,7 +18,7 @@ export const recapSelectionSchema = z.object({ v: z.literal(1), hash: z.string()
 export const recapGenerationId = (eventId: string) => createHash('sha256').update(`recap-generation:${eventId}`).digest('hex').slice(0, 32);
 export const recapSelectionKey = (eventId: string) => `${eventId}:selection`;
 export const recapMediaKey = (eventId: string, receipt: RecapFileReceipt) => `recap/${recapGenerationId(eventId)}/${receipt.hash}.${receipt.mediaType === 'image/jpeg' ? 'jpg' : 'mp3'}`;
-export const recapDraftHash = (draft: GameRecapDraft) => createHash('sha256').update(JSON.stringify(draft)).digest('hex');
+export const recapDraftHash = (draft: GameRecapDraft) => createHash('sha256').update(JSON.stringify(gameRecapDraftSchema.parse(draft))).digest('hex');
 
 /** Validation happens first. Freeze precisely what this submission may upload. */
 export async function prepareRecapSubmission(input: Identity & { draft: GameRecapDraft; trustedFallback?: true }) {

@@ -38,6 +38,8 @@ Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the own
 
 24. **Round 2 admission callback (B1, accepted):** send `opaque: false` in the Worker callback. Share the receiving Web request schema through the contracts public entrypoint and validate every intercepted test callback with it before returning admission results. Focused unscoped image, unscoped TTS and scoped reservation cases now use the actual Worker-built body; ordinary Responses/websocket/Live retain zero admission calls.
 
+25. **Round 2 canonical draft identity (B2, accepted):** hash the result of `gameRecapDraftSchema.parse`, so optional-card normalization cannot change a frozen selection solely by property order. The Postgres prepare → stage → accept path now covers zero, one and two valid cards with selected media, normalization and same-draft retries; changed content still rejects. All 90 game service cases pass.
+
 ## PR A execution
 
 Outcome: pair players receive one accepted themed recap through one text line and link. Full, sparse, failed-media and retired generations use the existing game authority; groups retain their current path. Proof includes contract fixtures, focused unit/Postgres checks and synthetic live parent journeys. Native visual implementation remains separate work; child forwarding is canceled.
