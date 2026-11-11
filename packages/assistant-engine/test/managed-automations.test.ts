@@ -1134,8 +1134,10 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.continuityPolicy).toBe('fresh')
     expect(seed.hostedRuntimeOnly).toBe(true)
     expect(seed.assistantTargetOverride).toEqual({ reasoningEffort: 'high' })
-    expect(seed.instructions).toContain('lightweight list of likely tips')
-    expect(seed.instructions).toContain('who gets teased about what')
+    expect(seed.instructions).toContain('Only a `user:` entry can add an item or keep one alive')
+    expect(seed.instructions).toContain('## Worn out')
+    expect(seed.instructions).toContain('Murph bringing it up never counts')
+    expect(seed.instructions).toContain('Cleaning an older page')
     expect(seed.instructions).toContain(
       'Never copy a raw handle into the page',
     )
@@ -1143,16 +1145,12 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('`## Explicit setup` section')
     expect(seed.instructions).toContain('preserve that section verbatim')
     expect(seed.instructions).toContain('explicit request to revise or forget it')
-    expect(seed.instructions).toContain('Target roughly 2-6 KiB')
+    expect(seed.instructions).toContain('Target roughly 1-4 KiB')
     expect(seed.instructions).toContain('20 KiB as a generous soft ceiling')
     expect(seed.instructions).toContain('never a write gate')
-    expect(seed.instructions).toContain(
-      'is itself a material maintenance improvement even when no new room lore emerged',
-    )
-    expect(seed.instructions).toContain('Treat the page as advisory')
-    expect(seed.instructions).toContain(
-      'do not encode a blanket "most turns use none" rule',
-    )
+    expect(seed.instructions).toContain('is itself a material improvement')
+    expect(seed.instructions).toContain('The page is advisory')
+    expect(seed.instructions).toContain('It never tells Murph to make a joke')
     expect(seed.instructions).toContain(
       `{"kind":"skip","privateSummary":"${MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY}"}`,
     )

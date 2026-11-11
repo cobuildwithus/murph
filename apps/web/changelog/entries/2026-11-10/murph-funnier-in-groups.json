@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 100,
+  "item": {
+    "id": "murph-funnier-in-groups",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph is funnier in group chats, and picks its moments",
+    "summary": "In a group chat Murph now gives you a hard time the way a friend would: it plays along with your bits, has an answer for a creative excuse, and remembers what your group calls each other. Most of its messages are still just the count and the answer.",
+    "details": "It never jokes about bodies, health, or anything you didn't say in the chat, and it doesn't keep reusing its own old jokes. Tell it a joke missed and it takes the note.",
+    "relevanceTags": [
+      "groups",
+      "conversation"
+    ],
+    "sourcePullRequests": [
+      4817
+    ]
+  }
+}

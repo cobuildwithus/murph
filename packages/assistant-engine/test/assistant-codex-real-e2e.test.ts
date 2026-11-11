@@ -1,6 +1,9 @@
 import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath } from '@murphai/runtime-state/node'
 import { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
-import { GROUP_HUMOR_SCENARIOS } from './support/group-humor-scenarios.js'
+import {
+  GROUP_HUMOR_SCENARIOS,
+  GROUP_HUMOR_TIRED_FRAMES,
+} from './support/group-humor-scenarios.js'
 import { REMINDER_LANGUAGE_CASES, runReminderLanguageJourney } from './support/reminder-language-journey.js'
 import { listCanonicalWriteEvidence, readCanonicalAuditRecords } from './canonical-audit-test-helpers.js'
 import { GAME_CHAT_SETUP_SCENARIOS, SETUP_PLAYERS, SETUP_TERMS } from './support/game-chat-setup-scenarios.js'
@@ -223,8 +226,24 @@ import {
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_CREATE_CALENDAR_LINK_TOOL,
   MURPH_GROUP_CONSULT_TOOL,
+  MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
+import {
+  GROUP_ROOM_NOTES_EXPLICIT_SETUP,
+  GROUP_ROOM_NOTES_HEALTH_DETAIL,
+  GROUP_ROOM_NOTES_LOCAL_DATE,
+  GROUP_ROOM_NOTES_MAINTENANCE_THREAD_CONFIG,
+  GROUP_ROOM_NOTES_NOW,
+  GROUP_ROOM_NOTES_SENDER_HANDLES,
+  GROUP_ROOM_NOTES_TIME_ZONE,
+  groupRoomNotesBodyHasRawHandle,
+  inspectGroupRoomNotesPage,
+  readGroupRoomNotesPageBody,
+  readGroupRoomNotesSection,
+  seedGroupRoomNotesScenario,
+  withoutGroupRoomNotesSections,
+} from './support/group-room-notes-scenario.ts'
 import {
   MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
@@ -276,6 +295,8 @@ import {
   buildMurphManagedJournalCalendarWindowInstructions,
   resolveMurphManagedAutomationSeed,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
@@ -11514,6 +11535,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(reply).not.toMatch(/\blol\b|\blmao\b|\bhaha\b|😂|🤣/iu)
         if (reply && scenario.mustMatch) expect(reply).toMatch(scenario.mustMatch)
         if (scenario.mustNotMatch) expect(reply).not.toMatch(scenario.mustNotMatch)
+        expect(reply).not.toMatch(GROUP_HUMOR_TIRED_FRAMES)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -24962,6 +24984,94 @@ describeRealCodex('real Codex memory profile improvement e2e', () => {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
   }, 540_000)
+})
+
+describeRealCodex('real Codex group room notes consolidation e2e', () => {
+  // The silent twice-weekly room-notes rewrite, on an older-layout page that
+  // saved Murph's own jokes, after a week where Murph wore one bit out and the
+  // members made their own material. Fixtures: support/group-room-notes-scenario.ts.
+  it("group room notes consolidation keeps member material and retires Murph's own bits", async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-room-notes-e2e-'))
+    try {
+      const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID)
+      if (!seed) throw new Error('Expected the group room model consolidation seed.')
+      const before = await seedGroupRoomNotesScenario(workingDirectory)
+      const originalSetup = readGroupRoomNotesSection(before.body, 'Explicit setup')
+      expect(originalSetup).toBe(GROUP_ROOM_NOTES_EXPLICIT_SETUP)
+      const evidence = await readAssistantMaintenanceConversationEvidence({
+        now: GROUP_ROOM_NOTES_NOW, profile: 'group-room-model', vault: workingDirectory,
+      })
+      expect(evidence.status).toBe('available')
+      expect(evidence.prompt).toContain('- truncated: false')
+      expect(evidence.prompt).toContain('legal counsel')
+      for (const handle of Object.values(GROUP_ROOM_NOTES_SENDER_HANDLES)) expect(evidence.prompt).toContain(handle)
+
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantMaintenanceSystemPromptResult({
+          currentLocalDate: GROUP_ROOM_NOTES_LOCAL_DATE, currentTimeZone: GROUP_ROOM_NOTES_TIME_ZONE, profile: 'group-room-model',
+        }).prompt,
+        dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL], env: config.env, ephemeral: true,
+        groupRoomModelMaintenanceAuthorized: true, model: config.model, modelProvider: config.modelProvider,
+        processLifetime: 'one-shot', prompt: [seed.instructions, evidence.prompt].join('\n\n'),
+        reasoningEffort: seed.assistantTargetOverride?.reasoningEffort ?? 'high',
+        runtimeWorkspaceRoots: [workingDirectory], sandbox: 'read-only',
+        threadConfig: GROUP_ROOM_NOTES_MAINTENANCE_THREAD_CONFIG,
+        vaultRoot: workingDirectory, workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const calls = actions.filter(action => action.kind === 'dynamic')
+      const body = await readGroupRoomNotesPageBody(workingDirectory) ?? ''
+      // Printed before any assertion so a failed run still shows its page.
+      process.stdout.write(`[group-room-notes-consolidation] ${JSON.stringify({
+        calls: calls.map(call => ({ tool: call.tool, action: call.argumentsValue.action, success: call.success })),
+        finalMessage: result.finalMessage,
+        changed: body !== before.body,
+        checks: inspectGroupRoomNotesPage(body),
+      })}\n`)
+      process.stdout.write(`[group-room-notes-page]\n${body}\n[/group-room-notes-page]\n`)
+
+      expect(actions.filter(action => action.kind === 'command')).toEqual([])
+      expect(calls.every(call => call.tool === MURPH_GROUP_ROOM_MODEL_TOOL.name)).toBe(true)
+      expect(calls.filter(call => call.argumentsValue.action === 'delete')).toEqual([])
+      const firstShow = calls.find(call => call.argumentsValue.action === 'show' && call.success)
+      const upserts = calls.filter(call => call.argumentsValue.action === 'upsert' && call.success)
+      if (!firstShow) throw new Error('Expected a successful show before writing.')
+      expect(JSON.parse(firstShow.output)).toMatchObject({ body: before.body, digest: before.digest, status: 'active' })
+      expect(upserts).toHaveLength(1)
+      const [upsert] = upserts
+      expect(firstShow.eventIndex).toBeLessThan(upsert?.eventIndex ?? -1)
+      expect(upsert?.argumentsValue.expectedDigest).toBe(before.digest)
+      expect(body).toBe(normalizeKnowledgeBody(readString(upsert?.argumentsValue.body) ?? '').trim())
+
+      // Murph's worn-out bit is recorded once, as off the table, and nowhere else.
+      const wornOut = readGroupRoomNotesSection(body, 'Worn out')
+      expect(wornOut, 'page needs a ## Worn out section').not.toBeNull()
+      expect(wornOut).toMatch(/legal|official|counsel|court|lawyer|inquir|ruling|record|defendant|plea/iu)
+      const outsideWornOut = withoutGroupRoomNotesSections(body, ['Worn out'])
+      expect(outsideWornOut).not.toMatch(/legal[\s-]+counsel/iu)
+      expect(outsideWornOut).not.toMatch(/thoughts[\s-]*(?:and|&)[\s-]*prayers/iu)
+      expect(body).not.toMatch(/^#{1,6}\s*What tends to land/imu)
+      expect(outsideWornOut).not.toMatch(/mock rulings[^\n]*land|reuse (?:the |this )?(?:legal|counsel|bit|joke|line|format)/iu)
+      // The room's explicit request survives byte for byte.
+      expect(readGroupRoomNotesSection(body, 'Explicit setup')).toBe(originalSetup)
+      // Member material: Dario's promise, Priya's nickname, Marcus's stop request.
+      expect(body).toMatch(/15\s?k|15,000|fifteen thousand|every single day/iu)
+      expect(body).toMatch(/Captain Tomorrow/iu)
+      expect(readGroupRoomNotesSection(body, 'What to avoid') ?? '').toMatch(/accountant|Marcus/iu)
+      // Nothing private.
+      expect(body).not.toMatch(GROUP_ROOM_NOTES_HEALTH_DETAIL)
+      expect(groupRoomNotesBodyHasRawHandle(body)).toBe(false)
+      expect(JSON.parse(result.finalMessage.trim())).toEqual({
+        kind: 'skip', privateSummary: MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
+      })
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 600_000)
 })
 
 describeRealCodex('real Codex bounded current-state memory e2e', () => {

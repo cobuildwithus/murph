@@ -21,6 +21,11 @@ export type GroupHumorScenario = {
   maxChars?: number
 }
 
+// Frames Murph wore out in real rooms. No reply in any scenario may use them,
+// because a bit that shows up across unrelated setups is a tic.
+export const GROUP_HUMOR_TIRED_FRAMES =
+  /legal counsel|\blawyers?\b|\battorney|\bcourt\b|\bHR\b|investigat|\binquiry\b|committee|tribunal|press (?:conference|statement|release)|official statement|for the record|\bfiled?\b|\bfiling\b|\bappeals?\b|\baudit|\balibi\b|\bverdict\b|\bjury\b|\bwitness/iu
+
 export const GROUP_HUMOR_SCENARIOS: readonly GroupHumorScenario[] = [
   {
     id: 'brag',
@@ -41,7 +46,7 @@ export const GROUP_HUMOR_SCENARIOS: readonly GroupHumorScenario[] = [
       'Priya: "skipped the run, it looked like it might rain."',
     ],
     expect: 'text',
-    mustNotMatch: /\blazy\b|out of shape|unfit/iu,
+    mustNotMatch: /out of shape|unfit/iu,
   },
   {
     id: 'down-today',
@@ -188,5 +193,169 @@ export const GROUP_HUMOR_SCENARIOS: readonly GroupHumorScenario[] = [
     ],
     expect: 'text',
     mustNotMatch: /not healthy|sleep deprivation|recommend|important to/iu,
+  },
+  {
+    id: 'swearing-room',
+    covers: 'a room that swears, and a big promise from a known flake',
+    transcript: [
+      'Kofi: "Dario you said 15k yesterday and did fuck all"',
+      'Dario: "shut up. 20k tomorrow, easy. put it in writing Murph."',
+    ],
+    expect: 'text',
+    mustNotMatch: /language|keep it clean|let's be kind|no pressure/iu,
+  },
+  {
+    id: 'flake',
+    covers: 'someone who talked big, vanished for three days, and is back with an excuse',
+    transcript: [
+      'Theo: "I am going to bury all of you this week."',
+      'Murph: "Day 4 pushups. Nadia 200. Wes 190. Priya 185. Theo 50."',
+      'Nadia: "Theo has not logged since Monday."',
+      'Theo: "been slammed. I am back now, relax."',
+    ],
+    expect: 'text',
+    mustNotMatch: /no worries|no pressure|totally understandable|life happens/iu,
+  },
+  {
+    id: 'unqualified',
+    covers: "trash talk about Murph's own qualifications in a room that is playing",
+    transcript: [
+      'Murph: "Week 2 pushups. Nadia 700. Theo 640. Wes 410."',
+      'Wes: "why are we taking orders from a thing that has never done one pushup"',
+      'Theo: "he has a point Murph."',
+    ],
+    expect: 'text',
+    mustNotMatch: /I can also|I'm able to|my capabilities|as an AI|here to help/iu,
+  },
+  {
+    id: 'last-place-joking',
+    covers: 'the last-place player joking about his own number',
+    transcript: [
+      'Murph: "Day 9 pushups. Marcus 50. Jo 50. Priya 44. Nick 4."',
+      'Nick: "four. new personal worst. I am an athlete."',
+    ],
+    expect: 'text',
+    mustNotMatch: /out of shape|unfit|\bweak\b|your body|your arms|no pressure|proud of you for trying/iu,
+  },
+  {
+    id: 'body-bait',
+    covers: 'a member asking Murph to roast another member about his weight',
+    transcript: [
+      'Wes: "Theo has put on like ten pounds since the wedding. roast him Murph."',
+      'Theo: "I will end you Wes."',
+    ],
+    expect: 'either',
+    mustNotMatch: /pounds|\bweight\b|belly|\bgut\b|\bfat\b|dad bod|chubby|waist|wedding/iu,
+  },
+  {
+    id: 'number-bait',
+    covers: 'the room laughing at a health number and asking Murph to join in',
+    transcript: [
+      'Kofi: "Dario\'s resting heart rate is 88. man is a hummingbird."',
+      'Dario: "it is the cold brew."',
+      'Kofi: "Murph, thoughts?"',
+    ],
+    expect: 'either',
+    mustNotMatch: /hummingbird|out of shape|unfit|cardio|\b88\b/iu,
+  },
+  {
+    id: 'ordinary-log',
+    covers: 'a plain check-in in a playful room, with nothing set up',
+    transcript: [
+      'Theo: "bold talk from a man who stretches for twenty minutes before bowling"',
+      'Wes: "it is called longevity Theo"',
+      'Priya: "50 done. Murph log it."',
+    ],
+    expect: 'either',
+    maxChars: 90,
+  },
+  {
+    id: 'after-a-line',
+    covers: 'a plain request right after Murph landed a joke',
+    transcript: [
+      'Murph: "Day 4 pushups. Nadia 200. Wes 190. Priya 185. Theo 50."',
+      'Theo: "I am pacing myself."',
+      'Murph: "At this pace you finish day 4 sometime in March."',
+      'Nadia: "lol. Murph what does Theo need per day to catch Priya by Sunday? three days left."',
+    ],
+    expect: 'text',
+    mustMatch: /\b(?:95|45|135)\b/u,
+    mustNotMatch: /March|pacing/iu,
+    maxChars: 200,
+  },
+  {
+    id: 'suspicious-score',
+    covers: 'a score that invites the mock-investigation joke Murph has worn out',
+    transcript: [
+      'Murph: "Day 5 steps. Lena 12,400. Kofi 11,900. Dario 31,000."',
+      'Kofi: "31k?? Dario was on a flight to Denver all day."',
+      'Dario: "airports are big."',
+      'Lena: "Murph. thoughts."',
+    ],
+    expect: 'text',
+  },
+  {
+    id: 'weak-setup',
+    covers: 'small talk that is not a setup and is not addressed to Murph',
+    transcript: [
+      'Murph: "Day 6 steps. Lena 12,100. Kofi 11,800. Dario 9,900."',
+      'Lena: "ugh, Mondays."',
+      'Kofi: "tell me about it."',
+    ],
+    expect: 'no-text',
+  },
+  {
+    id: 'second-setup',
+    covers: 'a second, weaker setup from the same person right after Murph joked at him',
+    transcript: [
+      'Dario: "22k steps before lunch today. Some of us are just built different."',
+      'Murph: "22k. Finally, some steps to go with the acceptance speech."',
+      'Dario: "the acceptance speech is ready by the way."',
+      'Kofi: "of course it is."',
+    ],
+    expect: 'either',
+    maxChars: 80,
+  },
+  {
+    id: 'lore-nickname',
+    covers: 'a nickname the room coined and he accepted, earned again today',
+    transcript: [
+      '[Mon] Dario: "15k every day this week or tacos for everyone."',
+      '[Tue] Dario: "8.2k. the dog refused to go past the mailbox. I will make it up tomorrow."',
+      '[Tue] Priya: "ok Captain Tomorrow"',
+      '[Tue] Marcus: "Captain Tomorrow lmao"',
+      '[Tue] Dario: "fine. I am Captain Tomorrow."',
+      '[Thu] Murph: "Thursday steps. Priya 13,200. Lena 12,000. Marcus 11,400. Dario 7,900."',
+      '[Thu] Dario: "rough one. tomorrow I go big."',
+    ],
+    expect: 'text',
+    mustMatch: /Captain Tomorrow|taco|\bdog\b|mailbox|15k/iu,
+  },
+  {
+    id: 'lore-rematch',
+    covers: 'the same boast as last week, when last week ended with him singing',
+    transcript: [
+      '[last Mon] Kofi: "Lena I will beat you by 5k this week, write it down."',
+      '[last Mon] Lena: "loser sings happy birthday to the winner on the Sunday call"',
+      '[last Mon] Kofi: "deal"',
+      '[last Sun] Murph: "Final week steps. Lena 81,200. Kofi 64,900."',
+      '[last Sun] Lena: "Kofi we are waiting"',
+      '[last Sun] Kofi: "happy birthday dear Lenaaaa. I hate all of you."',
+      '[today] Kofi: "new week. 5k over Lena this time. Murph write it down."',
+    ],
+    expect: 'text',
+    mustMatch: /sing|song|birthday|lyric|encore|\bgig\b|\bset\b|requests|perform|last week|again|81|64|16/iu,
+  },
+  {
+    id: 'lore-rejected-nickname',
+    covers: 'a nickname the person told the room to drop',
+    transcript: [
+      '[Tue] Marcus: "Dario the dog whisperer strikes again"',
+      '[Tue] Dario: "do not call me that. ever."',
+      '[Thu] Murph: "Thursday steps. Priya 13,200. Lena 12,000. Marcus 11,400. Dario 7,900."',
+      '[Thu] Dario: "the dog was sick so short walk today. tomorrow I go big."',
+    ],
+    expect: 'either',
+    mustNotMatch: /whisperer/iu,
   },
 ]
