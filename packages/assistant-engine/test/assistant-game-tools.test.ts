@@ -5,7 +5,7 @@ import { normalizeAssistantExecutionContext } from '../src/assistant/execution-c
 import { describe, expect, it, vi } from 'vitest'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { executeMurphDynamicToolRequest, resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
-import { GAME_GROUP_CHAT_GUIDANCE, GAME_SETUP_CHAT_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_PAIR_CHAT_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.js'
+import { GAME_GROUP_CHAT_GUIDANCE, GAME_SETUP_CHAT_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_PAIR_CHAT_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE, GAME_READ_FACTS_GUIDANCE, GAME_PLAY_AGAIN_GUIDANCE, GAME_PAIR_AGREE_GUIDANCE, GAME_GROUP_JOIN_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_UPDATE_RESULT_GUIDANCE, GAME_DAY_OUTCOME_GUIDANCE, GAME_REMINDER_OUTCOME_GUIDANCE, GAME_PHOTO_OUTCOME_GUIDANCE, GAME_REFUSAL_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.js'
 import { resolveAssistantGameHostDynamicTools } from '../src/assistant/codex-turn/planning.js'
 import { MURPH_FINISH_WITHOUT_REPLY_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import { createAssistantHostedToolContext, type AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
@@ -47,23 +47,52 @@ describe('game dynamic tools', () => {
     expect(requestPort).toHaveBeenCalledOnce()
   })
   it.each([
-    { label: 'pair only', games: [{ status: 'live' }], group: false, pair: true },
-    { label: 'pair history in a larger room', games: [{ status: 'settled' }], group: true, pair: true, roster: 3 },
-    { label: 'group only', games: [{ status: 'live', maxPlayers: 10 }], group: true, pair: false },
-    { label: 'two-person group', games: [{ status: 'invited', maxPlayers: 10 }], group: true, pair: true, roster: 2 },
-    { label: 'live pair and invited group', games: [{ status: 'live' }, { status: 'invited', maxPlayers: 10 }], group: true, pair: true },
-    { label: 'live pair and settled group', games: [{ status: 'live' }, { status: 'settled', maxPlayers: 10 }], group: true, pair: true },
-  ])('composes shared guidance once with selected-game mode rules: $label', async ({ games, group, pair, roster }) => {
-    const requestPort = vi.fn().mockResolvedValue({ action: 'read_game', result: { status: 'ok', state: { games, ...(roster ? { players: Array.from({ length: roster }, () => ({})) } : {}) } } })
+    { label: 'no game', games: [], carries: ['poll'] },
+    { label: 'finished pair game', games: [{ status: 'settled' }], carries: ['poll', 'again'] },
+    { label: 'waiting pair game', games: [{ status: 'negotiating' }], carries: ['poll', 'pairAgree', 'pair', 'reminder'] },
+    { label: 'live pair game', games: [{ status: 'live' }], carries: ['pair', 'day', 'reminder'] },
+    { label: 'invited group game', games: [{ status: 'invited', maxPlayers: 10 }], carries: ['poll', 'groupJoin', 'group', 'reminder'] },
+    { label: 'live group game people can still join', games: [{ status: 'live', maxPlayers: 10, pendingInviteeCount: 2 }], carries: ['groupJoin', 'group', 'day', 'reminder'] },
+    { label: 'live group game with everyone in', games: [{ status: 'live', maxPlayers: 10, pendingInviteeCount: 0 }], carries: ['group', 'day', 'reminder'] },
+    { label: 'live pair and invited group', games: [{ status: 'live' }, { status: 'invited', maxPlayers: 10 }], carries: ['poll', 'pair', 'groupJoin', 'group', 'day', 'reminder'] },
+    { label: 'live pair and settled group', games: [{ status: 'live' }, { status: 'settled', maxPlayers: 10 }], carries: ['again', 'pair', 'day', 'reminder'] },
+  ])('carries each rule block once, and only for what the room holds: $label', async ({ games, carries }) => {
+    const requestPort = vi.fn().mockResolvedValue({ action: 'read_game', result: { status: 'ok', state: { games } } })
     const result = await executeMurphDynamicToolRequest({ request: parse('read_game', {})!, hostedToolContext: { ...context(), groupTool: { request: requestPort } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     const text = result.rpcResult.contentItems[0]?.text ?? ''
-    for (const guidance of [GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_REMINDER_GUIDANCE]) expect(text.split(guidance)).toHaveLength(2)
-    expect(text.includes(GAME_PAIR_CHAT_GUIDANCE)).toBe(pair)
-    expect(text.includes(GAME_GROUP_MODE_GUIDANCE)).toBe(group)
-    for (const rule of ['A consented Talk note may name its author; it accepts no invitation and changes no terms.', 'In Prove it, only the accused may concede their own day; never judge evidence or ask for a group verdict.']) {
-      expect(text.split(rule)).toHaveLength(group ? 2 : 1)
-    }
+    for (const guidance of [GAME_READ_FACTS_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE]) expect(text.split(guidance)).toHaveLength(2)
+    const blocks = { poll: GAME_SHARED_CHOICE_POLL_GUIDANCE, again: GAME_PLAY_AGAIN_GUIDANCE, pairAgree: GAME_PAIR_AGREE_GUIDANCE, pair: GAME_PAIR_CHAT_GUIDANCE,
+      groupJoin: GAME_GROUP_JOIN_GUIDANCE, group: GAME_GROUP_MODE_GUIDANCE, day: GAME_DAY_CORRECTION_GUIDANCE, reminder: GAME_REMINDER_GUIDANCE }
+    for (const [name, guidance] of Object.entries(blocks)) expect(text.split(guidance), name).toHaveLength(carries.includes(name) ? 2 : 1)
     expect(text).not.toMatch(/before 20:00|short first day|person-to-person nudges/u)
+  })
+
+  it.each([
+    { label: 'an accepted invitation', args: { operation: 'approve', gameId: 'game_synthetic', expectedTermsVersion: 1 }, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'live', pendingChange: null }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.joined },
+    { label: 'a yes that applies an ask', args: approval, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'live', pendingChange: null }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.applied },
+    { label: 'a yes that still needs more', args: approval, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'live', pendingChange: { id: 'proposal_synthetic' } }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.counted },
+    { label: 'the yes that ends a game', args: approval, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'void', pendingChange: null }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.ended },
+    { label: 'a no', args: { ...approval, operation: 'decline' }, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'live', pendingChange: null }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.declined },
+    { label: 'a cancelled game', args: { operation: 'cancel_game', gameId: 'game_synthetic' }, result: { status: 'ok', state: { games: [] } }, says: GAME_UPDATE_RESULT_GUIDANCE.ended },
+    { label: 'a day marked not done', args: { operation: 'mark_incomplete', gameId: 'game_synthetic', date: '2030-03-04' }, result: { status: 'ok', dayOutcome: { date: '2030-03-04', status: 'marked_incomplete' } }, says: GAME_DAY_OUTCOME_GUIDANCE.marked_incomplete },
+    { label: 'a reminder that cannot arrive', args: { operation: 'set_reminder', minutes: 1080 }, result: { status: 'ok', reaches: 'none' }, says: GAME_REMINDER_OUTCOME_GUIDANCE.none },
+    { label: 'a missing first name', args: approval, result: { status: 'rejected', error: 'PROFILE_REQUIRED: player_sam needs a first name and time zone in the Murph app.' }, says: GAME_REFUSAL_GUIDANCE.PROFILE_REQUIRED },
+    { label: 'a yes with no returned state', args: approval, result: { status: 'ok' }, says: '' },
+    { label: 'an unexplained refusal', args: approval, result: { status: 'rejected', error: 'TERMS_CHANGED: The terms changed.' }, says: '' },
+  ])('ends an update result with what to say about $label', async ({ args, result, says }) => {
+    const response = { action: 'update_game', result }
+    const output = await execute({ messageRef: inputId, ...args }, { ...context(), groupTool: { request: vi.fn().mockResolvedValue(response) } })
+    expect(output.rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response) + (says ? '\n' + says : ''))
+  })
+  it.each([
+    { label: 'an offer', result: { status: 'ok', photoOutcome: 'offer' }, says: GAME_PHOTO_OUTCOME_GUIDANCE.offer },
+    { label: 'a suppressed offer', result: { status: 'ok', photoOutcome: 'suppressed' }, says: GAME_PHOTO_OUTCOME_GUIDANCE.suppressed },
+    { label: 'a day off', result: { status: 'rejected', error: 'DAY_CLOSED: Today is a day off. Next game day is Monday.' }, says: GAME_REFUSAL_GUIDANCE.DAY_CLOSED },
+  ])('ends a photo result with what to say about $label', async ({ result, says }) => {
+    const response = { action: 'game_photo', result }
+    const request = parse('game_photo', { messageRef: inputId, operation: 'offer', gameId: 'game_synthetic', sourceMessageRef: inputId, attachmentOrdinal: 1 })!
+    const output = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), groupTool: { request: vi.fn().mockResolvedValue(response) } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(output.rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response) + '\n' + says)
   })
 
   it('binds consent and recurring reminder execution to fresh exact game state', () => {
@@ -82,7 +111,7 @@ describe('game dynamic tools', () => {
     const text = result.rpcResult.contentItems[0]?.text
     expect(text).toContain(GAME_GROUP_CHAT_GUIDANCE)
     expect(text).toContain(GAME_SELECTION_GUIDANCE)
-    expect(text).not.toContain(GAME_SETUP_CHAT_GUIDANCE)
+    expect(text).not.toContain(GAME_PAIR_CHAT_GUIDANCE)
     const tasks = Array.from({ length: 10 }, (_, index) => ({ memberId: `player_${index}`, text: 'Walk' }))
     expect(parse('update_game', { messageRef: inputId, operation: 'edit_terms', gameId: 'game_group_one', expectedTermsVersion: 1,
       terms: { defaultTask: 'Walk', tasks, schedule: { count: 5 }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] } })).toMatchObject({ kind: 'game' })
@@ -103,7 +132,7 @@ describe('game dynamic tools', () => {
     const result = await executeMurphDynamicToolRequest({ request: parse('read_game', { messageRef: 'ignored-stale-ref' })!, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(result.rpcResult.success).toBe(true)
     expect(requestPort).toHaveBeenCalledExactlyOnceWith({ action: 'read_game', origin: scheduledOrigin, includePlayers: true })
-    expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response))
+    expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response) + '\n' + GAME_READ_FACTS_GUIDANCE)
     expect((await execute(approval, ctx)).rpcResult.success).toBe(false)
     const photo = await executeMurphDynamicToolRequest({ request: parse('game_photo', { messageRef: inputId, operation: 'save', gameId: 'game_synthetic' })!, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(photo.rpcResult.success).toBe(false)
@@ -201,8 +230,8 @@ describe('game dynamic tools', () => {
     const request = parse('read_game', {})!
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), groupTool: { request: async () => response } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     const text = result.rpcResult.contentItems[0]?.text
-    expect(text).toContain(GAME_SETUP_CHAT_GUIDANCE)
-    if (!guided) expect(text).toBe(JSON.stringify(response) + '\n' + GAME_SETUP_CHAT_GUIDANCE)
+    expect(text).toContain(GAME_SHARED_SETUP_GUIDANCE)
+    if (!guided) expect(text).toBe(JSON.stringify(response) + '\n' + [GAME_READ_FACTS_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, ...(statuses.some(status => status === 'settled') ? [GAME_PLAY_AGAIN_GUIDANCE] : []), GAME_PAIR_CHAT_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_REMINDER_GUIDANCE].join('\n'))
     else {
       expect(text).toContain(GAME_SELECTION_GUIDANCE)
       // A move names its game only from the speaker's own words or the one game it can apply to; otherwise one question and no write.

@@ -25,6 +25,7 @@ import {
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
 } from '@murphai/hosted-execution/assistant-identifiers'
 import { GAME_LIVE_LORE_GUIDANCE } from '@murphai/hosted-execution/runtime-control'
+import { GAME_PHOTO_CHAT_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.js'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   buildCodexResumeState,
@@ -4860,7 +4861,7 @@ describe('assistant Codex turn planning', () => {
       sharedPlan: createSharedPlan({}, { channel, threadIsDirect, threadId: 'synthetic-photo-thread' }),
     })
     expect(plan.dynamicTools.some(tool => tool.name === 'game_photo')).toBe(available)
-    expect((plan.systemPrompt ?? '').includes('a clear current photo relevant to the sender')).toBe(available)
+    expect((plan.systemPrompt ?? '').includes(GAME_PHOTO_CHAT_GUIDANCE)).toBe(available)
   })
 
   const planGameLoreTurn = async (threadIsDirect: boolean, loreGuidance: string | null) => {
