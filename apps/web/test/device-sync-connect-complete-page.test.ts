@@ -242,7 +242,7 @@ test("ConnectionCompletion shows the connected dialog with the signed-in member'
   assert.doesNotMatch(markup, /href="whoop:/);
   assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, /Open Messages</);
-  assert.match(markup, />Continue to Settings</);
+  assert.match(markup, />Continue</);
   assert.doesNotMatch(markup, /Go home/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   expect(mocks.buildHostedDeviceSyncSettingsResponse).toHaveBeenCalledWith({
@@ -324,7 +324,7 @@ test("ConnectionCompletion falls back to Telegram when no Messages line is assig
   assert.match(markup, /href="https:\/\/t\.me\/murph_bot\?text=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, /aria-label="Text Murph in Telegram"/);
   assert.match(markup, />Text Murph</);
-  assert.match(markup, />Continue to Settings</);
+  assert.match(markup, />Continue</);
   assert.doesNotMatch(markup, /href="sms:/);
 });
 
@@ -531,7 +531,7 @@ test("ConnectionCompletion keeps a continue-only dialog when there is no messagi
   assert.match(markup, /WHOOP doesn&#x27;t share all of your data automatically\./);
   assert.match(markup, />Get full sync</);
   assert.doesNotMatch(markup, /data-completion-unverified/);
-  assert.match(markup, />Continue to Settings</);
+  assert.match(markup, />Continue</);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   assert.doesNotMatch(markup, /Open Messages</);
@@ -711,7 +711,7 @@ test("ConnectionCompletion does not offer a messaging success CTA after callback
   assert.match(markup, /Nothing changed\. Try again\./);
   assert.doesNotMatch(markup, /data-completion-unverified/);
   assert.match(markup, /href="\/connect"[^>]*>.*Try again/s);
-  assert.match(markup, />Continue to Settings</);
+  assert.match(markup, />Continue</);
   assert.doesNotMatch(markup, /apps\.apple\.com\/us\/app\/murph-ai/);
   assert.doesNotMatch(markup, />Get full sync</);
   assert.doesNotMatch(markup, /href="sms:/);
