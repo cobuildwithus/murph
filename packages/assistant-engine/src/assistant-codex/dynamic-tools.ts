@@ -473,6 +473,8 @@ const sendProgressUpdateArgumentsSchema = z
 
 const generateImageArgumentsSchema = z
   .object({
+    output: z.enum(['chat', 'file']).optional(),
+    operationId: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u).optional(),
     alt: z.string().trim().min(1).max(500).nullable().default(null),
     outputFormat: z.enum(['webp', 'png', 'jpeg']).default('webp'),
     prompt: z.string().trim().min(1).max(4000),
@@ -3224,6 +3226,15 @@ async function executeGenerateImageDynamicTool(
   input: ExecuteMurphDynamicToolRequestInput,
   request: Extract<MurphDynamicToolRequest, { kind: 'generate-image' }>,
 ): Promise<MurphDynamicToolExecutionResult> {
+  if (request.args.output === 'file') {
+    const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'image', args: request.args })
+    if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
+    const result = await executeGenerateImageTool({ args: request.args, fileRuntime,
+      abortSignal: input.abortSignal, env: input.env, fetchImpl: input.fetchImpl,
+      providerRequestOrdinal: input.nextUsageOrdinal() })
+    return { ...toolTextResult(result.rpcSuccess, result.rpcText), usageDraft: result.usageDraft ?? null }
+  }
+  if (input.hostedToolContext?.currentGameRecapScope?.()?.show) return toolTextResult(false, 'Recap media requires output=file.', 'authority_rejected')
   if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
     return toolTextResult(false, 'image generation cannot be combined with a response card', 'conflict')
   }
@@ -3993,6 +4004,12 @@ async function dispatchMurphDynamicToolRequest(
       })
     }
     case 'generate-song': {
+      if (input.request.args.output === 'file') {
+        const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'song', args: input.request.args })
+        if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
+        return executeGenerateSongDynamicTool({ args: input.request.args, env: input.env, fileRuntime, abortSignal: input.abortSignal })
+      }
+      if (input.hostedToolContext?.currentGameRecapScope?.()?.show) return toolTextResult(false, 'Recap media requires output=file.', 'authority_rejected')
       if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
         return toolTextResult(false, 'song generation cannot be combined with a response card', 'conflict')
       }

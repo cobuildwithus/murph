@@ -1,3 +1,6 @@
+import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
+import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
+import type { GenerateSongToolArgs } from '../assistant-codex/generate-voice-memo-tool.js'
 import { appendRecapUsage, replaceRecapNarrative, type RecapUsage } from './game-recap-lore.js'
 import { materializeRecapWorkspace } from './recap-workspace.js'
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
@@ -209,6 +212,7 @@ export interface AssistantHostedToolContext {
   currentDeviceActivityOccurrence?(): AssistantDeviceActivityOccurrence | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentGameRecapScope?(): NonNullable<AssistantHostedExecutionContext['gameRecapScope']> | null
+  prepareRecapMedia?(request: { kind: 'image'; args: GenerateImageToolArgs } | { kind: 'song'; args: GenerateSongToolArgs }): Promise<GeneratedMediaFileRuntime>
   prepareGameRecapInputs?(material: unknown): Promise<unknown>
   readGameRecapWorkspace?(): Awaited<ReturnType<typeof materializeRecapWorkspace>> | null
   currentGameMissedCheckInScope?(): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null

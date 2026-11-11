@@ -1,3 +1,4 @@
+import type { GeneratedMediaFileArgs, GeneratedMediaFileRuntime } from './generated-media-file.js'
 import { AssistantWorkspaceArtifactMaterializationError } from '../assistant/execution-context.js'
 import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 import { Buffer } from 'node:buffer'
@@ -52,7 +53,7 @@ import {
   type OpenAiImageSize,
 } from './openai-image-generation.js'
 
-export interface GenerateImageToolArgs {
+export interface GenerateImageToolArgs extends GeneratedMediaFileArgs {
   alt: string | null
   outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
@@ -115,6 +116,7 @@ export async function executeGenerateImageTool(input: {
   codexHome?: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
+  fileRuntime?: GeneratedMediaFileRuntime | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   persistGeneratedImageCapture?: (<T>(
     write: () => Promise<T>,
@@ -127,6 +129,9 @@ export async function executeGenerateImageTool(input: {
   ) => Promise<string | null>
   vaultRoot?: string | null
 }): Promise<GenerateImageToolResult> {
+  if (input.args.output === 'file' && !input.fileRuntime) return { rpcSuccess: false, rpcText: 'File output requires an authorized owning flow.' }
+  const fileRuntime = input.args.output === 'file' ? input.fileRuntime : null
+  if (fileRuntime && input.args.outputFormat !== 'jpeg') return { rpcSuccess: false, rpcText: 'Recap file images require outputFormat=jpeg.' }
   const apiKey = normalizeNullableString(input.env.OPENAI_API_KEY)
   if (!apiKey) {
     return {
@@ -137,9 +142,9 @@ export async function executeGenerateImageTool(input: {
   }
 
   const referenceImageRefs = input.args.referenceImageRefs ?? []
-  const vaultRoot = normalizeNullableString(input.vaultRoot)
+  const vaultRoot = fileRuntime ? null : normalizeNullableString(input.vaultRoot)
   const requireHostedPrivateImageDelivery =
-    input.requireHostedPrivateImageDelivery === true
+    !fileRuntime && input.requireHostedPrivateImageDelivery === true
   if (requireHostedPrivateImageDelivery && !vaultRoot) {
     return {
       failureDiagnostic: toolFailureDiagnostic('unavailable'),
@@ -159,7 +164,7 @@ export async function executeGenerateImageTool(input: {
   }
 
   if (
-    referenceImageRefs.length > 0 &&
+    !fileRuntime && referenceImageRefs.length > 0 &&
     !vaultRoot &&
     hasVaultReferenceImageRef(referenceImageRefs)
   ) {
@@ -210,7 +215,7 @@ export async function executeGenerateImageTool(input: {
     savedCapture = existingCapture.capture
   } else {
     try {
-      referenceImages = referenceImageRefs.length > 0
+      referenceImages = fileRuntime ? await fileRuntime.resolveReferences(referenceImageRefs) : referenceImageRefs.length > 0
         ? await resolveGenerateImageReferences({
             materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
             refs: referenceImageRefs,
@@ -257,7 +262,7 @@ export async function executeGenerateImageTool(input: {
       openAiResult = await generateOpenAiImage({
         abortSignal: input.abortSignal ?? null,
         apiKey,
-        fetchImpl: input.fetchImpl,
+        fetchImpl: fileRuntime?.fetchImpl ?? input.fetchImpl,
         ...(input.args.outputCompression !== undefined
           ? { outputCompression: input.args.outputCompression }
           : {}),
@@ -316,6 +321,15 @@ export async function executeGenerateImageTool(input: {
     }
 
     generatedImageBytes = openAiResult.imageBytes
+    if (fileRuntime) {
+      try {
+        const receipt = await fileRuntime.save(generatedImageBytes, 'image/jpeg')
+        return { rpcSuccess: true, rpcText: JSON.stringify(receipt), usageDraft }
+      } catch (error) {
+        return { rpcSuccess: false, rpcText: 'Generated image could not be verified and saved.',
+          failureDiagnostic: toolFailureDiagnostic('invalid_result', error), usageDraft }
+      }
+    }
 
     if (vaultRoot) {
       try {
