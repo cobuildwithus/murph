@@ -30,7 +30,6 @@ import {
   createExplicitHealthQueryServices,
 } from "./explicit-health-family-services.js"
 import {
-  createUnwiredMethod,
   loadCoreRuntime,
   loadImporterRuntime,
   loadQueryRuntime,
@@ -1847,49 +1846,12 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
-function createIntegratedVaultServiceGroups(
+export function createIntegratedVaultServices(
   dependencies: IntegratedVaultServiceDependencies = {},
 ): VaultServices {
   return {
     core: createIntegratedCoreServices(dependencies),
     importers: createIntegratedImporterServices(),
     query: createIntegratedQueryServices(),
-  }
-}
-
-function createUnwiredServiceGroup<
-  TServiceGroup extends object,
->(
-  groupName: string,
-  integratedServices: TServiceGroup,
-): TServiceGroup {
-  const unwiredServices = {} as {
-    [TKey in keyof TServiceGroup]: TServiceGroup[TKey]
-  }
-
-  for (const methodName of Object.keys(integratedServices) as Array<keyof TServiceGroup & string>) {
-    unwiredServices[methodName] = createUnwiredMethod(
-      `${groupName}.${methodName}`,
-    ) as TServiceGroup[typeof methodName]
-  }
-
-  return unwiredServices
-}
-
-export function createIntegratedVaultServices(
-  dependencies: IntegratedVaultServiceDependencies = {},
-): VaultServices {
-  return createIntegratedVaultServiceGroups(dependencies)
-}
-
-export function createUnwiredVaultServices(
-  _dependencies: Record<string, unknown> = {},
-): VaultServices {
-  const integratedServices = createIntegratedVaultServiceGroups()
-
-  return {
-    core: createUnwiredServiceGroup("core", integratedServices.core),
-    importers: createUnwiredServiceGroup("importers", integratedServices.importers),
-    query: createUnwiredServiceGroup("query", integratedServices.query),
   }
 }

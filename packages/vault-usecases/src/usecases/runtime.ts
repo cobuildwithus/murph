@@ -3,7 +3,6 @@ import { loadRuntimeModule } from "../runtime-import.js"
 import { createRuntimeUnavailableError } from "../runtime-errors.js"
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
 import {
-  healthCoreRuntimeMethodNames,
   healthCoreServiceMethodNames,
   healthQueryRuntimeMethodNames,
   healthQueryServiceMethodNames,
@@ -18,9 +17,7 @@ import type {
   QueryRuntimeModule,
 } from "./types.js"
 
-let coreRuntimePromise: Promise<CoreRuntimeModule> | null = null
 let queryRuntimePromise: Promise<QueryRuntimeModule> | null = null
-let integratedRuntimePromise: Promise<IntegratedRuntime> | null = null
 
 function toRuntimeUnavailableCause(error: unknown): unknown {
   if (
@@ -60,33 +57,6 @@ function hasCallableMembers(
   members: string[],
 ) {
   return members.every((member) => typeof value[member] === "function")
-}
-
-function isCoreRuntimeModule(value: unknown): value is CoreRuntimeModule {
-  return (
-    isPlainObject(value) &&
-    Array.isArray(value.REQUIRED_DIRECTORIES) &&
-    hasCallableMembers(value, [
-      "applyCanonicalWriteBatch",
-      "resolveWorkoutSourceImportStatus",
-      "initializeVault",
-      "validateVault",
-      "repairVault",
-      "repairExperimentMedia",
-      "repairJunctionWorkoutHeartRateZones",
-      "runIntegrationIngestMigration",
-      "detectWearableStorageMigrationCandidates",
-      "runWearableStorageMigrationPass",
-      "addMeal",
-      "createExperiment",
-      "ensureJournalDay",
-      "upsertProtocol",
-      "readAssessmentResponse",
-      "projectAssessmentResponse",
-      "stopRegimen",
-      ...healthCoreRuntimeMethodNames,
-    ])
-  )
 }
 
 function isQueryRuntimeModule(value: unknown): value is QueryRuntimeModule {
@@ -132,24 +102,11 @@ export async function loadImportersRuntimeModule(): Promise<ImportersFactoryRunt
 }
 
 export async function loadCoreRuntime(): Promise<CoreRuntimeModule> {
-  const runtimePromise =
-    coreRuntimePromise ??
-    (coreRuntimePromise = (async () => {
-      try {
-        const coreModule = await loadRuntimeModule("@murphai/core")
-
-        if (!isCoreRuntimeModule(coreModule)) {
-          throw new TypeError("Core runtime package did not match the expected module shape.")
-        }
-
-        return coreModule
-      } catch (error) {
-        coreRuntimePromise = null
-        throw createRuntimeUnavailableError("core-backed vault-cli services", error)
-      }
-    })())
-
-  return runtimePromise
+  try {
+    return await import("@murphai/core")
+  } catch (error) {
+    throw createRuntimeUnavailableError("core-backed vault-cli services", error)
+  }
 }
 
 export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
@@ -175,29 +132,15 @@ export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
 }
 
 export async function loadIntegratedRuntime(): Promise<IntegratedRuntime> {
-  const runtimePromise =
-    integratedRuntimePromise ??
-    (integratedRuntimePromise = (async () => {
-      try {
-        const [core, query] = await Promise.all([
-          loadCoreRuntime(),
-          loadQueryRuntime(),
-        ])
-
-        return {
-          core,
-          query,
-        }
-      } catch (error) {
-        integratedRuntimePromise = null
-        throw createRuntimeUnavailableError(
-          "integrated vault-cli services",
-          toRuntimeUnavailableCause(error),
-        )
-      }
-    })())
-
-  return runtimePromise
+  try {
+    const [core, query] = await Promise.all([loadCoreRuntime(), loadQueryRuntime()])
+    return { core, query }
+  } catch (error) {
+    throw createRuntimeUnavailableError(
+      "integrated vault-cli services",
+      toRuntimeUnavailableCause(error),
+    )
+  }
 }
 
 export async function loadImporterRuntime(): Promise<ImportersRuntime> {

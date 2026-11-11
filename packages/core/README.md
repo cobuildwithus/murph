@@ -113,3 +113,15 @@ Recovery still needs their action state, staged payloads, append baselines and
 backups; terminal operations are explicitly excluded by inbox recovery. A missing
 checkpoint leaves pruning inert. New successful local writes retire immediately
 even without hosted checkpoints.
+
+## Saved experiment outcomes
+
+The exact `outcomeRef` and its immutable artifact own saved-result identity.
+Readers verify the artifact path, experiment identity, timestamp and protocol
+lineage; duplicated `outcome.latestOutcomeId` and `finalAnalysisStatus` are not
+read authority. Missing or stale tracking does not invalidate a valid artifact.
+
+Writers still publish those tracking fields for older supported readers. Remove
+them only after every supported runner and rollback target accepts reference-only
+documents. This reader-first change preserves old snapshots and does not rewrite
+existing vaults or relax missing-artifact, revision or lineage checks.

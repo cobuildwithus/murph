@@ -1,29 +1,14 @@
-import {
-  inboxRuntimeConfigSchema,
-  normalizeInboxRuntimeConfig,
-  type InboxConnectorConfig,
-  type InboxRuntimeConfig,
-} from '@murphai/operator-config/inbox-cli-contracts'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import {
-  hasLocalStatePath,
-  readVersionedJsonStateFile,
-  resolveRuntimePaths,
-  writeVersionedJsonStateFile,
-} from '@murphai/runtime-state/node'
-import { mkdir } from 'node:fs/promises'
 import type {
   InboxPaths,
   InboxRuntimeModule,
   RuntimeStore,
 } from '../inbox-app/types.js'
+import { mkdir } from 'node:fs/promises'
+import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import {
   fileExists,
   relativeToVault,
 } from './shared.js'
-
-const INBOX_RUNTIME_CONFIG_SCHEMA = 'murph.inbox-runtime-config.v1'
-const INBOX_RUNTIME_CONFIG_SCHEMA_VERSION = 1
 
 export async function ensureInitialized(
   loadInbox: () => Promise<InboxRuntimeModule>,
@@ -39,14 +24,6 @@ export async function ensureInitializedWithInbox(
   const paths = resolveRuntimePaths(vaultRoot)
   await inboxd.ensureInboxVault(paths.absoluteVaultRoot)
 
-  if (!(await hasLocalStatePath({ currentPath: paths.inboxConfigPath }))) {
-    throw new VaultCliError(
-      'INBOX_NOT_INITIALIZED',
-      'Inbox runtime is not initialized. Run Murph onboarding/setup first.',
-    )
-  }
-
-  await readConfig(paths)
   return paths
 }
 
@@ -82,55 +59,6 @@ export async function ensureDirectory(
   await mkdir(absolutePath, { recursive: true })
 }
 
-export async function ensureConfigFile(
-  paths: InboxPaths,
-  createdPaths: string[],
-): Promise<void> {
-  if (await hasLocalStatePath({ currentPath: paths.inboxConfigPath })) {
-    return
-  }
-
-  const emptyConfig: InboxRuntimeConfig = {
-    connectors: [],
-  }
-  await writeVersionedJsonStateFile({
-    filePath: paths.inboxConfigPath,
-    schema: INBOX_RUNTIME_CONFIG_SCHEMA,
-    schemaVersion: INBOX_RUNTIME_CONFIG_SCHEMA_VERSION,
-    value: normalizeInboxRuntimeConfig(
-      inboxRuntimeConfigSchema.parse(emptyConfig),
-    ),
-  })
-  createdPaths.push(relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath))
-}
-
-export async function readConfig(
-  paths: InboxPaths,
-): Promise<InboxRuntimeConfig> {
-  try {
-    const { value } = await readVersionedJsonStateFile({
-      currentPath: paths.inboxConfigPath,
-      label: 'Inbox runtime config',
-      parseValue(value) {
-        return normalizeInboxRuntimeConfig(
-          inboxRuntimeConfigSchema.parse(value),
-        )
-      },
-      schema: INBOX_RUNTIME_CONFIG_SCHEMA,
-      schemaVersion: INBOX_RUNTIME_CONFIG_SCHEMA_VERSION,
-    })
-    return value
-  } catch (error) {
-    throw new VaultCliError(
-      'INBOX_CONFIG_INVALID',
-      'Inbox runtime config is invalid.',
-      {
-        error: error instanceof Error ? error.message : String(error),
-      },
-    )
-  }
-}
-
 export async function rebuildRuntime(
   paths: InboxPaths,
   inboxd: InboxRuntimeModule,
@@ -143,43 +71,12 @@ export async function rebuildRuntime(
   })
 
   try {
-    await inboxd.rebuildRuntimeFromVault({
+    return await inboxd.rebuildRuntimeFromVault({
       enqueueParserJobs: options.enqueueParserJobs ?? true,
       vaultRoot: paths.absoluteVaultRoot,
       runtime,
     })
-
-    let limit = 200
-    while (true) {
-      const count = runtime.listCaptures({ limit }).length
-      if (count < limit) {
-        return count
-      }
-      limit *= 2
-    }
   } finally {
     runtime.close()
   }
-}
-
-export function findConnector(
-  config: InboxRuntimeConfig,
-  sourceId: string,
-): InboxConnectorConfig | null {
-  return config.connectors.find((connector) => connector.id === sourceId) ?? null
-}
-
-export function requireConnector(
-  config: InboxRuntimeConfig,
-  sourceId: string,
-): InboxConnectorConfig {
-  const connector = findConnector(config, sourceId)
-  if (!connector) {
-    throw new VaultCliError(
-      'INBOX_SOURCE_NOT_FOUND',
-      `Inbox source "${sourceId}" is not configured.`,
-    )
-  }
-
-  return connector
 }

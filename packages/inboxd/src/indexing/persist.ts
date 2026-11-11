@@ -602,7 +602,7 @@ export async function rebuildRuntimeFromVault(input: {
   enqueueParserJobs: boolean;
   vaultRoot: string;
   runtime: InboxRuntimeStore;
-}): Promise<void> {
+}): Promise<number> {
   const canonicalRecords = await listCanonicalInboxCaptureRecords(input.vaultRoot);
   const retainedAttachments = await readRetainedAttachmentMap(input.vaultRoot);
   const restoredIdentityKeys = new Set<string>();
@@ -653,7 +653,7 @@ export async function rebuildRuntimeFromVault(input: {
     restoredIdentityKeys.add(createInboxCaptureIdentityKey(envelope.input));
   }
 
-  replaceInboxCaptureProjection({
+  return replaceInboxCaptureProjection({
     databasePath: input.runtime.databasePath,
     enqueueParserJobs: input.enqueueParserJobs,
     entries: projectionEntries,

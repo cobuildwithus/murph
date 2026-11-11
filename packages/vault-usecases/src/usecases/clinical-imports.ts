@@ -386,7 +386,7 @@ function toClinicalImportError(error: unknown): never {
 function historyBase(
   vault: string,
   payload: z.infer<typeof commonEventPayloadSchema>,
-): Omit<AppendHistoryEventInput, 'kind'> {
+) {
   return compactObject({
     vaultRoot: vault,
     eventId: payload.eventId,

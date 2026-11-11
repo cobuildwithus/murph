@@ -2054,3 +2054,9 @@ tracks combined verification and release of prompt checkpointing and unique fore
 App image sizing and native decoding proof: [image sizing plan](exec-plans/completed/2026-11-10-game-image-right-sizing.md). The media contract remains in `../ARCHITECTURE.md`.
 
 Frog backlog resolution and verification: [execution record](exec-plans/completed/2026-11-10-frog-backlog.md).
+
+Canonical outcome authority, runtime loader reduction and retired inbox configuration
+are recorded in [the simplification plan](exec-plans/completed/2026-11-10-simplify-canonical-state.md).
+Current compatibility gates remain in `../packages/core/README.md` and
+`../packages/inbox-services/README.md`; loader boundaries remain in
+`../packages/vault-usecases/README.md`.

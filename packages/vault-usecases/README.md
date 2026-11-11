@@ -52,6 +52,16 @@ the one bundled graph (`VAULT_CLI_BUNDLE_RUNTIME_IMPORT_SPECIFIERS` in
 there when a command starts loading another runtime module by name. Core's
 manifest and emitted entry ship together in the runner artifact.
 
+The integrated core loader uses a literal dynamic import and the core owner's
+exported TypeScript signatures; the native module cache owns reuse. It does not
+maintain a second module promise or require unrelated repair exports before a
+command can execute. The combined runtime simply composes the existing core and
+query loaders without caching another object. Query retains its shared promise
+for its established cold-import timing span, and the public service factory
+retains one instance per dependency set. Unwired services have one public owner;
+they do not construct integrated services. Other by-name loaders keep the bundled
+runtime-import seam described above.
+
 Experiment progress and outcome analysis share one canonical evidence snapshot
 through `readExperimentQuerySource()`, deriving the selected metrics without
 rebuilding the global query/search database. Outcome persistence keeps evidence

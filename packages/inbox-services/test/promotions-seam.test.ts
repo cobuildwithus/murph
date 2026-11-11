@@ -40,7 +40,6 @@ import {
   resolveExperimentPromotionTarget,
   resolvePromotionAttachmentFilePath,
 } from '../src/inbox-services/promotions.ts'
-import { ensureConfigFile } from '../src/inbox-services/state.ts'
 
 const tempRoots: string[] = []
 
@@ -60,7 +59,6 @@ async function createTempVault(): Promise<RuntimePaths> {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-inbox-promotions-'))
   tempRoots.push(vaultRoot)
   const paths = resolveRuntimePaths(vaultRoot)
-  await ensureConfigFile(paths, [])
   return paths
 }
 
