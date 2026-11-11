@@ -2063,3 +2063,5 @@ tracks combined verification and release of prompt checkpointing and unique fore
 App image sizing and native decoding proof: [image sizing plan](exec-plans/completed/2026-11-10-game-image-right-sizing.md). The media contract remains in `../ARCHITECTURE.md`.
 
 Frog backlog resolution and verification: [execution record](exec-plans/completed/2026-11-10-frog-backlog.md).
+
+Invite phone-code lifecycle retirement is owned by [hosted authentication migration](../docs/hosted-auth-migration.md#retired-invite-phone-code-lifecycle); the [execution plan](exec-plans/active/2026-11-10-simplify-auth-lifecycle.md) records validation and remaining audit dispositions.

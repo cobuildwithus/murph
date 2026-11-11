@@ -423,7 +423,7 @@ async function createFixture(input: { channel?: "linq" | "telegram"; kind?: Offe
     } else {
       await tx.hostedMemberIdentity.create({ data: {
         ...await buildHostedMemberIdentityPrivateColumns({ memberId, phoneNumber: handle, prisma: tx,
-          signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }),
+          signupPhoneNumber: null }),
         memberId, phoneLookupKey: createHostedPhoneLookupKey(handle), phoneNumberVerifiedAt: postedAt,
       } });
     }
