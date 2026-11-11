@@ -7,11 +7,10 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
 import { initializeVault } from '@murphai/core';
-import { createHostedAssistantTurnEnvironment } from '@murphai/assistant-runtime/hosted-invocation-testkit';
+import { buildHostedCodexConfigToml, createHostedAssistantTurnEnvironment } from '@murphai/assistant-runtime/hosted-invocation-testkit';
 import { sendAssistantNotificationLocal } from '@murphai/assistant-engine/assistant-service';
 import { stopWarmCodexAppServer } from '@murphai/assistant-engine/assistant-codex';
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend';
-import { buildMurphHostedPermissionProfileTomlLines } from '@murphai/hosted-execution/assistant-permissions';
 import { listAssistantOutboxIntents } from '@murphai/assistant-engine/assistant-outbox';
 import { createHostedRecapFixture } from './helpers/recap-show-fixture.js';
 import { buildAssistantProviderMurphToolCall, buildAssistantProviderShellCommandCall, startAssistantProviderStubServer, readHostedLocalAssistantProviderToolOutputs, type HostedLocalAssistantProviderScriptedResponse } from './helpers/hosted-local-e2e-support.js';
@@ -91,10 +90,11 @@ it.each([false, true])('accepts a recap show through the production hosted Linux
     await mkdir(path.join(vault, 'games'), { recursive: true });
     await writeFile(path.join(vault, 'games/lore-0123456789abcdef0123456789abcdef.md'), '# Synthetic game lore\n');
     await writeFile(path.join(home, 'config.toml'), [
-      'model = "gpt-6.1-sol"', 'model_provider = "hosted-openai"', 'approval_policy = "never"', 'sandbox_mode = "workspace-write"', 'allow_login_shell = false',
       `model_catalog_json = "/usr/local/share/murph/codex-model-catalog.openai-flex.json"`,
-      '[model_providers.hosted-openai]', 'name = "Synthetic loopback"', `base_url = "http://127.0.0.1:${address.port}/v1"`, 'env_key = "OPENAI_API_KEY"', 'wire_api = "responses"', 'requires_openai_auth = false', 'request_max_retries = 0', 'stream_max_retries = 0',
-      ...buildMurphHostedPermissionProfileTomlLines(),
+      buildHostedCodexConfigToml({
+        exposeSpawnAgentModelOverrides: false, model: 'gpt-6.1-sol', reasoningEffort: 'low',
+        provider: { id: 'hosted-openai', name: 'Synthetic loopback', baseUrl: `http://127.0.0.1:${address.port}/v1`, envKey: 'OPENAI_API_KEY', wireApi: 'responses', supportsWebSockets: false },
+      }),
     ].join('\n'));
     const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: '/usr/local/bin/codex', codexHome: home, model: 'gpt-6.1-sol', modelProvider: 'hosted-openai', provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' });
     if (!target) throw new Error('Expected synthetic target.');
