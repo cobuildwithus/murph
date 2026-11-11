@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import sharp from 'sharp'
 import type { RecapMaterial, RecapTranscriptMessage } from '@murphai/contracts/recap-material'
-import { inspectRecapProviderRequest, recapReservationMicrodollars, reserveRecapOperation, type RecapAdmissionState, type RecapProviderRequest } from '@murphai/contracts/recap-admission'
+import { inspectRecapProviderRequest, recapReservationMicrodollars, reserveRecapOperation, RECAP_DEADLINE_MS, type RecapAdmissionState, type RecapProviderRequest } from '@murphai/contracts/recap-admission'
 import { gameRecapDraftSchema, recapFileReceiptSchema, type GameRecapDraft, type RecapFileReceipt } from '@murphai/contracts/recap-show'
 import type { HostedGameToolResponse, HostedRuntimeGroupToolRequest } from '@murphai/hosted-execution/runtime-control'
 
@@ -38,7 +38,7 @@ export async function createRecapShowLiveProviders(input: {
     at: new Date(Date.now() - 86_400_000 + index * 1000).toISOString(), source: 'player', laneSeq: String(index + 1) }))
   const image = await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="768" height="1024"><rect width="768" height="1024" fill="#2d3436"/><path d="M0 0H768V250Q384 80 0 250Z" fill="#9e5743"/><rect x="100" y="780" width="568" height="80" fill="#d4c4a8"/><circle cx="260" cy="490" r="70" fill="#d4c4a8"/><circle cx="510" cy="490" r="70" fill="#7a8c6e"/><path d="M180 780V600H340V780M430 780V600H590V780" fill="#d4c4a8"/></svg>')).jpeg().toBuffer()
   const song = await readFile(new URL('../../../../fixtures/generated-audio/recap-synthetic-20s.mp3', import.meta.url))
-  let state: RecapAdmissionState = { v: 1, deadline: new Date(Date.now() + 600_000).toISOString(), runs: [], operations: [] }
+  let state: RecapAdmissionState = { v: 1, deadline: new Date(Date.now() + RECAP_DEADLINE_MS).toISOString(), runs: [], operations: [] }
   const reservations = new Map<string, { id: string; descriptor: RecapProviderRequest; consumed: boolean }>()
   const receipts = new Map<string, RecapFileReceipt>()
   const staged = new Set<string>()
@@ -64,7 +64,7 @@ export async function createRecapShowLiveProviders(input: {
       const descriptor = command.providerRequest
       if (descriptor.kind === 'image' && (command.referenceIds ?? []).some((id, index) => !photos.has(id) || hash(photos.get(id)!) !== descriptor.referenceHashes[index])) throw new Error('Unapproved synthetic photo.')
       state = reserveRecapOperation(state, { id: command.operationId, runId: command.runId, request: descriptor,
-        reserved: recapReservationMicrodollars(descriptor, 20_000), now: new Date() })
+        reserved: recapReservationMicrodollars(descriptor), now: new Date() })
       const token = hash(command.operationId)
       reservations.set(token, { id: command.operationId, descriptor, consumed: false })
       recapGame = { token, deadline: state.deadline }

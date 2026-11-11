@@ -48236,6 +48236,9 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       expect(intents[0]?.media ?? []).toEqual([])
       if (mediaJourney) {
         expect(providers.providerCalls.some(call => call.kind === 'image')).toBe(true)
+        for (const call of providers.providerCalls.filter(call => call.kind === 'image')) {
+          expect(call).toMatchObject({ quality: 'high', size: '1024x1536' })
+        }
         expect(providers.providerCalls.filter(call => call.kind === 'song')).toHaveLength(1)
         const actions = readCapabilityRoutingActions(events)
         const previews = actions.filter(action => action.kind === 'dynamic' && /(?:^|[.])preview_recap$/u.test(action.tool) && action.success)

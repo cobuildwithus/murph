@@ -478,13 +478,13 @@ const generateImageArgumentsSchema = z
     alt: z.string().trim().min(1).max(500).nullable().default(null),
     outputFormat: z.enum(['webp', 'png', 'jpeg']).default('webp'),
     prompt: z.string().trim().min(1).max(4000),
-    quality: z.enum(['low', 'medium', 'high']).default('medium'),
+    quality: z.enum(['low', 'medium', 'high']).optional(),
     referenceImageRefs: z
       .array(z.string().trim().min(1).max(1024))
       .max(16)
       .describe(GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION)
       .default([]),
-    size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
+    size: z.enum(['1024x1024', '1024x1536', '1536x1024']).optional(),
     message_ref: z.string().regex(
       new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
     ).optional(),
@@ -7574,7 +7574,8 @@ function parseGenerateImageArguments(
   }
   const { message_ref: messageRef, ...args } = parsed.args
   return {
-    args,
+    args: { ...args, quality: args.quality ?? (args.output === 'file' ? 'high' : 'medium'),
+      size: args.size ?? (args.output === 'file' ? '1024x1536' : '1024x1024') },
     ...(messageRef ? { messageRef } : {}),
     ok: true,
   }

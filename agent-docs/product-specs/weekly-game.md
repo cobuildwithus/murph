@@ -581,16 +581,22 @@ resulting avatar. No private photo is shared with the subject or other players.
   behavior below. The [presentation contract](../references/recap-show-contract.md)
   owns the stable synthetic native fixtures and media authentication.
   Failed scenes preserve setup and payoff; failed songs disappear. After two
-  exhausted attempts or the ten-minute deadline, trusted code validates and seals
+  exhausted attempts or the twenty-minute deadline, trusted code validates and seals
   a plain three-page fallback from canonical facts. Revocation ends without save
   or send. An accepted recap is replayed without further generation.
 
   Activation order: apply the retirement and admission migrations, deploy the Web
   control/storage consumers, deploy the Worker egress fence and runtime image,
   ship the native decoder/player, then enable all pair shows. Keep the flag off
-  through incompatible producer/consumer skew. Set
-  `MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING` only to a verified provider-wide bound
-  for the permitted photo edits; absent verification, these requests fail closed.
+  through incompatible producer/consumer skew. Cover and scene files default to
+  high quality at 1024×1536. Each generation allows six image attempts, two images
+  concurrently, one song, and $3.00 in prospective reservations. All references
+  fit within 1024×1024 before upload. Admission defaults to 36,847 input tokens
+  for photo edits, using the conservative legacy high-fidelity estimate documented
+  in the plan's amendment 19; Flare publishes no equivalent input-token guarantee.
+  `MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING` is an optional total-input override.
+  Ordinary Responses and Live traffic bypass recap admission; paid media alone
+  consults it. Recap turns disable Codex's native image tool.
   `MURPH_GAME_RECAP_MEDIA_VISIBLE=false` hides generated media and cover previews;
   it does not remove readable text. `MURPH_GAME_RECAP_MEDIA_DIR` is local-test
   storage only. Once envelopes exist, retain compatible readers on rollback.

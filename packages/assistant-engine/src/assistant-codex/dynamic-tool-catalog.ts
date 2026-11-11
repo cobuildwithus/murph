@@ -405,12 +405,12 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
       size: {
         type: 'string',
         enum: ['1024x1024', '1024x1536', '1536x1024'],
-        default: '1024x1024',
+        description: 'Defaults to 1024x1536 portrait for file output and 1024x1024 for chat output.',
       },
       quality: {
         type: 'string',
         enum: ['low', 'medium', 'high'],
-        default: 'medium',
+        description: 'Defaults to high for file output and medium for chat output.',
       },
       outputFormat: {
         type: 'string',

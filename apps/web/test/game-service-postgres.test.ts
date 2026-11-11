@@ -654,19 +654,22 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       const { prepareRecapSubmission, stageRecapSubmissionFile } = await import("@/src/lib/game/recap-submission");
       const sharp = (await import("sharp")).default;
       const bytes = await sharp({ create: { width: 2, height: 2, channels: 3, background: "#abcdef" } }).jpeg().toBuffer();
+      const largePhoto = await sharp({ create: { width: 3072, height: 4096, channels: 3, background: "#abcdef" } }).jpeg().toBuffer();
       for (const player of [a, b]) {
-        const key = await putGameMedia({ bytes, contentType: "image/jpeg", prefix: mediaKeyPrefixFor(player) });
+        const key = await putGameMedia({ bytes: largePhoto, contentType: "image/jpeg", prefix: mediaKeyPrefixFor(player) });
         await db.gameProfile.update({ where: { memberId: player }, data: { photoKey: key } });
       }
       const material = (await readGameRecapMaterial(gameId, room, [a, b], eventId))!;
       const { readRecapSourceReferences, readRecapReferenceBytes } = await import("@/src/lib/game/recap-inputs");
       const references = (await readRecapSourceReferences(material, eventId)).filter(ref => ref.kind === 'profile');
-      const referenceHashes = await Promise.all(references.map(async ref => (await readRecapReferenceBytes(ref))!.hash));
-      vi.stubEnv('MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING', '20000');
+      const normalized = await Promise.all(references.map(async ref => (await readRecapReferenceBytes(ref))!));
+      expect(normalized.map(ref => [ref.width, ref.height])).toEqual([[768, 1024], [768, 1024]]);
+      const referenceHashes = normalized.map(ref => ref.hash);
+      vi.stubEnv('MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING', undefined);
       const identity = { memberId: room, runtimeIdentity: null, gameId, eventId }, runId = randomUUID();
       await handleRecapAdmission({ ...identity, material, command: { kind: "admit", runId } });
       const providerRequest = { kind: "image" as const, model: "gpt-image-2.6-flare" as const, requestHash: "a".repeat(64),
-        promptBytes: 300, size: "1024x1024" as const, quality: "low" as const, outputFormat: "jpeg" as const, referenceHashes };
+        promptBytes: 300, size: "1024x1536" as const, quality: "high" as const, outputFormat: "jpeg" as const, referenceHashes };
       const command = { kind: "reserve" as const, runId, operationId: "synthetic-cover", providerRequest, referenceIds: references.map(ref => ref.id) };
       const concurrent = await Promise.allSettled([handleRecapAdmission({ ...identity, material, command }), handleRecapAdmission({ ...identity, material, command })]);
       expect(concurrent.filter(item => item.status === "fulfilled")).toHaveLength(1);
@@ -689,6 +692,19 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       const { createHash } = await import("node:crypto");
       const receipt = { operationId: command.operationId, path: ".runtime/tmp/recap/synthetic/media/cover.jpg", hash: createHash("sha256").update(bytes).digest("hex"), mediaType: "image/jpeg" as const, byteLength: bytes.length, width: 2, height: 2 };
       await handleRecapAdmission({ ...identity, material, command: { kind: "finished", operationId: command.operationId, token, receipt } });
+      // Exercise persisted admission through all six images and the song: the
+      // storage decoder must continue accepting the expanded operation history.
+      for (let index = 1; index <= 6; index++) {
+        const operationId = `synthetic-extra-${index}`;
+        const nextRequest = index === 6 ? { kind: "song" as const, model: "music_v2" as const,
+          requestHash: "c".repeat(64), promptBytes: 200, durationMs: 20_000 as const } : providerRequest;
+        const next = await handleRecapAdmission({ ...identity, material, command: { kind: "reserve", runId, operationId,
+          providerRequest: nextRequest, referenceIds: nextRequest.kind === "image" ? command.referenceIds : [] } });
+        if (!next || typeof next !== "object" || !("token" in next) || typeof next.token !== "string") throw new Error("Missing media reservation.");
+        expect(await consumeRecapProviderReservation({ memberId: room, runtimeIdentity, token: next.token, providerRequest: nextRequest })).toEqual({ scoped: true, allowed: true });
+        await handleRecapAdmission({ ...identity, material, command: { kind: "finished", operationId, token: next.token } });
+      }
+      await expect(handleRecapAdmission({ ...identity, material, command: { ...command, operationId: "seventh-image" } })).rejects.toThrow("attempt limit");
       const files = [{ slot: "scene-0", receipt }];
       await prepareRecapSubmission({ ...identity, draft: { story: recap, files } });
       await expect(prepareRecapSubmission({ ...identity, draft: { story: { ...recap, chatLine: "Changed" }, files } })).rejects.toThrow("frozen");

@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import type { RecapReference } from "@murphai/contracts/recap-material";
+import { RECAP_REFERENCE_MAX_EDGE } from "@murphai/contracts/recap-admission";
 import { getPrisma } from "../prisma";
 import { readGameMedia } from "./media";
 import type { readGameRecapMaterial } from "./service";
@@ -42,7 +43,7 @@ export async function readRecapReferenceBytes(reference: RecapSourceReference) {
   const source = reference.kind === "murph" ? await readApprovedRecapCharacterSheet() : (await readGameMedia(reference.key))?.bytes;
   if (!source) return null;
   const bytes = await sharp(source, { limitInputPixels: 40_000_000 }).rotate()
-    .resize({ width: 1024, height: 1024, fit: "inside", withoutEnlargement: true })
+    .resize({ width: RECAP_REFERENCE_MAX_EDGE, height: RECAP_REFERENCE_MAX_EDGE, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 85 }).toBuffer();
   const metadata = await sharp(bytes).metadata();
   return { id: reference.id, bytes: bytes.toString("base64"), hash: digest(bytes), mediaType: "image/jpeg" as const,

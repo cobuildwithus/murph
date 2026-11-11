@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import * as z from '@murphai/contracts/zod-runtime';
 import { recapAssetSchema, recapFileReceiptSchema } from '@murphai/contracts/recap-show';
-import { RECAP_DEADLINE_MS, RECAP_MEDIA_PRICING_VERSION, recapReservationMicrodollars, reserveRecapOperation, type RecapProviderRequest } from '@murphai/contracts/recap-admission';
+import { RECAP_DEADLINE_MS, RECAP_IMAGE_ATTEMPTS, RECAP_MEDIA_PRICING_VERSION, recapReservationMicrodollars, reserveRecapOperation, type RecapProviderRequest } from '@murphai/contracts/recap-admission';
 import type { HostedGameToolRequest } from '@murphai/hosted-execution/runtime-control';
 import { getPrisma } from '../prisma';
 import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from '../hosted-execution/runtime-owner';
@@ -22,7 +22,7 @@ export const storedRecapAdmissionSchema = z.object({ v: z.literal(1), deadline: 
   operations: z.array(z.object({ id: z.string(), kind: z.enum(['image', 'song']), requestHash: digest,
     reserved: z.number().int(), active: z.boolean(), consumed: z.boolean(), tokenHash: digest,
     pricing: z.literal(RECAP_MEDIA_PRICING_VERSION), referenceIds: z.array(digest), references: recapAssetSchema.shape.references,
-    receipt: recapFileReceiptSchema.optional() }).strict()).max(5) }).strict();
+    receipt: recapFileReceiptSchema.optional() }).strict()).max(RECAP_IMAGE_ATTEMPTS + 1) }).strict();
 export type StoredRecapAdmission = z.infer<typeof storedRecapAdmissionSchema>;
 type Identity = { memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; gameId: string; eventId: string };
 type Control = NonNullable<Extract<HostedGameToolRequest, { action: 'read_game' }>['recapRead']>;

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
-import { inspectRecapProviderRequest } from '@murphai/contracts/recap-admission'
+import { inspectRecapProviderRequest, RECAP_FINALIZATION_MS, RECAP_REFERENCE_MAX_COUNT } from '@murphai/contracts/recap-admission'
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
 import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
 import type { GenerateSongToolArgs } from '../assistant-codex/generate-voice-memo-tool.js'
@@ -42,14 +42,14 @@ export function createRecapMediaRuntime(input: {
 }): GeneratedMediaFileRuntime {
   const operationId = input.request.args.operationId
   if (!operationId || !/^[a-zA-Z0-9_-]{1,80}$/u.test(operationId)) throw new TypeError('Use a stable operationId for file output.')
-  if (input.request.kind === 'image' && (input.request.args.quality === 'high' || input.request.args.outputFormat !== 'jpeg')) throw new TypeError('Recap file images require low/medium quality and JPEG output.')
+  if (input.request.kind === 'image' && input.request.args.outputFormat !== 'jpeg') throw new TypeError('Recap file images require JPEG output.')
   if (input.request.kind === 'song' && input.request.args.durationSeconds !== 20) throw new TypeError('Recap songs are twenty seconds.')
   const origin = { kind: 'game_recap' as const, gameId: input.scope.gameId, eventId: input.scope.eventId }
   const referenceIds = input.request.kind === 'image' ? [...(input.request.args.referenceImageRefs ?? [])] : []
-  if (referenceIds.length > 3 || new Set(referenceIds).size !== referenceIds.length) throw new TypeError('Use up to three distinct authorized reference IDs.')
+  if (referenceIds.length > RECAP_REFERENCE_MAX_COUNT || new Set(referenceIds).size !== referenceIds.length) throw new TypeError('Use up to three distinct authorized reference IDs.')
   let token: string | null = null
   let finished = false
-  const remaining = Date.parse(input.admission.deadline) - Date.now() - 30_000
+  const remaining = Date.parse(input.admission.deadline) - Date.now() - RECAP_FINALIZATION_MS
   const signal = remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort(new Error('Recap generation deadline reached.'))
   return {
     signal,

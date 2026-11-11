@@ -16,7 +16,7 @@ Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the own
 
 10. **Checkout evidence:** the supplied checkout was on `fable/recap-show-01-contracts`, at the same head as `fable/recap-show`. PR A branches from that head as requested; no base update or other worktree mutation is needed.
 
-11. **Prospective image cost:** current official Flare documentation provides output-token calculation but no guaranteed total input-token ceiling for photo edits. Reference-bearing paid requests fail closed unless `MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING` supplies a separately verified provider ceiling for the allowed request. Charge all those input tokens at the higher uncached image rate. Synthetic providers can establish their own bounded test ceiling; this is not rollout evidence for a real provider. Text-only images use the UTF-8 prompt-byte bound. Sources: https://developers.openai.com/api/docs/guides/image-generation#calculating-costs and https://developers.openai.com/api/docs/guides/images-vision#calculating-costs .
+11. **Prospective image cost (superseded by amendment 19):** current official Flare documentation provides output-token calculation but no guaranteed total input-token ceiling for photo edits. Reference-bearing paid requests fail closed unless `MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING` supplies a separately verified provider ceiling for the allowed request. Charge all those input tokens at the higher uncached image rate. Synthetic providers can establish their own bounded test ceiling; this is not rollout evidence for a real provider. Text-only images use the UTF-8 prompt-byte bound. Sources: https://developers.openai.com/api/docs/guides/image-generation#calculating-costs and https://developers.openai.com/api/docs/guides/images-vision#calculating-costs .
 12. **Provider scope survives game deletion:** add a nullable scope to the existing runtime owner, cleared by trusted turn finalization or invocation turnover. A GameEvent-only scope would disappear with its game FK and permit an unscoped provider request after deletion. The budget and operation receipts remain GameEvents; there is no new scheduler or process owner.
 13. **Committed replies:** the canonical committed Murph replies live in the owning room's assistant transcript, not Web mailbox ingress. Export those locally alongside server-paginated player ingress. The existing server quote policy quotes players only and validates against that same canonical ingress. Report any trimmed reply history as a gap.
 
@@ -26,6 +26,9 @@ Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the own
 17. **Authorized checkout handoff:** the owner moved the complete working tree and commit snapshots into a checkout created by `scripts/create-worktree`, on `fable/recap-show-pr-a`. Create the seven commits there, prove the committed tree matches the transferred files, then rebase onto fetched `origin/main` and repeat focused verification. Leave the original checkout untouched and do not push.
 
 18. **Media-only provider admission (parent review):** remove the recap admission round trip from ordinary Responses POSTs, websocket GET upgrades and Live creation/attachment. Only image endpoint POSTs, Responses POSTs requesting native image generation and ElevenLabs requests consult admission. Disable `features.image_generation` in the trusted recap turn configuration; keep ordinary native transport selection. Existing provider authorization and image subscription checks retain their owners. Deterministic tests simulate admission failure and require zero admission calls for ordinary model and Live traffic.
+
+19. **Reference input estimate without a required env (parent review):** the existing authorized reference exporter already rotates and resizes every player photo and the Murph sheet to fit 1024×1024, without enlargement, before hashing/upload. Share that bound with admission. With at most three references and a 16,384-byte prompt, use a default total input estimate of `16,384 + 3 × (65 + 129 × ceil(1024/512)^2 + 6,240) = 36,847` tokens, all charged at $8/million for reference requests. The optional `MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING` overrides that estimate. Missing configuration no longer rejects photos. **Evidence limit:** the current official [vision guide](https://developers.openai.com/api/docs/guides/images-vision#gpt-image-model-inputs) labels this high-fidelity accounting as legacy GPT Image 1; it publishes no equivalent Flare input formula. Deliberately omit the legacy shortest-side downscale and use the larger fidelity surcharge. This is a conservative estimate, not a provider-guaranteed Flare worst-case ceiling; the requested Flare-specific derivation remains unverified. The default is chosen to fulfill the owner's zero-new-env direction while exposing that limitation, instead of silently treating legacy documentation as a modern guarantee.
+20. **Quality and time budget (parent review):** file images default to high quality at 1024×1536, including cover and scenes; ordinary chat images keep medium/square defaults. Allow six image attempts, two concurrent images, one twenty-second song and $3.00 prospective reservations. Expand the stored operation bound to seven. The official [GPT-Image-2.6 output calculator](https://developers.openai.com/api/docs/guides/image-generation#calculating-costs) uses a high-quality long axis of 48 and multiplier 1 (1,372 output tokens at portrait size). Raise the generation deadline from ten to twenty minutes, retaining thirty seconds for finalization. The prior synthetic live run took 79.59 seconds with mocked media; it does not measure real high-quality rendering. Conservative timing is three two-image waves at the existing 240-second image timeout, plus the existing 300-second song timeout, plus 80 seconds of authoring and 30 seconds of finalization: 1,130 seconds, below 1,200. The hosted notification uses the default service tier (the separate ten-minute Flex deadline does not apply); Codex waits for turn completion, and hosted workspace runtime rejects configured maxRuntimeMs budgets rather than imposing a shorter one. No hosted deadline/configuration is extended. Preserve cancellation from the owning runtime.
 
 ## PR A execution
 
@@ -57,9 +60,8 @@ publish the member-facing entry when the native consumer and show flag ship.
 
 Deployment order: schema migrations, compatible Web control/storage consumers,
 Worker and runtime producers, then iOS; only then enable
-`MURPH_GAME_RECAP_SHOW_ENABLED=true` for pairs. Reference edits additionally need
-a verified `MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING`. The synthetic test ceiling is
-not suitable rollout evidence. `MURPH_GAME_RECAP_MEDIA_VISIBLE=false` hides media
+`MURPH_GAME_RECAP_SHOW_ENABLED=true` for pairs. Reference edits use the bounded reference estimate in amendment 19;
+`MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING` is an optional operator override. `MURPH_GAME_RECAP_MEDIA_VISIBLE=false` hides media
 and cover previews without deleting readable stories. `MURPH_GAME_RECAP_MEDIA_DIR`
 is a local test storage override. The separate authorized rollout regenerates
 the three settled pair games after verification; this task performs none of it.
@@ -79,7 +81,7 @@ paths. Rebase conflicts were confined to the documentation index, preserving
 both the upstream reminder entry and recap presentation entry. The original
 checkout remains untouched. Required remote CI and final ReviewGPT await a
 separately authorized pushed candidate. Product rollout status: Hold pending
-native consumer, verified provider input ceiling and those completion gates.
+native consumer and those completion gates; the Flare input estimate remains a disclosed evidence limit.
 
 ## Plan
 
