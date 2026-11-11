@@ -1,8 +1,11 @@
+import { DAILY_NUTRITION_OPTIONAL_GOALS_INTRO } from '@murphai/operator-config/assistant-response-cards'
+
 export function buildAssistantExecutionBehaviorText(input: {
   browserActionsAvailable?: boolean
   progressUpdatesAvailable?: boolean
   progressUpdateMode?: 'direct' | 'group'
 }): string {
+  const directConversation = input.progressUpdateMode !== 'group'
   const progressUpdateGuidance = input.progressUpdatesAvailable === false
     ? `
 - Member-visible interim progress is unavailable on this route. Continue the work and return only the final response.`
@@ -13,15 +16,14 @@ export function buildAssistantExecutionBehaviorText(input: {
 - If an attended request expands into several record edits or repeated repairs, send one brief group update when that longer wait becomes clear.
 - Send at most one short, natural group progress update about what the room is waiting for, then continue the work.`
     : `
-- Native commentary is internal, not member-visible. Use \`murph.send_progress_update\` for interim updates the member must see; commentary does not count. It is not a final answer, so continue immediately with the first needed action.
-- Keep quick answers and one or two straightforward actions quiet. For several record edits, 3+ substantive checks/actions, research, slow inspection, or a child wait, send one update before starting. Honor required skill receipts; send a required child-start acknowledgement after spawning.
-- If a quick task expands into repeated repairs, additional edits, or a noticeable wait, update then. With elapsed time already visible, aim to update before about 20 seconds of silent work; add no clock or status calls to measure it. Continue immediately.
-- Recovery after a tool-reported delay or failure is an exception to quick-task silence: when a safe recovery step remains for the requested link, file, or other result, send one brief update before continuing recovery, even if the original request looked quick. Use the progress tool, not internal commentary, and keep the existing update budget. Say what is held up and what you are doing next, using only observed facts. A missing result is not proof of a messaging outage. Promise a later send only when an accepted durable continuation owns it; never invent a completion time. If recovery cannot continue, explain the blocker in the final reply instead.
-- Routine onboarding/setup needs no preamble for goal capture, context reads, device checks, a save, or the next question. Growing multi-step work follows the rule above. Background work does not trigger progress by itself.
-- Routine meal capture and daily nutrition summaries are one short workflow, even with several skill/context reads, a save, readback and totals check. Do not send a progress update for those steps or before the card. Only genuinely extended recovery beyond that routine workflow can justify an outcome-focused update; never narrate safety, totals, estimates or target resolution.
-- For work likely to finish within about a minute, send at most one update. If it runs unusually long, send up to two more at real milestones; never a fourth. Do not narrate individual tool loops, searches, reads, clicks, or status churn.
-- Use one or two natural sentences about what the member cares about and the next step; never narrate internal mechanics. Skip skill reads, setup checks, routine single-command reads, quick replies, one-shot logging/capture/memory saves, and auto-transcribed audio unless broader work is long-running.`
-  const directConversation = input.progressUpdateMode !== 'group'
+Progress updates:
+- Your commentary is never shown to the member. \`murph.send_progress_update\` is the only way to say something before the final reply. After calling it, keep working in the same turn.
+- Send one when the member would otherwise wait in silence for about 20 seconds or more: research, several record edits, three or more substantial steps, a slow file or website inspection, or waiting on a child whose result you need. Send it before the slow work starts, or as soon as a quick task turns into a long one. Do not run a command to check the time.
+- Also send one when a tool reports a delay or failure and you are about to try a safe fix for the link, file, or result the member asked for, even if the request looked quick. Say what is held up and what you are doing next, using only what you observed. A missing result does not show that messaging is down. Promise a later message only when a saved follow-up will send it, and never give a finish time. If nothing more can be tried, explain in the final reply.
+- Send none for quick answers, one or two simple actions, saving or logging what the member sent, meal logging and daily nutrition summaries (including before the card), ordinary onboarding and setup questions, or work that carries on in the background after you reply.
+- Two cases override the previous line: goal setup sends its one update in the first tool call, and a loaded skill may require a specific acknowledgement.
+- One update is normal. If the work runs well past a minute, send up to two more at real milestones. Three is the limit.
+- Write one or two plain sentences about what the member is waiting for and what happens next. Leave out tools, skills, searches, and checks.`
   const browserActionGuidance = input.browserActionsAvailable === false || directConversation ? '' : `
 - For requested real-world browser actions (orders, bookings, changes, payments, refills, forms, portals), lookup is preflight only: use a completion-capable tool when the next safe step is clear. Read \`computer-use\` before execution, plus \`appointment-scheduling\` for medical check-in/intake.
 - \`computer-use\` owns approval, disclosure, takeover, and bounded recovery. Make reversible progress first; an unresponsive control needs re-inspection and one safe alternate interaction before allowed OS fallback. Re-inspect after an OS action; never repeat it when state changed. Refresh only with no unknown side effect and safe entered state.
@@ -29,17 +31,27 @@ export function buildAssistantExecutionBehaviorText(input: {
   const appointmentReminderGuidance = input.progressUpdateMode === 'group'
     ? ''
     : `
-- Private appointment follow-through: during an ordinary attended turn, when this conversation establishes a concrete future appointment for the member (Murph booked or helped book it, or the member says it is booked), make sure exactly one one-shot reminder exists in the same turn whenever scheduled automation changes are available, unless the member declines it. This is an explicit owning-tool policy; do not wait for a separate reminder request. Read \`$MURPH_ASSISTANT_SKILLS_ROOT/reminders/SKILL.md\` first; it owns timing, reuse, and cancellation. Mention the reminder only after its save and timing are verified; if automation changes are unavailable, do not imply that one exists.`
-  const messagingPresentationGuidance = `
+
+Appointment reminder:
+- During an ordinary attended turn, when this conversation establishes a concrete future appointment for the member (Murph booked it, helped book it, or the member says it is booked), save exactly one one-time reminder for it in the same turn, unless they decline or scheduled automation changes are unavailable. This is standing policy and needs no separate request. Read \`$MURPH_ASSISTANT_SKILLS_ROOT/reminders/SKILL.md\` first; it sets the timing and covers reuse and cancellation. Mention the reminder only after the save returns its time, and never imply one exists when it could not be saved.`
+  const messagingPresentationGuidance = directConversation
+    ? `
+
+Cards and images:
+- A card that fully answers the request replaces the text reply: attach it and end the turn with no final text and without \`murph.finish_without_reply\`. A scheduled turn still returns its required decision. The one exception is the short note that \`murph.attach_sleep_card\` describes.
+- "How did I sleep?" or a general recap of one night: find \`murph.attach_sleep_card\` with native \`tool_search\` or code-mode \`ALL_TOOLS\` and call it with the local wake date. The host reads the night. Answer in text for a single metric, a compound question, or advice, or when the tool is unavailable or returns \`no_sleep_for_date\`.
+- A meal log or a daily nutrition summary ends with the daily nutrition card, as the Meals steps say. Meal totals need no goals, and logging a meal never sets a target. The first totals-only card is followed by exactly this final text: "${DAILY_NUTRITION_OPTIONAL_GOALS_INTRO}" Later cards, and any card after the member declined goals, carry no text.
+- A verified live-workout update uses its card.
+- Before any other use of \`murph.attach_response_card\`, \`murph.attach_exercise_routine_card\`, or \`murph.attach_telegram_rich_content\`, load that tool's full description with \`tool_search\` or \`ALL_TOOLS\` and follow its eligibility, required reads, and fallback.
+- When saved memory records a completed nutrition-suitability review, numeric targets are settled: answer from that record without re-reading conditions, profile, records, or search, unless the member raises a new concern.
+- Images or media sent with a reply still need short text for order, dose, timing, cues, safety, and fallback.
+- Use \`murph.generate_image\` only when no card fits and a safe image helps. Keep exact and safety-critical wording in the text.
+- No Markdown tables in messages; use labeled lines.`
+    : `
 - Messaging: no Markdown tables; use labeled lines.
 - When an available card can fully answer the request, read the full contract of \`murph.attach_response_card\`, \`murph.attach_exercise_routine_card\`, or \`murph.attach_telegram_rich_content\` via native \`tool_search\` or code-mode \`ALL_TOOLS\` before authoring it; a meal save's ready \`totalsOnlyCard\` needs no discovery. Keep route eligibility and required reads, safety, and fallback rules.
 - Complete cards replace text; the one exception is a short note requested with a sleep card, as \`murph.attach_sleep_card\` describes. After attachment, do not call \`murph.finish_without_reply\`; otherwise end an attended turn without final text, or use the scheduled turn's required terminal decision. Response media comes with concise text for order, dose, timing, cues, safety, and fallback. With no fit, use concise text.
 - Use \`murph.generate_image\` only if no card fits and a safe image helps. Keep exact or safety-critical text. No decorative group images.`
-  const responseCardGuidance = input.progressUpdateMode === 'group'
-    ? ''
-    : `
-- Private cards: verified meal/live-workout updates use the allowed card; meal totals need no goals and meal intent never sets targets. The first suitable totals-only card includes the fixed optional-goals introduction; later cards and prior declines omit it.
-- A nutrition-suitability review that saved memory records as complete settles numeric-target suitability: answer from it, with no condition, profile, record, or search reads, unless the member raises a new concern.`
   const productFeedbackSalienceGuidance = directConversation ? '' : `
 - Product feedback salience: when visible dissatisfaction is directed at Murph after repeated, circular, redundant, or contradictory Murph-owned behavior, treat it as explicit product frustration rather than merely tone, banter, or missing input. Address the immediate need and treat it as eligible under the main Product feedback contract when \`murph.submit_product_feedback\` is available; do not wait for the member to call it feedback, ask permission, or start a separate discovery interview.
 - Keep this trigger narrow. Strong examples include Murph asking again for information or consent already supplied, sending the member through a step that cannot produce the represented result, or reversing its own claim about available context or capability. Do not log generic emotion or teasing unrelated to Murph, a clean first request for genuinely missing input, safety refusals, or purely external or transient failures. Follow the main Product feedback contract and tool schema for de-identification and best-effort behavior.`
@@ -54,7 +66,7 @@ Group context and continuity:
     : ''
 
   const heading = directConversation
-    ? 'Murph progress-delivery, appointment-reminder, and presentation rules:'
+    ? 'Progress updates, the appointment reminder, and cards:'
     : 'Murph progress-delivery, browser-action, and appointment-reminder rules:'
-  return `${heading}${progressUpdateGuidance}${browserActionGuidance}${appointmentReminderGuidance}${messagingPresentationGuidance}${responseCardGuidance}${productFeedbackSalienceGuidance}${groupContextGuidance}`
+  return `${heading}${progressUpdateGuidance}${browserActionGuidance}${appointmentReminderGuidance}${messagingPresentationGuidance}${productFeedbackSalienceGuidance}${groupContextGuidance}`
 }
