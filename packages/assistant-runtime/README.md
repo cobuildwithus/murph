@@ -4,6 +4,13 @@ Workspace-private headless hosted/runtime surface for Murph assistant execution.
 
 This package exists so hosted runtimes such as `apps/cloudflare` do not need to import their execution seams directly from the public `@murphai/murph` CLI package.
 
+Background notifications yield at the existing delivery checkpoint before
+another automation decision or managed-automation setup. Queue-only cron work
+also yields after creating pending output. The existing outbox dispatch and
+retry owners record acceptance; later notifications derive bounded context
+from those receipts. Pending text never counts as a prior send, and a failed
+send creates no indefinite scheduling barrier.
+
 Stopping the active mailbox watcher cancels its system HTTP fetch, preserving
 the system watermark for retry. Conversation imports keep their completion
 boundary, and stop still joins in-flight canonical persistence or rollback.

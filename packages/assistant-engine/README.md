@@ -289,11 +289,25 @@ are usable.
 
 Detached `assistant.notification.requested` system events are a different kind
 of input, not a scheduled-turn profile. Without a valid occurrence they use one
-isolated output-only formatter with no history, private context, resume
+isolated output-only formatter with no ambient history, private context, resume
 mutation, tools, or network callbacks; the platform still owns delivery. The
 formatter uses a fresh ephemeral thread on the resident App Server. Its
 thread-local deny configuration does not change the ordinary process launch
 identity or persist a resumable notification thread.
+
+Optional notifications share accepted outbound context at the notification
+boundary, after audience resolution. The existing outbox route index supplies
+at most 100 candidates across sessions; the prompt includes at most 20 whole
+accepted text messages and 8,000 text characters from the exact destination,
+channel and direct/group scope. Reactions, vault-file deliveries and unaccepted
+output are excluded. This is quoted evidence, never instructions or proof of
+reading or completion. Omit only an already-covered person/task/occurrence;
+keep uncovered tasks, explicit repeats and necessary safety cues. Required,
+maintenance and special-profile notifications keep their existing contracts.
+No new history store or suppression state exists. Queue-only cron processing
+yields after one pending delivery so the existing checkpoint/dispatch owner
+can publish acceptance before another background decision. Failed or ambiguous
+transport stays with the outbox retry owner and does not block later passes.
 
 An authenticated current-sender private Assistant Ask completion is the narrow
 deterministic exception. It starts no formatter or provider turn and does not

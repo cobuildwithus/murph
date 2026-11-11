@@ -1,3 +1,4 @@
+import { notificationHistoryIntent } from './notification-history-fixtures.ts'
 import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath } from '@murphai/runtime-state/node'
 import { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import { REMINDER_LANGUAGE_CASES, runReminderLanguageJourney } from './support/reminder-language-journey.js'
@@ -50233,6 +50234,82 @@ describeRealCodex('ordinary input replay reminder journeys', () => {
       process.stdout.write(`[automation-input-replay-e2e] ${JSON.stringify({ journey: name, saves: saves.length, reply: result.finalMessage })}\n`)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+
+describeRealCodex('shared reminder awareness', () => {
+  it.each([
+    { name: 'private ordinary reminder shares sent context', evening: false, prior: 'sent', task: 'walk', skip: true, direct: true },
+    { name: 'evening after ordinary reminder', evening: true, prior: 'sent', task: 'walk', skip: true },
+    { name: 'ordinary after evening reminder', evening: false, prior: 'sent', task: 'walk', skip: true },
+    { name: 'partial coverage keeps another task', evening: true, prior: 'sent', task: 'walk and stretch', skip: false },
+    { name: 'requested repeat is preserved', evening: false, prior: 'sent', task: 'repeat', skip: false },
+    { name: 'pending reminder is not accepted', evening: false, prior: 'pending', task: 'walk', skip: false },
+    { name: 'different date is preserved', evening: false, prior: 'sent', task: 'tomorrow', skip: false },
+    { name: 'ordinary safety cue is preserved', evening: false, prior: 'sent', task: 'safety', skip: false },
+  ] as const)('shared reminder awareness: $name', async scenario => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-reminder-awareness-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameEveningCheckInInstructions, gameEveningCheckInPolicySchema } = await import('@murphai/hosted-execution/runtime-control')
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const threadIsDirect = 'direct' in scenario && scenario.direct
+      const prior = notificationHistoryIntent({ status: scenario.prior, threadIsDirect })
+      await saveAssistantOutboxIntent(workingDirectory, prior)
+      const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never',
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const date = '2030-03-04'
+      const tasks = [{ gameId: 'game_walk', task: 'a walk' },
+        ...(scenario.task === 'walk and stretch' ? [{ gameId: 'game_stretch', task: 'five minutes of stretching' }] : [])]
+      const eventId = `game-evening:synthetic-group:${date}`
+      const policy = gameEveningCheckInPolicySchema.parse({ kind: 'game_evening_check_in', roomId: 'synthetic-group',
+        eventId, date, expiresAt: '2030-03-04T20:30:00.000Z', conversationLaneSeq: '0',
+        batch: tasks.map(task => ({ gameId: task.gameId, termsVersion: 1, memberIds: ['player_ava'], dayIndex: 0 })) })
+      const instructions = scenario.evening
+        ? buildGameEveningCheckInInstructions({ date, transcript: [], players: [{ memberId: 'player_ava', playerName: 'Ava', tasks }] })
+        : scenario.task === 'repeat'
+          ? 'It is March 4, 2030 at 20:05 UTC. Ava explicitly requested a second reminder five minutes after the first even if unanswered. Remind her about her walk today.'
+          : scenario.task === 'tomorrow'
+            ? 'It is March 5, 2030 at 20:00 UTC. Ask Ava about her walk today, March 5.'
+            : scenario.task === 'safety'
+              ? 'It is March 4, 2030 at 20:05 UTC. The air-quality alert for the group area now advises avoiding outdoor exercise. Send one useful safety message to keep today’s walk indoors.'
+              : 'It is March 4, 2030 at 20:05 UTC. Ask Ava whether she is taking her walk today.'
+      const events: unknown[] = []
+      let providerRequests = 0
+      const result = await sendAssistantNotificationLocal({
+        actorId: null, bindingDeliveryTarget: 'synthetic-room', channel: 'linq', identityId: null,
+        deliveryTarget: 'synthetic-room', threadId: 'synthetic-room', threadIsDirect,
+        deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+        executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
+        instructions, responsePolicy: scenario.evening ? policy : { kind: 'allow_send_or_skip' },
+        ...(!scenario.evening ? { scheduledOccurrenceAt: scenario.task === 'tomorrow' ? '2030-03-05T20:00:00.000Z' : '2030-03-04T20:05:00.000Z' } : {}),
+        onTraceEvent: event => events.push(event.rawEvent),
+        onProviderRequestStarted: () => { providerRequests += 1 },
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: scenario.evening ? 'manual-deliver' : 'automation-cron', vault: workingDirectory, workingDirectory,
+      })
+      const newIntents = (await listAssistantOutboxIntents(workingDirectory)).filter(intent => intent.intentId !== prior.intentId)
+      expect(providerRequests).toBe(1)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
+      expect(result.decision.kind).toBe(scenario.skip ? 'skip' : 'send_message')
+      expect(newIntents).toHaveLength(scenario.skip ? 0 : 1)
+      if (scenario.skip) expect(result.response).toBeNull()
+      else {
+        expect(newIntents[0]!.message).toBe(result.response)
+        expect(result.response).not.toMatch(/you (?:already )?(?:completed|finished)|you(?:'ve| have) already|outbox|receipt|automation|game_/iu)
+        expect(result.response).toMatch(scenario.task === 'walk and stretch' ? /stretch/iu : scenario.task === 'safety' ? /indoors?|inside/iu : /walk/iu)
+        if (scenario.task === 'walk and stretch') expect(result.response).not.toMatch(/walk/iu)
+      }
+      if (scenario.evening) expect(readCapabilityRoutingActions(events)).toEqual([])
+      process.stdout.write(`[reminder-awareness] ${JSON.stringify({ scenario: scenario.name, decision: result.decision.kind, reply: result.response, sends: newIntents.length, providerRequests })}\n`)
+    } finally {
+      await stopWarmCodexAppServer('reminder-awareness-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }
   }, 360_000)
 })

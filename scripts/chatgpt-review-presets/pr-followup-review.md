@@ -15,8 +15,13 @@ working-tree changes.
 - Any other pairing or missing required evidence is `INVALID`.
 
 Verify claimed corrections and label each remaining finding by its actual cause:
-`ORIGINAL_PR` or `REVIEW_INDUCED`. Report a qualifying original finding encountered
-in a directly affected path without expanding the correction review's scope.
+`ORIGINAL_PR` or `REVIEW_INDUCED`. Use `ADJACENT_EXISTING` for material
+pre-existing simplification in the connected architecture, with concrete
+removable complexity, preserved behavior, and proportionate implementation and
+verification cost. In correction rounds, keep this inspection within the
+remediation's directly affected flow; do not reopen an unchanged subsystem audit.
+Report a qualifying finding encountered in a directly affected path without
+expanding the correction review's scope.
 Reassess prior findings against these two bars; rejected or out-of-scope
 observations do not block completion. Patch size and round count are not bugs.
 
