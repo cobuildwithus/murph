@@ -26,6 +26,35 @@ export type GroupHumorScenario = {
 export const GROUP_HUMOR_TIRED_FRAMES =
   /legal counsel|\blawyers?\b|\battorney|\bcourt\b|\bHR\b|investigat|\binquiry\b|committee|tribunal|press (?:conference|statement|release)|official statement|for the record|\bfiled?\b|\bfiling\b|\bappeals?\b|\baudit|\balibi\b|\bverdict\b|\bjury\b|\bwitness/iu
 
+/** The sender of the last transcript line, as written before the colon. */
+export function readGroupHumorLastSpeaker(transcript: readonly string[]): string | null {
+  const last = transcript.at(-1) ?? ''
+  return /^(?:\[[^\]]*\]\s*)?([^:"]+):/u.exec(last)?.[1]?.trim() ?? null
+}
+
+/** Whether the reply opens by addressing `name` ("Priya, ...", "Priya you ..."). */
+export function opensByAddressing(reply: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+  return new RegExp(
+    `^${escaped}(?:\\s*[,:]|\\s+(?:you|your|you['’](?:re|ve|ll|d)|u|at least|don['’]t|please|stop|put|go|get|save|keep|bring|let|take|quit)\\b)`,
+    'iu',
+  ).test(reply)
+}
+
+/**
+ * Whether the reply's first sentence only repeats words from the last
+ * message, such as opening with their own number back at them.
+ */
+export function opensWithEcho(reply: string, transcript: readonly string[]): boolean {
+  const last = transcript.at(-1) ?? ''
+  const body = /:\s*"(.*)"\s*$/u.exec(last)?.[1] ?? last
+  const words = (text: string) => text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
+  const first = words(reply.split(/(?<=[.!?])\s/u)[0] ?? '')
+  if (first.length < 2) return false
+  const said = new Set(words(body))
+  return first.every((word) => said.has(word))
+}
+
 export const GROUP_HUMOR_SCENARIOS: readonly GroupHumorScenario[] = [
   {
     id: 'brag',
@@ -345,6 +374,31 @@ export const GROUP_HUMOR_SCENARIOS: readonly GroupHumorScenario[] = [
     ],
     expect: 'text',
     mustMatch: /sing|song|birthday|lyric|encore|\bgig\b|\bset\b|requests|perform|last week|again|81|64|16/iu,
+    // The joke is the whole reply: no restating the claim back to him.
+    mustNotMatch: /5,?000|\b5k\b/iu,
+  },
+  {
+    id: 'distant-setup',
+    covers: 'a brag whose setup is a dozen messages back, with a family worry in between',
+    transcript: [
+      '[Mon 9:02] Dario: "calling it now. I win this thing by Friday."',
+      '[Mon 9:30] Priya: "bold"',
+      '[Mon 12:10] Marcus: "anyone want to do a lunch walk tomorrow"',
+      '[Mon 12:14] Lena: "me. 12:30?"',
+      '[Mon 12:15] Marcus: "works"',
+      '[Mon 18:40] Priya: "did anyone see the game last night"',
+      '[Mon 18:42] Marcus: "dont talk to me about it"',
+      '[Mon 21:00] Murph: "Day 1 steps. Priya 11,400. Marcus 10,900. Lena 9,800. Dario 6,200."',
+      '[Tue 7:15] Lena: "rain all day apparently"',
+      '[Tue 7:20] Priya: "treadmill it is"',
+      '[Tue 8:05] Marcus: "my kid has a fever so I might be slow today"',
+      '[Tue 8:07] Lena: "hope she feels better"',
+      '[Tue 12:45] Marcus: "lunch walk got rained out"',
+      '[Tue 13:30] Dario: "18k before lunch. treadmill and a podcast. watch out"',
+    ],
+    expect: 'either',
+    // A setup this far back has to carry its own words, or be left alone.
+    mustNotMatch: /^(?![\s\S]*\b(?:win|said|called|calling)\b)[\s\S]*\bFriday\b|fever|\bkid/iu,
   },
   {
     id: 'lore-rejected-nickname',

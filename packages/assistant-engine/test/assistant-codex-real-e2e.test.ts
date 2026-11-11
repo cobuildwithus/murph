@@ -3,6 +3,9 @@ import { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from '../src/assistant-codex/dynam
 import {
   GROUP_HUMOR_SCENARIOS,
   GROUP_HUMOR_TIRED_FRAMES,
+  opensByAddressing,
+  opensWithEcho,
+  readGroupHumorLastSpeaker,
 } from './support/group-humor-scenarios.js'
 import { REMINDER_LANGUAGE_CASES, runReminderLanguageJourney } from './support/reminder-language-journey.js'
 import { listCanonicalWriteEvidence, readCanonicalAuditRecords } from './canonical-audit-test-helpers.js'
@@ -11536,6 +11539,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         if (reply && scenario.mustMatch) expect(reply).toMatch(scenario.mustMatch)
         if (scenario.mustNotMatch) expect(reply).not.toMatch(scenario.mustNotMatch)
         expect(reply).not.toMatch(GROUP_HUMOR_TIRED_FRAMES)
+        // Replying to whoever just spoke, their name is implied.
+        const lastSpeaker = readGroupHumorLastSpeaker(scenario.transcript)
+        if (reply && lastSpeaker && lastSpeaker !== 'Murph') {
+          expect(opensByAddressing(reply, lastSpeaker)).toBe(false)
+        }
+        // They know what they posted: no opening by repeating it back.
+        if (reply) expect(opensWithEcho(reply, scenario.transcript)).toBe(false)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
