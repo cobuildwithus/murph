@@ -1151,7 +1151,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       .toEqual({ chatContainerMemberId: room });
     expect(await db.hostedLinqDelivery.findFirst({ where: { source: "game_lifecycle", sourceRef: rematchId, template: "game_rematch" } }))
       .toMatchObject({ status: "awaiting_generation" });
-    expect(lifecycleDelivery).toHaveBeenCalledExactlyOnceWith(rematchId, "rematch");
+    expect(lifecycleDelivery).toHaveBeenCalledExactlyOnceWith(rematchId, "rematch", undefined);
 
     const maya = await member("Maya", "UTC");
     const sam = await member("Sam", "UTC");
