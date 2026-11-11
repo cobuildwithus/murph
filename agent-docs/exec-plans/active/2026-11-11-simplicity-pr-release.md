@@ -76,15 +76,45 @@ skip gates, use local production secrets or perform an unapproved rollback.
 
 ## Pull requests
 
-| Component | PR | Initial reviewed source |
+| Component | PR | Initial candidate source |
 | --- | --- | --- |
 | data | [#4861](https://github.com/cobuildwithus/murph/pull/4861) | `84d7c098a05371c64eacd01d90586d910e86bede` |
 | devices | [#4862](https://github.com/cobuildwithus/murph/pull/4862) | `97c8e2633ddb4c289f15884b910db41fbdab1136` |
 | runtime | [#4863](https://github.com/cobuildwithus/murph/pull/4863) | `078947d6a225657a758946ab67f37287b66d83fe` |
 | authority | [#4864](https://github.com/cobuildwithus/murph/pull/4864) | `d29b5722dc392cb60489eeeb8450a18d36b990c1` |
-| experience | [#4865](https://github.com/cobuildwithus/murph/pull/4865) | `5f4a89a8fe11c60699737497f15ab412519cb5d0` |
-| tooling | [#4866](https://github.com/cobuildwithus/murph/pull/4866) | `4cc2bd01c5d825cc4cfceb968ce289fc05416865` |
+| experience | [#4865](https://github.com/cobuildwithus/murph/pull/4865) | `8eeb1e7845a09c933999018dff72f38075179623` |
+| tooling | [#4866](https://github.com/cobuildwithus/murph/pull/4866) | `488a659f73028857b32204b60866a126b46f77e2` |
 
 These heads identify the prepared candidates; accepted review fixes and final
 merge/deployment evidence are recorded below as they occur. Reviews run on the
 actual pushed heads, including changelog provenance.
+
+
+## Review corrections
+
+- Data: accepted deletion of unused collector family buckets and duplicate result
+  types. The existing entity collection is sufficient. Net 93 lines removed;
+  134 focused tests, typecheck, complexity guard and real-file base/head
+  comparison passed. Three CSV scenario strings were corrected to stop naming
+  the retired preset option; scenario integrity and CLI typecheck passed.
+- Runtime: accepted the smoke runner home-directory mismatch. Restore the
+  existing `home` path while keeping the obsolete restore wrapper deleted.
+  Ten focused tests and Cloudflare typecheck passed; native confinement remains
+  a required corrected-head CI check.
+- Devices: accepted the collision between member documents named `manifest.json`
+  and system metadata. Resolve manifest paths through the existing canonical
+  document evidence owner; retain damaged-metadata rejection and replay proof.
+- Experience: remove redundant effect state resets; the existing member-keyed
+  page owner resets Connect UI. All 120 Connect cases, focused lint and Web
+  typecheck passed, including logout, relogin and replacement-member behavior.
+- Authority: CI exposed six fixtures without an activation transport. Preserve
+  the production acknowledgement requirement; acknowledge and verify the real
+  persisted mailbox pointer at the fixture's external transport boundary.
+- Tooling: add the audit to the canonical documentation index. Doc gardening
+  reports zero issues.
+
+Data, devices and runtime have validated GPT-6 Pro review receipts. The initial
+other three answers were recovered against their exact accepted turns, but
+model attestation remained unavailable. They do not count as passes; preserve
+those receipts and retry round one on the corrected stable candidates. The
+separate early-response attestation gap is recorded in the task's Frog entry.
