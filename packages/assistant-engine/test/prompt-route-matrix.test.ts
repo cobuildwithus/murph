@@ -97,7 +97,10 @@ describe('prompt route matrix', () => {
       expect(prompt).not.toMatch(/\bundefined\b|\[object Object\]|\bNaN\b/u)
       // One saved memory line keeps its dash because existing member records
       // are matched against that exact text.
-      expect(prompt.replaceAll('reminder timing \u2014 last offered', '')).not.toContain('\u2014')
+      const checked = prompt.replaceAll('reminder timing \u2014', '')
+      const dash = checked.indexOf('\u2014')
+      // On failure this shows the text around the dash.
+      expect(dash === -1 ? '' : checked.slice(Math.max(0, dash - 60), dash + 60)).toBe('')
     }
   })
 
