@@ -1,6 +1,6 @@
 # Cold start skips the vault-share offer while publication is due
 
-Status: active
+Status: completed
 Created: 2026-11-11
 Updated: 2026-11-11
 
@@ -201,6 +201,16 @@ preempted projection is a separate concern.
   so `prepareInitialForegroundState` gains no complexity (the guard flagged
   20 -> 24 when it was inline).
 
+- PR #4846 ReviewGPT round 1 (apollo) on c3cc0d208e: PASS with no findings,
+  but not attested (completed at 246 s without response-model metadata, the
+  same pattern as #4840). Not retried. A fresh read-only Codex c2 review of the
+  same head found no qualifying findings: the queue is correct, the synthetic
+  preemption is replay-safe, and the test is non-vacuous. It noted that
+  repeated due cold starts can keep postponing the best-effort projection
+  while obligations keep their retries. Required CI was green after one rerun of
+  an unrelated web game PostgreSQL perf test. Owner decision 2026-11-11:
+  merge once CI is green.
+
 ## Verification
 
 - Red: on the base source, the due case failed with "Due publication did not
@@ -216,3 +226,4 @@ preempted projection is a separate concern.
   (hosted-runtime.ts debt 411 -> 411) and `git diff --check`: exit 0.
 - Implementation and tests were delegated to Codex c2 (workspace-write),
   then reviewed, narrowed and re-verified by the parent.
+Completed: 2026-11-11
