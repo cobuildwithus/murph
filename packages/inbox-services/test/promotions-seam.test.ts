@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import * as coreRuntime from '@murphai/core'
+import { importDocument as importDocumentWithImporter } from '@murphai/importers'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -16,6 +18,7 @@ import { createInboxPromotionOps } from '../src/inbox-app/promotions.ts'
 import type {
   CoreRuntimeModule,
   ImportersFactoryRuntimeModule,
+  ImportersRuntimeModule,
   InboxAppEnvironment,
   InboxRuntimeModule,
   ParsersRuntimeModule,
@@ -29,7 +32,7 @@ import {
   mealCanonicalPromotionSpec,
   persistPromotionEntry,
   preserveCanonicalDocumentAttachments,
-  promoteCanonicalAttachmentImport,
+  promoteMealAttachmentImport,
   readExperimentPromotionEntries,
   readPromotionsByCapture,
   requireDocumentPromotionCore,
@@ -42,6 +45,16 @@ import {
 } from '../src/inbox-services/promotions.ts'
 
 const tempRoots: string[] = []
+
+const realDocumentImporters: ImportersFactoryRuntimeModule = {
+  createImporters({ corePort }: { corePort?: CoreRuntimeModule } = {}) {
+    return {
+      importDocument: (input) => importDocumentWithImporter<
+        Awaited<ReturnType<ImportersRuntimeModule['importDocument']>>
+      >(input, { corePort }),
+    }
+  },
+}
 
 afterEach(async () => {
   await Promise.all(
@@ -260,6 +273,7 @@ function createCoreRuntimeModule(
     async importDocument() {
       return {
         documentId: 'document-created',
+        manifestPath: 'raw/documents/created/manifest.json',
         event: { id: 'document-created' },
       }
     },
@@ -346,6 +360,7 @@ function createInboxAppEnvironment(input: {
             async importDocument() {
               return {
                 documentId: 'document-created',
+                manifestPath: 'raw/documents/created/manifest.json',
                 event: { id: 'document-created' },
               }
             },
@@ -490,36 +505,35 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
     attachments: [
       createAttachment({
         ordinal: 1,
-        kind: 'document',
-        storedPath: 'raw/inbox/email/capture-canonical/attachments/canonical.pdf',
-        fileName: 'Canonical.pdf',
+        kind: 'image',
+        storedPath: 'raw/inbox/email/capture-canonical/attachments/canonical.jpg',
+        fileName: 'Canonical.jpg',
       }),
     ],
   })
   await writeTextFile(
     canonicalPaths.absoluteVaultRoot,
-    'raw/inbox/email/capture-canonical/attachments/canonical.pdf',
-    'canonical document',
+    'raw/inbox/email/capture-canonical/attachments/canonical.jpg',
+    'canonical meal',
   )
   await writeJsonFile(
     canonicalPaths.absoluteVaultRoot,
-    'raw/documents/canonical/manifest.json',
+    'raw/meals/canonical/manifest.json',
     {
-      importId: 'document-existing',
-      importKind: 'document',
+      importId: 'meal-existing',
+      importKind: 'meal',
       importedAt: '2026-04-08T10:00:00.000Z',
       source: 'import',
       artifacts: [
         {
-          role: 'source_document',
-          sha256: sha256('canonical document'),
+          role: 'photo',
+          sha256: sha256('canonical meal'),
         },
       ],
       provenance: {
         occurredAt: canonicalCapture.occurredAt,
         note: canonicalCapture.text,
-        lookupId: 'document-existing',
-        title: 'Canonical.pdf',
+        lookupId: 'meal-existing',
       },
     },
   )
@@ -531,98 +545,94 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
     }),
   )
   let createdCalls = 0
-  const canonicalResult = await promoteCanonicalAttachmentImport({
+  const canonicalResult = await promoteMealAttachmentImport({
     input: {
       vault: canonicalPaths.absoluteVaultRoot,
       captureId: canonicalCapture.captureId,
       requestId: null,
     },
-    target: 'document',
     clock: () => new Date('2026-04-08T12:00:00.000Z'),
     loadInbox: async () => canonicalInbox,
     prepare: async () => ({ prepared: true }),
     findRequiredAttachment: (capture) =>
       capture.attachments.find(
         (attachment) =>
-          attachment.kind === 'document' && typeof attachment.storedPath === 'string',
+          attachment.kind === 'image' && typeof attachment.storedPath === 'string',
       ) as RuntimeAttachmentRecord & { storedPath: string } | undefined,
     missingAttachmentError: () =>
-      new VaultCliError('INBOX_PROMOTION_REQUIRES_DOCUMENT', 'missing document'),
-    canonicalPromotionSpec: documentCanonicalPromotionSpec,
+      new VaultCliError('INBOX_PROMOTION_REQUIRES_PHOTO', 'missing meal'),
     buildCanonicalMatchContext: async ({ paths, capture, attachment }) => ({
-      documentSha256: await resolveAttachmentSha256(
+      photoSha256: await resolveAttachmentSha256(
         paths.absoluteVaultRoot,
         capture,
         attachment,
       ),
-      title: attachment.fileName,
+      audioSha256: null,
     }),
     createPromotion: async () => {
       createdCalls += 1
       return {
-        lookupId: 'document-created',
-        relatedId: 'document-created',
+        lookupId: 'meal-created',
+        relatedId: 'meal-created',
       }
     },
   })
   assert.deepEqual(canonicalResult, {
     vault: canonicalPaths.absoluteVaultRoot,
     captureId: canonicalCapture.captureId,
-    target: 'document',
-    lookupId: 'document-existing',
-    relatedId: 'document-existing',
+    target: 'meal',
+    lookupId: 'meal-existing',
+    relatedId: 'meal-existing',
     created: false,
   })
   assert.equal(createdCalls, 0)
   assert.equal(canonicalClosed, 1)
   const canonicalGrouped = await readPromotionsByCapture(canonicalPaths)
-  assert.equal(canonicalGrouped.get(canonicalCapture.captureId)?.[0]?.lookupId, 'document-existing')
+  assert.equal(canonicalGrouped.get(canonicalCapture.captureId)?.[0]?.lookupId, 'meal-existing')
 
   const mismatchPaths = await createTempVault()
   await writeTextFile(
     mismatchPaths.absoluteVaultRoot,
-    'raw/inbox/email/capture-canonical/attachments/canonical.pdf',
-    'canonical document',
+    'raw/inbox/email/capture-canonical/attachments/canonical.jpg',
+    'canonical meal',
   )
   await writeJsonFile(
     mismatchPaths.absoluteVaultRoot,
-    'raw/documents/canonical/manifest.json',
+    'raw/meals/canonical/manifest.json',
     {
-      importId: 'document-existing',
-      importKind: 'document',
+      importId: 'meal-existing',
+      importKind: 'meal',
       importedAt: '2026-04-08T10:00:00.000Z',
       source: 'import',
       artifacts: [
         {
-          role: 'source_document',
-          sha256: sha256('canonical document'),
+          role: 'photo',
+          sha256: sha256('canonical meal'),
         },
       ],
       provenance: {
         occurredAt: canonicalCapture.occurredAt,
         note: canonicalCapture.text,
-        lookupId: 'document-existing',
-        title: 'Canonical.pdf',
+        lookupId: 'meal-existing',
       },
     },
   )
   await writePromotionStore(mismatchPaths, [
     {
       captureId: canonicalCapture.captureId,
-      target: 'document',
-      lookupId: 'document-other',
-      relatedId: 'document-other',
+      target: 'meal',
+      lookupId: 'meal-other',
+      relatedId: 'meal-other',
     },
   ])
   await assert.rejects(
     () =>
-      promoteCanonicalAttachmentImport({
+      promoteMealAttachmentImport({
         input: {
           vault: mismatchPaths.absoluteVaultRoot,
           captureId: canonicalCapture.captureId,
           requestId: null,
         },
-        target: 'document',
         clock: () => new Date('2026-04-08T12:01:00.000Z'),
         loadInbox: async () =>
           createInboxRuntimeModule(createRuntimeStore([canonicalCapture])),
@@ -630,23 +640,22 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
         findRequiredAttachment: (capture) =>
           capture.attachments.find(
             (attachment) =>
-              attachment.kind === 'document' &&
+              attachment.kind === 'image' &&
               typeof attachment.storedPath === 'string',
           ) as RuntimeAttachmentRecord & { storedPath: string } | undefined,
         missingAttachmentError: () =>
-          new VaultCliError('INBOX_PROMOTION_REQUIRES_DOCUMENT', 'missing document'),
-        canonicalPromotionSpec: documentCanonicalPromotionSpec,
+          new VaultCliError('INBOX_PROMOTION_REQUIRES_PHOTO', 'missing meal'),
         buildCanonicalMatchContext: async ({ paths, capture, attachment }) => ({
-          documentSha256: await resolveAttachmentSha256(
+          photoSha256: await resolveAttachmentSha256(
             paths.absoluteVaultRoot,
             capture,
             attachment,
           ),
-          title: attachment.fileName,
+          audioSha256: null,
         }),
         createPromotion: async () => ({
-          lookupId: 'document-created',
-          relatedId: 'document-created',
+          lookupId: 'meal-created',
+          relatedId: 'meal-created',
         }),
       }),
     (error: unknown) =>
@@ -660,16 +669,16 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
     attachments: [
       createAttachment({
         ordinal: 1,
-        kind: 'document',
-        storedPath: 'raw/inbox/email/capture-created/attachments/new.pdf',
-        fileName: ' New.pdf ',
+        kind: 'image',
+        storedPath: 'raw/inbox/email/capture-created/attachments/new.jpg',
+        fileName: ' New.jpg ',
       }),
     ],
   })
   await writeTextFile(
     createdPaths.absoluteVaultRoot,
-    'raw/inbox/email/capture-created/attachments/new.pdf',
-    'new document',
+    'raw/inbox/email/capture-created/attachments/new.jpg',
+    'new meal',
   )
   let createClosed = 0
   let createMetadata: {
@@ -677,7 +686,7 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
     occurredAt: string | null
     source: string | null
   } | null = null
-  const createdResult = await promoteCanonicalAttachmentImport({
+  const createdResult = await promoteMealAttachmentImport({
     input: {
       vault: createdPaths.absoluteVaultRoot,
       captureId: createdCapture.captureId,
@@ -686,7 +695,6 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
       occurredAt: '2026-04-08T12:11:00.000Z',
       source: 'manual',
     },
-    target: 'document',
     clock: () => new Date('2026-04-08T12:10:00.000Z'),
     loadInbox: async () =>
       createInboxRuntimeModule(
@@ -698,24 +706,23 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
     findRequiredAttachment: (capture) =>
       capture.attachments.find(
         (attachment) =>
-          attachment.kind === 'document' && typeof attachment.storedPath === 'string',
+          attachment.kind === 'image' && typeof attachment.storedPath === 'string',
       ) as RuntimeAttachmentRecord & { storedPath: string } | undefined,
     missingAttachmentError: () =>
-      new VaultCliError('INBOX_PROMOTION_REQUIRES_DOCUMENT', 'missing document'),
-    canonicalPromotionSpec: documentCanonicalPromotionSpec,
+      new VaultCliError('INBOX_PROMOTION_REQUIRES_PHOTO', 'missing meal'),
     buildCanonicalMatchContext: async ({ paths, capture, attachment }) => ({
-      documentSha256: await resolveAttachmentSha256(
+      photoSha256: await resolveAttachmentSha256(
         paths.absoluteVaultRoot,
         capture,
         attachment,
       ),
-      title: attachment.fileName?.trim() ?? null,
+      audioSha256: null,
     }),
     createPromotion: async ({ metadata }) => {
       createMetadata = metadata
       return {
-        lookupId: 'document-created',
-        relatedId: 'document-created',
+        lookupId: 'meal-created',
+        relatedId: 'meal-created',
       }
     },
   })
@@ -732,33 +739,32 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
     attachments: [
       createAttachment({
         ordinal: 1,
-        kind: 'document',
-        storedPath: 'raw/inbox/email/capture-stale/attachments/stale.pdf',
+        kind: 'image',
+        storedPath: 'raw/inbox/email/capture-stale/attachments/stale.jpg',
       }),
     ],
   })
   await writeTextFile(
     stalePaths.absoluteVaultRoot,
-    'raw/inbox/email/capture-stale/attachments/stale.pdf',
-    'stale document',
+    'raw/inbox/email/capture-stale/attachments/stale.jpg',
+    'stale meal',
   )
   await writePromotionStore(stalePaths, [
     {
       captureId: staleCapture.captureId,
-      target: 'document',
-      lookupId: 'document-stale',
-      relatedId: 'document-stale',
+      target: 'meal',
+      lookupId: 'meal-stale',
+      relatedId: 'meal-stale',
     },
   ])
   await assert.rejects(
     () =>
-      promoteCanonicalAttachmentImport({
+      promoteMealAttachmentImport({
         input: {
           vault: stalePaths.absoluteVaultRoot,
           captureId: staleCapture.captureId,
           requestId: null,
         },
-        target: 'document',
         clock: () => new Date('2026-04-08T12:20:00.000Z'),
         loadInbox: async () =>
           createInboxRuntimeModule(createRuntimeStore([staleCapture])),
@@ -766,23 +772,22 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
         findRequiredAttachment: (capture) =>
           capture.attachments.find(
             (attachment) =>
-              attachment.kind === 'document' &&
+              attachment.kind === 'image' &&
               typeof attachment.storedPath === 'string',
           ) as RuntimeAttachmentRecord & { storedPath: string } | undefined,
         missingAttachmentError: () =>
-          new VaultCliError('INBOX_PROMOTION_REQUIRES_DOCUMENT', 'missing document'),
-        canonicalPromotionSpec: documentCanonicalPromotionSpec,
+          new VaultCliError('INBOX_PROMOTION_REQUIRES_PHOTO', 'missing meal'),
         buildCanonicalMatchContext: async ({ paths, capture, attachment }) => ({
-          documentSha256: await resolveAttachmentSha256(
+          photoSha256: await resolveAttachmentSha256(
             paths.absoluteVaultRoot,
             capture,
             attachment,
           ),
-          title: null,
+          audioSha256: null,
         }),
         createPromotion: async () => ({
-          lookupId: 'document-created',
-          relatedId: 'document-created',
+          lookupId: 'meal-created',
+          relatedId: 'meal-created',
         }),
       }),
     (error: unknown) =>
@@ -795,33 +800,32 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
     attachments: [
       createAttachment({
         ordinal: 1,
-        kind: 'document',
-        storedPath: 'raw/inbox/email/capture-invalid/attachments/invalid.pdf',
+        kind: 'image',
+        storedPath: 'raw/inbox/email/capture-invalid/attachments/invalid.jpg',
       }),
     ],
   })
   await writeTextFile(
     invalidPaths.absoluteVaultRoot,
-    'raw/inbox/email/capture-invalid/attachments/invalid.pdf',
-    'invalid document',
+    'raw/inbox/email/capture-invalid/attachments/invalid.jpg',
+    'invalid meal',
   )
   await writePromotionStore(invalidPaths, [
     {
       captureId: invalidCapture.captureId,
-      target: 'document',
+      target: 'meal',
       lookupId: null,
       relatedId: null,
     },
   ])
   await assert.rejects(
     () =>
-      promoteCanonicalAttachmentImport({
+      promoteMealAttachmentImport({
         input: {
           vault: invalidPaths.absoluteVaultRoot,
           captureId: invalidCapture.captureId,
           requestId: null,
         },
-        target: 'document',
         clock: () => new Date('2026-04-08T12:30:00.000Z'),
         loadInbox: async () =>
           createInboxRuntimeModule(createRuntimeStore([invalidCapture])),
@@ -829,23 +833,22 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
         findRequiredAttachment: (capture) =>
           capture.attachments.find(
             (attachment) =>
-              attachment.kind === 'document' &&
+              attachment.kind === 'image' &&
               typeof attachment.storedPath === 'string',
           ) as RuntimeAttachmentRecord & { storedPath: string } | undefined,
         missingAttachmentError: () =>
-          new VaultCliError('INBOX_PROMOTION_REQUIRES_DOCUMENT', 'missing document'),
-        canonicalPromotionSpec: documentCanonicalPromotionSpec,
+          new VaultCliError('INBOX_PROMOTION_REQUIRES_PHOTO', 'missing meal'),
         buildCanonicalMatchContext: async ({ paths, capture, attachment }) => ({
-          documentSha256: await resolveAttachmentSha256(
+          photoSha256: await resolveAttachmentSha256(
             paths.absoluteVaultRoot,
             capture,
             attachment,
           ),
-          title: null,
+          audioSha256: null,
         }),
         createPromotion: async () => ({
-          lookupId: 'document-created',
-          relatedId: 'document-created',
+          lookupId: 'meal-created',
+          relatedId: 'meal-created',
         }),
       }),
     (error: unknown) =>
@@ -855,13 +858,12 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
 
   await assert.rejects(
     () =>
-      promoteCanonicalAttachmentImport({
+      promoteMealAttachmentImport({
         input: {
           vault: invalidPaths.absoluteVaultRoot,
           captureId: 'missing-capture',
           requestId: null,
         },
-        target: 'document',
         clock: () => new Date('2026-04-08T12:31:00.000Z'),
         loadInbox: async () =>
           createInboxRuntimeModule(createRuntimeStore([invalidCapture])),
@@ -869,23 +871,22 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
         findRequiredAttachment: (capture) =>
           capture.attachments.find(
             (attachment) =>
-              attachment.kind === 'document' &&
+              attachment.kind === 'image' &&
               typeof attachment.storedPath === 'string',
           ) as RuntimeAttachmentRecord & { storedPath: string } | undefined,
         missingAttachmentError: () =>
-          new VaultCliError('INBOX_PROMOTION_REQUIRES_DOCUMENT', 'missing document'),
-        canonicalPromotionSpec: documentCanonicalPromotionSpec,
+          new VaultCliError('INBOX_PROMOTION_REQUIRES_PHOTO', 'missing meal'),
         buildCanonicalMatchContext: async ({ paths, capture, attachment }) => ({
-          documentSha256: await resolveAttachmentSha256(
+          photoSha256: await resolveAttachmentSha256(
             paths.absoluteVaultRoot,
             capture,
             attachment,
           ),
-          title: null,
+          audioSha256: null,
         }),
         createPromotion: async () => ({
-          lookupId: 'document-created',
-          relatedId: 'document-created',
+          lookupId: 'meal-created',
+          relatedId: 'meal-created',
         }),
       }),
     (error: unknown) =>
@@ -900,74 +901,71 @@ test('canonical attachment promotion serializes canonical check, create, and pro
     attachments: [
       createAttachment({
         ordinal: 1,
-        kind: 'document',
-        storedPath: 'raw/inbox/email/capture-serialized/attachments/serialized.pdf',
-        fileName: 'Serialized.pdf',
+        kind: 'image',
+        storedPath: 'raw/inbox/email/capture-serialized/attachments/serialized.jpg',
+        fileName: 'Serialized.jpg',
       }),
     ],
   })
   await writeTextFile(
     paths.absoluteVaultRoot,
-    'raw/inbox/email/capture-serialized/attachments/serialized.pdf',
-    'serialized document',
+    'raw/inbox/email/capture-serialized/attachments/serialized.jpg',
+    'serialized meal',
   )
 
   let createCalls = 0
   const promote = () =>
-    promoteCanonicalAttachmentImport({
+    promoteMealAttachmentImport({
       input: {
         vault: paths.absoluteVaultRoot,
         captureId: capture.captureId,
         requestId: null,
       },
-      target: 'document',
       clock: () => new Date('2026-04-08T12:00:00.000Z'),
       loadInbox: async () => createInboxRuntimeModule(createRuntimeStore([capture])),
       prepare: async () => ({ prepared: true }),
       findRequiredAttachment: (candidate) =>
         candidate.attachments.find(
           (attachment) =>
-            attachment.kind === 'document' && typeof attachment.storedPath === 'string',
+            attachment.kind === 'image' && typeof attachment.storedPath === 'string',
         ) as RuntimeAttachmentRecord & { storedPath: string } | undefined,
       missingAttachmentError: () =>
-        new VaultCliError('INBOX_PROMOTION_REQUIRES_DOCUMENT', 'missing document'),
-      canonicalPromotionSpec: documentCanonicalPromotionSpec,
+        new VaultCliError('INBOX_PROMOTION_REQUIRES_PHOTO', 'missing meal'),
       buildCanonicalMatchContext: async ({ paths, capture, attachment }) => ({
-        documentSha256: await resolveAttachmentSha256(
+        photoSha256: await resolveAttachmentSha256(
           paths.absoluteVaultRoot,
           capture,
           attachment,
         ),
-        title: attachment.fileName,
+        audioSha256: null,
       }),
       createPromotion: async () => {
         createCalls += 1
         await new Promise((resolve) => setTimeout(resolve, 20))
         await writeJsonFile(
           paths.absoluteVaultRoot,
-          'raw/documents/serialized/manifest.json',
+          'raw/meals/serialized/manifest.json',
           {
-            importId: 'document-serialized',
-            importKind: 'document',
+            importId: 'meal-serialized',
+            importKind: 'meal',
             importedAt: '2026-04-08T12:00:00.000Z',
             source: 'import',
             artifacts: [
               {
-                role: 'source_document',
-                sha256: sha256('serialized document'),
+                role: 'photo',
+                sha256: sha256('serialized meal'),
               },
             ],
             provenance: {
               occurredAt: capture.occurredAt,
               note: capture.text,
-              lookupId: 'document-serialized',
-              title: 'Serialized.pdf',
+              lookupId: 'meal-serialized',
             },
           },
         )
         return {
-          lookupId: 'document-serialized',
-          relatedId: 'document-serialized',
+          lookupId: 'meal-serialized',
+          relatedId: 'meal-serialized',
         }
       },
     })
@@ -981,14 +979,14 @@ test('canonical attachment promotion serializes canonical check, create, and pro
   )
   assert.deepEqual(
     results.map((result) => result.relatedId),
-    ['document-serialized', 'document-serialized'],
+    ['meal-serialized', 'meal-serialized'],
   )
 
   const grouped = await readPromotionsByCapture(paths)
   assert.equal(grouped.get(capture.captureId)?.length, 1)
   assert.equal(
     grouped.get(capture.captureId)?.[0]?.relatedId,
-    'document-serialized',
+    'meal-serialized',
   )
 })
 
@@ -1111,6 +1109,7 @@ test('document preservation and experiment helper branches are deterministic', a
             )
             return {
               documentId: 'document-created',
+              manifestPath: 'raw/documents/created/manifest.json',
               event: { id: 'document-created' },
             }
           },
@@ -1179,6 +1178,7 @@ test('document preservation and experiment helper branches are deterministic', a
           async importDocument() {
             return {
               documentId: 'document-created',
+              manifestPath: 'raw/documents/created/manifest.json',
               event: { id: 'document-created' },
             }
           },
@@ -1189,6 +1189,7 @@ test('document preservation and experiment helper branches are deterministic', a
               async importDocument() {
                 return {
                   documentId: 'document-created',
+                  manifestPath: 'raw/documents/created/manifest.json',
                   event: { id: 'document-created' },
                 }
               },
@@ -1503,62 +1504,6 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
         }),
       ],
     }),
-    createCapture('capture-document-created', {
-      text: ' document note ',
-      attachments: [
-        createAttachment({
-          ordinal: 1,
-          kind: 'document',
-          storedPath: 'raw/inbox/email/capture-document-created/attachments/report.pdf',
-          fileName: ' Report.pdf ',
-        }),
-      ],
-    }),
-    createCapture('capture-document-default-retry', {
-      text: 'default retry note',
-      attachments: [
-        createAttachment({
-          ordinal: 1,
-          kind: 'document',
-          storedPath: 'raw/inbox/email/capture-document-default-retry/attachments/retry.pdf',
-          fileName: 'Retry.pdf',
-        }),
-      ],
-    }),
-    createCapture('capture-document-overrides', {
-      text: 'document override fallback',
-      attachments: [
-        createAttachment({
-          ordinal: 1,
-          kind: 'document',
-          storedPath: 'raw/inbox/email/capture-document-overrides/attachments/manual.pdf',
-          fileName: ' Manual.pdf ',
-        }),
-      ],
-    }),
-    createCapture('capture-document-overrides-retry', {
-      text: 'document override retry fallback',
-      attachments: [
-        createAttachment({
-          ordinal: 1,
-          kind: 'document',
-          storedPath:
-            'raw/inbox/email/capture-document-overrides-retry/attachments/manual.pdf',
-          fileName: ' Manual.pdf ',
-        }),
-      ],
-    }),
-    createCapture('capture-document-empty', {
-      text: '   ',
-      attachments: [
-        createAttachment({
-          ordinal: 1,
-          kind: 'document',
-          storedPath: 'raw/inbox/email/capture-document-empty/attachments/blank.pdf',
-          fileName: '   ',
-        }),
-      ],
-    }),
     createCapture('capture-journal'),
     createCapture('capture-experiment'),
     createCapture('capture-journal-existing', {
@@ -1568,7 +1513,6 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
       text: null,
     }),
     createCapture('capture-meal-missing'),
-    createCapture('capture-document-missing'),
   ]
 
   await writeTextFile(
@@ -1611,31 +1555,6 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
     'raw/inbox/email/capture-meal-overrides-retry/attachments/audio.m4a',
     'override retry meal audio',
   )
-  await writeTextFile(
-    paths.absoluteVaultRoot,
-    'raw/inbox/email/capture-document-created/attachments/report.pdf',
-    'report body',
-  )
-  await writeTextFile(
-    paths.absoluteVaultRoot,
-    'raw/inbox/email/capture-document-default-retry/attachments/retry.pdf',
-    'default retry body',
-  )
-  await writeTextFile(
-    paths.absoluteVaultRoot,
-    'raw/inbox/email/capture-document-overrides/attachments/manual.pdf',
-    'manual document draft body',
-  )
-  await writeTextFile(
-    paths.absoluteVaultRoot,
-    'raw/inbox/email/capture-document-overrides-retry/attachments/manual.pdf',
-    'manual document body',
-  )
-  await writeTextFile(
-    paths.absoluteVaultRoot,
-    'raw/inbox/email/capture-document-empty/attachments/blank.pdf',
-    'blank body',
-  )
   await writeJsonFile(
     paths.absoluteVaultRoot,
     'raw/meals/existing/manifest.json',
@@ -1671,49 +1590,9 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
       },
     },
   )
-  await writeJsonFile(
-    paths.absoluteVaultRoot,
-    'raw/documents/default-retry/manifest.json',
-    {
-      importId: 'document-default-existing',
-      importKind: 'document',
-      importedAt: '2026-04-08T07:05:30.000Z',
-      source: 'import',
-      artifacts: [
-        { role: 'source_document', sha256: sha256('default retry body') },
-      ],
-      provenance: {
-        occurredAt: '2026-04-08T11:22:33.000Z',
-        note: 'default retry note',
-        lookupId: 'document-default-existing',
-        title: 'Retry.pdf',
-      },
-    },
-  )
-  await writeJsonFile(
-    paths.absoluteVaultRoot,
-    'raw/documents/overrides-existing/manifest.json',
-    {
-      importId: 'document-overrides-existing',
-      importKind: 'document',
-      importedAt: '2026-04-08T07:06:00.000Z',
-      source: 'manual',
-      artifacts: [
-        { role: 'source_document', sha256: sha256('manual document body') },
-      ],
-      provenance: {
-        occurredAt: '2026-04-08T14:20:00.000Z',
-        note: 'Manual document note.',
-        lookupId: 'document-overrides-existing',
-        title: 'Manual.pdf',
-      },
-    },
-  )
-
   const mealCalls: Array<Parameters<NonNullable<CoreRuntimeModule['addMeal']>>[0]> = []
   const journalCalls: Array<Parameters<NonNullable<CoreRuntimeModule['promoteInboxJournal']>>[0]> = []
   const experimentCalls: Array<Parameters<NonNullable<CoreRuntimeModule['promoteInboxExperimentNote']>>[0]> = []
-  const importedFiles: Array<Parameters<ReturnType<ImportersFactoryRuntimeModule['createImporters']>['importDocument']>[0]> = []
   const documentCorrelationCalls: Array<
     Parameters<NonNullable<CoreRuntimeModule['recordInboxDocumentDefaultPromotion']>>[0]
   > = []
@@ -1755,19 +1634,6 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
         }
       },
     }),
-    importers: {
-      createImporters() {
-        return {
-          async importDocument(input) {
-            importedFiles.push(input)
-            return {
-              documentId: 'document-created',
-              event: { id: 'document-created' },
-            }
-          },
-        }
-      },
-    },
     query: createQueryRuntimeModule([
       {
         path: 'bank/experiments/current.md',
@@ -1783,30 +1649,6 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   })
 
   const ops = createInboxPromotionOps(env)
-  const unsupportedDocumentOps = createInboxPromotionOps(createInboxAppEnvironment({
-    inbox: createInboxRuntimeModule(createRuntimeStore(captures)),
-    core: {
-      async addMeal() {
-        return {
-          mealId: 'meal-created',
-          event: { id: 'meal-created' },
-          manifestPath: 'raw/meals/meal-created/manifest.json',
-        }
-      },
-    },
-  }))
-  await assert.rejects(
-    () =>
-      unsupportedDocumentOps.promoteDocument({
-        vault: paths.absoluteVaultRoot,
-        captureId: 'capture-document-created',
-        requestId: null,
-      }),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'INBOX_PROMOTION_UNSUPPORTED',
-  )
-
   const preserved = await ops.preserveDocumentAttachments({
     vault: paths.absoluteVaultRoot,
     captureId: 'capture-preserve-delegated',
@@ -1901,92 +1743,6 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
   assert.equal(retriedOverriddenMeal.relatedId, 'meal-overrides-existing')
   assert.equal(mealCalls.length, mealCallsBeforeRetry)
 
-  const createdDocument = await ops.promoteDocument({
-    vault: paths.absoluteVaultRoot,
-    captureId: 'capture-document-created',
-    requestId: null,
-  })
-  assert.equal(createdDocument.created, true)
-  const createdDocumentImport = importedFiles.at(-1)
-  assert.equal(createdDocumentImport?.title, 'Report.pdf')
-  assert.equal(createdDocumentImport?.note, 'document note')
-  assert.equal(createdDocumentImport?.occurredAt, '2026-04-08T11:22:33.000Z')
-  assert.equal(createdDocumentImport?.source, 'import')
-  assert.deepEqual(documentCorrelationCalls.at(-1), {
-    attachmentId: 'attachment-1',
-    captureId: 'capture-document-created',
-    documentId: 'document-created',
-    vaultRoot: paths.absoluteVaultRoot,
-  })
-  const documentImportsBeforeDefaultRetry = importedFiles.length
-  const retriedDefaultDocument = await ops.promoteDocument({
-    vault: paths.absoluteVaultRoot,
-    captureId: 'capture-document-default-retry',
-    requestId: null,
-  })
-  assert.equal(retriedDefaultDocument.created, false)
-  assert.equal(retriedDefaultDocument.relatedId, 'document-default-existing')
-  assert.equal(importedFiles.length, documentImportsBeforeDefaultRetry)
-  assert.deepEqual(documentCorrelationCalls.at(-1), {
-    attachmentId: 'attachment-1',
-    captureId: 'capture-document-default-retry',
-    documentId: 'document-default-existing',
-    vaultRoot: paths.absoluteVaultRoot,
-  })
-  const correlationsBeforeOverride = documentCorrelationCalls.length
-
-  const overriddenDocument = await ops.promoteDocument({
-    vault: paths.absoluteVaultRoot,
-    captureId: 'capture-document-overrides',
-    requestId: null,
-    note: 'Manual document note.',
-    occurredAt: '2026-04-08T14:20:00.000Z',
-    source: 'manual',
-  })
-  assert.equal(overriddenDocument.created, true)
-  const overriddenDocumentImport = importedFiles.at(-1)
-  assert.equal(overriddenDocumentImport?.title, 'Manual.pdf')
-  assert.equal(overriddenDocumentImport?.note, 'Manual document note.')
-  assert.equal(
-    overriddenDocumentImport?.occurredAt,
-    '2026-04-08T14:20:00.000Z',
-  )
-  assert.equal(overriddenDocumentImport?.source, 'manual')
-  assert.equal(documentCorrelationCalls.length, correlationsBeforeOverride)
-  assert.match(
-    overriddenDocumentImport?.filePath ?? '',
-    /capture-document-overrides\/attachments\/manual\.pdf$/,
-  )
-  const documentImportsBeforeRetry = importedFiles.length
-  const retriedOverriddenDocument = await ops.promoteDocument({
-    vault: paths.absoluteVaultRoot,
-    captureId: 'capture-document-overrides-retry',
-    requestId: null,
-    note: 'Manual document note.',
-    occurredAt: '2026-04-08T14:20:00.000Z',
-    source: 'manual',
-  })
-  assert.equal(retriedOverriddenDocument.created, false)
-  assert.equal(retriedOverriddenDocument.lookupId, 'document-overrides-existing')
-  assert.equal(retriedOverriddenDocument.relatedId, 'document-overrides-existing')
-  assert.equal(importedFiles.length, documentImportsBeforeRetry)
-
-  const emptyDocument = await ops.promoteDocument({
-    vault: paths.absoluteVaultRoot,
-    captureId: 'capture-document-empty',
-    requestId: null,
-  })
-  assert.equal(emptyDocument.created, true)
-  const emptyDocumentImport = importedFiles.at(-1)
-  assert.equal(emptyDocumentImport?.title, undefined)
-  assert.equal(emptyDocumentImport?.note, undefined)
-  assert.deepEqual(documentCorrelationCalls.at(-1), {
-    attachmentId: 'attachment-1',
-    captureId: 'capture-document-empty',
-    documentId: 'document-created',
-    vaultRoot: paths.absoluteVaultRoot,
-  })
-
   const journalResult = await ops.promoteJournal({
     vault: paths.absoluteVaultRoot,
     captureId: 'capture-journal',
@@ -2070,17 +1826,6 @@ test('app promotion ops exercise meal, document, journal, and experiment flows',
     (error: unknown) =>
       error instanceof VaultCliError &&
       error.code === 'INBOX_PROMOTION_REQUIRES_PHOTO',
-  )
-  await assert.rejects(
-    () =>
-      ops.promoteDocument({
-        vault: paths.absoluteVaultRoot,
-        captureId: 'capture-document-missing',
-        requestId: null,
-      }),
-    (error: unknown) =>
-      error instanceof VaultCliError &&
-      error.code === 'INBOX_PROMOTION_REQUIRES_DOCUMENT',
   )
 })
 
@@ -2223,36 +1968,108 @@ test('app promotion ops fail closed for unsupported or invalid journal and exper
   )
 })
 
-test.each(['{invalid-json', JSON.stringify({ importKind: 'document' })])(
-  'unreadable canonical promotion evidence blocks recreation: %s',
-  async (manifest) => {
+test('document preservation ignores member documents with manifest-like filenames and reuses canonical evidence', async () => {
+  const paths = await createTempVault()
+  const vaultRoot = paths.absoluteVaultRoot
+  await coreRuntime.initializeVault({ vaultRoot })
+  const memberArtifacts = []
+  for (const fileName of ['manifest.json', 'manifest.fixture.json']) {
+    const content = `${JSON.stringify({ documentType: 'member-owned', fileName })}\n`
+    const sourcePath = await writeTextFile(vaultRoot, `source/${fileName}`, content)
+    const imported = await coreRuntime.importDocument({ vaultRoot, sourcePath })
+    memberArtifacts.push({ content, rawRef: imported.raw.relativePath })
+  }
+  const capture = createCapture('capture-manifest-collision', {
+    attachments: [1, 2].map((ordinal) => createAttachment({
+      attachmentId: `att_manifest_${String(ordinal).padStart(2, '0')}`,
+      kind: 'document', ordinal, fileName: 'report.pdf',
+      storedPath: `raw/inbox/email/capture-manifest-collision/attachments/report-${ordinal}.pdf`,
+    })),
+  })
+  for (const attachment of capture.attachments) {
+    await writeTextFile(vaultRoot, attachment.storedPath!, '%PDF-1.4\nsynthetic report\n')
+  }
+  for (const differentMetadata of [
+    { title: 'other.pdf' },
+    { note: 'another note' },
+    { source: 'manual' as const },
+    { occurredAt: '2026-04-07T11:22:33.000Z' },
+  ]) {
+    await coreRuntime.importDocument({
+      vaultRoot,
+      sourcePath: path.join(vaultRoot, capture.attachments[0]!.storedPath!),
+      title: 'report.pdf',
+      note: capture.text!,
+      occurredAt: capture.occurredAt,
+      source: 'import',
+      ...differentMetadata,
+    })
+  }
+  const ops = createInboxPromotionOps(createInboxAppEnvironment({
+    core: coreRuntime,
+    importers: realDocumentImporters,
+    inbox: createInboxRuntimeModule(createRuntimeStore([capture])),
+  }))
+  const input = { vault: vaultRoot, captureId: capture.captureId, requestId: null }
+  const run = () => ops.preserveDocumentAttachments(input)
+  const first = await run()
+  assert.equal(first.createdCount, 1)
+  assert.deepEqual(first.documents.map((document) => document.created), [true, false])
+  assert.equal(first.documents[0]!.relatedId, first.documents[1]!.relatedId)
+  const rawTreeBeforeReplay = (await readdir(path.join(vaultRoot, 'raw/documents'), { recursive: true })).sort()
+  const replay = await run()
+  assert.equal(replay.createdCount, 0)
+  assert.deepEqual(replay.documents.map((document) => document.relatedId), first.documents.map((document) => document.relatedId))
+  assert.deepEqual(replay.documents.map((document) => document.lookupId), first.documents.map((document) => document.lookupId))
+  assert.deepEqual((await readdir(path.join(vaultRoot, 'raw/documents'), { recursive: true })).sort(), rawTreeBeforeReplay)
+  for (const { content, rawRef } of memberArtifacts) {
+    assert.equal(await readFile(path.join(vaultRoot, rawRef), 'utf8'), content)
+  }
+})
+
+test.each(['invalid-json', 'invalid-schema', 'removed', 'deleted', 'duplicate'] as const)(
+  'document preservation rejects %s authoritative evidence before recreating a document',
+  async (damage) => {
     const paths = await createTempVault()
-    const capture = createCapture('capture-interrupted', {
+    const vaultRoot = paths.absoluteVaultRoot
+    await coreRuntime.initializeVault({ vaultRoot })
+    const capture = createCapture('capture-damaged-manifest', {
       attachments: [createAttachment({
-        kind: 'document', ordinal: 1, storedPath: 'raw/inbox/email/capture-interrupted/attachments/report.pdf',
+        attachmentId: 'att_damaged_01', kind: 'document', ordinal: 1,
+        fileName: 'report.pdf',
+        storedPath: 'raw/inbox/email/capture-damaged-manifest/attachments/report.pdf',
       })],
     })
-    await writeTextFile(paths.absoluteVaultRoot, 'raw/documents/committed/manifest.json', manifest)
-    let created = false
-    await assert.rejects(() => promoteCanonicalAttachmentImport({
-      input: { vault: paths.absoluteVaultRoot, captureId: capture.captureId, requestId: null },
-      target: 'document',
-      clock: () => new Date('2026-11-11T12:00:00.000Z'),
-      loadInbox: async () => createInboxRuntimeModule(createRuntimeStore([capture])),
-      prepare: async () => ({}),
-      findRequiredAttachment: (current) => current.attachments.find(
-        (attachment): attachment is RuntimeAttachmentRecord & { storedPath: string } =>
-          typeof attachment.storedPath === 'string',
-      ),
-      missingAttachmentError: () => new VaultCliError('MISSING', 'Missing attachment'),
-      canonicalPromotionSpec: documentCanonicalPromotionSpec,
-      buildCanonicalMatchContext: () => ({ documentSha256: sha256('synthetic document'), title: null }),
-      createPromotion: async () => {
-        created = true
-        return { lookupId: 'duplicate', relatedId: 'duplicate' }
-      },
+    const sourcePath = await writeTextFile(vaultRoot, capture.attachments[0]!.storedPath!, '%PDF-1.4\nsynthetic report\n')
+    const importInput = {
+      vaultRoot, sourcePath, title: 'report.pdf', occurredAt: capture.occurredAt,
+      note: capture.text!, source: 'import' as const,
+    }
+    const imported = await coreRuntime.importDocument(importInput)
+    const manifestPath = path.join(vaultRoot, imported.manifestPath)
+    if (damage === 'duplicate') {
+      await coreRuntime.importDocument(importInput)
+    } else if (damage === 'deleted') {
+      await coreRuntime.deleteEvent({ vaultRoot, eventId: imported.event.id })
+    } else if (damage === 'removed') {
+      await rm(manifestPath)
+    } else {
+      await writeFile(manifestPath, damage === 'invalid-json' ? '{invalid-json' : JSON.stringify({ importKind: 'document' }))
+    }
+    const rawTreeBeforeRetry = (await readdir(path.join(vaultRoot, 'raw/documents'), { recursive: true })).sort()
+    const ops = createInboxPromotionOps(createInboxAppEnvironment({
+      core: coreRuntime, importers: realDocumentImporters,
+      inbox: createInboxRuntimeModule(createRuntimeStore([capture])),
     }))
-    assert.equal(created, false)
+    const input = { vault: vaultRoot, captureId: capture.captureId, requestId: null }
+    await assert.rejects(
+      () => ops.preserveDocumentAttachments(input),
+      (error: unknown) => error instanceof VaultCliError && error.code === (
+        damage === 'duplicate' ? 'INBOX_PROMOTION_DUPLICATE_CANONICAL' : 'INBOX_PROMOTION_CANONICAL_MISSING'
+      ),
+    )
+    assert.deepEqual((await readdir(path.join(vaultRoot, 'raw/documents'), { recursive: true })).sort(), rawTreeBeforeRetry)
     assert.equal((await readPromotionsByCapture(paths)).size, 0)
+    assert.equal(await readFile(sourcePath, 'utf8'), '%PDF-1.4\nsynthetic report\n')
   },
 )

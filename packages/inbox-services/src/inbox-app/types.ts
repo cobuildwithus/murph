@@ -24,7 +24,6 @@ import type {
   InboxInitResult,
   InboxListResult,
   InboxParserAttemptCompactionResult,
-  InboxPromoteDocumentResult,
   InboxPromoteExperimentNoteResult,
   InboxPromoteJournalResult,
   InboxPromoteMealResult,
@@ -66,17 +65,9 @@ export interface CanonicalPromotionLookupSpec<
   TContext,
 > {
   target: CanonicalPromotionLookupTarget
-  manifestDirectory: string
   manifestSchema: z.ZodType<TManifest>
   matchesManifest(manifest: TManifest, context: TContext): boolean
 }
-
-export type CanonicalAttachmentPromotionResult<
-  TTarget extends CanonicalPromotionLookupTarget,
-> = Extract<
-  InboxPromoteMealResult | InboxPromoteDocumentResult,
-  { target: TTarget }
->
 
 export type RuntimeStore = Pick<
   SharedInboxRuntimeStore,
@@ -155,6 +146,7 @@ export interface CoreRuntimeModule {
     source?: EventSource
   }): Promise<{
     documentId: string
+    manifestPath: string
     event: {
       id: string
     }
@@ -231,6 +223,7 @@ export interface ImportersRuntimeModule {
     source?: string
   }): Promise<{
     documentId: string
+    manifestPath: string
     event: {
       id: string
     }
@@ -358,7 +351,6 @@ export interface InboxServices {
     input: PreserveDocumentAttachmentInput,
   ): Promise<InboxPreservedDocument>
   promoteMeal(input: PromoteInput): Promise<InboxPromoteMealResult>
-  promoteDocument(input: PromoteInput): Promise<InboxPromoteDocumentResult>
   promoteJournal(input: PromoteInput): Promise<InboxPromoteJournalResult>
   promoteExperimentNote(
     input: PromoteInput,
