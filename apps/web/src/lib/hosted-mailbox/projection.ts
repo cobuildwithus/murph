@@ -465,7 +465,7 @@ const HOSTED_MAILBOX_FETCH_LIMIT_MAX = 100;
 // watermark. Exported so cleanup.ts consumes this value rather than restating
 // it. Retention direction is one-way — cleanup depends on the mailbox, never
 // the reverse — so this stays the single definition.
-export const HOSTED_MAILBOX_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+export const HOSTED_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export function normalizeHostedMailboxFetchLimit(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1) {

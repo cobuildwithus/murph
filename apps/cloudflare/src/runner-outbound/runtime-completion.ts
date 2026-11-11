@@ -1,5 +1,5 @@
 import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
-import { readRuntimeTargetAdapter } from "../runtime-target-adapter.ts";
+import { createHostedRunnerContainerNamespaceRouter } from "../standby-runner-contract.ts";
 import type {
   HostedRuntimeCompletionReceipt,
   HostedRuntimeCompletionReceiptReason,
@@ -71,7 +71,7 @@ export async function handleRunnerRuntimeCompletionRequest(input: {
     }
     return json({ completed: false, reason } satisfies HostedRuntimeCompletionReceipt);
   }
-  const container = readRuntimeTargetAdapter(input.env, owner.runnerContainerName);
+  const container = createHostedRunnerContainerNamespaceRouter(input.env)?.getByName(owner.runnerContainerName);
   if (!container?.recordSupervisedRuntimeCompletion) throw new Error("Native runtime completion receipt is unavailable.");
   return json(await container.recordSupervisedRuntimeCompletion({ userId: input.userId, attemptId: authority.attemptId, generation: authority.generation, result }));
 }

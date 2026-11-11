@@ -189,9 +189,6 @@ describe("hosted-member-store", () => {
       phoneLookupKey: "phone_lookup_123",
       phoneNumberVerifiedAt: new Date("2026-04-07T00:02:00.000Z"),
 
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
       signupPhoneNumber: "+15551234",
 
 
@@ -531,9 +528,6 @@ describe("hosted-member-store", () => {
           phoneLookupKey: "hbidx:phone:v1:abc123",
           phoneNumberVerifiedAt: null,
 
-          signupPhoneCodeSendAttemptId: null,
-          signupPhoneCodeSendAttemptStartedAt: null,
-          signupPhoneCodeSentAt: null,
           signupPhoneNumberEncrypted: await encryptHostedWebNullableString({
             field: "hosted-member-identity.signup-phone-number",
             memberId: member.id,
@@ -558,9 +552,6 @@ describe("hosted-member-store", () => {
         phoneNumber: null,
         phoneNumberVerifiedAt: null,
 
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
         signupPhoneNumber: "+15551234567",
 
 
@@ -579,9 +570,6 @@ describe("hosted-member-store", () => {
         phoneLookupKey: "hbidx:phone:v1:abc123",
         phoneNumberVerifiedAt: null,
 
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: null,
 
 
@@ -3249,9 +3237,6 @@ describe("hosted-member-store", () => {
       phoneNumberVerifiedAt: null,
 
 
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
       signupPhoneNumberEncrypted: null,
 
 
@@ -3271,9 +3256,6 @@ describe("hosted-member-store", () => {
         phoneNumber: "+15551234567",
         prisma,
 
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
         signupPhoneNumber: null,
       }),
     ).resolves.toEqual({
@@ -3283,9 +3265,6 @@ describe("hosted-member-store", () => {
       phoneNumber: "+15551234567",
       phoneNumberVerifiedAt: null,
 
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
 
 
@@ -3314,9 +3293,6 @@ describe("hosted-member-store", () => {
         phoneNumberVerifiedAt: null,
 
 
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: null,
       },
       update: {
@@ -3326,9 +3302,6 @@ describe("hosted-member-store", () => {
         phoneNumberVerifiedAt: null,
 
 
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: null,
       },
     });
@@ -4300,9 +4273,6 @@ describe("hosted-member-store", () => {
             phoneNumberVerifiedAt: null,
 
 
-            signupPhoneCodeSendAttemptId: null,
-            signupPhoneCodeSendAttemptStartedAt: null,
-            signupPhoneCodeSentAt: null,
             signupPhoneNumberEncrypted: null,
 
 
@@ -4351,9 +4321,6 @@ describe("hosted-member-store", () => {
         phoneNumber: null,
         phoneNumberVerifiedAt: null,
 
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
         signupPhoneNumber: null,
 
 

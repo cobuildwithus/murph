@@ -907,8 +907,8 @@ function createRuntimeInvocationPreparation(input: {
       });
     },
     runnerContainerNamespace: input.runnerContainerNamespace ?? createHostedRunnerContainerNamespaceRouter({
-      exactUser: createRunnerContainerNamespace({ invokedContainerNames: input.invokedContainerNames }),
-      standby: input.standbyContainerNamespace ?? null,
+      RUNNER_CONTAINER: createRunnerContainerNamespace({ invokedContainerNames: input.invokedContainerNames }),
+      STANDBY_RUNNER_CONTAINER: input.standbyContainerNamespace ?? null,
     }),
     runnerRuntimeEnvSource: input.runnerRuntimeEnvSource,
     runnerStoreCache: new TestRunnerStoreCache(input.runnerRuntimeEnvSource),

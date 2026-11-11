@@ -2,7 +2,61 @@
 
 Status: active
 Created: 2026-11-10
-Updated: 2026-11-10
+Updated: 2026-11-11
+
+## Legacy route projection follow-up
+
+Outcome: an authorized silent move can start for a legacy route whose nullable
+account projection has not been backfilled. The sealed delivery route remains
+the authority; no provider effect may precede its validation and reservation.
+Reaches: operator starts for existing Linq groups, including a null projection,
+an inconsistent non-null projection, and a route changed during preparation.
+Proof: real Postgres producer/consumer tests with a fake provider must preserve
+the same container through adoption and leave, reject mismatched or changed
+authority without an add, and leave the projection untouched on failed starts.
+
+The observed blocker is a null `hosted_thread_route.account_lookup_key` on an
+otherwise existing sealed route. The start guard currently rejects that row
+before opening its authoritative route. Derive the source key from the validated
+sealed route, retain both identity/key consistency checks, and fill only a null
+projection inside the existing source-locked reservation transaction after all
+quietness and line checks pass. Revalidate the exact originally read row and use
+a conditional update; a mismatch remains a conflict. No bulk backfill, new
+endpoint, credential path, schema, or ingress work is needed. Rollback leaves a
+valid projection understood by the previous producer.
+
+The candidate overview remains an indexed view of projected routes. An operator
+can use an exact opaque route reference obtained through authorized control
+diagnostics to start a legacy route. No plaintext identity is accepted.
+The requested real-group test is authorized, but waits for this fix's focused
+proof, review, exact-head CI and managed deployment. No group move has started.
+
+An additional preflight exposed a second start blocker: system acknowledgements
+advance the canonical lane watermark without stamping every item's `consumed_at`.
+The quietness guard mistook already handled system items for pending work.
+Use the existing one-statement `readHostedMailboxProgress` projection, including
+its live-item retention and expiry rules, and compare lane high-water marks to
+consumed watermarks. Keep the recent-conversation, active-runtime and pending
+delivery guards. This adds one bounded metadata read only to operator start;
+it neither changes acknowledgements nor replays or discards mailbox items.
+New synthetic cases reproduce the acknowledged/expired-item rejection before
+the correction and preserve rejection for unacknowledged system work and recent
+acknowledged conversation. The fixture now settles work through canonical lane
+acknowledgement rather than timestamp-only updates.
+
+Round 1 passed on `c220df0b440a88fc63982f9ff1fc3e3a3d703aed`. The mailbox guard
+correction adds production behavior after that review, so the completion owner
+will run round 2 on the next stable pushed head alongside fresh exact-head CI.
+
+Local verification reproduces both start blockers before their corrections
+and passes afterward: 78 consumer/producer PostgreSQL tests plus 15 move-unit
+and Ops-route tests. Coverage includes the complete legacy start/hold/adopt/leave
+path, unchanged projected starts, inconsistent authority, a projection changed
+during provider preparation, concurrent starts and failed quietness checks.
+Root typecheck, Web lint, complexity, docs drift, whitespace and privacy checks pass.
+No prompt, assistant tool or model decision changes, so real-model testing is
+not the changed behavior's proof boundary. Full CI and the external review run
+on the stable pushed candidate; real-provider confirmation remains outstanding.
 
 ## Parent continuation and release checkpoint
 

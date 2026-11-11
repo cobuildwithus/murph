@@ -89,8 +89,14 @@ export async function claimHostedRuntimeResourceCleanup(input: { prisma: PrismaC
   const media: Array<HostedRuntimeMediaPurge & { userId: string }> = [];
   const candidates = await input.prisma.$queryRaw<Array<{ userId: string; kind: string; resourceId: string }>>`
     SELECT resource.user_id AS "userId", resource.kind, resource.resource_id AS "resourceId"
-    FROM hosted_runtime_orphan AS resource
-    WHERE resource.purged_at IS NULL AND resource.cleanup_at <= ${input.now}
+    FROM (
+      SELECT user_id, kind, resource_id, cleanup_at FROM hosted_runtime_orphan
+      WHERE purged_at IS NULL AND cleanup_at <= ${input.now}
+      UNION ALL
+      SELECT user_id, 'game_recap' AS kind, resource_id, cleanup_at FROM game_recap_asset
+      WHERE purged_at IS NULL AND cleanup_at <= ${input.now}
+        AND (retired_at IS NOT NULL OR recovery_until <= ${input.now})
+    ) AS resource
     ORDER BY resource.cleanup_at, resource.user_id, resource.kind, resource.resource_id
     LIMIT ${RESOURCE_CLEANUP_BATCH_SIZE}
   `;
@@ -99,6 +105,20 @@ export async function claimHostedRuntimeResourceCleanup(input: { prisma: PrismaC
     const row = await input.prisma.$transaction(async tx => {
       await lockHostedMemberRow(tx, candidate.userId);
       await lockHostedRuntimeOwnerRowTx(tx, candidate.userId);
+      if (candidate.kind === "game_recap") {
+        const { userId, resourceId } = candidate;
+        const where = { userId_resourceId: { userId, resourceId } };
+        const current = await tx.gameRecapAsset.findUnique({ where });
+        if (!current || current.purgedAt || current.cleanupAt > input.now) return null;
+        if (!current.retiredAt) {
+          if (!current.recoveryUntil || current.recoveryUntil > input.now) return null;
+          const changed = await tx.gameRecapAsset.updateMany({ where: { userId, resourceId, revision: current.revision, retiredAt: null, recoveryUntil: { lte: input.now } },
+            data: { retiredAt: input.now, revision: { increment: 1 } } });
+          if (!changed.count) return null;
+        }
+        const retired = await tx.gameRecapAsset.findUniqueOrThrow({ where });
+        return { ...retired, kind: "game_recap", snapshotRef: null };
+      }
       const where = { userId_kind_resourceId: candidate };
       const current = await tx.hostedRuntimeOrphan.findUnique({ where });
       if (!current || current.purgedAt || current.cleanupAt > input.now) return null;
@@ -151,6 +171,10 @@ export async function acknowledgeHostedRuntimeOrphanPurge(input: { prisma: Prism
   // The row stays as the publication fence, which reads only retiredAt. A wrapped
   // key is useless once its object is gone. Legacy rows keep their ref: the table
   // requires it and a repeat purge parses it.
+  if (kind === "game_recap") {
+    const result = await input.prisma.gameRecapAsset.updateMany({ where: { userId, resourceId, revision, retiredAt: { not: null }, purgedAt: null }, data: { purgedAt: input.now } });
+    return result.count === 1;
+  }
   const result = await input.prisma.hostedRuntimeOrphan.updateMany({ where: { userId, kind, resourceId, revision, retiredAt: { not: null }, purgedAt: null },
     data: { purgedAt: input.now, ...(kind === "snapshot" ? { snapshotRef: Prisma.DbNull } : {}) } });
   return result.count === 1;
@@ -177,7 +201,10 @@ export async function runHostedRuntimeResourceCleanup(input: { prisma: PrismaCli
       failed += 1;
       warnHostedRuntimeResourceCleanupFailure(orphan, stage, error);
       // Avoid one unavailable resource monopolizing a bounded sweep.
-      await input.prisma.hostedRuntimeOrphan.updateMany({ where: { userId: orphan.userId, kind: orphan.kind, resourceId: orphan.resourceId, revision: orphan.revision, purgedAt: null }, data: { cleanupAt: new Date(input.now.getTime() + 60_000) } });
+      const where = { userId: orphan.userId, resourceId: orphan.resourceId, revision: orphan.revision, purgedAt: null };
+      const data = { cleanupAt: new Date(input.now.getTime() + 60_000) };
+      if (orphan.kind === "game_recap") await input.prisma.gameRecapAsset.updateMany({ where, data });
+      else await input.prisma.hostedRuntimeOrphan.updateMany({ where: { ...where, kind: orphan.kind }, data });
     }
   }
   for (const purge of claimed.media) {

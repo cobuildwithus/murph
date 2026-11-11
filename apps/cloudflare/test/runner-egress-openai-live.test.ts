@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { mockRecapMediaAdmission } from "./helpers/recap-media-admission.ts";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type IncomingMessage } from "node:http";
@@ -11,6 +12,8 @@ import type { RunnerOutboundEnvironmentSource } from "../src/runner-outbound.ts"
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { createPostgresTestOwner, mockPostgresOwnerCommand, nativeProviderTestNamespace } from "./postgres-owner-fixtures.ts";
 import { nativeLiveRequest } from "./fixtures/native-live-request.ts";
+
+beforeEach(() => { mockRecapMediaAdmission(); });
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -58,6 +61,7 @@ async function fixture() {
 
 describe("native public Live egress", () => {
   it("creates once, binds its resource to the runtime, and restores the opaque upstream id on attach", async () => {
+    const admission = mockRecapMediaAdmission(new Error('Synthetic admission outage'));
     const h = await fixture();
     const response = await h.create();
     expect(response.status).toBe(201);
@@ -75,6 +79,7 @@ describe("native public Live egress", () => {
     expect(attachment.redirect).toBe("manual");
     expect(h.upstream).toHaveBeenCalledTimes(2);
     expect(h.authorize).not.toHaveBeenCalled();
+    expect(admission).not.toHaveBeenCalled();
   });
 
   it.each([401, 403])("reports upstream authorization failure %s through the existing monitor", async (status) => {

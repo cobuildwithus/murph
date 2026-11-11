@@ -130,8 +130,7 @@ async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqPa
     if (contact.kind === "email") {
       if (!identity) await upsertHostedMemberIdentity({
         memberId, maskedPhoneNumberHint: null, phoneLookupKey: null, phoneNumber: null, phoneNumberVerifiedAt: null,
-        signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null, signupPhoneNumber: null, preparedControlRoot: root, prisma: tx,
+        signupPhoneNumber: null, preparedControlRoot: root, prisma: tx,
       });
       await syncHostedMemberVerifiedEmailAuthorization({
         memberId, address: contact.value, verifiedAt: new Date(), preparedControlRoot: root, preparedReplyAlias: replyAlias, prisma: tx,
@@ -139,9 +138,6 @@ async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqPa
     } else {
       await upsertHostedMemberIdentity({
         ...buildHostedMemberPhoneIdentityFields(contact.value), memberId, phoneNumberVerifiedAt: new Date(),
-        signupPhoneCodeSendAttemptId: identity?.signupPhoneCodeSendAttemptId ?? null,
-        signupPhoneCodeSendAttemptStartedAt: identity?.signupPhoneCodeSendAttemptStartedAt ?? null,
-        signupPhoneCodeSentAt: identity?.signupPhoneCodeSentAt ?? null,
         signupPhoneNumber: identity?.signupPhoneNumber ?? null, preparedControlRoot: root, prisma: tx,
       });
     }
