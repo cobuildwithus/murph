@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { gameEveningCheckInHorizons, gameEveningWindow } from "@/src/lib/game/evening-check-in";
 import { GAME_ROOM_FAR_APART_HOURS, gameZoneSpreadHours } from "@murphai/hosted-execution/runtime-control";
+import { reminderOpenDay } from "@/src/lib/game/reminders";
 import type { RuleState } from "@/src/lib/game/rules";
 
 function state(zones: readonly string[], date = "2030-03-04"): RuleState {
@@ -31,6 +32,21 @@ describe("game evening horizon", () => {
     const room = state(["America/New_York"]);
     room.game.terms = { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 3 }, stakes: [] }] };
     expect(gameEveningCheckInHorizons([room]).get("2030-03-04")?.toISOString()).toBe("2030-03-05T01:00:00.000Z");
+  });
+  it("keeps today's open task after another game post and a previous-day correction", () => {
+    const now = new Date("2030-03-04T20:05:00Z");
+    const cycling = state(["UTC", "UTC"], "2030-03-01");
+    cycling.game.id = "cycling";
+    const reading = state(["UTC", "UTC"], "2030-03-03");
+    reading.game.id = "reading";
+    const post = { id: "synthetic-post", memberId: "member-0", attempt: 1, kind: "words" as const,
+      mediaKeys: [], incomplete: false, blurHash: null, withdrawnAt: null, receivedAt: now };
+    cycling.entries.push({ ...post, id: "past-day-correction", dayIndex: 2 });
+    reading.entries.push({ ...post, id: "other-game-today", dayIndex: 1 });
+    expect(reminderOpenDay(cycling, cycling.players[0]!, now)).toBe(3);
+    expect(reminderOpenDay(reading, reading.players[0]!, now)).toBeNull();
+    expect(reminderOpenDay(cycling, cycling.players[1]!, now)).toBe(3);
+    expect(reminderOpenDay(reading, reading.players[1]!, now)).toBe(1);
   });
   it("allows only the thirty-minute window", () => {
     const dueAt = new Date("2030-03-05T02:00:00.000Z");
