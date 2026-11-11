@@ -38,43 +38,10 @@ import type { MarkdownDocumentRecord } from "./shared.ts";
 
 type RegistryFamily = BankEntityKind;
 
-type RegistryCollectionKey =
-  | "goals"
-  | "conditions"
-  | "allergies"
-  | "regimens"
-  | "familyMembers"
-  | "geneticVariants"
-  | "foods"
-  | "habitatAspects"
-  | "recipes"
-  | "providers"
-  | "workoutFormats";
-
 interface RegistryCollectorConfig {
-  key: RegistryCollectionKey;
   family: RegistryFamily;
   directory: string;
   toRecord: (document: MarkdownDocumentRecord) => RegistryMarkdownRecord | null;
-}
-
-interface RegistryCollections {
-  goals: CanonicalEntity[];
-  conditions: CanonicalEntity[];
-  allergies: CanonicalEntity[];
-  regimens: CanonicalEntity[];
-  familyMembers: CanonicalEntity[];
-  geneticVariants: CanonicalEntity[];
-  foods: CanonicalEntity[];
-  habitatAspects: CanonicalEntity[];
-  recipes: CanonicalEntity[];
-  providers: CanonicalEntity[];
-  workoutFormats: CanonicalEntity[];
-}
-
-interface RegistryCollectionResult {
-  collections: RegistryCollections;
-  failures: ParseFailure[];
 }
 
 type RegistryDocumentRead = MarkdownDocumentRecord | MarkdownDocumentOutcome;
@@ -85,86 +52,58 @@ type AsyncRegistryDocumentReader = (
   options?: { signal?: AbortSignal },
 ) => Promise<RegistryDocumentRead>;
 
-export interface CanonicalHealthEntityCollection {
-  assessments: CanonicalEntity[];
-  goals: CanonicalEntity[];
-  conditions: CanonicalEntity[];
-  allergies: CanonicalEntity[];
-  regimens: CanonicalEntity[];
-  familyMembers: CanonicalEntity[];
-  geneticVariants: CanonicalEntity[];
-  foods: CanonicalEntity[];
-  habitatAspects: CanonicalEntity[];
-  recipes: CanonicalEntity[];
-  providers: CanonicalEntity[];
-  workoutFormats: CanonicalEntity[];
-  entities: CanonicalEntity[];
-  failures: ParseFailure[];
-}
-
 const REGISTRY_COLLECTORS = [
   createRegistryCollectorConfig(
-    "goals",
     "goal",
     goalRegistryDefinition.registry.directory,
     (document) => toRegistryRecord(document, goalRegistryDefinition),
   ),
   createRegistryCollectorConfig(
-    "conditions",
     "condition",
     conditionRegistryDefinition.registry.directory,
     (document) => toRegistryRecord(document, conditionRegistryDefinition),
   ),
   createRegistryCollectorConfig(
-    "allergies",
     "allergy",
     allergyRegistryDefinition.registry.directory,
     (document) => toRegistryRecord(document, allergyRegistryDefinition),
   ),
   createRegistryCollectorConfig(
-    "regimens",
     "regimen",
     regimenRegistryDefinition.registry.directory,
     (document) => toRegistryRecord(document, regimenRegistryDefinition),
   ),
   createRegistryCollectorConfig(
-    "familyMembers",
     "family",
     familyRegistryDefinition.registry.directory,
     (document) => toRegistryRecord(document, familyRegistryDefinition),
   ),
   createRegistryCollectorConfig(
-    "geneticVariants",
     "genetics",
     geneticsRegistryDefinition.registry.directory,
     (document) => toRegistryRecord(document, geneticsRegistryDefinition),
   ),
   createRegistryCollectorConfig(
-    "foods",
     "food",
     foodRegistryDefinition.registry.directory,
     (document) => toRegistryRecord(document, foodRegistryDefinition),
   ),
   createRegistryCollectorConfig(
-    "habitatAspects",
     "habitat",
     habitatRegistryDefinition.registry.directory,
     (document) => toRegistryRecord(document, habitatRegistryDefinition),
   ),
   createRegistryCollectorConfig(
-    "recipes",
     "recipe",
     recipeRegistryDefinition.registry.directory,
     (document) => toRegistryRecord(document, recipeRegistryDefinition),
   ),
   createRegistryCollectorConfig(
-    "providers",
     "provider",
     providerRegistryDefinition.registry.directory,
     (document) => toRegistryRecord(document, providerRegistryDefinition),
   ),
   createRegistryCollectorConfig(
-    "workoutFormats",
     "workout_format",
     workoutFormatRegistryDefinition.registry.directory,
     (document) => toRegistryRecord(document, workoutFormatRegistryDefinition),
@@ -204,13 +143,11 @@ export async function readCanonicalHealthFamilyEntities(
 }
 
 function createRegistryCollectorConfig(
-  key: RegistryCollectionKey,
   family: RegistryFamily,
   directory: string,
   toRecord: (document: MarkdownDocumentRecord) => RegistryMarkdownRecord | null,
 ): RegistryCollectorConfig {
   return {
-    key,
     family,
     directory,
     toRecord,
@@ -220,7 +157,7 @@ function createRegistryCollectorConfig(
 export async function collectCanonicalEntities(
   vaultRoot: string,
   options: { mode: "strict" | "tolerant"; signal?: AbortSignal },
-): Promise<CanonicalHealthEntityCollection> {
+): Promise<EntityCollection> {
   const { mode, signal } = options;
   signal?.throwIfAborted();
   const assessmentArgs = [
@@ -229,44 +166,11 @@ export async function collectCanonicalEntities(
     projectAssessmentEntity,
     { signal },
   ] as const;
-  const assessments = mode === "strict"
+  let { entities, failures }: EntityCollection = mode === "strict"
     ? { entities: await readJsonlEntitiesStrict(...assessmentArgs), failures: [] }
     : await readJsonlEntitiesTolerant(...assessmentArgs);
   signal?.throwIfAborted();
-  const registryCollections = await readRegistryCollectionsAsync(
-    vaultRoot,
-    mode === "strict" ? readMarkdownDocument : readMarkdownDocumentOutcome,
-    signal,
-  );
-  signal?.throwIfAborted();
-  const families = { assessments: assessments.entities, ...registryCollections.collections };
-
-  return {
-    ...families,
-    entities: Object.values(families).flat().sort(compareCanonicalEntities),
-    failures: [...assessments.failures, ...registryCollections.failures],
-  };
-}
-
-async function readRegistryCollectionsAsync(
-  vaultRoot: string,
-  readDocument: AsyncRegistryDocumentReader,
-  signal?: AbortSignal,
-): Promise<RegistryCollectionResult> {
-  const collections: RegistryCollections = {
-    goals: [],
-    conditions: [],
-    allergies: [],
-    regimens: [],
-    familyMembers: [],
-    geneticVariants: [],
-    foods: [],
-    habitatAspects: [],
-    recipes: [],
-    providers: [],
-    workoutFormats: [],
-  };
-  const failures: ParseFailure[] = [];
+  const readDocument = mode === "strict" ? readMarkdownDocument : readMarkdownDocumentOutcome;
 
   for (const collector of REGISTRY_COLLECTORS) {
     signal?.throwIfAborted();
@@ -276,11 +180,15 @@ async function readRegistryCollectionsAsync(
       readDocument,
       signal,
     );
-    collections[collector.key] = result.entities;
-    failures.push(...result.failures);
+    entities = entities.concat(result.entities);
+    failures = failures.concat(result.failures);
   }
+  signal?.throwIfAborted();
 
-  return { collections, failures };
+  return {
+    entities: entities.sort(compareCanonicalEntities),
+    failures,
+  };
 }
 
 function projectRegistryDocumentEntity(

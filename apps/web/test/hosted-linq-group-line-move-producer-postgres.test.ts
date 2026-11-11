@@ -747,4 +747,24 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect(overview.candidates).toEqual([{ containerRef, containerHint: room.slice(-8), lastActivityAt: null, hasLiveGame: false }]);
     for (const raw of [room, owner, sender, sourceChat, targetChat, source, target, person]) expect(JSON.stringify(overview)).not.toContain(raw);
   });
+  it("reports missing legacy delivery routes without hiding usable candidates", async () => {
+    const missingRoom = randomUUID(); extraRooms.push(missingRoom);
+    await db.hostedMember.create({ data: { id: missingRoom, billingStatus: "active" } });
+    await db.hostedThreadContainer.create({ data: { memberId: missingRoom, ownerMemberId: owner } });
+    const missingChat = randomUUID();
+    const missingRef = createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: missingChat })!;
+    await db.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: missingRoom,
+      threadIdentityLookupKey: missingRef,
+      threadLookupKey: createHostedExternalThreadLookupKey({ channel: "linq", threadId: missingChat, accountLookupKey: sourceKey })!,
+      accountLookupKey: null, deliveryRouteEncrypted: null } });
+    const overview = await readHostedLinqGroupLineMoveOverview({ sourceLineLookupKey: sourceKey, prisma: db });
+    expect(overview.candidates.map(candidate => candidate.containerRef)).toContain(containerRef);
+    expect(overview.unresolvedCandidates).toEqual([{ containerRef: missingRef,
+      containerHint: missingRoom.slice(-8), code: "delivery_route_missing" }]);
+    expect(provider.retrieve).not.toHaveBeenCalled();
+    expect(provider.add).not.toHaveBeenCalled();
+    expect((await db.hostedThreadRoute.findUniqueOrThrow({ where: {
+      channel_threadIdentityLookupKey: { channel: "linq", threadIdentityLookupKey: missingRef },
+    } })).deliveryRouteEncrypted).toBeNull();
+  });
 });

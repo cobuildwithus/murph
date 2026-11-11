@@ -5,16 +5,13 @@ import type {
   InboxServices,
 } from './types.js'
 import {
-  documentCanonicalPromotionSpec,
-  mealCanonicalPromotionSpec,
   preserveCanonicalDocumentAttachment,
   preserveCanonicalDocumentAttachments,
   persistPromotionEntry,
-  promoteCanonicalAttachmentImport,
+  promoteMealAttachmentImport,
   readExperimentPromotionEntries,
   requireExperimentPromotionCore,
   requireExperimentPromotionEntry,
-  requireDocumentPromotionCore,
   requireJournalPromotionCore,
   resolveAttachmentSha256,
   resolveExperimentPromotionTarget,
@@ -23,7 +20,6 @@ import {
 } from '../inbox-services/promotions.js'
 import {
   isStoredAudioAttachment,
-  isStoredDocumentAttachment,
   isStoredImageAttachment,
 } from '../inbox-services/query.js'
 import { occurredDayFromCapture } from '../inbox-services/shared.js'
@@ -42,7 +38,6 @@ export function createInboxPromotionOps(
   | 'preserveDocumentAttachment'
   | 'preserveDocumentAttachments'
   | 'promoteMeal'
-  | 'promoteDocument'
   | 'promoteJournal'
   | 'promoteExperimentNote'
 > {
@@ -66,9 +61,8 @@ export function createInboxPromotionOps(
     },
 
     async promoteMeal(input) {
-      return promoteCanonicalAttachmentImport({
+      return promoteMealAttachmentImport({
         input,
-        target: 'meal',
         clock: env.clock,
         loadInbox: env.loadInbox,
         prepare: async () => ({
@@ -81,7 +75,6 @@ export function createInboxPromotionOps(
             'INBOX_PROMOTION_REQUIRES_PHOTO',
             'Meal promotion requires an image attachment on the inbox capture.',
           ),
-        canonicalPromotionSpec: mealCanonicalPromotionSpec,
         buildCanonicalMatchContext: async ({
           paths,
           capture,
@@ -132,98 +125,6 @@ export function createInboxPromotionOps(
             lookupId: result.mealId,
             relatedId: result.mealId,
           }
-        },
-      })
-    },
-
-    async promoteDocument(input) {
-      return promoteCanonicalAttachmentImport({
-        input,
-        target: 'document',
-        clock: env.clock,
-        loadInbox: env.loadInbox,
-        prepare: async () => {
-          const core = requireDocumentPromotionCore(await env.loadCore())
-          return {
-            core,
-            importers: (await env.loadImporters()).createImporters({ corePort: core }),
-          }
-        },
-        findRequiredAttachment: (capture) =>
-          capture.attachments.find(isStoredDocumentAttachment),
-        missingAttachmentError: () =>
-          new VaultCliError(
-            'INBOX_PROMOTION_REQUIRES_DOCUMENT',
-            'Document promotion requires a stored document attachment on the inbox capture.',
-          ),
-        canonicalPromotionSpec: documentCanonicalPromotionSpec,
-        buildCanonicalMatchContext: async ({
-          paths,
-          capture,
-          attachment,
-        }) => {
-          return {
-            documentSha256: await resolveAttachmentSha256(
-              paths.absoluteVaultRoot,
-              capture,
-              attachment,
-            ),
-            title:
-              typeof attachment.fileName === 'string' && attachment.fileName.trim()
-                ? attachment.fileName.trim()
-                : null,
-          }
-        },
-        createPromotion: async ({
-          paths,
-          capture,
-          prepared,
-          attachment,
-          metadata,
-        }) => {
-          const title =
-            typeof attachment.fileName === 'string' && attachment.fileName.trim()
-              ? attachment.fileName.trim()
-              : undefined
-          const result = await prepared.importers.importDocument({
-            filePath: await resolvePromotionAttachmentFilePath(
-              paths.absoluteVaultRoot,
-              capture,
-              attachment,
-            ),
-            vaultRoot: paths.absoluteVaultRoot,
-            occurredAt: metadata.occurredAt ?? undefined,
-            title,
-            note: metadata.note ?? undefined,
-            source: metadata.source ?? undefined,
-          })
-
-          return {
-            lookupId: result.documentId,
-            relatedId: result.documentId,
-          }
-        },
-        beforePersistPromotion: async ({
-          attachment,
-          capture,
-          paths,
-          prepared,
-          relatedId,
-        }) => {
-          if (
-            input.note !== undefined
-            || input.occurredAt !== undefined
-            || input.source !== undefined
-            || typeof attachment.attachmentId !== 'string'
-          ) {
-            return
-          }
-          await prepared.core.recordInboxDocumentDefaultPromotion({
-            attachmentId: attachment.attachmentId,
-            captureId: capture.captureId,
-            documentId: relatedId,
-            vaultRoot: paths.absoluteVaultRoot,
-          })
         },
       })
     },
