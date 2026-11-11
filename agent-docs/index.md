@@ -51,6 +51,8 @@ The [synthetic game self-play QA map](references/game-selfplay-qa.md) records re
 
 Sparse calendar diagnostic refinement: [execution plan](exec-plans/completed/2026-11-10-sparse-row-incomplete-diagnostic.md). Day provenance and bounded relations: [implementation and verification](exec-plans/completed/2026-11-11-calendar-day-diagnostics.md).
 
+[Calendar day coverage](exec-plans/active/2026-11-11-calendar-day-coverage.md): complete bounded source-local sparse refresh collection and recovery proof.
+
 Device-first per-day wearable selection and complete private RHR history are owned by
 [Query](../packages/query/README.md#device-readings-and-health-store-copies) and
 [private numbers](product-specs/ios-meals.md#private-numbers). Implementation evidence

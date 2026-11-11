@@ -1951,6 +1951,16 @@ Current product admission, delivery and native runtime safety rules remain.
   `sparse_interval.*` reason: source context, value, start/end presence or
   validity, interval ordering, day, provider, source type, or source instance.
   Historical producers may still report `sparse_interval.row_incomplete`.
+  Strict sparse calendar refreshes collect the previous, requested and next UTC
+  days with exact datetime bounds before selecting the requested source-local day
+  with the importer resolver.
+  Each collection is bounded to three single-attempt pages at 12 seconds per page;
+  the three days run serially, yielding between days without publishing a partial
+  replacement. Their existing job is available only after the full envelope closes
+  (requested UTC midnight plus 48 hours), covering the normalizer's accepted
+  offsets up to 24 hours. Source lifecycle is rechecked before canonical writes.
+  Missing or malformed intervals remain strict failures; only valid neighboring
+  days are excluded. A failed collection cannot produce an authoritative empty day.
   Day mismatches additionally report the selected `normalizationDayBasis`
   (explicit calendar, timestamp calendar, source offset, vault timezone, UTC,
   or missing) and UTC/resolved-day relations (before, equal, after, or missing)

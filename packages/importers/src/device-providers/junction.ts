@@ -2358,6 +2358,29 @@ function normalizeTimeseries(
   }
 }
 
+/** Select only after the provider has collected the adjacent UTC days completely.
+ * Keep malformed intervals for the strict repair validator; never turn them
+ * into an authoritative empty day by filtering them out here. */
+export function selectJunctionSparseCalendarDayRecords(
+  records: readonly unknown[],
+  input: { dayKey: string; sourceProviderSlug: string; defaultTimeZone?: string },
+): unknown[] {
+  return records.filter((record) => {
+    const entry = asPlainObject(record);
+    if (!entry) return true;
+    const startRaw = firstStringFromPaths(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS);
+    const startAt = resolveSafeTimestamp(startRaw);
+    const endAt = resolveSafeTimestamp(firstStringFromPaths(entry, JUNCTION_INTERVAL_END_TIMESTAMP_PATHS));
+    if (!startRaw || !startAt || !endAt || Date.parse(endAt) < Date.parse(startAt)) return true;
+    const timestamp = resolveJunctionSparseIntervalTimestamp(entry, startRaw, {}, input.sourceProviderSlug);
+    const { dayKey } = resolveJunctionTimeseriesAggregateDay(entry, timestamp, startAt, input.defaultTimeZone);
+    // Only a neighboring calendar day is covered by the collected envelope.
+    // Contradictory distant calendar metadata must still fail strict validation.
+    const calendarShift = dayKey ? Math.abs(Date.parse(dayKey) - Date.parse(startAt.slice(0, 10))) : Number.NaN;
+    return !dayKey || calendarShift > 86_400_000 || dayKey === input.dayKey;
+  });
+}
+
 function assertJunctionSparseCalendarRepairRowsValid(input: {
   context: NormalizationContext;
   descriptor: JunctionDailyTimeseriesDescriptor;
@@ -5734,7 +5757,7 @@ function pushJunctionSparseIntervalReadings(
 function resolveJunctionSparseIntervalTimestamp(
   entry: PlainObject,
   startRaw: string,
-  context: NormalizationContext,
+  context: Pick<NormalizationContext, "importedAt" | "windowEnd" | "windowStart">,
   sourceProviderSlug: string,
 ): ReturnType<typeof resolveRecordTimestamp> {
   const startAt = resolveSafeTimestamp(startRaw);

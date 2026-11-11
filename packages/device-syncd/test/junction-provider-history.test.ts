@@ -3828,7 +3828,7 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
       });
     }
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/caffeine/grouped")) {
-      const precise = new URL(url).searchParams.get("start_date")?.includes("T") === true;
+      const precise = new URL(url).searchParams.get("start_date") === "2026-04-03T03:25:00.000Z";
       return createJsonResponse({
         groups: {
           apple_health_kit: [{
@@ -3930,6 +3930,7 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
     "Junction sparse correction should persist its calendar refresh as a continuation.",
   );
   assert.deepEqual(preciseResult.scheduledJobs, [{
+    availableAt: "2026-04-04T00:00:00.000Z",
     kind: "resource",
     payload: {
       calendarRefreshDay: "2026-04-02",
@@ -3961,7 +3962,7 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
   const yielded = await executeJunctionJob(
     provider,
     createJunctionJobContext({
-      now: "2026-04-03T12:00:00.000Z",
+      now: "2026-04-04T00:00:00.000Z",
       importSnapshot,
       shouldYield: () => true,
     }),
@@ -3973,7 +3974,7 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
   const calendarResult = await executeJunctionJob(
     provider,
     createJunctionJobContext({
-      now: "2026-04-03T12:00:00.000Z",
+      now: "2026-04-04T00:00:00.000Z",
       importSnapshot,
     }),
     calendarJobRecord,
@@ -3995,7 +3996,7 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
     (snapshot as { timeseries?: { caffeine?: Array<{ value?: number }> } })
       .timeseries?.caffeine?.map((record) => record.value)
   ), [[0.095, 0.025], [0.105, 0.035]]);
-  const [preciseRequest, dailyRequest] = requests.filter((url) => url.includes("/v2/timeseries/"));
+  const [preciseRequest, , dailyRequest] = requests.filter((url) => url.includes("/v2/timeseries/"));
   const request = requireValue(preciseRequest, "Junction sparse resource job should issue a precise request.");
   assertJunctionWindowQuery(
     request,
@@ -4004,8 +4005,8 @@ test("Junction sparse sub-day corrections refresh the provider-owned calendar da
   );
   assertJunctionWindowQuery(
     requireValue(dailyRequest, "Junction sparse resource job should refresh its closed daily total."),
-    "2026-04-02",
-    "2026-04-02",
+    "2026-04-02T00:00:00.000Z",
+    "2026-04-03T00:00:00.000Z",
   );
 });
 
@@ -4048,7 +4049,7 @@ test("Junction sparse calendar refresh imports an authoritative empty source day
   const result = await executeJunctionJob(
     provider,
     createJunctionJobContext({
-      now: "2026-04-03T12:00:00.000Z",
+      now: "2026-04-04T00:00:00.000Z",
       importSnapshot: async (snapshot) => {
         importedSnapshots.push(snapshot);
         normalizedImports.push(normalizeJunctionSnapshot(snapshot as Parameters<
@@ -4114,7 +4115,7 @@ test("Junction sparse calendar refresh imports an authoritative empty source day
   assert.ok(requests.some((url) =>
     url.includes("provider=garmin")
     && url.includes("start_date=2026-04-02")
-    && url.includes("end_date=2026-04-02")
+    && url.includes("end_date=2026-04-03")
   ));
 });
 
@@ -4154,7 +4155,7 @@ test("Junction sparse calendar refresh rejects nonempty rows that apply no owned
     executeJunctionJob(
       provider,
       createJunctionJobContext({
-        now: "2026-04-03T12:00:00.000Z",
+        now: "2026-04-04T00:00:00.000Z",
         importSnapshot: async () => ({
           canonicalEventCount: 0,
           canonicalEventExternalRefResourceIds: [],
@@ -4199,7 +4200,7 @@ test("Junction sparse calendar refresh retains an unavailable optional endpoint"
   await assert.rejects(
     executeJunctionJob(
       provider,
-      createJunctionJobContext({ now: "2026-04-03T12:00:00.000Z" }),
+      createJunctionJobContext({ now: "2026-04-04T00:00:00.000Z" }),
       createJob("resource", {
         calendarRefreshDay: "2026-04-02",
         resource: "water",
