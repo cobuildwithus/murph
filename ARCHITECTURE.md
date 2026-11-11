@@ -5874,6 +5874,13 @@ Web producer; keep it while accepted actions can remain queued or restored.
 
 ## Weekly Game
 
+Recap media retirement receipts live in the additive, FK-free `game_recap_asset`
+table, surviving player and game deletion. The existing runtime retention worker
+claims recap and runtime-orphan candidates under one combined batch limit,
+rechecks ownership and revision fences, then purges outside its transaction.
+The runtime-orphan kind constraint is unchanged.
+
+
 Pair shows use the existing recap notification on GPT-6.1 Sol. The parent reads
 an authorized local material bundle, generates JPEG scenes and a twenty-second
 MP3 with the existing tools in file mode, previews and revises the draft, then

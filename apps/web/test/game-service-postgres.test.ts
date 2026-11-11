@@ -626,7 +626,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     } finally {
       fence.mockRestore(); active.mockRestore(); vi.unstubAllEnvs();
       await db.hostedRuntimeOwner.deleteMany({ where: { userId: room } });
-      await db.hostedRuntimeOrphan.deleteMany({ where: { kind: "game_recap", resourceId: { startsWith: `${gameId}|` } } });
+      await db.gameRecapAsset.deleteMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
     }
   });
   it("reserves once, freezes selected files, uploads before acceptance and creates no generator wake", async () => {
@@ -731,7 +731,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     } finally {
       fence.mockRestore(); active.mockRestore(); vi.unstubAllEnvs();
       await db.hostedRuntimeOwner.deleteMany({ where: { userId: room } });
-      await db.hostedRuntimeOrphan.deleteMany({ where: { kind: "game_recap", resourceId: { startsWith: `${gameId}|` } } });
+      await db.gameRecapAsset.deleteMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
     }
   });
   it("seals an authorized recap on the settled game and exposes it to both players", async () => {

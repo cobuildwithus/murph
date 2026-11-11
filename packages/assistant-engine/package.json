@@ -104,7 +104,6 @@
       "default": "./dist/outbound-channel.js"
     }
   },
-  "bin": { "murph-recap-preview": "./dist/recap-preview-cli.js" },
   "files": [
     "dist",
     "skills",

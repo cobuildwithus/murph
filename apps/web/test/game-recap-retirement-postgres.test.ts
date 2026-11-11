@@ -7,7 +7,7 @@ import { claimHostedRuntimeResourceCleanup, acknowledgeHostedRuntimeOrphanPurge 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Recap retirement requires an isolated local test database.");
 const ownerMemberId = `synthetic_recap_${randomUUID()}`;
-afterAll(async () => { if (enabled) await getPrisma().hostedRuntimeOrphan.deleteMany({ where: { userId: ownerMemberId } }); });
+afterAll(async () => { if (enabled) await getPrisma().gameRecapAsset.deleteMany({ where: { userId: ownerMemberId } }); });
 
 describe.skipIf(!enabled)("recap retirement receipts", () => {
   it("keeps ready assets, expires abandoned uploads, and preserves terminal fences without either FK", async () => {
@@ -30,6 +30,6 @@ describe.skipIf(!enabled)("recap retirement receipts", () => {
     const retired = (await claimHostedRuntimeResourceCleanup({ prisma: db, now: mediaDeadline })).orphans.filter(row => row.userId === ownerMemberId);
     expect(retired).toHaveLength(2);
     for (const orphan of retired) expect(await acknowledgeHostedRuntimeOrphanPurge({ prisma: db, orphan, now: mediaDeadline })).toBe(true);
-    expect(await db.hostedRuntimeOrphan.count({ where: { userId: ownerMemberId, retiredAt: { not: null }, purgedAt: { not: null } } })).toBe(2);
+    expect(await db.gameRecapAsset.count({ where: { userId: ownerMemberId, retiredAt: { not: null }, purgedAt: { not: null } } })).toBe(2);
   });
 });

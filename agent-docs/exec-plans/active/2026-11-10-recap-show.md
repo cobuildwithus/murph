@@ -32,6 +32,10 @@ Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the own
 
 21. **Parent authoring is the final design (owner review):** cancel plan PR 08 and the proposed child-forwarding PR B. The parent reads material, writes files, generates, previews, revises and submits the show. Keep native multi-agent features disabled for recap turns. Remove child/subagent instructions from the craft guide; it simply tells Murph to finish with the task files and tools. The separate native iOS work remains.
 
+22. **Round 2 clean-build wiring (A1):** route every new contracts public subpath through the existing explicit root/Web TypeScript source maps and keep the Web no-dist assertion empty, rather than accepting leaked declarations. Public exports and TypeScript project references already declare the package build closure. Add clean-resolution fixtures for the recap, Zod and generated-audio entries. Drop the unused preview bin declaration; the hosted `preview_recap` tool remains the authoring path. Verify from deleted package outputs so previous local builds cannot mask missing imports.
+
+23. **Round 2 expand-only retirement (A2):** the orphan kind extension required dropping its existing CHECK, which predeploy correctly rejects. Replace the undeployed migration with an additive FK-free `game_recap_asset` receipt table; retain the existing runtime cleanup worker, combined bounded candidate selection, ownership locks, revision fences and retry pacing. Existing orphan constraints/rows stay unchanged. The nullable runtime-owner scope migration remains additive. No contract migration or destructive SQL is part of PR A.
+
 ## PR A execution
 
 Outcome: pair players receive one accepted themed recap through one text line and link. Full, sparse, failed-media and retired generations use the existing game authority; groups retain their current path. Proof includes contract fixtures, focused unit/Postgres checks and synthetic live parent journeys. Native visual implementation remains separate work; child forwarding is canceled.

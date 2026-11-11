@@ -184,10 +184,10 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     const view = (await readGame(gameId, stays))!;
     expect(view).toMatchObject({ status: "void", result: null, tickets: [], settlesAt: null });
     expect((await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).recapEncrypted).toBeNull();
-    const receipt = await getPrisma().hostedRuntimeOrphan.findFirstOrThrow({ where: { kind: "game_recap", resourceId: { startsWith: `${gameId}|` } } });
+    const receipt = await getPrisma().gameRecapAsset.findFirstOrThrow({ where: { resourceId: { startsWith: `${gameId}|` } } });
     expect(receipt.retiredAt).not.toBeNull();
     expect(receipt.userId).toBe(leo);
-    await getPrisma().hostedRuntimeOrphan.deleteMany({ where: { userId: leo, kind: "game_recap" } });
+    await getPrisma().gameRecapAsset.deleteMany({ where: { userId: leo } });
     const left = view.players.find((player) => player.left);
     // The name the remaining player knew them by: Leo's own label for Ava, or Leo's own name.
     expect(left).toMatchObject({ memberId: null, firstName: leaver === "creator" ? "Leo" : "Bestie", seat: leaver === "creator" ? 0 : 1, avatarUrl: null });

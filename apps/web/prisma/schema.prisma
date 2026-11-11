@@ -1438,6 +1438,23 @@ model HostedRuntimeOrphan {
   @@map("hosted_runtime_orphan")
 }
 
+// FK-free recap receipts are swept by the existing runtime retention owner.
+model GameRecapAsset {
+  userId        String    @map("user_id")
+  resourceId    String    @map("resource_id")
+  objectKey     String    @map("object_key")
+  createdAt     DateTime  @map("created_at")
+  cleanupAt     DateTime  @map("cleanup_at")
+  recoveryUntil DateTime? @map("recovery_until")
+  retiredAt     DateTime? @map("retired_at")
+  purgedAt      DateTime? @map("purged_at")
+  revision      BigInt    @default(1)
+
+  @@id([userId, resourceId])
+  @@index([purgedAt, cleanupAt, userId])
+  @@map("game_recap_asset")
+}
+
 model HostedRuntimeMedia {
   userId    String    @map("user_id")
   mediaId   String    @map("media_id")
