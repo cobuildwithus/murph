@@ -1,4 +1,4 @@
-> Superseded implementation design: [pair recap simplification](2026-11-11-recap-show-simplify.md). The presentation contract remains current. Earlier amendments below are historical implementation evidence.
+> Superseded implementation design: [pair recap simplification](../completed/2026-11-11-recap-show-simplify.md). The presentation contract remains current. Earlier amendments below are historical implementation evidence.
 
 # Pair game recap as a show (agentic)
 
