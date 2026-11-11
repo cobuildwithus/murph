@@ -1283,7 +1283,7 @@ async function checkRecapOpenAiRequest(input: {
 }): Promise<Response | null> {
   // Text model traffic and opaque transports must not acquire a Web dependency.
   // Recap turns disable Codex's native image tool in their trusted configuration.
-  if (input.request.method !== "POST") return null;
+  if (input.request.method !== "POST" || !input.request.headers.has('x-murph-recap-reservation')) return null;
   const imageEndpoint = input.pathnameSuffix === "/v1/images/generations" || input.pathnameSuffix === "/v1/images/edits";
   if (!imageEndpoint && !input.imageGenerationRequested) return null;
   return checkRecapProviderRequest({ authorization: input.authorization, env: input.env,
@@ -3100,11 +3100,14 @@ async function checkHostedImageGenerationAccess(input: {
   } }, { status: 503 });
 }
 
-/** Scope comes from the current runtime owner, including requests with no header. */
+/** Only reservation-bearing media requests acquire the recap admission dependency. */
 async function checkRecapProviderRequest(input: {
   authorization: HostedProviderEgressAuthorization; env: RunnerOutboundEnvironmentSource;
   request: Request; media: boolean; nativeImage: boolean;
 }): Promise<Response | null> {
+  if (!input.request.headers.has('x-murph-recap-reservation')) return null;
+  const token = input.request.headers.get('x-murph-recap-reservation');
+  if (!token || !/^[a-f0-9]{64}$/u.test(token)) return new Response('Invalid recap reservation.', { status: 403 });
   // This separate bounded smoke owner has no member runtime or recap scope.
   if (input.authorization.authorized && input.authorization.mode === 'deploy_smoke_live_model_turn') return null;
   try {
@@ -3118,7 +3121,7 @@ async function checkRecapProviderRequest(input: {
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
     const result = await fetchHostedWebControlPlaneJson({
       body: { attemptId: fence.attemptId, generation: fence.leaseGeneration,
-        token: input.request.headers.get('x-murph-recap-reservation'), providerRequest,
+        token, providerRequest,
         opaque: false, nativeImage: input.nativeImage || invalidMedia },
       boundUserId: fence.userId, description: 'Recap provider admission', fetchImpl: fetch,
       route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.recapMediaAccess, timeoutMs: environment.webControlTimeoutMs,

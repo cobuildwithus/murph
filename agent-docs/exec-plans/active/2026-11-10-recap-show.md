@@ -46,6 +46,8 @@ Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the own
 
 28. **Round 2 clean assembly follow-up:** after resolving A1, full runner assembly exposed one additional static chunk for the recap schema shared between existing game-control validation and lazy authoring tools. Permit exactly 25 chunks instead of 24; keep the entry/static byte limits and forbidden-input guard. Actual production assembly measures 73,911 entry bytes, 2,044,273 static bytes and 12,423,527 total bytes. The 40 bundle tests retain rejection at one chunk over budget. Clean package/Web/Worker/tools typechecks, focused unit suites, 477 Postgres cases, 24 cardinality probes and the synthetic GPT-6.1 Sol file/preview/revision journey pass. The live run took 87 seconds with fixture media providers, selected two generated images and a song, and accepted one show with one line/link and zero chat media; artifacts remain under `audit-packages/recap-show-live/`.
 
+29. **Round 3 reservation-only egress (accepted):** supersede amendments 18 and 24 where they require admission for media without a reservation. Only media requests carrying `x-murph-recap-reservation` consult Web; absent headers return before cloning or callback. Invalid reservation tokens reject locally; scoped callback failures remain closed. Ordinary image generation/edit, native-image Responses, song and TTS preserve upstream 200/401/404/500/504 status/body/headers with zero admission calls, even when the callback would fail. Existing model/websocket/Live zero-call tests remain. The real Worker authorization-alert test and runner conformance pass. Update both route inventories for recap stage/read. These failures were PR-caused: main run `42964218485` at `8d8fabe` passed the same Worker, conformance, hosted-local and route-table test files. Existing provider authorization/subscription gates and the recap native-image disablement remain in force.
+
 ## PR A execution
 
 Outcome: pair players receive one accepted themed recap through one text line and link. Full, sparse, failed-media and retired generations use the existing game authority; groups retain their current path. Proof includes contract fixtures, focused unit/Postgres checks and synthetic live parent journeys. Native visual implementation remains separate work; child forwarding is canceled.
@@ -82,10 +84,11 @@ and cover previews without deleting readable stories. `MURPH_GAME_RECAP_MEDIA_DI
 is a local test storage override. The separate authorized rollout regenerates
 the three settled pair games after verification; this task performs none of it.
 
-The Worker adds a signed Web admission request only before paid media egress:
-image endpoint POSTs, Responses POSTs with native image generation, and
-ElevenLabs requests. Ordinary Responses, websocket upgrades and Live have no
-recap admission dependency. Recap turns disable Codex native image generation;
+The Worker adds a signed Web admission request only before reservation-bearing
+media egress: image endpoint POSTs, Responses POSTs with native image generation,
+and ElevenLabs requests. Requests without a recap reservation, including ordinary
+image, song and voice calls, have no recap admission dependency. Ordinary
+Responses, websocket upgrades and Live also have no admission dependency. Recap turns disable Codex native image generation;
 the bounded file tool owns their image calls. Media admission retains the Web
 control timeout, no retry and fail-closed semantics. Preserve the Web endpoint
 and nullable runtime-owner column while the new Worker is deployed.

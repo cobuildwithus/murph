@@ -5895,8 +5895,10 @@ two model runs, six image attempts, one song, two concurrent images and a $3.00
 prospective media cap. Reservations are never refunded. The nullable
 `hosted_runtime_owner.recap_media_scope` survives game deletion and fences exact
 runtime attempts. The outbound Worker inspects the actual request and consumes
-one matching reservation before paid media forwarding. Ordinary Responses,
-websocket upgrades and Live have no recap admission round trip. Recap turns
+one matching reservation before forwarding media requests carrying a recap
+reservation header. Requests without that header, including ordinary images,
+songs and voice, never consult recap admission; provider errors pass through.
+Ordinary Responses, websocket upgrades and Live also have no admission round trip. Recap turns
 disable Codex native image generation; file tools own their media calls.
 Reference images fit within 1024 pixels per edge, with at most three references;
 the default input estimate is 36,847 tokens with an optional operator override.
