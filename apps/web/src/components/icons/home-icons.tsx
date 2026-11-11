@@ -41,18 +41,3 @@ export function LabReportIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
-
-export function WatchCheckIcon(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg {...svgDefaults} {...props}>
-      {/* Watch body */}
-      <rect x={24} y={18} width={52} height={64} rx={12} />
-      {/* Band top */}
-      <path d="M 36 18 L 36 8 L 64 8 L 64 18" />
-      {/* Band bottom */}
-      <path d="M 36 82 L 36 92 L 64 92 L 64 82" />
-      {/* Checkmark on screen */}
-      <path d="M 37 50 L 46 59 L 63 40" strokeWidth={4} />
-    </svg>
-  );
-}

@@ -7,6 +7,11 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import { renderClientComponent } from "./render-client-component";
 
+const pendingSave = vi.hoisted(() => ({
+  deferred: false,
+  complete: null as (() => void) | null,
+}));
+
 vi.mock("@/src/components/murph/murph-assistant-style-picker", () => ({
   MurphAssistantStylePicker(props: {
     initialStep?: string;
@@ -15,21 +20,26 @@ vi.mock("@/src/components/murph/murph-assistant-style-picker", () => ({
     onOpenChange?: (open: boolean) => void;
     onSaved?: (preferences: { tone: string | null; voice: string | null }) => void;
     open?: boolean;
-    singleStep?: boolean;
   }) {
     return props.open
       ? React.createElement("div", {
           "data-assistant-style-step": props.initialStep ?? "",
           "data-initial-tone": props.initialTone ?? "",
           "data-initial-voice": props.initialVoice ?? "",
-          "data-single-step": props.singleStep ? "true" : "false",
         },
         `assistant style ${props.initialStep ?? ""}`,
         React.createElement("button", {
           "data-save-assistant-style": "true",
           onClick: () => {
-            props.onSaved?.({ tone: null, voice: "upbeat" });
-            props.onOpenChange?.(false);
+            const complete = () => {
+              props.onSaved?.({ tone: null, voice: "upbeat" });
+              props.onOpenChange?.(false);
+            };
+            if (pendingSave.deferred) {
+              pendingSave.complete = complete;
+            } else {
+              complete();
+            }
           },
           type: "button",
         }, "Save"),
@@ -50,7 +60,7 @@ vi.mock("@/src/components/settings/murph-personality-settings-dialog", async () 
     ...actual,
     MurphPersonalitySettingsDialog(props: {
       onOpenChange?: (open: boolean) => void;
-      onSaved?: (snapshot: { detail: number | null; humor: number | null; push: number | null }) => void;
+      onSaved?: (snapshot: { humor: number | null }) => void;
       open?: boolean;
     }) {
       return props.open
@@ -61,8 +71,15 @@ vi.mock("@/src/components/settings/murph-personality-settings-dialog", async () 
             React.createElement("button", {
               "data-save-style-levels": "true",
               onClick: () => {
-                props.onSaved?.({ detail: 5, humor: 7, push: 3 });
-                props.onOpenChange?.(false);
+                const complete = () => {
+                  props.onSaved?.({ humor: 7 });
+                  props.onOpenChange?.(false);
+                };
+                if (pendingSave.deferred) {
+                  pendingSave.complete = complete;
+                } else {
+                  complete();
+                }
               },
               type: "button",
             }, "Save levels"))
@@ -94,9 +111,70 @@ vi.mock("@/src/hooks/use-mobile", () => ({
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  pendingSave.deferred = false;
+  pendingSave.complete = null;
 });
 
 describe("CustomizeMurphSettings", () => {
+  test("a pending save applies to the latest server snapshot without reverting other preferences", async () => {
+    pendingSave.deferred = true;
+    const rendered = await renderCustomization({
+      assistant: { tone: "formal", voice: "grandpa" },
+      openVoiceLink: true,
+    });
+    try {
+      await React.act(async () => {
+        rendered.container.querySelector<HTMLButtonElement>("[data-save-assistant-style]")?.click();
+      });
+      await rendered.rerender(React.createElement(CustomizeMurphSettings, {
+        assistant: {
+          tone: "casual",
+          voice: "grandpa",
+          personality: { humor: 9, detail: 8, push: 1 },
+        },
+        openVoiceLink: true,
+      }));
+      await React.act(async () => { pendingSave.complete?.(); });
+      expect(rendered.container.textContent).toContain("Classic Murph · Custom");
+      expect(rendered.container.textContent).toContain("Casual · Custom");
+      expect(rendered.container.textContent).toContain("Humor 9 · Push 1 · Detail 8");
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("fresh server preferences replace a saved local snapshot and seed the next editor", async () => {
+    const rendered = await renderCustomization({
+      assistant: { tone: "formal", voice: "grandpa" },
+    });
+    try {
+      await React.act(async () => {
+        findSettingsRow(rendered.container, "Voice")?.querySelector("button")?.click();
+      });
+      await React.act(async () => {
+        rendered.container.querySelector<HTMLButtonElement>("[data-save-assistant-style]")?.click();
+      });
+      expect(rendered.container.textContent).toContain("Classic Murph");
+      await rendered.rerender(React.createElement(CustomizeMurphSettings, {
+        assistant: {
+          tone: "casual",
+          voice: "grandpa",
+          personality: { humor: 9, detail: 8, push: 1 },
+        },
+      }));
+      expect(rendered.container.textContent).toContain("Casual · Custom");
+      expect(rendered.container.textContent).toContain("Grandpa · Custom");
+      expect(rendered.container.textContent).toContain("Humor 9 · Push 1 · Detail 8");
+      await React.act(async () => {
+        findSettingsRow(rendered.container, "Voice")?.querySelector("button")?.click();
+      });
+      expect(rendered.container.querySelector("[data-assistant-style-step]")?.getAttribute("data-initial-voice"))
+        .toBe("grandpa");
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
   test("shows the saved tone and voice with their own actions", () => {
     const markup = renderToStaticMarkup(
       React.createElement(CustomizeMurphSettings, {
@@ -113,9 +191,9 @@ describe("CustomizeMurphSettings", () => {
     expect(markup).toContain("Change");
   });
 
-  test("shows the existing defaults with their source", () => {
+  test.each([null, undefined])("shows the existing defaults with their source (%s)", (assistant) => {
     const markup = renderToStaticMarkup(
-      React.createElement(CustomizeMurphSettings, { assistant: null }),
+      React.createElement(CustomizeMurphSettings, { assistant }),
     );
 
     expect(markup).toContain("Formal · Default");
@@ -161,17 +239,15 @@ describe("CustomizeMurphSettings", () => {
 
 
 
-  test("opens and saves the existing style-level editor independently", async () => {
-    const rendered = await renderClientComponent(
-      React.createElement(CustomizeMurphSettings, {
-        assistant: {
-          personality: { detail: 8, humor: 9, push: 1 },
-          tone: "formal",
-          voice: "grandpa",
-        },
-      }),
-      { requireButton: false },
-    );
+  test("a pending dial save preserves sibling dials from a newer server snapshot", async () => {
+    pendingSave.deferred = true;
+    const rendered = await renderCustomization({
+      assistant: {
+        personality: { detail: 8, humor: 9, push: 1 },
+        tone: "formal",
+        voice: "grandpa",
+      },
+    });
 
     const styleLevelsRow = findSettingsRow(rendered.container, "Style levels");
     await React.act(async () => {
@@ -185,9 +261,17 @@ describe("CustomizeMurphSettings", () => {
         "[data-save-style-levels]",
       )?.click();
     });
+    await rendered.rerender(React.createElement(CustomizeMurphSettings, {
+      assistant: {
+        personality: { detail: 6, humor: 9, push: 4 },
+        tone: "casual",
+        voice: "grandpa",
+      },
+    }));
+    await React.act(async () => { pendingSave.complete?.(); });
 
-    expect(rendered.container.textContent).toContain("Humor 7 · Push 3 · Detail 5");
-    expect(rendered.container.textContent).toContain("Formal");
+    expect(rendered.container.textContent).toContain("Humor 7 · Push 4 · Detail 6");
+    expect(rendered.container.textContent).toContain("Casual");
     expect(rendered.container.textContent).toContain("Grandpa");
     await rendered.cleanup();
   });
@@ -195,16 +279,13 @@ describe("CustomizeMurphSettings", () => {
 
 
   test("preserves personality after a tone or voice save", async () => {
-    const rendered = await renderClientComponent(
-      React.createElement(CustomizeMurphSettings, {
-        assistant: {
-          personality: { detail: 8, humor: 9, push: 1 },
-          tone: "formal",
-          voice: "grandpa",
-        },
-      }),
-      { requireButton: false },
-    );
+    const rendered = await renderCustomization({
+      assistant: {
+        personality: { detail: 8, humor: 9, push: 1 },
+        tone: "formal",
+        voice: "grandpa",
+      },
+    });
 
     const voiceRow = findSettingsRow(rendered.container, "Voice");
     await React.act(async () => {
@@ -239,41 +320,30 @@ describe("CustomizeMurphSettings", () => {
     expect(withoutLine).not.toContain("Contact card");
   });
 
-  test("opens the voice picker as a single step when the voice deep link is present", async () => {
-    const rendered = await renderClientComponent(
-      React.createElement(CustomizeMurphSettings, {
-        assistant: null,
-        openVoiceLink: true,
-      }),
-      {
-        location: {
-          href: "https://app.example.test/settings?voice=true&tab=account",
-        },
-        requireButton: false,
+  test("opens the voice picker when the voice deep link is present", async () => {
+    const rendered = await renderCustomization({
+      assistant: null,
+      openVoiceLink: true,
+    }, {
+      location: {
+        href: "https://app.example.test/settings?voice=true&tab=account",
       },
-    );
+    });
 
     const picker = rendered.container.querySelector("[data-assistant-style-step]");
     expect(picker?.getAttribute("data-assistant-style-step")).toBe("voice");
-    expect(picker?.getAttribute("data-single-step")).toBe("true");
     expect(rendered.replaceState).toHaveBeenCalledWith({}, "", "/settings?tab=account");
 
     await rendered.cleanup();
   });
 
   test("opens the voice picker when the voice deep link appears after mount", async () => {
-    const rendered = await renderClientComponent(
-      React.createElement(CustomizeMurphSettings, {
-        assistant: null,
-        openVoiceLink: false,
-      }),
-      {
-        location: {
-          href: "https://app.example.test/settings?voice=true",
-        },
-        requireButton: false,
-      },
-    );
+    const rendered = await renderCustomization({
+      assistant: null,
+      openVoiceLink: false,
+    }, {
+      location: { href: "https://app.example.test/settings?voice=true" },
+    });
 
     expect(rendered.container.querySelector("[data-assistant-style-step]")).toBeNull();
 
@@ -293,15 +363,10 @@ describe("CustomizeMurphSettings", () => {
   });
 
   test("opens the voice and contact-card pickers from their settings rows", async () => {
-    const rendered = await renderClientComponent(
-      React.createElement(CustomizeMurphSettings, {
-        assistant: null,
-        murphPhoneNumber: "+15550100001",
-      }),
-      {
-        requireButton: false,
-      },
-    );
+    const rendered = await renderCustomization({
+      assistant: null,
+      murphPhoneNumber: "+15550100001",
+    });
 
     const voiceRow = findSettingsRow(rendered.container, "Voice");
     await React.act(async () => {
@@ -424,19 +489,13 @@ describe("CustomizeMurphSettings", () => {
   });
 
   test("sends the member into the Murph chat after saving a new voice", async () => {
-    const rendered = await renderClientComponent(
-      React.createElement(CustomizeMurphSettings, {
-        assistant: null,
-        openVoiceLink: true,
-        voiceTestContactOption: makeVoiceTestOption(),
-      }),
-      {
-        location: {
-          href: "https://app.example.test/settings?voice=true",
-        },
-        requireButton: false,
-      },
-    );
+    const rendered = await renderCustomization({
+      assistant: null,
+      openVoiceLink: true,
+      voiceTestContactOption: makeVoiceTestOption(),
+    }, {
+      location: { href: "https://app.example.test/settings?voice=true" },
+    });
 
     const saveButton = rendered.container.querySelector("[data-save-assistant-style]");
     expect(saveButton).toBeInstanceOf(rendered.window.HTMLButtonElement);
@@ -452,19 +511,13 @@ describe("CustomizeMurphSettings", () => {
   });
 
   test("does not redirect when the picker closes without a voice save", async () => {
-    const rendered = await renderClientComponent(
-      React.createElement(CustomizeMurphSettings, {
-        assistant: null,
-        openVoiceLink: true,
-        voiceTestContactOption: makeVoiceTestOption(),
-      }),
-      {
-        location: {
-          href: "https://app.example.test/settings?voice=true",
-        },
-        requireButton: false,
-      },
-    );
+    const rendered = await renderCustomization({
+      assistant: null,
+      openVoiceLink: true,
+      voiceTestContactOption: makeVoiceTestOption(),
+    }, {
+      location: { href: "https://app.example.test/settings?voice=true" },
+    });
 
     const closeButton = rendered.container.querySelector("[data-close-assistant-style]");
     expect(closeButton).toBeInstanceOf(rendered.window.HTMLButtonElement);
@@ -479,15 +532,10 @@ describe("CustomizeMurphSettings", () => {
   });
 
   test("does not redirect after saving a tone", async () => {
-    const rendered = await renderClientComponent(
-      React.createElement(CustomizeMurphSettings, {
-        assistant: null,
-        voiceTestContactOption: makeVoiceTestOption(),
-      }),
-      {
-        requireButton: false,
-      },
-    );
+    const rendered = await renderCustomization({
+      assistant: null,
+      voiceTestContactOption: makeVoiceTestOption(),
+    });
 
     const toneButton = Array.from(rendered.container.querySelectorAll("button")).find(
       (candidate) => candidate.textContent === "Customize",
@@ -550,4 +598,14 @@ function findSettingsRow(container: Element, label: string): HTMLElement | null 
     (candidate) => candidate.textContent === label,
   );
   return labelElement?.parentElement?.parentElement ?? null;
+}
+
+function renderCustomization(
+  props: React.ComponentProps<typeof CustomizeMurphSettings>,
+  options: Omit<Parameters<typeof renderClientComponent>[1], "requireButton"> = {},
+) {
+  return renderClientComponent(
+    React.createElement(CustomizeMurphSettings, props),
+    { ...options, requireButton: false },
+  );
 }

@@ -90,7 +90,7 @@ export function MurphPersonalitySettingsDialog({
   savePersonality = saveAssistantPersonalityPreference,
 }: {
   onOpenChange: (open: boolean) => void;
-  onSaved?: (snapshot: AssistantPersonalitySnapshot) => void;
+  onSaved?: (savedDials: Partial<AssistantPersonalitySnapshot>) => void;
   open: boolean;
   personality?: AssistantPersonalitySnapshot | null;
   // The design showcase and tests inject a non-persisting save; everywhere else
@@ -147,7 +147,11 @@ export function MurphPersonalitySettingsDialog({
       if (!mountedRef.current) {
         return;
       }
-      onSaved?.(snapshot);
+      const savedDials: Partial<AssistantPersonalitySnapshot> = {};
+      for (const id of touchedDials) {
+        savedDials[id] = snapshot[id];
+      }
+      onSaved?.(savedDials);
       onOpenChange(false);
     } catch {
       if (mountedRef.current) {
@@ -417,6 +421,7 @@ async function saveAssistantPersonalityPreference(
       "Content-Type": "application/json",
     },
     method: "POST",
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!response.ok) {

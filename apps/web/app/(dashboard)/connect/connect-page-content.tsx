@@ -330,6 +330,7 @@ export default async function ConnectPage({
 } = {}) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const auth = await getHostedDashboardPageAuthSnapshot();
+  const memberId = auth.authenticatedMember?.id ?? null;
   const connectedSourceIds = new Set<string>();
   const recoveryKindBySourceId = new Map<string, ConnectSourceRecoveryKind>();
   const reconnectSourceIds = new Set<string>();
@@ -357,7 +358,7 @@ export default async function ConnectPage({
       Boolean(auth.authenticatedMember),
     ),
     resolveDeviceConnectChatContactAction(Boolean(auth.authenticatedMember)),
-    resolveDeviceSyncVoiceMemoSources(auth.authenticatedMember?.id ?? null),
+    resolveDeviceSyncVoiceMemoSources(memberId),
     resolveWhoopSyncContactAction(Boolean(auth.authenticatedMember)),
     resolveZeppSyncContactAction(Boolean(auth.authenticatedMember)),
     resolveAppleHealthRelaySyncContactActions(
@@ -461,6 +462,7 @@ export default async function ConnectPage({
       />
 
       <ConnectSourcesGrid
+        key={memberId}
         authenticated={Boolean(auth.authenticatedMember)}
         deviceConnectChatContactAction={chatContactAction}
         deviceConnectRecoveryContactAction={recoveryContactAction}

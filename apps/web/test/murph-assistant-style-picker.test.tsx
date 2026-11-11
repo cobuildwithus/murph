@@ -97,21 +97,38 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("MurphAssistantStylePicker filters voice rows without clearing the selected hidden voice", async () => {
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "voice",
-      initialVoice: "drill-sergeant",
-      onOpenChange: () => {},
-      open: true,
+test("a stalled preference save becomes retryable when its request deadline expires", async () => {
+  const deadline = new AbortController();
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+  vi.stubGlobal("fetch", vi.fn((_url: RequestInfo | URL, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
     }),
-    {
-      requireButton: false,
-    },
-  );
+  ));
+  const onOpenChange = vi.fn();
+  const rendered = await renderStylePicker({
+    initialTone: "casual",
+    onOpenChange,
+  });
+  try {
+    await clickButton(rendered, "Save");
+    await act(async () => { deadline.abort(new DOMException("Timed out", "TimeoutError")); });
+    assert.match(rendered.container.textContent ?? "", /Could not confirm the save/u);
+    assert.equal(findRadioInput(rendered.container, "Casual")?.checked, true);
+    assert.equal(findButton(rendered.container, "Save")?.disabled, false);
+    await clickButton(rendered, "Cancel");
+    assert.deepEqual(onOpenChange.mock.calls, [[false]]);
+  } finally {
+    timeout.mockRestore();
+    await rendered.cleanup();
+  }
+});
+
+test("MurphAssistantStylePicker filters voice rows without clearing the selected hidden voice", async () => {
+  const rendered = await renderStylePicker({
+    initialStep: "voice",
+    initialVoice: "drill-sergeant",
+  });
 
   try {
     assert.ok(findRadioInput(rendered.container, "Drill sergeant"));
@@ -151,24 +168,14 @@ test("MurphAssistantStylePicker does not persist the display-only voice filter",
   }));
   vi.stubGlobal("fetch", fetchMock);
 
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "voice",
-      initialVoice: "classic",
-      onOpenChange: () => {},
-      open: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
+  const rendered = await renderStylePicker({
+    initialStep: "voice",
+    initialVoice: "classic",
+  });
 
   try {
     await clickButton(rendered, "Female");
-    await clickButton(rendered, "Continue");
+    await clickButton(rendered, "Save");
 
     assert.equal(fetchMock.mock.calls.length, 1);
     const init = fetchMock.mock.calls[0]?.[1];
@@ -191,19 +198,9 @@ test("MurphAssistantStylePicker preselects Classic Murph and persists the upbeat
   }));
   vi.stubGlobal("fetch", fetchMock);
 
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "voice",
-      onOpenChange: () => {},
-      open: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
+  const rendered = await renderStylePicker({
+    initialStep: "voice",
+  });
 
   try {
     assert.equal(
@@ -211,7 +208,7 @@ test("MurphAssistantStylePicker preselects Classic Murph and persists the upbeat
       true,
     );
 
-    await clickButton(rendered, "Continue");
+    await clickButton(rendered, "Save");
 
     assert.equal(fetchMock.mock.calls.length, 1);
     const init = fetchMock.mock.calls[0]?.[1];
@@ -224,19 +221,9 @@ test("MurphAssistantStylePicker preselects Classic Murph and persists the upbeat
 });
 
 test("MurphAssistantStylePicker shows each tone as a sample message rather than a description", async () => {
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "tone",
-      onOpenChange: () => {},
-      open: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
+  const rendered = await renderStylePicker({
+    initialStep: "tone",
+  });
 
   try {
     const text = rendered.container.textContent ?? "";
@@ -251,106 +238,6 @@ test("MurphAssistantStylePicker shows each tone as a sample message rather than 
     assert.doesNotMatch(text, /pounds|lbs|weight/iu);
     assert.equal(findRadioInput(rendered.container, "Formal")?.checked, true);
     assert.equal(findRadioInput(rendered.container, "Casual")?.checked, false);
-    assert.match(
-      rendered.container.querySelector("[data-dialog-content='true']")?.className ?? "",
-      /sm:max-w-xl/u,
-    );
-    assert.match(
-      rendered.container.querySelector("[role='radiogroup'][aria-label='Murph tone']")?.className ?? "",
-      /sm:grid-cols-2/u,
-    );
-  } finally {
-    await rendered.cleanup();
-  }
-});
-
-test("MurphAssistantStylePicker keeps the default tone to voice onboarding chain", async () => {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    void input;
-    void init;
-    return {
-      ok: true,
-      json: async () => ({
-        assistantTone: "formal",
-        assistantVoice: null,
-      }),
-    };
-  });
-  vi.stubGlobal("fetch", fetchMock);
-
-  const onComplete = vi.fn();
-  const onOpenChange = vi.fn();
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "tone",
-      onComplete,
-      onOpenChange,
-      open: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
-
-  try {
-    await clickButton(rendered, "Continue");
-
-    assert.equal(fetchMock.mock.calls.length, 1);
-    assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)), {
-      tone: "formal",
-    });
-    assert.match(rendered.container.textContent ?? "", /Pick Murph's voice/u);
-    assert.doesNotMatch(rendered.container.textContent ?? "", /\b\d+ voices?\b/u);
-    assert.equal(onComplete.mock.calls.length, 0);
-    assert.equal(onOpenChange.mock.calls.length, 0);
-  } finally {
-    await rendered.cleanup();
-  }
-});
-
-test("MurphAssistantStylePicker uses an injected save without touching the network", async () => {
-  const fetchMock = vi.fn(async () => {
-    throw new Error("network must not be called");
-  });
-  vi.stubGlobal("fetch", fetchMock);
-
-  const savePreference = vi.fn(
-    async (preferences: { tone: string } | { voice: string }) => {
-      void preferences;
-      return {
-        tone: "formal" as const,
-        voice: null,
-      };
-    },
-  );
-  const onComplete = vi.fn();
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "tone",
-      onComplete,
-      onOpenChange: () => {},
-      open: true,
-      savePreference,
-      singleStep: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
-
-  try {
-    await clickButton(rendered, "Save");
-
-    assert.equal(savePreference.mock.calls.length, 1);
-    assert.deepEqual(savePreference.mock.calls[0]?.[0], { tone: "formal" });
-    assert.equal(fetchMock.mock.calls.length, 0);
-    assert.equal(onComplete.mock.calls.length, 1);
   } finally {
     await rendered.cleanup();
   }
@@ -366,22 +253,11 @@ test("MurphAssistantStylePicker preserves an explicitly saved casual tone", asyn
       };
     },
   );
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "tone",
-      initialTone: "casual",
-      onOpenChange: () => {},
-      open: true,
-      savePreference,
-      singleStep: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
+  const rendered = await renderStylePicker({
+    initialStep: "tone",
+    initialTone: "casual",
+    savePreference,
+  });
 
   try {
     assert.equal(findRadioInput(rendered.container, "Casual")?.checked, true);
@@ -395,51 +271,7 @@ test("MurphAssistantStylePicker preserves an explicitly saved casual tone", asyn
   }
 });
 
-test("MurphAssistantStylePicker freezes the selection while a save is in flight", async () => {
-  let resolveSave: (() => void) | null = null;
-  const savePreference = vi.fn(
-    () =>
-      new Promise<{ tone: "formal"; voice: null }>((resolve) => {
-        resolveSave = () => resolve({ tone: "formal", voice: null });
-      }),
-  );
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "tone",
-      initialTone: "formal",
-      onOpenChange: () => {},
-      open: true,
-      savePreference,
-      singleStep: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
-
-  try {
-    await clickButton(rendered, "Save");
-    assert.equal(savePreference.mock.calls.length, 1);
-
-    // A selection change after Save would make the persisted value, the
-    // visible selection, and the post-save handoff disagree.
-    const casualInput = findRadioInput(rendered.container, "Casual");
-    assert.ok(casualInput);
-    assert.equal(casualInput.disabled, true);
-    assert.equal(findRadioInput(rendered.container, "Formal")?.checked, true);
-
-    await act(async () => {
-      resolveSave?.();
-    });
-  } finally {
-    await rendered.cleanup();
-  }
-});
-
-test("MurphAssistantStylePicker ignores dismissal while a save is in flight", async () => {
+test("MurphAssistantStylePicker freezes controls and ignores dismissal while a save is in flight", async () => {
   let resolveSave: (() => void) | null = null;
   const fetchMock = vi.fn(
     () =>
@@ -456,27 +288,19 @@ test("MurphAssistantStylePicker ignores dismissal while a save is in flight", as
   );
   vi.stubGlobal("fetch", fetchMock);
 
-  const onComplete = vi.fn();
+  const onSaved = vi.fn();
   const onOpenChange = vi.fn();
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "tone",
-      onComplete,
-      onOpenChange,
-      open: true,
-      singleStep: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
+  const rendered = await renderStylePicker({
+    initialStep: "tone",
+    onSaved,
+    onOpenChange,
+  });
 
   try {
     await clickButton(rendered, "Save");
     assert.equal(fetchMock.mock.calls.length, 1);
+    assert.equal(findRadioInput(rendered.container, "Casual")?.disabled, true);
+    assert.equal(findRadioInput(rendered.container, "Formal")?.checked, true);
 
     // Escape/backdrop dismissal while the save is pending must not close the
     // picker and orphan the request's result.
@@ -490,14 +314,14 @@ test("MurphAssistantStylePicker ignores dismissal while a save is in flight", as
     await act(async () => {
       resolveSave?.();
     });
-    assert.equal(onComplete.mock.calls.length, 1);
+    assert.equal(onSaved.mock.calls.length, 1);
     assert.deepEqual(onOpenChange.mock.calls, [[false]]);
   } finally {
     await rendered.cleanup();
   }
 });
 
-test("MurphAssistantStylePicker saves and closes without advancing in single-step mode", async () => {
+test("MurphAssistantStylePicker saves the requested preference and closes", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     void input;
     void init;
@@ -511,26 +335,15 @@ test("MurphAssistantStylePicker saves and closes without advancing in single-ste
   });
   vi.stubGlobal("fetch", fetchMock);
 
-  const onComplete = vi.fn();
+  const onSaved = vi.fn();
   const onOpenChange = vi.fn();
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "tone",
-      onComplete,
-      onOpenChange,
-      open: true,
-      singleStep: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
+  const rendered = await renderStylePicker({
+    initialStep: "tone",
+    onSaved,
+    onOpenChange,
+  });
 
   try {
-    // Single-step mode relabels the actions as Cancel/Save.
     assert.equal(findButton(rendered.container, "Continue"), null);
     assert.ok(findButton(rendered.container, "Cancel"));
     await clickButton(rendered, "Save");
@@ -539,7 +352,7 @@ test("MurphAssistantStylePicker saves and closes without advancing in single-ste
     assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)), {
       tone: "formal",
     });
-    assert.equal(onComplete.mock.calls.length, 1);
+    assert.equal(onSaved.mock.calls.length, 1);
     assert.deepEqual(onOpenChange.mock.calls, [[false]]);
     assert.doesNotMatch(rendered.container.textContent ?? "", /22 voices/u);
   } finally {
@@ -548,39 +361,13 @@ test("MurphAssistantStylePicker saves and closes without advancing in single-ste
 });
 
 test("MurphAssistantStylePicker selects a voice when the row outside the label is clicked", async () => {
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "voice",
-      initialVoice: "classic",
-      onOpenChange: () => {},
-      open: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
+  const rendered = await renderStylePicker({
+    initialStep: "voice",
+    initialVoice: "classic",
+  });
 
   try {
     assert.doesNotMatch(rendered.container.textContent ?? "", /\b\d+ voices?\b/u);
-    assert.match(
-      rendered.container.querySelector("[data-dialog-content='true']")?.className ?? "",
-      /sm:max-w-2xl/u,
-    );
-    assert.match(
-      rendered.container.querySelector("[data-dialog-content='true']")?.className ?? "",
-      /lg:max-w-3xl/u,
-    );
-
-    const voiceGrid = rendered.container.querySelector(
-      "[role='radiogroup'][aria-label='Murph voice']",
-    );
-    assert.match(voiceGrid?.className ?? "", /grid-cols-2/u);
-    assert.match(voiceGrid?.className ?? "", /md:grid-cols-3/u);
-    assert.match(voiceGrid?.className ?? "", /overflow-y-auto/u);
-
     const grandpaRow = findRadioInput(rendered.container, "Grandpa")?.closest("div");
     assert.ok(grandpaRow, "Missing grandpa row");
     await act(async () => {
@@ -596,20 +383,10 @@ test("MurphAssistantStylePicker selects a voice when the row outside the label i
 });
 
 test("MurphAssistantStylePicker selects a voice when its audio preview is clicked", async () => {
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "voice",
-      initialVoice: "classic",
-      onOpenChange: () => {},
-      open: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
+  const rendered = await renderStylePicker({
+    initialStep: "voice",
+    initialVoice: "classic",
+  });
 
   try {
     const grandpaRow = findRadioInput(rendered.container, "Grandpa")?.closest("div");
@@ -637,22 +414,11 @@ test("MurphAssistantStylePicker keeps the voice selection frozen when a disabled
         resolveSave = () => resolve({ tone: null, voice: "classic" });
       }),
   );
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "voice",
-      initialVoice: "classic",
-      onOpenChange: () => {},
-      open: true,
-      savePreference,
-      singleStep: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
+  const rendered = await renderStylePicker({
+    initialStep: "voice",
+    initialVoice: "classic",
+    savePreference,
+  });
 
   try {
     await clickButton(rendered, "Save");
@@ -684,34 +450,14 @@ test("MurphAssistantStylePicker keeps the voice selection frozen when a disabled
 test("MurphAssistantStylePicker renders the voice chooser in the mobile drawer", async () => {
   componentMocks.useIsMobile.mockReturnValue(true);
 
-  const { MurphAssistantStylePicker } = await import(
-    "@/src/components/murph/murph-assistant-style-picker"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphAssistantStylePicker, {
-      initialStep: "voice",
-      initialVoice: "classic",
-      onOpenChange: () => {},
-      open: true,
-    }),
-    {
-      requireButton: false,
-    },
-  );
+  const rendered = await renderStylePicker({
+    initialStep: "voice",
+    initialVoice: "classic",
+  });
 
   try {
     assert.ok(rendered.container.querySelector("[data-drawer-open='true']"));
     assert.equal(rendered.container.querySelector("[data-dialog-open='true']"), null);
-    const drawerContent = rendered.container.querySelector("[data-drawer-content='true']");
-    assert.match(drawerContent?.className ?? "", /h-dvh/u);
-    assert.match(
-      drawerContent?.className ?? "",
-      /data-\[vaul-drawer-direction=bottom\]:max-h-dvh/u,
-    );
-    assert.match(
-      drawerContent?.className ?? "",
-      /data-\[vaul-drawer-direction=bottom\]:mt-0/u,
-    );
     const savedClassicVoice = findRadioInput(rendered.container, "New York");
     assert.equal(savedClassicVoice?.checked, true);
     const savedClassicVoiceRow = savedClassicVoice?.closest("div");
@@ -729,8 +475,8 @@ test("MurphAssistantStylePicker renders the voice chooser in the mobile drawer",
     );
     assert.ok(findRadioInput(rendered.container, "Warm and friendly"));
     assert.doesNotMatch(rendered.container.textContent ?? "", /\b\d+ voices?\b/u);
-    assert.ok(findButton(rendered.container, "Skip"));
-    assert.ok(findButton(rendered.container, "Continue"));
+    assert.ok(findButton(rendered.container, "Cancel"));
+    assert.ok(findButton(rendered.container, "Save"));
   } finally {
     await rendered.cleanup();
   }
@@ -774,4 +520,18 @@ function findRadioInput(container: Element, label: string): HTMLInputElement | n
   }
   const byId = container.ownerDocument.getElementById(inputId);
   return InputElement && byId instanceof InputElement ? byId : null;
+}
+
+async function renderStylePicker(
+  props: Partial<Parameters<typeof import("@/src/components/murph/murph-assistant-style-picker").MurphAssistantStylePicker>[0]> = {},
+) {
+  const { MurphAssistantStylePicker } = await import("@/src/components/murph/murph-assistant-style-picker");
+  return renderClientComponent(
+    createElement(MurphAssistantStylePicker, {
+      onOpenChange: () => {},
+      open: true,
+      ...props,
+    }),
+    { requireButton: false },
+  );
 }

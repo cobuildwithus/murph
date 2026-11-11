@@ -234,6 +234,23 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
     expect(await db.gameEvent.count({ where: { gameId: group, type: "reminder_activation", actor: "system" } })).toBe(3);
   });
 
+  it("recovers a late join's inherited preferences after the game's help offer expired", async () => {
+    const a = await member("Alex"), b = await member("Sam"), c = await member("Riley");
+    const prior = await game([a, b, c], { startedAt: new Date("2026-11-02T18:00:00Z") });
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId: prior, memberId: c } },
+      data: { reminderOff: true, reminderEveryDay: true } });
+    const current = await game([a, b, c], { previousGameId: prior, startedAt: new Date("2026-11-04T18:00:00Z") });
+    // Model a committed late seat whose post-commit activation did not run.
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId: current, memberId: c } }, data: { joinedAt: now } });
+    await reconcilePrivateGameActivations(now);
+    expect(await db.gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId: current, memberId: c } } }))
+      .toMatchObject({ reminderOff: true, reminderEveryDay: true });
+    expect(await kind(current, c)).toEqual({ messageKind: "none" });
+    expect(await receipt(current, c)).toBeNull();
+    await reconcilePrivateGameActivations(now);
+    expect(await db.gameEvent.count({ where: { gameId: current, type: "reminder_activation" } })).toBe(3);
+  });
+
   it("holds an overnight offer until 09:00 local and does not create expired offers", async () => {
     const a = await member("Alex"), b = await member("Sam");
     const late = new Date("2026-11-06T22:00:00Z");

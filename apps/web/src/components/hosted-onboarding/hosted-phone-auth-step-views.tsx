@@ -10,8 +10,6 @@ import {
 } from "@/src/components/ui/phone-number-input";
 import { Spinner } from "@/src/components/ui/spinner";
 
-import { HostedUseDifferentNumberButton } from "./hosted-phone-auth-use-different-number-button";
-import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
 import type {
   HostedPhoneAuthPendingAction,
   HostedPhoneCountryOption,
@@ -87,77 +85,4 @@ export function HostedPhoneEntryStep({
       </div>
     </form>
   );
-}
-
-export function HostedCodeEntryStep({
-  verificationPhoneNumberHint,
-  autoFocus = true,
-  code,
-  disableSignup = false,
-  disabled,
-  pendingAction,
-  secondaryActionSize,
-  size,
-  onCodeChange,
-  onResendCode,
-  onUseDifferentNumber,
-  onVerifyCode,
-}: {
-  verificationPhoneNumberHint: string;
-  autoFocus?: boolean;
-  code: string;
-  disableSignup?: boolean;
-  disabled: boolean;
-  pendingAction: HostedPhoneAuthPendingAction;
-  secondaryActionSize: "sm" | "lg";
-  size?: "default" | "compact";
-  onCodeChange: (value: string) => void;
-  onResendCode: () => void;
-  onUseDifferentNumber: () => void;
-  onVerifyCode: () => void;
-}) {
-  return (
-    <HostedVerificationCodeStep
-      autoFocus={autoFocus}
-      code={code}
-      size={size}
-      description={resolveHostedPhoneCodeEntryDescription({
-        disableSignup,
-        verificationPhoneNumberHint,
-      })}
-      disabled={disabled}
-      pendingAction={
-        pendingAction === "send-code" || pendingAction === "verify-code"
-          ? pendingAction
-          : null
-      }
-      primaryActionLabel="Verify phone"
-      primaryActionPendingLabel="Finishing..."
-      secondaryAction={
-        <HostedUseDifferentNumberButton
-          disabled={disabled}
-          pendingAction={pendingAction}
-          size={secondaryActionSize}
-          onClick={onUseDifferentNumber}
-        />
-      }
-      onCodeChange={onCodeChange}
-      onResendCode={onResendCode}
-      onSubmit={onVerifyCode}
-    />
-  );
-}
-
-function resolveHostedPhoneCodeEntryDescription({
-  disableSignup,
-  verificationPhoneNumberHint,
-}: {
-  disableSignup: boolean;
-  verificationPhoneNumberHint: string;
-}) {
-  if (disableSignup) {
-    return `If an account exists for ${verificationPhoneNumberHint}, we texted the latest code there.`;
-  }
-
-  return `We texted the latest code to ${verificationPhoneNumberHint}.`;
 }
