@@ -29,7 +29,7 @@ export async function generateMetadata(props: { params: Promise<{ gameId: string
   if (!preview || !/^[A-Za-z0-9_-]{43}$/u.test(preview)) return genericMetadata;
   const { readRecapCoverPreview } = await import("@/src/lib/game/recap-preview");
   if (!await readRecapCoverPreview(gameId, preview)) return genericMetadata;
-  const image = { url: `/recap/${encodeURIComponent(gameId)}/cover/${encodeURIComponent(preview)}`, alt: "Murph recap", type: "image/jpeg" };
+  const image = { url: `/recap/${encodeURIComponent(gameId)}/cover/${encodeURIComponent(preview)}`, alt: "Murph recap", type: "image/jpeg", width: 1200, height: 630 };
   return { ...genericMetadata, openGraph: { ...genericMetadata.openGraph, images: [image] }, twitter: { ...genericMetadata.twitter, images: [image] } };
 }
 

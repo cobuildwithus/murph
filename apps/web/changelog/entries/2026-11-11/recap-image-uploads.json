@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 300,
+  "item": {
+    "id": "recap-image-uploads",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable recap images",
+    "summary": "Generated images can now finish uploading into pair game recaps.",
+    "details": "Shared recap links use a landscape cover preview while the show keeps its portrait images.",
+    "relevanceTags": [
+      "games",
+      "recaps"
+    ],
+    "sourcePullRequests": []
+  }
+}

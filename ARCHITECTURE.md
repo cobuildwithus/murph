@@ -5805,6 +5805,11 @@ then calls `write_recap` once. The host uploads selected bytes and Web publishes
 through the canonical transaction, retaining the current source authorization,
 asset retirement and replay owners. One accepted story owns one chat line plus
 link with no chat media. Groups retain their existing writer rules and payload.
+The groups/tool proxy and marked recap-upload callback share a body allowance
+for base64 of one 2 MiB image plus 16 KiB of JSON envelope. Other proxy paths
+retain 256 KiB, and ordinary group callbacks retain their smaller bound.
+The cover capability serves a no-store 1200x630 JPEG crop for link previews;
+the accepted portrait remains unchanged in the show.
 The [native contract](agent-docs/references/recap-show-contract.md) owns decoder
 fixtures; the iOS presentation is unchanged.
 
