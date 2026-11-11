@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 100,
+  "item": {
+    "id": "settings-refresh-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Keep your settings changes through refreshes",
+    "summary": "Connection setup and preference saves keep their progress when Settings refreshes.",
+    "details": "A completed preference save updates only the fields you changed. Unrelated refreshed preferences stay current, and a stalled save lets you recover your draft.",
+    "relevanceTags": [
+      "settings",
+      "connections"
+    ],
+    "sourcePullRequests": []
+  }
+}

@@ -170,7 +170,7 @@ describe("one reply push per post", () => {
     expect(await claimGameReplyNotification(tx, { ...input, replyId: "new-reply" })).toBeNull();
     expect(m.send).not.toHaveBeenCalled();
   });
-  it.each(["gone", "blocked", "reported", "hidden"])("suppresses a %s reply at send time", async () => {
+  it("suppresses a reply when current read authorization denies it", async () => {
     const notification = await claimGameReplyNotification(tx, input);
     m.replyAccess.mockResolvedValue(false);
     await deliverGameReplyNotification(notification!);

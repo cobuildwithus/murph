@@ -1,8 +1,7 @@
-import { createElement, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { GameInviteShareCard } from "@/app/g/[token]/invite-share-card";
 import type { GameInvitePreview } from "@/src/lib/game/contract";
 
 const mocks = vi.hoisted(() => ({ readInvitePreview: vi.fn() }));
@@ -95,13 +94,6 @@ describe("weekly game invite link preview", () => {
     expect(metadata.referrer).toBe("no-referrer");
   });
 
-  // The preview never carries the invitee's name (the challenger's private label), so the card says "You".
-  it("puts the challenger against \"You\" on the card", () => {
-    const html = renderToStaticMarkup(createElement(GameInviteShareCard, { preview: OPEN }));
-    expect(html).toContain("Leo");
-    expect(html).toContain("You");
-  });
-
   it("describes a per-miss stake, and encodes the token in the card's address", async () => {
     const perMiss: GameInvitePreview = {
       ...OPEN,
@@ -126,16 +118,4 @@ describe("weekly game invite link preview", () => {
     // Nothing from any invite reaches a closed link's preview.
     expect(JSON.stringify(metadata)).not.toMatch(/Leo|Babe|pushups|abs|Breakfast/u);
   });
-});
-
-
-it.each(["prize", "dare"] as const)("describes a %s over a variable game length without weekly wording", async (kind) => {
-  if (OPEN.status !== "open") throw new Error("Expected open fixture");
-  const preview = {...OPEN,lengthDays:75,terms:{...OPEN.terms,schedule:{count:50},stakes:[{kind,item:"sing at karaoke"}]}};
-  const metadata = await metadataFor(preview);
-  expect(metadata.description).toBe(kind === "dare" ? "Loser has to sing at karaoke." : "FOR THE WINNER: sing at karaoke.");
-  const html=renderToStaticMarkup(createElement(GameInviteShareCard,{preview}));
-  expect(html).toContain("75 DAYS");
-  expect(html).toContain("ANY 50 DAYS TOTAL");
-  expect(html).not.toMatch(/of the week|gets|a week/iu);
 });

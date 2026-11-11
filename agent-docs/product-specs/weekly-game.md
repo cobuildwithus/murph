@@ -67,7 +67,9 @@ invitees keep their seats. Bearer joiners use separate seats, and ten total
 admissions includes departures. There is no rejoin. Late joiners share the
 existing calendar and can score only from their local joining day, capped by
 the common schedule. While invited, the starter alone can edit full terms
-directly. Once live, any remaining seated player can ask for a change from the
+directly. Waiting invitations retain only their latest terms and encrypted words;
+version numbers still increase, so stale acceptance remains invalid. Once live,
+played-day history remains available and any remaining seated player can ask for a change from the
 app or bound group chat with full terms, the current terms version and a new
 proposal ID. New app asks require a proven bound room for their announcement.
 More than half of the remaining players must say yes, including
@@ -492,7 +494,9 @@ resulting avatar. No private photo is shared with the subject or other players.
   command or upload has read its request, a server failure is not a refusal: it returns
   `retryable: true`, as `INTERNAL_ERROR` (500) or `GAME_MEDIA_UNAVAILABLE` (503),
   and the app keeps its unsent shot or reply. Same-ID replay makes that retry
-  safe after a commit whose response failed. Malformed input, a foreign or
+  safe after a commit whose response failed. Replay requires the same entry ID,
+  member and game; an entry from another game is not a successful retry.
+  Malformed input, a foreign or
   genuinely missing media key, an image the store refuses and every rule refusal
   stay final.
 - **Settle.** A pair ends when both remaining players have completed their last
@@ -861,7 +865,10 @@ that field eligible for ordinary carry-over. A new person gets
 one private help offer; familiar people with a changed schedule or length get
 one check-in preference question; an unchanged rhythm stays quiet. The offer
 waits until 09:00 local if activation is between 21:00 and 09:00 and expires
-24 hours after game start. Replies use normal direct behavior-followthrough.
+24 hours after game start. Recovery considers started live games regardless of
+age, in batches of at most twenty, so delayed activation can still carry reminder
+preferences after that offer expires. Recovery does not revive the expired offer.
+Replies use normal direct behavior-followthrough.
 
 ## Replies
 

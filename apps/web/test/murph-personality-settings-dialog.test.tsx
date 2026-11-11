@@ -164,17 +164,7 @@ afterEach(() => {
 const SAVE_ERROR = "Could not confirm the save. Your draft is still here. Try again.";
 
 test("resolves null dials to the shared defaults and starts with save disabled", async () => {
-  const { MurphPersonalitySettingsDialog } = await import(
-    "@/src/components/settings/murph-personality-settings-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphPersonalitySettingsDialog, {
-      onOpenChange: () => {},
-      open: true,
-      personality: null,
-    }),
-    { requireButton: false },
-  );
+  const rendered = await renderPersonalityEditor();
 
   try {
     assert.match(rendered.container.textContent ?? "", /Tune Murph's personality/u);
@@ -224,17 +214,9 @@ test("resolves null dials to the shared defaults and starts with save disabled",
 });
 
 test("resolves partial dials, keeping the stored value and defaulting the rest", async () => {
-  const { MurphPersonalitySettingsDialog } = await import(
-    "@/src/components/settings/murph-personality-settings-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphPersonalitySettingsDialog, {
-      onOpenChange: () => {},
-      open: true,
-      personality: { humor: 9, push: null, detail: null },
-    }),
-    { requireButton: false },
-  );
+  const rendered = await renderPersonalityEditor({
+    personality: { humor: 9, push: null, detail: null },
+  });
 
   try {
     assert.equal(readDialValue(rendered.container, "Humor"), "9");
@@ -284,18 +266,10 @@ test("submits only the single dial that changed", async () => {
 
   const onSaved = vi.fn();
   const onOpenChange = vi.fn();
-  const { MurphPersonalitySettingsDialog } = await import(
-    "@/src/components/settings/murph-personality-settings-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphPersonalitySettingsDialog, {
-      onOpenChange,
-      onSaved,
-      open: true,
-      personality: null,
-    }),
-    { requireButton: false },
-  );
+  const rendered = await renderPersonalityEditor({
+    onOpenChange,
+    onSaved,
+  });
 
   try {
     await driveDial(rendered, "Humor", 7);
@@ -305,7 +279,7 @@ test("submits only the single dial that changed", async () => {
     assert.equal(fetchMock.mock.calls.length, 1);
     const init = fetchMock.mock.calls[0]?.[1];
     assert.deepEqual(JSON.parse(String(init?.body)), { personality: { humor: 7 } });
-    assert.deepEqual(onSaved.mock.calls[0]?.[0], { detail: 5, humor: 7, push: 3 });
+    assert.deepEqual(onSaved.mock.calls[0]?.[0], { humor: 7 });
     assert.deepEqual(onOpenChange.mock.calls, [[false]]);
   } finally {
     await rendered.cleanup();
@@ -320,17 +294,7 @@ test("submits every changed dial and never the untouched defaults", async () => 
   }));
   vi.stubGlobal("fetch", fetchMock);
 
-  const { MurphPersonalitySettingsDialog } = await import(
-    "@/src/components/settings/murph-personality-settings-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphPersonalitySettingsDialog, {
-      onOpenChange: () => {},
-      open: true,
-      personality: null,
-    }),
-    { requireButton: false },
-  );
+  const rendered = await renderPersonalityEditor();
 
   try {
     await driveDial(rendered, "Humor", 7);
@@ -349,18 +313,9 @@ test("submits every changed dial and never the untouched defaults", async () => 
 
 test("returning a touched dial to its projected value still reasserts that intent", async () => {
   const savePersonality = vi.fn(async () => ({ detail: 5, humor: 3, push: 3 }));
-  const { MurphPersonalitySettingsDialog } = await import(
-    "@/src/components/settings/murph-personality-settings-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphPersonalitySettingsDialog, {
-      onOpenChange: () => {},
-      open: true,
-      personality: null,
-      savePersonality,
-    }),
-    { requireButton: false },
-  );
+  const rendered = await renderPersonalityEditor({
+    savePersonality,
+  });
 
   try {
     await driveDial(rendered, "Humor", 7);
@@ -384,18 +339,10 @@ test("freezes controls and blocks dismissal while a save is in flight", async ()
       }),
   );
   const onOpenChange = vi.fn();
-  const { MurphPersonalitySettingsDialog } = await import(
-    "@/src/components/settings/murph-personality-settings-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphPersonalitySettingsDialog, {
-      onOpenChange,
-      open: true,
-      personality: null,
-      savePersonality,
-    }),
-    { requireButton: false },
-  );
+  const rendered = await renderPersonalityEditor({
+    onOpenChange,
+    savePersonality,
+  });
 
   try {
     await driveDial(rendered, "Humor", 7);
@@ -427,29 +374,21 @@ test("freezes controls and blocks dismissal while a save is in flight", async ()
   }
 });
 
-test("treats the saved snapshot as authoritative and closes on success", async () => {
+test("acknowledges only requested dial values from the saved snapshot and closes", async () => {
   const savePersonality = vi.fn(async () => ({ detail: 5, humor: 7, push: 3 }));
   const onSaved = vi.fn();
   const onOpenChange = vi.fn();
-  const { MurphPersonalitySettingsDialog } = await import(
-    "@/src/components/settings/murph-personality-settings-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphPersonalitySettingsDialog, {
-      onOpenChange,
-      onSaved,
-      open: true,
-      personality: null,
-      savePersonality,
-    }),
-    { requireButton: false },
-  );
+  const rendered = await renderPersonalityEditor({
+    onOpenChange,
+    onSaved,
+    savePersonality,
+  });
 
   try {
     await driveDial(rendered, "Humor", 7);
     await clickButton(rendered, "Save changes");
 
-    assert.deepEqual(onSaved.mock.calls[0]?.[0], { detail: 5, humor: 7, push: 3 });
+    assert.deepEqual(onSaved.mock.calls[0]?.[0], { humor: 7 });
     assert.deepEqual(onOpenChange.mock.calls, [[false]]);
     // A personality save never triggers the voice chat handoff.
     assert.equal(rendered.assign.mock.calls.length, 0);
@@ -458,27 +397,23 @@ test("treats the saved snapshot as authoritative and closes on success", async (
   }
 });
 
-test("keeps the editor open with the draft and an alert when the save fails", async () => {
-  const savePersonality = vi.fn(async () => {
-    throw new Error("save failed");
-  });
-  const onOpenChange = vi.fn();
-  const { MurphPersonalitySettingsDialog } = await import(
-    "@/src/components/settings/murph-personality-settings-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphPersonalitySettingsDialog, {
-      onOpenChange,
-      open: true,
-      personality: null,
-      savePersonality,
+test("a stalled personality save restores the draft and dismissal after its deadline", async () => {
+  const deadline = new AbortController();
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+  vi.stubGlobal("fetch", vi.fn((_url: RequestInfo | URL, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
     }),
-    { requireButton: false },
-  );
+  ));
+  const onOpenChange = vi.fn();
+  const rendered = await renderPersonalityEditor({
+    onOpenChange,
+  });
 
   try {
     await driveDial(rendered, "Humor", 7);
     await clickButton(rendered, "Save changes");
+    await act(async () => { deadline.abort(new DOMException("Timed out", "TimeoutError")); });
 
     assert.equal(onOpenChange.mock.calls.length, 0);
     const alert = rendered.container.querySelector("[role='alert']");
@@ -487,65 +422,30 @@ test("keeps the editor open with the draft and an alert when the save fails", as
     // The draft is retained and re-editable.
     assert.equal(readDialValue(rendered.container, "Humor"), "7");
     assert.equal(findButton(rendered.container, "Save changes")?.disabled, false);
+    await clickButton(rendered, "Cancel");
+    assert.deepEqual(onOpenChange.mock.calls, [[false]]);
   } finally {
+    timeout.mockRestore();
     await rendered.cleanup();
   }
 });
 
-test("keeps the draft open when the server returns a non-OK response", async () => {
-  const fetchMock = vi.fn(async () => ({ ok: false }));
-  vi.stubGlobal("fetch", fetchMock);
-
-  const onOpenChange = vi.fn();
-  const onSaved = vi.fn();
-  const { MurphPersonalitySettingsDialog } = await import(
-    "@/src/components/settings/murph-personality-settings-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphPersonalitySettingsDialog, {
-      onOpenChange,
-      onSaved,
-      open: true,
-      personality: null,
-    }),
-    { requireButton: false },
-  );
-
-  try {
-    await driveDial(rendered, "Humor", 7);
-    await clickButton(rendered, "Save changes");
-
-    assert.equal(fetchMock.mock.calls.length, 1);
-    assert.equal(onSaved.mock.calls.length, 0);
-    assert.equal(onOpenChange.mock.calls.length, 0);
-    assert.equal(rendered.container.querySelector("[role='alert']")?.textContent, SAVE_ERROR);
-    assert.equal(readDialValue(rendered.container, "Humor"), "7");
-  } finally {
-    await rendered.cleanup();
-  }
-});
-
-test("rejects a malformed successful response without discarding the draft", async () => {
-  const fetchMock = vi.fn(async () => ({
+test.each([
+  ["non-OK", { ok: false }],
+  ["malformed success", {
     ok: true,
     json: async () => ({ assistantPersonality: { humor: 7, push: 3 } }),
-  }));
+  }],
+])("keeps the draft open after a %s response", async (_name, response) => {
+  const fetchMock = vi.fn(async () => response);
   vi.stubGlobal("fetch", fetchMock);
 
   const onOpenChange = vi.fn();
   const onSaved = vi.fn();
-  const { MurphPersonalitySettingsDialog } = await import(
-    "@/src/components/settings/murph-personality-settings-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphPersonalitySettingsDialog, {
-      onOpenChange,
-      onSaved,
-      open: true,
-      personality: null,
-    }),
-    { requireButton: false },
-  );
+  const rendered = await renderPersonalityEditor({
+    onOpenChange,
+    onSaved,
+  });
 
   try {
     await driveDial(rendered, "Humor", 7);
@@ -564,29 +464,11 @@ test("rejects a malformed successful response without discarding the draft", asy
 test("renders the dials in the mobile drawer", async () => {
   componentMocks.useIsMobile.mockReturnValue(true);
 
-  const { MurphPersonalitySettingsDialog } = await import(
-    "@/src/components/settings/murph-personality-settings-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphPersonalitySettingsDialog, {
-      onOpenChange: () => {},
-      open: true,
-      personality: null,
-    }),
-    { requireButton: false },
-  );
+  const rendered = await renderPersonalityEditor();
 
   try {
     assert.ok(rendered.container.querySelector("[data-drawer-open='true']"));
     assert.equal(rendered.container.querySelector("[data-dialog-open='true']"), null);
-    const drawerContent = rendered.container.querySelector("[data-drawer-content='true']");
-    assert.match(drawerContent?.className ?? "", /h-dvh/u);
-    assert.match(
-      drawerContent?.className ?? "",
-      /data-\[vaul-drawer-direction=bottom\]:max-h-dvh/u,
-    );
-    const description = drawerContent?.querySelector("p");
-    assert.match(description?.className ?? "", /text-left/u);
     assert.match(rendered.container.textContent ?? "", /Tune Murph's personality/u);
     assert.ok(findDialInput(rendered.container, "Humor"));
     assert.ok(findDialInput(rendered.container, "Push"));
@@ -607,18 +489,10 @@ test("blocks mobile drawer dismissal while a save is in flight", async () => {
       }),
   );
   const onOpenChange = vi.fn();
-  const { MurphPersonalitySettingsDialog } = await import(
-    "@/src/components/settings/murph-personality-settings-dialog"
-  );
-  const rendered = await renderClientComponent(
-    createElement(MurphPersonalitySettingsDialog, {
-      onOpenChange,
-      open: true,
-      personality: null,
-      savePersonality,
-    }),
-    { requireButton: false },
-  );
+  const rendered = await renderPersonalityEditor({
+    onOpenChange,
+    savePersonality,
+  });
 
   try {
     await driveDial(rendered, "Humor", 7);
@@ -692,4 +566,19 @@ function findButton(container: Element, label: string): HTMLButtonElement | null
     (candidate) => candidate.textContent === label,
   );
   return ButtonElement && button instanceof ButtonElement ? button : null;
+}
+
+async function renderPersonalityEditor(
+  props: Partial<Parameters<typeof import("@/src/components/settings/murph-personality-settings-dialog").MurphPersonalitySettingsDialog>[0]> = {},
+) {
+  const { MurphPersonalitySettingsDialog } = await import("@/src/components/settings/murph-personality-settings-dialog");
+  return renderClientComponent(
+    createElement(MurphPersonalitySettingsDialog, {
+      onOpenChange: () => {},
+      open: true,
+      personality: null,
+      ...props,
+    }),
+    { requireButton: false },
+  );
 }

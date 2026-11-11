@@ -52,42 +52,30 @@ export function MurphAssistantStylePicker({
   initialStep = "tone",
   initialTone = null,
   initialVoice = null,
-  onComplete,
   onOpenChange,
   onSaved,
-  onSkip,
   open,
   savePreference = saveAssistantStylePreference,
-  singleStep = false,
 }: {
   initialStep?: AssistantStyleStep;
   initialTone?: AssistantTonePreference | null;
   initialVoice?: AssistantVoiceOptionId | null;
-  onComplete?: (preferences: MurphAssistantStylePreferences) => void;
   onOpenChange: (open: boolean) => void;
   onSaved?: (preferences: MurphAssistantStylePreferences) => void;
-  onSkip?: (step: AssistantStyleStep) => void;
   open: boolean;
   // The design showcase injects a non-persisting save; everywhere else the
   // default posts to the settings endpoint.
   savePreference?: typeof saveAssistantStylePreference;
-  // Settings rows open one step at a time; onboarding keeps the tone → voice chain.
-  singleStep?: boolean;
 }) {
   const isMobile = useIsMobile();
   const groupId = useId();
-  const [step, setStep] = useState<AssistantStyleStep>(initialStep);
+  const step = initialStep;
   const [selectedTone, setSelectedTone] = useState<AssistantTonePreference>(
     initialTone ?? defaultAssistantTonePreference,
   );
   const [selectedVoice, setSelectedVoice] = useState<AssistantVoiceOptionId>(
     initialVoice ?? defaultAssistantVoiceOptionId,
   );
-  const [savedPreferences, setSavedPreferences] =
-    useState<MurphAssistantStylePreferences>({
-      tone: initialTone,
-      voice: initialVoice,
-    });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Dismissing the dialog unmounts this component while a save may still be in
@@ -102,7 +90,7 @@ export function MurphAssistantStylePicker({
     };
   }, []);
 
-  const handleContinue = async () => {
+  const handleSave = async () => {
     setSaving(true);
     setError(null);
     try {
@@ -112,20 +100,13 @@ export function MurphAssistantStylePicker({
       if (!mountedRef.current) {
         return;
       }
-      setSavedPreferences(saved);
       onSaved?.(saved);
-      advanceAfterStep(saved);
+      onOpenChange(false);
     } catch {
-      setError("Could not save. Try again.");
+      setError("Could not confirm the save. Try again.");
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleSkip = () => {
-    setError(null);
-    onSkip?.(step);
-    advanceAfterStep(savedPreferences);
   };
 
   // While a save is in flight, Escape/backdrop/swipe dismissal would unmount
@@ -136,15 +117,6 @@ export function MurphAssistantStylePicker({
       return;
     }
     onOpenChange(nextOpen);
-  };
-
-  const advanceAfterStep = (preferences: MurphAssistantStylePreferences) => {
-    if (!singleStep && step === "tone") {
-      setStep("voice");
-      return;
-    }
-    onComplete?.(preferences);
-    onOpenChange(false);
   };
 
   const title = step === "tone" ? "Pick Murph's tone" : "Pick Murph's voice";
@@ -193,21 +165,21 @@ export function MurphAssistantStylePicker({
         type="button"
         size="lg"
         variant="ghost"
-        onClick={handleSkip}
+        onClick={() => onOpenChange(false)}
         disabled={saving}
       >
-        {singleStep ? "Cancel" : "Skip"}
+        Cancel
       </Button>
       <Button
         type="button"
         size="lg"
-        onClick={handleContinue}
+        onClick={handleSave}
         disabled={saving}
       >
         {saving ? (
           <Loader2Icon data-icon="inline-start" className="animate-spin" />
         ) : null}
-        {singleStep ? "Save" : "Continue"}
+        Save
       </Button>
     </div>
   );
@@ -554,6 +526,7 @@ async function saveAssistantStylePreference(
       "Content-Type": "application/json",
     },
     method: "POST",
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!response.ok) {

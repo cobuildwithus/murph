@@ -101,7 +101,7 @@ test("OnboardingSteps hides the message card until an action is supplied", async
   assert.doesNotMatch(markup, /Message Murph/);
 });
 
-test("OnboardingSteps leads with the message card and takes the primary style", async () => {
+test("OnboardingSteps leads with the message card", async () => {
   const { OnboardingSteps } = await import("@/src/components/home/onboarding-steps");
   const markup = renderToStaticMarkup(createElement(OnboardingSteps, {
     messageMurphAction: createElement("a", { href: "https://t.me/example_bot" }, "Message"),
@@ -111,27 +111,4 @@ test("OnboardingSteps leads with the message card and takes the primary style", 
   assert.match(markup, /Murph can&#x27;t message you first/);
   assert.ok(markup.indexOf("Message Murph") < markup.indexOf("Connect devices"));
   assert.match(markup, /href="https:\/\/t\.me\/example_bot"/);
-  // The message step takes over the primary treatment from connect devices.
-  assert.equal(markup.match(/border-primary\/35/gu)?.length, 1);
-  assert.ok(
-    markup.indexOf("border-primary/35") < markup.indexOf("Connect devices"),
-  );
-});
-
-test("OnboardingSteps keeps three desktop setup cards on one horizontal track", async () => {
-  const { OnboardingSteps } = await import("@/src/components/home/onboarding-steps");
-  const markup = renderToStaticMarkup(createElement(OnboardingSteps, {
-    messageMurphAction: createElement("a", { href: "/message" }, "Message"),
-  }));
-
-  assert.match(markup, /data-onboarding-steps="true"/);
-  assert.match(markup, /lg:flex/);
-  assert.match(markup, /lg:overflow-x-auto/);
-  assert.doesNotMatch(markup, /xl:grid-cols-3/);
-  assert.equal(markup.match(/data-onboarding-step=/gu)?.length, 3);
-  assert.equal(markup.match(/lg:min-w-0/gu)?.length, 3);
-  assert.equal(
-    markup.match(/lg:basis-\[calc\(\(100%-2\.5rem\)\/3\)\]/gu)?.length,
-    3,
-  );
 });

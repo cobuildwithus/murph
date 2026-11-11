@@ -98,13 +98,13 @@ async function hasNewPeerTx(tx: Prisma.TransactionClient, gameId: string, member
   return false;
 }
 
-/** Recover activations after a post-commit failure; the event marker makes replay inert. */
+/** Recover preference inheritance for every live game; only the optional help offer expires. */
 export async function reconcilePrivateGameActivations(now = new Date(), options: { signal?: AbortSignal; deadlineMs?: number } = {}): Promise<number> {
   if (!enabled()) return 0;
   const db = getPrisma();
   const candidates = await db.$queryRaw<Array<{ id: string }>>`
     SELECT DISTINCT g.id FROM game g JOIN game_player p ON p.game_id = g.id
-    WHERE g.status = 'live' AND g.started_at > ${new Date(now.getTime() - 24 * 60 * 60_000)}
+    WHERE g.status = 'live' AND g.started_at IS NOT NULL
       AND p.member_id IS NOT NULL AND p.left_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM game_event e WHERE e.command_key = 'game-reminder-activation:' || g.id || ':' || p.member_id)
     ORDER BY g.id LIMIT 20`;
