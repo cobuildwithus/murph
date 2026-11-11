@@ -4004,6 +4004,16 @@ reference can also start a legacy route.
 The legacy notice hash column remains nullable for rollout;
 new code omits it. Drain old Web before producing null-hash reservations.
 
+The pending-delivery veto excludes only empty historical runtime dispatch fences
+and accepted runtime/webhook sends after a 15-minute drain. Attempt and update
+times must both precede the cutoff, as must a non-null acceptance time for an
+accepted row. A dispatch fence must have no acceptance, message, failure or
+receipt evidence. All three payload fields must be absent. Other sources,
+generation work and saved obligations retain the veto regardless of age.
+This is a read-only interpretation of deduplication history, never a delivery
+success claim or ledger rewrite; mailbox/runtime and locked route checks still
+apply, and subsequent dispatches retain the existing move-aware route fence.
+
 Cancellation claims `remove_started_at` once under the source-chat lock before
 dispatch and records `remove_accepted_at` only after a successful provider
 return. Replays reconcile roster absence; they never repeat removal. Until

@@ -4,6 +4,39 @@ Status: active
 Created: 2026-11-10
 Updated: 2026-11-11
 
+## Historical delivery quietness follow-up
+
+Outcome: an idle group can move despite historical delivery-ledger metadata,
+without treating saved obligations or current provider activity as settled.
+Reaches: operator starts after legacy runtime dispatches and confirmed sends.
+Proof: synthetic PostgreSQL cases must reproduce the historical veto, preserve
+the ledger byte-for-byte, and keep recent, incomplete and replayable work blocked.
+
+The ledger is also a deduplication/receipt owner, not solely a pending-work queue.
+Legacy runtime and webhook sends can remain accepted without group receipts;
+an empty runtime dispatch fence carries no Web-owned retry payload. Exempt only
+these known shapes after a conservative 15-minute drain, checking both attempt
+and update times and an old acceptance time for accepted rows. Require all
+payload fields absent; uncorrelated runtime dispatches must also have no outcome
+or receipt evidence. Other sources, generation work and saved payloads continue
+to veto. Canonical mailbox progress, runtime idleness, source-chat locking and
+fresh route revalidation remain mandatory. No ledger rewrite, new state,
+migration, provider call or ingress/reply-path work is added.
+
+The window exceeds the current three-minute terminal-retry horizon and bounded
+provider request. A new runtime dispatch still traverses the existing locked
+route/move authority. Existing consumers understand the same rows during skew;
+an older producer conservatively rejects starts. The canary remains pending
+until focused proof, review, exact-head CI and managed Web deployment complete.
+
+The three historical-shape cases failed before the correction. All 109 focused
+producer/consumer PostgreSQL, move-unit and Ops-route tests now pass, including
+same-container adoption, duplicate-event suppression and departure after each
+historical shape. Thirteen veto cases preserve recent attempt/update/acceptance,
+the drain window, incomplete acceptance, each saved-payload field, unknown
+sources, generation and partial dispatch evidence. No prompt or model decision
+surface changes; deterministic provider-shaped proof is the applicable boundary.
+
 ## Legacy route projection follow-up
 
 Outcome: an authorized silent move can start for a legacy route whose nullable

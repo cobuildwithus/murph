@@ -16,6 +16,8 @@ export const groupMoveOperatorSelect = { ...linqGroupMoveSelect, addStartedAt: t
 export type OperatorGroupMove = Prisma.HostedLinqGroupLineMoveGetPayload<{ select: typeof groupMoveOperatorSelect }>;
 export const GROUP_MOVE_QUIET_MS = 60_000;
 export const GROUP_MOVE_ADOPTION_MS = 24 * 60 * 60_000;
+// Outlast provider dispatch and the three-minute terminal-retry horizon.
+const GROUP_MOVE_DELIVERY_DRAIN_MS = 15 * 60_000;
 
 export function groupMoveError(code: string): never {
   throw hostedOnboardingError({ code: `HOSTED_LINQ_GROUP_MOVE_${code}`, httpStatus: code === "NOT_FOUND" ? 404 : 409,
@@ -121,9 +123,22 @@ export async function assertGroupMoveQuiet(input: { containerMemberId: string; c
   const recentConversation = await prisma.hostedMailboxItem.findFirst({ where: { userId: containerMemberId,
     kind: "conversation.message", createdAt: { gte: cutoff } }, select: { id: true } });
   const runtime = await prisma.hostedRuntimeOwner.findUnique({ where: { userId: containerMemberId }, select: { phase: true } });
+  const drainedBefore = new Date(Date.now() - GROUP_MOVE_DELIVERY_DRAIN_MS);
   const delivery = await prisma.hostedLinqDelivery.findFirst({ where: {
     OR: [{ linqChatLookupKey: { in: chatKeys } }, { payloadOwnerMemberId: containerMemberId }],
     status: { in: ["attempted", "provider_dispatch_started", "accepted", "awaiting_generation", "generation_queued"] },
+    // The ledger also retains deduplication history. Only known empty historical
+    // shapes cease to veto; saved obligations and unknown sources remain pending.
+    NOT: {
+      payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null,
+      attemptedAt: { lt: drainedBefore }, updatedAt: { lt: drainedBefore },
+      OR: [
+        { status: "accepted", acceptedAt: { not: null, lt: drainedBefore },
+          source: { in: ["hosted_runtime_linq_delivery", "hosted_webhook_side_effect"] } },
+        { status: "provider_dispatch_started", source: "hosted_runtime_linq_delivery",
+          acceptedAt: null, messageLookupKey: null, failedAt: null, failureCode: null, lastReceiptAt: null },
+      ],
+    },
   }, select: { id: true } });
   if (pending || recentConversation || (runtime && runtime.phase !== "idle") || delivery) groupMoveError("WORK_PENDING");
 }

@@ -461,6 +461,51 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect(await db.hostedLinqGroupLineMove.count({ where: { containerMemberId: room } })).toBe(0);
     expect((await db.hostedThreadRoute.findFirstOrThrow({ where: { containerMemberId: room } })).accountLookupKey).toBeNull();
   });
+  it.each(["runtime accepted", "webhook accepted", "runtime dispatch"])("starts past historical %s metadata without rewriting it", async kind => {
+    const earlier = new Date(Date.now() - 86_400_000), id = randomUUID();
+    const status = kind === "runtime dispatch" ? "provider_dispatch_started" : "accepted";
+    await db.hostedLinqDelivery.create({ data: { id, source: kind === "webhook accepted"
+      ? "hosted_webhook_side_effect" : "hosted_runtime_linq_delivery",
+      status, attemptedAt: earlier, updatedAt: earlier, acceptedAt: status === "accepted" ? earlier : null,
+      targetKind: "explicit", threadIsDirect: null,
+      linqChatLookupKey: createHostedLinqChatLookupKey(sourceChat), phoneNumberLookupKey: sourceKey } });
+    const before = await db.hostedLinqDelivery.findUniqueOrThrow({ where: { id } });
+    const move = await start();
+    expect(move).toMatchObject({ status: "reserved", code: null });
+    expect(provider.add).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
+    const eventId = randomUUID();
+    const incoming = () => webhook(targetChat, person, "Synthetic handoff", target, eventId);
+    await expect(incoming()).rejects.toMatchObject({ httpStatus: 503 });
+    await incoming(); await incoming();
+    for (const callback of callbacks) await callback();
+    expect((await row(move.moveId)).status).toBe("left");
+    expect(await db.hostedMailboxItem.count({ where: { userId: room, kind: "conversation.message" } })).toBe(1);
+    expect((await db.hostedThreadRoute.findFirstOrThrow({ where: { containerMemberId: room } })).accountLookupKey).toBe(targetKey);
+    expect(provider.leave).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
+    expect(await db.hostedLinqDelivery.findUniqueOrThrow({ where: { id } })).toEqual(before);
+  });
+  it.each(["recent attempt", "recent update", "recent acceptance", "missing acceptance", "payload", "drain window", "recent dispatch",
+    "payload owner", "payload schema", "other source", "generation", "dispatch receipt", "dispatch failure"])
+  ("keeps the delivery veto for %s", async kind => {
+    const earlier = new Date(Date.now() - 86_400_000), now = new Date();
+    const dispatch = kind.includes("dispatch");
+    await db.hostedLinqDelivery.create({ data: { id: randomUUID(),
+      source: kind === "other source" ? "game_lifecycle" : "hosted_runtime_linq_delivery",
+      status: kind === "generation" ? "generation_queued" : dispatch ? "provider_dispatch_started" : "accepted",
+      attemptedAt: kind === "recent attempt" || kind === "recent dispatch" ? now
+        : kind === "drain window" ? new Date(Date.now() - 14 * 60_000) : earlier,
+      updatedAt: kind === "recent update" ? now : earlier,
+      acceptedAt: dispatch || kind === "missing acceptance" ? null : kind === "recent acceptance" ? now : earlier,
+      payloadCiphertext: kind === "payload" ? "synthetic-sealed-obligation" : null,
+      payloadOwnerMemberId: kind === "payload owner" ? room : null,
+      payloadSchema: kind === "payload schema" ? "synthetic-obligation" : null,
+      messageLookupKey: kind === "dispatch receipt" ? randomUUID() : null,
+      failureCode: kind === "dispatch failure" ? "synthetic-partial-send" : null,
+      linqChatLookupKey: createHostedLinqChatLookupKey(sourceChat), phoneNumberLookupKey: sourceKey } });
+    await expect(start()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_WORK_PENDING" });
+    expect(provider.add).not.toHaveBeenCalled();
+    expect(await db.hostedLinqGroupLineMove.count({ where: { containerMemberId: room } })).toBe(0);
+  });
   it.each(["acknowledged", "unacknowledged", "expired"])("uses canonical lane progress for %s system work", async state => {
     const id = randomUUID(), earlier = new Date(Date.now() - 120_000);
     await db.hostedMailboxItem.create({ data: { id, userId: room, lane: "system", laneSeq: 1n,
