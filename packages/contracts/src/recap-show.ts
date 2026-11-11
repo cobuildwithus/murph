@@ -1,4 +1,4 @@
-import * as z from "./zod-runtime.js";
+import * as z from "./zod-runtime.ts";
 
 const ref = z.string().min(1).max(128);
 export const recapBlockSchema = z.object({

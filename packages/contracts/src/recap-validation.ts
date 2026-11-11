@@ -1,4 +1,4 @@
-import type { GameRecapStory as HostedGameRecap } from "./recap-show.js";
+import type { GameRecapStory as HostedGameRecap } from "./recap-show.ts";
 
 export type GameRecapEntry = { entryId: string; kind: string; playerName: string; text: string | null; visibleToBoth: boolean };
 export type GameRecapChatMessage = { playerName: string; text: string };

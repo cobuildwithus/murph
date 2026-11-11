@@ -232,7 +232,7 @@ test("drains more than two media transaction batches before one retention checkp
   try {
     expect(await drainRetention(fixture)).toBe(1);
     expect(fixture.checkpoints).toHaveLength(1);
-    expect(fixture.checkpoints[0]?.inboxMediaRetentionWakeAt).toBeNull();
+    expect(fixture.checkpoints[0]?.inboxMediaRetentionWakeAt).toBe(new Date(START + 16 * 24 * 60 * 60 * 1000).toISOString());
   } finally {
     vi.useRealTimers();
     await removeTempRoot(fixture.root);
@@ -319,7 +319,7 @@ test("persists the failure retry and deletes the overdue bytes on the retry", as
     expect((await stat(path.join(fixture.live, fixture.media[0]!.storedPath))).isFile()).toBe(true);
     vi.setSystemTime(Date.parse(failed.nextWakeAt!));
     await completeInvocation(fixture);
-    expect(fixture.checkpoints.at(-1)?.inboxMediaRetentionWakeAt).toBeNull();
+    expect(fixture.checkpoints.at(-1)?.inboxMediaRetentionWakeAt).toBe(new Date(START + 16 * 24 * 60 * 60 * 1000).toISOString());
     await expect(stat(path.join(fixture.live, fixture.media[0]!.storedPath))).rejects.toMatchObject({ code: "ENOENT" });
   } finally {
     retention.mockRestore();
@@ -340,7 +340,7 @@ test("replays deletion from the committed snapshot when snapshot publication fai
     expect(fixture.checkpoints).toHaveLength(0);
     await completeInvocation(fixture);
     expect(fixture.checkpoints).toHaveLength(1);
-    expect(fixture.checkpoints[0]?.inboxMediaRetentionWakeAt).toBeNull();
+    expect(fixture.checkpoints[0]?.inboxMediaRetentionWakeAt).toBe(new Date(START + 16 * 24 * 60 * 60 * 1000).toISOString());
     for (const item of fixture.media) {
       await expect(stat(path.join(fixture.live, item.storedPath))).rejects.toMatchObject({ code: "ENOENT" });
     }

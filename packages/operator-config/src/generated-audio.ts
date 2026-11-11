@@ -1,6 +1,6 @@
 import { setImmediate } from 'node:timers/promises'
 
-import { VaultCliError } from './vault-cli-errors.js'
+import { VaultCliError } from './vault-cli-errors.ts'
 
 /** Validate the encoded audio, without changing the bytes sent to the provider. */
 export async function assertGeneratedMp3Audio(

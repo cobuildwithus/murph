@@ -1,4 +1,4 @@
-import type { RecapShowPage } from './recap-show.js'
+import type { RecapShowPage } from './recap-show.ts'
 
 export const RECAP_PREVIEW_WIDTH = 768
 export const RECAP_PREVIEW_HEIGHT = 1280

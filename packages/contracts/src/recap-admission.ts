@@ -1,4 +1,4 @@
-import * as z from './zod-runtime.js'
+import * as z from './zod-runtime.ts'
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u)
 export const RECAP_REFERENCE_MAX_EDGE = 1024
