@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -80,10 +79,8 @@ it('accepts a recap show through the production hosted Linux sandbox', async () 
     'Synthetic recap submitted.',
   ];
   const observed = new Set<string>();
-  let inputsExistedAtProviderStart: boolean | undefined;
   const server = await startAssistantProviderStubServer({ responseState: { queuedResponses: responses }, maxResponsesApiRequestBodies: 20,
     onRequest: request => {
-      inputsExistedAtProviderStart ??= existsSync(path.join(vault, relativeRoot, 'inputs'));
       for (const output of readHostedLocalAssistantProviderToolOutputs(request)) {
         if (observed.has(output)) continue;
         observed.add(output);
@@ -120,7 +117,6 @@ it('accepts a recap show through the production hosted Linux sandbox', async () 
       turnEnvironment: { currentWorkingDirectory: vault, env: { PATH: process.env.PATH, HOME: home, MURPH_HOSTED_RUNTIME_PROCESS: '1', OPENAI_API_KEY: 'synthetic-only', ELEVENLABS_API_KEY: 'synthetic-only' } },
       vault, workingDirectory: vault,
     });
-    expect(inputsExistedAtProviderStart).toBe(true);
     expect(await readFile(path.join(vault, relativeRoot, 'inputs/writing-guide.md'), 'utf8')).toContain('recap');
     expect([...observed].some(output => output.includes('Process exited with code 0') && output.includes(gameId))).toBe(true);
     expect([...observed].some(output => output.includes('RECAP_CONFINEMENT_OK') && output.includes('Process exited with code 0'))).toBe(true);

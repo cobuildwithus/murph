@@ -2,11 +2,10 @@ export const MURPH_RECAP_PERMISSION_PROFILE = "murph-recap" as const;
 
 export function buildMurphRecapPermissionProfileTomlLines(): readonly string[] {
   return [
-    "# The host grants exact task descendants per invocation; otherwise fail closed.",
+    "# Restricted filesystem: only the host-granted task leaves are visible.",
+    "# Do not deny their ancestor: Linux masking would hide read-only leaves.",
     `[permissions.${MURPH_RECAP_PERMISSION_PROFILE}.filesystem]`,
     '":minimal" = "read"', '"/app" = "read"', "glob_scan_max_depth = 1", "",
-    `[permissions.${MURPH_RECAP_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
-    '"." = "deny"', "",
     `[permissions.${MURPH_RECAP_PERMISSION_PROFILE}.network]`, "enabled = false", "",
   ];
 }
