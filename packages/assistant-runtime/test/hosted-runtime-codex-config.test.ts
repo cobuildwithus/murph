@@ -54,7 +54,6 @@ import {
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
   resolveHostedOperatorModelProvider,
-  resolveHostedVoiceModelProvider,
 } from "../src/hosted-runtime/codex-runtime-env.ts";
 import {
   buildHostedRunnerExecutablePath,
@@ -898,11 +897,6 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   const memberProvider = readProviderConfigSection(config, "hosted-chatgpt-openai");
   assert.doesNotMatch(memberProvider, /base_url/u);
   assert.doesNotMatch(memberProvider, /env_key/u);
-  const voiceProvider = resolveHostedVoiceModelProvider(result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]);
-  assert.equal(voiceProvider, "hosted-openai");
-  const voiceConfig = readProviderConfigSection(config, voiceProvider);
-  assert.match(voiceConfig, /^env_key = "OPENAI_API_KEY"$/mu);
-  assert.match(voiceConfig, /^requires_openai_auth = false$/mu);
   assert.match(config, /^supports_websockets = true$/mu);
   assert.match(config, /^stream_idle_timeout_ms = 90000$/mu);
   assert.match(config, /^requires_openai_auth = true$/mu);
@@ -1255,7 +1249,6 @@ test(
       prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
     );
     assert.equal(operatorProvider, "hosted-openai");
-    assert.equal(resolveHostedVoiceModelProvider(prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]), "hosted-openai");
     const section = readProviderConfigSection(config, "hosted-openai");
     assert.match(section, /^stream_idle_timeout_ms = 90000$/mu);
     assert.match(section, /^stream_max_retries = 0$/mu);

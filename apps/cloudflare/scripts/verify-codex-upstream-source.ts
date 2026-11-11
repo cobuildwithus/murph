@@ -36,7 +36,7 @@ async function main(): Promise<void> {
     throw new Error("Codex image source does not match the reviewed upstream commit.");
   }
   if (!dockerfile.includes(`ARG CODEX_CLI_VERSION=${inventory.version}\n`)
-    || !hostedRunnerBaseImageRemoteTag.endsWith(`-codex${inventory.version}-live1`)) {
+    || !hostedRunnerBaseImageRemoteTag.endsWith(`-codex${inventory.version}-runtime1`)) {
     throw new Error("Codex native build and runner base tag must match the reviewed version.");
   }
   const runnerDockerfile = await readFile(
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
     // checking against the index needs neither lazy fetches nor a checkout.
     runGit(["read-tree", "FETCH_HEAD"], upstreamRepository);
     runGit([
-      "apply", "--cached", "--check", path.join(repoRoot, "patches/codex-public-live.patch"),
+      "apply", "--cached", "--check", path.join(repoRoot, "patches/codex-runtime.patch"),
     ], upstreamRepository);
 
     const sourceFiles = new Set(runGit([

@@ -7,7 +7,7 @@ on:
       - ".github/workflows/cloudflare-runner-permission-sandbox.yml"
       - "Dockerfile.cloudflare-hosted-runner"
       - "Dockerfile.cloudflare-hosted-runner-base"
-      - "patches/codex-public-live.patch"
+      - "patches/codex-runtime.patch"
       - "apps/cloudflare/package.json"
       - "apps/cloudflare/scripts/runner-base-image*"
       - "apps/cloudflare/scripts/runner-bundle/**"
@@ -17,7 +17,6 @@ on:
       - "packages/assistant-engine/src/assistant-ask.ts"
       - "packages/assistant-engine/src/assistant-codex.ts"
       - "packages/assistant-engine/src/assistant-codex/**"
-      - "packages/assistant-engine/test/assistant-codex-native-voice.test.ts"
       - "packages/assistant-engine/test/assistant-codex-scripted-runtime.test.ts"
       - "packages/assistant-engine/test/assistant-codex-websocket-stall.test.ts"
       - "packages/assistant-engine/test/support/codex-scripted-provider.ts"
@@ -37,7 +36,7 @@ on:
       - ".github/workflows/cloudflare-runner-permission-sandbox.yml"
       - "Dockerfile.cloudflare-hosted-runner"
       - "Dockerfile.cloudflare-hosted-runner-base"
-      - "patches/codex-public-live.patch"
+      - "patches/codex-runtime.patch"
       - "apps/cloudflare/package.json"
       - "apps/cloudflare/scripts/runner-base-image*"
       - "apps/cloudflare/scripts/runner-bundle/**"
@@ -47,7 +46,6 @@ on:
       - "packages/assistant-engine/src/assistant-ask.ts"
       - "packages/assistant-engine/src/assistant-codex.ts"
       - "packages/assistant-engine/src/assistant-codex/**"
-      - "packages/assistant-engine/test/assistant-codex-native-voice.test.ts"
       - "packages/assistant-engine/test/assistant-codex-scripted-runtime.test.ts"
       - "packages/assistant-engine/test/assistant-codex-websocket-stall.test.ts"
       - "packages/assistant-engine/test/support/codex-scripted-provider.ts"
@@ -118,11 +116,11 @@ jobs:
           docker cp "$container:/usr/local/lib/murph-codex/." "$RUNNER_TEMP/murph-codex/"
           echo "MURPH_TEST_CODEX_COMMAND=$RUNNER_TEMP/murph-codex/bin/codex" >> "$GITHUB_ENV"
 
-      - name: Prove deployed Codex native Live and provider compatibility
+      - name: Prove deployed Codex provider compatibility
         run: |
-          pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-codex-native-voice.test.ts test/assistant-codex-websocket-stall.test.ts --no-coverage
+          pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-codex-websocket-stall.test.ts --no-coverage
           pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-codex-scripted-runtime.test.ts --no-coverage -t 'preempts an unfinished SSE answer|explicitly disables instant steering|steered reply has no text|keeps scheduled turns and compaction on 30-minute cache retention|labels only the scheduled turn'
-          pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/codex-openai-egress-conformance.test.ts apps/cloudflare/test/runner-egress-openai-live.test.ts --no-coverage
+          pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/codex-openai-egress-conformance.test.ts --no-coverage
 
       - name: Allow capability-bearing nested user namespaces
         run: |

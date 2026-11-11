@@ -2498,44 +2498,29 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.22.1-codex0.166.0-live1`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.22.1-codex0.167.1-runtime1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-The base Dockerfile builds the CLI from the checksum-pinned Codex 0.166.0 source
-with `patches/codex-public-live.patch`. It keeps the same release's bundled
-Code Mode host and sandbox resources. The patch adds public API-key Live
-compatibility, owned-session shutdown, opt-in app-server input ownership, and a
-15-second bound on a Responses websocket request that receives no provider frame.
-Existing callers retain native routing by default. No separate package registry
-or release workflow is required.
-Both the Dockerfile and patch enter the source fingerprint, so a patch-only
-change cannot reuse an older published base. The package records its upstream
-revision and patch digest in `/usr/local/lib/murph-codex/murph-source-revision`.
-The permission-sandbox CI lane extracts this package from the built image and
-runs synthetic native voice and existing provider conformance checks against
-that exact binary before its final-image sandbox proof.
+The base Dockerfile builds the CLI from checksum-pinned Codex 0.167.1 source
+with `patches/codex-runtime.patch`, preserving the matching release's Code Mode
+host and sandbox resources. The patch retains opt-in app-server config isolation,
+a 15-second first-frame websocket timeout, hosted prompt-cache options and
+12-hour cache-write token accounting. Browser live voice and its native adapter
+are retired. The Web page, public and internal call admission, invocation media
+retention and Worker Live forwarding are removed; historical mailbox/usage
+readers remain. Roll out Web retirement before the new runner so old browser
+clients cannot start calls against the retired native interface.
 
-To update the patch, retain the pinned release as its base, run the affected
-upstream tests, and run `pnpm --dir apps/cloudflare verify:codex-upstream-source`
-to verify applicability. Codex 0.166.0 supplies the policy-aware websocket transport;
-the patch preserves upstream response-interruption acknowledgements and native
-transcript-tail history recording, retains that transport, and only adds the public Live wire adapter,
-client-managed input ownership, owned-session finalization, and the request
-acknowledgement bound. That bound fails a silently dropped reused socket so
-native fallback replays the request over HTTPS; acknowledged responses keep the
-provider stream idle timeout. It does not restore a separate model catalog or
-websocket stack. Update the source revision and archive checksum
-together when upgrading Codex, keep the npm helper version aligned, and rerun
-the exact-image compatibility and sandbox lane. Remove the patch and build
-stage once a verified upstream release provides this behavior. Cold native
-builds take longer. A persistent trusted BuildKit cache lets application-only
-changes reuse the compiled layer while preserving production's source-build
-rule. The protected deployment workflow must provide that cache before this
-patch is considered operationally ready; its current fresh-runner forced
-build would otherwise recompile Codex for each deployment.
+Both Dockerfile and patch enter the source fingerprint. The native package records
+the upstream revision and patch digest in `murph-source-revision`. Regenerate the
+patch and protocol exports against the exact source tag, run affected upstream
+Rust tests and `pnpm --dir apps/cloudflare verify:codex-upstream-source`, and keep
+the npm helper checksum aligned. The permission-sandbox lane verifies the image's
+websocket fallback, provider conformance and sandbox boundaries. Cold builds need
+the existing trusted BuildKit cache; application-only changes reuse compilation.
 
-Codex CLI 0.166.0 supplies native Sol, Luna and Astra entries. Its bundled
+Codex CLI 0.167.1 supplies native Sol, Luna and Astra entries. Its bundled
 Sol/Luna entries match the former pinned launch supplement, which is removed
 along with its bundle staging and fingerprint input. The native bundled catalog
 is the sole model-entry source.
@@ -2549,7 +2534,7 @@ transport failures, timeouts, throttling, and server failures. The new
 classifications use Murph's existing five-minute capacity retry; none triggers
 connection recovery or a higher-priced service-tier fallback. `modelNotFound`
 remains terminal even when provider prose contains a retry or rate-limit hint.
-Codex 0.166.0 defaults fresh native memory profiles to v2, but the shared hosted
+Codex 0.167.1 defaults fresh native memory profiles to v2, but the shared hosted
 config still disables the memory feature, generation, and use. Its newly stable
 reasoning-effort override remains enabled by the upstream default, as intended
 by the 0.165.0 release; Murph still sends its selected effort on each turn.

@@ -48,10 +48,6 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "POST",
     suffix: "runtime/ensure-processing",
   },
-  voiceControl: {
-    method: "POST",
-    suffix: "runtime/voice",
-  },
   runtimeHealthDataConsentReconcile: {
     method: "POST",
     suffix: "runtime/health-data-consent",
@@ -98,10 +94,6 @@ export function buildCloudflareHostedControlRuntimeHealthDataConsentPath(
     "runtimeHealthDataConsentReconcile",
     userId,
   );
-}
-
-export function buildCloudflareHostedControlVoiceControlPath(userId: string): string {
-  return buildCloudflareHostedControlUserRoutePath("voiceControl", userId);
 }
 
 export function buildCloudflareHostedControlTelegramUsageLimitNoticePath(userId: string): string {

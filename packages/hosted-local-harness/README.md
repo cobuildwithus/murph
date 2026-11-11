@@ -17,7 +17,6 @@ pnpm hosted-local e2e linq-delivery temporal-orchestration --no-bundle
 pnpm hosted-local e2e linq-scheduled-reminder
 pnpm hosted-local e2e codex-gateway-prefix --profile e2e:live
 pnpm hosted-local e2e vault-persistence --profile e2e:live
-MURPH_E2E_VOICE_AUDIO_PATH=/tmp/synthetic-voice.wav pnpm hosted-local e2e native-voice --profile e2e:live
 pnpm hosted-local e2e --list
 pnpm hosted-local profiles
 pnpm hosted-local doctor
@@ -35,14 +34,6 @@ requires a development provider key; missing credentials fail instead of skip.
 E2E MinIO cleanup uses the suite's existing local build identity, including after
 scenario failure or interruption. It removes that build's exact container and
 matching build-labelled leftovers; other E2E builds keep their storage service.
-
-The manual `native-voice` scenario needs a development OpenAI key entitled to
-GPT Live and a synthetic WAV saying “Read notes/synthetic-code.txt in my vault
-and tell me the code.” It seeds an isolated member and encrypted vault, then
-uses the real authenticated Voice page, Worker egress, native CLI, mailbox,
-and usage ledger. Only the physical microphone is replaced. The browser
-receives no provider credential. Missing audio skips this opt-in scenario;
-it is not part of `all` or ordinary credential-free CI.
 
 Runner readiness smoke polls every second locally, while retaining the canonical
 smoke client's attempt and wall-clock budgets. Standby preparation includes

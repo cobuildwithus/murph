@@ -295,7 +295,6 @@ import {
   type HostedAutonomousWakeWindow,
   type HostedSystemMailboxWakeCandidate,
 } from "./hosted-runtime/wake-candidates.ts";
-import { configureHostedRuntimeVoice, type HostedRuntimeVoice } from "./hosted-runtime/voice-call.ts";
 import {
   consumePendingRuntimeWakeUnlessShuttingDown,
   createCoalescingRuntimeWakeSignal,
@@ -811,7 +810,6 @@ function isHostedInitialBootstrapPending(input: {
 }
 
 export interface HostedWorkspaceRuntimeJobOptions {
-  voice?: HostedRuntimeVoice | null;
   /** Invocation-scoped diagnostic scalars for the completion log; never authority. */
   fetchTransportDiagnostics?: { read(): HostedRuntimeRedactedObject } | null;
   createCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder;
@@ -1806,13 +1804,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       codexProcessPreparationStart = Promise.resolve(null);
     }
   };
-  const settleInvocationCodexProcess = async (): Promise<void> => {
-    try {
-      await options.voice?.close();
-    } finally {
-      await settleCodexProcessPreparation();
-    }
-  };
   let latestCheckpointSnapshotCleanForWarmReuse = false;
   const createAbortGuardedCheckpointSnapshot: HostedWorkspaceSnapshotCheckpointBuilder =
     async (snapshotInput, context) => {
@@ -2479,7 +2470,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       : null;
     const runnerPlatform = {
       ...guardedRuntime.platform,
-      voicePort: options.voice,
       ...(invocationAssistantConfigurationToolPort
         ? { assistantConfigurationToolPort: invocationAssistantConfigurationToolPort }
         : {}),
@@ -2614,29 +2604,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         runtimeEnv: hostedCodexRuntime.runtimeEnv,
       });
     }
-    configureHostedRuntimeVoice(options.voice, async () => {
-      assertRuntimeNotAborted();
-      const prepared = await prepareInvocationCodexRuntime();
-      const target = await readHostedAssistantExecutionDefaultTarget({
-        assistantBootstrap: initialAssistantBootstrap,
-        homeDirectory: restored.operatorHomeRoot,
-        runtimeEnv: prepared.runtimeEnv,
-      });
-      if (!target) throw new Error("The hosted voice backing assistant is not ready.");
-      const turnEnvironment = createHostedAssistantTurnEnvironment({
-        operatorHomeRoot: restored.operatorHomeRoot,
-        runtimeEnv: prepared.runtimeEnv,
-        vaultRoot: restored.vaultRoot,
-      });
-      return {
-        env: turnEnvironment.env,
-        target,
-        workingDirectory: restored.vaultRoot,
-        signal: options.shutdownSignal
-          ? AbortSignal.any([runtimeAbortController.signal, options.shutdownSignal])
-          : runtimeAbortController.signal,
-      };
-    });
     assertRuntimeNotAborted();
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
@@ -3023,7 +2990,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     // checkpointed and serviced.
     let pendingWakeAfterDueAssistantService: HostedRuntimeHeldDurableWake | null = null;
     let invocationLocalProjectedAssistantWakeKey: string | null = null;
-    // Keep the no-progress guard across checkpoints and clean voice waits.
+    // Keep the no-progress guard across checkpoints.
     // A distinct successor projection may still run in this invocation.
     let hotProjectedWakeAttemptedKey: string | null = null;
     let durableCheckpointFollowUpPending = false;
@@ -6291,9 +6258,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         ): void => {
           if (
             !runtimeOwnerHandoffRequested
-            // A live/reserved call is foreground work. Routine mailbox follow-up
-            // may checkpoint in place; only explicit owner/policy changes end it.
-            && options.voice?.isHoldingRuntime() !== true
             && !foregroundWorkPending
             && pendingDurableCheckpointEffects.length === 0
             && readyDurableCheckpointEffects.length === 0
@@ -6805,58 +6769,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           wakeAtMs,
         };
       };
-      const voiceMayRetainRuntime = (): boolean =>
-        !runtimeOwnerHandoffRequested && !mailboxBudgetExhausted()
-        && !options.shutdownSignal?.aborted && !runtimeAbortController.signal.aborted
-        && options.voice?.isHoldingRuntime() === true;
-      const mayFinishRuntime = (): boolean => {
-        if (runtimeStateDirty || voiceMayRetainRuntime()) return false;
-        options.voice?.stopAccepting();
-        return true;
-      };
+      const mayFinishRuntime = (): boolean => !runtimeStateDirty;
       const prepareNextRuntimeCheckpoint = async (): Promise<boolean> => {
-        while (!runtimeStateDirty && voiceMayRetainRuntime()) {
-          const waitDeadlineMs = Date.now() + runnerIdleTtlMs;
-          const hotProjectedWake = resolveHotProjectedWake(waitDeadlineMs);
-          if (hotProjectedWake !== null && hotProjectedWake.wakeAtMs <= Date.now()) {
-            hotProjectedWakeAttemptedKey = hotProjectedWake.key;
-            await runForegroundPass({
-              projectedWakeKey: hotProjectedWake.key,
-              preserveDueWakeOnNoProgress: true,
-              requestIdKind: "idle-wake",
-            });
-            if (!runtimeStateDirty) await drainCleanDurableCheckpointEffects();
-            continue;
-          }
-          const waited = await waitForHostedRuntimeDirtyWindow({
-            idleCheckpointStartByMs: waitDeadlineMs,
-            projectedWakeAtMs: hotProjectedWake?.wakeAtMs ?? null,
-            runtimeAbortSignal: runtimeAbortController.signal,
-            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
-            shutdownSignal: options.shutdownSignal ?? null,
-          });
-          if (waited.kind === "external_wake") {
-            const latencySeed = createHostedRuntimeWakeLatencySeed(waited.notification);
-            if (latencySeed?.requestedProcessingMode) {
-              await runPreCheckpointConversationWake(latencySeed);
-            } else {
-              await runForegroundPass({ latencySeed, requestIdKind: "idle-wake" });
-            }
-            if (!runtimeStateDirty) await drainCleanDurableCheckpointEffects();
-          }
-        }
         if (!runtimeStateDirty) {
-          // Voice may have outlived the initial foreground pass. Quiesce the
-          // same owners as the ordinary clean return before reading dirtiness.
-          options.voice?.stopAccepting();
           await closeDetachedAssistantAskBeforeWorkspaceRelease();
           await workspaceSystemWork.quiesce();
         }
         return runtimeStateDirty;
       };
       const prepareInvocationRelease = async (): Promise<void> => {
-        if (voiceMayRetainRuntime()) return;
-        options.voice?.stopAccepting();
         await closeDetachedAssistantAskBeforeWorkspaceRelease();
       };
       const finishCleanRuntimeInvocation = async () => {
@@ -8075,7 +7996,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       await drainOwnedVaultShareProjection();
     } finally {
       try {
-        await settleInvocationCodexProcess();
+        await settleCodexProcessPreparation();
       } finally {
         try {
           await systemWork?.quiesce();

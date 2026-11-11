@@ -1,4 +1,3 @@
-import { controlHostedContainerVoice, type HostedContainerActiveInvocation } from "./container-voice-control.ts";
 import {
   createServer,
   type IncomingMessage,
@@ -11,7 +10,6 @@ import { pathToFileURL } from "node:url";
 import {
   buildHostedExecutionSafeErrorDetails,
   parseHostedVoiceCallId,
-  parseHostedVoiceControlRequest,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
@@ -94,7 +92,6 @@ const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS = 5_000;
 const HOSTED_CONTAINER_REQUEST_KINDS = new Map([
   ["GET /health", "health" as const],
-  ["POST /internal/voice-control", "voice-control" as const],
   [`POST ${HOSTED_CONTAINER_RUNTIME_WAKE_PATH}`, "runtime-wake" as const],
   [`POST ${HOSTED_CONTAINER_CODEX_SHELL_SMOKE_PATH}`, "codex-shell-smoke" as const],
   [`POST ${HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_PATH}`, "live-model-smoke" as const],
@@ -330,11 +327,16 @@ type HostedContainerRuntimeWakeNotification = {
 type HostedContainerRuntimeWakeSender =
   (notification?: HostedContainerRuntimeWakeNotification) => boolean;
 
-// One record per admitted invocation: identity, abort, voice, the installed wake
+// One record per admitted invocation: identity, abort, the installed wake
 // sender, and one coalesced wake held until that sender exists. A request
 // detaches only its own record, before the completion callback, so a successor
 // can enter while the predecessor's callback settles.
-interface HostedContainerAdmittedJob extends HostedContainerActiveInvocation {
+interface HostedContainerAdmittedJob {
+  abort(reason: Error): void;
+  attemptId: string;
+  leaseGeneration: string;
+  userId: string;
+  signal: AbortSignal;
   pendingWake: HostedContainerRuntimeWakeNotification | null;
   sendWake: HostedContainerRuntimeWakeSender | null;
 }
@@ -593,30 +595,6 @@ export async function startHostedContainerEntrypoint(input: {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
       const requestKind = HOSTED_CONTAINER_REQUEST_KINDS.get(`${request.method} ${requestUrl.pathname}`);
       requestDiagnostics.requestKind = requestKind ?? "unknown";
-
-      if (request.method === "POST" && requestUrl.pathname === "/internal/voice-control") {
-        let command;
-        try {
-          const body: unknown = JSON.parse(await readHostedContainerInvocationRequestBody(request, 72 * 1024));
-          if (typeof body !== "object" || body === null || !("userId" in body) || typeof body.userId !== "string") {
-            throw new TypeError("Voice control requires a bound member.");
-          }
-          const { userId, ...payload } = body;
-          command = { ...parseHostedVoiceControlRequest(payload), userId };
-        } catch (error) {
-          // JSON parser messages can quote private SDP bytes.
-          const classified = classifyRequestDecodeError(error instanceof SyntaxError
-            ? new TypeError("Voice request must contain valid JSON.") : error);
-          writeJsonResponse(response, classified.statusCode, classified.payload);
-          return;
-        }
-        const result = await controlHostedContainerVoice({
-          command, readCurrent: () => activeAdmittedJob,
-          shutdownSignal: containerShutdownController.signal,
-        });
-        writeJsonResponse(response, 200, result);
-        return;
-      }
 
       if (request.method === "GET" && requestUrl.pathname === "/health") {
         response.statusCode = 200;
@@ -965,9 +943,6 @@ export async function startHostedContainerEntrypoint(input: {
               receivedAtEpochMs,
             );
           }
-        },
-        onVoiceReady(voice) {
-          invocation.voice = voice;
         },
         onRuntimeWakeReady(sendWake) {
           invocation.sendWake = sendWake;

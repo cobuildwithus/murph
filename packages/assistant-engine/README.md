@@ -680,7 +680,7 @@ credential value remains in the process environment and its name is omitted
 from shell-tool allowlists. Model, provider, reasoning, and approval selections
 remain explicit journey inputs.
 
-Build from the exact source pin with `patches/codex-public-live.patch` applied,
+Build from the exact source pin with `patches/codex-runtime.patch` applied,
 then select that local artifact with `pnpm test:assistant:live -- --test <name>
 --codex-command <absolute-native-binary>`. The unpatched npm CLI does not support
 this App Server option. Keep the matching release's helper layout; the native

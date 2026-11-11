@@ -7,7 +7,7 @@ on:
     paths:
       - ".github/workflows/cloudflare-runner-base-image.yml"
       - "Dockerfile.cloudflare-hosted-runner-base"
-      - "patches/codex-public-live.patch"
+      - "patches/codex-runtime.patch"
       - "apps/cloudflare/scripts/runner-base-image.ts"
       - "apps/cloudflare/scripts/runner-base-image-contract.ts"
       - "apps/cloudflare/package.json"

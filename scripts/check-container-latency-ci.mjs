@@ -11,7 +11,7 @@ const scenarios = ["boot", "seed", "new"];
 const metrics = { cpuMs: { ratio: 1.25, floor: 100 }, wallMs: { ratio: 1.4, floor: 250 } };
 const benchPath = "packages/core/bench";
 // Every input of computeRunnerBaseImageSourceFingerprint; the test pins the two lists together.
-export const baseImageSources = ["Dockerfile.cloudflare-hosted-runner-base", "patches/codex-public-live.patch"];
+export const baseImageSources = ["Dockerfile.cloudflare-hosted-runner-base", "patches/codex-runtime.patch"];
 
 export function parseLatencyRun(output) {
   const rows = output.trim().split("\n").map((line) => JSON.parse(line));

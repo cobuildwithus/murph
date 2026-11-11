@@ -1249,7 +1249,7 @@ See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle
 
 The runner base image owns the native Codex build. Its Dockerfile pins the upstream
 release archive, Rust builder, and matching npm helper package, applies
-`patches/codex-public-live.patch`, and replaces only the CLI. The bundled Code Mode
+`patches/codex-runtime.patch`, and replaces only the CLI. The bundled Code Mode
 host, shell resources, and sandbox helper remain from the same release. The image
 records the upstream revision and patch SHA-256 in `murph-source-revision`.
 Cargo concurrency is capped at two jobs so a high CPU count does not expand the
@@ -1264,17 +1264,10 @@ feature switches, or disable managed requirements, project instructions or exec 
 canonical local journey launchers explicitly select this option. CLI overrides
 still supply the hosted behavior and local installation read roots.
 
-Public Live transcript fragments use Codex's native normalized event stream and
-bounded transcript collection. Handoffs without separate task text use upstream
-transcript fallback and delegation formatting, including escaped, bounded input
-and transcript fields. Raw transcript/delegation notifications are not duplicated
-onto App Server; browser captions still arrive through the provider data channel.
-Outgoing results reuse the native context-message builders and UTF-8 chunking;
-only the final serialization maps those frames to public Live append events.
-
-Public WebRTC sessions restrict browser commands to mute, unmute, and close.
-Instructions and delegated results stay on the native trusted connection; the
-browser receives only call state, transcripts, usage, and bounded protocol notices.
+The runtime patch retains config isolation, a 15-second websocket acknowledgement
+bound, hosted prompt-cache options, and 12-hour cache-write token accounting.
+Browser live voice and its native wire adapter are retired; the Worker denies
+public Live creation and attachment. Historical usage remains readable.
 
 `runner:docker:base` fingerprints both the complete Dockerfile and patch. Native
 helpers come directly from the matching checksum-pinned npm platform archive;
@@ -1301,12 +1294,10 @@ focused upstream tests and generated protocol schemas, and run
 `pnpm --dir apps/cloudflare verify:codex-upstream-source`. Keep the release's
 matching npm helpers and sandbox checksum aligned when changing the version.
 Focused upstream Rust tests also need that release's Code Mode helper: a partial
-Cargo build may omit it and fail during startup prewarm before voice is exercised.
+Cargo build may omit it and fail during startup prewarm before a turn is exercised.
 Supply the matching package's `bin/codex-code-mode-host` through the test harness's
 `CARGO_BIN_EXE_codex-code-mode-host` environment variable when it is not built locally.
-The runner permission workflow extracts the actual image's CLI and checks native
-voice input ownership, successive tool-backed turns, provider closure, provider-route
-inventory, and sandbox confinement. Local hosted development uses this same
+The runner permission workflow extracts the actual image's CLI and checks websocket fallback, provider-route inventory, and sandbox confinement. Local hosted development uses this same
 image recipe; no manual binary installation or separate release service is needed.
 
 ### Astra model catalog
@@ -1316,7 +1307,7 @@ The native runner image has a default GPT-6.1 Sol, GPT-6 Sol/Luna, and GPT-5.6 L
 the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
 authority, Edge, and group runtimes retain the default catalog and its
 existing delegation choices. The
-pinned Codex 0.166.0 release supplies every entry natively; the image validates
+pinned Codex 0.167.1 release supplies every entry natively; the image validates
 its bundled catalog without a separate launch supplement. Murph supplies its own base
 instructions for each turn.
 The Astra context window remains at most 272,000 tokens, verified while building the

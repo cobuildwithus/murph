@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
-import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
-import { createHostedRuntimeVoiceCall } from "@murphai/assistant-runtime/hosted-invocation";
 import { hostedRunnerIntercept, handleHostedRunnerOpenAiOutbound, handleHostedRunnerLinqOutbound, HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL } from "../src/runner-egress-intercept.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
@@ -9,8 +7,6 @@ import { fetchHostedExecutionWebControlPlaneResponse } from "../src/web-control-
 import { RunnerInvocationReceiptStore } from "../src/runner-invocation-receipt.ts";
 import { RunnerContainer } from "../src/runner-container.ts";
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.ts";
-import { createHostedRuntimeUsageRecordPort } from "../src/runtime-platform/usage-record-port.ts";
-import { createCloudflareHostedInternalFetch } from "../src/runtime-platform/provider-fetch.ts";
 import { readNativeRuntimeProviderAuthority } from "../src/runtime-provider-authorization.ts";
 import { HOSTED_RUNNER_WEB_CONTROL_ROUTES } from "../src/runner-outbound/shared-web-control-policy.ts";
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../src/internal-hosts.ts";
@@ -246,55 +242,6 @@ describe("Provider identity and usage settlement with native receipts", () => {
     const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ id: "synthetic-response" }));
     expect((await h.metered()).status).toBe(200);
     expect(upstream).toHaveBeenCalledOnce();
-  });
-
-  it("keeps native denial after a voice close replays the immutable record whose Web response was lost", async () => {
-    const h = harness();
-    const forwarded: Array<{ usage: AssistantUsageRecord }> = [];
-    vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockImplementation(async input => {
-      const body = JSON.parse(input.body!) as { usage: AssistantUsageRecord };
-      forwarded.push(body);
-      if (forwarded.length === 1) throw new Error("synthetic response lost after accounting");
-      return Response.json({ platformAiUsageAllowedAfter: true, recorded: true, usageId: body.usage.usageId });
-    });
-    const usagePort = createHostedRuntimeUsageRecordPort({
-      boundUserId: h.userId, timeoutMs: 10_000, transport: { mode: "proxy" },
-      fetchImpl: createCloudflareHostedInternalFetch(h.userId,
-        async (input, init) => handleRunnerOutboundRequest(new Request(input, init), h.env, h.userId, caller),
-        { readCurrentLease: () => ({ userId: h.userId, attemptId: h.identity.attemptId, leaseGeneration: h.identity.generation, workspaceVersion: "0" }) }),
-    });
-    type StartVoice = Parameters<ReturnType<typeof createHostedRuntimeVoiceCall>["connect"]>[1];
-    const closure = { providerConfirmed: true, providerSessionId: "synthetic-session", seconds: 2 };
-    let markStopped!: () => void;
-    const stopped = new Promise<void>(resolve => { markStopped = resolve; });
-    const native = {
-      sdp: "synthetic-answer", closed: new Promise<typeof closure>(() => {}),
-      speak: vi.fn(async () => {}), close: vi.fn(async () => { markStopped(); return closure; }),
-    };
-    const start = vi.fn<StartVoice>(async () => native);
-    const onError = vi.fn();
-    const call = createHostedRuntimeVoiceCall({
-      callId: "synthetic-call", memberId: h.userId, signal: new AbortController().signal,
-      usagePort, admitInput: async () => ({ mailboxItemId: "synthetic-mailbox" }), notifyRuntime: () => {}, onError,
-    });
-    try {
-      await call.connect("synthetic-offer", start);
-      start.mock.calls[0]![0].onUsage!(2);
-      await stopped;
-      await call.close();
-      expect(native.close).toHaveBeenCalledOnce();
-      expect(onError).not.toHaveBeenCalled();
-      expect(forwarded).toHaveLength(2);
-      expect(forwarded[1]!.usage).toEqual(forwarded[0]!.usage);
-      expect(commandHostedRuntimeOwner).toHaveBeenCalledExactlyOnceWith({ source: h.env, userId: h.userId,
-        command: { operation: "revoke_ai_usage", userId: h.userId, ...h.identity } });
-      expect(h.sql.exec("SELECT state FROM runner_usage_settlement").toArray()).toEqual([{ state: "denied" }]);
-      const upstream = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Must not reach provider"));
-      expect((await h.metered()).status).toBe(503);
-      expect(upstream).not.toHaveBeenCalled();
-    } finally {
-      await call.close();
-    }
   });
 
   it.each(["thrown forward", "non-OK response", "unparseable OK response"])("writes native denial before revoking Web after %s", async shape => {

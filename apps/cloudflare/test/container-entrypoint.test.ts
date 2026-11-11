@@ -416,60 +416,6 @@ function createDeferred<T = void>() {
 }
 
 describe("startHostedContainerEntrypoint", () => {
-  it("binds voice HTTP commands to the active invocation and releases them with it", async () => {
-    const ready = createDeferred();
-    const release = createDeferred();
-    const connect = vi.fn(async () => "v=0\r\nanswer");
-    const closeCall = vi.fn(async () => ({ providerConfirmed: true, providerSessionId: "synthetic-provider", seconds: 12 }));
-    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(async (_job, options) => {
-      options.onVoiceReady?.({ connect, closeCall });
-      ready.resolve();
-      await release.promise;
-      return buildWorkspaceRunnerResult();
-    });
-    const server = await startHostedContainerEntrypoint({ port: 0 });
-    servers.push(server);
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("TCP listener missing.");
-    const origin = `http://127.0.0.1:${address.port}`;
-    const invocation = fetch(origin + "/internal/workspace-invocation", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify(buildJobBody({ wake: {
-        event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
-        eventId: "voice-control", occurredAt: "2026-09-21T12:00:00.000Z",
-      } })),
-    });
-    const command = { userId: "u1", attemptId: "attempt_voice-control", leaseGeneration: "1",
-      callId: "call-synthetic", action: "connect", sdp: "v=0\r\noffer" };
-    const post = (body: unknown) => fetch(origin + "/internal/voice-control", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
-    });
-    try {
-      await ready.promise;
-      for (const change of [{ userId: "other" }, { attemptId: "old" }, { leaseGeneration: "2" }]) {
-        expect(await (await post({ ...command, ...change })).json()).toEqual({ kind: "unavailable" });
-      }
-      expect(connect).not.toHaveBeenCalled();
-      expect(await (await post(command)).json()).toEqual({ kind: "connected", sdp: "v=0\r\nanswer" });
-      expect(connect).toHaveBeenCalledExactlyOnceWith("call-synthetic", command.sdp);
-      const { sdp: _sdp, ...close } = { ...command, action: "close" };
-      expect(await (await post(close)).json()).toEqual({ kind: "closed", providerConfirmed: true, seconds: 12 });
-      expect(closeCall).toHaveBeenCalledExactlyOnceWith("call-synthetic");
-      expect((await post({ ...command, extra: true })).status).toBe(400);
-      expect((await post({ ...command, sdp: "x".repeat(74000) })).status).toBe(413);
-      const malformed = await fetch(origin + "/internal/voice-control", {
-        method: "POST", headers: { "content-type": "application/json" }, body: "private-synthetic-offer",
-      });
-      expect(malformed.status).toBe(400);
-      expect(await malformed.text()).not.toContain("private-synthetic-offer");
-      expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain("private-synthetic-offer");
-    } finally {
-      release.resolve();
-      await invocation;
-    }
-    expect(await (await post(command)).json()).toEqual({ kind: "unavailable" });
-    expect(connect).toHaveBeenCalledTimes(1);
-  });
   it("serves a lightweight health endpoint", async () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,
@@ -962,7 +908,6 @@ describe("startHostedContainerEntrypoint", () => {
     const releaseSuccessor = createDeferred();
     const oldSend = vi.fn(() => true);
     const successorSend = vi.fn(() => true);
-    const connect = vi.fn(async () => "v=0\r\nanswer");
     vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation")
       .mockImplementationOnce(async (_job, options) => {
         options.onRuntimeWakeReady?.(oldSend);
@@ -972,7 +917,6 @@ describe("startHostedContainerEntrypoint", () => {
         successorStarted.resolve(options.signal);
         await allowSuccessorReady.promise;
         options.onRuntimeWakeReady?.(successorSend);
-        options.onVoiceReady?.({ connect, closeCall: vi.fn() });
         successorReady.resolve();
         await releaseSuccessor.promise;
         return buildWorkspaceRunnerResult();
@@ -1034,10 +978,6 @@ describe("startHostedContainerEntrypoint", () => {
       expect(direct.headers["x-runtime-wake-pending"]).toBeUndefined();
       expect(successorSend).toHaveBeenCalledTimes(2);
       expect(oldSend).not.toHaveBeenCalled();
-      expect((await post("/internal/voice-control", {
-        ...successorIdentity, action: "connect", callId: "call-synthetic", sdp: "v=0\r\noffer",
-      })).json).toEqual({ kind: "connected", sdp: "v=0\r\nanswer" });
-      expect(connect).toHaveBeenCalledExactlyOnceWith("call-synthetic", "v=0\r\noffer");
       expect((await post("/internal/workspace-invocation/abort", oldIdentity)).headers["x-workspace-invocation-abort-status"]).toBe("stale");
       expect(signal?.aborted).toBe(false);
       expect((await post("/internal/workspace-invocation/abort", successorIdentity)).headers["x-workspace-invocation-abort-status"]).toBe("accepted");
@@ -1058,10 +998,8 @@ describe("startHostedContainerEntrypoint", () => {
       await releaseCompletion.promise;
     });
     const oldSend = vi.fn(() => true);
-    const connect = vi.fn(async () => "v=0\r\nanswer");
     vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementationOnce(async (_job, options) => {
       options.onRuntimeWakeReady?.(oldSend);
-      options.onVoiceReady?.({ connect, closeCall: vi.fn() });
       return buildWorkspaceRunnerResult();
     });
     const successorSignal = createDeferred<AbortSignal>();
@@ -1090,10 +1028,6 @@ describe("startHostedContainerEntrypoint", () => {
       expect(wake.headers["x-runtime-wake-accepted"]).toBe("0");
       expect(wake.headers["x-runtime-wake-absent"]).toBe("1");
       expect(oldSend).not.toHaveBeenCalled();
-      expect((await post("/internal/voice-control", {
-        ...oldIdentity, action: "connect", callId: "call-synthetic", sdp: "v=0\r\noffer",
-      })).json).toEqual({ kind: "unavailable" });
-      expect(connect).not.toHaveBeenCalled();
       expect((await post("/internal/workspace-invocation/abort", successorIdentity)).headers["x-workspace-invocation-abort-status"]).toBe("queued");
       expect((await post("/internal/workspace-invocation", buildWorkspaceJobBody(successorIdentity))).status).toBe(204);
       expect((await successorSignal.promise).aborted).toBe(true);
@@ -3564,7 +3498,7 @@ describe("startHostedContainerEntrypoint", () => {
     ["GET", "/health", "health", 200],
     ["POST", "/internal/runtime-wake", "runtime-wake", 400],
     ["POST", "/internal/workspace-invocation/abort", "workspace-invocation-abort", 400],
-    ["POST", "/internal/voice-control", "voice-control", 400],
+    ["POST", "/internal/voice-control", "unknown", 404],
     ["POST", "/internal/deploy-codex-shell-smoke", "codex-shell-smoke", 500],
     ["POST", "/internal/deploy-live-model-turn-smoke", "live-model-smoke", 500],
     ["POST", "/internal/direct-r2-presigned-put-smoke", "direct-r2-smoke", 400],

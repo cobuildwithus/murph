@@ -58,7 +58,7 @@ describe("hosted runner container image contract", () => {
       expect(dockerfile).not.toContain("worker-secrets.json");
       expect(dockerfile).not.toContain("wrangler.generated.jsonc");
     }
-    expect(baseDockerfile).toContain("git apply --check /tmp/codex-public-live.patch");
+    expect(baseDockerfile).toContain("git apply --check /tmp/codex-runtime.patch");
     expect(baseDockerfile).toContain("sha256sum /opt/codex/codex-resources/bwrap");
     expect(baseDockerfile).toContain("export CODEX_BWRAP_SHA256=");
   });

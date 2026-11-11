@@ -29,20 +29,6 @@ import {
 type ObservedRequest = { init?: RequestInit; url: string };
 
 describe("createCloudflareHostedControlClient", () => {
-  it("sends a member-bound voice control with the exact offer and runtime fence", async () => {
-    const fetchImpl = vi.fn(async () => createJsonResponse({ kind: "connected", sdp: "v=0\r\nanswer" }));
-    const client = createCloudflareHostedControlClient({
-      baseUrl: "https://runner.example.test", fetchImpl: fetchImpl as typeof fetch, getBearerToken: async () => "token-synthetic",
-    });
-    const request = { action: "connect" as const, callId: "call-synthetic", attemptId: "attempt-synthetic",
-      leaseGeneration: "3", sdp: "v=0\r\noffer" };
-    expect(await client.controlVoice({ userId: "member-synthetic", request })).toEqual({ kind: "connected", sdp: "v=0\r\nanswer" });
-    const [url, init] = vi.mocked(fetchImpl as typeof fetch).mock.calls[0]!;
-    expect(url).toBe("https://runner.example.test/internal/users/member-synthetic/runtime/voice");
-    expect(JSON.parse(String(init?.body))).toEqual(request);
-    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer token-synthetic");
-    expect(new Headers(init?.headers).get("x-hosted-execution-user-id")).toBe("member-synthetic");
-  });
   it("binds thumbnail delivery to the owner and tolerates an older Worker", async () => {
     const photo = { mediaId: "a".repeat(64), sha256: "b".repeat(64), byteSize: 123 };
     const delivery = { mediaId: photo.mediaId, url: "https://runner.example.test/private-thumbnail" };
@@ -70,7 +56,6 @@ describe("createCloudflareHostedControlClient", () => {
     });
 
     expect(Object.keys(client).sort()).toEqual([
-      "controlVoice",
       "createBrowserVaultExportSession",
       "createBrowserVaultSession",
       "deleteGameMedia",
