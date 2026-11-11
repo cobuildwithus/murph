@@ -151,28 +151,10 @@ function runCommand(command, args) {
   return result.status ?? 1;
 }
 
-async function hasPreparedArtifacts(importAttempt = 0) {
-  for (const artifactPath of requiredArtifactPaths) {
-    if (!existsSync(artifactPath)) {
-      return false;
-    }
-  }
-
-  for (const artifactPath of smokeImportPaths) {
-    try {
-      const artifactUrl = pathToFileURL(artifactPath);
-      artifactUrl.searchParams.set("murph-prepared-check", String(importAttempt));
-      await import(artifactUrl.href);
-    } catch {
-      return false;
-    }
-  }
-
-  if (!hasPublishedPackageSmokeImports()) {
-    return false;
-  }
-
-  return true;
+function hasPreparedArtifacts() {
+  return requiredArtifactPaths.every((artifactPath) => existsSync(artifactPath))
+    && runPublishedImportSmoke(repoRoot, smokeImportPaths.map((artifactPath) => pathToFileURL(artifactPath).href))
+    && hasPublishedPackageSmokeImports();
 }
 
 function hasPublishedPackageSmokeImports() {
@@ -194,7 +176,7 @@ function runPublishedImportSmoke(cwd, specifiers) {
   `;
   const result = spawnSync(process.execPath, ["--input-type=module", "-e", smokeScript], {
     cwd,
-    stdio: "pipe",
+    stdio: "inherit",
   });
 
   return result.status === 0;
@@ -324,42 +306,17 @@ function runPreparedBuild(force = false) {
   return runCommand("pnpm", ["--dir", "packages/importers", "build"]);
 }
 
-async function sleep(delayMs) {
-  await new Promise((resolve) => setTimeout(resolve, delayMs));
-}
-
 const preparedStatus = runPreparedBuild();
+if (preparedStatus !== 0) process.exit(preparedStatus);
 
-if (preparedStatus !== 0) {
+// Incremental project builds may retain their timestamp state after outputs
+// were removed. Repair that concrete case once; compiler/import errors fail.
+if (!requiredArtifactPaths.every((artifactPath) => existsSync(artifactPath))) {
   const forcedStatus = runPreparedBuild(true);
-  if (forcedStatus !== 0) {
-    process.exit(forcedStatus);
-  }
+  if (forcedStatus !== 0) process.exit(forcedStatus);
 }
 
-if (await hasPreparedArtifacts(0)) {
-  process.exit(0);
+if (!hasPreparedArtifacts()) {
+  console.error("build:test-runtime:prepared did not produce importable runtime artifacts.");
+  process.exitCode = 1;
 }
-
-const forcedRetryCount = 3;
-
-for (let attempt = 0; attempt < forcedRetryCount; attempt += 1) {
-  const forcedStatus = runPreparedBuild(true);
-
-  if (forcedStatus !== 0) {
-    process.exit(forcedStatus);
-  }
-
-  if (await hasPreparedArtifacts(attempt + 1)) {
-    process.exit(0);
-  }
-
-  if (attempt < forcedRetryCount - 1) {
-    await sleep(250);
-  }
-}
-
-console.error(
-  "build:test-runtime:prepared completed without producing the expected runtime artifacts.",
-);
-process.exit(1);

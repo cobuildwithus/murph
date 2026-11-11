@@ -1,3 +1,9 @@
+Repository tooling uses installed registry dependencies, one prepared-runtime
+build owner, author-controlled PR readiness, and structural documentation checks.
+The [verification owner](operations/verification-and-runtime.md),
+[plan lifecycle](PLANS.md), and [CI proof map](references/testing-ci-map.md)
+describe these contracts.
+
 Home restoration and Training retirement are recorded in the
 [follow-up plan](exec-plans/completed/2026-11-11-restore-home-after-training-retirement.md);
 [Frontend](FRONTEND.md#authenticated-product-scope) owns the retained surface.
