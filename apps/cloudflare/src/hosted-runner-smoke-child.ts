@@ -107,7 +107,7 @@ async function main(): Promise<void> {
     }
 
     const vaultRoot = path.join(workspaceRoot, "vault");
-    const operatorHomeRoot = path.join(workspaceRoot, "operator-home");
+    const operatorHomeRoot = path.join(workspaceRoot, "home");
     await mkdir(operatorHomeRoot, { recursive: true, mode: 0o700 });
     await restoreHostedBundleRoots({
       bytes: bundle,

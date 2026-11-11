@@ -177,15 +177,6 @@ export const inboxPromoteMealResultSchema = z.object({
   created: z.boolean(),
 })
 
-export const inboxPromoteDocumentResultSchema = z.object({
-  vault: pathSchema,
-  captureId: z.string().min(1),
-  target: z.literal('document'),
-  lookupId: z.string().min(1),
-  relatedId: z.string().min(1),
-  created: z.boolean(),
-})
-
 export const inboxPreservedDocumentSchema = z.object({
   attachmentId: z.string().min(1).nullable(),
   ordinal: z.number().int().positive(),
@@ -259,7 +250,6 @@ export type InboxParserAttemptCompactionResult = z.infer<
 >
 export type InboxPromoteMealResult = z.infer<typeof inboxPromoteMealResultSchema>
 
-export type InboxPromoteDocumentResult = z.infer<typeof inboxPromoteDocumentResultSchema>
 export type InboxPreservedDocument = z.infer<typeof inboxPreservedDocumentSchema>
 export type InboxPreserveDocumentAttachmentsResult = z.infer<
   typeof inboxPreserveDocumentAttachmentsResultSchema

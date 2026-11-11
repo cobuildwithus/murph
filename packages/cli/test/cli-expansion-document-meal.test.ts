@@ -417,6 +417,22 @@ test.sequential('document import preserves the exact current inbox attachment th
       manifestsBeforeRetentionRetry,
     )
 
+    const replacement = await runInProcessJsonCli<{
+      created: boolean
+      documentId: string
+    }>(cli, [
+      'document',
+      'import',
+      path.join(vaultRoot, secondAttachment.storedPath),
+      '--title',
+      'Explicit replacement after deletion',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(replacement.exitCode, null, JSON.stringify(replacement.envelope))
+    assert.equal(requireData(replacement.envelope).created, true)
+    assert.notEqual(requireData(replacement.envelope).documentId, firstResult.documentId)
+
     const firstAttachment = persisted.stored.attachments[0]
     assert.ok(firstAttachment?.storedPath)
     const firstAttachmentAbsolutePath = path.join(

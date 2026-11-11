@@ -1174,7 +1174,6 @@ function createInboxServices(): InboxServices {
     preserveDocumentAttachment: unreachable,
     preserveDocumentAttachments: unreachable,
     promoteMeal: unreachable,
-    promoteDocument: unreachable,
     promoteJournal: unreachable,
     promoteExperimentNote: unreachable,
   }

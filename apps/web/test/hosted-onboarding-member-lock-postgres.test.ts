@@ -65,6 +65,8 @@ import {
   reconcileHostedStripeEventById,
   recordHostedStripeEvent,
 } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
+import { parseHostedStripeActivationResultJson } from "@/src/lib/hosted-onboarding/stripe-activation-result";
+import type { SignalHostedMailboxAppendInput } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 import { deleteHostedAccountData } from "@/src/lib/hosted-privacy/account-data-service";
 import { createPrismaClient } from "@/src/lib/prisma";
@@ -94,6 +96,31 @@ const stripeProvider = vi.hoisted(() => ({
   eventsRetrieve: vi.fn(),
   subscriptionsCancel: vi.fn(),
   subscriptionsRetrieve: vi.fn(),
+}));
+
+const runtimeSignals = vi.hoisted(() => ({
+  mailboxAppend: vi.fn(async (input: SignalHostedMailboxAppendInput) => {
+    if (!input.prisma || !input.expectedUserId) {
+      throw new Error("Activation proof requires an explicit database and mailbox owner.");
+    }
+    const mailbox = await input.prisma.hostedMailboxItem.findUniqueOrThrow({
+      select: { userId: true },
+      where: { id: input.mailboxItemId },
+    });
+    expect(mailbox.userId).toBe(input.expectedUserId);
+    return { signalAccepted: true as const, workflowId: "hosted-user-runtime:fixture" };
+  }),
+  recheck: vi.fn(async () => ({
+    signalAccepted: true as const,
+    workflowId: "hosted-user-runtime:fixture",
+  })),
+}));
+
+// Keep activation persistence real; only the external Temporal transport is synthetic.
+// Loading the original module here can initialize cyclic activation consumers.
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: runtimeSignals.mailboxAppend,
+  signalHostedRuntimeRecheckRuntime: runtimeSignals.recheck,
 }));
 
 const companionBoundaries = vi.hoisted(() => ({
@@ -1818,6 +1845,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       prebindSubscription,
       restoreCompletesLast,
     }) => {
+      runtimeSignals.mailboxAppend.mockClear();
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const restoreClient = createPrismaClient({ databaseUrl, poolMax: 1 });
       const ordinaryClient = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -2049,6 +2077,19 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             status: HostedStripeEventStatus.completed,
           }),
         ]));
+        const restoredReceipt = await observer.hostedStripeEvent.findUniqueOrThrow({
+          select: { activationResultJson: true },
+          where: { eventId: restoreEvent.id },
+        });
+        const activationResult = parseHostedStripeActivationResultJson(
+          restoredReceipt.activationResultJson,
+        );
+        expect(activationResult?.activationMailboxItemIds).toHaveLength(1);
+        expect(runtimeSignals.mailboxAppend).toHaveBeenCalledWith(expect.objectContaining({
+          expectedUserId: memberId,
+          mailboxItemId: activationResult?.activationMailboxItemIds[0],
+          prisma: restoreClient,
+        }));
       } finally {
         releaseRestoreChargeRead.resolve(
           makeStripeCharge({ chargeId, customerId }),
