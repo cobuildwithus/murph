@@ -173,5 +173,5 @@ export function presentGameRecap(input: {
   const songMedia = media("song");
   if (story.song && songMedia.status === "ready") pages.push({ id: "song", kind: "song", background: "night", blocks: [], media: songMedia, song: { title: story.song.title, lyrics: story.song.lyrics } });
   pages.push({ id: "result", kind: "result", background: "paper", blocks: [] });
-  return { ...legacy, show: { version: 1, generationId: envelope.generationId, treatment: story.treatment ?? "", acceptedAt: envelope.acceptedAt, pages } };
+  return { ...legacy, show: { version: 1, generationId: envelope.generationId, treatment: (story.treatment ?? "").replace(/[\s.,;:]+$/u, ""), acceptedAt: envelope.acceptedAt, pages } };
 }
