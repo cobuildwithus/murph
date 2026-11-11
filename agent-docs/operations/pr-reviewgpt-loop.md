@@ -19,7 +19,14 @@ a causing change, plausible trigger, and serious current harm. Code-path proof
 suffices without a prior incident; practical rare exploits and destructive failures remain in scope.
 Complexity Collapse independently qualifies when a bounded correction removes
 meaningful code, concepts, or owners while preserving required behavior and
-invariants without replacement machinery. Minor refactoring, UX polish,
+invariants without replacement machinery. Inspect the touched flow's surrounding
+owners, callers, state, and recovery paths as a connected subsystem, including
+pre-existing complexity. A finding must name the removable machinery and explain
+why its implementation and verification are proportionate to this change. Label
+pre-existing adjacent opportunities `ADJACENT_EXISTING`; bugs still require a
+causing PR change. Correction rounds stay within the remediation's directly
+affected flow. No repository-wide cleanup or unrelated rewrite is required.
+Minor refactoring, UX polish,
 disclosure gaps, and speculative edge cases are not blocking findings. The
 targeted exploratory presets remain available separately.
 
