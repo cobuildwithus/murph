@@ -421,9 +421,6 @@ async function activateLinqGroupRoute(
     phoneNumber: participantPhone,
     prisma: fixture.observer,
 
-    signupPhoneCodeSendAttemptId: null,
-    signupPhoneCodeSendAttemptStartedAt: null,
-    signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
   });
   await fixture.observer.hostedMemberIdentity.create({

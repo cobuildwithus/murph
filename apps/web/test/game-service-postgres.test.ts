@@ -1367,7 +1367,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const sam = await member("Sam", "Europe/London");
     const phones = new Map([[ava, "+13125550171"], [kat, "+13125550172"], [sam, "+13125550173"], [leo, "+13125550174"]]);
     for (const [memberId, phone] of phones) await getPrisma().$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(phone), memberId, prisma: tx,
-      phoneNumberVerifiedAt: new Date(), signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
+      phoneNumberVerifiedAt: new Date(), signupPhoneNumber: null }));
     // Leo and Ava are mid-game; Leo has never played Kat.
     await startGame(ava, leo);
     const invite = (inviteeFirstName: string, value: string): GameCommand => ({ gameId: randomUUID(), inviteeFirstName, inviteeLabel: { relationship: "my brother" }, inviteeRecipient: { kind: "phone", value }, terms: TERMS, type: "createGame" });

@@ -300,9 +300,6 @@ interface HostedMemberIdentityStoreModule {
     phoneNumber: string;
     phoneNumberVerifiedAt: Date;
     prisma: unknown;
-    signupPhoneCodeSendAttemptId: string | null;
-    signupPhoneCodeSendAttemptStartedAt: Date | null;
-    signupPhoneCodeSentAt: Date | null;
     signupPhoneNumber: string;
   }): Promise<unknown>;
 }
@@ -585,9 +582,6 @@ export async function seedHostedActiveLinqMember(
           phoneNumber: input.memberPhone,
           phoneNumberVerifiedAt: new Date(),
           prisma: tx,
-          signupPhoneCodeSendAttemptId: null,
-          signupPhoneCodeSendAttemptStartedAt: null,
-          signupPhoneCodeSentAt: null,
           signupPhoneNumber: input.memberPhone,
         });
         // A member's assigned home phone must exist in the hosted_linq_line

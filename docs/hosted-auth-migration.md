@@ -2,6 +2,19 @@
 
 Status: first-party-only Web is live; legacy schema and project configuration are retired as of 2026-10-21. Native SDK removals are merged. Store publication and deletion of the downgraded vendor app are separate, unfinished actions; see the rollout record below. This document owns the rollout from Privy to Better Auth.
 
+## Retired invite phone-code lifecycle
+
+Current browser and native clients send and verify codes through the first-party
+OTP routes. The former invite `send-code`, `confirm` and `abort` routes and their
+attempt/cooldown state are retired; old SDK clients must refresh or update.
+Canonical saved signup-phone identity remains available to current invite and
+identity readers. Better Auth verification and rate-limit records own code delivery.
+
+Contract migration `20261110180000_drop_invite_phone_code_state` drops only the
+three old code-send columns after this Web version is live and earlier functions
+have drained through the ordinary production-alias gate. This version becomes the
+rollback floor after contraction; an older Web requires re-expansion or a forward fix.
+
 ## Target and boundaries
 
 Better Auth owns supported primary authentication and product sessions. Murph keeps canonical member IDs, authorization, contact/linking policy, consent, billing, vaults, groups, devices, and deletion. Approval passkeys belong to the existing sensitive-action owner. They approve one bound action; they are not an alternative primary-login system.

@@ -1652,9 +1652,6 @@ test("assistant notification state keeps private-field envelope reads serial on 
     phoneNumber: "+12125550123",
     prisma: tx.prisma,
 
-    signupPhoneCodeSendAttemptId: null,
-    signupPhoneCodeSendAttemptStartedAt: null,
-    signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
   });
   const routing = await buildHostedMemberRoutingPrivateColumns({
@@ -3470,9 +3467,6 @@ test("hosted member identity upsert keeps private-field crypto inside the caller
     phoneNumberVerifiedAt: null,
     prisma: tx.prisma,
 
-    signupPhoneCodeSendAttemptId: null,
-    signupPhoneCodeSendAttemptStartedAt: null,
-    signupPhoneCodeSentAt: null,
     signupPhoneNumber: "redacted-phone-token",
   })).resolves.toMatchObject({
     memberId: "member-test-upsert",
@@ -3505,8 +3499,7 @@ test.each([false, true])("phone channel welcome prepares real routing and mailbo
   }
   const identity = await buildHostedMemberIdentityPrivateColumns({
     memberId, phoneNumber: phone, prisma: tx.prisma,
-    signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
-    signupPhoneCodeSentAt: null, signupPhoneNumber: null,
+    signupPhoneNumber: null,
   });
   const member = {
     id: memberId, billingStatus: HostedBillingStatus.active, suspendedAt: null,
@@ -3594,8 +3587,7 @@ test("established phone welcome skips the full snapshot and KMS work that previo
   });
   const identity = await buildHostedMemberIdentityPrivateColumns({
     memberId, phoneNumber: "+15550001001", prisma: tx.prisma,
-    signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
-    signupPhoneCodeSentAt: null, signupPhoneNumber: null,
+    signupPhoneNumber: null,
   });
   const routing = await buildHostedMemberRoutingPrivateColumns({
     memberId, linqChatId: "synthetic-established-chat", linqRecipientPhone: "+15550001002",
@@ -4080,14 +4072,6 @@ function buildHostedMemberIdentityRecord(
       : null,
 
 
-    signupPhoneCodeSendAttemptId: nullableString(input.signupPhoneCodeSendAttemptId),
-    signupPhoneCodeSendAttemptStartedAt:
-      input.signupPhoneCodeSendAttemptStartedAt instanceof Date
-        ? input.signupPhoneCodeSendAttemptStartedAt
-        : null,
-    signupPhoneCodeSentAt: input.signupPhoneCodeSentAt instanceof Date
-      ? input.signupPhoneCodeSentAt
-      : null,
     signupPhoneNumberEncrypted: nullableString(input.signupPhoneNumberEncrypted),
     updatedAt: now,
 

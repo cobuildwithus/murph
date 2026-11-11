@@ -2,11 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
-  abortHostedInvitePhoneCode,
-  confirmHostedInvitePhoneCode,
-  prepareHostedInvitePhoneCode,
-} from "@/src/lib/hosted-onboarding/invite-service";
-import {
   ensureHostedMemberForPhone,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import { upsertHostedMemberHomeLinqBindingTx } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
@@ -73,9 +68,6 @@ describe("ensureHostedMemberForPhone", () => {
       phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
 
 
-      signupPhoneCodeSendAttemptId: "hbpc_old",
-      signupPhoneCodeSendAttemptStartedAt: new Date("2026-03-20T12:05:00.000Z"),
-      signupPhoneCodeSentAt: new Date("2026-03-20T12:05:00.000Z"),
       signupPhoneNumber: "+15550001111",
 
 
@@ -143,9 +135,6 @@ describe("ensureHostedMemberForPhone", () => {
         phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
 
 
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
       }),
       update: expect.objectContaining({
@@ -154,9 +143,6 @@ describe("ensureHostedMemberForPhone", () => {
         phoneNumberVerifiedAt: new Date("2026-03-20T12:00:00.000Z"),
 
 
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
         signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
       }),
     }));
@@ -345,360 +331,6 @@ describe("ensureHostedMemberForPhone", () => {
     ).rejects.toMatchObject({
       code: "PHONE_NUMBER_INVALID",
     });
-  });
-});
-
-describe("prepareHostedInvitePhoneCode", () => {
-  it.each([
-    ["missing", null, "INVITE_NOT_FOUND", 404],
-    [
-      "expired",
-      {
-        ...makeInviteRecord(),
-        expiresAt: NOW,
-      },
-      "INVITE_EXPIRED",
-      410,
-    ],
-  ] as const)(
-    "rejects %s invites before private identity reads or transaction entry",
-    async (_label, invite, code, httpStatus) => {
-      const identityFindUnique = vi.fn();
-      const prisma = asRootPrisma({
-        hostedInvite: {
-          findUnique: vi.fn().mockResolvedValue(invite),
-        },
-        hostedMemberIdentity: {
-          findUnique: identityFindUnique,
-          update: vi.fn(),
-        },
-      });
-
-      await expect(
-        prepareHostedInvitePhoneCode({
-          inviteCode: "invite-code",
-          now: NOW,
-          prisma: prisma as never,
-        }),
-      ).rejects.toMatchObject({
-        code,
-        httpStatus,
-      });
-
-      expect(identityFindUnique).not.toHaveBeenCalled();
-      expect(prisma.$transaction).not.toHaveBeenCalled();
-    },
-  );
-
-  it("returns a stored phone for the phone-code client send and records the transient send attempt", async () => {
-    const hostedMemberIdentity = {
-      findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
-        memberId: "member_123",
-        signupPhoneNumber: "+15551234567",
-      })),
-      update: vi.fn().mockResolvedValue({}),
-    };
-    const prisma = asRootPrisma({
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
-      },
-      hostedMemberIdentity,
-    });
-
-    const result = await prepareHostedInvitePhoneCode({
-      inviteCode: "invite-code",
-      now: NOW,
-      prisma: prisma as never,
-    });
-
-    expect(result).toEqual({
-      phoneHint: "*** 4567",
-      phoneNumber: "+15551234567",
-      sendAttemptId: expect.stringMatching(/^hbpc_/u),
-    });
-
-    expect(hostedMemberIdentity.update).toHaveBeenCalledWith({
-      where: {
-        memberId: "member_123",
-      },
-      data: {
-        signupPhoneCodeSendAttemptId: expect.stringMatching(/^hbpc_/u),
-        signupPhoneCodeSendAttemptStartedAt: NOW,
-      },
-    });
-  });
-
-  it("falls back to manual entry when the stored signup phone is unavailable", async () => {
-    const prisma = asRootPrisma({
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
-      },
-      hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
-          memberId: "member_123",
-          signupPhoneNumber: null,
-        })),
-        update: vi.fn(),
-      },
-    });
-
-    await expect(
-      prepareHostedInvitePhoneCode({
-        inviteCode: "invite-code",
-        now: NOW,
-        prisma: prisma as never,
-      }),
-    ).rejects.toMatchObject({
-      code: "SIGNUP_PHONE_UNAVAILABLE",
-      httpStatus: 409,
-    });
-  });
-
-  it("reuses the canonical verified phone hint after the signup-only phone has been cleared", async () => {
-    const hostedMemberIdentity = {
-      findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
-        memberId: "member_123",
-        phoneNumber: "+15557654321",
-        signupPhoneNumber: null,
-      })),
-      update: vi.fn().mockResolvedValue({}),
-    };
-    const prisma = asRootPrisma({
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
-      },
-      hostedMemberIdentity,
-    });
-
-    const result = await prepareHostedInvitePhoneCode({
-      inviteCode: "invite-code",
-      now: NOW,
-      prisma: prisma as never,
-    });
-
-    expect(result).toEqual({
-      phoneHint: "*** 4567",
-      phoneNumber: "+15557654321",
-      sendAttemptId: expect.stringMatching(/^hbpc_/u),
-    });
-  });
-
-  it("rate limits repeated invite send-code requests", async () => {
-    const update = vi.fn();
-    const prisma = asRootPrisma({
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
-      },
-      hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
-          memberId: "member_123",
-          signupPhoneCodeSentAt: new Date("2026-04-07T01:00:30.000Z"),
-          signupPhoneNumber: "+15551234567",
-        })),
-        update,
-      },
-    });
-
-    await expect(
-      prepareHostedInvitePhoneCode({
-        inviteCode: "invite-code",
-        now: new Date("2026-04-07T01:00:45.000Z"),
-        prisma: prisma as never,
-      }),
-    ).rejects.toMatchObject({
-      code: "PHONE_CODE_COOLDOWN",
-      httpStatus: 429,
-    });
-    expect(update).not.toHaveBeenCalled();
-  });
-
-  it("rate limits repeated invite send-code requests while a send attempt is in flight", async () => {
-    const update = vi.fn();
-    const prisma = asRootPrisma({
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
-      },
-      hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
-          memberId: "member_123",
-          signupPhoneCodeSendAttemptId: "hbpc_in_flight",
-          signupPhoneCodeSendAttemptStartedAt: new Date("2026-04-07T01:00:30.000Z"),
-          signupPhoneCodeSentAt: null,
-          signupPhoneNumber: "+15551234567",
-        })),
-        update,
-      },
-    });
-
-    await expect(
-      prepareHostedInvitePhoneCode({
-        inviteCode: "invite-code",
-        now: new Date("2026-04-07T01:00:45.000Z"),
-        prisma: prisma as never,
-      }),
-    ).rejects.toMatchObject({
-      code: "PHONE_CODE_COOLDOWN",
-      httpStatus: 429,
-    });
-    expect(update).not.toHaveBeenCalled();
-  });
-});
-
-describe("confirmHostedInvitePhoneCode", () => {
-  it("clears the pending attempt after a successful phone-code send confirmation", async () => {
-    const hostedMemberIdentity = {
-      findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
-        memberId: "member_123",
-        signupPhoneCodeSendAttemptId: "hbpc_confirm",
-        signupPhoneCodeSendAttemptStartedAt: NOW,
-        signupPhoneCodeSentAt: null,
-        signupPhoneNumber: "+15551234567",
-      })),
-      update: vi.fn().mockResolvedValue({}),
-    };
-    const prisma = asRootPrisma({
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
-      },
-      hostedMemberIdentity,
-    });
-
-    await expect(
-      confirmHostedInvitePhoneCode({
-        inviteCode: "invite-code",
-        now: new Date("2026-04-07T01:00:08.000Z"),
-        prisma: prisma as never,
-        sendAttemptId: "hbpc_confirm",
-      }),
-    ).resolves.toEqual({
-      ok: true,
-    });
-
-    expect(hostedMemberIdentity.update).toHaveBeenCalledWith({
-      where: {
-        memberId: "member_123",
-      },
-      data: {
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: new Date("2026-04-07T01:00:08.000Z"),
-      },
-    });
-  });
-
-  it("rejects stale or mismatched invite send-code confirmations", async () => {
-    const update = vi.fn();
-    const prisma = asRootPrisma({
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
-      },
-      hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
-          memberId: "member_123",
-          signupPhoneCodeSendAttemptId: "hbpc_current",
-          signupPhoneCodeSendAttemptStartedAt: NOW,
-          signupPhoneCodeSentAt: null,
-          signupPhoneNumber: "+15551234567",
-        })),
-        update,
-      },
-    });
-
-    await expect(
-      confirmHostedInvitePhoneCode({
-        inviteCode: "invite-code",
-        now: new Date("2026-04-07T01:00:20.000Z"),
-        prisma: prisma as never,
-        sendAttemptId: "hbpc_old",
-      }),
-    ).rejects.toMatchObject({
-      code: "PHONE_CODE_ATTEMPT_INVALID",
-      httpStatus: 409,
-    });
-    expect(update).not.toHaveBeenCalled();
-  });
-});
-
-describe("abortHostedInvitePhoneCode", () => {
-  it("clears only the pending attempt after a failed phone-code send", async () => {
-    const hostedMemberIdentity = {
-      findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
-        memberId: "member_123",
-        signupPhoneCodeSendAttemptId: "hbpc_abort",
-        signupPhoneCodeSendAttemptStartedAt: NOW,
-        signupPhoneCodeSentAt: null,
-        signupPhoneNumber: "+15551234567",
-      })),
-      update: vi.fn().mockResolvedValue({}),
-    };
-    const prisma = asRootPrisma({
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
-      },
-      hostedMemberIdentity,
-    });
-
-    await expect(
-      abortHostedInvitePhoneCode({
-        inviteCode: "invite-code",
-        now: new Date("2026-04-07T01:00:05.000Z"),
-        prisma: prisma as never,
-        sendAttemptId: "hbpc_abort",
-      }),
-    ).resolves.toEqual({
-      ok: true,
-    });
-
-    expect(hostedMemberIdentity.update).toHaveBeenCalledWith({
-      where: {
-        memberId: "member_123",
-      },
-      data: {
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: new Date("2026-04-07T01:00:05.000Z"),
-      },
-    });
-  });
-
-  it("ignores stale abort requests so they cannot clear a later cooldown", async () => {
-    const update = vi.fn();
-    const prisma = asRootPrisma({
-      $queryRaw: vi.fn().mockResolvedValue([]),
-      hostedInvite: {
-        findUnique: vi.fn().mockResolvedValue(makeInviteRecord()),
-      },
-      hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue(await makeIdentityRecord({
-          memberId: "member_123",
-          signupPhoneCodeSendAttemptId: "hbpc_current",
-          signupPhoneCodeSendAttemptStartedAt: NOW,
-          signupPhoneCodeSentAt: null,
-          signupPhoneNumber: "+15551234567",
-        })),
-        update,
-      },
-    });
-
-    await expect(
-      abortHostedInvitePhoneCode({
-        inviteCode: "invite-code",
-        now: new Date("2026-04-07T01:00:05.000Z"),
-        prisma: prisma as never,
-        sendAttemptId: "hbpc_old",
-      }),
-    ).resolves.toEqual({
-      ok: true,
-    });
-    expect(update).not.toHaveBeenCalled();
   });
 });
 
@@ -920,9 +552,6 @@ async function makeIdentityRecord(input: {
   phoneLookupKey?: string;
   phoneNumber?: string | null;
   phoneNumberVerifiedAt?: Date | null;
-  signupPhoneCodeSendAttemptId?: string | null;
-  signupPhoneCodeSendAttemptStartedAt?: Date | null;
-  signupPhoneCodeSentAt?: Date | null;
   signupPhoneNumber?: string | null;
   walletAddress?: string | null;
   walletAddressLookupKey?: string | null;
@@ -942,9 +571,6 @@ async function makeIdentityRecord(input: {
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt ?? null,
 
 
-    signupPhoneCodeSendAttemptId: input.signupPhoneCodeSendAttemptId ?? null,
-    signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt ?? null,
-    signupPhoneCodeSentAt: input.signupPhoneCodeSentAt ?? null,
     signupPhoneNumberEncrypted: await encryptHostedWebNullableString({
       field: "hosted-member-identity.signup-phone-number",
       memberId: input.memberId,
