@@ -1647,6 +1647,7 @@ const ASSISTANT_ROUTER_SKILL = {
   stress: "stress-regulation",
   substances: "substance-load",
   chronicIllness: "chronic-illness-support",
+  smallTrial: "self-management-experiments",
 } as const;
 
 function buildAssistantSkillRouteHintText(

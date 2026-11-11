@@ -90,6 +90,17 @@ describe('prompt route matrix', () => {
     for (const input of sweepPromptInputs()) expectBlocksAreTheRender(render(input))
   })
 
+  it('renders no failed interpolation and no em dash on any input', () => {
+    // A template that reads a missing constant renders the word "undefined".
+    for (const input of sweepPromptInputs()) {
+      const { prompt } = render(input)
+      expect(prompt).not.toMatch(/\bundefined\b|\[object Object\]|\bNaN\b/u)
+      // One saved memory line keeps its dash because existing member records
+      // are matched against that exact text.
+      expect(prompt.replaceAll('reminder timing \u2014 last offered', '')).not.toContain('\u2014')
+    }
+  })
+
   it('never admits a block twice and keeps every block in its declared layer order', () => {
     const layerOrder: AssistantPromptBlockLayer[] = ['core', 'route', 'thread', 'turn']
     for (const input of sweepPromptInputs()) {
