@@ -297,6 +297,17 @@ test.each([
   },
 );
 
+test("group join returns to chat even when the initial onboarding marker is pending", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: { id: "member_123" },
+  });
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({ launchGranted: true }));
+  mocks.readHostedInitialOnboardingState.mockResolvedValueOnce({ status: "pending" });
+  const markup = await renderGroupJoinPage("JOIN123");
+  expect(markup).toContain('data-post-join-contact-href="https://chat.example.test/murph"');
+});
+
 test("routes an authenticated first-checkout member into setup after the group save", async () => {
   const auth = {
     authenticated: true,

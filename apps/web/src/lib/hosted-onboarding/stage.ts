@@ -3,28 +3,27 @@ export type HostedOnboardingStage =
   | "expired"
   | "verify"
   | "checkout"
-  | "activating"
   | "blocked"
   | "active";
 
 export type HostedPostVerificationStage = Extract<
   HostedOnboardingStage,
-  "checkout" | "activating" | "blocked" | "active"
+  "checkout" | "blocked" | "active"
 >;
 
 export type HostedAccessibleOnboardingStage = Extract<
   HostedOnboardingStage,
-  "activating" | "active"
+  "active"
 >;
 
 export function isHostedOnboardingAccessibleStage(
   stage: HostedOnboardingStage,
 ): stage is HostedAccessibleOnboardingStage {
-  return stage === "active" || stage === "activating";
+  return stage === "active";
 }
 
 export function isHostedOnboardingPendingStage(
   stage: HostedOnboardingStage,
 ): boolean {
-  return stage === "verify" || stage === "checkout" || stage === "activating";
+  return stage === "verify" || stage === "checkout";
 }

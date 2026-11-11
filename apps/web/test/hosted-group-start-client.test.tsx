@@ -6,7 +6,7 @@ import { renderClientComponent } from "./render-client-component";
 
 type AuthCompletion = {
   joinUrl: string;
-  stage: "active" | "activating" | "blocked" | "checkout";
+  stage: "active" | "blocked" | "checkout";
 };
 
 const mocks = vi.hoisted(() => ({
@@ -133,6 +133,34 @@ test("finishes an on-page sign-in through the group's own recovery", async () =>
   expect(mocks.navigateHostedAuthRedirect).not.toHaveBeenCalled();
   expect(container.textContent).toContain("Go back to the group.");
   expect(container.querySelector('a[href="sms:"]')?.textContent).toContain("Open Messages");
+});
+
+test("retains active sign-in after recovery fails and an explicit retry succeeds", async () => {
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new Error("Temporary recovery failure"))
+    .mockResolvedValueOnce({ ok: true, status: "linked" });
+  const { container, cleanup } = await renderStartClient({ authenticated: false });
+  cleanupRender = cleanup;
+
+  await vi.waitFor(() => expect(mocks.authPanelProps).not.toBeNull());
+  await act(async () => {
+    await mocks.authPanelProps?.onCompleted?.({
+      joinUrl: "/join/invite-code",
+      stage: "active",
+    });
+  });
+  expect(container.textContent).toContain("That recovery link did not work");
+  const retry = container.querySelector("button");
+  expect(retry?.textContent).toContain("Try again");
+  await act(async () => {
+    retry?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+  expect(container.textContent).toContain("Go back to the group.");
+  expect(container.querySelector('a[href="sms:"]')?.textContent).toContain("Open Messages");
+  expect(container.textContent).not.toContain("Finish setting up Murph");
+  expect(mocks.navigateHostedAuthRedirect).not.toHaveBeenCalled();
 });
 
 test("sends an unfinished account to setup after an on-page sign-in", async () => {

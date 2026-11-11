@@ -126,20 +126,6 @@ test("a dead link on the return page never claims nothing changed", () => {
   }
 });
 
-test("activating success page explains when vault and assistant setup is still running", () => {
-  const markup = renderToStaticMarkup(
-    createElement(JoinInviteSuccessClient, {
-      initialStatus: createStatus("activating"),
-      inviteCode: "invite-code",
-      sessionId: null,
-    }),
-  );
-
-  assert.match(markup, /Payment confirmed\./);
-  assert.match(markup, /Setup finishes in about ten seconds/);
-  assert.match(markup, /data-slot="link-page-dots"/);
-});
-
 test("checkout-stage success page stays blank while the returned session is being verified", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteSuccessClient, {
@@ -154,7 +140,7 @@ test("checkout-stage success page stays blank while the returned session is bein
   assert.doesNotMatch(markup, /Private by default/);
 });
 
-test("checkout-stage success page reconciles the returned session once and redirects home when active", async () => {
+test("checkout-stage success page reconciles the returned session once and redirects to Settings when active", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
     new Response(JSON.stringify(createStatus("active")), {
       status: 200,
@@ -179,7 +165,7 @@ test("checkout-stage success page reconciles the returned session once and redir
   await view.cleanup();
 });
 
-test("checkout-stage success page waits for returned session reconciliation before opening home", async () => {
+test("checkout-stage success page waits for returned session reconciliation before opening Settings", async () => {
   let resolveFetch!: (response: Response) => void;
   const fetchMock = vi.fn<typeof fetch>().mockImplementation(
     () =>
@@ -211,16 +197,16 @@ test("checkout-stage success page waits for returned session reconciliation befo
   await view.cleanup();
 });
 
-test("activating success page keeps waiting when returned session reconciliation is still pending", async () => {
+test("checkout success page keeps waiting when returned session reconciliation is still pending", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-    new Response(JSON.stringify(createStatus("activating")), {
+    new Response(JSON.stringify(createStatus("checkout")), {
       status: 200,
     }),
   );
   vi.stubGlobal("fetch", fetchMock);
 
   const view = await renderJoinInviteSuccessClientForEffects({
-    initialStatus: createStatus("activating"),
+    initialStatus: createStatus("checkout"),
   });
   await act(async () => {});
 
@@ -263,7 +249,7 @@ test("active success page reconciles the returned session when the invite is alr
   await view.cleanup();
 });
 
-test("active success page redirects home without waiting for returned session reconciliation", async () => {
+test("active success page redirects to Settings without waiting for returned session reconciliation", async () => {
   let resolveFetch!: (response: Response) => void;
   const fetchMock = vi.fn<typeof fetch>().mockImplementation(
     () =>
@@ -295,7 +281,7 @@ test("active success page redirects home without waiting for returned session re
   await view.cleanup();
 });
 
-test("active success page redirects home even when returned session reconciliation fails", async () => {
+test("active success page redirects to Settings even when returned session reconciliation fails", async () => {
   const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new Error("Stripe unavailable"));
   vi.stubGlobal("fetch", fetchMock);
 
@@ -313,14 +299,14 @@ test("active success page redirects home even when returned session reconciliati
 test("pending success page shows email support after the setup delay", async () => {
   vi.useFakeTimers();
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-    new Response(JSON.stringify(createStatus("activating")), {
+    new Response(JSON.stringify(createStatus("checkout")), {
       status: 200,
     }),
   );
   vi.stubGlobal("fetch", fetchMock);
 
   const view = await renderJoinInviteSuccessClientForEffects({
-    initialStatus: createUnmatchedStatus("activating"),
+    initialStatus: createUnmatchedStatus("checkout"),
   });
   await act(async () => {});
 
@@ -351,13 +337,13 @@ test("pending success page shows email support after the setup delay", async () 
   const mailtoHref = String(view.locationAssign.mock.calls[0]?.[0] ?? "");
   expect(mailtoHref).toContain("mailto:support@withmurph.ai");
   expect(mailtoHref).toContain("Invite%20code%3A%20invite-code");
-  expect(mailtoHref).toContain("Current%20stage%3A%20activating");
+  expect(mailtoHref).toContain("Current%20stage%3A%20checkout");
   expect(mailtoHref).not.toContain("cs_123");
 
   await view.cleanup();
 });
 
-test("active success page redirects to home without a returned checkout session", async () => {
+test("active success page redirects to Settings without a returned checkout session", async () => {
   const view = await renderJoinInviteSuccessClientForEffects({
     initialStatus: createStatus("active"),
     sessionId: null,

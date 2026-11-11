@@ -24,7 +24,7 @@ import type { HostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-m
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { getPrisma } from "@/src/lib/prisma";
 
-export const DEVICE_SYNC_COMPLETION_HOME_MARKER = "deviceSyncCompletion";
+export const DEVICE_SYNC_COMPLETION_MARKER = "deviceSyncCompletion";
 
 const DEVICE_SYNC_COMPLETION_REDIRECT_KEYS = [
   "source",
@@ -56,12 +56,12 @@ interface CompletionState {
 
 type ConnectIdentityMatchMode = "loose" | "strict";
 
-export function buildDeviceSyncCompletionHomeRedirectHref(
+export function buildDeviceSyncCompletionSettingsRedirectHref(
   searchParams: DeviceSyncCompletionSearchParams,
 ): string {
   const params = new URLSearchParams();
 
-  params.set(DEVICE_SYNC_COMPLETION_HOME_MARKER, "1");
+  params.set(DEVICE_SYNC_COMPLETION_MARKER, "1");
   for (const key of DEVICE_SYNC_COMPLETION_REDIRECT_KEYS) {
     const value = readSearchParamString(searchParams, key);
     if (value) {
@@ -69,14 +69,14 @@ export function buildDeviceSyncCompletionHomeRedirectHref(
     }
   }
 
-  return `/home?${params.toString()}`;
+  return `/settings?${params.toString()}`;
 }
 
 export async function resolveDeviceSyncCompletionDialogModel(input: {
   member: HostedMemberCoreState | null;
   searchParams: DeviceSyncCompletionSearchParams;
 }): Promise<DeviceSyncCompletionDialogModel | null> {
-  if (readSearchParamString(input.searchParams, DEVICE_SYNC_COMPLETION_HOME_MARKER) !== "1") {
+  if (readSearchParamString(input.searchParams, DEVICE_SYNC_COMPLETION_MARKER) !== "1") {
     return null;
   }
 

@@ -248,7 +248,7 @@ test("VercelTelemetry drops non-allowlisted events before either vendor sends", 
     speedInsightsProps.beforeSend({
       route: "/family/accept/[inviteCode]",
       type: "vital",
-      url: "https://www.example.test/home",
+      url: "https://www.example.test/settings",
     }),
     null,
   );
@@ -306,11 +306,11 @@ test("VercelTelemetry drops malformed and pathless vendor URLs", () => {
     "?private=1",
     "#private",
     ".",
-    " /home",
-    "//www.example.test/home",
+    " /settings",
+    "//www.example.test/settings",
     "\\home",
     "https:home",
-    "https:/home",
+    "https:/settings",
   ]) {
     assert.equal(
       analyticsProps.beforeSend({ type: "pageview", url }),
@@ -319,7 +319,7 @@ test("VercelTelemetry drops malformed and pathless vendor URLs", () => {
     );
     assert.equal(
       speedInsightsProps.beforeSend({
-        route: "/home",
+        route: "/settings",
         type: "vital",
         url,
       }),
@@ -332,14 +332,14 @@ test("VercelTelemetry drops malformed and pathless vendor URLs", () => {
     speedInsightsProps.beforeSend({
       route: "https:home",
       type: "vital",
-      url: "https://www.example.test/home",
+      url: "https://www.example.test/settings",
     }),
     null,
   );
 });
 
 test("VercelTelemetry canonicalizes allowlisted paths and strips URL state", () => {
-  mocks.pathname = "/home";
+  mocks.pathname = "/settings";
   mocks.analyticsProps.length = 0;
   mocks.speedInsightsProps.length = 0;
 
@@ -355,30 +355,30 @@ test("VercelTelemetry canonicalizes allowlisted paths and strips URL state", () 
   assert.deepEqual(
     analyticsProps.beforeSend({
       type: "pageview",
-      url: "https://www.example.test/home?tab=persona#persona",
+      url: "https://www.example.test/settings?tab=persona#persona",
     }),
     {
       type: "pageview",
-      url: "https://www.example.test/home",
+      url: "https://www.example.test/settings",
     },
   );
   assert.deepEqual(
     speedInsightsProps.beforeSend({
-      route: "/home?panel=usage",
+      route: "/settings?panel=usage",
       type: "vital",
-      url: "https://www.example.test/home?tab=persona#persona",
+      url: "https://www.example.test/settings?tab=persona#persona",
     }),
     {
-      route: "/home",
+      route: "/settings",
       type: "vital",
-      url: "https://www.example.test/home",
+      url: "https://www.example.test/settings",
     },
   );
   assert.equal(
     speedInsightsProps.beforeSend({
       route: "/clubs",
       type: "vital",
-      url: "https://www.example.test/home",
+      url: "https://www.example.test/settings",
     }),
     null,
   );
@@ -478,18 +478,21 @@ test("VercelTelemetry aggregates public dynamic routes without sending identifie
 test("redactPrivateAnalyticsUrl canonicalizes allowlisted routes", () => {
   mocks.pathname = "/";
   assert.equal(shouldSuppressVercelTelemetryForPathname("/searching"), true);
-  assert.equal(shouldSuppressVercelTelemetryForPathname("/home/"), false);
+  assert.equal(shouldSuppressVercelTelemetryForPathname("/settings/"), false);
+  for (const retired of ["/training", "/history", "/journal", "/labs", "/overview"]) {
+    assert.equal(shouldSuppressVercelTelemetryForPathname(retired), true);
+  }
   assert.equal(
-    redactPrivateAnalyticsUrl("https://join.example.test/home?from=/computer"),
-    "https://join.example.test/home",
+    redactPrivateAnalyticsUrl("https://join.example.test/settings?from=/computer"),
+    "https://join.example.test/settings",
   );
   assert.equal(
     redactPrivateAnalyticsUrl("/computer/handoff"),
     "/computer/handoff",
   );
   assert.equal(
-    redactPrivateAnalyticsUrl("/home?clinicalRecords=failed#clinicalRecordsIntent=not-a-claim"),
-    "/home",
+    redactPrivateAnalyticsUrl("/settings?clinicalRecords=failed#clinicalRecordsIntent=not-a-claim"),
+    "/settings",
   );
 });
 
