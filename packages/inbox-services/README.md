@@ -12,4 +12,4 @@ this version needs this reader version as its rollback floor unless the older
 bundle's inbox initialization runs before its inbox reads. Existing snapshots
 remain readable; this change neither rewrites nor removes their retired files.
 
-Canonical promotion lookup reads manifests sequentially through the core vault walker. Unreadable or invalid canonical evidence blocks promotion instead of being treated as absence; a retry may create a record only after the canonical lookup completes successfully.
+Document preservation reads only manifest paths identified by core's exact source evidence, including paths returned by imports earlier in the same batch. Member documents named `manifest.json` or `manifest.*.json` remain ordinary source bytes. Meal promotion uses the core vault walker. Both read manifests sequentially, and unreadable or invalid authoritative evidence blocks promotion instead of being treated as absence.

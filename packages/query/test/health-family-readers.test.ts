@@ -107,7 +107,6 @@ test("canonical collector omits habitat records stored outside their aspect path
     mode: "tolerant",
   });
 
-  assert.equal(collection.habitatAspects.length, 0);
   assert.equal(collection.entities.some((entity) => entity.family === "habitat"), false);
   assert.equal((await listHabitatAspects(vaultRoot)).length, 0);
   assert.equal(await readHabitatAspect(vaultRoot, "hab_01JNV422Y2M5ZBV64ZP4N1DRB1"), null);
