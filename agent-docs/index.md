@@ -1,4 +1,4 @@
-[Pair recap simplification](exec-plans/active/2026-11-11-recap-show-simplify.md) tracks the normal group turn, single publication and silent regeneration failure.
+[Pair recap simplification](exec-plans/completed/2026-11-11-recap-show-simplify.md) tracks the normal group turn, single publication and silent regeneration failure.
 
 Home restoration and Training retirement are recorded in the
 [follow-up plan](exec-plans/completed/2026-11-11-restore-home-after-training-retirement.md);
@@ -10,7 +10,7 @@ Shared reminder awareness is owned by the [assistant engine](../packages/assista
 
 [Hosted Linux recap file access](exec-plans/completed/2026-11-11-recap-show-hosted-files.md) records the restricted mount fix, host-only song credentials and native container proof.
 
-[Pair recap show presentation](references/recap-show-contract.md) owns the final-at-acceptance native presentation payload and synthetic decoder fixtures. Current implementation follows the [simplification plan](exec-plans/active/2026-11-11-recap-show-simplify.md).
+[Pair recap show presentation](references/recap-show-contract.md) owns the final-at-acceptance native presentation payload and synthetic decoder fixtures. Implementation evidence is recorded in the [simplification plan](exec-plans/completed/2026-11-11-recap-show-simplify.md).
 
 Bound pair and group games tolerate bystanders while retaining current-player,
 route and restriction checks. [Architecture](../ARCHITECTURE.md),

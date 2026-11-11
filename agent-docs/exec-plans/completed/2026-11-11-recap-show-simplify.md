@@ -49,11 +49,19 @@ existing recap and silently retires its delivery receipt.
   workspace profile. Local ARM Docker emulation cannot install native seccomp
   (`ENOSYS`), the existing hosted-local limitation tracked in #3862. Native
   Ubuntu CI remains the required sandbox proof; do not weaken the sandbox.
-- The single real-provider journey and synthetic PostgreSQL bridge are ready.
-  The bridge creates two seven-day synthetic games successfully. The two live
-  journeys are blocked: this task has no approved local image key source.
-  Main's native-runtime simplification removed the earlier patched-binary
-  prerequisite. No paid calls or production actions have run; this is not a pass.
+- The real GPT-6.1 Sol journey passes with the real OpenAI image provider through
+  canonical Web storage/publication. Final code runs: 79.10s and 80.35s command
+  wall time (71.585s and 72.831s journey time), two referenced images each,
+  one accepted show, one chat line/link, no chat media. Each corrected one
+  `entryId` versus `entryIds` schema error before the single canonical write.
+  Replies and presentation JSON reviewed: Ready. Auth is local subscription
+  with ambient configuration; this is developer-local real-model evidence.
+- Initial harness attempts failed on credential selection and missing synthetic
+  link/route authority; those setup issues are fixed. Two earlier accepted runs
+  took 82.56s/80.78s, two images each, with zero/one corrected tool errors. The
+  latter exposed the inherited treatment copy cutoff, now removed for shows.
+  All six attempts, tool errors and final presentation JSON are recorded under
+  ignored `audit-packages/recap-show-simplify/`. No production actions ran.
 - Rebased onto `3a31792d92`; retained main's deletion of the Live voice test.
   Full typecheck, focused egress tests and complete input measurements pass again.
 
@@ -63,14 +71,19 @@ assertion to expect the canonical cards, matching the authorized deletion of
 rolling writer projection; current group authoring/validation remains unchanged. The live bridge initializes
 its artifact directory, and its repeatable invocation is in the testing map.
 
-Candidate PR: #4837. Status: active; implementation complete, live/native proof
-pending. No ReviewGPT requested or started.
+Candidate PR: #4837. Implementation, local proof and parent candidate review
+complete. Exact-head CI, including native Ubuntu sandbox proof, remains the PR
+completion gate and is tracked in the PR evidence. No ReviewGPT requested or started.
 
 Current-main integration preserves published history with a merge. The only
 conflict is the documentation index; retain both the recap plan and main's
-Home-restoration pointer. Full typecheck passes on the integrated tree.
+Home-restoration pointer. Full typecheck and all 187 focused PostgreSQL tests pass on the integrated tree.
+The fixture route repair also passes its 88-test service suite.
 
 The real journey exposed an inherited 60-character treatment copy cutoff. Pair
 show authoring and persisted presentation now accept descriptive genre strings;
 legacy/group validation stays unchanged. Contract projection and canonical
 PostgreSQL acceptance/replay cover the longer treatment.
+Status: completed
+Updated: 2026-11-11
+Completed: 2026-11-11
