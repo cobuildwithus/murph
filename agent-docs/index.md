@@ -28,7 +28,7 @@ owned by the [runtime protocol](references/hosted-runtime-protocol.md), with
 reservation and rollback rules in Architecture.
 The [verification workflow](operations/verification-and-runtime.md) and
 [CI map](references/testing-ci-map.md) cover Chromium's installed-library
-fallback during dependency mirror outages; real browser checks remain required.
+preflight during dependency mirror outages; real browser checks remain required.
 
 The [synthetic game self-play QA map](references/game-selfplay-qa.md) records reachable game states, local native gameplay, real-model chat edits and explicit coverage gaps, with a [machine-readable native scenario inventory](references/game-selfplay-scenarios.json).
 

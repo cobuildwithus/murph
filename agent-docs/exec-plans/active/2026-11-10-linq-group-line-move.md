@@ -56,11 +56,13 @@ Round 2 full-snapshot ReviewGPT passes on candidate
 ca510a5905b085b0b4e099931e862331d71fe050 with no qualifying findings. CI exposed
 the already-recorded workspace wake timing flake; its isolated test passes.
 An upstream Ubuntu DNS outage repeatedly prevented the browser lanes from
-installing dependencies. The tooling-only correction permits an independent
-pinned-browser download after that failure, but requires real headed and
-headless launches under Xvfb before the unchanged browser tests. Download,
-native-library and launch failures remain fatal, and the 14-minute ceiling is
-unchanged. Focused installer and billing workflow tests pass (45 tests), as does
+installing dependencies. The first tooling fallback still waited behind APT and a billing runner
+reached its timeout before that fallback could execute. The corrected order
+downloads pinned Chromium independently and verifies real headed and headless
+launches under Xvfb first. Only an unusable runtime invokes dependency repair,
+followed by the same mandatory probe. Download, dependency-repair and final
+launch failures remain fatal; the 14-minute ceiling and browser tests are
+unchanged. Focused installer and billing workflow tests pass (46 tests), as does
 workspace typecheck. The runtime design reviewed in round 2 is unchanged;
 this CI correction does not require another runtime review.
 
