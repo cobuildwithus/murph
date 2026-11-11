@@ -2110,4 +2110,4 @@ Invite phone-code lifecycle retirement is owned by [hosted authentication migrat
 
 Game delivery timing and row conversion use the [weekly game contract](product-specs/weekly-game.md) and [architecture](../ARCHITECTURE.md#weekly-game). The simplification decisions and verification are recorded in the [execution record](exec-plans/completed/2026-11-10-simplify-game-state.md).
 
-Game reminder writes at maximum cardinality: [execution plan](exec-plans/active/2026-11-11-frog-game-reminder-write.md); the live contract remains in [Architecture](../ARCHITECTURE.md#weekly-game).
+Game reminder writes at maximum cardinality: [execution plan](exec-plans/completed/2026-11-11-frog-game-reminder-write.md); the live contract remains in [Architecture](../ARCHITECTURE.md#weekly-game).
