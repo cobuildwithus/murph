@@ -788,7 +788,7 @@ async function executeImmediateResourceContinuations(input: {
         for (const calendarJob of pendingCalendarJobs.values()) {
           if (
             calendarJob.availableAt
-            && calendarJob.availableAt !== input.context.now
+            && Date.parse(calendarJob.availableAt) > Date.parse(input.context.now)
           ) {
             continue;
           }
@@ -2924,7 +2924,7 @@ test("sparse history waits for upstream pull success beyond the empty retry ladd
   });
 
   assertHistoryCoverage(completed.result.metadataPatch, "omron", "caffeine");
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 5);
   assert.equal(readinessDecisions.at(-1), "ready");
 });
 
@@ -2962,7 +2962,7 @@ test("sparse history completion resolves supported source aliases", async () => 
     {
       expectedCoverage: true,
       expectedScheduledJobs: 0,
-      expectedTimeseriesRequests: 3,
+      expectedTimeseriesRequests: 5,
       historicalPullState: {
         notPulled: true,
         resource: "caffeine",
