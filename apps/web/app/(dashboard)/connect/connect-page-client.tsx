@@ -294,10 +294,6 @@ export function ConnectSourcesGrid({
 
   useEffect(() => {
     connectionSessionRef.current = authenticated ? Symbol() : null;
-    if (!authenticated) {
-      setPendingSourceId(null);
-      setConnectIntentRedirectName(null);
-    }
     return () => {
       connectionSessionRef.current = null;
     };

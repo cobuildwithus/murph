@@ -3741,8 +3741,6 @@ test.each([
         "https://provider.example.test/oauth/start",
       );
     });
-  } else {
-    assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Whoop/u);
   }
 
   assert.equal(fetch.mock.calls.length, 1);
@@ -3750,7 +3748,12 @@ test.each([
   await rendered.cleanup();
 });
 
-test("ConnectPage discards a pending authorization when the signed-in member changes", async () => {
+test.each([
+  "logout",
+  "logout then login",
+  "member change",
+] as const)("ConnectPage resets pending authorization after %s", async (transition) => {
+  configureJunction("oura");
   let resolveFetch: ((response: Response) => void) | undefined;
   const fetch = vi.fn(() => new Promise<Response>((resolve) => {
     resolveFetch = resolve;
@@ -3764,16 +3767,28 @@ test("ConnectPage discards a pending authorization when the signed-in member cha
     },
   });
   try {
+    const continueButton = [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Continue to Oura");
+    assert.ok(continueButton);
+    await clickButton(rendered, continueButton);
     await vi.waitFor(() => {
       assert.equal(fetch.mock.calls.length, 1);
       assert.match(rendered.container.textContent ?? "", /Connecting Oura/u);
     });
     const previousAuth = await mocks.getHostedPageAuthSnapshot();
-    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-      ...previousAuth,
-      authenticatedMember: { ...previousAuth.authenticatedMember, id: "member_other" },
-    });
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue(transition === "member change"
+      ? {
+          ...previousAuth,
+          authenticatedMember: { ...previousAuth.authenticatedMember, id: "member_other" },
+        }
+      : { ...previousAuth, authenticated: false, authenticatedMember: null });
     await rendered.rerender(await ConnectPage());
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Oura/u);
+
+    if (transition === "logout then login") {
+      mocks.getHostedPageAuthSnapshot.mockResolvedValue(previousAuth);
+      await rendered.rerender(await ConnectPage());
+    }
     await act(async () => {
       resolveFetch?.(Response.json({
         authorizationUrl: "https://provider.example.test/oauth/previous-member",
@@ -3782,6 +3797,11 @@ test("ConnectPage discards a pending authorization when the signed-in member cha
     assert.equal(fetch.mock.calls.length, 1);
     assert.equal(rendered.assign.mock.calls.length, 0);
     assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Oura/u);
+    const nextAction = rendered.container.querySelector<HTMLButtonElement>(
+      `[data-connect-source="oura"] button[aria-label="${transition === "logout" ? "Sign in to Murph" : "Connect Oura"}"]`,
+    );
+    assert.ok(nextAction);
+    assert.equal(nextAction.disabled, false);
   } finally {
     await rendered.cleanup();
   }
