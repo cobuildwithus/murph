@@ -1,7 +1,8 @@
 Repository tooling uses installed registry dependencies, one prepared-runtime
 build owner, author-controlled PR readiness, and structural documentation checks.
-The [verification owner](operations/verification-and-runtime.md) and
-[plan lifecycle](PLANS.md) describe these contracts.
+The [verification owner](operations/verification-and-runtime.md),
+[plan lifecycle](PLANS.md), and [CI proof map](references/testing-ci-map.md)
+describe these contracts.
 
 Bound pair and group games tolerate bystanders while retaining current-player,
 route and restriction checks. [Architecture](../ARCHITECTURE.md),
