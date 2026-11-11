@@ -21,7 +21,6 @@ import {
   type GroupJoinPostJoinDestination,
 } from "@/src/lib/hosted-groups/group-join-handoff";
 import { readHostedGroupJoinView } from "@/src/lib/hosted-groups/group-store";
-import { readHostedInitialOnboardingState } from "@/src/lib/hosted-onboarding/initial-onboarding";
 import {
   getHostedPageAuthSnapshot,
   readHostedDashboardCheckoutRequired,
@@ -97,17 +96,15 @@ export default async function GroupJoinPage({
       ? readGroupJoinLaunchConsentStatus({ memberId, prisma })
       : Promise.resolve(null),
     memberId
-      ? resolveGroupJoinPostJoinContactOption({ memberId, prisma })
+      ? resolveHostedMurphContactOption().catch(() => null)
       : Promise.resolve(null),
     readHostedDashboardCheckoutRequired(auth),
   ]);
   const postJoinDestination = checkoutRequired
     ? "/join"
     : defaultPostJoinDestination;
-  // Most members live in a chat thread, not the dashboard, so the post-join
-  // hand-off returns completed members to the channel Murph already reaches
-  // them on. The dashboard auth owner identifies first-checkout members, who
-  // continue directly into its existing setup route instead.
+  // Return to the existing chat when available. First-checkout members still
+  // continue into setup before using their account.
   const postJoinContactOption = postJoinDestination === "/join"
     ? null
     : resolvedPostJoinContactOption;
@@ -128,24 +125,6 @@ export default async function GroupJoinPage({
   );
 }
 
-async function resolveGroupJoinPostJoinContactOption(input: {
-  memberId: string;
-  prisma: ReturnType<typeof getPrisma>;
-}): Promise<MurphContactOption | null> {
-  try {
-    const onboarding = await readHostedInitialOnboardingState({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
-    if (onboarding.status === "pending") {
-      return null;
-    }
-    return await resolveHostedMurphContactOption();
-  } catch {
-    return null;
-  }
-}
-
 function renderGroupJoin(input: {
   authenticated: boolean;
   inviteCode: string | null;
@@ -160,7 +139,7 @@ function renderGroupJoin(input: {
     return (
       <LinkPageScreen
         actions={
-          <Link className={LINK_PAGE_PILL_CLASS} href="/home">
+          <Link className={LINK_PAGE_PILL_CLASS} href="/settings">
             Open Murph
           </Link>
         }

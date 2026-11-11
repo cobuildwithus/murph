@@ -49,11 +49,12 @@ Last verified: 2026-09-09
 - A member with no current goal is not a failed onboarding case. Murph may
   offer one optional baseline review, then remain available without inventing
   a problem.
-- Hosted landing-page signup routes members to `/home?initialVisit=true`.
-  Pending members with a text contact can add Murph to Contacts; add, skip or
-  dismiss completes the existing account onboarding marker. Other members
-  complete directly. No personality setup or welcome dialog follows.
-  Login-oriented landing CTAs continue to route to ordinary `/home`.
+- The authenticated website is Settings and its supporting account flows:
+  sign-in, onboarding, billing, family/group handoffs, devices, consent and
+  export. Accessible members land at `/settings`. `/home`, `/training`,
+  `/overview`, `/history`, `/journal` and `/labs` redirect there; old Home
+  connection callback parameters remain usable. Health review stays in native
+  apps and conversations. The public marketing site remains public.
 - The public changelog opens on a bounded seven-day window of dated editions.
   Every edition remains a stable cursor, and API or digest links to an older
   item resolve to the exact archive window and anchor that contains it.

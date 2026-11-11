@@ -71,9 +71,9 @@ test("an accessible member returns to the configured destination after auth", as
 test("an accessible member still lands on home without a destination", async () => {
   const rendered = await renderProvider();
   try {
-    mocks.onCompleted?.(completionPayload({ stage: "activating" }));
+    mocks.onCompleted?.(completionPayload({ stage: "active" }));
     expect(mocks.navigateHostedAuthRedirect).toHaveBeenCalledExactlyOnceWith(
-      "/home",
+      "/settings",
     );
   } finally {
     await rendered.cleanup();

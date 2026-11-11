@@ -115,7 +115,7 @@ describe("/join session resume page", () => {
     );
   });
 
-  it("redirects active members home without issuing an invite", async () => {
+  it("redirects active members to Settings without issuing an invite", async () => {
     const member = createHostedMember();
     mocks.getHostedPageAuthSnapshot.mockResolvedValue({
       authenticated: true,
@@ -128,10 +128,10 @@ describe("/join session resume page", () => {
       },
     });
 
-    await expect(renderJoinResumePage()).rejects.toThrow("NEXT_REDIRECT:/home");
+    await expect(renderJoinResumePage()).rejects.toThrow("NEXT_REDIRECT:/settings");
 
     expect(mocks.issueHostedInvite).not.toHaveBeenCalled();
-    expect(mocks.redirect).toHaveBeenCalledWith("/home");
+    expect(mocks.redirect).toHaveBeenCalledWith("/settings");
   });
 
   it("redirects paused members to the Subscription controls without issuing a fresh checkout invite", async () => {
@@ -155,7 +155,7 @@ describe("/join session resume page", () => {
     expect(mocks.redirect).toHaveBeenCalledWith("/settings#subscription");
   });
 
-  it("redirects Family-sponsored members home without issuing an invite", async () => {
+  it("redirects Family-sponsored members to Settings without issuing an invite", async () => {
     const member = createHostedMember({
       billingStatus: HostedBillingStatus.not_started,
     });
@@ -171,13 +171,13 @@ describe("/join session resume page", () => {
     });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
 
-    await expect(renderJoinResumePage()).rejects.toThrow("NEXT_REDIRECT:/home");
+    await expect(renderJoinResumePage()).rejects.toThrow("NEXT_REDIRECT:/settings");
 
     expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
       memberId: "member_123",
     });
     expect(mocks.issueHostedInvite).not.toHaveBeenCalled();
-    expect(mocks.redirect).toHaveBeenCalledWith("/home");
+    expect(mocks.redirect).toHaveBeenCalledWith("/settings");
   });
 
   it("sends a lapsed member to the Subscription controls", async () => {
@@ -223,7 +223,7 @@ describe("/join session resume page", () => {
 
     expect(mocks.issueHostedInvite).not.toHaveBeenCalled();
     expect(mocks.redirect).toHaveBeenCalledWith("/settings#subscription");
-    expect(mocks.redirect).not.toHaveBeenCalledWith("/home");
+    expect(mocks.redirect).not.toHaveBeenCalledWith("/settings");
   });
 
   it("does not issue an invite for blocked members", async () => {

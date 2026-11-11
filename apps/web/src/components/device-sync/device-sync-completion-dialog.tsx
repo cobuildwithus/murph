@@ -69,7 +69,7 @@ export function DeviceSyncCompletionDialog({
     if (!nextOpen) {
       // An unverified result intentionally keeps the marker for its first
       // retry. Remove it synchronously before the close refresh too, so that
-      // refresh can only request plain Home and reveal canonical onboarding.
+      // refresh can only request plain Settings and reveal account controls.
       stripCompletionQueryParams();
       router.refresh();
     }
@@ -156,7 +156,7 @@ export function DeviceSyncCompletionScreen({
               {model.contactAction.label}
             </a>
           ) : null}
-          <LinkPageLink onClick={onContinueExploring}>Continue exploring</LinkPageLink>
+          <LinkPageLink onClick={onContinueExploring}>Continue to Settings</LinkPageLink>
         </>
       }
       detail={model.detail}

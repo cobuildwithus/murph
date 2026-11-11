@@ -67,7 +67,7 @@ export function FamilyInviteWebAcceptScreen(props: {
   }
 
   if (status === "accepted") {
-    return <FamilyInviteJoinedScreen onOpenMurph={() => router.push("/home")} />;
+    return <FamilyInviteJoinedScreen onOpenMurph={() => router.push("/settings")} />;
   }
 
   if (recoveryPath) {
@@ -157,7 +157,7 @@ export function FamilyInviteSignInButton(props: {
 
 function readCurrentFamilyInvitePath(): string {
   if (typeof window === "undefined") {
-    return "/home";
+    return "/settings";
   }
 
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;

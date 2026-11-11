@@ -13,8 +13,9 @@ Some arrive with a clear change in mind; others want help understanding where to
 focus.
 
 The default relationship is a private direct conversation on the phone, where
-people already communicate. The desktop web vault is a secondary surface for
-deeper review and control. Friend and group conversations are optional support
+people already communicate. The website is an account Settings surface for billing, connected devices,
+consent, and data export; private health review lives in the conversation and
+native apps. Friend and group conversations are optional support
 Murph can suggest when they fit the member's need and the member explicitly
 chooses them.
 Group funding remains private by default: participants may learn that Murph is

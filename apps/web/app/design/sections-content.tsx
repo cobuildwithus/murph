@@ -50,8 +50,6 @@ import { GroupStartStudy } from "./group-start-study";
 import { GroupMemberPlanStudy } from "./group-member-plan-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HealthDataConsentWithdrawalFlowStudy } from "./health-data-consent-study";
-import { HomeLoadStateStudy } from "./home-load-state-study";
-import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { JoinInviteStudy } from "./join-invite-study";
 import { OpsUsageStudy } from "./ops-usage-study";
 import { OpsGameReportsStudy } from "./ops-game-reports-study";
@@ -59,7 +57,6 @@ import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
 import { JunctionRecoveryStudy, RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
-import { TrainingDashboardStudy } from "./training-dashboard-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
@@ -249,22 +246,6 @@ export function SectionsContent({
         </>
       ) : null}
 
-      {category === "health" ? (
-        <>
-          <Separator />
-
-
-          <StudySection title="Private training dashboard">
-            <div
-              id="private-training-dashboard"
-              data-design-section="private-training-dashboard"
-              inert
-            >
-              <TrainingDashboardStudy />
-            </div>
-          </StudySection>
-        </>
-      ) : null}
 
       {category === "home" ? (
         <>
@@ -636,21 +617,6 @@ export function SectionsContent({
         </>
       ) : null}
 
-      {category === "home" ? (
-        <>
-          <Separator />
-
-          <StudySection title="Home partial-load and vault-unavailable recovery">
-            <HomeLoadStateStudy />
-          </StudySection>
-
-          <Separator />
-
-          <StudySection title="Home onboarding steps">
-            <HomeOnboardingStepsStudy />
-          </StudySection>
-        </>
-      ) : null}
 
       {category === "groups" ? (
         <>

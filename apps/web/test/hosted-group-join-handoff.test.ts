@@ -19,7 +19,7 @@ test("removes a stale post-join marker for an existing accessible member", () =>
   expect(buildGroupJoinPostAuthReturnPath({
     currentPath: "/groups/join/JOIN123?postJoin=setup&source=text",
     payload: {
-      stage: "activating",
+      stage: "active",
     },
   })).toBe("/groups/join/JOIN123?source=text");
 });
@@ -37,11 +37,11 @@ test.each(["checkout", "blocked"] as const)(
 test("maps only bounded handoff markers to fixed internal destinations", () => {
   expect(resolveGroupJoinPostJoinDestination(
     readGroupJoinPostAuthHandoff("initial-visit"),
-  )).toBe("/home");
+  )).toBe("/settings");
   expect(resolveGroupJoinPostJoinDestination(
     readGroupJoinPostAuthHandoff(["setup", "initial-visit"]),
   )).toBe("/join");
   expect(resolveGroupJoinPostJoinDestination(
     readGroupJoinPostAuthHandoff("https://example.test"),
-  )).toBe("/home");
+  )).toBe("/settings");
 });

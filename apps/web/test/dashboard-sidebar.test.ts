@@ -177,12 +177,13 @@ beforeEach(() => {
   mocks.setOpenMobile.mockClear();
 });
 
-test("Sidebar exposes primary destinations without Voice or the internal Overview route", () => {
+test("Sidebar exposes only Settings as its account destination", () => {
   mocks.usePathname.mockReturnValue("/biomarkers");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
-  assert.match(markup, /href="\/home"[^>]*>\s*<svg/);
+  assert.match(markup, /href="\/settings"[^>]*>\s*<svg/);
+  assert.doesNotMatch(markup, /href="\/(?:home|training|connect)"/);
   assert.doesNotMatch(markup, /href="\/journal"/);
   assert.doesNotMatch(markup, />Journal<\/a>/);
   assert.doesNotMatch(markup, /href="\/voice"/);
@@ -197,13 +198,13 @@ test("Sidebar exposes primary destinations without Voice or the internal Overvie
 });
 
 test("Sidebar keeps retired Environment out of primary navigation", () => {
-  mocks.usePathname.mockReturnValue("/home");
+  mocks.usePathname.mockReturnValue("/settings");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
   assert.doesNotMatch(markup, /href="\/environment(?:\/|"|\?)/);
   assert.doesNotMatch(markup, />Environment</);
-  assert.match(markup, /href="\/home"/);
+  assert.match(markup, /href="\/settings"/);
 });
 
 test("Sidebar keeps public Goal guides out of authenticated dashboard navigation", () => {
@@ -397,10 +398,10 @@ test.each(["/connect", "/settings", "/settings/billing"])(
         initialAuth: { authenticated: true, label: null },
       }),
     );
-    const href = pathname.startsWith("/settings") ? "/settings" : "/connect";
+    const href = "/settings";
     assert.match(markup, new RegExp(`data-active="true"><a[^>]*href="${href}"`));
-    assert.equal((markup.match(/href="\/connect"/g) ?? []).length, 1);
-    assert.equal((markup.match(/href="\/settings"/g) ?? []).length, 1);
+    assert.equal((markup.match(/href="\/connect"/g) ?? []).length, 0);
+    assert.equal((markup.match(/href="\/settings"/g) ?? []).length, 2);
     assert.match(markup, /Sign out/);
   },
 );
@@ -433,7 +434,7 @@ test("Sidebar renders a login CTA card when signed out", () => {
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
-  assert.match(markup, /Experiments tailored to you/);
+  assert.match(markup, /Your Murph account/);
   assert.match(markup, /<button[^>]*>Log in or sign up<\/button>/);
   assert.match(markup, /w-full/);
   assert.doesNotMatch(markup, /Sign up/);

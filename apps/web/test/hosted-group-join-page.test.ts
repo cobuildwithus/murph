@@ -177,7 +177,7 @@ test("explains a dead group link and offers Murph", async () => {
 
   expect(markup).toContain("This group link isn&#x27;t valid.");
   expect(markup).toContain("Ask the person who shared it to send a new one.");
-  expect(markup).toContain('href="/home"');
+  expect(markup).toContain('href="/settings"');
   expect(markup).not.toContain('data-invite-code');
 });
 
@@ -279,7 +279,7 @@ test("forwards a phone-bound invite into the authenticated join form", async () 
 
 test.each([
   ["setup", "/join"],
-  ["untrusted", "/home"],
+  ["untrusted", "/settings"],
 ] as const)(
   "passes the bounded %s post-auth handoff to the join form",
   async (postJoin, destination) => {
@@ -296,6 +296,17 @@ test.each([
     expect(markup).toContain(`data-post-join-destination="${destination.replaceAll("&", "&amp;")}"`);
   },
 );
+
+test("group join returns to chat even when the retired Home onboarding marker is pending", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: { id: "member_123" },
+  });
+  mocks.readHostedConsentStatus.mockResolvedValueOnce(createConsentStatus({ launchGranted: true }));
+  mocks.readHostedInitialOnboardingState.mockResolvedValueOnce({ status: "pending" });
+  const markup = await renderGroupJoinPage("JOIN123");
+  expect(markup).toContain('data-post-join-contact-href="https://chat.example.test/murph"');
+});
 
 test("routes an authenticated first-checkout member into setup after the group save", async () => {
   const auth = {
@@ -357,7 +368,7 @@ test("ignores the obsolete initial-visit marker on the legal consent decline exi
   const markup = await renderGroupJoinPage("JOIN123", { postJoin: "initial-visit" });
 
   expect(markup).toContain('data-legal-consent-gate="true"');
-  expect(markup).toContain('data-not-now-href="/home"');
+  expect(markup).toContain('data-not-now-href="/settings"');
 });
 
 test("ignores the obsolete marker for an existing group member", async () => {
@@ -384,7 +395,7 @@ test("ignores the obsolete marker for an existing group member", async () => {
 
   const markup = await renderGroupJoinPage("JOIN123", { postJoin: "initial-visit" });
 
-  expect(markup).toContain('data-post-join-destination="/home"');
+  expect(markup).toContain('data-post-join-destination="/settings"');
   expect(markup).toContain('data-membership-id="membership_existing"');
   expect(markup).toContain('data-join-code="JOIN123"');
   expect(markup).toContain("Leave group");
@@ -417,7 +428,7 @@ test("keeps self-service leave available when an existing member lacks launch co
   expect(markup).toContain('data-legal-consent-gate="true"');
   expect(markup).toContain("Leave group");
   expect(markup).not.toContain("Accept group invite");
-  expect(markup).not.toContain("Go home");
+  expect(markup).not.toContain("Go to Settings");
 });
 
 test("does not offer self-service leave to the group owner", async () => {

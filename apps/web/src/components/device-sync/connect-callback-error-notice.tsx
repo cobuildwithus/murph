@@ -48,7 +48,7 @@ export function ConnectCallbackErrorNotice({
             buttonVariants({ variant: "outline" }),
             "w-full justify-center font-semibold sm:w-auto",
           )}
-          href="/home"
+          href="/settings"
         >
           Go to home
         </a>

@@ -55,7 +55,7 @@ test("NotFound sends anonymous users back to the public landing page", async () 
   assert.match(markup, /href="\/sitemap\.xml"/u);
 });
 
-test("NotFound sends authenticated users back to the hosted home page", async () => {
+test("NotFound sends authenticated users back to the Settings page", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
   });
@@ -65,8 +65,8 @@ test("NotFound sends authenticated users back to the hosted home page", async ()
   const markup = renderToStaticMarkup(await NotFound());
 
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
-  assert.match(markup, /data-prefetch="false" href="\/home"[^>]*>\s*Back to Murph home\s*<\/a>/u);
-  assert.match(markup, /Return to your Murph home/u);
+  assert.match(markup, /data-prefetch="false" href="\/settings"[^>]*>\s*Back to Settings\s*<\/a>/u);
+  assert.match(markup, /Return to Settings/u);
   assert.match(markup, /href="\/settings"/u);
   assert.match(markup, /href="\/contact"/u);
   assert.doesNotMatch(markup, /public Murph page/u);

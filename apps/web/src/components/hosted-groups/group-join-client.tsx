@@ -257,7 +257,7 @@ export function GroupJoinAcceptForm(props: {
   const secondaryLabel = props.postJoinDestination === "/join"
     ? GROUP_JOIN_SETUP_LABEL
     : props.alreadyActiveMember
-      ? "Go home"
+      ? "Go to Settings"
       : "Not now";
 
   function togglePermissionGroup(
@@ -496,7 +496,7 @@ export function GroupJoinLeaveButton(props: {
         method: "POST",
         url: `/api/groups/join/${encodeURIComponent(props.joinCode)}/leave`,
       });
-      router.push("/home");
+      router.push("/settings");
     } catch (error) {
       setSubmitting(false);
       setErrorMessage(toErrorMessage(error, "Could not leave this group right now."));
@@ -685,7 +685,7 @@ function GroupJoinPeople({
 
 function readCurrentGroupJoinPath(): string {
   if (typeof window === "undefined") {
-    return "/home";
+    return "/settings";
   }
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }

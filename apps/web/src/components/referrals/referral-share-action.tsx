@@ -29,7 +29,7 @@ export function ReferralShareAction({
 
   if (authenticated) {
     return (
-      <Link className={PRIMARY_ACTION_CLASSES} href="/home" prefetch={false}>
+      <Link className={PRIMARY_ACTION_CLASSES} href="/settings" prefetch={false}>
         Open Murph
         <span
           aria-hidden="true"

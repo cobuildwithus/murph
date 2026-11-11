@@ -194,7 +194,7 @@ export function GroupJoinStudy({
           <GroupJoinLegalConsentGate
             detail={DESIGN_DETAIL}
             initialStatus={DESIGN_CONSENT_STATUS}
-            notNowHref="/home"
+            notNowHref="/settings"
             title={`Join ${DESIGN_GROUP_NAME}.`}
           />
         </GroupJoinPageMock>
@@ -319,7 +319,7 @@ export function GroupJoinStudy({
             groupName={DESIGN_GROUP_NAME}
             memberCount={DESIGN_MEMBER_COUNT}
             postJoinContactOption={null}
-            postJoinDestination="/home"
+            postJoinDestination="/settings"
           />
         </GroupJoinPageMock>
       </GroupJoinVariant>
@@ -334,7 +334,7 @@ export function GroupJoinStudy({
             groupName={DESIGN_GROUP_NAME}
             memberCount={DESIGN_MEMBER_COUNT}
             postJoinContactOption={null}
-            postJoinDestination="/home"
+            postJoinDestination="/settings"
           />
         </GroupJoinPageMock>
       </GroupJoinVariant>
@@ -415,13 +415,13 @@ function DesignForm({
   alreadyActiveMember,
   canLeave = false,
   permissions,
-  postJoinDestination = "/home",
+  postJoinDestination = "/settings",
 }: {
   activeScopes?: readonly HostedVaultShareProjectionScope[];
   alreadyActiveMember: boolean;
   canLeave?: boolean;
   permissions: readonly GroupJoinPermissionDisplay[];
-  postJoinDestination?: "/home" | "/join";
+  postJoinDestination?: "/settings" | "/join";
 }) {
   return (
     <GroupJoinAcceptForm

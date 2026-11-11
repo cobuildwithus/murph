@@ -418,7 +418,7 @@ describe("Starter usage enrollment owner", () => {
       prisma: prisma as never,
       source: "companion_onboarding",
     })).resolves.toEqual({
-      redirectPath: "/home",
+      redirectPath: "/settings",
       status: "enrolled",
     });
     await expect(ensureHostedStarterUsageEnrollment({
@@ -428,7 +428,7 @@ describe("Starter usage enrollment owner", () => {
       prisma: prisma as never,
       source: "web_onboarding",
     })).resolves.toEqual({
-      redirectPath: "/home",
+      redirectPath: "/settings",
       status: "already_enrolled",
     });
 
@@ -496,7 +496,7 @@ describe("Starter usage enrollment owner", () => {
     })).resolves.toEqual({
       disposition: "enrolled",
       enrollment: {
-        redirectPath: "/home",
+        redirectPath: "/settings",
         status: "enrolled",
       },
     });
@@ -1061,7 +1061,7 @@ describe("Starter usage enrollment owner", () => {
       prisma: prisma as never,
       source: "web_onboarding",
     })).resolves.toEqual({
-      redirectPath: "/home",
+      redirectPath: "/settings",
       status: "already_active",
     });
 
@@ -1171,7 +1171,7 @@ describe("Starter usage enrollment owner", () => {
         hostedExecutionEventId: "execution_activation_1",
         memberId: memberState.id,
       },
-      redirectPath: "/home",
+      redirectPath: "/settings",
       status: "enrolled",
     });
 

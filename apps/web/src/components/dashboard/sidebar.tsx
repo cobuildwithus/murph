@@ -4,15 +4,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   ChevronsUpDown,
-  Home,
   Settings,
-  Watch,
 } from "lucide-react";
 import {
   useEffect,
   useState,
   type CSSProperties,
-  type ElementType,
   type ReactElement,
 } from "react";
 
@@ -55,17 +52,6 @@ import {
   SIDEBAR_NAV_ITEM_CLASS,
 } from "./sidebar-nav-classes";
 
-const navItems: {
-  label: string;
-  href: string;
-  matchPrefix?: string;
-  icon?: ElementType;
-}[] = [
-  { label: "Home", href: "/home", icon: Home },
-  { label: "Devices", href: "/connect", icon: Watch },
-  { label: "Settings", href: "/settings", icon: Settings },
-];
-
 const sidebarThemeStyle = {
   "--sidebar": "transparent",
   "--sidebar-foreground": "rgba(255, 255, 255, 0.85)",
@@ -83,10 +69,10 @@ function SidebarAuthActions() {
     <div className="-mx-2 border-t border-white/10 px-4 py-5">
       <div className="mb-4 flex flex-col gap-2">
         <p className="font-serif text-base font-medium leading-snug tracking-tight text-white">
-          Experiments tailored to you
+          Your Murph account
         </p>
         <p className="text-[13px] leading-relaxed text-white/60">
-          See what actually works for you. Connect your health data and track your progress.
+          Manage your plan, connected accounts, and data privacy.
         </p>
       </div>
       <Button
@@ -309,28 +295,19 @@ export function SidebarPrimaryNavigation({
 }) {
   return (
     <SidebarMenu className="mb-12 gap-3 md:gap-3">
-      {navItems.map((item) => {
-        const activePrefix = item.matchPrefix ?? item.href;
-        const isActive =
-          pathname === item.href || pathname.startsWith(activePrefix);
-        const Icon = item.icon;
-
-        return (
-          <SidebarMenuItem key={item.href}>
-            <SidebarMenuButton
-              isActive={isActive}
-              size="lg"
-              className={SIDEBAR_NAV_ITEM_CLASS}
-              render={
-                <Link href={item.href}>
-                  {Icon ? <Icon className={SIDEBAR_NAV_ICON_CLASS} /> : null}
-                  {item.label}
-                </Link>
-              }
-            />
-          </SidebarMenuItem>
-        );
-      })}
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          isActive={pathname.startsWith("/settings") || pathname.startsWith("/connect")}
+          size="lg"
+          className={SIDEBAR_NAV_ITEM_CLASS}
+          render={
+            <Link href="/settings">
+              <Settings className={SIDEBAR_NAV_ICON_CLASS} />
+              Settings
+            </Link>
+          }
+        />
+      </SidebarMenuItem>
       {chatAction}
     </SidebarMenu>
   );

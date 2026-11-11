@@ -69,7 +69,7 @@ describe("hosted onboarding billing success route", () => {
         expiresAt: null,
         matchesInvite: true,
       },
-      stage: "activating",
+      stage: "active",
     });
   });
 
@@ -111,7 +111,7 @@ describe("hosted onboarding billing success route", () => {
         expiresAt: null,
         matchesInvite: true,
       },
-      stage: "activating",
+      stage: "active",
     });
     expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.reconcileHostedBillingCheckoutSuccess).toHaveBeenCalledWith({

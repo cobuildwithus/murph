@@ -55,6 +55,14 @@ const badgeVariants = cva("rounded-full px-2 py-0.5 text-xs font-medium", {
 });
 ```
 
+## Authenticated product scope
+
+Settings is the authenticated Web destination. Devices, billing, consent,
+export and sign-in/onboarding handoffs support account control. Home, Training
+and the older health dashboard routes redirect to Settings. Do not reintroduce
+Browser Vault page providers, caches or polling for retired dashboard views;
+shared replica APIs and explicit export still serve native and account flows.
+
 ## Stack
 
 - **shadcn/ui** with **base UI, not Radix** — `apps/web/components.json`. We use `@base-ui/react` primitives. Do not install or import from `@radix-ui/*`.

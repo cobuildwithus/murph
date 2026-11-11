@@ -206,7 +206,7 @@ test("turns the whole page into the welcome once the invite is accepted", async 
   await act(async () => {
     openMurph?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
-  expect(mocks.routerPush).toHaveBeenCalledWith("/home");
+  expect(mocks.routerPush).toHaveBeenCalledWith("/settings");
 });
 
 test("keeps the invite on the page with the error when accepting fails", async () => {

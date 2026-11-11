@@ -56,7 +56,7 @@ test("JoinInvitePageView makes a signed-in account mismatch an exclusive recover
 
   assert.match(markup, /You’re on a different account\./);
   assert.match(markup, /This link is for another Murph account\./);
-  assert.match(markup, /href="\/home"/);
+  assert.match(markup, /href="\/settings"/);
   assert.match(markup, />Go to Murph home</);
   assert.match(markup, />Sign out and continue</);
   assert.doesNotMatch(markup, /Add your phone/);

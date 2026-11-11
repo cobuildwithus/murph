@@ -11,8 +11,7 @@ export type JoinInvitePreviewStage =
   | "checkout"
   | "messaging-setup"
   | "blocked"
-  | "active"
-  | "activating";
+  | "active";
 
 const PREVIEW_STAGES: readonly JoinInvitePreviewStage[] = [
   "invalid",
@@ -22,7 +21,6 @@ const PREVIEW_STAGES: readonly JoinInvitePreviewStage[] = [
   "messaging-setup",
   "blocked",
   "active",
-  "activating",
 ];
 
 export function parseJoinInvitePreviewStage(
@@ -87,7 +85,5 @@ export function buildJoinInvitePreviewStatus(
       return { ...base, stage: "blocked" };
     case "active":
       return { ...base, stage: "active" };
-    case "activating":
-      return { ...base, stage: "activating" };
   }
 }

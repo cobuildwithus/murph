@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 200,
+  "item": {
+    "id": "web-account-settings",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Your account controls live in Settings",
+    "summary": "The website now opens Settings for your plan, connected accounts, and data privacy.",
+    "details": "Home and Training links now open Settings. Device connections, billing, consent, and data export remain available.",
+    "relevanceTags": [
+      "account",
+      "settings"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Open Settings",
+      "href": "/settings"
+    }
+  }
+}

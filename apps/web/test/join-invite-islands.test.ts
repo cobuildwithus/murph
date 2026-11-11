@@ -235,7 +235,7 @@ test("JoinInviteCheckoutPlanButtonIsland refreshes instead of redirecting when c
 
 test("JoinInviteStarterUsageIsland reloads the document after successful enrollment", async () => {
   mocks.requestHostedStarterUsageEnrollment.mockResolvedValue({
-    redirectPath: "/home",
+    redirectPath: "/settings",
     status: "enrolled",
   });
 
@@ -253,7 +253,7 @@ test("JoinInviteStarterUsageIsland reloads the document after successful enrollm
   expect(mocks.requestHostedStarterUsageEnrollment).toHaveBeenCalledWith({
     inviteCode: "invite-code",
   });
-  expect(replaceLocation).toHaveBeenCalledWith("/home");
+  expect(replaceLocation).toHaveBeenCalledWith("/settings");
   expect(mocks.replace).not.toHaveBeenCalled();
   await cleanup();
 });
@@ -277,19 +277,19 @@ test("JoinInviteStarterUsageIsland preserves the document reload after unmount",
 
   await act(async () => {
     resolveEnrollment({
-      redirectPath: "/home",
+      redirectPath: "/settings",
       status: "enrolled",
     });
     await Promise.resolve();
   });
 
-  expect(replaceLocation).toHaveBeenCalledWith("/home");
+  expect(replaceLocation).toHaveBeenCalledWith("/settings");
   expect(mocks.replace).not.toHaveBeenCalled();
 });
 
 test("JoinInviteStarterUsageIsland reloads the armed group-start handoff", async () => {
   mocks.requestHostedStarterUsageEnrollment.mockResolvedValue({
-    redirectPath: "/home",
+    redirectPath: "/settings",
     status: "enrolled",
   });
   const sessionStorage = createMemoryStorage();
@@ -768,7 +768,7 @@ test("JoinInviteLegalConsentIsland reloads Home after consent-owned Starter enro
     .mockResolvedValueOnce({
       ...acceptedStatus,
       starterEnrollment: {
-        redirectPath: "/home",
+        redirectPath: "/settings",
         status: "enrolled",
       },
     });
@@ -788,7 +788,7 @@ test("JoinInviteLegalConsentIsland reloads Home after consent-owned Starter enro
   });
 
   await vi.waitFor(() => {
-    expect(replaceLocation).toHaveBeenCalledWith("/home");
+    expect(replaceLocation).toHaveBeenCalledWith("/settings");
   });
   expect(mocks.refresh).not.toHaveBeenCalled();
   await cleanup();
@@ -810,7 +810,7 @@ test("JoinInviteLegalConsentIsland preserves an armed group-start handoff", asyn
     .mockResolvedValueOnce({
       ...acceptedStatus,
       starterEnrollment: {
-        redirectPath: "/home",
+        redirectPath: "/settings",
         status: "enrolled",
       },
     });

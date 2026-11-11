@@ -262,23 +262,23 @@ Sources: `hosted-onboarding/join-invite-state.ts`,
 `hosted-groups/group-start-client.tsx`, `family/family-invite-accept-client.tsx`.
 
 States: invite `invalid`, `expired`, `verify`, `checkout`, `blocked`,
-`active`; UI contract still recognizes legacy `activating` presentation; recovery `checking`, `idle`, `linking`, `linked`, `failed`, `conflict`;
+`active`; recovery `checking`, `idle`, `linking`, `linked`, `failed`, `conflict`;
 family acceptance `idle`, `submitting`, `accepted`.
 
 | From | Event / guard | To / effect |
 | --- | --- | --- |
 | Verify | Authenticated matching account | Server-derived checkout/activation/access stage |
-| Checkout/active (including retained activating projection) | Consent incomplete | Gate progression until current grant |
+| Checkout/active | Consent incomplete | Gate progression until current grant |
 | Post-verify | Stale authenticated matching `verify` refresh | Ignore regression |
 | Recovery checking | Token + authenticated account | Linking; success clears recovery fragment |
 | Linking | Cross-account binding conflict | Terminal conflict for this recovery link |
-| Linking | Transient/error response | Failed; user can retry current link |
+| Linking | Transient/error response | Failed; authenticated access remains known, so a successful explicit retry returns to the group |
 | Family idle | Accept action | Submitting; success accepted; failure returns idle |
 
 Invariants: stage does not establish membership by itself; account must match
 invite; consent is independent of billing; stale verify responses cannot send an
 admitted invite backward. Group recovery conflicts must not attach another
-account's messaging address. Inspected; no confirmed defect.
+account's messaging address. Group-start authentication is published before linking, so transient recovery failure cannot discard active access.
 
 ### W3. Consent acceptance, handoff and withdrawal
 
@@ -304,31 +304,15 @@ partial success cannot be undone by a UI error; withdrawal and health-source
 cleanup remain server-owned; the settings recovery route stays available.
 Inspected; no confirmed defect.
 
-### W4. Browser Vault authority, snapshots and runtime refresh
+### W4. Retired Browser Vault page lifecycle
 
-Sources: `apps/web/src/lib/browser-vault/{context.tsx,warm-store.ts,loader.ts,authority.ts,session-invalidation.ts}`.
-
-States: empty/loading/ready/error; warm outcomes `ready`, `empty`,
-`identity_changed`, `unauthorized`, `superseded`, `session_ending`, `error`;
-refresh admission `awaiting_request` or `admitted`, with bounded observation.
-
-| From | Event / guard | To / effect |
-| --- | --- | --- |
-| Empty/ready | Current session load | One shared in-flight request with shard demand and generation |
-| In-flight | Stronger/different demand | Wait current request, restart only in same generation |
-| Loading | Valid current member/ref/shards | Ready in-memory decrypted snapshot |
-| Ready | Not-modified current ref | Reuse covered shards; project exact demanded capabilities |
-| Ready | Transient load failure | Retain stale snapshot, expose error |
-| Any | Auth loss, replacement or consent/session ending | Clear decrypted state, increment generation, abort current load |
-| Stale request | Generation changed / abort | Superseded; cannot publish over new owner |
-| Cross-tab ending | Initiator disappears and lease expires | Recheck authority; expiry itself grants no data access |
-| Runtime refresh | Request-local boundary admitted | Observe boundedly until a later qualifying snapshot or timeout |
-
-Invariants: cache never grants authority; decrypted data remains memory-only;
-identity and request generation fence publication; baseline response is not proof
-that requested fresh work completed; an observer cannot silently restart an
-unbounded refresh. Inspected, including loader abort guards; apparent stale
-completion concerns without a real schedule are not promoted to findings.
+The authenticated Web product is now Settings. Home and Training redirect there;
+the global React provider, warm cache, shard demand, refresh polling and
+homepage preparation have no remaining product consumer and were deleted.
+Shared `loader.ts`, `authority.ts`, `session-handler.ts`, `export.ts` and replica
+publication remain for native APIs and explicit account export. The auth
+provider still consumes `session-invalidation.ts` to fence cross-tab cookie
+replacement; it is not a dashboard cache owner.
 
 ### W5. Usage-credit checkout and recovery
 
@@ -451,22 +435,11 @@ input URL and generation scope every result.
 Invariant: no frame or late clipboard completion may present another account's
 referral URL as current. Inspected.
 
-### W11. Training handoff observation
+### W11. Retired Training handoff observation
 
-Source: `apps/web/app/(dashboard)/training/training-page-client.tsx`.
-States: waiting first client; initial/handoff baseline; checking; not-visible;
-completed/canceled. Initial refresh and message handoff use different predicates.
-
-| From | Event / guard | To / effect |
-| --- | --- | --- |
-| First ready client | Initial baseline captured | Request bounded Browser Vault refresh |
-| Message handoff | Focus/visibility returns | Compare later snapshot with exact pre-handoff training baseline |
-| Checking | Predicate proves update | Clear baseline; ordinary training view |
-| Checking | Bounded refresh settles without update | Not-visible with retry/cancel |
-| Any baseline | Cancel/error | Stop page-local wait; retain available training |
-
-Invariant: a contact-link click or generic successful refresh is not proof that
-a workout mutation was saved. Inspected.
+`/training` redirects to `/settings`. Its workout view, refresh baseline and
+focus/visibility observation state were deleted with the Browser Vault provider.
+Native training data and runtime publication are unchanged.
 
 ### W12. Human browser handoff
 

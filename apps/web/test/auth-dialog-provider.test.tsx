@@ -135,7 +135,7 @@ test("dashboard sign-in opens on entry, respects dismissal, and opens on another
   await rendered.rerender(view());
   expect(mocks.authDialogProps?.open).toBe(false);
 
-  mocks.pathname = "/home";
+  mocks.pathname = "/connect";
   await rendered.rerender(view());
   expect(mocks.authDialogProps?.open).toBe(true);
   await rendered.cleanup();
@@ -159,7 +159,7 @@ test.each([
   await rendered.cleanup();
 });
 
-test.each(["/home", "/experiments/example"])(
+test.each(["/connect", "/experiments/example"])(
   "dashboard sign-in resumes the full current URL: %s",
   async (pathname) => {
     const { AuthProvider } = await import(
@@ -216,9 +216,9 @@ test("AuthProvider reloads a document that receives a cross-tab session transiti
     value: {
       assign,
       hash: "",
-      href: "https://join.example.test/home",
+      href: "https://join.example.test/settings",
       origin: "https://join.example.test",
-      pathname: "/home",
+      pathname: "/settings",
       reload,
       search: "",
     },
@@ -462,7 +462,7 @@ test("AuthProvider does not resume Clinical Records connect without a valid stag
     completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
-  expect(rendered.assign).toHaveBeenCalledWith("/home");
+  expect(rendered.assign).toHaveBeenCalledWith("/settings");
   expect(rendered.reload).not.toHaveBeenCalled();
 
   await rendered.cleanup();
@@ -845,7 +845,7 @@ test.each([
     expect(reload).toHaveBeenCalledTimes(1);
     expect(assign).not.toHaveBeenCalled();
   } else {
-    expect(assign).toHaveBeenCalledWith("/home");
+    expect(assign).toHaveBeenCalledWith("/settings");
     expect(reload).not.toHaveBeenCalled();
   }
 
@@ -928,7 +928,7 @@ test.each([
     expect(reload).toHaveBeenCalledTimes(1);
     expect(assign).not.toHaveBeenCalled();
   } else {
-    expect(assign).toHaveBeenCalledWith("/home");
+    expect(assign).toHaveBeenCalledWith("/settings");
     expect(reload).not.toHaveBeenCalled();
   }
 
@@ -1066,7 +1066,7 @@ test.each([
     expect(reload).toHaveBeenCalledTimes(1);
     expect(assign).not.toHaveBeenCalled();
   } else {
-    expect(assign).toHaveBeenCalledWith("/home");
+    expect(assign).toHaveBeenCalledWith("/settings");
     expect(reload).not.toHaveBeenCalled();
   }
 
@@ -1121,7 +1121,7 @@ test("AuthProvider keeps the ordinary home redirect for settings without a signe
   });
 
   // A partial return is not a return, so the resume branch must stay scoped.
-  expect(assign).toHaveBeenCalledWith("/home");
+  expect(assign).toHaveBeenCalledWith("/settings");
   expect(reload).not.toHaveBeenCalled();
 
   await rendered.cleanup();
@@ -1420,12 +1420,12 @@ test("AuthProvider keeps the default home redirect for ordinary sign-in completi
     completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
-  expect(assign).toHaveBeenCalledWith("/home");
+  expect(assign).toHaveBeenCalledWith("/settings");
 
   await rendered.cleanup();
 });
 
-test("AuthProvider reloads plain home so it can read canonical onboarding state", async () => {
+test("AuthProvider reloads Settings to read canonical account state", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
@@ -1454,9 +1454,9 @@ test("AuthProvider reloads plain home so it can read canonical onboarding state"
     value: {
       assign,
       hash: "",
-      href: "https://join.example.test/home",
+      href: "https://join.example.test/settings",
       origin: "https://join.example.test",
-      pathname: "/home",
+      pathname: "/settings",
       search: "",
     },
   });
@@ -1473,7 +1473,7 @@ test("AuthProvider reloads plain home so it can read canonical onboarding state"
     });
   });
 
-  expect(assign).toHaveBeenCalledWith("https://join.example.test/home");
+  expect(assign).toHaveBeenCalledWith("https://join.example.test/settings");
 
   await rendered.cleanup();
 });

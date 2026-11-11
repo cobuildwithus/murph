@@ -15,11 +15,7 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/farewell",
   "/groups/start",
   "/growth",
-  "/history",
-  "/home",
-  "/journal",
   "/join",
-  "/labs",
   "/legal",
   "/legal/consumer-health-data-privacy-policy",
   "/legal/health-ai-safety-disclosure",
@@ -33,7 +29,6 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/ops/runtime-maintenance",
   "/ops/tasks",
   "/ops/usage",
-  "/overview",
   "/records",
   "/records/connect",
   "/refer",
@@ -41,7 +36,6 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/settings",
   "/settings/data-privacy",
   "/subprocessors",
-  "/training",
 ] as const;
 const VERCEL_TELEMETRY_PATHNAME_SET = new Set<string>(
   VERCEL_TELEMETRY_PATHNAMES,

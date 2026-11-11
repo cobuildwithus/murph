@@ -1,19 +1,11 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 
 import { DashboardCriticalLoadError } from "@/src/components/dashboard/dashboard-critical-load-error";
 import { DashboardShell } from "@/src/components/dashboard/dashboard-shell";
-import { DevelopmentPersonaSwitcher } from "@/src/components/dashboard/development-persona-switcher";
 import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
 import { LinkPageTakeoverHold } from "@/src/components/link-page/link-page-takeover";
 import { LinkPageVeil } from "@/src/components/link-page/link-page-veil";
-import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
-import {
-  DEVELOPMENT_PERSONA_COOKIE,
-  isDevelopmentPersonaId,
-} from "@/src/lib/browser-vault/development-personas";
-import { buildDevelopmentPersonaReplica } from "@/src/lib/browser-vault/development-personas.server";
 import { getHostedDashboardLayoutAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   hasHostedHistoricalLaunchConsent,
@@ -42,37 +34,16 @@ export default async function DashboardLayout({
   }
 
   const authenticatedMember = auth.pageAuth.authenticatedMember;
-  const developmentPersona =
-    process.env.NODE_ENV === "development"
-      ? await readDevelopmentPersona()
-      : null;
-  const developmentReplica = developmentPersona
-    ? await buildDevelopmentPersonaReplica(developmentPersona)
-    : null;
   const consentStatus = authenticatedMember
     ? await readDashboardConsentReminderStatus(authenticatedMember.id)
     : null;
-  // A signed-out visitor has no vault to load. Without this the provider would
-  // post a session request that can only be rejected, and the dashboard would
-  // tell someone who never signed in that their session expired.
-  const browserVaultLoadEnabled = authenticatedMember
-    ? consentStatus?.launchGranted ?? true
-    : false;
-
   return (
-    <BrowserVaultProvider
-      developmentReplica={developmentReplica}
-      initialMemberId={authenticatedMember?.id ?? null}
-      loadEnabled={browserVaultLoadEnabled}
-    >
+    <>
       <LinkPageVeil />
       <DashboardShell sidebarAuth={auth.sidebarAuth}>
         <LinkPageTakeoverHold held={Boolean(consentStatus && !consentStatus.launchGranted)}>
           {children}
         </LinkPageTakeoverHold>
-        {process.env.NODE_ENV === "development" ? (
-          <DevelopmentPersonaSwitcher activePersona={developmentPersona} />
-        ) : null}
         {consentStatus && !consentStatus.launchGranted ? (
           <DashboardLegalConsentGate
             initialStatus={consentStatus}
@@ -84,14 +55,8 @@ export default async function DashboardLayout({
           />
         ) : null}
       </DashboardShell>
-    </BrowserVaultProvider>
+    </>
   );
-}
-
-async function readDevelopmentPersona() {
-  const cookieStore = await cookies();
-  const value = cookieStore.get(DEVELOPMENT_PERSONA_COOKIE)?.value ?? null;
-  return isDevelopmentPersonaId(value) ? value : null;
 }
 
 async function readDashboardConsentReminderStatus(memberId: string) {

@@ -37,7 +37,7 @@ export function FamilyInviteScreen(input: {
     return (
       <LinkPageScreen
         actions={view?.status === "accepted" ? (
-          <Link className={LINK_PAGE_PILL_CLASS} href="/home" prefetch={false}>
+          <Link className={LINK_PAGE_PILL_CLASS} href="/settings" prefetch={false}>
             Open Murph
           </Link>
         ) : undefined}

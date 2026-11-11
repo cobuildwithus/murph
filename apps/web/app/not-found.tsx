@@ -5,8 +5,8 @@ import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth
 
 export default async function NotFound() {
   const { authenticated } = await getHostedPageAuthSnapshot();
-  const backHref = authenticated ? "/home" : "/";
-  const backLabel = authenticated ? "Back to Murph home" : "Back to Murph";
+  const backHref = authenticated ? "/settings" : "/";
+  const backLabel = authenticated ? "Back to Settings" : "Back to Murph";
 
   return (
     <>
@@ -21,7 +21,7 @@ export default async function NotFound() {
           </h2>
           <p className="mx-auto mt-4 max-w-[54ch] text-sm leading-7 text-muted-foreground">
             {authenticated
-              ? "That address could not be found. Return to your Murph home to continue, review your settings, or contact support if you need help."
+              ? "That address could not be found. Return to Settings to manage your account, or contact support if you need help."
               : "That address does not match a public Murph page. Return to Murph, learn what the product does, contact support, or use the machine-readable guides below to find another public route."}
           </p>
 

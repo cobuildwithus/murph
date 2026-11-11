@@ -145,7 +145,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     mocks.cleanupHostedStandardCheckoutLoser.mockResolvedValue(undefined);
     mocks.sendHostedSignupWelcomeEmailForMemberBestEffort.mockResolvedValue(undefined);
     mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
-      stage: "activating",
+      stage: "active",
     }));
   });
 
@@ -181,7 +181,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         prisma: prisma as never,
         sessionId: `cs_${status}`,
       })).resolves.toEqual(createStatus({
-        stage: "activating",
+        stage: "active",
       }));
 
       expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith(`cs_${status}`, {
@@ -287,7 +287,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       prisma: prisma as never,
       sessionId: "cs_123",
     })).resolves.toEqual(createStatus({
-      stage: "activating",
+      stage: "active",
     }));
 
     expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
@@ -327,7 +327,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       member: createAuthenticatedMember(),
       prisma: prisma as never,
       sessionId: "cs_123",
-    })).resolves.toEqual(createStatus({ stage: "activating" }));
+    })).resolves.toEqual(createStatus({ stage: "active" }));
 
     expect(mocks.cleanupHostedFamilySponsoredDirectSubscription).toHaveBeenCalledWith({
       checkoutSessionId: "cs_123",
@@ -363,7 +363,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       member: createAuthenticatedMember(),
       prisma: prisma as never,
       sessionId: "cs_123",
-    })).resolves.toEqual(createStatus({ stage: "activating" }));
+    })).resolves.toEqual(createStatus({ stage: "active" }));
 
     expect(mocks.cleanupHostedStandardCheckoutLoser).toHaveBeenCalledWith({
       checkoutSessionId: "cs_123",
@@ -415,7 +415,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       member: createAuthenticatedMember(),
       prisma: prisma as never,
       sessionId: "cs_accepted_before_family",
-    })).resolves.toEqual(createStatus({ stage: "activating" }));
+    })).resolves.toEqual(createStatus({ stage: "active" }));
 
     expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -446,7 +446,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       prisma: prisma as never,
       sessionId: "cs_123",
     })).resolves.toEqual(createStatus({
-      stage: "activating",
+      stage: "active",
     }));
 
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).toHaveBeenCalledWith({
@@ -480,7 +480,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       prisma: prisma as never,
       sessionId: "cs_no_subscription",
     })).resolves.toEqual(createStatus({
-      stage: "activating",
+      stage: "active",
     }));
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -549,7 +549,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       prisma: prisma as never,
       sessionId: "cs_123",
     })).resolves.toEqual(createStatus({
-      stage: "activating",
+      stage: "active",
     }));
 
     expect(mocks.findMemberForStripeObject).not.toHaveBeenCalled();
