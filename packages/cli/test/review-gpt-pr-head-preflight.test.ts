@@ -180,7 +180,7 @@ describe('ReviewGPT PR context guard', () => {
 
       expect(result.status, result.stderr).toBe(0)
       expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-        `pr=42\nphase=final\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 80s ${preset} --dry-run\n`,
+        `pr=42\nphase=final\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh ${preset} --dry-run\n`,
       )
       expect(result.stdout).toContain(
         `ReviewGPT PR attachment preflight passed for 42 at ${harness.head}.`,
@@ -194,14 +194,14 @@ describe('ReviewGPT PR context guard', () => {
 
     expect(result.status, result.stderr).toBe(0)
     expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-      'pr=\nphase=\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 80s simplify --dry-run\n',
+      'pr=\nphase=\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh simplify --dry-run\n',
     )
   })
 
   it.each([
     ['--minimum-marked-response-time', '5m'],
     ['--minimumMarkedResponseTime', '5m'],
-  ])('rejects repository trust-floor overrides when %s precedes the preset', (option, value) => {
+  ])('forwards %s before the preset while deriving PR context', (option, value) => {
     const harness = createHarness()
     const result = runHarness(harness, [
       option,
@@ -210,11 +210,13 @@ describe('ReviewGPT PR context guard', () => {
       '--dry-run',
     ])
 
-    expect(result.status).toBe(64)
-    expect(result.stderr).toContain(
-      "Murph's repository ReviewGPT policy cannot be overridden",
+    expect(result.status, result.stderr).toBe(0)
+    expect(readFileSync(harness.capturePath, 'utf8')).toBe(
+      `pr=42\nphase=final\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh ${option} ${value} pr-review --dry-run\n`,
     )
-    expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
+    expect(result.stdout).toContain(
+      `ReviewGPT PR attachment preflight passed for 42 at ${harness.head}.`,
+    )
   })
 
   it('rejects dirty or stale PR heads before invoking ReviewGPT', () => {
