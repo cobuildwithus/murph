@@ -572,7 +572,8 @@ the current user explicitly asks for it.
    current PR. Label every finding by its actual origin; a failed correction does
    not relabel the original cause. Verify claimed fixes and reassess old
    findings against the serious-bug and Complexity Collapse bars. Rejected or
-   out-of-scope observations do not remain blockers. Exclude findings equivalent on the base.
+   out-of-scope observations do not remain blockers. Exclude bugs equivalent on
+   the base; adjacent Complexity Collapse follows the bounded scope above.
 
    ReviewGPT findings are adversarial signals, not implementation instructions.
    Before accepting a finding, identify the invariant it protects and any
