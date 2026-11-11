@@ -87,10 +87,9 @@ async function resumeGroupMove(move: OperatorGroupMove, cleanup: HostedLinqGroup
   let roster = await readGroupMoveRoster(cleanup);
   assertGroupMoveSourceSelf(roster, cleanup);
   if (!groupMoveHasPhone(roster, cleanup.targetPhone)) {
-    // Never blindly repeat a claimed add. Disarm and clean up an unconfirmed attempt.
+    // A queued or interrupted add can appear later. Reconcile without repeating it.
     if (move.addStartedAt) {
-      await recordGroupMoveError(move, "add_unconfirmed", prisma);
-      await cancelGroupMove(await readOperatorGroupMove(move.id, prisma), cleanup, prisma);
+      await recordGroupMoveError(move, "add_pending", prisma);
       return;
     }
     const claimed = await prisma.$transaction(async tx => {
@@ -110,8 +109,7 @@ async function resumeGroupMove(move: OperatorGroupMove, cleanup: HostedLinqGroup
       return;
     }
     if (!groupMoveHasPhone(roster, cleanup.targetPhone)) {
-      await recordGroupMoveError(move, "add_unconfirmed", prisma);
-      await cancelGroupMove(await readOperatorGroupMove(move.id, prisma), cleanup, prisma);
+      await recordGroupMoveError(move, "add_pending", prisma);
       return;
     }
   }

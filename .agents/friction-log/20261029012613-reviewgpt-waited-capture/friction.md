@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT waited capture hides terminal generation errors'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4398'
 ---
 
 ## Expected Behavior

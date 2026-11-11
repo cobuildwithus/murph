@@ -1,6 +1,7 @@
 ---
 title: 'Worktree storage guard hides the failing filesystem probe during concurrent checkout changes'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4836'
 ---
 
 ## What happened

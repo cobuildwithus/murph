@@ -1195,3 +1195,28 @@ Final-head CI found one additional narrow fixture in the dispatch suite that
 omitted `findFirst` for the latest cancellation lookup. Adding its empty-history
 response restores all 234 dispatch tests; no production behavior changes.
 The other Web shards passed. Fresh exact-head CI remains the merge gate.
+
+
+### Queued participant-add reconciliation
+
+The provider's documented successful add response acknowledges queued work;
+an immediate complete roster can still omit the destination. A synthetic SDK
+fixture reproduces premature disarming and cleanup after a successful response.
+Keep the existing reservation and report `add_pending` until a later explicit
+Ops resume sees destination presence. Never repeat a claimed add, renew the
+adoption deadline, or treat absence as terminal failure. Existing explicit
+cancel, provider error, incomplete roster, source fallback, and expiry boundaries
+remain authoritative. This deletes premature cancellation rather than adding a
+poller, state column, or alternate provider mutation path.
+
+Product UX proof covers queued add, repeated pending reads, later confirmation,
+normal adoption and verified departure, plus interrupted claim, expiry and
+explicit cleanup. Operator receipt assertions and the real database/ingress
+composition cover this change; assistant prompts and reply decisions are
+untouched. Production canary remains required after the Web change converges.
+
+Focused verification: the delayed-visibility regression fails on the baseline;
+all 133 producer, consumer, audience and Ops route tests pass after the fix.
+Web typecheck, docs drift and diff whitespace checks pass. Source complexity
+remains zero debt with maximum 18. Final review, exact-head CI and production
+canary are pending.
