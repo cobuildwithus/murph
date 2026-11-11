@@ -1,6 +1,6 @@
 # Simplify hosted external-effect state ownership
 
-Status: active
+Status: completed
 Created: 2026-11-10
 Updated: 2026-11-10
 
@@ -29,9 +29,9 @@ Computer-use service/store, affected tests, logical Prisma schema and owning arc
 
 ## Decisions and retirement evidence
 
-- Physical-note legacy retirement is deferred: bounded read-only aggregate evidence confirms unresolved historical failure state remains. Existing provider reconciliation must settle it before removing the legacy acceptance path; do not manufacture billing evidence.
+- Physical-note legacy handling is retained: bounded read-only aggregate evidence confirms unresolved historical failure state remains. Existing provider reconciliation must settle it before removing the legacy acceptance path; do not manufacture billing evidence.
 - Approval dual hashing is removed after bounded read-only drain evidence ruled out retained null-channel approval candidates. The modern serializer has been the sole writer since the historical compatibility reader was introduced. Retain exact action hash, generation and consumer checks; the current production alias was independently verified to include the modern writer.
-- Passkey enrollment flag remains: the current security owner also uses it to pause enrollment and recovery at admission and commit, independently of existing-key verification (docs/hosted-auth-migration.md). Deleting it would remove current product/security behavior, not just a finished migration branch.
+- Passkey enrollment flag is retained as an active security control: the current security owner uses it to pause enrollment and recovery at admission and commit while existing-key verification continues (agent-docs/SECURITY.md and docs/hosted-auth-migration.md). The finished rollout does not eliminate this independent pause policy; deleting it would change current security behavior.
 - Remove awaitingMessage from the logical client schema now, leaving the nullable physical column in place for old deployed readers. The prepared post-drain contract migration owns physical removal through the existing exact-alias and old-function-drain lane; no production mutation was run.
 
 ## Verification
@@ -43,5 +43,6 @@ Computer-use service/store, affected tests, logical Prisma schema and owning arc
 - Local database setup used the current Prisma schema in an isolated loopback test database. Column cleanup executed its exact SQL twice and preserved current-client reads.
 - No prompt, tool schema, availability or assistant reply policy changed; live-model proof is not applicable to these database-only ownership changes.
 - Product journeys retain current link presentation, resume authority, sensitive-action generations and replay. Database proof covers losing requests, insertion rollback, competing winners and suspension; no visual UI changed.
-- Parent completion owner retains final review, ReviewGPT, exact-head CI, plan closure and release. No production mutation or message was sent.
+- Implementation and audit dispositions are complete. The parent completion owner retains candidate review, ReviewGPT, exact-head CI and release after this plan is archived. No production mutation or message was sent.
 
+Completed: 2026-11-10
