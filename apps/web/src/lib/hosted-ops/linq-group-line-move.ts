@@ -4,6 +4,7 @@ import type { PrismaClient } from "@prisma/client";
 import { getPrisma } from "../prisma";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates, createHostedExternalThreadLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { addHostedLinqChatParticipant, leaveHostedLinqChat, removeHostedLinqChatParticipant } from "../hosted-onboarding/linq-client";
+import { adoptDiscoveredHostedLinqGroupMove } from "./linq-group-line-move-discovery";
 import { openHostedThreadDeliveryRoute } from "../hosted-routing/thread-delivery-route";
 import { openHostedLinqGroupMoveCleanup, prepareHostedLinqGroupMoveCleanup, type HostedLinqGroupMoveCleanup } from "../hosted-routing/linq-group-line-move-store";
 import { activeGroupMoveHandles, assertGroupMoveLinesCanSend, assertGroupMoveQuiet, assertGroupMoveReservationAvailable, assertGroupMoveSourceSelf,
@@ -61,7 +62,7 @@ async function reserveGroupMove(input: { containerRef: string; targetLineLookupK
 }
 
 export async function operateHostedLinqGroupLineMove(input: {
-  operation: "resume" | "cancel" | "retry_leave"; moveId: string; prisma?: PrismaClient;
+  operation: "resume" | "cancel" | "retry_leave" | "adopt"; moveId: string; prisma?: PrismaClient;
 }) {
   const prisma = input.prisma ?? getPrisma();
   const move = await readOperatorGroupMove(input.moveId, prisma);
@@ -71,7 +72,12 @@ export async function operateHostedLinqGroupLineMove(input: {
   // Encryption and all provider calls are outside transactions, including after route deletion.
   try {
     const cleanup = await openHostedLinqGroupMoveCleanup(move, prisma);
-    if (input.operation === "cancel") await cancelGroupMove(move, cleanup, prisma);
+    if (input.operation === "adopt" && move.status === "reserved") {
+      await adoptDiscoveredHostedLinqGroupMove({ move, cleanup, prisma });
+      const current = await readOperatorGroupMove(move.id, prisma);
+      if (current.status === "adopted") await leaveGroupMove(current, cleanup, prisma);
+    }
+    else if (input.operation === "cancel") await cancelGroupMove(move, cleanup, prisma);
     else if (move.status === "adopted") await leaveGroupMove(move, cleanup, prisma);
     else await resumeGroupMove(move, cleanup, prisma);
   } catch (error) {

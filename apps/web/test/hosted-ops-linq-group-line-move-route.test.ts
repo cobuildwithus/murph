@@ -24,7 +24,7 @@ describe("group line move ops access and request contract", () => {
     expect(mocks.start).toHaveBeenCalledWith(body);
     expect(response.status).toBe(200); expect(await response.json()).toEqual({ moveId, status: "reserved" });
   });
-  it.each(["resume", "cancel", "retry_leave"])("dispatches %s only by move id", async operation => {
+  it.each(["resume", "cancel", "retry_leave", "adopt"])("dispatches %s only by move id", async operation => {
     expect((await POST(request({ operation, moveId }))).status).toBe(200);
     expect(mocks.operate).toHaveBeenCalledWith({ operation, moveId });
   });

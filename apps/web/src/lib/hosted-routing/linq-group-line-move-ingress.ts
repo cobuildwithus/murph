@@ -56,6 +56,17 @@ async function prepareAdoption(input: Ingress & { prisma: PrismaClient },
   move: HostedLinqGroupLineMove, cleanup: HostedLinqGroupMoveCleanup,
   candidate: HostedLinqChatSummary, prepared: PreparedHostedLinqGroupMoveIngress,
 ): Promise<PreparedHostedLinqGroupMoveIngress> {
+  const adoption = await prepareVerifiedHostedLinqGroupMoveAdoption({ ...input, move, cleanup, candidate });
+  return adoption ? { ...prepared, action: "consume", retryAfterAdoption: normalizePhoneNumber(input.sender) !== cleanup.sourcePhone, adoption }
+    : { ...prepared, action: "hold" };
+}
+
+/** Shared fresh-roster proof for webhook and explicit Ops discovery; no synthetic message. */
+export async function prepareVerifiedHostedLinqGroupMoveAdoption(input: {
+  threadId: string; prisma: PrismaClient; move: HostedLinqGroupLineMove;
+  cleanup: HostedLinqGroupMoveCleanup; candidate: HostedLinqChatSummary;
+}): Promise<PreparedHostedLinqGroupLineMoveAdoption | null> {
+  const { move, cleanup, candidate } = input;
   const sourceChat = await readRoster(cleanup.sourceChatId);
   const oldAudience = hostedLinqGroupMoveAudience(sourceChat, cleanup);
   const newAudience = hostedLinqGroupMoveAudience(candidate, cleanup);
@@ -67,7 +78,7 @@ async function prepareAdoption(input: Ingress & { prisma: PrismaClient },
     || !active.some(handle => handle.isMe && normalizePhoneNumber(handle.handle) === cleanup.targetPhone)
     || !active.some(handle => normalizePhoneNumber(handle.handle) === cleanup.sourcePhone)) {
     await input.prisma.hostedLinqGroupLineMove.updateMany({ where: { id: move.id, status: "reserved" }, data: { lastErrorCode: "roster_mismatch" } });
-    return { ...prepared, action: "hold" };
+    return null;
   }
   const expected = await readHostedThreadRouteByThreadIdentity({ channel: "linq", threadId: cleanup.sourceChatId, prisma: input.prisma });
   if (expected?.containerMemberId !== move.containerMemberId || !expected.deliveryRouteState?.deliveryRouteEncrypted)
@@ -75,7 +86,7 @@ async function prepareAdoption(input: Ingress & { prisma: PrismaClient },
   const route = await prepareHostedThreadContainerDeliveryRoute({ accountLookupKey: move.toAccountLookupKey,
     channel: "linq", containerMemberId: move.containerMemberId, observedDeliveryRouteEncrypted: expected.deliveryRouteState.deliveryRouteEncrypted,
     prisma: input.prisma, threadId: input.threadId });
-  return { ...prepared, action: "consume", retryAfterAdoption: normalizePhoneNumber(input.sender) !== cleanup.sourcePhone, adoption: { move, cleanup, expected, destination: route, verifiedAt: new Date(Math.min(sourceChat.observedAt.getTime(), candidate.observedAt.getTime())) } };
+  return { move, cleanup, expected, destination: route, verifiedAt: new Date(Math.min(sourceChat.observedAt.getTime(), candidate.observedAt.getTime())) };
 }
 
 /** All encrypted opens, provider reads and destination sealing happen before BEGIN. */

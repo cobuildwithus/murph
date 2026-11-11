@@ -24,9 +24,9 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/w
 import { buildHostedThreadDeliveryRoute, sealHostedThreadDeliveryRoute } from "@/src/lib/hosted-routing/thread-delivery-route";
 import { localRosterCrypto, rosterPhoneIdentity, rosterRoute, syntheticPhone } from "./support/roster-postgres";
 
-const provider = vi.hoisted(() => ({ retrieve: vi.fn(), add: vi.fn(), remove: vi.fn(), leave: vi.fn(), send: vi.fn(), signal: vi.fn() }));
+const provider = vi.hoisted(() => ({ retrieve: vi.fn(), list: vi.fn(), add: vi.fn(), remove: vi.fn(), leave: vi.fn(), send: vi.fn(), signal: vi.fn() }));
 vi.mock("@linqapp/sdk", async original => ({ ...await original<typeof import("@linqapp/sdk")>(),
-  default: class { chats = { retrieve: provider.retrieve, participants: { add: provider.add, remove: provider.remove },
+  default: class { chats = { retrieve: provider.retrieve, listChats: provider.list, participants: { add: provider.add, remove: provider.remove },
     leaveChat: provider.leave, messages: { send: provider.send } }; },
 }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: provider.signal }));
@@ -52,6 +52,7 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
       { handle: person, is_me: false, status: "active" },
       ...(humans > 1 ? [{ handle: "synthetic-person@example.test", is_me: false, status: "active" }] : []),
     ] }));
+    provider.list.mockResolvedValue({ chats: [], next_cursor: null });
     provider.add.mockImplementation(async () => { targetPresent = true; return { status: "queued" }; });
     provider.remove.mockImplementation(async () => { targetPresent = false; return { status: "queued" }; });
     provider.leave.mockImplementation(async () => { sourcePresent = false; return { status: "queued" }; });
@@ -81,7 +82,7 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     vi.useRealTimers(); vi.unstubAllEnvs();
   });
   const start = () => startHostedLinqGroupLineMove({ containerRef, targetLineLookupKey: targetKey, prisma: db });
-  const operate = (moveId: string, operation: "resume" | "cancel" | "retry_leave" = "resume") => operateHostedLinqGroupLineMove({ moveId, operation, prisma: db });
+  const operate = (moveId: string, operation: "resume" | "cancel" | "retry_leave" | "adopt" = "resume") => operateHostedLinqGroupLineMove({ moveId, operation, prisma: db });
   const row = (id: string) => db.hostedLinqGroupLineMove.findUniqueOrThrow({ where: { id } });
   async function admissionCounts() {
     const containers = await db.hostedThreadContainer.findMany({ where: { ownerMemberId: { in: [owner, sender] } }, select: { memberId: true } });
@@ -127,6 +128,8 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
   }
   it.each([false, true])("starts, holds, adopts and leaves with missing account projection=%s", async missingProjection => {
     if (missingProjection) await db.hostedThreadRoute.updateMany({ where: { containerMemberId: room }, data: { accountLookupKey: null } });
+    const overview = await readHostedLinqGroupLineMoveOverview({ sourceLineLookupKey: sourceKey, prisma: db });
+    expect(overview.candidates.some(candidate => candidate.containerRef === containerRef)).toBe(true);
     const result = await start(); expect(result.status).toBe("reserved"); expect(result.addConfirmedAt).not.toBeNull();
     expect((await db.hostedThreadRoute.findFirstOrThrow({ where: { containerMemberId: room } })).accountLookupKey).toBe(sourceKey);
     expect(result.adoptionDeadlineAt).toBeDefined();
@@ -140,6 +143,49 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect((await row(result.moveId)).status).toBe("left"); expect(provider.leave).toHaveBeenCalledOnce();
     expect((await operate(result.moveId, "retry_leave")).status).toBe("left"); expect(provider.leave).toHaveBeenCalledOnce();
     expect(provider.add).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
+  });
+  async function discoverableChat(id = targetChat, createdAt = new Date().toISOString()) {
+    return { ...await provider.retrieve(id), id, created_at: createdAt };
+  }
+  it("discovers and adopts the new line without any inbound or outbound message", async () => {
+    const result = await start();
+    provider.list.mockResolvedValue({ chats: [await discoverableChat()], next_cursor: null });
+    expect(await operate(result.moveId, "adopt")).toMatchObject({ status: "left", code: null });
+    expect(await operate(result.moveId, "adopt")).toMatchObject({ status: "left" });
+    expect(provider.list).toHaveBeenCalledWith({ from: target, to: source, limit: 100 });
+    expect(provider.add).toHaveBeenCalledOnce(); expect(provider.leave).toHaveBeenCalledOnce();
+    expect(provider.send).not.toHaveBeenCalled();
+    expect(await db.hostedMailboxItem.count({ where: { userId: room, kind: "conversation.message" } })).toBe(0);
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room, accountLookupKey: targetKey } })).toBe(1);
+  });
+  it.each(["missing", "old", "future", "ambiguous", "truncated", "wrong-audience", "wrong-self", "stale-roster", "cancel-race"])("refuses unsafe discovery: %s", async scenario => {
+    const result = await start();
+    const candidate = await discoverableChat();
+    let chats = [candidate]; let next_cursor: string | null = null;
+    if (scenario === "missing") chats = [];
+    if (scenario === "old") candidate.created_at = new Date(0).toISOString();
+    if (scenario === "future") candidate.created_at = new Date(Date.now() + 60_000).toISOString();
+    if (scenario === "ambiguous") chats.push({ ...candidate, id: randomUUID() });
+    if (scenario === "truncated") next_cursor = "next-page";
+    if (scenario === "wrong-audience") candidate.handles.push({ handle: "outside@example.test", is_me: false, status: "active" });
+    provider.list.mockImplementation(async () => {
+      if (scenario === "cancel-race") await db.hostedLinqGroupLineMove.update({ where: { id: result.moveId }, data: { adoptionDeadlineAt: new Date(0) } });
+      if (scenario === "wrong-self" || scenario === "stale-roster") {
+        const retrieve = provider.retrieve.getMockImplementation()!;
+        provider.retrieve.mockImplementation(async (id: string) => {
+          const chat = await retrieve(id);
+          if (id === targetChat) return { ...chat, handles: scenario === "wrong-self"
+            ? chat.handles.map((h: { is_me: boolean }) => ({ ...h, is_me: false }))
+            : [...chat.handles, { handle: "outside@example.test", is_me: false, status: "active" }] };
+          return chat;
+        });
+      }
+      return { chats, next_cursor };
+    });
+    const outcome = await operate(result.moveId, "adopt");
+    expect(outcome.status).toBe("reserved"); expect(outcome.code).not.toBeNull();
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room, accountLookupKey: sourceKey } })).toBe(1);
+    expect(provider.leave).not.toHaveBeenCalled(); expect(provider.remove).not.toHaveBeenCalled(); expect(provider.send).not.toHaveBeenCalled();
   });
   it("adopts a person's photo as the first event and preserves it for normal redelivery", async () => {
     const result = await start(), eventId = randomUUID();
