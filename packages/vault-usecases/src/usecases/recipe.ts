@@ -15,65 +15,8 @@ import {
   toVaultCliError,
 } from './vault-usecase-helpers.js'
 
-interface RecipeReadModel {
-  recipeId: string
-  slug: string
-  title: string
-  status: string
-  schemaVersion?: string
-  docType?: string
-  relativePath: string
-  markdown: string
-  links?: Array<{
-    type: 'supports_goal' | 'addresses_condition'
-    targetId: string
-  }>
-}
-
-interface RecipeCoreRuntime {
-  upsertRecipe(input: {
-    vaultRoot: string
-    recipeId?: string
-    allowSlugRename?: boolean
-    slug?: string
-    title?: string
-    status?: string
-    summary?: string
-    cuisine?: string
-    dishType?: string
-    source?: string
-    servings?: number | null
-    prepTimeMinutes?: number | null
-    cookTimeMinutes?: number | null
-    totalTimeMinutes?: number | null
-    tags?: string[]
-    ingredients?: string[]
-    steps?: string[]
-    relatedGoalIds?: string[]
-    relatedConditionIds?: string[]
-  }): Promise<{
-    created: boolean
-    record: {
-      recipeId: string
-      relativePath: string
-    }
-  }>
-  listRecipes(vaultRoot: string): Promise<RecipeReadModel[]>
-  deleteRecipe(input: {
-    vaultRoot: string
-    recipeId?: string
-    slug?: string
-  }): Promise<{
-    recipeId: string
-    relativePath: string
-    deleted: true
-  }>
-  readRecipe(input: {
-    vaultRoot: string
-    recipeId?: string
-    slug?: string
-  }): Promise<RecipeReadModel>
-}
+type RecipeCoreRuntime = typeof import('@murphai/core')
+type RecipeReadModel = Awaited<ReturnType<RecipeCoreRuntime['readRecipe']>>
 
 const slugSchema = z
   .string()
@@ -261,26 +204,29 @@ export async function editRecipeRecord(input: {
   set?: string[]
   clear?: string[]
 }) {
-  const recipe = await requireRecipeRecord(input.vault, input.lookup)
-  const patched = await preparePatchedUpsertPayload({
-    record: buildRecipePayload(recipe),
-    entityIdField: 'recipeId',
-    entityId: recipe.recipeId,
-    inputFile: input.inputFile,
-    set: input.set,
-    clear: input.clear,
-    patchLabel: 'recipe payload',
-    parsePayload: parseRecipePayload,
-  })
+  const core = await loadRecipeCoreRuntime()
+  return core.withCanonicalWriteLock(input.vault, async () => {
+    const recipe = await requireRecipeRecord(input.vault, input.lookup)
+    const patched = await preparePatchedUpsertPayload({
+      record: buildRecipePayload(recipe),
+      entityIdField: 'recipeId',
+      entityId: recipe.recipeId,
+      inputFile: input.inputFile,
+      set: input.set,
+      clear: input.clear,
+      patchLabel: 'recipe payload',
+      parsePayload: parseRecipePayload,
+    })
 
-  await upsertRecipeRecord({
-    vault: input.vault,
-    payload: patched.payload,
-    clearedFields: patched.clearedFields,
-    allowSlugRename: patched.allowSlugRename,
-  })
+    await upsertRecipeRecord({
+      vault: input.vault,
+      payload: patched.payload,
+      clearedFields: patched.clearedFields,
+      allowSlugRename: patched.allowSlugRename,
+    })
 
-  return showRecipeRecord(input.vault, recipe.recipeId)
+    return showRecipeRecord(input.vault, recipe.recipeId)
+  })
 }
 
 export async function deleteRecipeRecord(input: {
@@ -402,26 +348,7 @@ async function requireRecipeRecord(vault: string, lookup: string) {
   }
 }
 
-interface RecipeCoreUpsertInput {
-  vaultRoot: string
-  recipeId?: string
-  slug?: string
-  title?: string
-  status?: string
-  summary?: string
-  cuisine?: string
-  dishType?: string
-  source?: string
-  servings?: number | null
-  prepTimeMinutes?: number | null
-  cookTimeMinutes?: number | null
-  totalTimeMinutes?: number | null
-  tags?: string[]
-  ingredients?: string[]
-  steps?: string[]
-  relatedGoalIds?: string[]
-  relatedConditionIds?: string[]
-}
+type RecipeCoreUpsertInput = Parameters<RecipeCoreRuntime['upsertRecipe']>[0]
 
 function buildRecipeCoreInput(input: {
   vault: string

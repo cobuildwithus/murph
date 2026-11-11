@@ -31,13 +31,6 @@ export interface SampleThresholdSummary {
   longestRunSeconds: number;
 }
 
-export interface SampleWindowScreen {
-  profile: SampleSummaryProfile;
-  level: "normal_oxygen_trace" | "borderline_oxygen_trace" | "concerning_oxygen_trace";
-  reasons: string[];
-  caveat: string;
-}
-
 export interface SampleWindowSummary {
   stream: string;
   unit: string | null;
@@ -55,7 +48,6 @@ export interface SampleWindowSummary {
   thresholds: SampleThresholdSummary[];
   gaps: SampleWindowGap[];
   warnings: string[];
-  screen?: SampleWindowScreen;
 }
 
 interface NormalizedSample {
@@ -81,7 +73,14 @@ export function summarizeSampleSeries(input: SampleSeriesSummaryInput): SampleWi
     ? secondsBetween(normalized[0]?.epochMs ?? 0, normalized[normalized.length - 1]?.epochMs ?? 0)
     : null;
   const values = numeric.map((sample) => sample.value).filter((value): value is number => value !== null);
-  const sumValue = values.reduce((sum, value) => sum + value, 0);
+  let sumValue = 0;
+  let minValue = Infinity;
+  let maxValue = -Infinity;
+  for (const value of values) {
+    sumValue += value;
+    minValue = Math.min(minValue, value);
+    maxValue = Math.max(maxValue, value);
+  }
   const summary: SampleWindowSummary = {
     stream: input.stream,
     unit: normalizeUnit(input.unit),
@@ -93,17 +92,13 @@ export function summarizeSampleSeries(input: SampleSeriesSummaryInput): SampleWi
     lastSampleAt: normalized[normalized.length - 1]?.recordedAt ?? null,
     durationSeconds,
     sampleIntervalSeconds,
-    minValue: values.length > 0 ? Math.min(...values) : null,
-    maxValue: values.length > 0 ? Math.max(...values) : null,
+    minValue: values.length > 0 ? minValue : null,
+    maxValue: values.length > 0 ? maxValue : null,
     averageValue: values.length > 0 ? round4(sumValue / values.length) : null,
     thresholds: thresholdSummaries,
     gaps,
     warnings: buildWarnings(input, normalized, numeric),
   };
-
-  if (input.profile === "oxygen-night" && input.stream === "spo2") {
-    summary.screen = summarizeOxygenNightScreen(thresholdSummaries);
-  }
 
   return summary;
 }
@@ -315,36 +310,6 @@ function resolveSampleDurationSeconds(
   }
 
   return sampleIntervalSeconds ?? 1;
-}
-
-function summarizeOxygenNightScreen(
-  thresholds: readonly SampleThresholdSummary[],
-): SampleWindowScreen {
-  const below90 = thresholds.find((entry) => entry.below === 90);
-  const below88 = thresholds.find((entry) => entry.below === 88);
-  const below90Seconds = below90?.durationSeconds ?? 0;
-  const below88Seconds = below88?.durationSeconds ?? 0;
-  const longestBelow90 = below90?.longestRunSeconds ?? 0;
-  const reasons: string[] = [];
-  let level: SampleWindowScreen["level"] = "normal_oxygen_trace";
-
-  if (below90Seconds > 300 || longestBelow90 > 120 || below88Seconds > 60) {
-    level = "concerning_oxygen_trace";
-    reasons.push("Low-oxygen time or sustained low-oxygen runs were detected.");
-  } else if (below90Seconds > 60 || longestBelow90 > 30 || below88Seconds > 0) {
-    level = "borderline_oxygen_trace";
-    reasons.push("Low-oxygen time was present but not strongly sustained.");
-  } else {
-    reasons.push("Time below 90% was brief.");
-    reasons.push("No sustained low-oxygen clusters were detected.");
-  }
-
-  return {
-    profile: "oxygen-night",
-    level,
-    reasons,
-    caveat: "This summarizes oxygen samples only and does not diagnose or rule out sleep apnea.",
-  };
 }
 
 function buildWarnings(

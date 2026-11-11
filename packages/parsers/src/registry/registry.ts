@@ -4,11 +4,7 @@ import type {
   ProviderAvailability,
   ProviderSelection,
 } from "../contracts/provider.js";
-import {
-  DEFAULT_PROVIDER_RANKING_POLICY,
-  scoreProvider,
-  type ProviderRankingPolicy,
-} from "./policy.js";
+
 
 export interface ParserRegistry {
   readonly providers: readonly ParserProvider[];
@@ -19,7 +15,6 @@ export interface ParserRegistry {
 
 export function createParserRegistry(
   providers: ParserProvider[],
-  policy: ProviderRankingPolicy = DEFAULT_PROVIDER_RANKING_POLICY,
 ): ParserRegistry {
   const availabilityCache = new Map<string, Promise<ProviderAvailability>>();
 
@@ -52,11 +47,10 @@ export function createParserRegistry(
         candidates.push({
           provider,
           availability,
-          score: scoreProvider(provider, policy),
         });
       }
 
-      return candidates.sort((left, right) => right.score - left.score || left.provider.id.localeCompare(right.provider.id));
+      return candidates;
     },
     async select(request) {
       const [selection] = await this.listCandidates(request);

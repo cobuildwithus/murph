@@ -118,7 +118,7 @@ function selectMetricSeriesRowsByPolicy(
 
   return groupMetricPointsByDate(points).flatMap((datePoints) => {
     const selected = duplicatePolicy === "selection-policy"
-      ? selectMetricValue({ metricKey: definition.key, points: datePoints }).point ?? datePoints.at(-1) ?? null
+      ? selectMetricValue({ metricKey: definition.key, points: datePoints }).point
       : datePoints.at(-1) ?? null;
     const row = selected ? metricPointToSeriesPoint(selected, definition) : null;
     return row ? [row] : [];

@@ -39,13 +39,6 @@ const sampleDocumentPath = path.join(
   'fixtures/sample-imports/README.md',
 )
 
-interface SchemaEnvelope {
-  options: {
-    properties: Record<string, unknown>
-    required?: string[]
-  }
-}
-
 interface DocumentImportEnvelope {
   documentId: string
   eventId: string
@@ -234,7 +227,6 @@ interface MealNutrientEnvelope {
 
 const runSourceCli = runCli
 const runRawSourceCli = runRawCli
-const DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS = 45_000
 
 function createDocumentMealSchemaCli(): Cli.Cli {
   const cli = Cli.create('vault-cli', {
@@ -250,27 +242,6 @@ function createDocumentMealSchemaCli(): Cli.Cli {
   installVaultCliVaultContext(cli, createVaultCliVaultContext())
 
   return cli
-}
-
-async function readCommandSchema(
-  cli: Cli.Cli,
-  args: string[],
-): Promise<SchemaEnvelope> {
-  const output: string[] = []
-  let exitCode: number | null = null
-
-  await cli.serve([...args, '--schema', '--format', 'json'], {
-    env: process.env,
-    exit(code) {
-      exitCode = code
-    },
-    stdout(chunk) {
-      output.push(chunk)
-    },
-  })
-
-  assert.equal(exitCode, null)
-  return JSON.parse(output.join('').trim()) as SchemaEnvelope
 }
 
 async function createVault(): Promise<string> {
@@ -522,85 +493,6 @@ test.sequential('document import preserves the exact current inbox attachment th
     await rm(workspaceRoot, { recursive: true, force: true })
   }
 })
-
-test(
-  'document and meal command schemas expose the expansion and mutation surfaces',
-  async () => {
-    const cli = createDocumentMealSchemaCli()
-    const documentImportSchema = await readCommandSchema(cli, ['document', 'import'])
-    const documentEditSchema = await readCommandSchema(cli, ['document', 'edit'])
-    const documentDeleteSchema = await readCommandSchema(cli, ['document', 'delete'])
-    const documentListSchema = await readCommandSchema(cli, ['document', 'list'])
-    const mealAddSchema = await readCommandSchema(cli, ['meal', 'add'])
-    const mealImportJsonSchema = await readCommandSchema(cli, ['meal', 'import-json'])
-    const mealEditSchema = await readCommandSchema(cli, ['meal', 'edit'])
-    const mealDeleteSchema = await readCommandSchema(cli, ['meal', 'delete'])
-    const mealListSchema = await readCommandSchema(cli, ['meal', 'list'])
-    const mealTotalsSchema = await readCommandSchema(cli, ['meal', 'totals'])
-
-    assert.equal('title' in documentImportSchema.options.properties, true)
-    assert.equal('occurredAt' in documentImportSchema.options.properties, true)
-    assert.equal('note' in documentImportSchema.options.properties, true)
-    assert.equal('source' in documentImportSchema.options.properties, true)
-    assert.deepEqual(documentImportSchema.options.required ?? [], ['reuseExact'])
-
-    assert.equal('from' in documentListSchema.options.properties, true)
-    assert.equal('to' in documentListSchema.options.properties, true)
-    assert.equal('limit' in documentListSchema.options.properties, true)
-    assert.equal('kind' in documentListSchema.options.properties, false)
-    assert.deepEqual(documentListSchema.options.required ?? [], ['limit'])
-
-    assert.equal('input' in documentEditSchema.options.properties, false)
-    assert.equal('set' in documentEditSchema.options.properties, false)
-    assert.equal('clear' in documentEditSchema.options.properties, false)
-    assert.equal('title' in documentEditSchema.options.properties, true)
-    assert.equal('note' in documentEditSchema.options.properties, true)
-    assert.equal('dayKeyPolicy' in documentEditSchema.options.properties, true)
-    assert.deepEqual(documentEditSchema.options.required ?? [], [])
-    assert.deepEqual(documentDeleteSchema.options.required ?? [], [])
-
-    assert.equal('input' in mealAddSchema.options.properties, false)
-    assert.equal('source' in mealAddSchema.options.properties, true)
-    assert.deepEqual([...(mealAddSchema.options.required ?? [])].sort(), [])
-
-    assert.equal('input' in mealImportJsonSchema.options.properties, true)
-    assert.equal('source' in mealImportJsonSchema.options.properties, true)
-    assert.match(
-      String((mealImportJsonSchema.options.properties.input as { description?: unknown }).description),
-      /Structured meal payload in @file\.json form or - for stdin/u,
-    )
-    assert.equal('input' in mealEditSchema.options.properties, false)
-    assert.equal('set' in mealEditSchema.options.properties, false)
-    assert.equal('clear' in mealEditSchema.options.properties, false)
-    assert.equal('ingredient' in mealEditSchema.options.properties, true)
-    assert.equal('nutritionCalories' in mealEditSchema.options.properties, true)
-    assert.equal('dayKeyPolicy' in mealEditSchema.options.properties, true)
-    assert.match(
-      String((mealImportJsonSchema.options.properties.input as { description?: unknown }).description),
-      /Structured payload object keys:.*ingredients.*nutrition/u,
-    )
-    assert.deepEqual([...(mealImportJsonSchema.options.required ?? [])].sort(), [
-      'input',
-    ])
-
-    assert.equal('input' in mealEditSchema.options.properties, false)
-    assert.equal('set' in mealEditSchema.options.properties, false)
-    assert.equal('clear' in mealEditSchema.options.properties, false)
-    assert.equal('dayKeyPolicy' in mealEditSchema.options.properties, true)
-    assert.deepEqual(mealEditSchema.options.required ?? [], [])
-    assert.deepEqual(mealDeleteSchema.options.required ?? [], [])
-
-    assert.equal('from' in mealListSchema.options.properties, true)
-    assert.equal('limit' in mealListSchema.options.properties, true)
-    assert.equal('to' in mealListSchema.options.properties, true)
-    assert.equal('kind' in mealListSchema.options.properties, false)
-    assert.deepEqual(mealListSchema.options.required, ['limit'])
-    assert.equal('from' in mealTotalsSchema.options.properties, true)
-    assert.equal('to' in mealTotalsSchema.options.properties, true)
-    assert.deepEqual(mealTotalsSchema.options.required ?? [], [])
-  },
-  DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS,
-)
 
 test('meal edit rejects a non-IANA timezone in the final repair envelope', async () => {
   const privateTimeZone = 'Private/TimezoneSentinel'

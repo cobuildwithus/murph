@@ -303,6 +303,28 @@ test("canonical write lock releases its queue slot after a failed acquisition", 
   }
 });
 
+test("canonical write lock waits for a concurrent stale cleanup claim to clear", async () => {
+  const { acquireCanonicalWriteLock, inspectCanonicalWriteLock, CANONICAL_WRITE_LOCK_DIRECTORY } =
+    await loadCanonicalWriteLockModule();
+  const vaultRoot = await makeScratchRoot();
+  const lockPath = path.join(vaultRoot, CANONICAL_WRITE_LOCK_DIRECTORY);
+  const claimPath = path.join(lockPath, ".cleanup-claim");
+  await fs.mkdir(lockPath, { recursive: true });
+  await fs.writeFile(claimPath, "concurrent-cleaner");
+
+  const acquisition = acquireCanonicalWriteLock(vaultRoot, { timeoutMs: 1_000 }).then(
+    (handle) => ({ ok: true as const, handle }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(await fs.readFile(claimPath, "utf8"), "concurrent-cleaner");
+  await fs.rm(claimPath);
+  const result = await acquisition;
+  if (!result.ok) throw result.error;
+  await result.handle.release();
+  assert.equal((await inspectCanonicalWriteLock(vaultRoot)).state, "unlocked");
+});
+
 test("canonical write lock rejects stale held locks with a rich VaultError", async () => {
   const actualRuntimeState = await vi.importActual<typeof import("@murphai/runtime-state/node")>(
     "@murphai/runtime-state/node",
@@ -331,7 +353,7 @@ test("canonical write lock rejects stale held locks with a rich VaultError", asy
   const vaultRoot = await makeScratchRoot("murph-core-lock-stale-held-");
 
   await assert.rejects(
-    () => acquireCanonicalWriteLock(vaultRoot),
+    () => acquireCanonicalWriteLock(vaultRoot, { timeoutMs: 0 }),
     (error: unknown) => {
       assert.equal((error as { name?: string }).name, "VaultError");
       const lockError = error as {
@@ -404,7 +426,7 @@ test("canonical write lock re-inspects EEXIST failures and either rethrows or re
   );
 
   await assert.rejects(
-    () => acquireCanonicalWriteLock(staleVaultRoot),
+    () => acquireCanonicalWriteLock(staleVaultRoot, { timeoutMs: 0 }),
     (error: unknown) => {
       assert.equal((error as { name?: string }).name, "VaultError");
       const lockError = error as {

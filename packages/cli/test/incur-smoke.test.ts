@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
 import { Cli, Errors, Mcp, Parser, z } from 'incur'
-import { EVENT_KINDS } from '@murphai/contracts'
+import { Validator, type Schema } from '@cfworker/json-schema'
 import { initializeVault } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { localParallelCliTest as test } from './local-parallel-test.js'
@@ -39,7 +39,6 @@ const require = createRequire(import.meta.url)
 const packageJson = require('../package.json') as { version?: string }
 const INCUR_ROOT_HELP_TIMEOUT_MS = 90_000
 const INCUR_HELP_TIMEOUT_MS = 45_000
-const INCUR_SCHEMA_TIMEOUT_MS = 45_000
 const INCUR_KNOWLEDGE_BOUNDARY_TIMEOUT_MS = 120_000
 const DELETED_COMMONS_COMMANDS = [
   'commons search',
@@ -2411,6 +2410,289 @@ test('read-only vault commands reject uninitialized vault roots before query rea
   }
 })
 
+test('production command schemas expose typed fields and explicit JSON imports', async () => {
+  const cases: Array<{
+    command: string
+    args: string[]
+    required: string[]
+    types: Record<string, string>
+    absent?: string[]
+  }> = [
+    {
+      command: 'init',
+      args: [],
+      required: [],
+      types: { timezone: 'string' },
+    },
+    {
+      command: 'provider edit',
+      args: ['id'],
+      required: [],
+      types: { title: 'string', clearWebsite: 'boolean' },
+    },
+    {
+      command: 'food edit',
+      args: ['id'],
+      required: [],
+      types: { title: 'string', alias: 'array', clearNote: 'boolean' },
+    },
+    {
+      command: 'recipe edit',
+      args: ['id'],
+      required: [],
+      types: { ingredient: 'array', step: 'array', clearSummary: 'boolean' },
+    },
+    {
+      command: 'event edit',
+      args: ['id'],
+      required: [],
+      types: { title: 'string', dayKeyPolicy: 'string' },
+      absent: ['kind'],
+    },
+    {
+      command: 'event scaffold',
+      args: [],
+      required: ['kind'],
+      types: { kind: 'string' },
+    },
+    {
+      command: 'samples add',
+      args: [],
+      required: ['stream', 'unit', 'recordedAt'],
+      types: { stream: 'string', value: 'number', stage: 'string' },
+    },
+    {
+      command: 'food schedule',
+      args: ['title'],
+      required: ['time'],
+      types: { time: 'string', note: 'string', slug: 'string' },
+    },
+    {
+      command: 'food unschedule',
+      args: ['id'],
+      required: [],
+      types: {},
+    },
+    {
+      command: 'document import',
+      args: ['file'],
+      required: ['reuseExact'],
+      types: { title: 'string', reuseExact: 'boolean' },
+    },
+    {
+      command: 'document edit',
+      args: ['id'],
+      required: [],
+      types: { note: 'string', dayKeyPolicy: 'string' },
+    },
+    {
+      command: 'meal add',
+      args: [],
+      required: [],
+      types: { source: 'string' },
+    },
+    {
+      command: 'meal edit',
+      args: ['id'],
+      required: [],
+      types: { ingredient: 'array', nutritionCalories: 'number', dayKeyPolicy: 'string' },
+    },
+    {
+      command: 'meal totals',
+      args: [],
+      required: [],
+      types: { from: 'string', to: 'string' },
+    },
+    {
+      command: 'workout add',
+      args: [],
+      required: [],
+      types: { duration: 'integer', type: 'string', distanceKm: 'number' },
+    },
+    {
+      command: 'workout edit',
+      args: ['id'],
+      required: [],
+      types: { duration: 'integer', dayKeyPolicy: 'string' },
+    },
+    {
+      command: 'workout format save',
+      args: [],
+      required: [],
+      types: { exercise: 'array' },
+    },
+    {
+      command: 'workout delete',
+      args: ['id'],
+      required: ['expectedRevision'],
+      types: { expectedRevision: 'integer' },
+    },
+    {
+      command: 'intervention add',
+      args: ['text'],
+      required: [],
+      types: { duration: 'integer', experiment: 'string', skipExperimentLink: 'boolean', allowOutOfWindow: 'boolean' },
+    },
+    {
+      command: 'intervention edit',
+      args: ['id'],
+      required: [],
+      types: { sessionStatus: 'string', dayKeyPolicy: 'string' },
+    },
+    {
+      command: 'experiment edit',
+      args: ['id'],
+      required: [],
+      types: { title: 'string', baselineDays: 'integer', scheduleKind: 'string', setupAnswer: 'array' },
+      absent: ['protocolKey', 'pageRevisionId', 'runSpecRevisionId', 'testPlanId', 'hydrateProtocolDefaults', 'schedule', 'scheduleJson'],
+    },
+    {
+      command: 'experiment checkpoint',
+      args: ['lookup'],
+      required: [],
+      types: { occurredAt: 'string', note: 'string' },
+    },
+    {
+      command: 'experiment session log',
+      args: ['lookup'],
+      required: [],
+      types: { durationMinutes: 'integer', temperatureC: 'number' },
+    },
+    {
+      command: 'experiment context log',
+      args: ['lookup'],
+      required: [],
+      types: { contextType: 'string', dose: 'number' },
+    },
+    {
+      command: 'experiment session attach',
+      args: ['lookup', 'eventId'],
+      required: [],
+      types: { replace: 'boolean', allowOutOfWindow: 'boolean' },
+    },
+    {
+      command: 'automation save',
+      args: ['title'],
+      required: ['instructions'],
+      types: { instructions: 'string', scheduleKind: 'string', channel: 'string' },
+    },
+    {
+      command: 'automation edit',
+      args: ['lookup'],
+      required: [],
+      types: { instructions: 'string', clearAssistantTargetOverride: 'boolean' },
+    },
+    {
+      command: 'automation show',
+      args: ['lookup'],
+      required: [],
+      types: {},
+    },
+    {
+      command: 'memory upsert',
+      args: ['text'],
+      required: ['section'],
+      types: { section: 'string' },
+    },
+    {
+      command: 'memory set-name',
+      args: ['displayName'],
+      required: [],
+      types: {},
+    },
+    {
+      command: 'memory update',
+      args: ['memoryId', 'text'],
+      required: [],
+      types: { section: 'string' },
+    },
+    {
+      command: 'memory show',
+      args: [],
+      required: [],
+      types: { compact: 'boolean' },
+    },
+    {
+      command: 'provider list',
+      args: [],
+      required: ['limit'],
+      types: { status: 'string' },
+      absent: ['from', 'to'],
+    },
+    {
+      command: 'event list',
+      args: [],
+      required: ['limit'],
+      types: { kind: 'string', tag: 'array', experiment: 'string' },
+    },
+    {
+      command: 'blood-test list',
+      args: [],
+      required: ['limit'],
+      types: { text: 'string', status: 'string', from: 'string', to: 'string' },
+      absent: ['kind'],
+    },
+    {
+      command: 'immunization list',
+      args: [],
+      required: ['limit'],
+      types: { from: 'string', to: 'string' },
+      absent: ['kind', 'status'],
+    },
+    {
+      command: 'document list',
+      args: [],
+      required: ['limit'],
+      types: { from: 'string', to: 'string' },
+      absent: ['kind', 'status'],
+    },
+    {
+      command: 'meal list',
+      args: [],
+      required: ['limit'],
+      types: { from: 'string', to: 'string' },
+      absent: ['kind'],
+    },
+    {
+      command: 'query projection status',
+      args: [],
+      required: [],
+      types: { requestId: 'string' },
+      absent: ['text', 'backend'],
+    },
+  ]
+  for (const noun of ['provider', 'food', 'recipe', 'event', 'document', 'meal', 'intervention']) {
+    cases.push({ command: `${noun} delete`, args: ['id'], required: [], types: {} })
+  }
+  for (const noun of ['provider', 'food', 'recipe', 'samples', 'goal', 'automation', 'meal']) {
+    cases.push({ command: `${noun} import-json`, args: [], required: ['input'], types: { input: 'string' } })
+  }
+
+  for (const { command, args, required, types, absent = [] } of cases) {
+    const schema = JSON.parse(
+      await runSourceCliRaw([...command.split(' '), '--schema', '--format', 'json']),
+    ) as {
+      args: Schema & { required?: string[] }
+      options: Schema & { properties: Record<string, { type?: string; items?: { type?: string } }>; required?: string[] }
+      output?: Schema
+    }
+    assert.ok(schema.options, command)
+    assert.deepEqual(schema.args?.required ?? [], args, `${command} arguments`)
+    assert.deepEqual(schema.options.required ?? [], required, `${command} required options`)
+    for (const [field, type] of Object.entries(types)) {
+      assert.equal(schema.options.properties[field]?.type, type, `${command} ${field}`)
+      if (type === 'array') assert.equal(schema.options.properties[field]?.items?.type, 'string', `${command} repeatable ${field}`)
+    }
+    for (const field of [...absent, ...(command.endsWith('edit') ? ['set', 'clear'] : []), ...(command.endsWith('import-json') ? [] : ['input'])]) {
+      assert.equal(field in schema.options.properties, false, `${command} ${field}`)
+    }
+    for (const part of [schema.args, schema.options, schema.output]) {
+      if (part) assert.doesNotThrow(() => new Validator(part), `${command} JSON Schema`)
+    }
+  }
+})
+
+
 test('search query schema exposes retrieval-specific filters', async () => {
   const schema = JSON.parse(
     await runSourceCliRaw(['search', 'query', '--schema', '--format', 'json']),
@@ -2691,64 +2973,6 @@ test('food search-labels-batch schema exposes hosted batch lookup inputs', async
 })
 
 
-
-test('blood-test list schema exposes targeted text, date-range, and status filters', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['blood-test', 'list', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('status' in schema.options.properties, true)
-  assert.equal('from' in schema.options.properties, true)
-  assert.equal('to' in schema.options.properties, true)
-  assert.equal('text' in schema.options.properties, true)
-  assert.equal('kind' in schema.options.properties, false)
-  assert.deepEqual(schema.options.required, ['limit'])
-})
-
-test('immunization list schema stays scoped to shared date-range filters', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['immunization', 'list', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('status' in schema.options.properties, false)
-  assert.equal('from' in schema.options.properties, true)
-  assert.equal('to' in schema.options.properties, true)
-  assert.equal('kind' in schema.options.properties, false)
-  assert.deepEqual(schema.options.required, ['limit'])
-})
-
-test('query projection status schema stays scoped to projection-management options', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw([
-      'query',
-      'projection',
-      'status',
-      '--schema',
-      '--format',
-      'json',
-    ]),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('text' in schema.options.properties, false)
-  assert.equal('backend' in schema.options.properties, false)
-  assert.deepEqual(Object.keys(schema.options.properties), ['requestId'])
-  assert.deepEqual(schema.options.required ?? [], [])
-})
 
 test('knowledge commands expose the expected schema', async () => {
   const upsertSchema = JSON.parse(
@@ -3285,231 +3509,6 @@ test('knowledge upsert rejects whitespace-only bodies through the CLI boundary',
   }
 })
 
-test('automation save and edit schemas expose typed automation fields and a separate JSON import fallback', async () => {
-  const saveSchema = JSON.parse(
-    await runSourceCliRaw(['automation', 'save', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('title' in saveSchema.args.properties, true)
-  assert.deepEqual(saveSchema.args.required, ['title'])
-  assert.equal('input' in saveSchema.options.properties, false)
-  for (const field of [
-    'id',
-    'slug',
-    'status',
-    'summary',
-    'tags',
-    'continuityPolicy',
-    'instructions',
-    'scheduleKind',
-    'scheduleAt',
-    'scheduleEveryMs',
-    'scheduleCron',
-    'scheduleLocalTime',
-    'channel',
-    'deliveryTarget',
-    'identityId',
-    'participantId',
-    'threadId',
-    'assistantTargetOverrideModel',
-    'assistantTargetOverrideModelProvider',
-    'assistantTargetOverrideReasoningEffort',
-  ]) {
-    assert.equal(field in saveSchema.options.properties, true, field)
-  }
-
-  const editSchema = JSON.parse(
-    await runSourceCliRaw(['automation', 'edit', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('lookup' in editSchema.args.properties, true)
-  assert.deepEqual(editSchema.args.required, ['lookup'])
-  assert.equal('input' in editSchema.options.properties, false)
-  assert.equal(editSchema.options.required?.includes('instructions') ?? false, false)
-  for (const field of [
-    'title',
-    'continuityPolicy',
-    'instructions',
-    'channel',
-    'assistantTargetOverrideModel',
-    'assistantTargetOverrideModelProvider',
-    'assistantTargetOverrideReasoningEffort',
-    'clearAssistantTargetOverride',
-  ]) {
-    assert.equal(field in editSchema.options.properties, true, field)
-  }
-
-  const importJsonSchema = JSON.parse(
-    await runSourceCliRaw(['automation', 'import-json', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('input' in importJsonSchema.options.properties, true)
-  assert.deepEqual(importJsonSchema.options.required, ['input'])
-
-  const listSchema = JSON.parse(
-    await runSourceCliRaw(['automation', 'list', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('includeBody' in listSchema.options.properties, false)
-}, INCUR_SCHEMA_TIMEOUT_MS)
-
-test('automation show schema accepts an id-or-slug lookup', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['automation', 'show', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('lookup' in schema.args.properties, true)
-  assert.deepEqual(schema.args.required, ['lookup'])
-  assert.deepEqual(schema.options.required ?? [], [])
-}, INCUR_SCHEMA_TIMEOUT_MS)
-
-test('memory upsert schema exposes create-only canonical memory fields', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['memory', 'upsert', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, {
-        description?: string
-      }>
-      required?: string[]
-    }
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('text' in schema.args.properties, true)
-  assert.match(
-    String(schema.args.properties.text?.description ?? ''),
-    /Memory text to store/u,
-  )
-  assert.deepEqual(schema.args.required, ['text'])
-  assert.equal('section' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['section'])
-}, INCUR_SCHEMA_TIMEOUT_MS)
-
-test('memory set-name schema exposes the typed preferred-name command', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['memory', 'set-name', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, {
-        description?: string
-      }>
-      required?: string[]
-    }
-    options: {
-      required?: string[]
-    }
-  }
-
-  assert.equal('displayName' in schema.args.properties, true)
-  assert.match(
-    String(schema.args.properties.displayName?.description ?? ''),
-    /Preferred display name/u,
-  )
-  assert.deepEqual(schema.args.required, ['displayName'])
-  assert.deepEqual(schema.options.required ?? [], [])
-}, INCUR_SCHEMA_TIMEOUT_MS)
-
-test('memory update schema requires a memory id and text, with an optional replacement section', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['memory', 'update', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, {
-        description?: string
-      }>
-      required?: string[]
-    }
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('memoryId' in schema.args.properties, true)
-  assert.equal('text' in schema.args.properties, true)
-  assert.match(
-    String(schema.args.properties.memoryId?.description ?? ''),
-    /Canonical memory record id/u,
-  )
-  assert.deepEqual(schema.args.required, ['memoryId', 'text'])
-  assert.equal('section' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required ?? [], [])
-}, INCUR_SCHEMA_TIMEOUT_MS)
-
-test('memory show schema accepts an optional memory id and compact projection', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['memory', 'show', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, {
-        description?: string
-      }>
-      required?: string[]
-    }
-    options: {
-      properties: Record<string, {
-        description?: string
-        type?: string
-      }>
-      required?: string[]
-    }
-  }
-
-  assert.equal('memoryId' in schema.args.properties, true)
-  assert.match(
-    String(schema.args.properties.memoryId?.description ?? ''),
-    /omit to return the whole memory document/u,
-  )
-  assert.deepEqual(schema.args.required ?? [], [])
-  assert.equal(schema.options.properties.compact?.type, 'boolean')
-  assert.match(
-    String(schema.options.properties.compact?.description ?? ''),
-    /document existence plus each record's id, section, and text/u,
-  )
-  assert.deepEqual(schema.options.required ?? [], [])
-}, INCUR_SCHEMA_TIMEOUT_MS)
-
 test('automation help points operators at canonical automations', async () => {
   const saveHelp = await runSourceCliRaw(['automation', 'save', '--help'])
   const saveDiscovery = await runSourceCliRaw(['automation', 'save', '--llms-full'])
@@ -3546,59 +3545,6 @@ test('automation help points operators at canonical automations', async () => {
   }
   assert.match(scaffoldHelp, /advanced automation JSON payload template/u)
 }, INCUR_HELP_TIMEOUT_MS)
-
-test('food schedule schema exposes the recurring food options', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['food', 'schedule', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('title' in schema.args.properties, true)
-  assert.deepEqual(schema.args.required, ['title'])
-  assert.equal('time' in schema.options.properties, true)
-  assert.equal('note' in schema.options.properties, true)
-  assert.equal('slug' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['time'])
-})
-
-test('food unschedule schema exposes the recurring food lookup', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['food', 'unschedule', '--schema', '--format', 'json']),
-  ) as {
-    args: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('id' in schema.args.properties, true)
-  assert.deepEqual(schema.args.required, ['id'])
-  assert.deepEqual(schema.options.required ?? [], [])
-  assert.equal('input' in schema.options.properties, false)
-  assert.equal('set' in schema.options.properties, false)
-  assert.equal('clear' in schema.options.properties, false)
-})
-
-test('food help exposes schedule and no longer exposes add-daily', async () => {
-  const help = await runSourceCliRaw(['food', '--help'])
-
-  assert.match(help, /rename\s+Rename one remembered food while preserving its canonical id\./u)
-  assert.match(help, /schedule\s+Schedule one remembered food for daily auto-log meal creation\./u)
-  assert.match(help, /unschedule\s+Unschedule one remembered food from daily auto-log meal creation\./u)
-  assert.doesNotMatch(help, /add-daily/u)
-})
 
 test('inbox command group is not exposed', async () => {
   const help = await runSourceCliRaw(['--help'])
@@ -3680,69 +3626,6 @@ test('health command help surfaces examples and hints through Incur metadata', a
   )
 }, INCUR_HELP_TIMEOUT_MS)
 
-test('health list help preserves command-family option shapes', async () => {
-  const providerHelp = await runSourceCliRaw(['provider', 'list', '--help'])
-  const eventHelp = await runSourceCliRaw(['event', 'list', '--help'])
-  const documentHelp = await runSourceCliRaw(['document', 'list', '--help'])
-
-  assert.match(providerHelp, /^\s+--status\b/mu)
-  assert.doesNotMatch(providerHelp, /^\s+--from\b/mu)
-  assert.doesNotMatch(providerHelp, /^\s+--to\b/mu)
-
-  assert.match(eventHelp, /^\s+--kind\b/mu)
-  assert.match(eventHelp, /^\s+--from\b/mu)
-  assert.match(eventHelp, /^\s+--to\b/mu)
-  assert.match(eventHelp, /^\s+--tag\b/mu)
-  assert.match(eventHelp, /^\s+--experiment\b/mu)
-  assert.match(
-    eventHelp,
-    new RegExp(
-      `--kind <${EVENT_KINDS.join('\\|')}>\\s+Optional canonical event kind filter such as encounter, procedure, test, adverse_effect, or exposure\\.`,
-      'u',
-    ),
-  )
-  assert.match(
-    eventHelp,
-    /--tag <array>\s+Optional tag filter\. Repeat --tag to match any listed tag\./u,
-  )
-  assert.match(
-    eventHelp,
-    /--experiment <string>\s+Optional experiment slug filter for events linked to one experiment\./u,
-  )
-
-  assert.match(documentHelp, /^\s+--from\b/mu)
-  assert.match(documentHelp, /^\s+--to\b/mu)
-  assert.doesNotMatch(documentHelp, /^\s+--status\b/mu)
-  assert.match(documentHelp, /^\s+--limit\b/mu)
-}, INCUR_HELP_TIMEOUT_MS)
-
-test('owned date-range list help reuses consistent date and limit descriptions', async () => {
-  const journalListHelp = await runSourceCliRaw(['journal', 'list', '--help'])
-  const workoutListHelp = await runSourceCliRaw(['workout', 'list', '--help'])
-  const eventListHelp = await runSourceCliRaw(['event', 'list', '--help'])
-
-  for (const help of [journalListHelp, workoutListHelp, eventListHelp]) {
-    assert.match(
-      help,
-      /--from <string>\s+Optional inclusive lower date bound in YYYY-MM-DD form\./u,
-    )
-    assert.match(
-      help,
-      /--to <string>\s+Optional inclusive upper date bound in YYYY-MM-DD form\./u,
-    )
-  }
-  for (const help of [journalListHelp, eventListHelp]) {
-    assert.match(
-      help,
-      /--limit <number>\s+Maximum number of results to return, from 1 to 200\. \(default: 10\)/u,
-    )
-  }
-  assert.match(
-    workoutListHelp,
-    /--limit <number>\s+Maximum number of results to return\. Defaults to 5\./u,
-  )
-}, INCUR_HELP_TIMEOUT_MS)
-
 test('event list help discloses the enforced limit cap and rejects oversized limits before reading', async () => {
   const help = await runSourceCliRaw(['event', 'list', '--help'])
   assert.match(
@@ -3795,34 +3678,6 @@ test('event list help discloses the enforced limit cap and rejects oversized lim
     await rm(tempRoot, { force: true, recursive: true })
   }
 }, INCUR_KNOWLEDGE_BOUNDARY_TIMEOUT_MS)
-
-test('command schema reflects only domain-specific options', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['init', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.deepEqual(Object.keys(schema.options.properties), ['requestId', 'timezone'])
-  assert.deepEqual(schema.options.required ?? [], [])
-}, INCUR_HELP_TIMEOUT_MS)
-
-test('health command schema remains JSON-Schema-safe', async () => {
-  const schema = JSON.parse(
-    await runSourceCliRaw(['goal', 'import-json', '--schema', '--format', 'json']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-
-  assert.equal('input' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['input'])
-}, INCUR_HELP_TIMEOUT_MS)
 
 test('full-output json exposes the native Incur success envelope', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-'))

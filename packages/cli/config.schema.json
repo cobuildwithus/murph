@@ -9970,11 +9970,6 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
-                        "preset": {
-                          "description": "Optional preset id that supplies stream, delimiter, and column defaults.",
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "stream": {
                           "description": "Optional stream identifier. Recognized aliases such as SpO2 are accepted, and the importer can infer the stream from recognizable CSV headers when unambiguous.",
                           "type": "string",
@@ -9991,7 +9986,7 @@
                           "minLength": 1
                         },
                         "unit": {
-                          "description": "Optional unit override. When omitted, the importer will use the preset unit or a stream-specific default.",
+                          "description": "Optional unit override. When omitted, the importer will use a stream-specific default.",
                           "type": "string",
                           "minLength": 1
                         },
@@ -10039,11 +10034,6 @@
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 128
-                                },
-                                "preset": {
-                                  "description": "Optional preset id that supplies stream, delimiter, and column defaults.",
-                                  "type": "string",
-                                  "minLength": 1
                                 },
                                 "stream": {
                                   "description": "Optional stream identifier. Recognized aliases such as SpO2 are accepted.",
@@ -10093,7 +10083,7 @@
                                   "enum": [
                                     "oxygen-night"
                                   ],
-                                  "description": "Optional summary preset. oxygen-night adds SpO2 thresholds and a cautious oxygen-trace screen."
+                                  "description": "Optional summary preset. oxygen-night adds numerical SpO2 thresholds."
                                 },
                                 "thresholdBelow": {
                                   "description": "Threshold burden to compute as value-below-N. Repeat --threshold-below for multiple thresholds.",
@@ -10124,11 +10114,6 @@
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 128
-                                },
-                                "preset": {
-                                  "description": "Optional preset id that supplies stream, delimiter, and column defaults.",
-                                  "type": "string",
-                                  "minLength": 1
                                 },
                                 "stream": {
                                   "description": "Optional stream identifier. Recognized aliases such as SpO2 are accepted.",
@@ -10238,7 +10223,7 @@
                           "enum": [
                             "oxygen-night"
                           ],
-                          "description": "Optional summary preset. oxygen-night adds SpO2 thresholds and a cautious oxygen-trace screen."
+                          "description": "Optional summary preset. oxygen-night adds numerical SpO2 thresholds."
                         },
                         "thresholdBelow": {
                           "description": "Threshold burden to compute as value-below-N. Repeat --threshold-below for multiple thresholds.",

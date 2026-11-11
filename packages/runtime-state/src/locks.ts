@@ -139,8 +139,14 @@ export async function acquireDirectoryLock<TMetadata>(
       }
 
       if (inspection.inspection.state === "stale" && (options.clearStale ?? true)) {
-        await tryCleanupStaleLockDirectory(options, inspection.snapshot);
-        continue;
+        const cleanup = await tryCleanupStaleLockDirectory(options, inspection.snapshot);
+        if (cleanup === "cleaned") {
+          continue;
+        }
+        // Another cleaner may still own the claim, or may have died before
+        // releasing it. Leave retry policy with the caller instead of trapping
+        // it in an unbounded acquisition loop that bypasses its deadline.
+        throw new DirectoryLockHeldError(inspection.inspection);
       }
 
       throw new DirectoryLockHeldError(inspection.inspection);

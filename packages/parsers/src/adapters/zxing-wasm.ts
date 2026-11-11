@@ -98,10 +98,7 @@ export function createZxingWasmProvider(
 
   return {
     id: "zxing-wasm",
-    locality: "local",
-    openness: "open_source",
-    runtime: "node",
-    priority: 950,
+
     async discover() {
       try {
         const wasmPath = await resolveWasmPath();

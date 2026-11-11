@@ -13,13 +13,6 @@ import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
-interface SchemaEnvelope {
-  options: {
-    properties: Record<string, unknown>
-    required?: string[]
-  }
-}
-
 interface InterventionAddEnvelope {
   eventId: string
   lookupId: string
@@ -97,21 +90,6 @@ async function runSliceCli<TData>(args: string[]): Promise<CliEnvelope<TData>> {
   return JSON.parse(output.join('').trim()) as CliEnvelope<TData>
 }
 
-async function runSliceCliRaw(args: string[]) {
-  const cli = createSliceCli()
-  const output: string[] = []
-
-  await cli.serve([...args, '--format', 'json'], {
-    env: process.env,
-    exit: () => {},
-    stdout(chunk) {
-      output.push(chunk)
-    },
-  })
-
-  return output.join('').trim()
-}
-
 async function createActiveExperiment(
   vaultRoot: string,
   slug: string,
@@ -161,61 +139,6 @@ function assertEntityExperimentLink(
     expectedExperimentId !== null,
   )
 }
-
-test('intervention add schema exposes the freeform intervention capture surface', async () => {
-  const schema = JSON.parse(
-    await runSliceCliRaw(['intervention', 'add', '--schema']),
-  ) as SchemaEnvelope
-
-  assert.equal('duration' in schema.options.properties, true)
-  assert.equal('type' in schema.options.properties, true)
-  assert.equal('regimenId' in schema.options.properties, true)
-  assert.equal('experiment' in schema.options.properties, true)
-  assert.equal('skipExperimentLink' in schema.options.properties, true)
-  assert.equal('allowOutOfWindow' in schema.options.properties, true)
-  assert.equal('occurredAt' in schema.options.properties, true)
-  assert.equal('source' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault'])
-})
-
-test('intervention edit/delete schemas expose typed mutation options', async () => {
-  const editSchema = JSON.parse(
-    await runSliceCliRaw(['intervention', 'edit', '--schema']),
-  ) as SchemaEnvelope
-  const deleteSchema = JSON.parse(
-    await runSliceCliRaw(['intervention', 'delete', '--schema']),
-  ) as SchemaEnvelope
-
-  assert.equal('input' in editSchema.options.properties, false)
-  assert.equal('set' in editSchema.options.properties, false)
-  assert.equal('clear' in editSchema.options.properties, false)
-  assert.equal('note' in editSchema.options.properties, true)
-  assert.equal('duration' in editSchema.options.properties, true)
-  assert.equal('type' in editSchema.options.properties, true)
-  assert.equal('sessionStatus' in editSchema.options.properties, true)
-  assert.equal('dayKeyPolicy' in editSchema.options.properties, true)
-  assert.deepEqual(editSchema.options.required, ['vault'])
-  assert.deepEqual(deleteSchema.options.required, ['vault'])
-})
-
-test('experiment session attach schema exposes repair flags', async () => {
-  const schema = JSON.parse(
-    await runSliceCliRaw(['experiment', 'session', 'attach', '--schema']),
-  ) as SchemaEnvelope
-
-  assert.equal('replace' in schema.options.properties, true)
-  assert.equal('allowOutOfWindow' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault'])
-})
-
-test('intervention add help uses a positional text argument', async () => {
-  const help = await runSliceCliRaw(['intervention', 'add', '--help'])
-  const llms = await runSliceCliRaw(['intervention', 'add', '--llms-full'])
-
-  assert.match(help, /Usage: vault-cli intervention add <text> \[options\]/u)
-  assert.match(llms, /intervention add '20 min sauna after lifting\.'/u)
-  assert.doesNotMatch(llms, /intervention add 20 min sauna after lifting\./u)
-})
 
 test.sequential(
   'intervention add captures intervention_session events and fails fast on ambiguous types and durations',

@@ -3,7 +3,6 @@ import {
   ID_PREFIXES,
   isContractId,
   type FoodUpsertPayload,
-  type FoodNutrition,
   type JsonObject,
 } from '@murphai/contracts'
 import { loadRuntimeModule } from '../runtime-import.js'
@@ -24,111 +23,8 @@ import {
   toVaultCliError,
 } from './vault-usecase-helpers.js'
 
-interface FoodReadModel {
-  foodId: string
-  slug: string
-  title: string
-  status: string
-  schemaVersion?: string
-  docType?: string
-  summary?: string
-  kind?: string
-  brand?: string
-  vendor?: string
-  location?: string
-  serving?: string
-  nutrition?: FoodNutrition | null
-  aliases?: string[]
-  ingredients?: string[]
-  tags?: string[]
-  note?: string
-  attachedRegimenIds?: string[]
-  links?: FoodUpsertPayload['links']
-  relativePath: string
-  markdown: string
-}
-
-interface FoodCoreRuntime {
-  buildDailyFoodScheduledLogSlug(food: {
-    slug: string
-  }): string
-  buildDailyFoodScheduledLogTitle(food: {
-    title: string
-  }): string
-  loadVault(input: {
-    vaultRoot: string
-  }): Promise<{
-    metadata: {
-      timezone?: string | null
-    }
-  }>
-  upsertFood(input: {
-    vaultRoot: string
-    foodId?: string
-    slug?: string
-    allowSlugRename?: boolean
-    title?: string
-    status?: string
-    summary?: string
-    kind?: string
-    brand?: string
-    vendor?: string
-    location?: string
-    serving?: string
-    nutrition?: FoodNutrition | null
-    aliases?: string[]
-    ingredients?: string[]
-    tags?: string[]
-    note?: string
-    attachedRegimenIds?: string[]
-    links?: FoodUpsertPayload['links']
-  }): Promise<{
-    created: boolean
-    record: {
-      foodId: string
-      relativePath: string
-    }
-  }>
-  upsertDailyFoodScheduledLog(input: {
-    vaultRoot: string
-    foodId: string
-    localTime: string
-  }): Promise<{
-    created: boolean
-    record: {
-      scheduledLogId: string
-      title: string
-      slug: string
-      relativePath: string
-    }
-  }>
-  archiveDailyFoodScheduledLog(input: {
-    vaultRoot: string
-    foodId: string
-  }): Promise<{
-    archived: Array<{
-      scheduledLogId: string
-      title: string
-      slug: string
-      relativePath: string
-    }>
-  }>
-  listFoods(vaultRoot: string): Promise<FoodReadModel[]>
-  deleteFood(input: {
-    vaultRoot: string
-    foodId?: string
-    slug?: string
-  }): Promise<{
-    foodId: string
-    relativePath: string
-    deleted: true
-  }>
-  readFood(input: {
-    vaultRoot: string
-    foodId?: string
-    slug?: string
-  }): Promise<FoodReadModel>
-}
+type FoodCoreRuntime = typeof import('@murphai/core')
+type FoodReadModel = Awaited<ReturnType<FoodCoreRuntime['readFood']>>
 
 export type FoodPayload = Omit<FoodUpsertPayload, 'status'> & {
   status?: FoodUpsertPayload['status']
@@ -317,68 +213,71 @@ export async function editFoodRecord(input: {
   set?: string[]
   clear?: string[]
 }) {
-  const food = await requireFoodRecord(input.vault, input.lookup)
-  const patched = await preparePatchedUpsertPayload({
-    record: buildFoodPayload(food),
-    entityIdField: 'foodId',
-    entityId: food.foodId,
-    inputFile: input.inputFile,
-    set: input.set,
-    clear: input.clear,
-    patchLabel: 'food payload',
-    parsePayload: parseFoodPayload,
-  })
+  const core = await loadFoodCoreRuntime()
+  return core.withCanonicalWriteLock(input.vault, async () => {
+    const food = await requireFoodRecord(input.vault, input.lookup)
+    const patched = await preparePatchedUpsertPayload({
+      record: buildFoodPayload(food),
+      entityIdField: 'foodId',
+      entityId: food.foodId,
+      inputFile: input.inputFile,
+      set: input.set,
+      clear: input.clear,
+      patchLabel: 'food payload',
+      parsePayload: parseFoodPayload,
+    })
 
-  await upsertFoodRecord({
-    vault: input.vault,
-    payload: patched.payload,
-    clearedFields: patched.clearedFields,
-    allowSlugRename: patched.allowSlugRename,
-  })
+    await upsertFoodRecord({
+      vault: input.vault,
+      payload: patched.payload,
+      clearedFields: patched.clearedFields,
+      allowSlugRename: patched.allowSlugRename,
+    })
 
-  return showFoodRecord(input.vault, food.foodId)
+    return showFoodRecord(input.vault, food.foodId)
+  })
 }
 
 export async function deleteFoodRecord(input: {
   vault: string
   lookup: string
 }) {
-  const food = await requireFoodRecord(input.vault, input.lookup)
-  const normalizedLookup = input.lookup.trim()
   const core = await loadFoodCoreRuntime()
+  return core.withScheduledLogRegistryLock(input.vault, () =>
+    core.withCanonicalWriteLock(input.vault, async () => {
+      const food = await requireFoodRecord(input.vault, input.lookup)
 
-  try {
-    await core.deleteFood({
-      vaultRoot: input.vault,
-      foodId: isContractId(normalizedLookup, ID_PREFIXES.food)
-        ? normalizedLookup
-        : food.foodId,
-      slug: normalizedLookup,
-    })
-    await core.archiveDailyFoodScheduledLog({
-      vaultRoot: input.vault,
-      foodId: food.foodId,
-    })
-  } catch (error) {
-    throw toVaultCliError(error, {
-      VAULT_FOOD_MISSING: {
-        code: 'not_found',
-        message: `No food found for "${input.lookup}".`,
-      },
-      VAULT_INVALID_FOOD: {
-        code: 'contract_invalid',
-      },
-    })
-  }
+      try {
+        await core.archiveDailyFoodScheduledLog({
+          vaultRoot: input.vault,
+          foodId: food.foodId,
+        })
+        await core.deleteFood({
+          vaultRoot: input.vault,
+          foodId: food.foodId,
+        })
+      } catch (error) {
+        throw toVaultCliError(error, {
+          VAULT_FOOD_MISSING: {
+            code: 'not_found',
+            message: `No food found for "${input.lookup}".`,
+          },
+          VAULT_INVALID_FOOD: {
+            code: 'contract_invalid',
+          },
+        })
+      }
 
-  return {
-    vault: input.vault,
-    entityId: food.foodId,
-    lookupId: food.foodId,
-    kind: 'food' as const,
-    deleted: true as const,
-    retainedPaths: [],
-  }
+      return {
+        vault: input.vault,
+        entityId: food.foodId,
+        lookupId: food.foodId,
+        kind: 'food' as const,
+        deleted: true as const,
+        retainedPaths: [],
+      }
+    }),
+  )
 }
 
 export async function renameFoodRecord(input: {
@@ -388,63 +287,65 @@ export async function renameFoodRecord(input: {
   slug?: string
 }) {
   const core = await loadFoodCoreRuntime()
-  const existing = await requireFoodRecord(input.vault, input.lookup)
-  const title = input.title.trim()
-  const slugInput = typeof input.slug === 'string' ? input.slug.trim() || undefined : undefined
+  return core.withCanonicalWriteLock(input.vault, async () => {
+    const existing = await requireFoodRecord(input.vault, input.lookup)
+    const title = input.title.trim()
+    const slugInput = typeof input.slug === 'string' ? input.slug.trim() || undefined : undefined
 
-  if (!title) {
-    throw new VaultCliError('contract_invalid', 'title must be a non-empty string.')
-  }
-
-  const slug = slugInput ?? slugifyFoodLookup(title)
-
-  try {
-    const persisted = await persistFoodRecord({
-      core,
-      vault: input.vault,
-      payload: {
-        vaultRoot: input.vault,
-        foodId: existing.foodId,
-        slug,
-        allowSlugRename: true,
-        title,
-        status: existing.status,
-        summary: existing.summary,
-        kind: existing.kind,
-        brand: existing.brand,
-        vendor: existing.vendor,
-        location: existing.location,
-        serving: existing.serving,
-        nutrition: existing.nutrition,
-        aliases: mergeFoodAliases(existing.aliases, existing.title, title),
-        ingredients: existing.ingredients,
-        tags: existing.tags,
-        note: existing.note,
-        attachedRegimenIds: existing.attachedRegimenIds,
-        links: existing.links,
-      },
-    })
-
-    return {
-      vault: input.vault,
-      foodId: persisted.food.foodId,
-      lookupId: persisted.food.foodId,
-      path: persisted.food.relativePath,
-      created: persisted.created,
+    if (!title) {
+      throw new VaultCliError('contract_invalid', 'title must be a non-empty string.')
     }
-  } catch (error) {
-    throw toVaultCliError(error, {
-      VAULT_INVALID_INPUT: {
-        code: 'contract_invalid',
-      },
-      VAULT_INVALID_FOOD: {
-        code: 'contract_invalid',
-      },
-      VAULT_FOOD_CONFLICT: {
-        code: 'conflict',
-      },
-    })
-  }
+
+    const slug = slugInput ?? slugifyFoodLookup(title)
+
+    try {
+      const persisted = await persistFoodRecord({
+        core,
+        vault: input.vault,
+        payload: {
+          vaultRoot: input.vault,
+          foodId: existing.foodId,
+          slug,
+          allowSlugRename: true,
+          title,
+          status: existing.status,
+          summary: existing.summary,
+          kind: existing.kind,
+          brand: existing.brand,
+          vendor: existing.vendor,
+          location: existing.location,
+          serving: existing.serving,
+          nutrition: existing.nutrition,
+          aliases: mergeFoodAliases(existing.aliases, existing.title, title),
+          ingredients: existing.ingredients,
+          tags: existing.tags,
+          note: existing.note,
+          attachedRegimenIds: existing.attachedRegimenIds,
+          links: existing.links,
+        },
+      })
+
+      return {
+        vault: input.vault,
+        foodId: persisted.food.foodId,
+        lookupId: persisted.food.foodId,
+        path: persisted.food.relativePath,
+        created: persisted.created,
+      }
+    } catch (error) {
+      throw toVaultCliError(error, {
+        VAULT_INVALID_INPUT: {
+          code: 'contract_invalid',
+        },
+        VAULT_INVALID_FOOD: {
+          code: 'contract_invalid',
+        },
+        VAULT_FOOD_CONFLICT: {
+          code: 'conflict',
+        },
+      })
+    }
+  })
 }
 
 export async function addDailyFoodRecord(input: {
@@ -646,27 +547,7 @@ async function requireFoodRecord(vault: string, lookup: string) {
   }
 }
 
-interface FoodCoreUpsertInput {
-  vaultRoot: string
-  foodId?: string
-  slug?: string
-  allowSlugRename?: boolean
-  title?: string
-  status?: string
-  summary?: string
-  kind?: string
-  brand?: string
-  vendor?: string
-  location?: string
-  serving?: string
-  nutrition?: FoodNutrition | null
-  aliases?: string[]
-  ingredients?: string[]
-  tags?: string[]
-  note?: string
-  attachedRegimenIds?: string[]
-  links?: FoodUpsertPayload['links']
-}
+type FoodCoreUpsertInput = Parameters<FoodCoreRuntime['upsertFood']>[0]
 
 function buildFoodCoreInput(input: {
   vault: string
@@ -880,5 +761,5 @@ function mergeFoodAliases(
 
 function buildFoodData(food: FoodReadModel): JsonObject {
   const { relativePath: _relativePath, markdown: _markdown, ...data } = food
-  return structuredClone(data) as JsonObject
+  return structuredClone({ ...data, links: data.links.map((link) => ({ ...link })) })
 }

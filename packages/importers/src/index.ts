@@ -64,11 +64,3 @@ export {
   type WorkoutCsvSource,
   type WorkoutCsvWeightUnit,
 } from "./workout-csv-planner.ts";
-export {
-  createSamplePresetRegistry,
-  defineSampleImportPreset,
-  resolveSampleImportConfig,
-  type ResolvedSampleImportConfig,
-  type SampleImportPreset,
-  type SamplePresetRegistry,
-} from "./preset-registry.ts";

@@ -14,10 +14,7 @@ export function createTextFileProvider(options: {
 } = {}): ParserProvider {
   return {
     id: "text-file",
-    locality: "local",
-    openness: "open_source",
-    runtime: "node",
-    priority: 1_000,
+
     async discover() {
       return {
         available: true,

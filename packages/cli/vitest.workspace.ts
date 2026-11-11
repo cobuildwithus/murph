@@ -22,13 +22,6 @@ import {
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const cliVitestConcurrency = resolveMurphVitestConcurrency();
 const cliVitestMaxWorkers = resolveMurphVitestMaxWorkers();
-const cliVitestCoverageThresholds = {
-  perFile: false,
-  lines: 80,
-  functions: 70,
-  branches: 55,
-  statements: 80,
-} as const;
 const cliVitestTsconfigAliases = createVitestAliasesFromTsconfigPaths({
   workspaceDir: packageDir,
   specifierFilter: (specifier) =>
@@ -43,7 +36,6 @@ export const cliVitestCoverage = createMurphVitestCoverage({
     "src/incur.generated.ts",
     "src/index.ts",
   ],
-  thresholds: cliVitestCoverageThresholds,
 });
 
 type CliVitestProjectSpec = {

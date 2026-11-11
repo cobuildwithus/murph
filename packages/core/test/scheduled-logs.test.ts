@@ -450,6 +450,7 @@ test("scheduled log execution inherits food details and is idempotent per occurr
     throw new Error("Expected a meal event for the scheduled occurrence.");
   }
 
+  assert.equal(mealEvent.title, "Recovery Smoothie");
   assert.match(mealEvent.note ?? "", /Auto-logged saved food: Recovery Smoothie/);
   assert.match(mealEvent.note ?? "", /Serving: 1 glass/);
   assert.deepEqual(mealEvent.ingredients, ["banana", "berries"]);
@@ -929,3 +930,34 @@ for (const scenario of ["current", "equal instant", "revision", "occurrence", "p
     }
   });
 }
+
+
+test("scheduled meals keep legacy food titles executable when they are not valid meal names", async () => {
+  const vaultRoot = await makeTempDirectory("murph-scheduled-legacy-food-name");
+  try {
+    await initializeVault({ vaultRoot });
+    const { record: food } = await upsertFood({ vaultRoot, title: "Toast" });
+    const { record: schedule } = await upsertDailyFoodScheduledLog({
+      vaultRoot,
+      foodId: food.foodId,
+      localTime: "09:00",
+    });
+    const occurrenceAt = "2026-04-22T09:00:00.000Z";
+    const result = await executeScheduledLogOccurrence({
+      vaultRoot,
+      scheduledLogId: schedule.scheduledLogId,
+      occurrenceAt,
+    });
+    assert.equal(result.skipped, false);
+    const meal = await findEventByExternalRef({
+      vaultRoot,
+      system: "murph-scheduled-log",
+      resourceType: "occurrence",
+      resourceId: `${schedule.scheduledLogId}:${occurrenceAt}`,
+    });
+    assert.equal(meal?.title, "Meal");
+    assert.match(meal?.note ?? "", /Auto-logged saved food: Toast/);
+  } finally {
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+  }
+});

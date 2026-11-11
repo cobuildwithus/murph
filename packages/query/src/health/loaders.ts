@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
+import type { Dirent } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -205,44 +205,6 @@ export async function walkRelativeFiles(
   return sortRelativePaths(files);
 }
 
-export function walkRelativeFilesSync(
-  vaultRoot: string,
-  relativeRoot: string,
-  extension: string,
-): string[] {
-  const files: string[] = [];
-
-  function walk(currentRelativeRoot: string): void {
-    const basePath = path.join(vaultRoot, currentRelativeRoot);
-    let entries: Dirent[];
-
-    try {
-      entries = readdirSync(basePath, { withFileTypes: true });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return;
-      }
-
-      throw error;
-    }
-
-    const { childDirectories, matchingFiles } = collectRelativeFilePaths(
-      currentRelativeRoot,
-      extension,
-      entries,
-    );
-
-    files.push(...matchingFiles);
-
-    for (const childDirectory of childDirectories) {
-      walk(childDirectory);
-    }
-  }
-
-  walk(relativeRoot);
-  return sortRelativePaths(files);
-}
-
 export async function readMarkdownDocument(
   vaultRoot: string,
   relativePath: string,
@@ -266,18 +228,6 @@ export async function readOptionalMarkdownDocument(
     return null;
   }
 
-  if (!outcome.ok) {
-    throw toStrictParseError(outcome);
-  }
-
-  return outcome.document;
-}
-
-export function readMarkdownDocumentSync(
-  vaultRoot: string,
-  relativePath: string,
-): MarkdownDocumentRecord {
-  const outcome = readMarkdownDocumentOutcomeSync(vaultRoot, relativePath);
   if (!outcome.ok) {
     throw toStrictParseError(outcome);
   }
@@ -311,19 +261,6 @@ export async function readOptionalMarkdownDocumentOutcome(
   return parseMarkdownDocumentOutcome(relativePath, markdown);
 }
 
-export function readOptionalMarkdownDocumentOutcomeSync(
-  vaultRoot: string,
-  relativePath: string,
-): MarkdownDocumentOutcome | null {
-  const absolutePath = path.join(vaultRoot, relativePath);
-  if (!existsSync(absolutePath)) {
-    return null;
-  }
-
-  const markdown = readFileSync(absolutePath, "utf8");
-  return parseMarkdownDocumentOutcome(relativePath, markdown);
-}
-
 export async function readMarkdownDocumentOutcome(
   vaultRoot: string,
   relativePath: string,
@@ -337,45 +274,12 @@ export async function readMarkdownDocumentOutcome(
   return outcome;
 }
 
-export function readMarkdownDocumentOutcomeSync(
-  vaultRoot: string,
-  relativePath: string,
-): MarkdownDocumentOutcome {
-  const outcome = readOptionalMarkdownDocumentOutcomeSync(vaultRoot, relativePath);
-  if (!outcome) {
-    throw new Error(`Missing markdown document at ${relativePath}`);
-  }
-
-  return outcome;
-}
-
 export async function readJsonlRecords(
   vaultRoot: string,
   relativeRoot: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<Array<{ relativePath: string; value: unknown }>> {
   const outcomes = await readJsonlRecordOutcomes(vaultRoot, relativeRoot, options);
-  const records: Array<{ relativePath: string; value: unknown }> = [];
-
-  for (const outcome of outcomes) {
-    if (!outcome.ok) {
-      throw toStrictParseError(outcome);
-    }
-
-    records.push({
-      relativePath: outcome.relativePath,
-      value: outcome.value,
-    });
-  }
-
-  return records;
-}
-
-export function readJsonlRecordsSync(
-  vaultRoot: string,
-  relativeRoot: string,
-): Array<{ relativePath: string; value: unknown }> {
-  const outcomes = readJsonlRecordOutcomesSync(vaultRoot, relativeRoot);
   const records: Array<{ relativePath: string; value: unknown }> = [];
 
   for (const outcome of outcomes) {
@@ -449,22 +353,6 @@ async function parseJsonlRecordOutcomesCooperatively(
     } catch (error) {
       records.push(buildJsonParseFailure(relativePath, index + 1, error));
     }
-  }
-
-  return records;
-}
-
-export function readJsonlRecordOutcomesSync(
-  vaultRoot: string,
-  relativeRoot: string,
-): JsonlRecordOutcome[] {
-  const shardPaths = walkRelativeFilesSync(vaultRoot, relativeRoot, ".jsonl");
-  const records: JsonlRecordOutcome[] = [];
-
-  for (const relativePath of shardPaths) {
-    const absolutePath = path.join(vaultRoot, relativePath);
-    const raw = readFileSync(absolutePath, "utf8");
-    records.push(...parseJsonlRecordOutcomes(relativePath, raw));
   }
 
   return records;

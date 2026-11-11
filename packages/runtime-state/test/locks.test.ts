@@ -307,6 +307,21 @@ describe("runtime-state locks", () => {
     }
   });
 
+  it("returns a held-lock error when a stale cleanup claim survives its cleaner", async () => {
+    const options = createLockOptions(createTempRoot());
+    mkdirSync(options.lockPath, { recursive: true });
+    writeFileSync(options.metadataPath, JSON.stringify({ owner: "stale-owner", stale: true }));
+    const claimPath = path.join(options.lockPath, ".cleanup-claim");
+    writeFileSync(claimPath, "abandoned-claim");
+
+    await expect(acquireDirectoryLock(options)).rejects.toBeInstanceOf(DirectoryLockHeldError);
+    expect(readFileSync(claimPath, "utf8")).toBe("abandoned-claim");
+    expect(JSON.parse(readFileSync(options.metadataPath, "utf8"))).toEqual({
+      owner: "stale-owner",
+      stale: true,
+    });
+  }, 2_000);
+
   it("allows only one winner when contenders race to clear a metadata-less stale directory", async () => {
     const tempRoot = createTempRoot();
     const options = createLockOptions(tempRoot);

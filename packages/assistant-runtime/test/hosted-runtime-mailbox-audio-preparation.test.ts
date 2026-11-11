@@ -529,7 +529,7 @@ async function createFixture(count: number, options: { typing?: boolean } = {}) 
     payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   }));
   const registry = createParserRegistry([{
-    id: "synthetic-audio", locality: "local", openness: "open_source", runtime: "node", priority: 1,
+    id: "synthetic-audio",
     async discover() { return { available: true, reason: "Synthetic fixture." }; },
     supports(request) { return request.artifact.kind === "audio"; },
     async run(request) {

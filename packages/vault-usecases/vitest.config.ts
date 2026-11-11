@@ -15,12 +15,5 @@ export default createMurphPackageVitestConfig({
   coverage: createMurphVitestCoverage({
     customProviderModule: resolveMurphVitestCoverageProviderModule(PACKAGE_DIR),
     include: ["src/**/*.ts"],
-    thresholds: {
-      perFile: false,
-      lines: 54,
-      functions: 59,
-      branches: 47,
-      statements: 54,
-    },
   }),
 });

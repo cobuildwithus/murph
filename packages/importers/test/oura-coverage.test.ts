@@ -268,69 +268,37 @@ test("normalizeOuraSnapshot covers sleep deleted, rest, nap, and partial timing 
   const deletedSleepEvent = payload.events?.find(
     (event) => event.externalRef?.resourceId === "sleep-deleted" && event.externalRef?.facet === "deleted",
   );
-  const napSleepEvent = payload.events?.find(
-    (event) => event.externalRef?.resourceId === "sleep-nap" && event.kind === "sleep_session",
-  );
-  const restSleepEvent = payload.events?.find(
-    (event) => event.externalRef?.resourceId === "sleep-rest" && event.kind === "sleep_session",
-  );
-  const partialSleepEvent = payload.events?.find(
-    (event) => event.externalRef?.resourceId === "sleep-partial" && event.kind === "sleep_session",
-  );
-  const partialSessionEvent = payload.events?.find(
-    (event) => event.externalRef?.resourceId === "session-partial" && event.kind === "activity_session",
-  );
-  const partialWorkoutEvent = payload.events?.find(
-    (event) => event.externalRef?.resourceId === "workout-partial" && event.kind === "activity_session",
-  );
-  const unknownDistanceWorkoutEvent = payload.events?.find(
-    (event) =>
-      event.externalRef?.resourceId === "workout-unknown-distance" && event.kind === "activity_session",
-  );
-  const restSleepAverageHeartRate = payload.events?.find(
-    (event) =>
-      event.externalRef?.resourceId === "sleep-rest" &&
-      event.kind === "observation" &&
-      event.fields?.metric === "average-heart-rate",
-  );
-  const partialSleepRespiratoryRate = payload.events?.find(
-    (event) =>
-      event.externalRef?.resourceId === "sleep-partial" &&
-      event.kind === "observation" &&
-      event.fields?.metric === "respiratory-rate",
-  );
-  const partialSessionHeartRate = payload.events?.find(
-    (event) =>
-      event.externalRef?.resourceId === "session-partial" &&
-      event.kind === "observation" &&
-      event.fields?.metric === "average-heart-rate",
-  );
-  const partialWorkoutMetricEvents = payload.events?.filter(
-    (event) =>
-      event.externalRef?.resourceId === "workout-partial" &&
-      event.kind === "observation",
-  ) ?? [];
-
   assert.equal(payload.accountId, "oura-user-user-id-2");
   assert.equal(payload.provenance?.ouraUserId, "oura-user-user-id-2");
   assert.equal(deletedSleepEvent?.fields?.resourceType, "sleep");
   assert.equal(deletedSleepEvent?.fields?.sourceEventType, "sleep.deleted");
-  assert.equal(napSleepEvent?.title, "Oura nap");
-  assert.equal(restSleepEvent, undefined);
-  assert.equal(partialSleepEvent, undefined);
-  assert.equal(partialSessionEvent, undefined);
-  assert.equal(partialWorkoutEvent, undefined);
-  assert.ok(unknownDistanceWorkoutEvent);
-  assert.equal(unknownDistanceWorkoutEvent?.fields?.activityType, "rowing");
-  assert.equal(unknownDistanceWorkoutEvent?.fields?.distanceKm, undefined);
-  assert.deepEqual(workoutMetricsFromEvent(unknownDistanceWorkoutEvent), {
-    activeCalories: 290,
-  });
-  assert.equal(restSleepAverageHeartRate?.fields?.value, 55);
-  assert.equal(partialSleepRespiratoryRate?.fields?.value, 11.7);
-  assert.equal(partialSessionHeartRate, undefined);
+  assert.deepEqual(
+    payload.events?.filter((event) => event.kind === "sleep_session")
+      .map((event) => [event.externalRef?.resourceId, event.title]),
+    [["sleep-nap", "Oura nap"]],
+  );
+  const activities = payload.events?.filter((event) => event.kind === "activity_session");
+  assert.deepEqual(activities?.map((event) => event.externalRef?.resourceId), [
+    "workout-unknown-distance",
+  ]);
+  assert.equal(activities?.[0]?.fields?.activityType, "rowing");
+  assert.equal(activities?.[0]?.fields?.distanceKm, undefined);
+  assert.deepEqual(workoutMetricsFromEvent(activities?.[0]), { activeCalories: 290 });
+  for (const [resourceId, metric, value] of [
+    ["sleep-rest", "average-heart-rate", 55],
+    ["sleep-partial", "respiratory-rate", 11.7],
+  ] as const) {
+    assert.equal(payload.events?.find((event) =>
+      event.externalRef?.resourceId === resourceId
+      && event.kind === "observation"
+      && event.fields?.metric === metric
+    )?.fields?.value, value);
+  }
+  assert.deepEqual(payload.events?.filter((event) =>
+    event.externalRef?.resourceId === "session-partial"
+    || event.externalRef?.resourceId === "workout-partial"
+  ), []);
   assert.equal(payload.samples?.length ?? 0, 0);
-  assert.deepEqual(partialWorkoutMetricEvents, []);
 });
 
 test("normalizeOuraSnapshot covers deletion resource and event fallbacks", () => {
@@ -355,31 +323,23 @@ test("normalizeOuraSnapshot covers deletion resource and event fallbacks", () =>
     ],
   });
 
-  const camelDeletion = payload.events?.find(
-    (event) => event.externalRef?.resourceId === "sleep-camel" && event.externalRef?.facet === "deleted",
-  );
-  const objectIdDeletion = payload.events?.find(
-    (event) => event.externalRef?.resourceId === "session-camel" && event.externalRef?.facet === "deleted",
-  );
-  const dataTypeDeletion = payload.events?.find(
-    (event) => event.externalRef?.resourceId === "workout-snake" && event.externalRef?.facet === "deleted",
-  );
-
-  assert.equal(camelDeletion?.externalRef?.resourceType, "sleep");
-  assert.equal(camelDeletion?.fields?.sourceEventType, "sleep.deleted");
-  assert.equal(objectIdDeletion?.externalRef?.resourceType, "session");
-  assert.equal(objectIdDeletion?.fields?.sourceEventType, "session.deleted");
-  assert.equal(dataTypeDeletion?.externalRef?.resourceType, "workout");
-  assert.equal(dataTypeDeletion?.fields?.sourceEventType, "workout.deleted");
-  assert.ok(
-    payload.evidenceParts?.some((artifact) => artifact.role.startsWith("deletion:sleep:sleep.deleted:")),
-  );
-  assert.ok(
-    payload.evidenceParts?.some((artifact) => artifact.role.startsWith("deletion:session:session.deleted:")),
-  );
-  assert.ok(
-    payload.evidenceParts?.some((artifact) => artifact.role.startsWith("deletion:workout:workout.deleted:")),
-  );
+  assert.deepEqual(payload.events?.map((event) => [
+    event.externalRef?.resourceId,
+    event.externalRef?.resourceType,
+    event.externalRef?.facet,
+    event.fields?.sourceEventType,
+  ]), [
+    ["sleep-camel", "sleep", "deleted", "sleep.deleted"],
+    ["session-camel", "session", "deleted", "session.deleted"],
+    ["workout-snake", "workout", "deleted", "workout.deleted"],
+  ]);
+  for (const prefix of [
+    "deletion:sleep:sleep.deleted:",
+    "deletion:session:session.deleted:",
+    "deletion:workout:workout.deleted:",
+  ]) {
+    assert.ok(payload.evidenceParts?.some((artifact) => artifact.role.startsWith(prefix)));
+  }
 });
 
 test("Oura record emitters preserve deletion, rest, and skipped-session fallback ids", () => {

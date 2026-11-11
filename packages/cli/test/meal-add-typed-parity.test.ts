@@ -9,7 +9,7 @@ import {
 } from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
-import { test, vi } from 'vitest'
+import { onTestFinished, test, vi } from 'vitest'
 
 import { registerMealCommands } from '../src/commands/meal.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
@@ -87,6 +87,20 @@ function createMealCli(services = createIntegratedVaultServices()) {
 
   registerMealCommands(cli, services)
   return cli
+}
+
+async function createMealVault() {
+  const context = await createTempVaultContext('murph-meal-typed-')
+  onTestFinished(() => rm(context.parentRoot, { force: true, recursive: true }))
+  const cli = createMealCli()
+  await initializeVault({ vaultRoot: context.vaultRoot })
+  return {
+    ...context,
+    cli,
+    mealCommand: <T = Record<string, unknown>>(args: string[]) => runInProcessJsonCli<T>(cli, [
+      'meal', ...args, '--vault', context.vaultRoot,
+    ]),
+  }
 }
 
 async function runRawInProcessCli(
@@ -582,50 +596,36 @@ test.sequential(
 test.sequential(
   'meal add rejects empty JSON payloads and empty typed invocations',
   async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'murph-cli-meal-empty-parity-',
-    )
+    const { parentRoot, mealCommand } = await createMealVault()
 
-    try {
-      await initializeVault({ vaultRoot })
-      const cli = createMealCli()
-      const emptyTypedResult = await runInProcessJsonCli<MealAddResult>(cli, [
-        'meal',
-        'add',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(emptyTypedResult.exitCode, 1)
-      assert.equal(emptyTypedResult.envelope.ok, false)
-      if (!emptyTypedResult.envelope.ok) {
-        assert.equal(emptyTypedResult.envelope.error.code, 'invalid_option')
-        assert.match(
-          emptyTypedResult.envelope.error.message ?? '',
-          /Meal capture requires/u,
-        )
-      }
+    const emptyTypedResult = await mealCommand<MealAddResult>([
+      'add',
+    ])
+    assert.equal(emptyTypedResult.exitCode, 1)
+    assert.equal(emptyTypedResult.envelope.ok, false)
+    if (!emptyTypedResult.envelope.ok) {
+      assert.equal(emptyTypedResult.envelope.error.code, 'invalid_option')
+      assert.match(
+        emptyTypedResult.envelope.error.message ?? '',
+        /Meal capture requires/u,
+      )
+    }
 
-      const payloadPath = path.join(parentRoot, 'empty-meal.json')
-      await writeFile(payloadPath, '{}\n', 'utf8')
-      const emptyPayloadResult = await runInProcessJsonCli<MealAddResult>(cli, [
-        'meal',
-        'import-json',
-        '--input',
-        `@${payloadPath}`,
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(emptyPayloadResult.exitCode, 1)
-      assert.equal(emptyPayloadResult.envelope.ok, false)
-      if (!emptyPayloadResult.envelope.ok) {
-        assert.equal(emptyPayloadResult.envelope.error.code, 'invalid_option')
-        assert.match(
-          emptyPayloadResult.envelope.error.message ?? '',
-          /Meal capture requires/u,
-        )
-      }
-    } finally {
-      await rm(parentRoot, { force: true, recursive: true })
+    const payloadPath = path.join(parentRoot, 'empty-meal.json')
+    await writeFile(payloadPath, '{}\n', 'utf8')
+    const emptyPayloadResult = await mealCommand<MealAddResult>([
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+    ])
+    assert.equal(emptyPayloadResult.exitCode, 1)
+    assert.equal(emptyPayloadResult.envelope.ok, false)
+    if (!emptyPayloadResult.envelope.ok) {
+      assert.equal(emptyPayloadResult.envelope.error.code, 'invalid_option')
+      assert.match(
+        emptyPayloadResult.envelope.error.message ?? '',
+        /Meal capture requires/u,
+      )
     }
   },
 )
@@ -633,38 +633,106 @@ test.sequential(
 test.sequential(
   'meal import-json keeps nested corrections while sanitizing root unknown fields and writing no meal',
   async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'murph-cli-meal-unknown-field-',
+    const { parentRoot, mealCommand } = await createMealVault()
+
+    const unknownField = 'ingredientz'
+    const unknownValue = 'synthetic private value'
+    const nestedMicronutrientTypo = 'vitaminCM'
+    const payloadPath = path.join(parentRoot, 'meal.json')
+    await writeFile(
+      payloadPath,
+      `${JSON.stringify({
+        note: 'A valid meal note',
+        [unknownField]: unknownValue,
+        nutrition: {
+          micros: {
+            [nestedMicronutrientTypo]: 12,
+          },
+        },
+      })}\n`,
+      'utf8',
     )
 
-    try {
-      await initializeVault({ vaultRoot })
-      const cli = createMealCli()
-      const unknownField = 'ingredientz'
-      const unknownValue = 'synthetic private value'
-      const nestedMicronutrientTypo = 'vitaminCM'
-      const payloadPath = path.join(parentRoot, 'meal.json')
+    const result = await mealCommand<MealAddResult>([
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'invalid_payload')
+      assert.equal(result.envelope.error.stage, 'validation')
+      assert.match(result.envelope.error.message ?? '', /unsupported field/u)
+      assert.match(result.envelope.error.message ?? '', /ingredients/u)
+      assert.match(
+        result.envelope.error.message ?? '',
+        new RegExp(
+          `nutrition\\.micros: Unrecognized key: "${nestedMicronutrientTypo}"`,
+          'u',
+        ),
+      )
+      assert.deepEqual(
+        result.envelope.error.fieldErrors
+          ?.map((fieldError) => fieldError.path)
+          .sort(),
+        ['$', 'nutrition.micros'],
+      )
+    }
+
+    const serializedError = JSON.stringify(result.envelope)
+    assert.equal(serializedError.includes(unknownField), false)
+    assert.equal(serializedError.includes(unknownValue), false)
+    assert.equal(serializedError.includes(payloadPath), false)
+
+    const listed = await mealCommand<MealListResult>([
+      'list',
+      '--limit',
+      '10',
+    ])
+    assert.equal(listed.exitCode, null)
+    assert.equal(requireData(listed.envelope).count, 0)
+    assert.deepEqual(requireData(listed.envelope).items, [])
+  },
+)
+
+test.sequential(
+  'meal import-json rejects differing media aliases before writing and accepts equal aliases',
+  async () => {
+    const { parentRoot, mealCommand } = await createMealVault()
+
+    const conflictScenarios = [
+      {
+        aliasField: 'photoPath',
+        canonicalField: 'photo',
+        firstValue: path.join(parentRoot, 'private-photo-a.jpg'),
+        secondValue: path.join(parentRoot, 'private-photo-b.jpg'),
+      },
+      {
+        aliasField: 'audioPath',
+        canonicalField: 'audio',
+        firstValue: path.join(parentRoot, 'private-audio-a.m4a'),
+        secondValue: path.join(parentRoot, 'private-audio-b.m4a'),
+      },
+    ] as const
+
+    for (const [index, scenario] of conflictScenarios.entries()) {
+      const payloadPath = path.join(parentRoot, `conflict-${index}.json`)
       await writeFile(
         payloadPath,
         `${JSON.stringify({
-          note: 'A valid meal note',
-          [unknownField]: unknownValue,
-          nutrition: {
-            micros: {
-              [nestedMicronutrientTypo]: 12,
-            },
-          },
+          [scenario.aliasField]: scenario.secondValue,
+          [scenario.canonicalField]: scenario.firstValue,
+          note: 'Synthetic meal with conflicting media aliases.',
         })}\n`,
         'utf8',
       )
 
-      const result = await runInProcessJsonCli<MealAddResult>(cli, [
-        'meal',
+      const result = await mealCommand<MealAddResult>([
         'import-json',
         '--input',
         `@${payloadPath}`,
-        '--vault',
-        vaultRoot,
       ])
 
       assert.equal(result.exitCode, 1)
@@ -672,12 +740,10 @@ test.sequential(
       if (!result.envelope.ok) {
         assert.equal(result.envelope.error.code, 'invalid_payload')
         assert.equal(result.envelope.error.stage, 'validation')
-        assert.match(result.envelope.error.message ?? '', /unsupported field/u)
-        assert.match(result.envelope.error.message ?? '', /ingredients/u)
         assert.match(
           result.envelope.error.message ?? '',
           new RegExp(
-            `nutrition\\.micros: Unrecognized key: "${nestedMicronutrientTypo}"`,
+            `${scenario.canonicalField} and ${scenario.aliasField} must match`,
             'u',
           ),
         )
@@ -685,298 +751,175 @@ test.sequential(
           result.envelope.error.fieldErrors
             ?.map((fieldError) => fieldError.path)
             .sort(),
-          ['$', 'nutrition.micros'],
+          [scenario.aliasField, scenario.canonicalField].sort(),
         )
+        assert.match(result.envelope.error.hint ?? '', /same path/u)
+        assert.match(result.envelope.error.hint ?? '', /No meal was written/u)
       }
 
       const serializedError = JSON.stringify(result.envelope)
-      assert.equal(serializedError.includes(unknownField), false)
-      assert.equal(serializedError.includes(unknownValue), false)
+      assert.equal(serializedError.includes(scenario.firstValue), false)
+      assert.equal(serializedError.includes(scenario.secondValue), false)
       assert.equal(serializedError.includes(payloadPath), false)
-
-      const listed = await runInProcessJsonCli<MealListResult>(cli, [
-        'meal',
-        'list',
-        '--limit',
-        '10',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(listed.exitCode, null)
-      assert.equal(requireData(listed.envelope).count, 0)
-      assert.deepEqual(requireData(listed.envelope).items, [])
-    } finally {
-      await rm(parentRoot, { force: true, recursive: true })
     }
-  },
-)
 
-test.sequential(
-  'meal import-json rejects differing media aliases before writing and accepts equal aliases',
-  async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'murph-cli-meal-media-alias-conflict-',
-    )
+    const afterConflicts = await mealCommand<MealListResult>([
+      'list',
+      '--limit',
+      '10',
+    ])
+    assert.equal(afterConflicts.exitCode, null)
+    assert.equal(requireData(afterConflicts.envelope).count, 0)
 
-    try {
-      await initializeVault({ vaultRoot })
-      const cli = createMealCli()
-      const conflictScenarios = [
-        {
-          aliasField: 'photoPath',
-          canonicalField: 'photo',
-          firstValue: path.join(parentRoot, 'private-photo-a.jpg'),
-          secondValue: path.join(parentRoot, 'private-photo-b.jpg'),
-        },
-        {
-          aliasField: 'audioPath',
-          canonicalField: 'audio',
-          firstValue: path.join(parentRoot, 'private-audio-a.m4a'),
-          secondValue: path.join(parentRoot, 'private-audio-b.m4a'),
-        },
-      ] as const
+    const equalPhotoPath = path.join(parentRoot, 'equal-photo.jpg')
+    const equalAudioPath = path.join(parentRoot, 'equal-audio.m4a')
+    const equalPayloadPath = path.join(parentRoot, 'equal-aliases.json')
+    await Promise.all([
+      writeFile(equalPhotoPath, 'synthetic photo bytes', 'utf8'),
+      writeFile(equalAudioPath, 'synthetic audio bytes', 'utf8'),
+      writeFile(
+        equalPayloadPath,
+        `${JSON.stringify({
+          audio: equalAudioPath,
+          audioPath: equalAudioPath,
+          name: 'Bean bowl',
+          note: 'Synthetic meal with matching media aliases.',
+          photo: equalPhotoPath,
+          photoPath: equalPhotoPath,
+        })}\n`,
+        'utf8',
+      ),
+    ])
 
-      for (const [index, scenario] of conflictScenarios.entries()) {
-        const payloadPath = path.join(parentRoot, `conflict-${index}.json`)
-        await writeFile(
-          payloadPath,
-          `${JSON.stringify({
-            [scenario.aliasField]: scenario.secondValue,
-            [scenario.canonicalField]: scenario.firstValue,
-            note: 'Synthetic meal with conflicting media aliases.',
-          })}\n`,
-          'utf8',
-        )
-
-        const result = await runInProcessJsonCli<MealAddResult>(cli, [
-          'meal',
-          'import-json',
-          '--input',
-          `@${payloadPath}`,
-          '--vault',
-          vaultRoot,
-        ])
-
-        assert.equal(result.exitCode, 1)
-        assert.equal(result.envelope.ok, false)
-        if (!result.envelope.ok) {
-          assert.equal(result.envelope.error.code, 'invalid_payload')
-          assert.equal(result.envelope.error.stage, 'validation')
-          assert.match(
-            result.envelope.error.message ?? '',
-            new RegExp(
-              `${scenario.canonicalField} and ${scenario.aliasField} must match`,
-              'u',
-            ),
-          )
-          assert.deepEqual(
-            result.envelope.error.fieldErrors
-              ?.map((fieldError) => fieldError.path)
-              .sort(),
-            [scenario.aliasField, scenario.canonicalField].sort(),
-          )
-          assert.match(result.envelope.error.hint ?? '', /same path/u)
-          assert.match(result.envelope.error.hint ?? '', /No meal was written/u)
-        }
-
-        const serializedError = JSON.stringify(result.envelope)
-        assert.equal(serializedError.includes(scenario.firstValue), false)
-        assert.equal(serializedError.includes(scenario.secondValue), false)
-        assert.equal(serializedError.includes(payloadPath), false)
-      }
-
-      const afterConflicts = await runInProcessJsonCli<MealListResult>(cli, [
-        'meal',
-        'list',
-        '--limit',
-        '10',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(afterConflicts.exitCode, null)
-      assert.equal(requireData(afterConflicts.envelope).count, 0)
-
-      const equalPhotoPath = path.join(parentRoot, 'equal-photo.jpg')
-      const equalAudioPath = path.join(parentRoot, 'equal-audio.m4a')
-      const equalPayloadPath = path.join(parentRoot, 'equal-aliases.json')
-      await Promise.all([
-        writeFile(equalPhotoPath, 'synthetic photo bytes', 'utf8'),
-        writeFile(equalAudioPath, 'synthetic audio bytes', 'utf8'),
-        writeFile(
-          equalPayloadPath,
-          `${JSON.stringify({
-            audio: equalAudioPath,
-            audioPath: equalAudioPath,
-            name: 'Bean bowl',
-            note: 'Synthetic meal with matching media aliases.',
-            photo: equalPhotoPath,
-            photoPath: equalPhotoPath,
-          })}\n`,
-          'utf8',
-        ),
-      ])
-
-      const equalAliases = await runInProcessJsonCli<MealAddResult>(cli, [
-        'meal',
-        'import-json',
-        '--input',
-        `@${equalPayloadPath}`,
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(equalAliases.exitCode, null)
-      assert.ok(requireData(equalAliases.envelope).photoPath)
-      assert.ok(requireData(equalAliases.envelope).audioPath)
-    } finally {
-      await rm(parentRoot, { force: true, recursive: true })
-    }
+    const equalAliases = await mealCommand<MealAddResult>([
+      'import-json',
+      '--input',
+      `@${equalPayloadPath}`,
+    ])
+    assert.equal(equalAliases.exitCode, null)
+    assert.ok(requireData(equalAliases.envelope).photoPath)
+    assert.ok(requireData(equalAliases.envelope).audioPath)
   },
 )
 
 test.sequential(
   'meal add typed ingredients and nutrition override structured payload fields',
   async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'murph-cli-meal-override-parity-',
+    const { parentRoot, mealCommand } = await createMealVault()
+
+    const payloadPath = path.join(parentRoot, 'payload-meal.json')
+    await writeFile(
+      payloadPath,
+      `${JSON.stringify({
+        name: 'Salmon rice bowl',
+        occurredAt: '2026-03-15T08:00:00Z',
+        source: 'import',
+        ingredients: ['payload rice', 'payload salmon'],
+        nutrition: {
+          totals: {
+            calories: 610,
+            proteinGrams: 42,
+            carbsGrams: 51,
+            fatGrams: 22,
+            fiberGrams: 8,
+          },
+          provenance: {
+            source: 'label',
+            confidence: 'high',
+            sourceDetail: 'Payload label',
+          },
+        },
+      })}\n`,
+      'utf8',
     )
 
-    try {
-      await initializeVault({ vaultRoot })
-      const cli = createMealCli()
-      const payloadPath = path.join(parentRoot, 'payload-meal.json')
-      await writeFile(
-        payloadPath,
-        `${JSON.stringify({
-          name: 'Salmon rice bowl',
-          occurredAt: '2026-03-15T08:00:00Z',
-          source: 'import',
-          ingredients: ['payload rice', 'payload salmon'],
-          nutrition: {
-            totals: {
-              calories: 610,
-              proteinGrams: 42,
-              carbsGrams: 51,
-              fatGrams: 22,
-              fiberGrams: 8,
-            },
-            provenance: {
-              source: 'label',
-              confidence: 'high',
-              sourceDetail: 'Payload label',
-            },
-          },
-        })}\n`,
-        'utf8',
-      )
+    const result = await mealCommand<MealAddResult>([
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--ingredient',
+      'typed oats',
+      '--ingredient',
+      'typed berries',
+      '--nutrition-calories',
+      '390',
+      '--nutrition-protein-grams',
+      '15',
+      '--nutrition-source',
+      'estimated',
+      '--nutrition-confidence',
+      'medium',
+      '--nutrition-source-detail',
+      'Typed estimate',
+    ])
 
-      const result = await runInProcessJsonCli<MealAddResult>(cli, [
-        'meal',
-        'import-json',
-        '--input',
-        `@${payloadPath}`,
-        '--ingredient',
-        'typed oats',
-        '--ingredient',
-        'typed berries',
-        '--nutrition-calories',
-        '390',
-        '--nutrition-protein-grams',
-        '15',
-        '--nutrition-source',
-        'estimated',
-        '--nutrition-confidence',
-        'medium',
-        '--nutrition-source-detail',
-        'Typed estimate',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(result.exitCode, null)
-      const meal = requireData(result.envelope)
-      assert.deepEqual(meal.ingredients, ['typed oats', 'typed berries'])
-      assert.deepEqual(meal.nutrition, {
-        totals: {
-          calories: 390,
-          proteinGrams: 15,
-          carbsGrams: 51,
-          fatGrams: 22,
-          fiberGrams: 8,
-        },
-        provenance: {
-          source: 'estimated',
-          confidence: 'medium',
-          sourceDetail: 'Typed estimate',
-        },
-      })
-    } finally {
-      await rm(parentRoot, { force: true, recursive: true })
-    }
+    assert.equal(result.exitCode, null)
+    const meal = requireData(result.envelope)
+    assert.deepEqual(meal.ingredients, ['typed oats', 'typed berries'])
+    assert.deepEqual(meal.nutrition, {
+      totals: {
+        calories: 390,
+        proteinGrams: 15,
+        carbsGrams: 51,
+        fatGrams: 22,
+        fiberGrams: 8,
+      },
+      provenance: {
+        source: 'estimated',
+        confidence: 'medium',
+        sourceDetail: 'Typed estimate',
+      },
+    })
   },
 )
 
 test.sequential(
   'meal add rejects typed nutrition provenance without a source',
   async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'murph-cli-meal-provenance-parity-',
-    )
+    const { parentRoot, mealCommand } = await createMealVault()
 
-    try {
-      await initializeVault({ vaultRoot })
-      const cli = createMealCli()
+    const result = await mealCommand<MealAddResult>([
+      'add',
+      '--nutrition-confidence',
+      'medium',
+    ])
 
-      const result = await runInProcessJsonCli<MealAddResult>(cli, [
-        'meal',
-        'add',
-        '--nutrition-confidence',
-        'medium',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(result.exitCode, 1)
-      assert.equal(result.envelope.ok, false)
-      if (!result.envelope.ok) {
-        assert.equal(result.envelope.error.code, 'invalid_option')
-        assert.match(result.envelope.error.message ?? '', /--nutrition-source/u)
-      }
-
-      const payloadPath = path.join(parentRoot, 'payload-source-meal.json')
-      await writeFile(
-        payloadPath,
-        `${JSON.stringify({
-          name: 'Oatmeal bowl',
-          ingredients: ['payload oats'],
-          nutrition: {
-            provenance: {
-              source: 'label',
-            },
-          },
-        })}\n`,
-        'utf8',
-      )
-      const payloadSourceResult = await runInProcessJsonCli<MealAddResult>(cli, [
-        'meal',
-        'import-json',
-        '--input',
-        `@${payloadPath}`,
-        '--nutrition-confidence',
-        'medium',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(payloadSourceResult.exitCode, null)
-      assert.deepEqual(requireData(payloadSourceResult.envelope).nutrition, {
-        provenance: {
-          source: 'label',
-          confidence: 'medium',
-        },
-      })
-    } finally {
-      await rm(parentRoot, { force: true, recursive: true })
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'invalid_option')
+      assert.match(result.envelope.error.message ?? '', /--nutrition-source/u)
     }
+
+    const payloadPath = path.join(parentRoot, 'payload-source-meal.json')
+    await writeFile(
+      payloadPath,
+      `${JSON.stringify({
+        name: 'Oatmeal bowl',
+        ingredients: ['payload oats'],
+        nutrition: {
+          provenance: {
+            source: 'label',
+          },
+        },
+      })}\n`,
+      'utf8',
+    )
+    const payloadSourceResult = await mealCommand<MealAddResult>([
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--nutrition-confidence',
+      'medium',
+    ])
+
+    assert.equal(payloadSourceResult.exitCode, null)
+    assert.deepEqual(requireData(payloadSourceResult.envelope).nutrition, {
+      provenance: {
+        source: 'label',
+        confidence: 'medium',
+      },
+    })
   },
 )
 
@@ -1118,55 +1061,47 @@ test.sequential('structured meal save retains incomplete daily coverage in its c
 
 
 test.sequential('meal names persist separately through add import and edit without changing totals', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-cli-meal-name-')
-  try {
-    await initializeVault({ vaultRoot })
-    const cli = createMealCli()
-    const payloadPath = path.join(parentRoot, 'meal.json')
-    await writeFile(payloadPath, JSON.stringify({ name: 'Lentil soup', note: 'Two cups from a cafe; estimated portion', nutrition: { totals: { calories: 620 } } }))
-    for (const args of [
-      ['add', '--name', 'Lentil soup', '--note', 'Two cups from a cafe; estimated portion', '--nutrition-calories', '620'],
-      ['import-json', '--input', `@${payloadPath}`],
-    ]) {
-      const saved = requireData((await runInProcessJsonCli<MealAddResult & { name: string }>(cli, ['meal', ...args, '--vault', vaultRoot])).envelope)
-      assert.equal(saved.name, 'Lentil soup')
-      assert.equal(saved.note, 'Two cups from a cafe; estimated portion')
-      const edited = await runInProcessJsonCli<ShowResult>(cli, ['meal', 'edit', saved.mealId, '--name', 'Red lentil soup', '--vault', vaultRoot])
-      assert.equal(edited.exitCode, null)
-      const shown = requireData((await runInProcessJsonCli<ShowResult>(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot])).envelope)
-      assert.equal(shown.entity.data.title, 'Red lentil soup')
-      assert.equal(shown.entity.data.note, saved.note)
-      assert.deepEqual(shown.entity.data.nutrition, saved.nutrition)
-    }
-  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+  const { parentRoot, mealCommand } = await createMealVault()
+  const payloadPath = path.join(parentRoot, 'meal.json')
+  await writeFile(payloadPath, JSON.stringify({ name: 'Lentil soup', note: 'Two cups from a cafe; estimated portion', nutrition: { totals: { calories: 620 } } }))
+  for (const args of [
+    ['add', '--name', 'Lentil soup', '--note', 'Two cups from a cafe; estimated portion', '--nutrition-calories', '620'],
+    ['import-json', '--input', `@${payloadPath}`],
+  ]) {
+    const saved = requireData((await mealCommand<MealAddResult & { name: string }>(args)).envelope)
+    assert.equal(saved.name, 'Lentil soup')
+    assert.equal(saved.note, 'Two cups from a cafe; estimated portion')
+    const edited = await mealCommand<ShowResult>(['edit', saved.mealId, '--name', 'Red lentil soup'])
+    assert.equal(edited.exitCode, null)
+    const shown = requireData((await mealCommand<ShowResult>(['show', saved.mealId])).envelope)
+    assert.equal(shown.entity.data.title, 'Red lentil soup')
+    assert.equal(shown.entity.data.note, saved.note)
+    assert.deepEqual(shown.entity.data.nutrition, saved.nutrition)
+  }
 })
 
 test.sequential('invalid meal names return actionable validation before add import or edit writes', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-cli-meal-name-invalid-')
-  try {
-    await initializeVault({ vaultRoot })
-    const cli = createMealCli()
-    const saved = await addMeal({ vaultRoot, name: 'Bean tacos', note: 'Two tacos', nutrition: { totals: { calories: 450 } } })
-    const before = await runRawInProcessCli(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot, '--format', 'json'])
-    const payloadPath = path.join(parentRoot, 'meal.json')
-    for (const name of ['x'.repeat(41), 'Estimated soup', 'Photo shows soup', 'Retained image reviewed: soup', 'Approximately soup', 'Lunch: soup', 'Breakfast: soup', 'Dinner: soup', 'Snack: soup', 'Probably soup', 'beans, rice and peas', 'One two three four five six', 'lentil soup']) {
-      await writeFile(payloadPath, JSON.stringify({ name, note: 'One bowl' }))
-      for (const args of [
-        ['add', '--name', name, '--note', 'One bowl'],
-        ['import-json', '--input', `@${payloadPath}`],
-        ['edit', saved.mealId, '--name', name],
-        ['edit', saved.mealId, '--title', name],
-      ]) {
-        const result = await runInProcessJsonCli(cli, ['meal', ...args, '--vault', vaultRoot])
-        assert.equal(result.exitCode, 1)
-        assert.equal(result.envelope.ok, false)
-        if (!result.envelope.ok) assert.match(JSON.stringify(result.envelope.error), /(?:40 characters|dish name)/u)
-      }
+  const { parentRoot, vaultRoot, cli, mealCommand } = await createMealVault()
+  const saved = await addMeal({ vaultRoot, name: 'Bean tacos', note: 'Two tacos', nutrition: { totals: { calories: 450 } } })
+  const before = await runRawInProcessCli(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot, '--format', 'json'])
+  const payloadPath = path.join(parentRoot, 'meal.json')
+  for (const name of ['x'.repeat(41), 'Estimated soup', 'Photo shows soup', 'Retained image reviewed: soup', 'Approximately soup', 'Lunch: soup', 'Breakfast: soup', 'Dinner: soup', 'Snack: soup', 'Probably soup', 'beans, rice and peas', 'One two three four five six', 'lentil soup']) {
+    await writeFile(payloadPath, JSON.stringify({ name, note: 'One bowl' }))
+    for (const args of [
+      ['add', '--name', name, '--note', 'One bowl'],
+      ['import-json', '--input', `@${payloadPath}`],
+      ['edit', saved.mealId, '--name', name],
+      ['edit', saved.mealId, '--title', name],
+    ]) {
+      const result = await mealCommand(args)
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (!result.envelope.ok) assert.match(JSON.stringify(result.envelope.error), /(?:40 characters|dish name)/u)
     }
-    assert.equal(await runRawInProcessCli(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot, '--format', 'json']), before)
-    const list = requireData((await runInProcessJsonCli<MealListResult>(cli, ['meal', 'list', '--vault', vaultRoot])).envelope)
-    assert.equal(list.count, 1)
-  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+  }
+  assert.equal(await runRawInProcessCli(cli, ['meal', 'show', saved.mealId, '--vault', vaultRoot, '--format', 'json']), before)
+  const list = requireData((await mealCommand<MealListResult>(['list'])).envelope)
+  assert.equal(list.count, 1)
 })
 
 
@@ -1183,32 +1118,28 @@ test.sequential('meal saves require a dish name instead of displaying an ingredi
 })
 
 test.sequential('meal corrections preserve optional names and validate an explicit generic title', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-cli-meal-corrections-')
-  try {
-    await initializeVault({ vaultRoot })
-    const cli = createMealCli()
-    const saved = await addMeal({ vaultRoot, name: 'Bean tacos', note: 'Two tacos', occurredAt: '2026-10-20T12:00:00Z', nutrition: { totals: { calories: 450 } } })
-    for (const args of [['--note', 'One taco'], ['--nutrition-calories', '300'], ['--occurred-at', '2026-10-20T13:00:00Z', '--day-key-policy', 'keep']]) {
-      const edited = await runInProcessJsonCli<ShowResult & { entity: { title: string } }>(cli, ['meal', 'edit', saved.mealId, ...args, '--vault', vaultRoot])
-      assert.equal(edited.exitCode, null, JSON.stringify({ args, envelope: edited.envelope }))
-      assert.equal(requireData(edited.envelope).entity.title, 'Bean tacos')
-    }
-    const renamed = await runInProcessJsonCli<ShowResult & { entity: { title: string } }>(cli, ['meal', 'edit', saved.mealId, '--title', 'Black bean tacos', '--vault', vaultRoot])
-    const meal = requireData(renamed.envelope).entity
-    assert.equal(meal.title, 'Black bean tacos')
-    assert.equal(meal.data.note, 'One taco')
-    assert.deepEqual(meal.data.nutrition, { totals: { calories: 300 } })
-    assert.equal(meal.occurredAt, '2026-10-20T13:00:00.000Z')
-    const photoPath = path.join(parentRoot, 'synthetic.jpg')
-    await writeFile(photoPath, 'synthetic attachment')
-    const raw = await addMeal({ vaultRoot, photoPath })
-    const corrected = requireData((await runInProcessJsonCli<ShowResult & { entity: { title: string } }>(cli, [
-      'meal', 'edit', raw.mealId, '--note', 'Non-food object; not consumed.', '--vault', vaultRoot,
-    ])).envelope)
-    assert.equal(corrected.entity.title, 'Meal')
-    assert.equal(corrected.entity.data.note, 'Non-food object; not consumed.')
-    const payload = path.join(parentRoot, 'unnamed.json')
-    await writeFile(payload, JSON.stringify({ note: 'One bowl' }))
-    assert.equal((await runInProcessJsonCli(cli, ['meal', 'import-json', '--input', `@${payload}`, '--vault', vaultRoot])).exitCode, 1)
-  } finally { await rm(parentRoot, { recursive: true, force: true }) }
+  const { parentRoot, vaultRoot, mealCommand } = await createMealVault()
+  const saved = await addMeal({ vaultRoot, name: 'Bean tacos', note: 'Two tacos', occurredAt: '2026-10-20T12:00:00Z', nutrition: { totals: { calories: 450 } } })
+  for (const args of [['--note', 'One taco'], ['--nutrition-calories', '300'], ['--occurred-at', '2026-10-20T13:00:00Z', '--day-key-policy', 'keep']]) {
+    const edited = await mealCommand<ShowResult & { entity: { title: string } }>(['edit', saved.mealId, ...args])
+    assert.equal(edited.exitCode, null, JSON.stringify({ args, envelope: edited.envelope }))
+    assert.equal(requireData(edited.envelope).entity.title, 'Bean tacos')
+  }
+  const renamed = await mealCommand<ShowResult & { entity: { title: string } }>(['edit', saved.mealId, '--title', 'Black bean tacos'])
+  const meal = requireData(renamed.envelope).entity
+  assert.equal(meal.title, 'Black bean tacos')
+  assert.equal(meal.data.note, 'One taco')
+  assert.deepEqual(meal.data.nutrition, { totals: { calories: 300 } })
+  assert.equal(meal.occurredAt, '2026-10-20T13:00:00.000Z')
+  const photoPath = path.join(parentRoot, 'synthetic.jpg')
+  await writeFile(photoPath, 'synthetic attachment')
+  const raw = await addMeal({ vaultRoot, photoPath })
+  const corrected = requireData((await mealCommand<ShowResult & { entity: { title: string } }>([
+    'edit', raw.mealId, '--note', 'Non-food object; not consumed.',
+  ])).envelope)
+  assert.equal(corrected.entity.title, 'Meal')
+  assert.equal(corrected.entity.data.note, 'Non-food object; not consumed.')
+  const payload = path.join(parentRoot, 'unnamed.json')
+  await writeFile(payload, JSON.stringify({ note: 'One bowl' }))
+  assert.equal((await mealCommand(['import-json', '--input', `@${payload}`])).exitCode, 1)
 })

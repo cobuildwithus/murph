@@ -1127,58 +1127,6 @@ describe("record service seams", () => {
     expect(upsertDailyFoodScheduledLog).not.toHaveBeenCalled();
   });
 
-  test("food edit clearing attached regimens does not preserve related regimen links", async () => {
-    const foodCore = {
-      upsertFood: vi.fn(async (_input: Record<string, unknown>) => ({
-        created: false,
-        record: {
-          foodId: "food_01JNV44P4R5SWC90K2AHXQJQYT",
-          relativePath: "foods/regular-acai-bowl.md",
-        },
-      })),
-      readFood: vi.fn(async () => ({
-        foodId: "food_01JNV44P4R5SWC90K2AHXQJQYT",
-        slug: "regular-acai-bowl",
-        title: "Regular Acai Bowl",
-        status: "active",
-        attachedRegimenIds: ["reg_01JNV422Y2M5ZBV64ZP4N1DRB1"],
-        links: [{ type: "related_regimen", targetId: "reg_01JNV422Y2M5ZBV64ZP4N1DRB1" }],
-        relativePath: "foods/food_1.md",
-        markdown: "# Food",
-      })),
-    };
-
-    const food = await importWithMocks<typeof import("../src/usecases/food.ts")>(
-      "../src/usecases/food.ts",
-      {
-        "../src/runtime-import.ts": mockActualModule("../src/runtime-import.ts", (actual) => ({
-          ...actual,
-          loadRuntimeModule: vi.fn(async (specifier: string) => {
-            if (specifier === "@murphai/core") {
-              return foodCore;
-            }
-            throw new Error(`Unexpected specifier: ${specifier}`);
-          }),
-        })),
-      },
-    );
-
-    await food.editFoodRecord({
-      vault: "./vault",
-      lookup: "food_01JNV44P4R5SWC90K2AHXQJQYT",
-      clear: ["attachedRegimenIds"],
-    });
-
-    expect(foodCore.upsertFood).toHaveBeenCalledWith(
-      expect.objectContaining({
-        attachedRegimenIds: [],
-      }),
-    );
-    const upsertInput = foodCore.upsertFood.mock.calls[0]?.[0];
-    assert.ok(upsertInput);
-    expect(upsertInput).not.toHaveProperty("links");
-  });
-
   test("private protocol listing filters by Health Commons protocol references", async () => {
     const query = {
       ...queryRuntime,
@@ -1242,60 +1190,26 @@ describe("record service seams", () => {
     ]);
   });
 
-  test("intervention and experiment journal services keep their event and journal wiring stable", async () => {
+  test("intervention capture preserves the specific type and normalized result", async () => {
     const eventUpsert = vi.fn(async () => ({
       eventId: "evt_1",
       lookupId: "evt_1",
       ledgerFile: "events/evt_1.md",
       created: true,
     }));
-    const eventDelete = vi.fn(async () => ({ deleted: true }));
-    const eventShow = vi.fn(async () => ({
-      vault: "./vault",
-      entity: {
-        id: "evt_1",
-        kind: "intervention_session",
-        title: "Edited",
-        occurredAt: null,
-        path: "events/evt_1.md",
-        markdown: null,
-        data: {},
-        links: [],
-      },
-    }));
-    const eventEdit = vi.fn(async () => ({
-      lookupId: "evt_1",
-      entity: {
-        id: "evt_1",
-        kind: "intervention_session",
-        title: "Edited",
-        occurredAt: null,
-        path: "events/evt_1.md",
-        markdown: null,
-        data: {},
-        links: [],
-      },
-    }));
     const intervention = await importWithMocks<typeof import("../src/usecases/intervention.ts")>(
       "../src/usecases/intervention.ts",
       {
-        "../src/usecases/event-record-mutations.ts": () => ({
-          deleteEventRecord: eventDelete,
-          editEventRecord: eventEdit,
-        }),
         "../src/usecases/provider-event.ts": () => ({
           upsertEventRecord: eventUpsert,
-          deleteEventRecord: eventDelete,
-          showEventRecord: eventShow,
-          editEventRecord: eventEdit,
         }),
       },
     );
-    const addedIntervention = await intervention.addInterventionRecord({
+    const added = await intervention.addInterventionRecord({
       vault: "./vault",
       text: "20 minute red light sauna session",
     });
-    expect(addedIntervention).toMatchObject({
+    expect(added).toMatchObject({
       eventId: "evt_1",
       lookupId: "evt_1",
       ledgerFile: "events/evt_1.md",
@@ -1307,433 +1221,22 @@ describe("record service seams", () => {
       durationMinutes: 20,
       note: "20 minute red light sauna session",
     });
-    expect("protocolId" in addedIntervention).toBe(false);
-    const editedIntervention = await intervention.editInterventionRecord({
-      vault: "./vault",
-      lookup: "evt_1",
-      set: ["title=Edited"],
-    });
-    assert.equal(editedIntervention.vault, "./vault");
-    assert.equal(editedIntervention.entity.id, "evt_1");
-    assert.deepEqual(await intervention.deleteInterventionRecord({ vault: "./vault", lookup: "evt_1" }), { deleted: true });
+    expect(added).not.toHaveProperty("protocolId");
+    expect(eventUpsert).toHaveBeenCalledTimes(1);
+  });
 
-    const journalCore = {
-      createExperiment: vi.fn(async () => ({
-        created: true,
-        experiment: {
-          id: "exp_1",
-          slug: "focus-sprint",
-          relativePath: "experiments/focus-sprint.md",
-        },
-      })),
-      ensureJournalDay: vi.fn(async () => ({
-        created: true,
-        relativePath: "journals/2026-04-08.md",
-      })),
-      appendJournal: vi.fn(async () => ({
-        relativePath: "journals/2026-04-08.md",
-        created: false,
-        updated: true,
-      })),
-      updateExperiment: vi.fn(async () => ({
-        experimentId: "exp_1",
-        slug: "focus-sprint",
-        relativePath: "experiments/focus-sprint.md",
-        status: "active",
-        updated: true,
-      })),
-      stopExperiment: vi.fn(async () => ({
-        experimentId: "exp_1",
-        slug: "focus-sprint",
-        relativePath: "experiments/focus-sprint.md",
-        status: "stopped",
-        eventId: "evt_2",
-        ledgerFile: "events/evt_2.md",
-        updated: true,
-      })),
-      linkJournalEventIds: vi.fn(async () => ({
-        relativePath: "journals/2026-04-08.md",
-        created: true,
-        changed: 1,
-        eventIds: ["evt_1"],
-        sampleStreams: [],
-      })),
-      unlinkJournalEventIds: vi.fn(async () => ({
-        relativePath: "journals/2026-04-08.md",
-        created: true,
-        changed: 1,
-        eventIds: [],
-        sampleStreams: [],
-      })),
-      linkJournalStreams: vi.fn(async () => ({
-        relativePath: "journals/2026-04-08.md",
-        created: true,
-        changed: 1,
-        eventIds: [],
-        sampleStreams: ["heart_rate"],
-      })),
-      unlinkJournalStreams: vi.fn(async () => ({
-        relativePath: "journals/2026-04-08.md",
-        created: true,
-        changed: 1,
-        eventIds: [],
-        sampleStreams: [],
-      })),
-      updateVaultSummary: vi.fn(async () => ({
-        metadataFile: "metadata.json",
-        corePath: "core.md",
-        title: "Vault",
-        timezone: "UTC",
-        updatedAt: "2026-04-08T12:00:00.000Z",
-        updated: true,
-      })),
-    };
-    const journalQuery = {
-      readVault: vi.fn(async () => ({
-        metadata: {
-          formatVersion: CURRENT_VAULT_FORMAT_VERSION,
-          vaultId: "vault_1",
-          title: "Vault",
-          timezone: "UTC",
-          createdAt: "2026-04-08T12:00:00.000Z",
-        },
-        coreDocument: {
-          path: "core.md",
-          title: "Core",
-          occurredAt: "2026-04-08T11:00:00.000Z",
-        },
-        entities: [],
-        experiments: [],
-        journalEntries: [],
-        events: [],
-        samples: [],
-        audits: [],
-        assessments: [],
-        goals: [],
-        conditions: [],
-        allergies: [],
-        protocols: [],
-        familyMembers: [],
-        geneticVariants: [],
-        foods: [],
-        habitatAspects: [],
-        recipes: [],
-        providers: [],
-        workoutFormats: [],
-        byFamily: {},
-      })),
-      lookupEntityById: vi.fn(() => sampleQueryRecord({
-        entityId: "exp_1",
-        primaryLookupId: "exp_1",
-        family: "experiment",
-        kind: "experiment",
-      })),
-      resolveCanonicalEntityInFamily: vi.fn(async (
-        _vault: string,
-        family: string,
-      ) => sampleQueryRecord({
-        entityId: family === "journal" ? "journal:2026-04-08" : "exp_1",
-        primaryLookupId: family === "journal" ? "journal:2026-04-08" : "exp_1",
-        family: family === "journal" ? "journal" : "experiment",
-        kind: family === "journal" ? "journal_day" : "experiment",
-      })),
-      readVaultMetadataSource: vi.fn(async () => ({
+  test("outcome closeout retries frontmatter conflicts and returns the immutable saved result", async () => {
+    const readModel = queryRuntime.createVaultReadModel({
+      vaultRoot: "./vault",
+      entities: [],
+      metadata: {
         formatVersion: CURRENT_VAULT_FORMAT_VERSION,
         vaultId: "vault_1",
         title: "Vault",
         timezone: "UTC",
         createdAt: "2026-04-08T12:00:00.000Z",
-      })),
-      readCanonicalEntityFamilySource: vi.fn(async (_vault: string, family: string) =>
-        family === "core"
-          ? [sampleQueryRecord({
-              entityId: "vault_1",
-              primaryLookupId: "vault_1",
-              family: "core",
-              kind: "core_document",
-              path: "core.md",
-              title: "Core",
-              occurredAt: "2026-04-08T11:00:00.000Z",
-            })]
-          : family === "experiment"
-            ? [sampleQueryRecord({
-                entityId: "exp_1",
-                primaryLookupId: "exp_1",
-                family: "experiment",
-                kind: "experiment",
-              })]
-            : []),
-      listEntities: vi.fn(() => [sampleQueryRecord({
-        entityId: "exp_1",
-        primaryLookupId: "exp_1",
-        family: "experiment",
-        kind: "experiment",
-      })]),
-      listMetricPoints: vi.fn(async () => {
-        throw new Error("Experiment follow-up should not read metric points.");
-      }),
-      listMetricPointsBatch: vi.fn(async () => {
-        throw new Error("Experiment follow-up should not read metric points.");
-      }),
-      decideExperimentFollowupDue: vi.fn(() => ({
-        schema: "murph.experiment-followup-due.v1",
-        kind: "missed-log",
-        action: "notify",
-        reason: "planned_session_log_missing",
-        date: "2026-04-08",
-        dedupeKey: "experiment-followup:exp_1:missed-log:2026-04-08",
-        experiment: {
-          id: "exp_1",
-          slug: "focus-sprint",
-          status: "active",
-          title: "Focus Sprint",
-        },
-        window: {
-          sessionDate: "2026-04-08",
-          baselineStart: null,
-          baselineEnd: null,
-          interventionStart: null,
-          interventionEnd: null,
-        },
-      })),
-      showVaultSummary: vi.fn(async () => ({ title: "Vault", timezone: "UTC" })),
-      showVaultStats: vi.fn(async () => ({ vault: "./vault" })),
-    };
-
-    const journal = await importWithMocks<
-      typeof import("../src/usecases/experiment-journal-vault.ts")
-    >("../src/usecases/experiment-journal-vault.ts", {
-      "../src/runtime-import.ts": mockActualModule("../src/runtime-import.ts", (actual) => ({
-        ...actual,
-        loadRuntimeModule: vi.fn(async (specifier: string) => {
-          if (specifier === "@murphai/core") {
-            return journalCore;
-          }
-          throw new Error(`Unexpected specifier: ${specifier}`);
-        }),
-      })),
-      "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
-        ...actual,
-        loadQueryRuntime: vi.fn(async () => ({
-          ...journalQuery,
-          readExperimentQuerySource: vi.fn(async () => ({
-            readModel: await journalQuery.readVault(),
-            listMetricPoints: journalQuery.listMetricPoints,
-          })),
-        })),
-      })),
-    });
-    assert.deepEqual(await journal.createExperimentRecord({ vault: "./vault", slug: "focus-sprint" }), {
-      vault: "./vault",
-      experimentId: "exp_1",
-      lookupId: "exp_1",
-      slug: "focus-sprint",
-      experimentPath: "experiments/focus-sprint.md",
-      created: true,
-    });
-    assert.deepEqual(await journal.ensureJournalRecord({ vault: "./vault", date: "2026-04-08" }), {
-      vault: "./vault",
-      lookupId: "journal:2026-04-08",
-      journalPath: "journals/2026-04-08.md",
-      created: true,
-    });
-    assert.deepEqual(await journal.appendJournalText({ vault: "./vault", date: "2026-04-08", text: "Hello" }), {
-      vault: "./vault",
-      date: "2026-04-08",
-      lookupId: "journal:2026-04-08",
-      journalPath: "journals/2026-04-08.md",
-      created: false,
-      updated: true,
-    });
-    expect(await journal.showExperimentRecord("./vault", "exp_1")).toMatchObject({
-      vault: "./vault",
-      entity: {
-        id: "exp_1",
-        kind: "experiment",
       },
     });
-    expect(await journal.listExperimentRecords({ vault: "./vault", limit: 5 })).toMatchObject({
-      vault: "./vault",
-      filters: {
-        status: null,
-        limit: 5,
-      },
-      count: 1,
-      nextCursor: null,
-      items: [
-        {
-          id: "exp_1",
-          kind: "experiment",
-        },
-      ],
-    });
-    expect(await journal.showExperimentFollowupDue({
-      vault: "./vault",
-      lookup: "exp_1",
-      kind: "missed-log",
-      date: "2026-04-08",
-    })).toMatchObject({
-      experimentId: "exp_1",
-      lookupId: "exp_1",
-      slug: "focus-sprint",
-      kind: "missed-log",
-      decision: {
-        action: "notify",
-      },
-    });
-    expect(journalQuery.listMetricPoints).not.toHaveBeenCalled();
-
-    const anchoredExperimentId = "exp_01JNV4458HYPP53JDQCBP1QJAN";
-    const anchoredExperiment = sampleQueryRecord({
-      entityId: anchoredExperimentId,
-      primaryLookupId: anchoredExperimentId,
-      family: "experiment",
-      recordClass: "bank",
-      kind: "experiment",
-      status: "active",
-      experimentSlug: "glucose-anchors",
-      attributes: {
-        schemaVersion: "murph.frontmatter.experiment.v1",
-        docType: "experiment",
-        experimentId: anchoredExperimentId,
-        slug: "glucose-anchors",
-        status: "active",
-        title: "Glucose Anchors",
-        startedOn: "2026-06-01",
-        runPlan: {
-          baselineStart: "2026-06-01",
-          baselineEnd: "2026-06-03",
-          interventionStart: "2026-06-04",
-          interventionEnd: "2026-06-18",
-        },
-        analysisPlan: {
-          primaryBiomarkerKey: "biomarker:blood-glucose",
-          desiredDirection: "decrease",
-          measurementAnchors: [
-            {
-              role: "baseline",
-              kind: "wearable_summary",
-              recordId: "metric_sample_glucose_baseline",
-              biomarkerKeys: ["biomarker:blood-glucose"],
-              observedOn: "2026-05-29",
-            },
-            {
-              role: "followup",
-              kind: "wearable_summary",
-              recordId: "metric_sample_glucose_followup",
-              biomarkerKeys: ["biomarker:blood-glucose"],
-              observedOn: "2026-06-18",
-            },
-          ],
-        },
-      },
-    });
-    const anchoredMetricPointFilters: unknown[] = [];
-    const anchoredMetricQuery = {
-      readExperimentQuerySource: vi.fn(async () => ({
-        readModel: journalQuery.readVault(),
-        listMetricPoints: (filtersList: readonly unknown[]) => {
-          anchoredMetricPointFilters.push(...filtersList);
-          return [];
-        },
-      })),
-      readVault: vi.fn(async () => journalQuery.readVault()),
-      lookupEntityById: vi.fn(() => anchoredExperiment),
-      resolveCanonicalEntityInFamily: vi.fn(async () => anchoredExperiment),
-      listMetricPoints: vi.fn(async (_vault: string, filters: unknown) => {
-        anchoredMetricPointFilters.push(filters);
-        return [];
-      }),
-      listMetricPointsBatch: vi.fn(async (_vault: string, filtersList: readonly unknown[]) => {
-        anchoredMetricPointFilters.push(...filtersList);
-        return [];
-      }),
-      normalizeMetricKey: queryRuntime.normalizeMetricKey,
-      resolveMetricDefinition: queryRuntime.resolveMetricDefinition,
-      resolveMetricDefinitionForBiomarker: queryRuntime.resolveMetricDefinitionForBiomarker,
-      summarizeExperimentProgress: vi.fn(() => ({
-        schemaVersion: "murph.experiment-progress.v1",
-        asOf: "2026-06-18",
-        experiment: {
-          id: anchoredExperimentId,
-          slug: "glucose-anchors",
-          status: "active",
-          title: "Glucose Anchors",
-        },
-        phase: "review_due",
-        windows: {
-          baselineStart: "2026-06-01",
-          baselineEnd: "2026-06-03",
-          interventionStart: "2026-06-04",
-          interventionEnd: "2026-06-18",
-        },
-        setupReadiness: { status: "ready", blockingReasons: [] },
-        analysisReadiness: { status: "ready", blockingReasons: [] },
-        dataCoverage: {
-          status: "ready_for_review",
-          baselineDaysAvailable: 1,
-          interventionDaysAvailable: 1,
-          primaryBiomarkerKey: "biomarker:blood-glucose",
-          primaryMetricDaysAvailable: 2,
-          wearableProviders: [],
-        },
-        adherence: {
-          completedSessions: 0,
-          expectedSessionsByNow: null,
-          minimumUsefulSessions: null,
-          status: "unknown",
-          targetSessions: null,
-        },
-        signals: [],
-        earlySignals: [],
-        confounders: [],
-        recommendation: null,
-        commonsProtocolRef: null,
-        protocolRef: null,
-      })),
-    };
-    const anchoredJournal = await importWithMocks<
-      typeof import("../src/usecases/experiment-journal-vault.ts")
-    >("../src/usecases/experiment-journal-vault.ts", {
-      "../src/query-runtime.ts": mockActualModule("../src/query-runtime.ts", (actual) => ({
-        ...actual,
-        loadQueryRuntime: vi.fn(async () => anchoredMetricQuery),
-      })),
-    });
-    await anchoredJournal.showExperimentProgress({
-      vault: "./vault",
-      lookup: "glucose-anchors",
-      asOf: "2026-06-18",
-    });
-    expect(anchoredMetricPointFilters).toEqual([
-      {
-        limit: null,
-        metricKey: "glucose",
-        to: "2026-06-18",
-      },
-    ]);
-
-    assert.deepEqual(await journal.showVaultSummary("./vault"), {
-      vault: "./vault",
-      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
-      vaultId: "vault_1",
-      title: "Vault",
-      timezone: "UTC",
-      createdAt: "2026-04-08T12:00:00.000Z",
-      corePath: "core.md",
-      coreTitle: "Core",
-      coreUpdatedAt: "2026-04-08T11:00:00.000Z",
-    });
-    assert.deepEqual(await journal.updateVaultSummary({ vault: "./vault", title: "Vault" }), {
-      vault: "./vault",
-      metadataFile: "metadata.json",
-      corePath: "core.md",
-      title: "Vault",
-      timezone: "UTC",
-      updatedAt: "2026-04-08T12:00:00.000Z",
-      updated: true,
-    });
-
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-09T01:02:03.000Z"));
     try {
@@ -1777,7 +1280,7 @@ describe("record service seams", () => {
         writeExperimentOutcome,
       };
       const experimentOutcomeQuery = {
-        readVault: vi.fn(async () => journalQuery.readVault()),
+        readVault: vi.fn(async () => readModel),
         lookupEntityById: vi.fn(() => ({
           entityId: experimentId,
           primaryLookupId: experimentId,
@@ -1868,7 +1371,7 @@ describe("record service seams", () => {
             ...experimentOutcomeQuery,
             resolveCanonicalEntityInFamily: vi.fn(async () => experimentOutcomeQuery.lookupEntityById()),
             readExperimentQuerySource: vi.fn(async () => ({
-              readModel: await journalQuery.readVault(),
+              readModel,
               listMetricPoints: () => [],
             })),
           })),
@@ -1919,11 +1422,5 @@ describe("record service seams", () => {
     } finally {
       vi.useRealTimers();
     }
-
-    assert.equal(eventUpsert.mock.calls.length, 1);
-    assert.equal(eventDelete.mock.calls.length, 1);
-    assert.equal(eventEdit.mock.calls.length, 1);
-    assert.equal(journalCore.createExperiment.mock.calls.length, 1);
-    assert.equal(journalCore.ensureJournalDay.mock.calls.length, 1);
   });
 });

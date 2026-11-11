@@ -42,3 +42,10 @@ test("parses CSV and plans a workout without loading sample planning or the vaul
   assert.equal(plan.sessions.length, 1);
   assert.equal(plan.sessions[0]?.occurredAt, "2026-03-12T07:00:00.000Z");
 });
+
+test("preserves tab delimiters instead of treating them as blank text", () => {
+  assert.deepEqual(parseDelimitedRows("time\tvalue\n2026-01-01T00:00:00Z\t7", "\t"), [
+    ["time", "value"], ["2026-01-01T00:00:00Z", "7"],
+  ]);
+  assert.throws(() => parseDelimitedRows("a,b", ""), /single character/);
+});

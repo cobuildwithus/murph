@@ -35,3 +35,30 @@ test("summarizeSampleSeries computes threshold burden, runs, and gaps", () => {
     ],
   );
 });
+
+// A summary is numerical evidence, including when a window contains no readings.
+test("sample summaries preserve custom thresholds without assigning a health category", () => {
+  const empty = summarizeSampleSeries({ stream: "spo2", profile: "oxygen-night", samples: [] });
+  assert.equal(empty.numericSampleCount, 0);
+  assert.equal(empty.minValue, null);
+  assert.equal("screen" in empty, false);
+  const summary = summarizeSampleSeries({
+    stream: "spo2", profile: "oxygen-night", thresholdsBelow: [92],
+    samples: [{ recordedAt: "2026-01-01T00:00:00Z", value: 80 }],
+  });
+  assert.deepEqual(summary.thresholds.map((row) => row.below), [92]);
+  assert.equal("screen" in summary, false);
+});
+
+test("sample summaries handle multiple days of second-resolution readings", () => {
+  const summary = summarizeSampleSeries({
+    stream: "spo2",
+    samples: Array.from({ length: 200_000 }, (_, index) => ({
+      recordedAt: new Date(Date.UTC(2026, 0, 1) + index * 1000).toISOString(),
+      value: 96 + index % 3,
+    })),
+  });
+  assert.equal(summary.numericSampleCount, 200_000);
+  assert.equal(summary.minValue, 96);
+  assert.equal(summary.maxValue, 98);
+});

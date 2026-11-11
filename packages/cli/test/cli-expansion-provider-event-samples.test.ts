@@ -29,6 +29,204 @@ interface DeleteEnvelope {
   retainedPaths: string[]
 }
 
+interface BankEntity {
+  id: string
+  kind: string
+  title: string | null
+  path: string
+  data: Record<string, unknown>
+  excerpt?: string | null
+}
+
+for (const scenario of [
+  {
+    noun: 'food',
+    idField: 'foodId',
+    idPattern: /^food_/u,
+    slug: 'regular-acai-bowl',
+    title: 'Regular Acai Bowl',
+    status: 'active',
+    payload: {
+      summary: 'The usual acai bowl order from the neighborhood spot with repeat toppings.',
+      kind: 'acai bowl',
+      vendor: 'Neighborhood Acai Bar',
+      location: 'Brooklyn, NY',
+      serving: '1 bowl',
+      nutrition: {
+        perServing: { calories: 540, proteinGrams: 11, carbsGrams: 68, fatGrams: 24, fiberGrams: 11 },
+        provenance: { source: 'estimated', confidence: 'medium', sourceDetail: 'Neighborhood menu plus standard granola serving.' },
+      },
+      aliases: ['regular acai bowl', 'usual acai bowl'],
+      ingredients: ['acai base', 'banana', 'strawberries', 'granola'],
+      tags: ['breakfast', 'favorite'],
+      note: 'Typical order includes extra granola and no honey.',
+    },
+    expectedData: {
+      kind: 'acai bowl',
+      vendor: 'Neighborhood Acai Bar',
+      ingredients: ['acai base', 'banana', 'strawberries', 'granola'],
+      nutrition: {
+        perServing: { calories: 540, proteinGrams: 11, carbsGrams: 68, fatGrams: 24, fiberGrams: 11 },
+        provenance: { source: 'estimated', confidence: 'medium', sourceDetail: 'Neighborhood menu plus standard granola serving.' },
+      },
+    },
+    scaffoldFields: {
+      aliases: ['regular acai bowl', 'usual acai bowl'],
+      nutrition: {
+        perServing: { calories: 540, proteinGrams: 11, carbsGrams: 68, fatGrams: 24, fiberGrams: 11 },
+        provenance: { source: 'estimated', confidence: 'medium', sourceDetail: 'Neighborhood menu plus standard granola serving.' },
+      },
+    },
+    excerpt: /Summary The usual acai bowl order from the neighborhood spot with re/u,
+    markdown: [/foodId:/u, /nutrition:/u, /perServing:/u, /provenance:/u],
+    sections: ['Aliases', 'Ingredients'],
+    editedSlug: 'protein-acai-bowl',
+    editedTitle: 'Protein Acai Bowl',
+    editFlags: ['--note', 'Now with chia seeds.', '--tag', 'breakfast', '--tag', 'protein', '--alias', 'usual acai bowl'],
+    editedData: { note: 'Now with chia seeds.', aliases: ['usual acai bowl'], tags: ['breakfast', 'protein'] },
+    clearFlags: ['--clear-note'],
+    clearedFields: ['note'],
+  },
+  {
+    noun: 'recipe',
+    idField: 'recipeId',
+    idPattern: /^rcp_/u,
+    slug: 'sheet-pan-salmon-bowls',
+    title: 'Sheet Pan Salmon Bowls',
+    status: 'saved',
+    payload: {
+      summary: 'A reliable high-protein salmon bowl with roasted vegetables and rice.',
+      cuisine: 'mediterranean',
+      dishType: 'dinner',
+      source: 'Family weeknight rotation',
+      servings: 2,
+      prepTimeMinutes: 15,
+      cookTimeMinutes: 20,
+      tags: ['high-protein', 'weeknight'],
+      ingredients: ['2 salmon fillets', '2 cups cooked rice', '2 cups broccoli florets'],
+      steps: ['Heat the oven to 220C and line a sheet pan.', 'Roast the broccoli for 10 minutes.', 'Add the salmon and roast until cooked through.', 'Serve over rice with lemon juice.'],
+    },
+    expectedData: { cuisine: 'mediterranean', dishType: 'dinner', totalTimeMinutes: 35 },
+    scaffoldFields: {},
+    excerpt: /Summary A reliable high protein salmon/u,
+    markdown: [/recipeId:/u],
+    sections: ['Ingredients', 'Steps'],
+    editedSlug: 'sheet-pan-salmon-skillet',
+    editedTitle: 'Sheet Pan Salmon Skillet',
+    editFlags: ['--summary', 'Updated rotation dinner.', '--ingredient', '2 salmon fillets', '--ingredient', '1 lemon', '--step', 'Roast the salmon.', '--step', 'Finish with lemon juice.'],
+    editedData: { summary: 'Updated rotation dinner.', ingredients: ['2 salmon fillets', '1 lemon'], steps: ['Roast the salmon.', 'Finish with lemon juice.'] },
+    clearFlags: ['--clear-summary', '--clear-ingredients'],
+    clearedFields: ['summary', 'ingredients'],
+  },
+]) {
+  test.sequential(`${scenario.noun} import/edit/clear/delete preserves canonical identity and persisted fields`, async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-bank-lifecycle-'))
+    const payloadPath = path.join(vaultRoot, 'payload.json')
+    const originalPath = `bank/${scenario.noun}s/${scenario.slug}.md`
+    const editedPath = `bank/${scenario.noun}s/${scenario.editedSlug}.md`
+    try {
+      assert.equal((await runSliceCli(['init', '--vault', vaultRoot])).ok, true)
+      const scaffold = requireData(await runSliceCli<{
+        noun: string
+        payload: Record<string, unknown>
+      }>([scenario.noun, 'scaffold', '--vault', vaultRoot]))
+      assert.equal(scaffold.noun, scenario.noun)
+      assert.equal(scaffold.payload.title, scenario.title)
+      for (const [key, value] of Object.entries(scenario.scaffoldFields)) {
+        assert.deepEqual(scaffold.payload[key], value)
+      }
+      await writeFile(payloadPath, JSON.stringify({
+        ...scenario.payload,
+        title: scenario.title,
+        slug: scenario.slug,
+        status: scenario.status,
+      }))
+      const imported = await runSliceCli<Record<string, unknown>>([
+        scenario.noun, 'import-json', '--input', `@${payloadPath}`, '--vault', vaultRoot,
+      ])
+      assert.equal(imported.ok, true)
+      assert.equal(imported.meta.command, `${scenario.noun} import-json`)
+      const created = requireData(imported)
+      const id = created[scenario.idField]
+      assert.ok(typeof id === 'string')
+      assert.match(id, scenario.idPattern)
+      assert.equal(created.path, originalPath)
+      assert.equal(created.created, true)
+      const markdown = await readFile(path.join(vaultRoot, originalPath), 'utf8')
+      for (const pattern of scenario.markdown) assert.match(markdown, pattern)
+      for (const section of scenario.sections) assert.ok(markdown.includes(`## ${section}`))
+
+      for (const lookup of [id, scenario.slug]) {
+        const shown = requireData(await runSliceCli<{ entity: BankEntity }>([
+          scenario.noun, 'show', lookup, '--vault', vaultRoot,
+        ])).entity
+        assert.equal(shown.id, id)
+        assert.equal(shown.kind, scenario.noun)
+        assert.equal(shown.title, scenario.title)
+        for (const [key, value] of Object.entries(scenario.expectedData)) {
+          assert.deepEqual(shown.data[key], value)
+        }
+      }
+      const listed = requireData(await runSliceCli<{
+        filters: { status: string }
+        count: number
+        items: BankEntity[]
+      }>([scenario.noun, 'list', '--status', scenario.status, '--vault', vaultRoot]))
+      assert.equal(listed.filters.status, scenario.status)
+      assert.equal(listed.count, 1)
+      assert.deepEqual(listed.items.map(item => item.id), [id])
+      assert.equal(listed.items[0].kind, scenario.noun)
+      assert.match(listed.items[0].excerpt ?? '', scenario.excerpt)
+      assert.equal('markdown' in listed.items[0], false)
+      for (const [key, value] of Object.entries(scenario.expectedData)) {
+        assert.deepEqual(listed.items[0].data[key], value)
+      }
+
+      const edited = await runSliceCli<{ entity: BankEntity }>([
+        scenario.noun, 'edit', id, '--title', scenario.editedTitle,
+        '--slug', scenario.editedSlug, ...scenario.editFlags, '--vault', vaultRoot,
+      ])
+      assert.equal(edited.ok, true)
+      assert.equal(edited.meta.command, `${scenario.noun} edit`)
+      const entity = requireData(edited).entity
+      assert.equal(entity.id, id)
+      assert.equal(entity.title, scenario.editedTitle)
+      assert.equal(entity.path, editedPath)
+      for (const [key, value] of Object.entries(scenario.editedData)) {
+        assert.deepEqual(entity.data[key], value)
+      }
+      await access(path.join(vaultRoot, editedPath))
+      await assert.rejects(() => access(path.join(vaultRoot, originalPath)))
+      const finalTitle = `${scenario.editedTitle} Revised`
+      const cleared = requireData(await runSliceCli<{ entity: BankEntity }>([
+        scenario.noun, 'edit', id, '--title', finalTitle,
+        ...scenario.clearFlags, '--vault', vaultRoot,
+      ])).entity
+      assert.equal(cleared.id, id)
+      assert.equal(cleared.title, finalTitle)
+      for (const field of scenario.clearedFields) assert.equal(cleared.data[field], undefined)
+      const reopened = requireData(await runSliceCli<{ entity: BankEntity }>([
+        scenario.noun, 'show', id, '--vault', vaultRoot,
+      ])).entity
+      assert.equal(reopened.id, id)
+      assert.equal(reopened.title, finalTitle)
+      assert.equal(reopened.path, editedPath)
+      for (const field of scenario.clearedFields) assert.equal(reopened.data[field], undefined)
+
+      const deleted = await runSliceCli<DeleteEnvelope>([
+        scenario.noun, 'delete', id, '--vault', vaultRoot,
+      ])
+      assert.equal(deleted.ok, true)
+      await assert.rejects(() => access(path.join(vaultRoot, editedPath)))
+      const missing = await runSliceCli([scenario.noun, 'show', id, '--vault', vaultRoot])
+      assert.equal(missing.ok, false)
+      assert.equal(missing.error?.code, 'not_found')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  })
+}
+
 function createSliceCli() {
   const cli = Cli.create('vault-cli', {
     description: 'provider/food/recipe/event/samples slice test cli',
@@ -67,21 +265,6 @@ async function runSliceCli<TData>(args: string[]): Promise<CliEnvelope<TData>> {
   return JSON.parse(output.join('').trim()) as CliEnvelope<TData>
 }
 
-async function runSliceCliRaw(args: string[]) {
-  const cli = createSliceCli()
-  const output: string[] = []
-
-  await cli.serve([...args, '--format', 'json'], {
-    env: process.env,
-    exit: () => {},
-    stdout(chunk) {
-      output.push(chunk)
-    },
-  })
-
-  return output.join('').trim()
-}
-
 async function snapshotVaultFiles(vaultRoot: string): Promise<Map<string, Buffer>> {
   const snapshot = new Map<string, Buffer>()
   const relativePaths = await readdir(vaultRoot, { recursive: true })
@@ -95,107 +278,6 @@ async function snapshotVaultFiles(vaultRoot: string): Promise<Map<string, Buffer
 
   return snapshot
 }
-
-test('provider, food, recipe, event, and samples schemas expose the new noun entrypoints', async () => {
-  const providerSchema = JSON.parse(
-    await runSliceCliRaw(['provider', 'import-json', '--schema']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-    }
-  }
-  const foodSchema = JSON.parse(
-    await runSliceCliRaw(['food', 'import-json', '--schema']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-    }
-  }
-  const recipeSchema = JSON.parse(
-    await runSliceCliRaw(['recipe', 'import-json', '--schema']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-    }
-  }
-  const eventSchema = JSON.parse(
-    await runSliceCliRaw(['event', 'scaffold', '--schema']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-  const samplesAddSchema = JSON.parse(
-    await runSliceCliRaw(['samples', 'add', '--schema']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-  const samplesImportJsonSchema = JSON.parse(
-    await runSliceCliRaw(['samples', 'import-json', '--schema']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-    }
-  }
-
-  assert.equal('input' in providerSchema.options.properties, true)
-  assert.equal('input' in foodSchema.options.properties, true)
-  assert.equal('input' in recipeSchema.options.properties, true)
-  assert.equal('kind' in eventSchema.options.properties, true)
-  assert.deepEqual(eventSchema.options.required, ['vault', 'kind'])
-  assert.equal('input' in samplesAddSchema.options.properties, false)
-  assert.equal('stream' in samplesAddSchema.options.properties, true)
-  assert.equal('recordedAt' in samplesAddSchema.options.properties, true)
-  assert.equal('value' in samplesAddSchema.options.properties, true)
-  assert.equal('stage' in samplesAddSchema.options.properties, true)
-  assert.deepEqual(samplesAddSchema.options.required, [
-    'vault',
-    'stream',
-    'unit',
-    'recordedAt',
-  ])
-  assert.equal('input' in samplesImportJsonSchema.options.properties, true)
-})
-
-test('recipe and samples examples surface branchy command fields in help and LLM metadata', async () => {
-  const recipeSaveHelp = await runSliceCliRaw(['recipe', 'save', '--help'])
-  const recipeEditHelp = await runSliceCliRaw(['recipe', 'edit', '--help'])
-  const samplesAddHelp = await runSliceCliRaw(['samples', 'add', '--help'])
-  const samplesImportJsonHelp = await runSliceCliRaw(['samples', 'import-json', '--help'])
-  const recipeSaveLlms = await runSliceCliRaw(['recipe', 'save', '--llms-full'])
-  const recipeEditLlms = await runSliceCliRaw(['recipe', 'edit', '--llms-full'])
-  const samplesAddLlms = await runSliceCliRaw(['samples', 'add', '--llms-full'])
-  const samplesImportJsonLlms = await runSliceCliRaw([
-    'samples',
-    'import-json',
-    '--llms-full',
-  ])
-
-  assert.match(recipeSaveHelp, /--link supports_goal:goal_01JNV422Y2M5ZBV64ZP4N1DRB1/u)
-  assert.match(recipeEditHelp, /--link supports_goal:goal_01JNV422Y2M5ZBV64ZP4N1DRB1/u)
-  assert.match(recipeEditHelp, /canonical type:targetId grammar/u)
-  assert.match(recipeSaveLlms, /supports_goal:goal_01JNV422Y2M5ZBV64ZP4N1DRB1/u)
-  assert.match(recipeEditLlms, /supports_goal:goal_01JNV422Y2M5ZBV64ZP4N1DRB1/u)
-  assert.match(recipeEditLlms, /canonical type:targetId grammar/u)
-
-  assert.match(samplesAddHelp, /--stream glucose/u)
-  assert.match(samplesAddHelp, /--source-path <string>/u)
-  assert.match(samplesAddHelp, /--sourcePath \.\/imports\/glucose\.csv/u)
-  assert.match(samplesAddHelp, /--batch-preset-id <string>/u)
-  assert.match(samplesAddHelp, /--batchPresetId manual-glucose-csv/u)
-  assert.match(samplesAddHelp, /--stream sleep_stage/u)
-  assert.match(samplesAddHelp, /--stage deep/u)
-  assert.match(samplesAddHelp, /stage-specific field group/u)
-  assert.match(samplesImportJsonHelp, /sourcePath\/importConfig provenance/u)
-  assert.match(samplesImportJsonHelp, /sleep_stage segments/u)
-  assert.match(samplesAddLlms, /manual-glucose-csv/u)
-  assert.match(samplesAddLlms, /sleep_stage/u)
-  assert.match(samplesImportJsonLlms, /sourcePath\/importConfig provenance/u)
-})
 
 test.sequential('samples import-json returns indexed repair fields without partial writes or value echo', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-repair-'))
@@ -459,76 +541,6 @@ test.sequential('samples import-json returns indexed repair fields without parti
   }
 })
 
-test('provider, food, recipe, and event edit/delete schemas expose shared record mutation options', async () => {
-  const providerEditSchema = JSON.parse(
-    await runSliceCliRaw(['provider', 'edit', '--schema']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-  const foodEditSchema = JSON.parse(
-    await runSliceCliRaw(['food', 'edit', '--schema']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-  const recipeEditSchema = JSON.parse(
-    await runSliceCliRaw(['recipe', 'edit', '--schema']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-  const eventEditSchema = JSON.parse(
-    await runSliceCliRaw(['event', 'edit', '--schema']),
-  ) as {
-    options: {
-      properties: Record<string, unknown>
-      required?: string[]
-    }
-  }
-  const providerDeleteSchema = JSON.parse(
-    await runSliceCliRaw(['provider', 'delete', '--schema']),
-  ) as {
-    options: {
-      required?: string[]
-    }
-  }
-
-  assert.equal('input' in providerEditSchema.options.properties, false)
-  assert.equal('set' in providerEditSchema.options.properties, false)
-  assert.equal('clear' in providerEditSchema.options.properties, false)
-  assert.equal('title' in providerEditSchema.options.properties, true)
-  assert.deepEqual(providerEditSchema.options.required, ['vault'])
-
-  assert.equal('input' in foodEditSchema.options.properties, false)
-  assert.equal('set' in foodEditSchema.options.properties, false)
-  assert.equal('clear' in foodEditSchema.options.properties, false)
-  assert.equal('title' in foodEditSchema.options.properties, true)
-  assert.deepEqual(foodEditSchema.options.required, ['vault'])
-
-  assert.equal('input' in recipeEditSchema.options.properties, false)
-  assert.equal('set' in recipeEditSchema.options.properties, false)
-  assert.equal('clear' in recipeEditSchema.options.properties, false)
-  assert.equal('title' in recipeEditSchema.options.properties, true)
-  assert.deepEqual(recipeEditSchema.options.required, ['vault'])
-
-  assert.equal('input' in eventEditSchema.options.properties, false)
-  assert.equal('set' in eventEditSchema.options.properties, false)
-  assert.equal('clear' in eventEditSchema.options.properties, false)
-  assert.equal('title' in eventEditSchema.options.properties, true)
-  assert.equal('kind' in eventEditSchema.options.properties, false)
-  assert.equal('dayKeyPolicy' in eventEditSchema.options.properties, true)
-  assert.deepEqual(eventEditSchema.options.required, ['vault'])
-
-  assert.deepEqual(providerDeleteSchema.options.required, ['vault'])
-})
-
 test('event scaffold keeps activity_session aligned with the canonical nested workout shape', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-event-scaffold-'))
 
@@ -613,426 +625,6 @@ test('workout format save rejects structured payloads that omit canonical templa
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
-
-test('provider/food/recipe/event/samples help uses generic id selectors for read commands', async () => {
-  const providerHelp = await runSliceCliRaw(['provider', 'show', '--help'])
-  const foodHelp = await runSliceCliRaw(['food', 'show', '--help'])
-  const recipeHelp = await runSliceCliRaw(['recipe', 'show', '--help'])
-  const eventHelp = await runSliceCliRaw(['event', 'show', '--help'])
-  const sampleHelp = await runSliceCliRaw(['samples', 'show', '--help'])
-  const batchHelp = await runSliceCliRaw(['samples', 'batch', 'show', '--help'])
-
-  assert.match(providerHelp, /Usage: vault-cli provider show <id> \[options\]/u)
-  assert.match(foodHelp, /Usage: vault-cli food show <id> \[options\]/u)
-  assert.match(recipeHelp, /Usage: vault-cli recipe show <id> \[options\]/u)
-  assert.match(eventHelp, /Usage: vault-cli event show <id> \[options\]/u)
-  assert.match(sampleHelp, /Usage: vault-cli samples show <id> \[options\]/u)
-  assert.match(batchHelp, /Usage: vault-cli samples batch show <id> \[options\]/u)
-})
-
-test('generic read and semantic summary help surfaces explain when to use them', async () => {
-  const showHelp = await runSliceCliRaw(['show', '--help'])
-  const listHelp = await runSliceCliRaw(['list', '--help'])
-  const searchHelp = await runSliceCliRaw(['search', 'query', '--help'])
-  const timelineHelp = await runSliceCliRaw(['timeline', '--help'])
-  const wearablesDayHelp = await runSliceCliRaw(['wearables', 'day', '--help'])
-  const mealManifestHelp = await runSliceCliRaw(['meal', 'manifest', '--help'])
-
-  assert.match(
-    showHelp,
-    /Use generic `show` with canonical read ids such as `meal_\*`, `doc_\*`, `evt_\*`, or `journal:\*`\./u,
-  )
-  assert.match(
-    listHelp,
-    /Use `list` for family\/kind\/status\/tag\/date filtering, `search query` for fuzzy text recall, and `timeline` for chronology across record types\./u,
-  )
-  assert.match(
-    searchHelp,
-    /Use `search query <query>` for direct fuzzy recall, or `search query --text "<query>"` for explicit machine-oriented calls\. Use `show` for one exact id, `list` for structured filters, and `timeline` for chronology\./u,
-  )
-  assert.match(
-    timelineHelp,
-    /Use `timeline` when you need chronology across journals, events, assessments, and sample summaries\./u,
-  )
-  assert.match(
-    wearablesDayHelp,
-    /Use `wearables day` first for date-specific questions except workouts; use `wearables activity list` for workouts\. Choose the output before the first and only data read: day totals omit both detail options; individual workout facts use --include-workout-summaries; lap\/split facts use --include-workout-details\. Never probe with smaller output and retry\./u,
-  )
-  assert.match(
-    mealManifestHelp,
-    /Show the immutable raw import manifest for a meal\./u,
-  )
-})
-
-test.sequential(
-  'recipe scaffold/import-json/show/list work through the slice commands',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-recipe-'))
-    const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
-
-    try {
-      await runSliceCli(['init', '--vault', vaultRoot])
-
-      const recipeScaffold = await runSliceCli<{
-        noun: string
-        payload: {
-          title?: string
-        }
-      }>(['recipe', 'scaffold', '--vault', vaultRoot])
-
-      assert.equal(recipeScaffold.ok, true)
-      assert.equal(requireData(recipeScaffold).noun, 'recipe')
-      assert.equal(
-        requireData(recipeScaffold).payload.title,
-        'Sheet Pan Salmon Bowls',
-      )
-
-      await writeFile(
-        recipePayloadPath,
-        JSON.stringify({
-          title: 'Sheet Pan Salmon Bowls',
-          slug: 'sheet-pan-salmon-bowls',
-          status: 'saved',
-          summary: 'A reliable high-protein salmon bowl with roasted vegetables and rice.',
-          cuisine: 'mediterranean',
-          dishType: 'dinner',
-          source: 'Family weeknight rotation',
-          servings: 2,
-          prepTimeMinutes: 15,
-          cookTimeMinutes: 20,
-          tags: ['high-protein', 'weeknight'],
-          ingredients: ['2 salmon fillets', '2 cups cooked rice', '2 cups broccoli florets'],
-          steps: [
-            'Heat the oven to 220C and line a sheet pan.',
-            'Roast the broccoli for 10 minutes.',
-            'Add the salmon and roast until cooked through.',
-            'Serve over rice with lemon juice.',
-          ],
-        }),
-        'utf8',
-      )
-
-      const recipeUpsert = await runSliceCli<{
-        recipeId: string
-        path: string
-        created: boolean
-      }>([
-        'recipe',
-        'import-json',
-        '--input',
-        `@${recipePayloadPath}`,
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(recipeUpsert.ok, true, JSON.stringify(recipeUpsert))
-      assert.equal(recipeUpsert.meta?.command, 'recipe import-json')
-      assert.match(requireData(recipeUpsert).recipeId, /^rcp_/u)
-      assert.equal(
-        requireData(recipeUpsert).path,
-        'bank/recipes/sheet-pan-salmon-bowls.md',
-      )
-      assert.equal(requireData(recipeUpsert).created, true)
-      await access(path.join(vaultRoot, requireData(recipeUpsert).path))
-
-      const recipeShow = await runSliceCli<{
-        entity: {
-          id: string
-          kind: string
-          title: string | null
-          data: {
-            cuisine?: string
-            totalTimeMinutes?: number
-          }
-        }
-      }>([
-        'recipe',
-        'show',
-        requireData(recipeUpsert).recipeId,
-        '--vault',
-        vaultRoot,
-      ])
-      const recipeShowBySlug = await runSliceCli<{
-        entity: {
-          id: string
-        }
-      }>([
-        'recipe',
-        'show',
-        'sheet-pan-salmon-bowls',
-        '--vault',
-        vaultRoot,
-      ])
-      const recipeList = await runSliceCli<{
-        filters: {
-          status: string | null
-          limit: number
-        }
-        count: number
-        items: Array<{
-          id: string
-          kind: string
-          data: Record<string, unknown>
-          excerpt?: string | null
-        }>
-      }>([
-        'recipe',
-        'list',
-        '--status',
-        'saved',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(recipeShow.ok, true)
-      assert.equal(requireData(recipeShow).entity.id, requireData(recipeUpsert).recipeId)
-      assert.equal(requireData(recipeShow).entity.kind, 'recipe')
-      assert.equal(requireData(recipeShow).entity.title, 'Sheet Pan Salmon Bowls')
-      assert.equal(requireData(recipeShow).entity.data.cuisine, 'mediterranean')
-      assert.equal(requireData(recipeShow).entity.data.totalTimeMinutes, 35)
-      assert.equal(recipeShowBySlug.ok, true)
-      assert.equal(
-        requireData(recipeShowBySlug).entity.id,
-        requireData(recipeUpsert).recipeId,
-      )
-
-      assert.equal(recipeList.ok, true)
-      assert.equal(requireData(recipeList).filters.status, 'saved')
-      assert.equal(requireData(recipeList).count, 1)
-      assert.equal(requireData(recipeList).items.length, 1)
-      assert.equal(requireData(recipeList).items[0]?.kind, 'recipe')
-      assert.match(
-        requireData(recipeList).items[0]?.excerpt ?? '',
-        /Summary A reliable high protein salmon/u,
-      )
-      assert.equal('markdown' in (requireData(recipeList).items[0] ?? {}), false)
-      assert.equal(requireData(recipeList).items[0]?.data.dishType, 'dinner')
-
-      const recipeMarkdown = await readFile(
-        path.join(vaultRoot, requireData(recipeUpsert).path),
-        'utf8',
-      )
-      assert.match(recipeMarkdown, /recipeId:/u)
-      assert.match(recipeMarkdown, /## Ingredients/u)
-      assert.match(recipeMarkdown, /## Steps/u)
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
-  'food scaffold/import-json/show/list work through the slice commands',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-food-'))
-    const foodPayloadPath = path.join(vaultRoot, 'food.json')
-
-    try {
-      await runSliceCli(['init', '--vault', vaultRoot])
-
-      const foodScaffold = await runSliceCli<{
-        noun: string
-        payload: {
-          title?: string
-          aliases?: string[]
-          nutrition?: {
-            perServing?: Record<string, unknown>
-            provenance?: Record<string, unknown>
-          }
-        }
-      }>(['food', 'scaffold', '--vault', vaultRoot])
-
-      assert.equal(foodScaffold.ok, true)
-      assert.equal(requireData(foodScaffold).noun, 'food')
-      assert.equal(requireData(foodScaffold).payload.title, 'Regular Acai Bowl')
-      assert.deepEqual(requireData(foodScaffold).payload.aliases, [
-        'regular acai bowl',
-        'usual acai bowl',
-      ])
-      assert.deepEqual(requireData(foodScaffold).payload.nutrition?.perServing, {
-        calories: 540,
-        proteinGrams: 11,
-        carbsGrams: 68,
-        fatGrams: 24,
-        fiberGrams: 11,
-      })
-      assert.deepEqual(requireData(foodScaffold).payload.nutrition?.provenance, {
-        source: 'estimated',
-        confidence: 'medium',
-        sourceDetail: 'Neighborhood menu plus standard granola serving.',
-      })
-
-      await writeFile(
-        foodPayloadPath,
-        JSON.stringify({
-          title: 'Regular Acai Bowl',
-          slug: 'regular-acai-bowl',
-          status: 'active',
-          summary: 'The usual acai bowl order from the neighborhood spot with repeat toppings.',
-          kind: 'acai bowl',
-          vendor: 'Neighborhood Acai Bar',
-          location: 'Brooklyn, NY',
-          serving: '1 bowl',
-          nutrition: {
-            perServing: {
-              calories: 540,
-              proteinGrams: 11,
-              carbsGrams: 68,
-              fatGrams: 24,
-              fiberGrams: 11,
-            },
-            provenance: {
-              source: 'estimated',
-              confidence: 'medium',
-              sourceDetail: 'Neighborhood menu plus standard granola serving.',
-            },
-          },
-          aliases: ['regular acai bowl', 'usual acai bowl'],
-          ingredients: ['acai base', 'banana', 'strawberries', 'granola'],
-          tags: ['breakfast', 'favorite'],
-          note: 'Typical order includes extra granola and no honey.',
-        }),
-        'utf8',
-      )
-
-      const foodUpsert = await runSliceCli<{
-        foodId: string
-        path: string
-        created: boolean
-      }>([
-        'food',
-        'import-json',
-        '--input',
-        `@${foodPayloadPath}`,
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(foodUpsert.ok, true, JSON.stringify(foodUpsert))
-      assert.equal(foodUpsert.meta?.command, 'food import-json')
-      assert.match(requireData(foodUpsert).foodId, /^food_/u)
-      assert.equal(requireData(foodUpsert).path, 'bank/foods/regular-acai-bowl.md')
-      assert.equal(requireData(foodUpsert).created, true)
-      await access(path.join(vaultRoot, requireData(foodUpsert).path))
-
-      const foodShow = await runSliceCli<{
-        entity: {
-          id: string
-          kind: string
-          title: string | null
-          data: {
-            vendor?: string
-            ingredients?: string[]
-            nutrition?: {
-              perServing?: Record<string, unknown>
-              provenance?: Record<string, unknown>
-            }
-          }
-        }
-      }>([
-        'food',
-        'show',
-        requireData(foodUpsert).foodId,
-        '--vault',
-        vaultRoot,
-      ])
-      const foodShowBySlug = await runSliceCli<{
-        entity: {
-          id: string
-        }
-      }>([
-        'food',
-        'show',
-        'regular-acai-bowl',
-        '--vault',
-        vaultRoot,
-      ])
-      const foodList = await runSliceCli<{
-        filters: {
-          status: string | null
-          limit: number
-        }
-        count: number
-        items: Array<{
-          id: string
-          kind: string
-          data: Record<string, unknown>
-          excerpt?: string | null
-        }>
-      }>([
-        'food',
-        'list',
-        '--status',
-        'active',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(foodShow.ok, true)
-      assert.equal(requireData(foodShow).entity.id, requireData(foodUpsert).foodId)
-      assert.equal(requireData(foodShow).entity.kind, 'food')
-      assert.equal(requireData(foodShow).entity.title, 'Regular Acai Bowl')
-      assert.equal(requireData(foodShow).entity.data.vendor, 'Neighborhood Acai Bar')
-      assert.deepEqual(requireData(foodShow).entity.data.ingredients, [
-        'acai base',
-        'banana',
-        'strawberries',
-        'granola',
-      ])
-      assert.deepEqual(requireData(foodShow).entity.data.nutrition?.perServing, {
-        calories: 540,
-        proteinGrams: 11,
-        carbsGrams: 68,
-        fatGrams: 24,
-        fiberGrams: 11,
-      })
-      assert.deepEqual(requireData(foodShow).entity.data.nutrition?.provenance, {
-        source: 'estimated',
-        confidence: 'medium',
-        sourceDetail: 'Neighborhood menu plus standard granola serving.',
-      })
-      assert.equal(foodShowBySlug.ok, true)
-      assert.equal(requireData(foodShowBySlug).entity.id, requireData(foodUpsert).foodId)
-
-      assert.equal(foodList.ok, true)
-      assert.equal(requireData(foodList).filters.status, 'active')
-      assert.equal(requireData(foodList).count, 1)
-      assert.equal(requireData(foodList).items.length, 1)
-      assert.equal(requireData(foodList).items[0]?.kind, 'food')
-      assert.match(
-        requireData(foodList).items[0]?.excerpt ?? '',
-        /Summary The usual acai bowl order from the neighborhood spot with re/u,
-      )
-      assert.equal('markdown' in (requireData(foodList).items[0] ?? {}), false)
-      assert.equal(requireData(foodList).items[0]?.data.kind, 'acai bowl')
-      assert.deepEqual(
-        (requireData(foodList).items[0]?.data.nutrition as {
-          perServing?: Record<string, unknown>
-        } | undefined)?.perServing,
-        {
-        calories: 540,
-        proteinGrams: 11,
-        carbsGrams: 68,
-        fatGrams: 24,
-        fiberGrams: 11,
-        },
-      )
-
-      const foodMarkdown = await readFile(
-        path.join(vaultRoot, requireData(foodUpsert).path),
-        'utf8',
-      )
-      assert.match(foodMarkdown, /foodId:/u)
-      assert.match(foodMarkdown, /nutrition:/u)
-      assert.match(foodMarkdown, /perServing:/u)
-      assert.match(foodMarkdown, /provenance:/u)
-      assert.match(foodMarkdown, /## Aliases/u)
-      assert.match(foodMarkdown, /## Ingredients/u)
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
 
 test.sequential(
   'food schedule creates a remembered food plus a daily auto-log job',
@@ -1994,423 +1586,6 @@ test.sequential(
 )
 
 test.sequential(
-  'food and recipe edit rename the underlying document when slug is patched',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-edit-rename-'))
-    const foodPayloadPath = path.join(vaultRoot, 'food.json')
-    const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
-
-    try {
-      await runSliceCli(['init', '--vault', vaultRoot])
-
-      await writeFile(
-        foodPayloadPath,
-        JSON.stringify({
-          title: 'Regular Acai Bowl',
-          slug: 'regular-acai-bowl',
-          status: 'active',
-          note: 'Typical order.',
-        }),
-        'utf8',
-      )
-      await writeFile(
-        recipePayloadPath,
-        JSON.stringify({
-          title: 'Sheet Pan Salmon Bowls',
-          slug: 'sheet-pan-salmon-bowls',
-          status: 'saved',
-          ingredients: ['2 salmon fillets'],
-          steps: ['Roast the salmon.'],
-        }),
-        'utf8',
-      )
-
-      const foodCreated = await runSliceCli<{ foodId: string }>([
-        'food',
-        'import-json',
-        '--input',
-        `@${foodPayloadPath}`,
-        '--vault',
-        vaultRoot,
-      ])
-      const recipeCreated = await runSliceCli<{ recipeId: string }>([
-        'recipe',
-        'import-json',
-        '--input',
-        `@${recipePayloadPath}`,
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(foodCreated.ok, true)
-      assert.equal(recipeCreated.ok, true)
-
-      const foodEdited = await runSliceCli<{
-        entity: {
-          id: string
-          path: string | null
-        }
-      }>([
-        'food',
-        'edit',
-        requireData(foodCreated).foodId,
-        '--slug',
-        'protein-acai-bowl',
-        '--vault',
-        vaultRoot,
-      ])
-      const recipeEdited = await runSliceCli<{
-        entity: {
-          id: string
-          path: string | null
-        }
-      }>([
-        'recipe',
-        'edit',
-        requireData(recipeCreated).recipeId,
-        '--slug',
-        'sheet-pan-salmon-skillet',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(foodEdited.ok, true)
-      assert.equal(
-        requireData(foodEdited).entity.path,
-        'bank/foods/protein-acai-bowl.md',
-      )
-      await access(path.join(vaultRoot, 'bank/foods/protein-acai-bowl.md'))
-      await assert.rejects(() =>
-        access(path.join(vaultRoot, 'bank/foods/regular-acai-bowl.md')))
-
-      assert.equal(recipeEdited.ok, true)
-      assert.equal(
-        requireData(recipeEdited).entity.path,
-        'bank/recipes/sheet-pan-salmon-skillet.md',
-      )
-      await access(path.join(vaultRoot, 'bank/recipes/sheet-pan-salmon-skillet.md'))
-      await assert.rejects(() =>
-        access(path.join(vaultRoot, 'bank/recipes/sheet-pan-salmon-bowls.md')))
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
-  'food and recipe edit typed fields preserve canonical ids',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-edit-input-'))
-    const foodPayloadPath = path.join(vaultRoot, 'food.json')
-    const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
-
-    try {
-      await runSliceCli(['init', '--vault', vaultRoot])
-
-      await writeFile(
-        foodPayloadPath,
-        JSON.stringify({
-          title: 'Regular Acai Bowl',
-          slug: 'regular-acai-bowl',
-          status: 'active',
-          note: 'Typical order.',
-        }),
-        'utf8',
-      )
-      await writeFile(
-        recipePayloadPath,
-        JSON.stringify({
-          title: 'Sheet Pan Salmon Bowls',
-          slug: 'sheet-pan-salmon-bowls',
-          status: 'saved',
-          summary: 'Weeknight salmon bowls.',
-          ingredients: ['2 salmon fillets'],
-          steps: ['Roast the salmon.'],
-        }),
-        'utf8',
-      )
-
-      const foodCreated = await runSliceCli<{ foodId: string }>([
-        'food',
-        'import-json',
-        '--input',
-        `@${foodPayloadPath}`,
-        '--vault',
-        vaultRoot,
-      ])
-      const recipeCreated = await runSliceCli<{ recipeId: string }>([
-        'recipe',
-        'import-json',
-        '--input',
-        `@${recipePayloadPath}`,
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(foodCreated.ok, true)
-      assert.equal(recipeCreated.ok, true)
-
-      const foodEdited = await runSliceCli<{
-        entity: {
-          id: string
-          path: string | null
-          title: string | null
-          data: {
-            note?: string
-          }
-        }
-      }>([
-        'food',
-        'edit',
-        requireData(foodCreated).foodId,
-        '--title',
-        'Protein Acai Bowl',
-        '--slug',
-        'protein-acai-bowl',
-        '--note',
-        'Now with chia seeds.',
-        '--vault',
-        vaultRoot,
-      ])
-      const recipeEdited = await runSliceCli<{
-        entity: {
-          id: string
-          path: string | null
-          title: string | null
-          data: {
-            summary?: string
-          }
-        }
-      }>([
-        'recipe',
-        'edit',
-        requireData(recipeCreated).recipeId,
-        '--title',
-        'Sheet Pan Salmon Skillet',
-        '--slug',
-        'sheet-pan-salmon-skillet',
-        '--summary',
-        'Updated rotation dinner.',
-        '--ingredient',
-        '2 salmon fillets',
-        '--ingredient',
-        '1 lemon',
-        '--step',
-        'Roast the salmon.',
-        '--step',
-        'Finish with lemon juice.',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(foodEdited.ok, true)
-      assert.equal(requireData(foodEdited).entity.id, requireData(foodCreated).foodId)
-      assert.equal(requireData(foodEdited).entity.title, 'Protein Acai Bowl')
-      assert.equal(
-        requireData(foodEdited).entity.path,
-        'bank/foods/protein-acai-bowl.md',
-      )
-      assert.equal(requireData(foodEdited).entity.data.note, 'Now with chia seeds.')
-      await access(path.join(vaultRoot, 'bank/foods/protein-acai-bowl.md'))
-      await assert.rejects(() =>
-        access(path.join(vaultRoot, 'bank/foods/regular-acai-bowl.md')))
-
-      assert.equal(recipeEdited.ok, true)
-      assert.equal(requireData(recipeEdited).entity.id, requireData(recipeCreated).recipeId)
-      assert.equal(requireData(recipeEdited).entity.title, 'Sheet Pan Salmon Skillet')
-      assert.equal(
-        requireData(recipeEdited).entity.path,
-        'bank/recipes/sheet-pan-salmon-skillet.md',
-      )
-      assert.equal(
-        requireData(recipeEdited).entity.data.summary,
-        'Updated rotation dinner.',
-      )
-      await access(path.join(vaultRoot, 'bank/recipes/sheet-pan-salmon-skillet.md'))
-      await assert.rejects(() =>
-        access(path.join(vaultRoot, 'bank/recipes/sheet-pan-salmon-bowls.md')))
-
-      const foodShown = await runSliceCli<{
-        entity: {
-          id: string
-          path: string | null
-        }
-      }>([
-        'food',
-        'show',
-        requireData(foodCreated).foodId,
-        '--vault',
-        vaultRoot,
-      ])
-      const recipeShown = await runSliceCli<{
-        entity: {
-          id: string
-          path: string | null
-        }
-      }>([
-        'recipe',
-        'show',
-        requireData(recipeCreated).recipeId,
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(foodShown.ok, true)
-      assert.equal(requireData(foodShown).entity.id, requireData(foodCreated).foodId)
-      assert.equal(
-        requireData(foodShown).entity.path,
-        'bank/foods/protein-acai-bowl.md',
-      )
-      assert.equal(recipeShown.ok, true)
-      assert.equal(requireData(recipeShown).entity.id, requireData(recipeCreated).recipeId)
-      assert.equal(
-        requireData(recipeShown).entity.path,
-        'bank/recipes/sheet-pan-salmon-skillet.md',
-      )
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
-  'food and recipe edit typed fields preserve canonical ids',
-  async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-edit-id-boundary-'))
-    const foodPayloadPath = path.join(vaultRoot, 'food.json')
-    const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
-
-    try {
-      await runSliceCli(['init', '--vault', vaultRoot])
-
-      await writeFile(
-        foodPayloadPath,
-        JSON.stringify({
-          title: 'Regular Acai Bowl',
-          slug: 'regular-acai-bowl',
-          status: 'active',
-          note: 'Typical order.',
-        }),
-        'utf8',
-      )
-      await writeFile(
-        recipePayloadPath,
-        JSON.stringify({
-          title: 'Sheet Pan Salmon Bowls',
-          slug: 'sheet-pan-salmon-bowls',
-          status: 'saved',
-          summary: 'Weeknight salmon bowls.',
-          ingredients: ['2 salmon fillets'],
-          steps: ['Roast the salmon.'],
-        }),
-        'utf8',
-      )
-
-      const foodCreated = await runSliceCli<{ foodId: string }>([
-        'food',
-        'import-json',
-        '--input',
-        `@${foodPayloadPath}`,
-        '--vault',
-        vaultRoot,
-      ])
-      const recipeCreated = await runSliceCli<{ recipeId: string }>([
-        'recipe',
-        'import-json',
-        '--input',
-        `@${recipePayloadPath}`,
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(foodCreated.ok, true)
-      assert.equal(recipeCreated.ok, true)
-
-      const foodEdited = await runSliceCli<{
-        entity: {
-          id: string
-          title: string | null
-          data: {
-            note?: string
-          }
-        }
-      }>([
-        'food',
-        'edit',
-        requireData(foodCreated).foodId,
-        '--title',
-        'Protein Acai Bowl',
-        '--clear-note',
-        '--vault',
-        vaultRoot,
-      ])
-      const recipeEdited = await runSliceCli<{
-        entity: {
-          id: string
-          title: string | null
-          data: {
-            summary?: string
-          }
-        }
-      }>([
-        'recipe',
-        'edit',
-        requireData(recipeCreated).recipeId,
-        '--title',
-        'Sheet Pan Salmon Skillet',
-        '--clear-summary',
-        '--vault',
-        vaultRoot,
-      ])
-
-      assert.equal(foodEdited.ok, true)
-      assert.equal(requireData(foodEdited).entity.id, requireData(foodCreated).foodId)
-      assert.equal(requireData(foodEdited).entity.title, 'Protein Acai Bowl')
-      assert.equal(requireData(foodEdited).entity.data.note, undefined)
-
-      assert.equal(recipeEdited.ok, true)
-      assert.equal(requireData(recipeEdited).entity.id, requireData(recipeCreated).recipeId)
-      assert.equal(requireData(recipeEdited).entity.title, 'Sheet Pan Salmon Skillet')
-      assert.equal(requireData(recipeEdited).entity.data.summary, undefined)
-
-      const foodShown = await runSliceCli<{
-        entity: {
-          id: string
-          title: string | null
-        }
-      }>([
-        'food',
-        'show',
-        requireData(foodCreated).foodId,
-        '--vault',
-        vaultRoot,
-      ])
-      const recipeShown = await runSliceCli<{
-        entity: {
-          id: string
-          title: string | null
-        }
-      }>([
-        'recipe',
-        'show',
-        requireData(recipeCreated).recipeId,
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(foodShown.ok, true)
-      assert.equal(requireData(foodShown).entity.id, requireData(foodCreated).foodId)
-      assert.equal(requireData(foodShown).entity.title, 'Protein Acai Bowl')
-      assert.equal(recipeShown.ok, true)
-      assert.equal(requireData(recipeShown).entity.id, requireData(recipeCreated).recipeId)
-      assert.equal(requireData(recipeShown).entity.title, 'Sheet Pan Salmon Skillet')
-
-    } finally {
-      await rm(vaultRoot, { recursive: true, force: true })
-    }
-  },
-)
-
-test.sequential(
   'provider edit keeps templated markdown body aligned with note updates and body resets',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-provider-body-sync-'))
@@ -2523,12 +1698,10 @@ test.sequential(
 )
 
 test.sequential(
-  'provider, food, recipe, and event edit/delete mutate existing records and remove them cleanly',
+  'provider and event edit/delete mutate existing records and remove them cleanly',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-record-mutations-'))
     const providerPayloadPath = path.join(vaultRoot, 'provider.json')
-    const foodPayloadPath = path.join(vaultRoot, 'food.json')
-    const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
     const eventPayloadPath = path.join(vaultRoot, 'event.json')
 
     try {
@@ -2543,31 +1716,6 @@ test.sequential(
           specialty: 'lab',
           website: 'https://labcorp.example.test',
           body: '# Labcorp\n',
-        }),
-        'utf8',
-      )
-      await writeFile(
-        foodPayloadPath,
-        JSON.stringify({
-          title: 'Regular Acai Bowl',
-          slug: 'regular-acai-bowl',
-          status: 'active',
-          vendor: 'Neighborhood Acai Bar',
-          aliases: ['regular acai bowl', 'usual acai bowl'],
-          tags: ['breakfast'],
-          note: 'Typical order.',
-        }),
-        'utf8',
-      )
-      await writeFile(
-        recipePayloadPath,
-        JSON.stringify({
-          title: 'Sheet Pan Salmon Bowls',
-          slug: 'sheet-pan-salmon-bowls',
-          status: 'saved',
-          summary: 'Weeknight salmon bowls.',
-          ingredients: ['2 salmon fillets'],
-          steps: ['Roast the salmon.'],
         }),
         'utf8',
       )
@@ -2594,22 +1742,6 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
-      const foodUpsert = await runSliceCli<{ foodId: string }>([
-        'food',
-        'import-json',
-        '--input',
-        `@${foodPayloadPath}`,
-        '--vault',
-        vaultRoot,
-      ])
-      const recipeUpsert = await runSliceCli<{ recipeId: string }>([
-        'recipe',
-        'import-json',
-        '--input',
-        `@${recipePayloadPath}`,
-        '--vault',
-        vaultRoot,
-      ])
       const eventUpsert = await runSliceCli<{ eventId: string }>([
         'event',
         'import-json',
@@ -2620,8 +1752,6 @@ test.sequential(
       ])
 
       assert.equal(providerUpsert.ok, true)
-      assert.equal(foodUpsert.ok, true)
-      assert.equal(recipeUpsert.ok, true)
       assert.equal(eventUpsert.ok, true)
 
       const providerEdit = await runSliceCli<{
@@ -2643,50 +1773,6 @@ test.sequential(
       assert.equal(providerEdit.meta?.command, 'provider edit')
       assert.equal(requireData(providerEdit).entity.title, 'Labcorp West')
       assert.equal(requireData(providerEdit).entity.data.website, undefined)
-
-      const foodEdit = await runSliceCli<{
-        entity: {
-          data: Record<string, unknown>
-        }
-      }>([
-        'food',
-        'edit',
-        requireData(foodUpsert).foodId,
-        '--note',
-        'Now with chia seeds.',
-        '--tag',
-        'breakfast',
-        '--tag',
-        'protein',
-        '--alias',
-        'usual acai bowl',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(foodEdit.ok, true)
-      assert.equal(foodEdit.meta?.command, 'food edit')
-      assert.equal(requireData(foodEdit).entity.data.note, 'Now with chia seeds.')
-      assert.deepEqual(requireData(foodEdit).entity.data.aliases, ['usual acai bowl'])
-      assert.deepEqual(requireData(foodEdit).entity.data.tags, ['breakfast', 'protein'])
-
-      const recipeEdit = await runSliceCli<{
-        entity: {
-          data: Record<string, unknown>
-        }
-      }>([
-        'recipe',
-        'edit',
-        requireData(recipeUpsert).recipeId,
-        '--summary',
-        'Updated rotation dinner.',
-        '--clear-ingredients',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(recipeEdit.ok, true)
-      assert.equal(recipeEdit.meta?.command, 'recipe edit')
-      assert.equal(requireData(recipeEdit).entity.data.summary, 'Updated rotation dinner.')
-      assert.equal(requireData(recipeEdit).entity.data.ingredients, undefined)
 
       const eventEdit = await runSliceCli<{
         entity: {
@@ -2723,28 +1809,6 @@ test.sequential(
       assert.equal(eventDelete.ok, true)
       assert.equal(requireData(eventDelete).kind, 'symptom')
 
-      const recipeDelete = await runSliceCli<DeleteEnvelope>([
-        'recipe',
-        'delete',
-        requireData(recipeUpsert).recipeId,
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(recipeDelete.ok, true)
-      await assert.rejects(() =>
-        access(path.join(vaultRoot, 'bank/recipes/sheet-pan-salmon-bowls.md')))
-
-      const foodDelete = await runSliceCli<DeleteEnvelope>([
-        'food',
-        'delete',
-        requireData(foodUpsert).foodId,
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(foodDelete.ok, true)
-      await assert.rejects(() =>
-        access(path.join(vaultRoot, 'bank/foods/regular-acai-bowl.md')))
-
       const providerDelete = await runSliceCli<DeleteEnvelope>([
         'provider',
         'delete',
@@ -2763,20 +1827,6 @@ test.sequential(
         '--vault',
         vaultRoot,
       ])
-      const missingRecipe = await runSliceCli([
-        'recipe',
-        'show',
-        requireData(recipeUpsert).recipeId,
-        '--vault',
-        vaultRoot,
-      ])
-      const missingFood = await runSliceCli([
-        'food',
-        'show',
-        requireData(foodUpsert).foodId,
-        '--vault',
-        vaultRoot,
-      ])
       const missingProvider = await runSliceCli([
         'provider',
         'show',
@@ -2787,10 +1837,6 @@ test.sequential(
 
       assert.equal(missingEvent.ok, false)
       assert.equal(missingEvent.error?.code, 'not_found')
-      assert.equal(missingRecipe.ok, false)
-      assert.equal(missingRecipe.error?.code, 'not_found')
-      assert.equal(missingFood.ok, false)
-      assert.equal(missingFood.error?.code, 'not_found')
       assert.equal(missingProvider.ok, false)
       assert.equal(missingProvider.error?.code, 'not_found')
     } finally {

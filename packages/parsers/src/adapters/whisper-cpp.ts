@@ -67,10 +67,7 @@ export function createWhisperCppProvider(
 
   return {
     id: "whisper.cpp",
-    locality: "local",
-    openness: "open_source",
-    runtime: "cli",
-    priority: 900,
+
     async discover() {
       if (resolvedToolState) {
         return buildResolvedAvailability(resolvedToolState);

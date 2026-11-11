@@ -7,6 +7,7 @@ import {
   executableScheduleIntentSchema,
   formatScheduleIntentIssues,
   scheduledLogActionSchema,
+  mealNameViolation,
   scheduledLogFrontmatterSchema,
   scheduledLogStatusValues,
   type ExecutableScheduleIntent,
@@ -640,7 +641,7 @@ export async function archiveDailyFoodScheduledLog(
   });
 }
 
-function withScheduledLogRegistryLock<TResult>(
+export function withScheduledLogRegistryLock<TResult>(
   vaultRoot: string,
   run: () => Promise<TResult>,
 ): Promise<TResult> {
@@ -768,6 +769,7 @@ async function executeScheduledLogAction(input: {
         mealId: deterministicOccurrenceId(CONTRACT_ID_PREFIXES.meal, `${input.scheduledLogId}:${input.action.kind}:meal`, input.occurrenceAt),
         eventId,
         occurredAt: input.occurrenceAt,
+        name: food && mealNameViolation(food.title) === null ? food.title : undefined,
         note: input.action.note ?? (food ? renderScheduledFoodMealNote(food) : undefined),
         ingredients: input.action.ingredients ?? food?.ingredients,
         nutrition: input.action.nutrition ?? buildInheritedMealNutrition(food?.nutrition, food?.title ?? "Food"),

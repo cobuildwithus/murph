@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 100,
+  "item": {
+    "id": "saved-food-edit-consistency",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Keep saved-food edits together",
+    "summary": "Concurrent changes to a saved food preserve each edited field, and scheduled meals use its saved name.",
+    "details": "Removing a food archives its generated schedules before deleting it. If that step fails, the food stays available so you can try again.",
+    "relevanceTags": [
+      "food",
+      "scheduled-meals"
+    ],
+    "sourcePullRequests": []
+  }
+}
