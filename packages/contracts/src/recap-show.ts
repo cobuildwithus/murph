@@ -68,7 +68,7 @@ export const recapAssetSchema = z.object({
   references: z.array(z.object({
     kind: z.enum(["profile", "entry", "murph"]),
     memberId: ref.optional(), entryId: ref.optional(), key: z.string().min(1).max(512),
-  }).strict()).max(5),
+  }).strict()).max(16),
   hash: z.string().regex(/^[a-f0-9]{64}$/u),
   mediaType: z.enum(["image/jpeg", "audio/mpeg"]),
   byteLength: z.number().int().positive().max(2 * 1024 * 1024),

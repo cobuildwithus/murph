@@ -61,7 +61,7 @@ export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin, automationOccurrenceOrigin]), includePlayers: z.literal(true).optional(),
     recapRead: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("recover"), failed: z.literal(true).optional() }).strict(),
-      z.object({ kind: z.literal("upload"), slot: z.string().regex(/^(scene-[0-6]|song)$/u), mediaType: z.enum(["image/jpeg", "audio/mpeg"]), referenceIds: z.array(z.string().regex(/^[a-f0-9]{64}$/u)).max(3), bytes: z.string().max(2_800_000) }).strict(),
+      z.object({ kind: z.literal("upload"), slot: z.string().regex(/^(scene-[0-6]|song)$/u), mediaType: z.enum(["image/jpeg", "audio/mpeg"]), referenceIds: z.array(z.string().regex(/^[a-f0-9]{64}$/u)).max(16), bytes: z.string().max(2_800_000) }).strict(),
       z.object({ kind: z.literal("transcript"), after: z.string().regex(/^\d{1,20}$/u).optional() }).strict(),
       z.object({ kind: z.literal("reference"), id: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
     ]).optional() }).strict(),
