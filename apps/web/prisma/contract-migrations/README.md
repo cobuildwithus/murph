@@ -85,3 +85,11 @@ deletion cannot be undone. Billing, recovery and revenue reporting never needed 
 table, and the runner never accesses it directly. #4615 is the rollback floor after
 cleanup; older Web writes this table, so restoring it requires re-expanding the
 table first.
+
+The `20261110231500_drop_computer_awaiting_message` cleanup drops the unused
+computer-run pause-message column after the Web deployment removing its client
+field is live and the ordinary function drain has passed. Computer requests and
+external-retention HTTP cron use the current Web deployment; no deployment-pinned
+Workflow owns this field. Handoff and browser ownership remain unchanged. This
+Web deployment is the rollback floor; older generated clients require the
+nullable column to be re-expanded before rollback.
