@@ -139,7 +139,7 @@ describe("maybeScheduleHostedLinqAckReaction", () => {
     });
   }
 
-  it("checks named-group usage only after response, then classifies and reacts without live suppression", async () => {
+  it("checks named-group usage only after response, then reacts when the conversation is idle", async () => {
     store.claimHostedLinqAckReaction.mockResolvedValueOnce(new Date());
     const { input, scheduled } = groupInput();
     expect(maybeScheduleHostedLinqAckReaction(input)).toBe(true);
@@ -151,9 +151,30 @@ describe("maybeScheduleHostedLinqAckReaction", () => {
       mode: "read_only", prisma: transactionClient, userId: "group-container",
     });
     expect(providers.classify).toHaveBeenCalledTimes(1);
-    expect(store.claimHostedLinqAckReaction).toHaveBeenCalledWith(expect.objectContaining({ skipLiveConversation: false }));
+    expect(store.claimHostedLinqAckReaction).toHaveBeenCalledWith(expect.objectContaining({ skipLiveConversation: true }));
     expect(providers.addReaction).toHaveBeenCalledTimes(1);
     expect(store.confirmHostedLinqAckReaction).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["my_data", false],
+    ["calendar", false],
+    ["reminder", false],
+    ["challenge", false],
+    ["research", true],
+    ["song", true],
+  ] as const)("handles %s in a live named group: reaction sent = %s", async (kind, sendsReaction) => {
+    providers.classify.mockResolvedValueOnce(decision({ kind }));
+    store.claimHostedLinqAckReaction.mockImplementationOnce(async ({ skipLiveConversation }) =>
+      skipLiveConversation ? "live_conversation" : new Date(),
+    );
+    const { input, scheduled } = groupInput();
+    expect(maybeScheduleHostedLinqAckReaction(input)).toBe(true);
+    await scheduled[0]!();
+    expect(providers.addReaction).toHaveBeenCalledTimes(sendsReaction ? 1 : 0);
+    expect(store.confirmHostedLinqAckReaction).toHaveBeenCalledTimes(sendsReaction ? 1 : 0);
+    expect(store.releaseHostedLinqAckReaction).not.toHaveBeenCalled();
+    expect(store.markHostedLinqAckReactionHeavy).not.toHaveBeenCalled();
   });
 
   it.each(["allowed", "denied", "health_data_consent_withdrawn", "error"])(

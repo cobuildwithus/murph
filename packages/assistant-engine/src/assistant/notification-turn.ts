@@ -42,6 +42,7 @@ import { resolveAssistantSessionTarget } from './session-resolution.js'
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
 import { resolveAssistantConversationScope } from './conversation-policy.js'
 import { prepareAssistantCronNotificationInput } from './cron/output-history.js'
+import { readNotificationDeliveryHistory } from './notification-history.js'
 import {
   executeCodexTurnWithRecovery,
   type AssistantCodexTurnThreadScopeProfile,
@@ -447,6 +448,10 @@ export async function sendAssistantNotificationLocal(
           }),
         )
       }
+
+      messageInput.prompt = await buildNotificationPromptWithDeliveryHistory({
+        input, messageInput, session: resolved.session, sharedPlan,
+      })
 
       const turnId = createAssistantTurnId()
       const hostedExecutionContext = resolveAssistantNotificationHostedExecutionContext(
@@ -2070,12 +2075,36 @@ function textOnlyGameNotification(gameRecapTurn: boolean, policy: AssistantNotif
     || policy.kind === 'game_private_evening_check_in' || policy.kind === 'game_private_kickoff'
 }
 
+async function buildNotificationPromptWithDeliveryHistory(context: {
+  input: AssistantNotificationInput
+  messageInput: AssistantMessageInput
+  session: AssistantSession
+  sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
+}): Promise<string> {
+  const { input, messageInput, session, sharedPlan } = context
+  if (!assistantNotificationAllowsSkip(input.responsePolicy ?? { kind: 'allow_send_or_skip' })
+    || input.turnPolicy?.kind === 'maintenance-exact-skip' || input.notificationPromptProfile) {
+    return messageInput.prompt
+  }
+  const history = await readNotificationDeliveryHistory({
+    vault: input.vault,
+    destination: resolveAssistantCurrentAudienceDeliveryFields({
+      input: messageInput, session, sharedPlan,
+    }),
+  })
+  return history ? `${messageInput.prompt}\n\n${history}` : messageInput.prompt
+}
+
+function assistantNotificationAllowsSkip(policy: AssistantNotificationResponsePolicy): boolean {
+  return policy.kind === 'allow_send_or_skip' || policy.kind === 'game_missed_check_in'
+    || policy.kind === 'game_group_missed_check_in' || policy.kind === 'game_evening_check_in'
+    || policy.kind === 'game_private_evening_check_in' || policy.kind === 'game_private_kickoff'
+}
+
 function assertAssistantNotificationSkipAllowed(
   policy: AssistantModelBackedNotificationResponsePolicy,
 ): void {
-  if (policy.kind === 'allow_send_or_skip' || policy.kind === 'game_missed_check_in' || policy.kind === 'game_group_missed_check_in' || policy.kind === 'game_evening_check_in' || policy.kind === 'game_private_evening_check_in' || policy.kind === 'game_private_kickoff') {
-    return
-  }
+  if (assistantNotificationAllowsSkip(policy)) return
 
   throw new VaultCliError(
     'ASSISTANT_NOTIFICATION_RESPONSE_REQUIRED',

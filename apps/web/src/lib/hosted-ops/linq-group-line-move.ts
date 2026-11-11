@@ -20,16 +20,16 @@ async function reserveGroupMove(input: { containerRef: string; targetLineLookupK
   const expected = await prisma.hostedThreadRoute.findUnique({ where: {
     channel_threadIdentityLookupKey: { channel: "linq", threadIdentityLookupKey: input.containerRef },
   } });
-  if (!expected?.accountLookupKey) groupMoveError("ROUTE_REQUIRED");
+  if (!expected) groupMoveError("ROUTE_REQUIRED");
   const route = await openHostedThreadDeliveryRoute({ channel: "linq", containerMemberId: expected.containerMemberId,
     encrypted: expected.deliveryRouteEncrypted, prisma });
-  if (route.channel !== "linq" || route.accountLookupKey !== expected.accountLookupKey
+  if (route.channel !== "linq" || (expected.accountLookupKey !== null && route.accountLookupKey !== expected.accountLookupKey)
     || !createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId: route.threadId }).includes(expected.threadIdentityLookupKey)
     || !createHostedExternalThreadLookupKeyReadCandidates({ channel: "linq", threadId: route.threadId, accountLookupKey: route.accountLookupKey }).includes(expected.threadLookupKey)) groupMoveError("ROUTE_CHANGED");
   const id = randomUUID();
   const sourceCleanupEncrypted = await prepareHostedLinqGroupMoveCleanup({ id, containerMemberId: expected.containerMemberId,
-    fromAccountLookupKey: expected.accountLookupKey, toAccountLookupKey: input.targetLineLookupKey, sourceChatId: route.threadId, prisma });
-  const data = { id, containerMemberId: expected.containerMemberId, fromAccountLookupKey: expected.accountLookupKey,
+    fromAccountLookupKey: route.accountLookupKey, toAccountLookupKey: input.targetLineLookupKey, sourceChatId: route.threadId, prisma });
+  const data = { id, containerMemberId: expected.containerMemberId, fromAccountLookupKey: route.accountLookupKey,
     toAccountLookupKey: input.targetLineLookupKey, fromThreadIdentityLookupKey: expected.threadIdentityLookupKey,
     toThreadIdentityLookupKey: null, sourceCleanupEncrypted,
     status: "reserved", adoptionDeadlineAt: new Date(Date.now() + GROUP_MOVE_ADOPTION_MS) };
@@ -45,6 +45,17 @@ async function reserveGroupMove(input: { containerRef: string; targetLineLookupK
     if (Date.now() - roster.observedAt.getTime() > 30_000) groupMoveError("ROSTER_UNAVAILABLE");
     await assertGroupMoveLinesCanSend(cleanup, tx);
     await assertGroupMoveQuiet({ containerMemberId: data.containerMemberId, chatId: cleanup.sourceChatId, prisma: tx });
+    // The sealed route owns legacy account identity. Project it only as part of
+    // this validated reservation, never before failure/quietness checks pass.
+    if (expected.accountLookupKey === null) {
+      const projected = await tx.hostedThreadRoute.updateMany({ where: {
+        channel: "linq", threadIdentityLookupKey: expected.threadIdentityLookupKey,
+        containerMemberId: expected.containerMemberId, accountLookupKey: null,
+        threadLookupKey: expected.threadLookupKey, deliveryRouteEncrypted: expected.deliveryRouteEncrypted,
+        updatedAt: expected.updatedAt,
+      }, data: { accountLookupKey: route.accountLookupKey } });
+      if (projected.count !== 1) groupMoveError("ROUTE_CHANGED");
+    }
     return tx.hostedLinqGroupLineMove.create({ data, select: groupMoveOperatorSelect });
   });
 }

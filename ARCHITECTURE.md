@@ -3988,7 +3988,20 @@ existing access guard; GET pages opaque move/container/line references and
 activity/game hints. Cleanup is verified before cancellation/departure. Leave
 runs after the adoption response and is also operator-retryable; refusal keeps
 adoption permanent. Start requires a quiet source with no pending work and uses
-a 24-hour deadline. The legacy notice hash column remains nullable for rollout;
+a 24-hour deadline. Pending mailbox work comes from the canonical live lane
+high-water marks and consumed watermarks: system acknowledgements do not stamp
+each item's `consumed_at`. Recent conversation activity still enforces the
+60-second quietness window even when acknowledged; active runtime ownership and
+pending deliveries also block start. No mailbox state is changed by this check.
+A legacy null account projection is derived from the sealed
+delivery route only after its thread identity and account-bound thread key match.
+An existing non-null projection must agree. Under the source lock, start
+revalidates the exact prepared row and conditionally fills a null projection in
+the same transaction as reservation, after quietness and line checks. Failed
+reservation rolls it back; no provider add precedes the commit. Candidate
+overview pages remain indexed to projected lines; an authorized exact route
+reference can also start a legacy route.
+The legacy notice hash column remains nullable for rollout;
 new code omits it. Drain old Web before producing null-hash reservations.
 
 Cancellation claims `remove_started_at` once under the source-chat lock before
