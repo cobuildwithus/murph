@@ -36,8 +36,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - competition-training
-      - running-cardio
+      - training
   startPrompt: Hey Murph, help me run an ultramarathon.
   indexable: true
 safety:

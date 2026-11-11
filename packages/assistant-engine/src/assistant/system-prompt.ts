@@ -798,7 +798,7 @@ function buildThreadContextBlocks(
     promptBlock(
       "thread.strength-training",
       conversationScope === "direct"
-        ? "Strength routines: read strength-training before planning, saving, or retrieving one. Call an unsaved plan a draft, and check the saved record before saying a routine is saved or ready."
+        ? "Strength routines: read training before planning, saving, or retrieving one. Call an unsaved plan a draft, and check the saved record before saying a routine is saved or ready."
         : null,
     ),
     promptBlock(
@@ -1632,25 +1632,15 @@ function buildAssistantVaultFileSendGuidanceText(): string {
 // Each slug below is written once, so renaming or merging these skills is a
 // one-word edit that every router line picks up.
 const ASSISTANT_ROUTER_SKILL = {
-  sleepMechanics: "sleep-improvement",
-  bodyClock: "circadian-rhythm",
-  readiness: "sleep-recovery-readiness",
-  heartMarkers: "hrv-resting-heart-rate",
-  fatigue: "energy-fatigue",
+  sleep: "sleep-improvement",
   dailyActivity: "daily-activity",
-  cardio: "running-cardio",
-  strength: "strength-training",
-  aerobic: "aerobic-fitness",
-  competition: "competition-training",
-  mobility: "mobility-posture",
+  training: "training",
   physicalTherapy: "physical-therapy",
   workoutCsv: "workout-csv-import",
   liveWorkout: "tracked-table",
   stress: "stress-regulation",
-  focus: "cognitive-focus",
   substances: "substance-load",
   chronicIllness: "chronic-illness-support",
-  chronicPain: "chronic-pain-support",
   smallTrial: "self-management-experiments",
 } as const;
 
@@ -1694,11 +1684,11 @@ function buildAssistantSkillRouteHintText(
 
   const topics = [
     "Read by topic before answering:",
-    `- Sleep: ${skill.sleepMechanics} (falling or staying asleep, sleep quality); ${skill.bodyClock} (body clock, jet lag, shift work); ${skill.readiness} (train hard, go easy, or rest today); ${skill.heartMarkers} (what HRV and resting heart rate mean); ${skill.fatigue} (ongoing tiredness). Snoring or gasping, unrefreshing sleep despite enough time in bed, unexplained awakenings, morning headaches, sleep attacks, or dangerous daytime sleepiness always go to ${skill.sleepMechanics}; if driving or work safety is affected, give safety guidance first.`,
+    `- Sleep and energy: ${skill.sleep} (falling or staying asleep, sleep quality, body clock, jet lag, shift work, whether to train hard or rest today, what HRV and resting heart rate mean, ongoing tiredness). If sleepiness affects driving or work safety, give that safety guidance first.`,
     "- Food and body: nutrition-strategy (what to eat from here, named diets); body-composition (weight, waist, fat loss, muscle gain); gut-digestion (digestive symptoms, elimination and reintroduction); micronutrients-supplements (supplement evidence, labels, dose, safety); cardiometabolic-health (glucose, lipids, blood pressure, connected insulin records); cycle-hormonal-health.",
-    `- Movement: ${skill.dailyActivity} (steps, everyday movement, what the wearable recorded); ${skill.cardio} (running, cycling, and cardio programming); ${skill.strength} (strength programming, saved routines, logging sets); ${skill.aerobic} (VO2 max, zones); ${skill.competition} (a named event or benchmark); ${skill.mobility} (stiffness without pain); ${skill.workoutCsv} (workout CSV files); ${skill.physicalTherapy} (pain, injury, rehab, return to activity: read it before suggesting exercises, rest, or load changes for pain). ${direct ? `"Start a live workout" is consent: read ${skill.liveWorkout} and start it before replying. For a saved routine by name, look it up exactly with \`vault-cli workout format show <name>\`; a limited list cannot show that it is missing.` : "Logging sets or a live workout belongs in the person's private chat; do not read or write it here."} When choosing or teaching exercises, also read \`$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md\`.`,
-    `- Mind and substances: ${skill.stress} (stress or overload right now); ${skill.focus}; ${skill.substances} (caffeine, alcohol, nicotine, cannabis, sleep aids).`,
-    `- Long-term conditions: ${skill.chronicIllness}, ${skill.chronicPain}.${direct ? ` For the small trial that turn priority 5 describes, read ${skill.smallTrial}, and add experiment-onboarding when it compares several days.` : ""}`,
+    `- Movement: ${skill.dailyActivity} (steps, everyday movement, what the wearable recorded); ${skill.training} (strength and cardio programming, VO2 max and zones, a named event or benchmark, stiffness without pain, saved routines, logging sets); ${skill.workoutCsv} (workout CSV files); ${skill.physicalTherapy} (pain, injury, rehab, return to activity: read it before suggesting exercises, rest, or load changes for pain). ${direct ? `"Start a live workout" is consent: read ${skill.liveWorkout} and start it before replying. For a saved routine by name, look it up exactly with \`vault-cli workout format show <name>\`; a limited list cannot show that it is missing.` : "Logging sets or a live workout belongs in the person's private chat; do not read or write it here."} When choosing or teaching exercises, also read \`$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md\`.`,
+    `- Mind and substances: ${skill.stress} (stress or overload right now, focus and attention); ${skill.substances} (caffeine, alcohol, nicotine, cannabis, sleep aids).`,
+    `- Long-term illness or persistent pain: ${skill.chronicIllness}.${direct ? ` For the small trial that turn priority 5 describes, read ${skill.smallTrial}, and add experiment-onboarding when it compares several days.` : ""}`,
     "- Following through: behavior-followthrough (a plan Murph already supports: missed sessions, ignored or broken reminders, \"what is my plan\"; new plans go to goal-setup); experiment-onboarding (starting, changing, or reviewing an experiment).",
     "- Murph itself: bluetooth-device-help (live heart rate, or a wearable that will not pair in the iPhone app; first settle whether they mean Bluetooth or saved-data sync, since Bluetooth has no device logs or remote diagnostics); automatic-meal-capture (iPhone app meal photos, Photos permission, the Meals page); signup-link (a link to share Murph); murph-onboarding (first-run setup while it is open).",
     "- Eye health: answer from the Health Commons search.",

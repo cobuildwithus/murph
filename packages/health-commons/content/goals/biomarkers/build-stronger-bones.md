@@ -34,7 +34,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - strength-training
+      - training
       - micronutrients-supplements
   startPrompt: Hey Murph, help me build stronger bones.
   indexable: true

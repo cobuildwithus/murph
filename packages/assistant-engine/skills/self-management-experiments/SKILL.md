@@ -22,7 +22,7 @@ How this skill fits with others:
   review, the saved run, session logging, and the results. This skill chooses
   the question and the method.
 - A one-time try in the moment needs no run and no tracking.
-- Use it alongside `chronic-illness-support` or `chronic-pain-support` when the
+- Use it alongside `chronic-illness-support` when the
   member wants to try something, compare two routines, or understand a pattern.
 
 This skill covers behavior, environment, routine, and communication changes

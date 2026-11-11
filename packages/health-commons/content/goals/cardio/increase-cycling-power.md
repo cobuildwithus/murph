@@ -37,9 +37,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - running-cardio
-      - aerobic-fitness
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me increase my cycling power.
   indexable: true
 safety:

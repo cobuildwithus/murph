@@ -34,8 +34,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - strength-training
-      - mobility-posture
+      - training
   startPrompt: Hey Murph, help me do a pistol squat.
   indexable: true
 safety:

@@ -34,7 +34,6 @@ goal:
   workflow:
     kind: general_plan
     ownerSkillIds:
-      - sleep-recovery-readiness
       - sleep-improvement
   startPrompt: Hey Murph, help me recover from sleep debt.
   indexable: true

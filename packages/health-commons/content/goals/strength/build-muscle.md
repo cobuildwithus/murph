@@ -33,7 +33,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - strength-training
+      - training
       - nutrition-strategy
   startPrompt: Hey Murph, help me build muscle.
   indexable: true

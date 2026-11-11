@@ -37,7 +37,7 @@ goal:
     kind: training_plan
     ownerSkillIds:
       - physical-therapy
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me rebuild core strength after birth.
   indexable: true
 safety:

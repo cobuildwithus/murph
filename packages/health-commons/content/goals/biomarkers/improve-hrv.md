@@ -39,7 +39,7 @@ goal:
   workflow:
     kind: tracking_plan
     ownerSkillIds:
-      - hrv-resting-heart-rate
+      - sleep-improvement
   startPrompt: Hey Murph, help me improve my HRV.
   indexable: true
 safety:

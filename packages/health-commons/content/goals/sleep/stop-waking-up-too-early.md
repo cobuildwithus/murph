@@ -35,7 +35,6 @@ goal:
     kind: general_plan
     ownerSkillIds:
       - sleep-improvement
-      - circadian-rhythm
   startPrompt: Hey Murph, help me stop waking up too early.
   indexable: true
 safety:

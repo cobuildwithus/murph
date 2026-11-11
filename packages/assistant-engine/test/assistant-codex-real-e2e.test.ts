@@ -7416,7 +7416,7 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
         const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'behavior-followthrough' }),
-          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
           materializeAssistantSkillAsset({
             relativePath: 'shared/exercise-catalog-runtime.md',
@@ -7768,7 +7768,7 @@ describeRealCodex('real Codex routine chat readiness e2e', () => {
       await initializeVault({ title: 'Synthetic routine proof', timezone: 'UTC', vaultRoot: workingDirectory })
       await writeFile(commandLogPath, '', 'utf8')
       await Promise.all([
-        materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+        materializeAssistantSkill({ skillsRoot, slug: 'training' }),
         materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
         materializeAssistantSkillAsset({ relativePath: 'shared/exercise-catalog-runtime.md', skillsRoot }),
         materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory }),
@@ -7889,7 +7889,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         })
         const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
         await Promise.all([
-          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
           materializeAssistantSkillAsset({
             relativePath: 'shared/exercise-catalog-runtime.md',
@@ -8158,7 +8158,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         })
         const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
         await Promise.all([
-          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
           materializeAssistantSkillAsset({
             relativePath: 'shared/exercise-catalog-runtime.md',
@@ -8351,7 +8351,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           vaultRoot: automationDirectory,
         })
         await Promise.all([
-          ...(['strength-training', 'tracked-table'] as const).map((slug) =>
+          ...(['training', 'tracked-table'] as const).map((slug) =>
             materializeAssistantSkill({ skillsRoot, slug }),
           ),
           materializeAssistantSkillAsset({
@@ -8543,7 +8543,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           vaultRoot: workingDirectory,
         })
         await Promise.all([
-          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
           materializeAssistantSkillAsset({
             relativePath: 'shared/exercise-catalog-runtime.md',
@@ -8734,7 +8734,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'behavior-followthrough' }),
           materializeAssistantSkill({ skillsRoot, slug: 'experiment-onboarding' }),
-          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
           materializeAssistantSkillAsset({
             relativePath: 'shared/exercise-catalog-runtime.md',
@@ -12335,7 +12335,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           materializeRoutinePresentationVaultCli(binDirectory),
           materializeAssistantSkill({
             skillsRoot,
-            slug: 'mobility-posture',
+            slug: 'training',
           }),
           materializeAssistantSkillAsset({
             relativePath: path.join(
@@ -12454,7 +12454,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const actions = readCapabilityRoutingActions(result.jsonEvents)
         const movementSkillRead = actions.find((action) =>
           action.kind === 'command'
-          && action.command.includes('mobility-posture/SKILL.md')
+          && action.command.includes('training/SKILL.md')
         )
         const catalogReferenceRead = actions.find((action) =>
           action.kind === 'command'
@@ -21839,7 +21839,7 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
         })
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'daily-activity' }),
-          materializeAssistantSkill({ skillsRoot, slug: 'running-cardio' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'training' }),
           materializeWearableArrivalVaultCli({ binDirectory }),
         ])
 
@@ -25222,10 +25222,6 @@ describeRealCodex('real Codex public goal setup e2e', () => {
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'goal-setup' }),
           materializeAssistantSkill({ skillsRoot, slug: 'sleep-improvement' }),
-          materializeAssistantSkill({
-            skillsRoot,
-            slug: 'sleep-recovery-readiness',
-          }),
           materializePublicGoalSetupVaultCli({
             binDirectory,
             commandLogPath,
@@ -41921,7 +41917,7 @@ async function runRepeatedSetResolutionProbe(
       }),
       materializeAssistantSkill({
         skillsRoot,
-        slug: 'strength-training',
+        slug: 'training',
       }),
       materializeAssistantSkill({
         skillsRoot,
@@ -42587,7 +42583,7 @@ async function runLiveWorkoutRepetitionRecoveryProbe(
   try {
     await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
     await Promise.all([
-      materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+      materializeAssistantSkill({ skillsRoot, slug: 'training' }),
       materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
       materializeAssistantSkillAsset({ relativePath: 'shared/exercise-catalog-runtime.md', skillsRoot }),
       materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory }),

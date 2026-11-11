@@ -45,7 +45,7 @@ Skip the lookup only for a general evidence question where the specific product,
 - Symptoms such as fatigue do not establish a deficiency. Normal labs weaken the case for repletion without settling every performance or symptom question.
 - Buying a supplement, or feeling better on one, does not show that it is effective, safe or right for the member.
 - Do not recommend prescription-strength megadoses, and do not suggest starting several new supplements at once.
-- For a supplement used as a sleep aid, also read `sleep-improvement`. Add `circadian-rhythm` when melatonin is used to shift the body clock, and `substance-load` when alcohol, cannabis, sedating antihistamines or sedating medication are part of the mix.
+- For a supplement used as a sleep aid, also read `sleep-improvement`, which covers melatonin used to shift the body clock. Add `substance-load` when alcohol, cannabis, sedating antihistamines or sedating medication are part of the mix.
 
 ## When a clinician owns the decision
 

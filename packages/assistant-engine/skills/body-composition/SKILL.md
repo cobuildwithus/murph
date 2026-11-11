@@ -19,7 +19,7 @@ Answer first. Ask at most one question, at the end of the reply, and only when t
 - `references/tracking-and-adjustment.md`: read it before setting up measurements, reviewing progress, calling a plateau or changing a plan.
 - `nutrition-strategy`: protein numbers, meals, training fuel and how to carry out the food side once this skill has set the direction.
 - `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`: a saved daily calorie target. This skill decides the direction (maintenance, gain or loss) and that file derives the number.
-- `strength-training`: the lifting program. `daily-activity`: step and activity facts. `sleep-recovery-readiness`: whether to train or rest today.
+- `training`: the lifting program. `daily-activity`: step and activity facts. `sleep-improvement`: whether to train or rest today.
 - `cardiometabolic-health`: when glucose, blood pressure or lipids are the main outcome. `gut-digestion`: when digestive symptoms shape the food plan.
 - `behavior-followthrough`: reminders, lapses and support. `food-journal`: meal logging. `experiment-onboarding`: a bounded test the member asks for. `tracked-table`: a table or visual tracker the member asks for.
 
@@ -55,7 +55,7 @@ Do not assume weight loss is medically needed, and do not assume a member who wa
 - Start with a deficit of at most about 500 kcal a day. Loss of up to 1% of body weight a week is the ceiling for the observed trend and never the starting plan; 0.25 to 1% a week is the usual range. Above 1%, add food.
 - Stay at the low end, at maintenance or with clinician input when the member is lean, highly trained, older, protecting performance, has a long dieting history or shows any under-fueling sign.
 - Do not promise a steady rate. Early change is mostly water and stored carbohydrate.
-- Pair the deficit with resistance training and adequate protein to protect muscle. `strength-training` owns the program and `nutrition-strategy` owns the protein number.
+- Pair the deficit with resistance training and adequate protein to protect muscle. `training` owns the program and `nutrition-strategy` owns the protein number.
 - Never speed up because one week was slow. Ease the deficit or pause when recovery, performance, mood, cycle, sleep or food preoccupation gets worse.
 - Include the maintenance phase from the start: which habits stay, which tracking stops, and a broad weight range with a calm response to drift. Treat regain as a change in circumstances to work on. It is never a personal failing.
 - Medication and surgery are legitimate obesity treatments and a clinician chooses and manages them. When the member asks, explain the options at a high level, help them prepare questions and history, and keep supporting protein, resistance training and food quality.

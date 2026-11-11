@@ -35,7 +35,6 @@ goal:
     kind: habit_plan
     ownerSkillIds:
       - sleep-improvement
-      - circadian-rhythm
   startPrompt: Hey Murph, help me keep a consistent sleep schedule.
   indexable: true
 safety:

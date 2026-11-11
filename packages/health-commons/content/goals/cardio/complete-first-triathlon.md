@@ -35,8 +35,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - competition-training
-      - running-cardio
+      - training
   startPrompt: Hey Murph, help me complete my first triathlon.
   indexable: true
 safety:

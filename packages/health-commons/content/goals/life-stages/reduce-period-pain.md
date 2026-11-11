@@ -34,7 +34,7 @@ goal:
     kind: general_plan
     ownerSkillIds:
       - cycle-hormonal-health
-      - chronic-pain-support
+      - chronic-illness-support
   startPrompt: Hey Murph, help me reduce period pain.
   indexable: true
 safety:

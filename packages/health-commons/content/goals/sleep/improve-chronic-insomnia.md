@@ -36,7 +36,6 @@ goal:
     kind: care_support
     ownerSkillIds:
       - sleep-improvement
-      - sleep-recovery-readiness
   startPrompt: Hey Murph, help me understand my chronic insomnia.
   indexable: true
 safety:

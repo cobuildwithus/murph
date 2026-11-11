@@ -35,8 +35,7 @@ goal:
   workflow:
     kind: general_plan
     ownerSkillIds:
-      - circadian-rhythm
-      - sleep-recovery-readiness
+      - sleep-improvement
   startPrompt: Hey Murph, help me reduce jet lag.
   indexable: true
 safety:

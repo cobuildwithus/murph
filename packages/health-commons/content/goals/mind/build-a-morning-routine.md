@@ -36,7 +36,7 @@ goal:
     kind: habit_plan
     ownerSkillIds:
       - behavior-followthrough
-      - circadian-rhythm
+      - sleep-improvement
   startPrompt: Hey Murph, help me build a morning routine.
   indexable: true
 safety:

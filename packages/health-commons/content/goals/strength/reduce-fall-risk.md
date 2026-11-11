@@ -33,7 +33,7 @@ goal:
   workflow:
     kind: care_support
     ownerSkillIds:
-      - mobility-posture
+      - training
       - appointment-scheduling
   startPrompt: Hey Murph, help me reduce my risk of falling.
   indexable: true

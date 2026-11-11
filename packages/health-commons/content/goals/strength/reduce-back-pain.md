@@ -34,7 +34,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - physical-therapy
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me reduce my back pain.
   indexable: true
 safety:

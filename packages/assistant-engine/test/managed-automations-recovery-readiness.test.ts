@@ -32,10 +32,7 @@ describe('weekly health insight recovery readiness candidate', () => {
       'A proprietary recovery/readiness score alone never clears the bar.',
     )
     expect(weeklyHealthInsight?.instructions).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/hrv-resting-heart-rate/SKILL.md',
-    )
-    expect(weeklyHealthInsight?.instructions).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/sleep-recovery-readiness/SKILL.md',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/sleep-improvement/SKILL.md',
     )
     expect(weeklyHealthInsight?.instructions).toContain(
       'compose their guidance rather than inventing a new readiness score',

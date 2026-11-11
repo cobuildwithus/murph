@@ -36,7 +36,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - aerobic-fitness
+      - training
   startPrompt: "Hey Murph, help me improve my VO₂ max."
   indexable: true
 safety:

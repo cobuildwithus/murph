@@ -22,7 +22,7 @@ Read what Murph has on cycle dates and regularity, symptoms, sleep, resting hear
 - For heavy periods with fatigue, suggest a ferritin test through a clinician before attributing the fatigue to motivation or training.
 - In perimenopause, significant sleep disruption, hot flashes, mood changes or changes in bleeding are worth raising with a clinician. Keep helping with sleep, training and tracking in the meantime.
 - Give one adjustment that fits the symptoms and one thing to track.
-- Other owners: `sleep-improvement` for insomnia that is not tied to the cycle, `energy-fatigue` for fatigue outside a clear cycle pattern, and `strength-training` or `running-cardio` for the program.
+- Other owners: `sleep-improvement` for insomnia or fatigue that is not tied to the cycle, and `training` for the program.
 
 ## When a clinician owns the decision
 

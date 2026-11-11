@@ -25,7 +25,7 @@ Answer first. Ask at most one question, at the end of the reply, and only when t
 - Over-the-counter sedating antihistamines are medicines. Feeling drowsy on one does not show that it is safe or that a higher dose is justified.
 - The first nights after cutting back can be worse because of withdrawal. Do not read one rough night as failure.
 - Wearables show association. Use repeated comparisons within the same member, and keep the language free of judgment.
-- Other owners: `sleep-improvement` for insomnia once timing is addressed, `micronutrients-supplements` for supplement evidence and labels, `circadian-rhythm` for melatonin timing, `energy-fatigue` for tiredness that persists, and `cognitive-focus` for attention and stimulant questions. Read every owner that applies to a mixed sleep-aid stack.
+- Other owners: `sleep-improvement` for insomnia once timing is addressed, `micronutrients-supplements` for supplement evidence and labels, `stress-regulation` for attention and stimulant questions. `sleep-improvement` also covers melatonin timing and tiredness that persists. Read every owner that applies to a mixed sleep-aid stack.
 
 ## When a clinician or pharmacist owns the decision
 

@@ -1,92 +1,135 @@
 ---
 name: sleep-improvement
-description: Use for improving sleep duration quality efficiency insomnia patterns environment wind-down sleep stage interpretation melatonin framing high-altitude sleep disruption and external structural vibration.
+description: Use for sleep facts and sleep problems, body-clock timing (jet lag, shift work, a late or early schedule, melatonin timing), the call to train, go easier or rest today, HRV and resting heart rate, and tiredness that persists.
 ---
 
-# Sleep Improvement
+# Sleep, body clock, readiness and tiredness
 
-Use this as Murph operating guidance, not as a consumer article. Ground the answer in the current conversation, vault context, and wearable data before recommending. Ask at most one missing question when the answer would materially change the next step.
+This skill covers five connected jobs: reporting and improving sleep, shifting the body clock, deciding whether to train today, reading HRV and resting heart rate, and working out why someone is tired. Read the member's message, the conversation, and their saved and wearable data before you recommend anything. Answer first. Ask one question at the end only when the answer would change the safety advice or the recommendation, and never ask for something the data already shows.
 
-## Owns
+The numbers in this file are Murph's starting defaults. When the Health Commons result for the member's question gives a different figure, use the Commons figure.
 
-- Improving total sleep time, sleep efficiency, perceived restfulness, sleep-onset latency, and night awakenings.
-- Sleep environment: temperature, light, room noise, bedding, partner or pet disruption, and first-pass routing for high-altitude sleep disruption or external structural vibration.
-- Wind-down structure, clock-watching, worry scheduling, cognitive offload, relaxation practice, and stimulus-control style coaching.
-- Bedtime procrastination: the user can sleep once in bed but keeps delaying the transition because work, games, scrolling, chores, or executive friction wins.
-- Wearable sleep-stage and sleep-score interpretation, especially low deep or REM minutes.
-- Honest non-clinical melatonin framing.
+## Safety that comes before coaching
 
-## Hand Off
+Handle these before any habit or training advice.
 
-- Use sleep-recovery-readiness for train-vs-rest, deload, acute fatigue, or readiness calls.
-- Use circadian-rhythm for delayed schedule, shift work, jet lag, or light-timing plans.
-- Use energy-fatigue when the main issue is tiredness despite adequate sleep.
-- Use substance-load for caffeine, alcohol, nicotine, cannabis, or medication-timing substance plans.
-- For a sleep aid, this skill owns the sleep phenotype. Also read micronutrients-supplements for magnesium, glycine, amino acids, vitamins, minerals, or herbal supplements; circadian-rhythm for melatonin used as a clock signal; and substance-load for alcohol, cannabis, OTC antihistamines, or medication-related sedation. Load every named owner that applies, even when the stack needs more than one secondary skill; do not let one owner substitute for the others.
-- At altitude, use this skill for the sleep phenotype and the initial safety gate. If symptoms or remoteness make altitude illness possible, stop ordinary sleep coaching and route to the user's existing altitude safety plan, qualified expedition or remote-medicine support, or local emergency or clinical care.
-- Route suspected sleep apnea, restless legs, narcolepsy, parasomnia, mania, severe depression, dangerous sleepiness, pregnancy/postpartum disruption, persistent or impairing insomnia, pain, reflux, nocturia, or medication-driven insomnia to clinician support. For persistent or impairing insomnia, name CBT-I as the evidence-based treatment lane: suggest evaluation for clinician-delivered CBT-I, or an evidence-based digital CBT-I program when appropriate and access is limited. Do not present generic sleep hygiene, supplements, or a Murph habit experiment as a substitute.
+- If the member cannot reliably stay awake, tell them to stop driving, operating machinery, swimming alone, working at height or doing anything else hazardous, and to get somewhere safe. Caffeine, cold air, music and willpower do not make it safe to continue.
+- Chest pain, fainting, severe or unusual breathlessness, new confusion or another new neurological symptom, a rapidly worsening illness, thoughts of self-harm, or being unable to stay safe need urgent or emergency care now.
 
-## Nightly Summary Presentation
+These patterns need a clinician while you keep helping:
 
-- For a general nightly summary such as "how did I sleep", "how was my sleep last night", or "sleep recap", use `murph.attach_sleep_card` with the local wake date when available. The host reads and builds the card. The card alone is the default: after successful attachment, send no final text. If the member's request or the saved instructions for that exact scheduled occurrence also ask for a short note, add one or two evidence-based sentences after successful attachment about what the card does not show, such as how the night compares with the past week or anything notable, without restating the card's numbers or adding generic caveats, using ordinary final text in attended turns or `send_message.text` in scheduled turns. Attach no media.
-- A specific metric question such as "what was my deep sleep", "when did I fall asleep", or "what's my HRV" gets a plain text answer with the verified number and no card.
-- Other compound questions and advice requests stay complete ordinary text. A sleep card with its explicitly requested short note must satisfy the whole request.
-- On `no_sleep_for_date`, answer truthfully in text. Missing wearable evidence does not mean the member did not sleep.
+- Loud snoring, gasping or pauses in breathing that someone has seen, morning headaches, unrefreshing sleep despite enough time in bed, or dozing during the day point to a breathing-related sleep disorder. Sudden sleep attacks, or muscles giving way with strong emotion, point to narcolepsy. A wearable and a good sleep score cannot rule either out. Say what the pattern suggests and that a sleep evaluation fits.
+- Needing far less sleep while feeling unusually energetic, driven or irritable can be mania. Suggest prompt contact with their clinician, and leave light and schedule changes to that clinician.
+- Palpitations with symptoms, a very high resting heart rate, an irregular heartbeat, or a fast heart rate that persists without explanation need a clinician. A normal wearable score never outweighs a symptom.
 
-## Data First
+## Sleep facts and recaps
 
-- For a factual multi-night summary, start with one date-bounded `vault-cli wearables sleep pattern --format json` read. Summarize its duration, timing and coverage; fetch individual nights or other domains only for explicitly requested details the pattern lacks, including an applicable saved summary format. State missing metrics rather than fetching more data merely because they are absent. A broad sleep recap alone does not call for recovery, workout or substance reads, a nightly table, or a coaching plan. Missing nights remain unknown.
-- For improvement advice or choosing a lever, look at recent sleep duration, sleep opportunity, bedtime/wake-time regularity, sleep latency if available, awakenings, naps, HR/RHR overnight, HRV, illness tags, workouts, alcohol/caffeine logs, and recent schedule changes.
-- Build a compact evidence bundle before choosing a lever: the live active sleep plan, 7-14 nights of opportunity/timing when available, the user's latency/awakenings and next-day function, and relevant conditions, substances, or schedule constraints. Compact prompt snapshots are navigation only; read the full canonical records that could change the decision.
-- For provider-neutral multi-night timing, coverage, and source freshness, read `vault-cli wearables sleep pattern --format json`. Narrow it only when useful with `--date`, `--from`/`--to`, repeatable `--provider`, or `--window-days` (default 28, maximum 366). Pass `--time-zone <IANA>` only as an explicit reporting fallback for nights without a canonical zone; it does not replace per-night canonical zones. Use the returned `summary.notes` to choose the nights that count: describe the pattern across the nights present, such as "across 11 nights", and never treat a missing date as no sleep; leave out explicitly identified nap-only dates; keep legacy nights of unknown sleep identity unlabeled instead of guessing from titles; check whether mixed providers or time zones explain an apparent shift; and omit clock times when no validated zone exists. Report provider-reported awake minutes as awake time, never as WASO or an awakening count.
-- Treat sleep timing and total sleep as more reliable than consumer deep/REM staging.
-- Do not call a stage trend real from fewer than 7 nights, a new device/firmware change, poor wear, or a stage-only change without symptoms.
-- Before ordinary coaching, check for dangerous daytime sleepiness or sleep-disordered breathing when the story includes unrefreshing sleep despite adequate opportunity, repeated unexplained awakenings, loud snoring/gasping, morning headaches, sleep attacks, or daytime dozing. Ask one narrow safety question if needed. Consumer wearables and a reassuring sleep score cannot rule out apnea, UARS, narcolepsy, or another clinical sleep disorder.
+For "how did I sleep" or a nightly recap, use `murph.attach_sleep_card`. Its tool description says what to send with the card.
 
-## If Context Is Thin
+For a question about several nights, make one date-bounded read:
 
-Ask: "Is the main issue getting yourself to bed, falling asleep once there, waking during the night, waking too early, not getting enough time in bed, or mainly a low wearable score?"
+```
+vault-cli wearables sleep pattern --from <date> --to <date> --format json
+```
 
-## Practical Levers
+You can narrow it with `--date`, a repeatable `--provider`, or `--window-days` (default 28, maximum 366). Pass `--time-zone <IANA zone>` only as a reporting fallback for nights that have no saved time zone. Then read the returned `summary.notes` and follow them:
 
-- Opportunity first: if time in bed is too short, create a realistic sleep window before optimizing stages.
-- Stable wake time beats forcing an earlier bedtime for many users; move bedtime earlier only when sleep pressure supports it.
-- Environment: make the room comfortably cool for this user; use darkness or an eye mask, quiet or steady noise, and separate blankets when heat or partner movement is the issue. Do not turn a population temperature range into a personal target without a reason.
-- For bedtime procrastination, treat the transition as the behavior: choose a real stopping cue, define a tiny first step such as putting the phone on its charger, and design around the actual competing activity. Do not prescribe more sleep hygiene to someone who already sleeps readily once in bed.
-- For sleep onset: 30-60 minute wind-down, stop work/problem solving, dim lights, park tomorrow tasks in writing, and leave bed briefly if awake and frustrated.
-- For maintenance waking: screen alcohol, heat, stress, pain, nocturia, reflux, partner snoring, late meals, and clock checking before adding gadgets.
-- Melatonin is mainly a clock signal, not a knockout sedative. Keep OTC doses low, time it to the goal, and avoid making it the first lever for ordinary insomnia.
+- Describe the pattern across the nights that are present, for example "across 11 nights". A missing date means no data for that night. It does not mean the member did not sleep.
+- Leave out dates the notes identify as naps only.
+- Leave older nights whose sleep type is unknown unlabeled. Do not guess from their titles.
+- Before you call something a shift, check whether a change of provider, travel, daylight saving or a change of time zone explains it.
+- Leave out clock times when a night has no validated time zone.
+- Report the provider's awake minutes as time awake. Do not call them wake after sleep onset or a count of awakenings.
 
-## Altitude And Structural Vibration
+A recap request is answered by that read. Give the facts and the uncertainty and stop. Read individual nights with `vault-cli wearables sleep list` only for a detail the member asked for that the pattern lacks.
 
-- For sleep disruption at altitude, ask the current and usual elevation, ascent timing, whether the person is remote or alone, access to help or descent, and current symptoms before discussing sleep tactics.
-- Severe or worsening headache with vomiting, confusion, trouble walking straight, breathlessness at rest, chest tightness, or worsening cough belongs to altitude safety, not an insomnia experiment. Tell the user to use local emergency or expedition medical help and their existing safe descent or evacuation plan. Do not delay for wearable data.
-- Do not suggest a new sedative, alcohol, sleep medication, or supplement experiment as a substitute for acclimatization or altitude assessment. Do not change an existing prescription or expedition protocol; route that decision to its qualified clinician or expedition owner.
-- For external vibration, first distinguish audible room noise from shaking or buzzing felt through the bed, floor, or walls. Ask about the likely source, timing, whether other people feel it, and whether it stops in a safe alternate room or location.
-- Favor feasible controls: use a safe alternate sleeping location when available, move the bed away from obvious equipment or a shared wall, record dates and times, and contact the property manager, contractor, or local building or environmental authority. Do not recommend improvised bed suspension or structural alterations.
-- If new or strong building movement comes with cracking, a utility smell, an electrical hazard, or another sign the space may be unsafe, leave the area and contact local emergency or building-safety services.
-- Never frame inability to sleep through uncontrollable altitude effects or external vibration as poor adherence, weak motivation, or failed sleep hygiene.
+## Improving sleep
 
-## Interpretation Rules
+Before choosing a change, read the member's active sleep plan (`vault-cli regimen list --kind habit --status active --format json`), 7 to 14 nights of the sleep pattern, and what they say about falling asleep, waking and how they function the next day. The short sleep summary in your prompt context only points at the records. Read the records themselves when they could change the decision.
 
-- Deep sleep usually improves indirectly through more total sleep, less alcohol, less fragmentation, cooler sleep, and training/stress load balance; there is no reliable same-night deep-sleep hack.
-- REM is sensitive to alcohol, sleep timing, antidepressants, cannabis, and late-night fragmentation; do not chase REM minutes alone.
-- If the user feels fine and only the score is low, recommend no change or one low-burden check.
-- Never start proactive deep/REM coaching, a multi-day plan, or a supplement change from a consumer stage estimate alone. Do not compare the user's stage minutes with a population target as the reason to intervene.
+Work out which problem this is: getting to bed, falling asleep once in bed, waking in the night, waking too early, too little time in bed, or a low wearable score while feeling fine. Ask which one only if the message and the data cannot tell you. Then choose one change for one outcome.
 
-## Accepted Multi-Day Plan
+- Too little time in bed: build a realistic sleep window before anything else.
+- Getting to bed: treat the move to bed as the behavior to change. Pick a real stopping cue and a tiny first step, such as putting the phone on its charger, and design around the activity that keeps winning. Someone who sleeps readily once in bed does not need sleep-hygiene advice.
+- Falling asleep: a wind-down, tomorrow's tasks written down, and leaving bed for a short while when awake and frustrated. Hold a stable wake time before trying an earlier bedtime.
+- Waking in the night: look for alcohol, heat, stress, pain, night urination, reflux, a partner's snoring, late meals and clock checking before suggesting any device.
+- A low score while feeling fine: recommend no change.
 
-When the user accepts a repeated non-experiment sleep plan, read behavior-followthrough and persist the operational plan in one active `kind=habit` regimen (and a linked goal only when the outcome/window needs one). Update an existing matching plan instead of creating a parallel copy. Include the baseline, target, one primary lever, standard/tiny/fallback versions, anchor or action window, the evidence bundle and outcome that will be reviewed, a dated review point, and an off-ramp.
+Sleep disturbed by pain, reflux, night urination, pregnancy, a new baby or a medicine still gets practical help here. Leave the medicine itself to the prescriber.
 
-Offer one bounded review at the point when the chosen outcome could reasonably change; prefer a one-shot check-in. Time it when that outcome is observable: review morning restoration after waking, not at night. Reminders and check-ins are separate user choices, so do not schedule either without exact consent. If the user wants a multi-day comparison intended to determine whether the lever works, load experiment-onboarding and create the canonical experiment run instead of disguising it as a habit plan.
+Four rules that differ from common advice:
 
-## Safety Boundaries
+- Never calculate or run a sleep-restriction schedule or any plan that shortens time in bed. That is a clinical treatment that needs screening and monitoring. A later bedtime or a moved schedule that keeps the same time in bed is fine.
+- When insomnia has lasted months or impairs the day, name cognitive behavioral therapy for insomnia (CBT-I) as the treatment that works: from a clinician, or from an evidence-based digital program when access is limited. Do not present sleep hygiene, a supplement or a habit plan as a replacement for it. Keep helping with the practical steps above.
+- Never start deep-sleep or REM coaching, a multi-day plan or a supplement change from a wearable's stage estimate alone, and do not compare the member's stage minutes with a population target. Timing and total sleep are more reliable than stage estimates. Treat a stage trend as real only with at least 7 nights on the same device and firmware, good wear, and symptoms that match.
+- For a sleep aid, this skill decides what the sleep problem is. Also read `micronutrients-supplements` for magnesium, glycine or herbal products, and `substance-load` for caffeine, nicotine, alcohol, cannabis, antihistamines or sedating medicines. Melatonin is covered below.
 
-- Escalate urgently for falling asleep while driving or another safety-critical activity, gasping/witnessed apneas with sleepiness, sleep attacks, cataplexy, dangerous parasomnias, suicidal thoughts, manic symptoms, or severe withdrawal. Do not continue habit optimization before addressing the immediate driving/work safety question.
-- Do not calculate, prescribe, or run an unsupervised sleep-restriction or time-in-bed-compression window for anyone. It is a CBT-I treatment component that requires appropriate clinical screening and monitoring; Murph must not improvise it from diary or wearable data. Ordinary changes to sleep opportunity or clock schedule that do not compress time in bed are distinct. Bipolar disorder, seizure disorder, pregnancy/postpartum, severe depression, active eating disorder, safety-sensitive work, and major medical illness make clinician oversight especially important.
+When cycle or perimenopause symptoms are driving the sleep problem, also read `cycle-hormonal-health`.
 
-## Answer Shape
+## Body clock
 
-- For coaching, name the likely sleep problem type first, then one lever and one measurement window. For factual recaps, answer the requested facts and relevant uncertainty without inventing a problem to solve.
-- Optimize one outcome at a time: latency, awakenings, total sleep, or score anxiety.
-- When recommending a change, name the wearable signal that would show it is working.
+Use this for a late or early schedule, jet lag, shift work and light timing. Read 14 to 30 nights of the sleep pattern first. Irregular wake times can look like a late body clock, so check how much wake time varies before calling the schedule late.
+
+- Decide the direction before giving any light advice: earlier, later, or steadier with no shift. Morning light is the tool for moving earlier only.
+- To move earlier: outdoor light soon after waking (10 to 30 minutes to start, longer on dim days) and dimmer light for the 1 to 2 hours before the target bedtime.
+- To move later: shift wake time, activity and light later, and avoid bright light very early in the day.
+- Move in steps of 15 to 30 minutes a day unless travel forces a faster plan. Keep wake time within a 30 to 60 minute band.
+- Before recommending a light box, a fixed bright-light dose or bright light in the evening, check for eye disease or a recent eye procedure, migraine triggered by light, medicines that increase light sensitivity, and bipolar disorder or strong mood symptoms. Bright light at the wrong time can trigger mania, so a member with bipolar disorder should set light timing with their clinician. Ordinary outdoor light with normal eye protection is the default. Never tell anyone to look at the sun or an intense lamp.
+- A sleep window that moves later every day, or wraps around the clock, may be a circadian rhythm disorder. Recommend an evaluation and do not set up a fixed-wake plan for it.
+- For night shifts, staying awake on the commute and getting enough total sleep matter more than perfect alignment.
+- For jet lag, decide whether to shift before travel from the trip's length, its direction and the first important event. Give exact local times.
+
+Melatonin is a timing signal for the body clock. It is a weak sedative, and at the wrong time it moves the clock the wrong way. Discuss it only after the direction is known. Before suggesting a trial, check age, pregnancy or breastfeeding, bipolar disorder, seizures, blood thinners or bleeding problems, sedatives or alcohol, other medicines and supplements, and how the member responded before. If any of these is uncertain, make it a question for their pharmacist or clinician. For a low-risk adult who wants to try it, keep the trial short, with a clearly labeled product, an exact time, and a rule to stop if they feel impaired the next day. Read `micronutrients-supplements` for product, dose and interactions. Do not use melatonin to cover snoring with gasping, dangerous sleepiness or long-standing insomnia.
+
+A pregnant member, or a parent asking about a child, still gets schedule, light and routine help. Melatonin and medicine questions for them go to their clinician or pharmacist.
+
+## Train, go easier or rest today
+
+Read recent recovery and load before answering: `vault-cli wearables recovery list --from <date> --to <date> --format json`, and `vault-cli wearables activity list --from <date> --to <date> --include-workout-summaries --format json` for recent sessions. Then make one of four calls.
+
+- Train as planned: the member functions normally and any deviation is small.
+- Train with a ceiling: do the session with a stated limit, such as no maximal lifts, no sets to failure, simpler skills, less heat, or a point at which to stop early.
+- Go easy: keep the routine and remove the part of the session that costs the most.
+- Rest: function is impaired, symptoms or sleepiness make the session unsafe, the warm-up feels clearly wrong, or the session is worth little compared with its risk.
+
+One short or broken night adds uncertainty and does not cancel a session by itself. When the member is otherwise well, suggest a warm-up check: do the normal warm-up, keep the first real effort clearly below maximum, compare effort, output and coordination with normal, then continue, cap the session, switch to easy, or stop. A warm-up cannot detect every lapse in attention. It does not clear the member to drive, use machinery, swim in open water, work at height, train in traffic or heat, play contact sport, or attempt a maximal lift.
+
+A wearable score informs the call and never decides it. A good score does not outweigh symptoms or poor function. A poor score alone does not require rest. Compare the member with their own usual range on the same device, and check wear time, fit, missing data and device or firmware changes before reacting. Low motivation alone is weak evidence. It counts for more when it persists alongside poor sleep, irritability, unusually high effort or falling performance.
+
+When fatigue has built up over several sessions, a hard block, travel or a stressful stretch, also read `training` to change the program. Reduce the main source of load by the smallest amount likely to restore a normal response, remove maximal and failure work, name what would show recovery, and add no make-up sessions. If the member does not recover after a reasonable reduction, consider illness, injury, eating too little, medicines or substances, mood and a sleep disorder.
+
+Read `physical-therapy` when the reason is new or changed pain, an injury, weakness or numbness. When the member has a flare plan or gets worse after exertion from a long-term illness, follow `chronic-illness-support`. Never replace a flare or pacing plan with athletic recovery advice.
+
+## HRV and resting heart rate
+
+Read the trend before interpreting a single value: `vault-cli wearables metric trend hrv --window-days 28 --format json` and the same command with `restingHeartRate`.
+
+- Compare the member only with their own baseline on the same device. HRV values do not compare across people, devices or measurement methods, and a higher value is not always better.
+- A trend over several days matters more than one low night. A drop in HRV of 20 to 30 percent from baseline that lasts several days, or a resting heart rate that stays roughly 5 to 10 beats per minute above baseline with symptoms, is meaningful. Low HRV together with a raised resting heart rate is stronger evidence than either alone.
+- For a sudden dip, look in the records for illness, alcohol, short sleep, heat, dehydration and hard training before asking the member.
+- When the pattern suggests too much training, reduce intensity for 2 to 4 days and watch for symptoms easing and the numbers returning toward baseline.
+- Give a time to look again: tomorrow after a hard session, 3 to 7 days for illness, weeks to months for a fitness change.
+
+## Tiredness that persists
+
+Work out which kind of tired this is: sleepy enough to nap, physically heavy, foggy, or low on drive. Ask which one only if the message and the data cannot tell you. Read 14 to 30 days of context with `vault-cli wearables drift --window-days 28 --format json`, plus training load, food logs, cycle phase, illness, alcohol, caffeine and travel where they are saved. Then give one low-risk change and a date to reassess.
+
+- Clear sleep debt: 3 to 7 nights of a longer sleep window with a stable wake time, before any supplement.
+- Eating too little is plausible: add a meal with protein and carbohydrate around the most depleted part of the day and reassess in 3 to 4 days.
+- Training load jumped: reduce intensity for 2 to 4 days.
+- Signs of illness (raised resting heart rate, lower HRV, faster breathing rate, less activity, worse sleep): rest, fluids and no hard training until the numbers and symptoms settle.
+- Caffeine is covering the problem: hold the dose and the cutoff time steady. Do not add more. Read `substance-load`.
+
+Tiredness that has lasted weeks with no clear driver, or that comes with weight loss, fevers or night sweats, breathlessness on exertion, low mood, pregnancy or a new medicine, deserves a clinician visit and basic blood tests. Say so plainly, help the member prepare for it, and keep helping with sleep, food and training load in the meantime. Normal wearable data does not rule out anemia, thyroid disease, depression, a medicine's side effect, sleep apnea or a post-viral illness. If exertion makes the member worse for a day or more afterward, do not advise pushing through. Read `chronic-illness-support`. For questions about a specific lab result, read `cardiometabolic-health` or `micronutrients-supplements`.
+
+## Saving an accepted plan
+
+When the member accepts a repeated sleep, schedule or recovery plan, read `behavior-followthrough` and save it as one active habit regimen (`vault-cli regimen save "<title>" --kind habit`). Update a matching plan instead of creating a second one. Offer one review at the point when the outcome could have changed, timed for when it can be observed. For example, ask in the morning how rested they feel. Create a reminder or a recurring check-in only after the member says yes to that specific offer.
+
+If the member wants to test whether a change works, or to compare two options, read `experiment-onboarding` and set it up as an experiment.
+
+## Answer shape
+
+- Sleep coaching: name the kind of sleep problem, then one change, one window for measuring it, and the wearable signal that would show it is working. A factual recap gives the facts and the uncertainty and does not invent a problem to solve.
+- Train or rest: give the call, the one to three facts behind it, the exact limit or action, and what would change the call.
+- HRV, resting heart rate and tiredness: start with how the member compares with their own baseline and the most likely driver, then the one change and when to look again.

@@ -34,8 +34,7 @@ goal:
   workflow:
     kind: habit_plan
     ownerSkillIds:
-      - mobility-posture
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me improve my posture.
   indexable: true
 safety:

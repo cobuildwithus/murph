@@ -35,8 +35,7 @@ goal:
   workflow:
     kind: general_plan
     ownerSkillIds:
-      - sleep-recovery-readiness
-      - energy-fatigue
+      - sleep-improvement
   startPrompt: Hey Murph, help me wake up feeling rested.
   indexable: true
 safety:

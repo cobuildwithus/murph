@@ -34,7 +34,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me build stronger glutes.
   indexable: true
 safety:

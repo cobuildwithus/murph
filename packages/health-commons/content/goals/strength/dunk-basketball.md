@@ -34,7 +34,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - strength-training
+      - training
   startPrompt: "Hey Murph, help me dunk a basketball."
   indexable: true
 safety:

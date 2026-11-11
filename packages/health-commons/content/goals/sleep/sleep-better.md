@@ -35,7 +35,6 @@ goal:
     kind: general_plan
     ownerSkillIds:
       - sleep-improvement
-      - sleep-recovery-readiness
   startPrompt: Hey Murph, help me sleep better.
   indexable: true
 safety:

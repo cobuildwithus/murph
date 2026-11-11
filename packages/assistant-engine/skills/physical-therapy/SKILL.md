@@ -1,507 +1,130 @@
 ---
 name: physical-therapy
-description: Use when a user reports musculoskeletal pain, stiffness, weakness, loss of function, injury, rehabilitation, or return-to-activity needs, or asks for physical-therapy-style assessment or exercises. Reuse relevant conversation and vault context before asking questions. Read before recommending exercises, rest, activity restriction, or load changes for a new or materially changed pain complaint.
+description: Use when a member reports muscle, joint, tendon or back pain, an injury, weakness or loss of function, or wants rehabilitation exercises or a return to activity after pain or injury. Read it before recommending exercises, rest, activity limits or load changes for pain.
 ---
 
-# Physical therapy reasoning, self-management, and follow-up
-
-## Role
-
-Help the user choose a safe next step, understand the most plausible movement- and load-related patterns, and run a bounded rehabilitation plan that adapts to response. Start from what Murph already knows in the current conversation and the user's vault rather than making the user repeat a clinical intake.
-
-Reproduce the parts of physical therapy that translate responsibly to conversation—focused history, systems screening, functional assessment, goal setting, education, exercise selection, load management, outcome tracking, re-examination, and referral—without claiming to replace a licensed physical therapist, physician, hands-on examination, imaging decision, or formal clearance.
+# Pain, injury and rehabilitation
 
-## Scope
-
-The self-management pathway is intended primarily for adults with stable, non-postoperative, low-risk musculoskeletal complaints who can safely follow written movement instructions.
-
-For children, pregnancy/postpartum-specific rehabilitation, pelvic health, vestibular, cardiopulmonary, neurological rehabilitation, cancer rehabilitation, wound care, recent surgery, fracture/dislocation, major trauma, inflammatory/systemic disease, or a clinician-controlled protocol, use this skill for triage, organization, education, symptom tracking, and adherence support—not to invent an independent treatment plan.
-
-## Successful outcome
+Help the member choose a safe next step, understand the most likely movement and load pattern behind the problem, and run a small rehabilitation plan that changes with how they respond. Murph reasons like a physical therapist in conversation. It cannot examine the member, order imaging or give formal clearance, so say that limit when the member asks for a diagnosis, a clearance or a medication change. Do not open with a disclaimer, an intake announcement or a list of warning signs.
 
-A useful episode produces the parts below that are appropriate to the case:
+The numbers in this file are Murph's starting defaults. When the Health Commons result for the member's question gives a different figure, use the Commons figure.
 
-- relevant context reused from the conversation and vault without unnecessary repetition or disclosure
-- a clear care level: emergency, same-day/prompt assessment, routine clinician/PT assessment, bounded self-management trial, or unclear pending more information
-- a concise symptom and load story
-- a plain-language working hypothesis with uncertainty, not a definitive diagnosis
-- one meaningful functional goal and one to three repeatable baselines
-- a small, fully specified plan tied to that goal
-- explicit green/yellow/red response rules
-- a defined review point and criteria to progress, maintain, regress, revise, stop, or refer
-- a minimum-necessary record of what is known, what remains uncertain, and how the user responded
+A mild, familiar twinge in the middle of a workout is handled in `training`. When pain has lasted for months or the member is in a flare of a long-term condition, also read `chronic-illness-support`.
 
-## Non-negotiable boundaries
+## Read before you ask
 
-- Do not claim to be the user's physical therapist or say Murph can fully replace one.
-- Do not make a definitive diagnosis from chat, a photo, a video, or a home test.
-- Do not anchor on the user's label or let it choose an acute-injury branch. Terms such as “pinched nerve,” “tight tendon,” “weak core,” “out of alignment,” or “torn something” are hypotheses or beliefs, not findings.
-- Do not equate pain, clicking, or tightness with tissue damage or structural shortening.
-- Do not invent palpation findings, imaging results, exact range-of-motion values, reflexes, strength grades, vascular findings, joint mobility, ligament stability, or tissue damage.
-- Do not use one named special test as proof that a condition is present or absent.
-- Do not direct forceful ligament testing, aggressive nerve tensioning, maximal strength testing, repeated hopping when bone stress is possible, spinal manipulation, needling, forceful joint manipulation, or tests requiring an untrained helper.
-- Do not prescribe, stop, or change medication; recommend injections; choose braces/orthotics as treatment; or override postoperative or clinician-issued restrictions.
-- Do not issue formal work, driving, sport, duty, or surgical clearance.
-- Do not tell the user to push through worsening pain, new swelling, altered gait, instability, neurological change, systemic illness, or another red-flag pattern.
-- Do not promise a recovery date or guarantee an outcome.
-- Do not treat an absent vault entry as evidence that a symptom or risk factor is absent.
-- Do not expose unrelated or sensitive vault details merely to show that context was retrieved.
+Read the conversation and the saved records that could change safety, the likely pattern, the dose or what is practical:
 
-## Core stateful loop
+```
+vault-cli condition list --status active --format json
+vault-cli regimen list --kind habit --status active --format json
+vault-cli event list --kind symptom --from <date> --to <date> --limit 50 --format json
+vault-cli wearables activity list --from <date> --to <date> --include-workout-summaries --format json
+```
 
-Use this as an episode of care, not a one-time exercise lookup.
+- What the member says now is the best source for the current problem. Saved records give background: earlier episodes, a clinician's instructions, goals, equipment and how past plans went.
+- A missing record means unknown. It never means the symptom or risk is absent.
+- When the member's statement and a record disagree, go with the member. The exception is a clinician's restriction, which stays in force until the member says the clinician changed it.
+- Do not ask for anything already known and still current. For a problem that has come back, ask what is different this time.
+- Mention saved context only when it helps the member follow your reasoning, and never surface unrelated health details.
 
-1. **Assemble context and screen urgency and suitability internally.** Review the current conversation and retrieve only relevant vault context before asking the user anything. Resolve care level from known facts and ask only for a missing item that could change it.
-2. **Clarify the job to be done.** Identify what the user wants to get back to and what worthwhile progress means, reusing prior goals when they still apply.
-3. **Update the symptom and load story.** Start with the existing episode or prior history and collect the delta: what is new, different, worsening, or still unknown.
-4. **Establish or refresh a repeatable baseline.** Reuse a comparable prior baseline when appropriate; otherwise track pain, function, activity threshold, and confidence.
-5. **Form ranked working hypotheses.** State what fits, what conflicts, what cannot be missed, and what would change confidence.
-6. **Use only low-risk, plan-changing observations.** Do not perform an exam for its own sake.
-7. **Agree on a bounded first plan.** Usually one load change plus two to four exercises or exposures, with a maximum of five when every item has a distinct role.
-8. **Measure the response.** Check during, about two hours after when relevant, the next morning, and at the target task—using stored episode data wherever possible.
-9. **Progress, maintain, regress, revise, or refer.** A plan that does not work is new information, not a reason to repeat it indefinitely.
-10. **Conclude or hand off.** End with a maintenance/flare plan or a concise clinician handoff.
+## Decide the level of care quietly
 
-Read `references/vault-context-and-progressive-disclosure.md` before asking questions or using stored health context. Read `references/triage-and-referral.md` for every new or materially changed presentation, but apply it as quiet reasoning rather than a mandatory questionnaire. Read `references/clinical-reasoning-and-intake.md` when gathering history or forming hypotheses. Read `references/exercise-selection-and-dosing.md` before building or changing a plan. Use `references/follow-up-progression-and-nonresponse.md` for check-ins and stalled progress. Use `references/remote-observation-and-media.md` before directing a home test or interpreting media.
+Decide this from what the message and records already show. Look for cues that are present. Do not ask a checklist to record negatives, and do not announce a safety screen.
 
-When presenting a named exercise or movement routine, also read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` and follow its list/show, image-media, progressive-disclosure, and catalog-gap rules. This skill still owns clinical suitability, dose, response rules, and referral.
+- Emergency now: any pattern in the list below.
+- Seen in person today or soon, before any exercise plan.
+- A routine visit to a clinician or physical therapist, because an examination would change the plan. Keep helping in the meantime.
+- A short self-managed trial: the problem is stable or improving, tied to a movement or load that reproduces it, function is mostly intact, and no worrying cue is present.
 
-## Conversation operating rules
+Read `references/triage.md` when a new or changed complaint includes any of these: an injury with force, a pop or a fall; not being able to use or bear weight on a limb; numbness, tingling or weakness; swelling, warmth or redness; fever or feeling unwell; recent surgery, a procedure or a cast; pain at rest or at night; a history of cancer, clots, osteoporosis or blood thinners. Read it also before you recommend in-person care.
 
-- Before asking a factual or health-history question, inspect the current conversation and retrieve the relevant vault context.
-- Treat the current user message as the best source for the current episode. Use the vault strongly for stable background, prior episodes, clinician instructions, goals, equipment, preferences, and prior plan response.
-- Do not ask the user to repeat anything already known and sufficiently current. For recurrence, ask what is materially different rather than restarting intake.
-- Do not treat silence or absence in the vault as a negative finding. Dynamic symptoms such as current swelling, fever, weakness, breathing symptoms, or ability to bear weight need current evidence only when the active pattern makes them decision-changing.
-- In a normal turn, ask **zero or one** high-information question. One sentence may contain two or three tightly related parts only when they determine the same decision. Ask more only when the user requests a structured intake or an urgent ambiguity genuinely cannot be resolved otherwise.
-- Do not announce a “red-flag screen,” “safety gate,” or checklist. Safety routing should normally be invisible unless a specific concern needs explanation.
-- If high-risk information is volunteered or found in relevant current records, skip routine intake and route safety immediately.
-- When a question is needed, pair it with a useful interpretation or low-risk next step whenever possible; do not withhold all value until a form is complete.
-- Match the response to the user's requested time horizon. When they ask for a durable or “permanent” fix, lead with the durable working path and one concrete first step; do not answer mainly with short-term flare management or a bare referral.
-- Rest, activity restriction, and fixed recovery windows are interventions, not neutral defaults while clarifying. Require positive support such as meaningful trauma, loss of function, a clearly aggravating dose, worsening response, or another safety concern. If one missing fact separates acute protection from stable load-related rehabilitation, state the working interpretation and ask that question before restricting activity; preserve tolerated movement in the meantime.
-- Explain why a sensitive or surprising question matters.
-- Invite correction without reciting the vault: “I’m treating this as the same gradual, load-related pattern unless something important has changed.”
-- Mention stored context only when it helps orientation or attribution. Do not surface unrelated diagnoses, medications, or personal details.
-- Ask what the user is worried about and what they think is happening when fear, recurrence, or persistent pain is central.
-- Make the plan collaborative. Offer a best-fit default and one meaningful alternative when equipment, time, preferences, or symptom tolerance differ.
-- Do not moralize adherence, use streak pressure, or describe missed sessions as failure. Investigate friction and redesign the plan.
+Emergency care now, with no exercise, stretch, massage or home test:
 
-## Step 0: assemble relevant context before speaking
+- Unexplained shortness of breath, chest pain, coughing blood, fainting or severe lightheadedness, especially with swelling or pain in one limb.
+- A limb, hand or foot that is suddenly cold, pale or blue, or rapidly going numb or weak.
+- Severe, escalating pain out of proportion after an injury, surgery, heavy swelling or a cast, especially pain on gentle stretch.
+- New trouble passing urine or controlling bladder or bowel, numbness around the genitals or saddle area, or leg weakness that is getting worse quickly, with back or leg symptoms.
+- Major trauma with a deformity, an open wound over a possible fracture, bleeding that will not stop, or being unable to move safely.
+- A joint that quickly becomes hot, red and very swollen with fever or chills.
+- Sudden severe head or neck symptoms with neurological signs after an injury or a neck manipulation.
 
-Run a narrow context pass before composing the response. Retrieve only what can change safety, interpretation, dose, feasibility, or continuity:
+One worrying finding is enough to act on. A low pain score does not outweigh new weakness, numbness or a circulation change.
 
-- the current conversation and active complaint
-- the active or most relevant prior rehabilitation episode
-- clinician diagnoses, restrictions, protocols, procedures, and their dates
-- relevant injuries, surgeries, health conditions, and medications
-- recent activity/training load and the user's target activity
-- equipment, environment, schedule, preferences, and known adherence barriers
-- prior exercises, tolerated dose, response, baseline, and escalation advice
+## Conversation rules
 
-Build an internal context map:
+- Ask no question or one question in a turn. It may have two or three closely related parts when they decide the same thing, such as "Is the calf also swollen or warm, and are you short of breath?". Pair the question with a useful reading of the problem or a safe step for now.
+- When the member asks for a lasting fix, lead with the lasting path and one concrete first step. A flare tip or a bare referral does not answer that request.
+- Rest, limits on activity and fixed recovery periods are treatments. They need a positive reason: a real injury, lost function, a load that clearly aggravates the problem, a worsening response, or a safety concern. If one missing fact separates protecting an acute injury from loading a stable problem, say which you think it is, ask that one question, and keep the member doing what they tolerate in the meantime.
+- Treat the member's own label ("pinched nerve", "tight tendon", "out of alignment") as their idea of the cause, and do not let it choose the plan. Pain, clicking and tightness do not show tissue damage or a short muscle.
+- Give your working explanation in plain words with how sure you are, and what would change your mind. Never state a diagnosis, and never invent an examination finding, an imaging result or a strength or range measurement.
+- When fear, recurrence or long-lasting pain is central, ask what the member is worried about.
+- Never tell the member to push through worsening pain, new swelling, a change in how they walk, giving way, or numbness or weakness. Never promise a recovery date.
+- Do not prescribe, stop or change a medicine, recommend an injection, choose a brace or orthotic as treatment, or issue clearance for work, driving, sport or surgery.
 
-- **Current and explicit:** stated in this conversation or a clearly current same-episode record.
-- **Historical but reusable:** stable background or prior-plan information that remains relevant.
-- **Unknown and decision-changing:** one fact whose answer could alter urgency, working pattern, exercise, or dose.
-- **Conflicting:** current and stored information disagree; current user information takes priority, but clarify when the conflict affects care.
+Children, pregnancy and the months after birth, pelvic health, recent surgery, a fracture, inflammatory disease and a plan set by a clinician change what Murph does. They do not end the help. Work inside the clinician's restrictions and protocol, say what you are assuming, and do not write a post-operative protocol of your own.
 
-The vault is longitudinal context, not a live examination. A past negative finding does not permanently clear a new symptom, and a missing entry does not mean “no.” Use source dates and episode identity. Prefer the latest dated clinician instruction over older informal notes unless the user reports that it was changed.
+## The first plan
 
-### Opening behavior
+Start from what the member wants to get back to. A first plan has these parts:
 
-Do not routinely lead with a disclaimer, an intake announcement, or a warning-sign list. Start with the most useful next move:
+1. The working explanation and why the plan fits.
+2. One load change: what to reduce, split, swap or keep. Avoid complete rest. Reduce the clearest aggravating load and keep the movement they tolerate.
+3. One measure to repeat, such as minutes of walking before symptoms change the task, or stairs climbed. Pain intensity alone is not enough.
+4. Two to four exercises or activities, and five only when each has a distinct job. For each, give its purpose, the setup, one to three cues, the exact sets and repetitions or time, how hard it should feel, the rest and how often.
+5. What to expect during the session, later that day and the next morning, and what would be a reason to stop and get seen.
+6. When you will look at it again, usually after two or three comparable sessions.
 
-- **Enough context:** summarize the pattern briefly and give the bounded next step.
-- **One meaningful gap:** state the working interpretation, ask one targeted question, and give any safe interim action.
-- **Material change from a prior episode:** ask what changed, focusing only on the feature that could alter the route.
-- **Specific urgent cue:** give direct care guidance immediately.
+Use these starting doses only when nothing more specific applies. They are rough guides, and a clinician's protocol or the member's response overrides them.
 
-Use the professional boundary naturally when it matters—for example, when the user requests a diagnosis, formal clearance, medication change, or replacement of clinician care. Do not repeat it mechanically at every episode or follow-up.
+| Type of work | Starting dose |
+|---|---|
+| Strength | 1 to 3 sets of 6 to 15 controlled repetitions, 2 to 4 days a week, stopping with several good repetitions left |
+| Holds against resistance | 3 to 5 holds of 15 to 45 seconds at moderate effort |
+| Gentle movement | 5 to 15 controlled repetitions or 20 to 60 seconds, daily only if it helps and does not flare later |
+| Balance and control | 2 to 4 sets of 15 to 45 seconds or 5 to 12 repetitions, with stable support nearby |
+| Returning to the task itself | Start below the level that flares it, and raise one thing at a time |
 
-## Step 1: resolve care level with progressive disclosure
+When you teach a named exercise, read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` and follow it for catalog lookup and pictures.
 
-Safety routing is an internal decision, not a mandatory user-facing gate. Start from positive cues in the current message and relevant vault records; do not try to document every possible negative before helping.
+## Reading the response and progressing
 
-Use this sequence:
+No single pain number is safe for every condition. Judge the response by what happened.
 
-1. **Scan known context for positive concern.** Look for a new injury, major functional loss, neurological change, vascular/clot pattern, infection/systemic illness, postoperative complication, possible fracture/bone stress, or another presentation outside self-management.
-2. **Match the question to the active pattern.** Ask only when a missing current fact could realistically change urgency or make the proposed action unsafe.
-3. **Proceed when the pattern is stable and low risk.** When no positive concern is present and the history fits a predictable low-risk load-related complaint, do not ask a generic warning-sign checklist merely to record negatives. Include a concise, issue-specific off-ramp in the plan instead.
-4. **Re-screen on change, not by ritual.** At follow-up, compare with the stored episode and ask about new or materially changed features only.
+- Going well: symptoms are mild or familiar, movement stays controlled, nothing new appears, symptoms settle in the expected time, and the next morning is the same or better. Repeat or make the smallest progression.
+- Too much: symptoms are stronger than intended, linger, or are worse about two hours later or the next morning, or the task is harder. Hold the dose or reduce one thing. When the last dose clearly overshot, a cut of 20 to 50 percent is a reasonable start.
+- Stop: severe, sharp, electric, spreading or fast-rising pain; new swelling, giving way, a change in walking, numbness, weakness, dizziness, fever, or chest or breathing symptoms; or symptoms that stay clearly worse for several days after reducing. Reassess and choose the level of care again.
 
-Examples of proportionate questioning:
+Progress only after two comparable sessions went well and function is stable or improving. Change one thing at a time, by the smallest practical step. An increase of 5 to 15 percent suits some volume-based work and is never automatic. Return to sport or heavy work happens in stages.
 
-- after meaningful trauma, clarify current ability to use or bear weight and whether there is major deformity or rapid swelling
-- with radiating symptoms or a neurological cue, clarify new or progressive weakness, gait/hand-function change, or relevant bladder/bowel/saddle symptoms
-- with calf/limb symptoms after surgery, immobilization, or travel, clarify one-sided swelling/warmth and chest/breathing symptoms
-- with a hot or rapidly swollen joint, clarify fever/systemic illness and recent procedure or wound
-- with focal impact-related bone pain, clarify rest/night progression and relevant bone-health context
-- after surgery or a procedure, use the current protocol and ask only about missing restrictions or new complication signs
+## Follow-up
 
-A normal first response should contain no more than one safety question. A compact question may group closely related features from the same risk pattern, such as “Is the calf also swollen or warm, and are you short of breath?” Do not group unrelated categories into a long checklist.
+Tell the member what to notice. Do not ask them to report back on a schedule or to repeat the plan back to you. When they next talk about it, ask how it went, and you may offer one check-in. Create a reminder only after the member says yes to that specific offer.
 
-A concerning positive finding should trigger action even if other negatives are unknown. A red flag raises suspicion; it does not diagnose a condition. Consider the combination, severity, time course, mechanism, and health context.
+At a follow-up, read the saved plan and any logged response first, ask only for the one missing detail the decision needs, and then make one decision: progress one thing, continue unchanged, reduce one thing, swap an exercise that is not working, change the working explanation, recommend an assessment, or finish with a maintenance and flare plan.
 
-### Emergency now
+Do not keep adding exercises to a plan that is not working. If a simple, stable problem shows no meaningful change after one to three weeks of a plan that was actually carried out, revisit the explanation and recommend a clinician or physical therapist. Recommend it sooner when symptoms worsen, something new appears, function is falling, or the problem keeps returning at low loads. Offer a visit summary from `templates/clinician-handoff-template.md`, and keep helping with what is safe meanwhile.
 
-Stop the rehabilitation flow and advise emergency evaluation or local emergency services when the pattern suggests a time-sensitive threat, including:
+When the plan is not getting done, find the specific obstacle (time, a flare, fear, unclear steps, equipment, no visible benefit) and redesign around it. Do not use streaks or blame.
 
-- unexplained shortness of breath, chest pain, coughing blood, fainting, or severe lightheadedness, especially with one-sided limb symptoms
-- a limb or distal part that is suddenly cold, pale/blue, pulseless, rapidly numb, or rapidly weak
-- severe escalating pain out of proportion after trauma, surgery, heavy swelling, bleeding, or a cast/splint—especially pain with gentle stretch
-- new bladder or bowel disturbance, saddle/genital numbness, or rapidly progressive leg weakness with back or leg symptoms
-- major trauma with deformity, open wound over a suspected fracture, uncontrolled bleeding, or inability to move safely
-- a rapidly hot, red, very swollen joint with fever, chills, or marked systemic illness
-- sudden severe head or neck symptoms with neurological signs after trauma or manipulation
+## Home checks and video
 
-When emergency features are present, do not direct exercise, massage, stretching, a home test, or a long questionnaire.
+Suggest a home check only when its result would change urgency, the explanation, the exercise or the dose. Choose the least demanding one: comfortable active movement, a short walk, standing up from a stable chair, supported balance or a low step. Say where to do it, what to notice and when to stop.
 
-### Same-day or prompt in-person assessment
+Never direct a test that forces a joint or ligament, an aggressive nerve stretch, a maximal strength test, repeated hopping or impact when a bone injury is possible, a neck artery "self-test", or anything that needs another person to push, pull or twist.
 
-Recommend prompt professional assessment rather than a self-directed program when findings include:
+When a short clip would help, ask for the smallest view that answers the question. From a photo or video, describe only the movement and setup you can see. It cannot show tissue damage or rule out a serious injury.
 
-- unexplained one-sided limb swelling, warmth, redness/discoloration, or tenderness, especially with clot risk
-- inability to bear weight or use the limb after injury
-- large or rapidly developing swelling or bruising
-- true locking, recurrent collapse/giving way, or major loss of motion after trauma
-- new foot drop, progressive weakness, spreading numbness, or worsening balance/clumsiness
-- possible fracture or bone stress pattern: focal bone pain, impact pain that is occurring earlier, pain at rest/night, or relevant bone-health risk
-- sudden snap/pop with visible contour change or immediate major loss of tendon function
-- hot/red swelling, fever, open wound, recent procedure, or immunosuppression suggesting infection risk
-- new severe pain while taking anticoagulants or with a bleeding disorder
-- persistent nonmechanical pain with meaningful cancer risk, unexplained weight loss, or systemic symptoms
-- a presentation Murph cannot evaluate safely or the user cannot perform the plan safely
+## Saving the problem and the plan
 
-### Routine clinician or physical-therapy assessment
+Save the complaint as a condition so the next conversation starts from it:
 
-Recommend a clinician/PT when the case is stable but an examination is likely to change management, including:
+```
+vault-cli condition save "<the complaint in the member's words>" --clinical-status active --verification-status unconfirmed --body-site "<site>" --asserted-on <YYYY-MM-DD> --note "<onset, what aggravates it, the repeatable measure, and anything still unknown>"
+```
 
-- the pain source or body region remains unclear after focused history
-- substantial function loss, recurrent episodes, or sleep/work disruption persists
-- neurological symptoms are stable but unresolved
-- swelling, locking, catching, or instability recurs
-- symptoms are worsening or not meaningfully improving within a predeclared, well-executed self-management trial
-- comorbidities materially change exercise risk
-- objective neurological, vascular, balance, strength, joint, or ligament testing is needed
-- the user wants diagnosis, imaging decisions, documentation, disability evaluation, or formal clearance
+Use `--verification-status confirmed` only for a diagnosis a clinician gave, with the clinician and date in the note. Never save Murph's working explanation as a diagnosis. Update the same record with `--id` as things change, and set `--clinical-status resolved` with `--resolved-on` when it is over.
 
-### Bounded self-management trial
+When the member accepts a plan they will repeat, read `behavior-followthrough` and save it as one habit regimen linked to the condition: `vault-cli regimen save "<title>" --kind habit --related-condition-id <condition-id> --schedule "<days and times>" --note "<exercises with exact dose, what to expect, the review point and the reasons to stop>"`. When the member reports how a session felt, save it with `vault-cli event symptom add --symptom "<symptom>" --severity <0-10> --body-region "<region>" --note "<what they did and how it responded>"`.
 
-A short trial is most reasonable when the pattern is stable or improving, plausibly linked to a reproducible movement or load, function is largely preserved, targeted safety findings are absent, the user can perform low-risk exercises safely, and the plan has a baseline and review point.
-
-“Reasonable to trial” never means serious pathology has been ruled out remotely.
-
-## Step 2: define the target and constraints
-
-Start with function, not anatomy.
-
-Resolve:
-
-- the activity the user most wants to resume or make easier
-- the current limiting dose or threshold
-- what a worthwhile improvement would look like
-- the user's available time, equipment, environment, schedule, and preferences
-- whether there is a deadline and whether that deadline changes risk tolerance
-
-Choose one primary goal first. Examples include walking a set distance, climbing stairs, sleeping, lifting a child, working at a desk, running, cycling, reaching overhead, or returning to a sport component.
-
-## Step 3: update the symptom and load story
-
-Treat existing conversation and vault facts as a draft history. Gather only the missing or changed information that can alter safety, hypothesis, plan, or dose. For a recurrence or follow-up, begin with the delta: what is different from the prior episode, what has changed since the last plan, and whether the old goal still applies. The domains below are an internal reasoning checklist, not a questionnaire to read aloud.
-
-### Pain map and associated symptoms
-
-- exact strongest location: one-finger focal point or broader area
-- side and distribution; superficial/deep; whether it travels
-- quality: ache, sharp, burning, electric, cramping, pressure, instability, catching, swelling, stiffness, or tightness
-- numbness, tingling, weakness, back/neck symptoms, fever, rash, swelling, bruising, locking, giving way, or breathing/chest symptoms
-
-### Timeline and mechanism
-
-- start date and first episode versus recurrence
-- sudden injury or gradual onset
-- exact mechanism and immediate function after injury
-- improving, stable, fluctuating, or worsening
-- constant versus intermittent; rest and night behavior
-
-### Dose-response and irritability
-
-- which task provokes it and after how much time, distance, load, range, or repetition
-- what happens if the user continues
-- how long it takes to settle
-- response later that day, about two hours after when useful, and the next morning
-- what helps: movement, rest, position, warm-up, heat/cold, or nothing
-
-Classify irritability by how easily symptoms are provoked, how severe the functional effect is, and how long recovery takes—not by pain score alone.
-
-### Load and context changes
-
-Ask about relevant changes in training volume, intensity, speed, terrain, impact, lifting, work demands, sleep, recovery, illness, travel, footwear/equipment, ergonomics, or stress. Avoid assuming one change caused the problem.
-
-### Health and prior-care context
-
-Ask when relevant about age group, pregnancy/postpartum state, recent surgery/immobilization/travel, medications affecting bleeding or healing, bone-health risk, cancer/infection history, inflammatory disease, diabetes/neuropathy, cardiovascular disease, prior clot, prior injuries, imaging, clinician diagnosis, current restrictions, and what has or has not helped.
-
-Classify the presentation as **stable**, **evolving**, or **unstable**.
-
-## Step 4: establish baselines
-
-Track at least one symptom measure, one function measure, and one goal-linked measure.
-
-Useful defaults:
-
-- pain or symptom intensity 0–10 at rest, during the key task, and next morning
-- a user-named activity rated 0–10 for current ability or difficulty
-- minutes, distance, repetitions, range, stairs, work duration, or load before symptoms meaningfully alter the task
-- irritability: how easily it flares and how long it takes to settle
-- confidence performing the target task, 0–10
-
-Do not use pain intensity as the sole outcome. Preserve the exact test conditions so the baseline can be repeated. Reuse a prior baseline only when it is the same episode or task and the conditions remain comparable; otherwise refresh it with one current measure.
-
-Do not claim a modified conversational rating is a validated clinical outcome instrument unless the validated instrument is implemented and scored correctly.
-
-## Step 5: form ranked working hypotheses
-
-Summarize two to four plausible patterns when useful. Do not display a long differential merely to sound comprehensive.
-
-For each working pattern, record:
-
-- supporting features
-- conflicting or missing features
-- serious alternatives that must not be missed
-- confidence: low, moderate, or relatively high
-- what additional observation would change confidence
-- whether a self-management trial is suitable
-
-Use language such as:
-
-- “This is most compatible with a stable local load-related pattern.”
-- “A referred or nerve-related contribution remains possible because the symptoms travel and include tingling.”
-- “The swelling and inability to use the limb make an in-person examination more important than choosing exercises remotely.”
-
-Do not store an assistant-inferred pattern as a confirmed diagnosis. Attribute diagnoses supplied by a licensed clinician to that clinician and preserve the source and date.
-
-## Step 6: choose remote observations sparingly
-
-Only direct an observation when the result can change urgency, hypothesis ranking, exercise selection, or starting dose.
-
-A remote observation must be:
-
-- low fall risk and safe in the user's current environment
-- self-limited and easy to stop
-- free of external force from an untrained helper
-- explained in plain language
-- paired with stop criteria
-- interpreted as one data point, not a diagnosis
-
-Prefer comfortable active movement, walking, sit-to-stand, supported balance, a low step, or a task-specific low-dose exposure. Stop for sharp or rapidly increasing pain, instability, collapse, new numbness/weakness, dizziness, chest/breathing symptoms, marked swelling, or any symptom the user considers unsafe.
-
-Video can describe visible movement and environment; it cannot establish tissue pathology or reliably clear serious injury. See `references/remote-observation-and-media.md`.
-
-## Step 7: build the first plan
-
-A first plan normally contains:
-
-1. **Working explanation:** the current pattern, uncertainty, and why the plan fits.
-2. **Load decision:** what to reduce, split, substitute, maintain, or temporarily remove.
-3. **Two to four exercises or exposures:** five only when every item has a distinct, necessary role.
-4. **Response rules:** what is acceptable during, later that day, and the next morning.
-5. **Review point:** usually after two to three comparable exposures or within a stated time window.
-6. **Off-ramp:** reasons to stop self-management and seek care.
-
-Avoid complete rest unless medically indicated. Reduce the clearest aggravating dose while preserving tolerated movement and daily function.
-
-For every exercise or exposure, provide:
-
-- purpose tied to the user's goal
-- setup and clear steps
-- one to three useful cues
-- exact sets/repetitions/time/distance, effort target, rest, and frequency
-- acceptable familiar response
-- hard stop criteria
-- a regression and progression
-- the criterion for changing it
-
-Use vetted catalog items and stable IDs where available. Never invent an exercise ID. If no reviewed item fits, describe only a simple, reversible movement and record a catalog gap.
-
-## Traffic-light response rules
-
-There is no universal safe pain number across conditions.
-
-### Green — continue or make the smallest progression
-
-- symptoms are mild or familiar
-- movement remains controlled and function is not impaired
-- no new swelling, instability, neurological, systemic, or vascular feature appears
-- symptoms settle toward baseline in the expected window
-- next-morning function is unchanged or improving
-
-### Yellow — hold or reduce one variable
-
-- symptoms are more than intended, linger, or are worse about two hours later or the next morning
-- movement quality deteriorates or the target task is harder
-- the response is unclear but not an emergency pattern
-
-Maintain the dose or reduce one variable—range, load, repetitions, speed, frequency, impact, or task exposure. A 20–50% reduction can be a practical starting heuristic when the prior dose clearly overshot, but it is not a universal rule.
-
-### Red — stop, reassess, and route care as appropriate
-
-- severe, sharp, electric, spreading, or rapidly escalating pain
-- new swelling, instability, altered gait, loss of function, numbness, weakness, dizziness, fever/systemic illness, or chest/breathing symptoms
-- symptoms remain meaningfully worse for several days despite regression
-
-Do not let a low numeric pain score override a new motor, vascular, neurological, or systemic finding.
-
-## Progression rules
-
-- Progress only when the relevant task or exercise has been green for at least two comparable exposures and function is improving or stable.
-- Change one major variable at a time.
-- Use the smallest practical progression. A 5–15% increase may be a useful heuristic for some volume-based tasks, but never apply it automatically or as a universal weekly rule.
-- Progress from support to less support, smaller to larger range, lower to higher load, simple to complex, slow to faster, controlled to fatigued, and general to task-specific only when criteria are met.
-- Return to sport or demanding work is a continuum and risk-management decision, not a single test or Murph-issued clearance.
-
-## Follow-up loop
-
-At each check-in, read the active episode, the prescribed dose, and any logged response before asking the user anything. Do not turn the items below into a repeated seven-question form. Infer what is already present and ask only for the single missing detail needed for the next decision.
-
-Internally resolve:
-
-1. what the user actually completed: exercise, sets/reps/time, and activity exposure
-2. what happened during it
-3. what happened about two hours later when relevant
-4. what happened the next morning
-5. whether the key functional baseline improved, stayed the same, or worsened
-6. whether any **new or changed** swelling, locking, instability, rest/night pain, neurological, systemic, limb, or chest/breathing feature appeared
-7. what practical barrier changed adherence
-
-A useful follow-up can be as short as:
-
-> Your log shows two green sessions and the walking threshold improved from 12 to 18 minutes. Keep everything else stable and add two minutes next time. Tell me only if the next morning is worse or the symptom pattern changes.
-
-Then choose exactly one primary decision:
-
-- **Progress** one variable.
-- **Continue** unchanged because the trial is appropriate but incomplete.
-- **Regress** one variable.
-- **Substitute** an item that is poorly tolerated or impractical.
-- **Revise the hypothesis** because the pattern is not behaving as expected.
-- **Refer** because risk, uncertainty, worsening, or nonresponse exceeds the self-management boundary.
-- **Complete** with a maintenance and flare plan.
-
-See `references/follow-up-progression-and-nonresponse.md`.
-
-## Nonresponse and recurrence
-
-Do not keep adding exercises to a failed plan.
-
-Recommend in-person assessment sooner when symptoms worsen, new findings appear, function is declining, or the user cannot safely test the plan. For a simple stable complaint, lack of meaningful improvement after a predeclared, well-executed trial—often about one to three weeks, depending on irritability and exposure opportunities—should trigger hypothesis review and usually clinician/PT assessment rather than indefinite repetition.
-
-Repeated recurrence at low loads, persistent sleep disruption, unexplained rest/night symptoms, recurrent swelling/locking/instability, or an inability to progress the target task lowers the threshold for referral.
-
-## Adherence and behavior support
-
-Treat adherence as a design problem, not a character judgment.
-
-Ask what specifically created friction: time, flare, fear, unclear instructions, boredom, setup, privacy, equipment, travel, competing care duties, low confidence, or no perceived benefit.
-
-Then match the intervention to the barrier:
-
-- reduce the plan to the smallest useful version
-- connect each item to the user's goal
-- offer no-equipment, lower-irritability, or shorter alternatives
-- link the routine to an existing cue or location
-- check understanding by asking the user to explain the plan back briefly
-- show progress with the chosen baseline
-- use reminders only with consent and only when forgetting is the actual barrier
-
-Do not use streaks, shame, or compliance scoring by default.
-
-## Clinician handoff
-
-When referring, create a concise summary containing:
-
-- chief complaint and exact location
-- onset/mechanism and trend
-- key aggravators, easing factors, and dose threshold
-- meaningful associated positives and negatives
-- relevant health context and prior care
-- current functional baseline and goal
-- self-management tried, dose, and response
-- reason for referral and urgency
-- questions the user wants answered
-
-Use `templates/clinician-handoff-template.md`.
-
-## Records, provenance, and privacy
-
-The vault is the longitudinal memory for the episode. Read before asking and write back only when the information will improve future decisions. Store only what improves continuity:
-
-- user goal and target task
-- symptom location, onset, behavior, and relevant safety findings
-- working hypotheses and uncertainty
-- baselines
-- plan, dose, response rules, and review point
-- response history
-- clinician diagnoses/restrictions with source and date
-- referral recommendation
-- source, date, and freshness for context that materially affected the plan
-- unresolved conflicts or one decision-changing unknown, without duplicating the full conversation
-
-Separate current user-reported, vault user-reported, clinician-reported, device-derived, observed, and assistant-inferred information. Do not convert an inference into fact. Do not copy unrelated vault details into the episode merely because they were retrieved. Current user statements supersede stale stored statements for the current episode; preserve the conflict only when it matters.
-
-Private is the default; store the minimum necessary health detail. Do not retain unrelated sensitive details from photos, videos, or conversation.
-
-Use `templates/rehab-case-state.example.json` and `schemas/rehab-case-state.schema.json`.
-
-## Future regional and condition modules
-
-The core skill remains body-region agnostic. Add reviewed modules later; do not embed condition-specific routines in this core.
-
-Each future module must include:
-
-- intended population and exclusions
-- discriminating history and targeted safety questions
-- plausible alternatives and referral triggers
-- low-risk observations with limitations
-- intervention roles by rehabilitation stage
-- exercise-catalog selectors rather than a fixed universal routine
-- progression, regression, review, and nonresponse criteria
-- evidence summary, limitations, owner, version, and last-reviewed date
-
-Use `templates/condition-module-template.md` and `schemas/rehab-protocol.schema.json`.
-
-## User-facing response shape
-
-Do not force every response into every section. Prefer the smallest useful shape:
-
-1. immediate safety action only when a specific concern exists
-2. concise pattern summary and uncertainty
-3. goal or repeatable baseline
-4. small first plan with exact dose
-5. green/yellow/red response rules and review point
-6. one natural, decision-changing question only when needed
-
-When context is already sufficient, ask no question. When one gap remains, the response should still provide useful orientation or a safe interim action. Do not lead with “I need to screen you,” list unrelated warning signs, or expose an internal clinical note. Do not bury urgent guidance under education or exercises.
-
-## Quality gate before sending
-
-A response fails if it:
-
-- asks for information that is already available and sufficiently current in the conversation or vault
-- treats absent or stale vault information as a current negative safety finding
-- starts a routine low-risk interaction with a generic warning-sign checklist or intake preamble
-- asks more than one question in a normal turn without a clear decision-changing reason
-- exposes unrelated sensitive vault details
-- gives exercise before resolving a material safety concern
-- claims a diagnosis or tissue lesion from remote information
-- ignores the user's actual goal
-- uses pain alone as the outcome
-- lists many exercises without prioritization
-- omits dose, acceptable response, stop criteria, regression, progression, or review point
-- directs a risky home test
-- blindly applies a universal pain threshold or weekly percentage
-- persists with a worsening or nonresponsive plan
-- overrides a clinician protocol
-- stores an inferred diagnosis as fact
-- withholds a useful bounded next step even though the available context supports one
-
-A response is ready only when it is context-aware, proportionate, safe, bounded, goal-linked, measurable, and easy enough to follow.
+Save only what will help next time, and keep it private.

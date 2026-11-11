@@ -36,9 +36,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - competition-training
-      - running-cardio
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me run a faster mile.
   indexable: true
 safety:

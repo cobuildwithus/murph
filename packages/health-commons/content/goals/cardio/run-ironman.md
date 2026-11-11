@@ -35,7 +35,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - competition-training
+      - training
   startPrompt: "Hey Murph, help me run an Ironman."
   indexable: true
 safety:

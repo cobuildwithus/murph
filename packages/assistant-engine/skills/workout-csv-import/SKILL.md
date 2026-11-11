@@ -1,6 +1,6 @@
 ---
 name: workout-csv-import
-description: Use when a member sends or references a workout-history CSV for import, including Strong, Hevy, an unknown export format, or a large custom spreadsheet whose rows must be grouped into canonical workouts. Owns provider inspection, source preservation, local Python transformation, schema validation, batch import, and replay safety; use strength-training only when programming or interpretation is also requested.
+description: Use when a member sends or references a workout-history CSV for import, including Strong, Hevy, an unknown export format, or a large custom spreadsheet whose rows must be grouped into canonical workouts. Owns provider inspection, source preservation, local Python transformation, schema validation, batch import, and replay safety; use training only when programming or interpretation is also requested.
 ---
 
 # Workout CSV import

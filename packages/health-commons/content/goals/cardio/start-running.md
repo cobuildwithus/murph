@@ -35,7 +35,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - running-cardio
+      - training
       - behavior-followthrough
   startPrompt: Hey Murph, help me start running.
   indexable: true

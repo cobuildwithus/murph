@@ -36,7 +36,7 @@ goal:
   workflow:
     kind: habit_plan
     ownerSkillIds:
-      - cognitive-focus
+      - stress-regulation
       - cardiometabolic-health
   startPrompt: Hey Murph, help me keep my brain healthy as I age.
   indexable: true

@@ -35,7 +35,7 @@ goal:
     kind: general_plan
     ownerSkillIds:
       - stress-regulation
-      - energy-fatigue
+      - sleep-improvement
       - behavior-followthrough
   startPrompt: Hey Murph, help me prevent burnout.
   indexable: true

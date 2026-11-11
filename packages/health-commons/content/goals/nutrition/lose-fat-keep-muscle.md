@@ -33,7 +33,7 @@ goal:
     ownerSkillIds:
       - body-composition
       - nutrition-strategy
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me lose fat and keep muscle.
   indexable: true
 safety:

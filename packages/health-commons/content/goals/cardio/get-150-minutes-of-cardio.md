@@ -34,7 +34,7 @@ goal:
   workflow:
     kind: habit_plan
     ownerSkillIds:
-      - running-cardio
+      - training
       - daily-activity
       - behavior-followthrough
   startPrompt: Hey Murph, help me get 150 minutes of cardio each week.

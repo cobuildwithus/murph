@@ -35,7 +35,7 @@ goal:
   workflow:
     kind: care_support
     ownerSkillIds:
-      - chronic-pain-support
+      - chronic-illness-support
       - sleep-improvement
   startPrompt: Hey Murph, help me sleep better with chronic pain.
   indexable: true

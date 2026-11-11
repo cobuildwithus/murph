@@ -35,7 +35,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - strength-training
+      - training
       - cycle-hormonal-health
   startPrompt: Hey Murph, help me stay strong during pregnancy.
   indexable: true

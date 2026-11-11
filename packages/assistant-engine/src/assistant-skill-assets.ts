@@ -53,19 +53,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'sleep-improvement',
     name: 'sleep-improvement',
     triggerHint:
-      'Use for improving sleep duration, sleep efficiency, sleep onset, night awakenings, bedtime procrastination or getting-to-bed transition friction, sleep-environment disruption such as noise or vibration, high-altitude sleep disruption, wind-down routines, wearable sleep stage or sleep score interpretation, non-clinical melatonin framing, and initial screening when snoring, gasping, unrefreshing sleep, or dangerous daytime sleepiness could indicate sleep-disordered breathing. Use sleep-recovery-readiness for train-vs-rest decisions and circadian-rhythm for body-clock, light-timing, jet-lag, shift-work, or clock-shifting plans.',
-  },
-  {
-    slug: 'circadian-rhythm',
-    name: 'circadian-rhythm',
-    triggerHint:
-      'Use for body-clock timing, chronotype, delayed or advanced sleep schedule, morning/evening light, jet lag, shift work, social jet lag, and sleep schedule regularity. Use sleep-improvement when the main issue is insomnia mechanics rather than clock timing.',
-  },
-  {
-    slug: 'energy-fatigue',
-    name: 'energy-fatigue',
-    triggerHint:
-      'Use for persistent tiredness, daytime sleepiness, low energy, brain/body fatigue, post-illness fatigue patterns, and lifestyle-versus-clinician triage. Route to sleep-improvement, cardiometabolic-health, micronutrients-supplements, or clinician support when that owner is primary.',
+      'Use for sleep facts and sleep problems, body-clock timing (jet lag, shift work, a late or early schedule, melatonin timing), the call to train, go easier or rest today, HRV and resting heart rate, and tiredness that persists.',
   },
   {
     slug: 'substance-load',
@@ -74,40 +62,16 @@ export const ASSISTANT_SKILLS = [
       'Use for caffeine, alcohol, nicotine, cannabis, branded OTC sleep aids or sedating antihistamines, medication-related sedation, and other common substance effects on sleep, HRV, resting heart rate, recovery, energy, appetite, and performance, including reduction experiments and honest same-night wearable interpretation.',
   },
   {
-    slug: 'cognitive-focus',
-    name: 'cognitive-focus',
-    triggerHint:
-      'Use for focus, attention, brain fog, deep work, distraction, procrastination, cognitive energy, and non-diagnostic support around stimulant timing or ADHD-adjacent questions. Route medication decisions, diagnosis, and unsafe impairment to clinician support.',
-  },
-  {
-    slug: 'hrv-resting-heart-rate',
-    name: 'hrv-resting-heart-rate',
-    triggerHint:
-      'Use for HRV, resting heart rate, autonomic readiness markers, personal baseline deviations, wearable noise versus signal, illness or overreaching warning signs, and chronic levers that move HRV/RHR. Use sleep-recovery-readiness for train-vs-rest decisions.',
-  },
-  {
-    slug: 'aerobic-fitness',
-    name: 'aerobic-fitness',
-    triggerHint:
-      'Use for reported VO2 max values (text or device screenshots), cardio fitness estimates, aerobic capacity, zone interpretation, and wearable cardio trends. Use running-cardio or competition-training for a concrete training plan.',
-  },
-  {
     slug: 'daily-activity',
     name: 'daily-activity',
     triggerHint:
-      'Use for daily movement and wearable day facts: steps, NEAT, sedentary time, walking breaks, all workouts, or total workout time for a date. Use running-cardio or strength-training for workout programming.',
+      'Use for steps, everyday movement, sitting time and walking breaks, and for factual questions about wearable activity or workouts on a given day. Use training for workout programming.',
   },
   {
     slug: 'workout-csv-import',
     name: 'workout-csv-import',
     triggerHint:
-      'Use when a member sends or references a workout-history CSV for import, including Strong, Hevy, an unknown export format, or a large custom spreadsheet whose rows must be grouped into canonical workouts. Owns provider inspection, source preservation, local Python transformation, schema validation, batch import, and replay safety; use strength-training only when programming or interpretation is also requested.',
-  },
-  {
-    slug: 'mobility-posture',
-    name: 'mobility-posture',
-    triggerHint:
-      'Use for non-pain stiffness, mobility, posture, desk ergonomics, range-of-motion limitations, movement breaks, and movement quality. Use physical-therapy first for pain, injury, weakness, numbness, loss of function, or return-to-activity rehab.',
+      'Use when a member sends or references a workout-history CSV for import, including Strong, Hevy, an unknown export format, or a large custom spreadsheet whose rows must be grouped into canonical workouts. Owns provider inspection, source preservation, local Python transformation, schema validation, batch import, and replay safety; use training only when programming or interpretation is also requested.',
   },
   {
     slug: 'cardiometabolic-health',
@@ -146,28 +110,22 @@ export const ASSISTANT_SKILLS = [
       'Use when a user is starting, sustaining, repairing, or reviewing a repeated behavior, routine, habit, commitment, or recurring experiment session, especially ignored reminders, missed sessions, friction, accountability, support style, social/visual support, or reminder fatigue. Also use before scheduling recurring behavior support when follow-through is likely to matter.',
   },
   {
-    slug: 'competition-training',
-    name: 'competition-training',
-    triggerHint:
-      'Use when a user is preparing for a target fitness race or competition and needs feasibility, phase selection, event-demand classification, pacing, tapering, event rehearsal, execution, logistics, or post-event review. Covers running, multisport, cycling, hybrid, obstacle, functional-fitness, and other endurance or strength-endurance events. For pure strength-sport meets such as powerlifting, weightlifting, or strongman, use strength-training first for strength or resistance programming, loading, progression, plateaus, and exercise selection; use competition-training only for event-demand classification, current rule or standard checks, taper, execution, logistics, or post-event review. Do not use for ordinary exercise without a target event or as the primary skill for a new pain or injury complaint.',
-  },
-  {
     slug: 'tracked-table',
     name: 'tracked-table',
     triggerHint:
-      'Use when a private member asks to start or resume a live workout; updates, finishes, or corrects one; logs or clears a workout set; continues a live-workout exchange with a short follow-up; or requests a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Owns native compact-table presentation and canonical workout-backed refreshes; use strength-training alongside it when workout programming or interpretation is also needed.',
+      'Use when a private member asks to start or resume a live workout; updates, finishes, or corrects one; logs or clears a workout set; continues a live-workout exchange with a short follow-up; or requests a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Owns native compact-table presentation and canonical workout-backed refreshes; use training alongside it when workout programming or interpretation is also needed.',
   },
   {
-    slug: 'strength-training',
-    name: 'strength-training',
+    slug: 'training',
+    name: 'training',
     triggerHint:
-      'Use for evidence-informed strength or resistance training plans, progression, plateaus, hypertrophy, maximal strength, power, gym, home, or calisthenics programming, logging completed strength sets, competition preparation, and adherence coaching for generally healthy adults. Do not use for diagnosis, rehabilitation, medical clearance, aggressive weight cuts, eating-disorder treatment, or performance-enhancing-drug protocols.',
+      'Use for strength and resistance training, running and other cardio, VO2 max and cardio fitness numbers, preparing for a dated event or a named benchmark, stiffness and mobility without pain, and drafting, saving or finding a workout routine.',
   },
   {
     slug: 'stress-regulation',
     name: 'stress-regulation',
     triggerHint:
-      'Use when stress or overload is the immediate bottleneck: acute activation, trouble winding down, possible occupational burnout, symptom or pain fear, stress-linked eating or training avoidance, or stress-driven low motivation on a hard day. Offer one brief state- or load-shifting action, then hand off recurring, domain-specific, clinical, urgent, or crisis work.',
+      'Use when stress or overload is what blocks the member right now (a tense moment, trouble winding down, work burnout, fear about a symptom, a hard day for a habit), and for focus, attention, procrastination and brain fog. Gives one small action and points to the skill that owns anything recurring.',
   },
   {
     slug: 'automatic-meal-capture',
@@ -186,12 +144,6 @@ export const ASSISTANT_SKILLS = [
     name: 'nutrition-strategy',
     triggerHint:
       'Use for forward-looking nutrition decisions about meal structure, named diets and dietary patterns, protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, daily nutrition-card goal setup, and real-life food-system execution. Use food-journal for meal capture and retrospective patterns, body-composition for intentional body change, gut-digestion for digestive symptom strategy or elimination/reintroduction, and clinical owners for therapeutic diets or medically complex cases.',
-  },
-  {
-    slug: 'sleep-recovery-readiness',
-    name: 'sleep-recovery-readiness',
-    triggerHint:
-      'Use when the user needs an acute readiness decision: whether to train hard, modify, train easy, rest, deload, or start a short recovery block based on recent sleep, fatigue, soreness, illness context, low motivation, load, function, or wearable context. Use sleep-improvement for sleep mechanics, circadian-rhythm for clock timing, hrv-resting-heart-rate for HRV/RHR interpretation, and energy-fatigue for persistent tiredness.',
   },
   {
     slug: 'appointment-scheduling',
@@ -239,13 +191,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'chronic-illness-support',
     name: 'chronic-illness-support',
     triggerHint:
-      'Use for chronic illness, fluctuating disability, symptom flares, treatment burden, medical invalidation, low-capacity self-management, longitudinal support, care preparation, and caregiver coordination. This skill should reason, recommend, and help the user act—not merely validate or refer.',
-  },
-  {
-    slug: 'chronic-pain-support',
-    name: 'chronic-pain-support',
-    triggerHint:
-      'Use when persistent or recurring pain affects relief, function, sleep, confidence, work, relationships, or participation. Provide a working pain formulation, recommend the best immediate or next-step intervention, and use personalized experiments when appropriate.',
+      'Use when a long-term illness or persistent pain is central, including a symptom or pain flare, pacing and energy limits, worsening after exertion, treatment burden, feeling dismissed by care, preparing for an appointment, or managing symptoms over time.',
   },
   {
     slug: 'self-management-experiments',
@@ -257,13 +203,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'physical-therapy',
     name: 'physical-therapy',
     triggerHint:
-      'Use when a user reports musculoskeletal pain, stiffness, weakness, loss of function, injury, rehabilitation, return-to-activity needs, or asks for PT-style assessment or exercises—including workout modification because of pain. Before asking questions, reuse relevant current-conversation and vault context and ask only decision-changing gaps. Read before recommending exercises, rest, activity restriction, or load changes for a new or materially changed pain complaint. Do not use for ordinary workout programming without pain, injury, or rehabilitation needs.',
-  },
-  {
-    slug: 'running-cardio',
-    name: 'running-cardio',
-    triggerHint:
-      'Use for running, structured walking workouts, cycling, aerobic-base or Zone 2 work, cardio conditioning, low-impact conditioning, cardio around strength or sport, limited-time maintenance, and non-event speed development. Use daily-activity for ordinary walking breaks and everyday movement targets. For a named event, date, competition category, qualifying target, concrete benchmark, or event-specific performance goal, use competition-training when registered; otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression. Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance. Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
+      'Use when a member reports muscle, joint, tendon or back pain, an injury, weakness or loss of function, or wants rehabilitation exercises or a return to activity after pain or injury. Read it before recommending exercises, rest, activity limits or load changes for pain.',
   },
   {
     slug: 'group-newsletter',
