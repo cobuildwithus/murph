@@ -7,11 +7,9 @@ their existing `pages`, `superlatives`, `scoreLine` and `chatLine` representatio
 New pair shows have empty top-level `pages` and ordered `show.pages`.
 
 Stable synthetic decoder fixtures live in `packages/contracts/fixtures/recap-show/`:
-`full-show.json`, `failed-scene-no-song.json`, `pending-failed.json` (historical
-pending media), and `legacy.json`. IDs, names, words and URLs are synthetic.
+`full-show.json`, `failed-scene-no-song.json`, and `legacy.json`. IDs, names, words and URLs are synthetic.
 
-`show` contains `version: 1`, `generationId`, `treatment`, `acceptedAt`,
-`mediaDeadline` and `pages`. Page IDs are stable within a generation. Replace the
+`show` contains `version: 1`, `generationId`, `treatment`, `acceptedAt` and `pages`. Page IDs are stable within a generation. Replace the
 complete generation when its ID changes. Ignore unknown optional fields and skip
 unknown page/block kinds without losing readable text or the canonical result.
 
@@ -33,7 +31,7 @@ Every page has `id`, `kind`, `background` and `blocks`. Backgrounds are `night`,
 - `result`: render the surrounding game response's canonical result and prize.
   `scoreLine` is optional copy, never a second score owner.
 
-Generated `media.status` is `ready`, `failed` or historical `pending`. Ready media
+Generated `media.status` is `ready` or `failed`. Media is final at acceptance. Ready media
 has `url`, `mediaType` (`image/jpeg` or `audio/mpeg`) and optional `width`, `height`
 or `durationMs`. A scene's `fallback` is `photo` with one authorized entry ID, or
 `text` with none. Failure must preserve setup, payoff and the result.
@@ -41,9 +39,8 @@ or `durationMs`. A scene's `fallback` is `photo` with one authorized entry ID, o
 Media URLs are relative to the API origin, require the same bearer, and bind a
 specific generation. Fetch privately without shared caching; clear cached bytes
 on logout, access loss or generation replacement. Stale, denied and unavailable
-media use fallback. Only historical pending payloads may include `refreshAfterMs`;
-refresh while open, before `mediaDeadline`, and stop when the field disappears.
-New shows finish media before acceptance and need no polling.
+media use fallback. Shows finish media before acceptance. There is no pending variant, publication
+deadline or polling hint; clients never poll for media completion.
 
 The public `/recap/:gameId` page remains an app handoff. Its opaque `preview`
 capability allows only the composed cover at `/recap/:gameId/cover/:token`, for

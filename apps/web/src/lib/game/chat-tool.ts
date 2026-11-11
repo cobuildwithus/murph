@@ -301,7 +301,7 @@ async function handleAuthorizedRecapWrite(input: RecapToolInput & { request: Ext
 // Older runtime schemas reject unknown fields, including on replay of a newer story.
 function recapForWriter(saved: HostedGameRecap, submitted: HostedGameRecap): HostedGameRecap {
   if (submitted.treatment !== undefined) return saved;
-  const legacy = presentGameRecap({ stored: saved, now: new Date(), permittedPhotoIds: new Set(), mediaUrl: () => "" });
+  const legacy = presentGameRecap({ stored: saved, permittedPhotoIds: new Set(), mediaUrl: () => "" });
   if (submitted.superlatives) return legacy;
   const { superlatives: _superlatives, ...withoutCards } = legacy;
   return withoutCards;

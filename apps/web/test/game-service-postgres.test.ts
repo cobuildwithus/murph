@@ -621,7 +621,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(presented?.show?.pages.map(page => page.kind)).toEqual(["cover", "text", "result"]);
       expect(presented?.show?.pages.some(page => page.kind === "song" || page.kind === "superlative")).toBe(false);
       const { readRecapEnvelope } = await import("@/src/lib/game/recap-asset-access");
-      expect((await readRecapEnvelope(gameId))?.envelope.assets).toEqual([expect.objectContaining({ recipeId: "fallback-cover", status: "ready" })]);
+      expect((await readRecapEnvelope(gameId))?.envelope.assets).toEqual([expect.objectContaining({ recipeId: "fallback-cover" })]);
       expect(await db.hostedMailboxItem.count({ where: { userId: room } })).toBe(0);
     } finally {
       fence.mockRestore(); active.mockRestore(); vi.unstubAllEnvs();
@@ -731,7 +731,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(accepted.envelope.story.superlatives ?? []).toEqual(cards);
       expect(await db.gameEvent.count({ where: { commandKey: `${eventId}:selection` } })).toBe(1);
       expect(accepted.envelope.assets).toHaveLength(1);
-      expect(accepted.envelope.assets[0]).toMatchObject({ status: "ready", hash: receipt.hash });
+      expect(accepted.envelope.assets[0]).toMatchObject({ hash: receipt.hash });
       expect(await db.hostedMailboxItem.count({ where: { userId: room } })).toBe(0);
       expect((await readGame(gameId, a))?.recap?.show?.pages[0]?.media?.status).toBe("ready");
       const assetInput = { gameId, generationId: accepted.envelope.generationId, slot: "scene-0", memberId: a };
@@ -739,6 +739,11 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(await readAuthorizedRecapAsset({ ...assetInput, memberId: room })).toBeNull();
       const { readRecapCoverPreview } = await import("@/src/lib/game/recap-preview");
       expect((await readRecapCoverPreview(gameId, accepted.envelope.preview.token))?.length).toBe(bytes.length);
+      await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: null } });
+      expect(await readAuthorizedRecapAsset(assetInput)).toBeNull();
+      expect(await readRecapCoverPreview(gameId, accepted.envelope.preview.token)).toBeNull();
+      expect((await readGame(gameId, a))?.recap?.chatLine).toBe(recap.chatLine);
+      await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: profile.photoKey } });
       expect(await readPendingRecapUsages(scope)).toHaveLength(1);
       await handleRecapAdmission({ ...identity, material, command: { kind: "lore_checkpointed", generationIds: [eventId] } });
       expect(await readPendingRecapUsages(scope)).toEqual([]);

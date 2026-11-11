@@ -5890,26 +5890,29 @@ remains an app handoff. Groups retain their existing prompt, tools and payload.
 The [native contract](agent-docs/references/recap-show-contract.md) owns decoder
 fixtures; no capability header or older-client show projection remains.
 
-`recap-admission.ts` uses the existing GameEvent owner for a ten-minute deadline,
-two model runs, four image attempts, one song, two concurrent images and a $1.25
+`recap-admission.ts` uses the existing GameEvent owner for a twenty-minute deadline,
+two model runs, six image attempts, one song, two concurrent images and a $3.00
 prospective media cap. Reservations are never refunded. The nullable
 `hosted_runtime_owner.recap_media_scope` survives game deletion and fences exact
 runtime attempts. The outbound Worker inspects the actual request and consumes
-one matching reservation before forwarding. Missing tokens, native image tools
-and opaque Live/socket paths cannot bypass scoped admission. Reference-bearing
-image calls require a separately verified input-token ceiling; without one they
-fail closed. The task's shell can read only its bundle and write only drafts,
-media and previews; network and child forwarding are disabled.
+one matching reservation before paid media forwarding. Ordinary Responses,
+websocket upgrades and Live have no recap admission round trip. Recap turns
+disable Codex native image generation; file tools own their media calls.
+Reference images fit within 1024 pixels per edge, with at most three references;
+the default input estimate is 36,847 tokens with an optional operator override.
+The estimate is not a provider-guaranteed Flare bound. The task shell reads its
+bundle and writes drafts, media and previews, with network disabled.
 
 Submission validates canonical material, freezes the draft and selected receipts,
 registers cleanup ownership before each upload, and accepts only complete verified
 bytes. Fresh runtime, room, roster, witness and reference checks guard each
-boundary. The existing FK-free orphan owner retires unselected/replaced media;
+boundary. The FK-free recap receipts let the existing retention worker retire abandoned/replaced media;
 permanent retirement tombstones prevent late uploads from restoring access.
 Accepted media uses private generation URLs; a thirty-day opaque cover capability
 exposes only a composed cover. Failed scenes retain their text, failed songs are
 omitted, and exhausted generation uses a validated three-page plain fallback.
-There is no asset mailbox executor or post-acceptance provider call.
+There is no asset mailbox executor, post-acceptance provider call or pending-media
+presentation. Accepted assets are complete; clients never poll for media completion.
 
 Canonical usage stamps are appended by trusted code. Pending stamps are repaired
 without a model call or send; the existing mailbox checkpoints the repaired lore,

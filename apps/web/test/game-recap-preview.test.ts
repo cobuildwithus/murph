@@ -7,8 +7,8 @@ vi.mock("@/src/lib/game/recap-media", () => ({ readRecapMedia: mocks.media }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
 const now = new Date("2026-11-10T00:00:00Z"), token = "a".repeat(43);
 function envelope() { return gameRecapEnvelopeSchema.parse({ version: 1, generationId: "a".repeat(32), story: { treatment: "Courtroom drama", chatLine: "Synthetic verdict.", pages: [{ background: "paper", blocks: [{ kind: "headline", text: "The verdict" }] }] },
-  acceptedAt: now.toISOString(), coverDeadline: "2026-11-10T00:05:00Z", mediaDeadline: "2026-11-10T00:10:00Z", preview: { token, expiresAt: "2026-12-10T00:00:00Z" },
-  assets: [{ slot: "scene-0", kind: "image", recipeId: "synthetic-recipe", storageKey: "synthetic-key", status: "ready", references: [], hash: "b".repeat(64), mediaType: "image/jpeg" }] }); }
+  acceptedAt: now.toISOString(), preview: { token, expiresAt: "2026-12-10T00:00:00Z" },
+  assets: [{ slot: "scene-0", kind: "image", recipeId: "synthetic-recipe", storageKey: "synthetic-key", references: [], hash: "b".repeat(64), mediaType: "image/jpeg", byteLength: 3 }] }); }
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); });
 describe("cover-only preview capability", () => {
   it("serves exactly the generated cover and denies wrong, expired, stale-source and hidden capabilities", async () => {

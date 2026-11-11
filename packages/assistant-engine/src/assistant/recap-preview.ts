@@ -42,7 +42,7 @@ export async function previewRecap(input: {
     if (createHash('sha256').update(bytes).digest('hex') !== receipt.hash || bytes.length !== receipt.byteLength) throw new Error('Selected media changed after generation.')
     if (receipt.mediaType === 'image/jpeg') media.set(slot, `data:image/jpeg;base64,${bytes.toString('base64')}`)
     assets.push({ slot, kind: receipt.mediaType === 'image/jpeg' ? 'image' : 'song', recipeId: receipt.operationId,
-      storageKey: slot, status: 'ready', references: [], hash: receipt.hash, byteLength: receipt.byteLength,
+      storageKey: slot, references: [], hash: receipt.hash, byteLength: receipt.byteLength,
       mediaType: receipt.mediaType, width: receipt.width, height: receipt.height, durationMs: receipt.durationMs })
   }
   const photos = new Map<string, string>()
@@ -55,8 +55,8 @@ export async function previewRecap(input: {
   const draftHash = createHash('sha256').update(JSON.stringify(draft)).digest('hex')
   const instant = new Date().toISOString()
   const presentation = presentGameRecap({ stored: { version: 1, generationId: draftHash, story: draft.story, assets,
-    acceptedAt: instant, coverDeadline: instant, mediaDeadline: instant, preview: { token: 'local-preview-only'.repeat(3), expiresAt: instant } },
-    now: new Date(), permittedPhotoIds: new Set(photos.keys()), mediaUrl: slot => `${input.relativeRoot}/media/${slot}` })
+    acceptedAt: instant, preview: { token: 'local-preview-only'.repeat(3), expiresAt: instant } },
+    permittedPhotoIds: new Set(photos.keys()), mediaUrl: slot => `${input.relativeRoot}/media/${slot}` })
   const directory = await recapDirectory(input.vault, `${input.relativeRoot}/previews/${draftHash.slice(0, 16)}`)
   const warnings: string[] = []
   const pages: string[] = []

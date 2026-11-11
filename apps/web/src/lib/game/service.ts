@@ -3824,7 +3824,7 @@ async function buildViewInputs(
       result,
       recap: recapAt[index] === null ? null : presentGameRecap({
         stored: storedGameRecapSchema.parse(JSON.parse(plain[recapAt[index]!] ?? "null")),
-        now: clock, mediaVisible: isRecapMediaVisible(),
+        mediaVisible: isRecapMediaVisible(),
         permittedPhotoIds: new Set(game.entries.filter(entry => entry.kind === "photo" && !hiddenEntryIds.has(entry.id) && !hiddenMemberIds.has(entry.memberId)).map(entry => entry.id)),
         mediaUrl: (slot, generationId) => `/api/game/v1/games/${encodeURIComponent(game.row.id)}/recap-assets/${encodeURIComponent(slot)}?generation=${encodeURIComponent(generationId)}`,
       }),

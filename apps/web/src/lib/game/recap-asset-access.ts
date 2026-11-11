@@ -41,7 +41,7 @@ export async function readAuthorizedRecapAsset(input: { gameId: string; generati
   if (!isRecapMediaVisible() || !(await readGame(input.gameId, input.memberId, false))?.recap?.show) return null;
   const current = await readRecapEnvelope(input.gameId);
   if (!current || current.envelope.generationId !== input.generationId) return null;
-  const asset = current.envelope.assets.find(item => item.slot === input.slot && item.status === "ready");
+  const asset = current.envelope.assets.find(item => item.slot === input.slot);
   if (!asset || !await recapReferencesCurrent(getPrisma(), input.gameId, [asset])) return null;
   const stored = await readRecapMedia({ storageKey: asset.storageKey, ownerMemberId: current.row.wordsOwnerMemberId });
   if (!stored || stored.hash !== asset.hash) return null;

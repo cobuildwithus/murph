@@ -67,22 +67,20 @@ export const recapAssetSchema = z.object({
   kind: z.enum(["image", "song"]),
   recipeId: ref,
   storageKey: z.string().min(1).max(512),
-  status: z.enum(["pending", "attempted", "ready", "failed"]),
   references: z.array(z.object({
     kind: z.enum(["profile", "entry", "murph"]),
     memberId: ref.optional(), entryId: ref.optional(), key: z.string().min(1).max(512),
   }).strict()).max(5),
-  attemptedAt: instant.optional(),
-  hash: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
-  mediaType: z.enum(["image/jpeg", "audio/mpeg"]).optional(),
-  byteLength: z.number().int().positive().max(2 * 1024 * 1024).optional(),
+  hash: z.string().regex(/^[a-f0-9]{64}$/u),
+  mediaType: z.enum(["image/jpeg", "audio/mpeg"]),
+  byteLength: z.number().int().positive().max(2 * 1024 * 1024),
   width: z.number().int().positive().optional(), height: z.number().int().positive().optional(),
   durationMs: z.number().int().positive().optional(),
 }).strict();
 export type RecapAsset = z.infer<typeof recapAssetSchema>;
 export const gameRecapEnvelopeSchema = z.object({
   version: z.literal(1), generationId: ref, story: gameRecapStorySchema,
-  acceptedAt: instant, coverDeadline: instant, mediaDeadline: instant,
+  acceptedAt: instant,
   assets: z.array(recapAssetSchema).max(5),
   preview: z.object({ token: z.string().min(32).max(128), expiresAt: instant }).strict(),
 }).strict();
@@ -104,7 +102,6 @@ export const legacyRecapBlockSchema = recapBlockSchema.omit({ scene: true }).ext
   kind: z.enum(["photo", "photoPair", "contactSheet", "headline", "kicker", "quote", "stat"]),
 });
 const displayMedia = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("pending") }).strict(),
   z.object({ status: z.literal("failed") }).strict(),
   z.object({ status: z.literal("ready"), url: z.string().min(1), mediaType: z.enum(["image/jpeg", "audio/mpeg"]),
     width: z.number().positive().optional(), height: z.number().positive().optional(), durationMs: z.number().positive().optional(),
@@ -125,7 +122,7 @@ export const gameRecapPresentationSchema = z.object({
   pages: z.array(z.object({ background: z.enum(["night", "paper", "sage", "sienna", "slate"]), blocks: z.array(legacyRecapBlockSchema) }).strict()),
   superlatives: recapSuperlatives.optional(), scoreLine: z.string().optional(), chatLine: z.string(),
   show: z.object({ version: z.literal(1), generationId: ref, treatment: z.string(),
-    acceptedAt: instant, mediaDeadline: instant, refreshAfterMs: z.number().int().min(1000).max(30000).optional(),
+    acceptedAt: instant,
     pages: z.array(recapShowPageSchema).max(11),
   }).strict().optional(),
 }).strict();
@@ -134,7 +131,7 @@ export type RecapShowPage = z.infer<typeof recapShowPageSchema>;
 
 /** Pure projection; the caller supplies only currently authorized photo IDs and media URLs. */
 export function presentGameRecap(input: {
-  stored: GameRecapStory | GameRecapEnvelope; now: Date;
+  stored: GameRecapStory | GameRecapEnvelope;
   permittedPhotoIds: ReadonlySet<string>; mediaUrl: (slot: string, generationId: string) => string;
   mediaVisible?: boolean;
 }): GameRecapPresentation {
@@ -156,9 +153,8 @@ export function presentGameRecap(input: {
   const media = (slot: string): z.infer<typeof displayMedia> => {
     const asset = envelope.assets.find(item => item.slot === slot);
     if (input.mediaVisible === false || !asset) return { status: "failed" };
-    if (asset.status === "ready" && asset.mediaType && asset.hash) return { status: "ready", url: input.mediaUrl(slot, envelope.generationId), mediaType: asset.mediaType,
+    return { status: "ready", url: input.mediaUrl(slot, envelope.generationId), mediaType: asset.mediaType,
       ...(asset.width ? { width: asset.width } : {}), ...(asset.height ? { height: asset.height } : {}), ...(asset.durationMs ? { durationMs: asset.durationMs } : {}) };
-    return { status: asset.status === "failed" || input.now.getTime() >= Date.parse(envelope.mediaDeadline) ? "failed" : "pending" };
   };
   const pages: RecapShowPage[] = story.pages.map((page, index) => {
     const sceneIndex = page.blocks.findIndex(block => block.kind === "scene");
@@ -178,7 +174,5 @@ export function presentGameRecap(input: {
   const songMedia = media("song");
   if (story.song && songMedia.status === "ready") pages.push({ id: "song", kind: "song", background: "night", blocks: [], media: songMedia, song: { title: story.song.title, lyrics: story.song.lyrics } });
   pages.push({ id: "result", kind: "result", background: "paper", blocks: [] });
-  const pending = pages.some(page => page.media?.status === "pending") || songMedia.status === "pending";
-  return { ...legacy, show: { version: 1, generationId: envelope.generationId, treatment: story.treatment ?? "", acceptedAt: envelope.acceptedAt, mediaDeadline: envelope.mediaDeadline, pages,
-    ...(pending ? { refreshAfterMs: 5000 } : {}) } };
+  return { ...legacy, show: { version: 1, generationId: envelope.generationId, treatment: story.treatment ?? "", acceptedAt: envelope.acceptedAt, pages } };
 }

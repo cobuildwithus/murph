@@ -4,13 +4,13 @@ import { hostedRecapMediaObjectKey } from "@murphai/hosted-execution/storage-pat
 /** FK-free receipts outlive both the story and account, including surviving owners.
  * Call under the game lock, in the transaction accepting or clearing the story. */
 export async function registerRecapAssetsTx(tx: Prisma.TransactionClient, input: {
-  gameId: string; generationId: string; ownerMemberId: string; storageKeys: readonly string[]; acceptedAt: Date; mediaDeadline: Date;
+  gameId: string; generationId: string; ownerMemberId: string; storageKeys: readonly string[]; acceptedAt: Date; recoveryUntil: Date;
 }): Promise<void> {
   if (input.storageKeys.length > 5) throw new Error("Recap asset count exceeds its bound.");
   await tx.gameRecapAsset.createMany({ data: input.storageKeys.map(storageKey => ({
     userId: input.ownerMemberId, resourceId: recapResourceId(input.gameId, input.generationId, storageKey),
     objectKey: hostedRecapMediaObjectKey({ userId: input.ownerMemberId, mediaId: storageKey }),
-    createdAt: input.acceptedAt, cleanupAt: input.mediaDeadline, recoveryUntil: input.mediaDeadline,
+    createdAt: input.acceptedAt, cleanupAt: input.recoveryUntil, recoveryUntil: input.recoveryUntil,
   })), skipDuplicates: true });
 }
 

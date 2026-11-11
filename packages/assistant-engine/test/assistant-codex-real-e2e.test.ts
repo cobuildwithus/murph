@@ -48253,10 +48253,10 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
         const { presentGameRecap } = await import('@murphai/contracts/recap-show')
         const accepted = providers.accept(), now = new Date().toISOString()
         const presentation = presentGameRecap({ stored: { version: 1, generationId: 'synthetic-accepted', story: accepted.story,
-          acceptedAt: now, coverDeadline: now, mediaDeadline: now, preview: { token: 'synthetic-capability'.repeat(3), expiresAt: now },
-          assets: accepted.files.map(({ slot, receipt }) => ({ slot, recipeId: receipt.operationId, storageKey: slot, status: 'ready', references: [],
+          acceptedAt: now, preview: { token: 'synthetic-capability'.repeat(3), expiresAt: now },
+          assets: accepted.files.map(({ slot, receipt }) => ({ slot, recipeId: receipt.operationId, storageKey: slot, references: [],
             kind: receipt.mediaType === 'image/jpeg' ? 'image' : 'song', hash: receipt.hash, mediaType: receipt.mediaType, byteLength: receipt.byteLength,
-            width: receipt.width, height: receipt.height, durationMs: receipt.durationMs })) }, now: new Date(),
+            width: receipt.width, height: receipt.height, durationMs: receipt.durationMs })) },
           permittedPhotoIds: new Set(entries.map(entry => entry.entryId)), mediaUrl: slot => `/api/game/v1/games/synthetic-game/recap-assets/${slot}?generation=synthetic-accepted` })
         await writeFile(path.join(artifactRoot, 'accepted-presentation.json'), JSON.stringify(presentation, null, 2) + '\n')
         await writeFile(path.join(artifactRoot, 'verification.json'), JSON.stringify({ model: config.model, mediaProviders: 'synthetic in-process fixtures',

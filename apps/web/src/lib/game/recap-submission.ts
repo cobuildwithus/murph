@@ -64,7 +64,7 @@ export async function stageRecapSubmissionFile(input: Identity & { receipt: Reca
     const operation = admission.operations.find(operation => operation.id === input.receipt.operationId);
     if (!operation || !await recapReferencesCurrent(tx, input.gameId, [operation])) throw new Error('Selected media references were revoked.');
     await registerRecapAssetsTx(tx, { gameId: input.gameId, generationId: recapGenerationId(input.eventId), ownerMemberId: game.wordsOwnerMemberId,
-      storageKeys: [storageKey], acceptedAt: new Date(), mediaDeadline: new Date(selection.deadline) });
+      storageKeys: [storageKey], acceptedAt: new Date(), recoveryUntil: new Date(selection.deadline) });
     return game.wordsOwnerMemberId;
   });
   await putRecapMedia({ storageKey, ownerMemberId, bytes, durationMs: input.receipt.mediaType === 'audio/mpeg' ? 20_000 : undefined });

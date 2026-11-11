@@ -182,7 +182,7 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
       operationId: `synthetic-media-${index}`, path: 'media/synthetic', hash: String(index + 1).repeat(64), mediaType, byteLength: 100,
     }));
     await getPrisma().$transaction(tx => registerRecapAssetsTx(tx, { gameId, generationId: recapGenerationId(recapEventId), ownerMemberId: leo,
-      storageKeys, acceptedAt: new Date(), mediaDeadline: new Date(Date.now() + 600_000) }));
+      storageKeys, acceptedAt: new Date(), recoveryUntil: new Date(Date.now() + 600_000) }));
     const [gone, stays] = leaver === "creator" ? [leo, ava] : [ava, leo];
     expect(await deleteAccount(gone)).toEqual({ calledOff: 2, deleted: 0, kept: 2 });
     expect(await readGame(secondGame, stays)).toMatchObject({ status: "void" });

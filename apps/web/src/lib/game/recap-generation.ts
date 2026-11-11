@@ -36,7 +36,7 @@ export async function prepareRecapGeneration(input: {
     const storageKey = recapMediaKey(input.eventId, receipt);
     const stored = await readRecapMedia({ storageKey, ownerMemberId: input.row.wordsOwnerMemberId });
     if (!stored || stored.hash !== receipt.hash) throw new Error('Selected media has not been uploaded.');
-    assets.push({ slot, kind: operation.kind, recipeId: receipt.operationId, storageKey, status: 'ready', references: operation.references,
+    assets.push({ slot, kind: operation.kind, recipeId: receipt.operationId, storageKey, references: operation.references,
       hash: receipt.hash, byteLength: receipt.byteLength, mediaType: receipt.mediaType, width: receipt.width, height: receipt.height, durationMs: receipt.durationMs });
   }
   const now = new Date();
@@ -57,14 +57,14 @@ export async function prepareRecapGeneration(input: {
       if (!current || current.wordsOwnerMemberId !== input.row.wordsOwnerMemberId || !await readGameRecapEntryIdsTx(tx, current, input.eventId)
         || !await recapReferencesCurrent(tx, current.id, [])) throw new Error('Recap authority changed.');
       await registerRecapAssetsTx(tx, { gameId: current.id, generationId, ownerMemberId: current.wordsOwnerMemberId,
-        storageKeys: [storageKey], acceptedAt: now, mediaDeadline: new Date(selection.deadline) });
+        storageKeys: [storageKey], acceptedAt: now, recoveryUntil: new Date(selection.deadline) });
     });
     const meta = await putRecapMedia({ storageKey, ownerMemberId: input.row.wordsOwnerMemberId, bytes });
-    assets.push({ slot: 'scene-0', kind: 'image', recipeId: 'fallback-cover', storageKey, status: 'ready', references: [],
+    assets.push({ slot: 'scene-0', kind: 'image', recipeId: 'fallback-cover', storageKey, references: [],
       hash: meta.hash, byteLength: meta.bytes, mediaType: meta.mediaType, width: meta.width, height: meta.height });
   }
   const envelope = gameRecapEnvelopeSchema.parse({ version: 1, generationId, story: input.story, assets,
-    acceptedAt: now.toISOString(), coverDeadline: now.toISOString(), mediaDeadline: now.toISOString(),
+    acceptedAt: now.toISOString(),
     preview: { token: randomBytes(32).toString('base64url'), expiresAt: new Date(now.getTime() + 30 * 86400_000).toISOString() } });
   return { envelope, async publish(tx: Prisma.TransactionClient) {
     const current = await tx.gameEvent.findUnique({ where: { commandKey: recapSelectionKey(input.eventId) }, select: { payload: true } });

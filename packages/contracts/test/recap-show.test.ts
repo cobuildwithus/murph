@@ -7,13 +7,13 @@ const story = { treatment: "Courtroom drama", chatLine: "Player A won. The mat w
     { kind: "scene" as const, scene: { cast: ["Player A", "Player B"], prompt: "A fictional courtroom made of exercise mats, with two athletes standing beside a wooden desk and bright morning windows." }, entryIds: ["photo-one"] }] },
 ], song: { title: "The Mat Knows", style: "Playful", lyrics: ["The mat knows", "The shoes wait", "The door opens", "The score stays"] } };
 const envelope: GameRecapEnvelope = { version: 1, generationId: "game-recap:synthetic-game", story,
-  acceptedAt: "2026-11-10T12:00:00Z", coverDeadline: "2026-11-10T12:05:00Z", mediaDeadline: "2026-11-10T12:10:00Z",
+  acceptedAt: "2026-11-10T12:00:00Z",
   preview: { token: "synthetic-preview-token-with-no-authority", expiresAt: "2026-12-10T12:00:00Z" },
-  assets: [{ slot: "scene-0", kind: "image", recipeId: "recipe-one", storageKey: "private-storage-key", references: [], status: "pending" }],
+  assets: [{ slot: "scene-0", kind: "image", recipeId: "recipe-one", storageKey: "private-storage-key", references: [], hash: "a".repeat(64), mediaType: "image/jpeg", byteLength: 123 }],
 };
-const input = { stored: envelope, now: new Date("2026-11-10T12:01:00Z"), permittedPhotoIds: new Set(["photo-one"]), mediaUrl: () => "/synthetic-media" };
+const input = { stored: envelope, permittedPhotoIds: new Set(["photo-one"]), mediaUrl: () => "/synthetic-media" };
 describe("recap presentation compatibility", () => {
-  it.each(["legacy", "full-show", "pending-failed", "failed-scene-no-song"])("decodes the stable %s fixture", name => {
+  it.each(["legacy", "full-show", "failed-scene-no-song"])("decodes the stable %s fixture", name => {
     const value = JSON.parse(readFileSync(new URL(`../fixtures/recap-show/${name}.json`, import.meta.url), "utf8"));
     expect(gameRecapPresentationSchema.parse(value)).toEqual(value);
   });
@@ -39,13 +39,30 @@ describe("recap presentation compatibility", () => {
     expect(gameRecapDraftSchema.safeParse({ story, files: [selected, selected] }).success).toBe(false);
     expect(gameRecapDraftSchema.safeParse({ story, files: [{ ...selected, storageKey: "forged" }] }).success).toBe(false);
   });
-  it("keeps page identity, falls back on deadline, and never makes failed audio a page", () => {
-    const pending = presentGameRecap(input);
-    const expired = presentGameRecap({ ...input, now: new Date(envelope.mediaDeadline), permittedPhotoIds: new Set() });
-    expect(pending.show?.pages[0].media).toEqual({ status: "pending" });
-    expect(expired.show?.pages[0]).toMatchObject({ id: pending.show?.pages[0].id, media: { status: "failed" }, fallback: { kind: "text", entryIds: [] } });
-    expect(expired.show?.refreshAfterMs).toBeUndefined();
-    expect(expired.show?.pages.map(page => page.kind)).toEqual(["cover", "result"]);
+  it("publishes final images and songs without a pending variant or polling", () => {
+    const stored: GameRecapEnvelope = { ...envelope, assets: [...envelope.assets, {
+      slot: 'song', kind: 'song', recipeId: 'synthetic-song', storageKey: 'private-song', references: [],
+      hash: 'b'.repeat(64), mediaType: 'audio/mpeg', byteLength: 100, durationMs: 20_000,
+    }] };
+    const view = presentGameRecap({ ...input, stored });
+    expect(view.show?.pages.map(page => page.kind)).toEqual(['cover', 'song', 'result']);
+    expect(view.show?.pages[0].media).toMatchObject({ status: 'ready', mediaType: 'image/jpeg' });
+    expect(view.show?.pages[1].media).toMatchObject({ status: 'ready', mediaType: 'audio/mpeg' });
+    expect(view.show).not.toHaveProperty('mediaDeadline');
+    expect(view.show).not.toHaveProperty('refreshAfterMs');
+    const hidden = presentGameRecap({ ...input, stored, mediaVisible: false });
+    expect(hidden.show?.pages.map(page => page.kind)).toEqual(['cover', 'result']);
+    expect(hidden.show?.pages[0]).toMatchObject({ media: { status: 'failed' }, fallback: { kind: 'photo', entryIds: ['photo-one'] } });
+    expect(hidden.chatLine).toBe(story.chatLine);
+  });
+  it("uses stable text fallback for missing media and revoked photo references", () => {
+    const view = presentGameRecap({ ...input, stored: { ...envelope, assets: [] }, permittedPhotoIds: new Set() });
+    expect(view.show?.pages[0]).toMatchObject({ id: 'page-0', media: { status: 'failed' }, fallback: { kind: 'text', entryIds: [] } });
+    expect(view.show?.pages.map(page => page.kind)).toEqual(['cover', 'result']);
+  });
+  it("retains historical plain-story reads without a show or polling", () => {
+    const fixture = JSON.parse(readFileSync(new URL('../fixtures/recap-show/legacy.json', import.meta.url), 'utf8'));
+    expect(presentGameRecap({ ...input, stored: gameRecapWriterSchema.parse(fixture) })).toEqual(fixture);
   });
   it("rejects host authority and malformed optional authoring media on new writes", () => {
     expect(gameRecapWriterSchema.safeParse({ ...story, assets: [] }).success).toBe(false);

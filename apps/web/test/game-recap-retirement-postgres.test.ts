@@ -14,22 +14,22 @@ describe.skipIf(!enabled)("recap retirement receipts", () => {
     const db = getPrisma();
     const gameId = `synthetic_game_${randomUUID()}`, generationId = "a".repeat(32);
     const first = `recap/${generationId}/scene-0.jpg`, abandoned = `recap/${generationId}/scene-1.jpg`;
-    const acceptedAt = new Date("2026-01-01T00:00:00Z"), mediaDeadline = new Date("2026-01-01T00:10:00Z");
+    const acceptedAt = new Date("2026-01-01T00:00:00Z"), recoveryUntil = new Date("2026-01-01T00:10:00Z");
     await db.$transaction(async tx => {
-      await registerRecapAssetsTx(tx, { gameId, generationId, ownerMemberId, storageKeys: [first, abandoned], acceptedAt, mediaDeadline });
+      await registerRecapAssetsTx(tx, { gameId, generationId, ownerMemberId, storageKeys: [first, abandoned], acceptedAt, recoveryUntil });
       expect(await retainRecapAssetTx(tx, { gameId, generationId, ownerMemberId, storageKey: first, now: acceptedAt })).toBe(true);
     });
-    const expired = await claimHostedRuntimeResourceCleanup({ prisma: db, now: mediaDeadline });
+    const expired = await claimHostedRuntimeResourceCleanup({ prisma: db, now: recoveryUntil });
     const claimed = expired.orphans.filter(row => row.userId === ownerMemberId);
     expect(claimed).toHaveLength(1);
     expect(claimed[0]!.resourceId).toContain(abandoned);
     await db.$transaction(async tx => {
       expect(await retainRecapAssetTx(tx, { gameId, generationId, ownerMemberId, storageKey: abandoned, now: acceptedAt })).toBe(false);
-      await retireGameRecapAssetsTx(tx, gameId, ownerMemberId, mediaDeadline);
+      await retireGameRecapAssetsTx(tx, gameId, ownerMemberId, recoveryUntil);
     });
-    const retired = (await claimHostedRuntimeResourceCleanup({ prisma: db, now: mediaDeadline })).orphans.filter(row => row.userId === ownerMemberId);
+    const retired = (await claimHostedRuntimeResourceCleanup({ prisma: db, now: recoveryUntil })).orphans.filter(row => row.userId === ownerMemberId);
     expect(retired).toHaveLength(2);
-    for (const orphan of retired) expect(await acknowledgeHostedRuntimeOrphanPurge({ prisma: db, orphan, now: mediaDeadline })).toBe(true);
+    for (const orphan of retired) expect(await acknowledgeHostedRuntimeOrphanPurge({ prisma: db, orphan, now: recoveryUntil })).toBe(true);
     expect(await db.gameRecapAsset.count({ where: { userId: ownerMemberId, retiredAt: { not: null }, purgedAt: { not: null } } })).toBe(2);
   });
 });
