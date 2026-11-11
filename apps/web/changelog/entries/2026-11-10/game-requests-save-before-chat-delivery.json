@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 100,
+  "item": {
+    "id": "game-requests-save-before-chat-delivery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Game requests save before chat delivery",
+    "summary": "Suggesting a game change, sending a Talk note, or starting a rematch no longer keeps the app waiting while Murph prepares the chat message.",
+    "details": "Your request is saved first. A delayed chat message does not undo the saved request.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      4825
+    ]
+  }
+}
