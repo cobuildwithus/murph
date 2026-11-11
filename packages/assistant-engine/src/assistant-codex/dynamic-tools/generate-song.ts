@@ -1,3 +1,4 @@
+import type { GeneratedMediaFileRuntime } from '../generated-media-file.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import type {
@@ -34,12 +35,15 @@ export const MURPH_GENERATE_SONG_TOOL = {
     'Translate requests to sound like a real artist, song, show, or franchise into generic musical traits; never pass the protected name or copied lyrics to the generator.',
     'Never include sensitive or potentially embarrassing personal details.',
     'If the user asks only for the song, attach it and leave final response text empty unless an owning flow requires accompanying text.',
+    'For an authorized recap, output=file writes an MP3 receipt and attaches nothing. Supply a stable operationId and durationSeconds=20.',
     'This does not send directly.',
   ].join(' '),
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
+      output: { type: 'string', enum: ['chat', 'file'] },
+      operationId: { type: 'string', pattern: '^[a-zA-Z0-9_-]{1,80}$' },
       prompt: {
         type: 'string',
         minLength: 1,
@@ -62,6 +66,8 @@ export const MURPH_GENERATE_SONG_TOOL = {
 
 const generateSongArgumentsSchema = z
   .object({
+    output: z.enum(['chat', 'file']).optional(),
+    operationId: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u).optional(),
     durationSeconds: z.number().int().min(3).max(300).default(30),
     instrumental: z.boolean().default(false),
     prompt: z.string().trim().min(1).max(4100),
@@ -83,6 +89,8 @@ export function parseGenerateSongArguments(
 export async function executeGenerateSongDynamicTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateSongToolArgs
+  env?: NodeJS.ProcessEnv
+  fileRuntime?: GeneratedMediaFileRuntime | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   recordPhaseTiming?: VoiceMemoPhaseTimingRecorder | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
@@ -91,6 +99,8 @@ export async function executeGenerateSongDynamicTool(input: {
     await executeGenerateSongTool({
       abortSignal: input.abortSignal ?? null,
       args: input.args,
+      env: input.env,
+      fileRuntime: input.fileRuntime,
       currentResponseMedia: input.currentResponseMedia ?? [],
       recordPhaseTiming: input.recordPhaseTiming ?? null,
       runtime: input.voiceMemoRuntime ?? null,

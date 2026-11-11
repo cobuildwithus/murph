@@ -1,3 +1,4 @@
+import type { GameRecapPresentation } from "@murphai/contracts/recap-show";
 /**
  * The weekly game's wire contract: the request bodies of the /api/game/v1
  * routes, the commands they become (the one internal write path, which Murph's
@@ -514,7 +515,7 @@ export interface GameView {
   inviteToken: string | null;
   inviteExpiresAt: string | null;
   result: { scores: { seat: number; score: number }[]; outcome: "won" | "lost" | "tie" | "perfect"; winnerSeats?: number[]; standings?: GameStandingView[] } | null;
-  recap: { superlatives?: Array<{ memberId: string; title: string; line: string }>; pages: Array<{ background: "night" | "paper" | "sage" | "sienna" | "slate"; blocks: Array<Record<string, unknown>> }>; scoreLine?: string; chatLine: string } | null;
+  recap: GameRecapPresentation | null;
   tickets: GameTicketView[];
 }
 

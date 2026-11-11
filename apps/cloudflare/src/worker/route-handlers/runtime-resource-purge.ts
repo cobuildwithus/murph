@@ -1,4 +1,5 @@
 import { workspaceSnapshotBucket } from "../../workspace-snapshot-local-s3.ts";
+import { retireRecapMediaObject } from "../../recap-media-store.ts";
 import { abortRuntimeMultipartUpload } from "../../runtime-object-upload.ts";
 import { parseHostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
 import { readHostedExecutionSnapshotBaseRef, readHostedExecutionSnapshotDeltaRef, readHostedExecutionSnapshotHotRef } from "@murphai/hosted-execution/parsers";
@@ -34,6 +35,10 @@ export async function purgeHostedRuntimeResource(input: {
   const bucket = workspaceSnapshotBucket(input.source);
   if (!bucket.delete) throw new Error("Runtime resource deletion is unavailable.");
   const resource = parseHostedRuntimeResourcePurge(input.resource);
+  if (resource.kind === "game_recap") {
+    await retireRecapMediaObject({ bucket: input.source.BUNDLES, userId: input.userId, objectKey: resource.objectKey });
+    return;
+  }
   if (resource.kind === "multipart") {
     if (!bucket.resumeMultipartUpload) throw new Error("Runtime multipart recovery is unavailable.");
     const prefixes = await Promise.all([hostedMediaUserPrefix({ userId: input.userId }), hostedPrivateMediaUserPrefix({ userId: input.userId }), hostedBrowserVaultReplicaUserPrefix({ userId: input.userId }), hostedWorkspaceSnapshotUserPrefix({ userId: input.userId })]);

@@ -12,7 +12,7 @@ import { fetchHostedExecutionWebControlPlaneResponse } from "./web-control-plane
 import { readHostedWebControlPlaneResponseText } from "./runtime-platform/web-control-transport.ts";
 import { createHostedRunnerContainerNamespaceRouter, requireHostedRunnerSlotLifecycle } from "./standby-runner-contract.ts";
 
-type RuntimeUserControlSource = Pick<WorkerEnvironmentSource, "BUNDLES" | "GAME_IMAGES" | "RUNNER_CONTAINER" | "NEXT_RUNNER_CONTAINER" | "STANDBY_RUNNER_CONTAINER"> & Readonly<Record<string, unknown>>;
+type RuntimeUserControlSource = Pick<WorkerEnvironmentSource, "BUNDLES" | "GAME_IMAGES" | "RUNNER_CONTAINER" | "NEXT_RUNNER_CONTAINER" | "SMALL_RUNNER_CONTAINER" | "STANDBY_RUNNER_CONTAINER"> & Readonly<Record<string, unknown>>;
 
 export async function controlPostgresRuntimeVoice(
   source: RuntimeUserControlSource, userId: string, request: HostedVoiceControlRequest,
@@ -24,10 +24,7 @@ export async function controlPostgresRuntimeVoice(
   if (request.action === "connect" && (owner.phase === "retiring" || !owner.platformAiUsageAllowed)) {
     return { kind: "unavailable" };
   }
-  const namespace = createHostedRunnerContainerNamespaceRouter({
-    exactUser: source.RUNNER_CONTAINER, next: source.NEXT_RUNNER_CONTAINER,
-    standby: source.STANDBY_RUNNER_CONTAINER ?? null,
-  });
+  const namespace = createHostedRunnerContainerNamespaceRouter(source);
   const container = namespace?.getByName(owner.runnerContainerName);
   if (!container?.controlVoice) return { kind: "unavailable" };
   return container.controlVoice({ ...request, userId });
@@ -73,8 +70,7 @@ export async function stopPostgresRuntimeForUser(source: RuntimeUserControlSourc
   }
   if (owner.runnerContainerName) {
     result.runnerContainerDestroyAttempted = true;
-    const namespace = createHostedRunnerContainerNamespaceRouter({ exactUser: source.RUNNER_CONTAINER,
-      next: source.NEXT_RUNNER_CONTAINER, standby: source.STANDBY_RUNNER_CONTAINER ?? null });
+    const namespace = createHostedRunnerContainerNamespaceRouter(source);
     if (!namespace) throw new Error("Runtime stop adapter is unavailable.");
     const slot = requireHostedRunnerSlotLifecycle(namespace.getByName(owner.runnerContainerName));
     await slot.retireStandbySlot({ ...(owner.allocationId ? { claimId: owner.allocationId } : {}),

@@ -452,6 +452,7 @@ export async function executeHostedAssistantNotificationWake(input: {
   }
   let notificationDecisionKind: string | null = null;
   let deliveryIntentIds: string[] = [];
+  let recapCheckpoint: HostedMailboxOutcome["postCheckpointRecord"] = null;
   const effectsPort = input.effectsPort ?? {};
   const operatorTask = requireHostedOperatorMessageNotification(input.wake);
 
@@ -475,6 +476,7 @@ export async function executeHostedAssistantNotificationWake(input: {
       ...await resolveHostedConnectedChannelGreetingPolicy(input),
     });
     notificationDecisionKind = notificationResult?.decision.kind ?? null;
+    recapCheckpoint = recapNotificationCheckpoint(input.wake, notificationResult);
     const deliveryOutcome = notificationResult?.deliveryOutcome ?? null;
     const deliveryIntentId =
       deliveryOutcome && "intentId" in deliveryOutcome
@@ -575,10 +577,8 @@ export async function executeHostedAssistantNotificationWake(input: {
   );
 
   return createNoopMailboxEffect({
-    conversationMetrics: null,
-    deliveryIntentIds,
-    mailboxLane: "assistant-notification",
-    redactedLogEntries,
+    conversationMetrics: null, deliveryIntentIds, mailboxLane: "assistant-notification", redactedLogEntries,
+    postCheckpointRecord: recapCheckpoint,
   });
 }
 
@@ -835,7 +835,7 @@ function gameRecapHostedScope(
   }
   return {
     gameRecapScope: { gameId: policy.gameId, eventId: policy.eventId, pairFingerprint: policy.pairFingerprint,
-      ...(policy.loreAccess ? { loreAccess: policy.loreAccess } : {}) },
+      ...(policy.loreAccess ? { loreAccess: policy.loreAccess } : {}), ...(policy.show ? { show: true as const } : {}) },
     groupTool: groupToolPort,
   };
 }
@@ -954,7 +954,15 @@ function buildAssistantNotificationInput(
     vault,
     wake,
   });
+  withPairShowTarget(notificationInput, wake, executionContext);
   return withOperatorTaskExecution(notificationInput, operatorTask, executionContext);
+}
+
+function withPairShowTarget(notificationInput: AssistantNotificationInput, wake: HostedExecutionAssistantNotificationRequestedWake, executionContext: AssistantExecutionContext): void {
+  if (wake.notification.responsePolicy?.kind === "require_game_recap" && wake.notification.responsePolicy.show) {
+    notificationInput.assistantTargetOverride = { model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+      modelProvider: resolveHostedOperatorModelProvider(executionContext.hosted?.defaultTarget?.modelProvider) };
+  }
 }
 
 function withOperatorTaskExecution(
@@ -1495,4 +1503,12 @@ function resolveHostedNotificationTerminalNoSend(error: unknown): {
     extraDetails: { eventCode: "assistant.notification.operator_task_terminal_no_send", terminalDisposition: deriveHostedExecutionErrorCode(error) },
   };
   return null;
+}
+
+function recapNotificationCheckpoint(wake: HostedExecutionAssistantNotificationRequestedWake,
+  result: Awaited<ReturnType<typeof sendAssistantNotification>> | undefined): HostedMailboxOutcome['postCheckpointRecord'] {
+  const policy = wake.notification.responsePolicy;
+  if (policy?.kind !== 'require_game_recap' || !policy.show || !result?.recapLoreCheckpointed?.length) return null;
+  return { kind: 'game.recap-lore-checkpointed', gameId: policy.gameId, eventId: policy.eventId,
+    generationIds: result.recapLoreCheckpointed, resume: result.recapLoreRepairOnly === true };
 }

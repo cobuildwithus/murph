@@ -22,9 +22,9 @@ import {
 
 const VAULT_CREATED_AT = "2026-06-01T00:00:00.000Z";
 const OLD_AT = "2026-06-01T00:00:00.000Z";
-// 30 days after the old capture, so the old one is well past the 14-day window
+// 31 days after the old capture, so the old one is past the 30-day window
 // and the recent one is comfortably inside it.
-const NOW = "2026-07-01T00:00:00.000Z";
+const NOW = "2026-07-02T00:00:00.000Z";
 const RECENT_AT = "2026-06-28T00:00:00.000Z";
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -187,7 +187,7 @@ test("runInboxTextRetention anchors expiry to receipt rather than delayed storag
   });
 
   const result = await runInboxTextRetention({
-    now: "2026-06-24T10:00:00.000Z",
+    now: "2026-07-10T10:00:00.000Z",
     vaultRoot,
   });
   assert.equal(result.expiredCaptures, 1);

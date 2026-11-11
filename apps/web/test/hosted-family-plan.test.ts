@@ -2341,9 +2341,6 @@ describe("hosted Family plan", () => {
       phoneNumber: null,
       phoneNumberVerifiedAt: null,
 
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
 
 
@@ -2409,9 +2406,6 @@ describe("hosted Family plan", () => {
       phoneNumberVerifiedAt: now,
 
 
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
       signupPhoneNumberEncrypted: null,
       updatedAt: now,
 
@@ -2838,9 +2832,6 @@ describe("hosted Family plan", () => {
       phoneNumberVerifiedAt: new Date("2026-06-18T12:00:00.000Z"),
 
 
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
       signupPhoneNumberEncrypted: null,
 
 
@@ -2912,9 +2903,6 @@ describe("hosted Family plan", () => {
       phoneNumberVerifiedAt: new Date("2026-06-18T12:00:00.000Z"),
 
 
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
       signupPhoneNumberEncrypted: null,
 
 

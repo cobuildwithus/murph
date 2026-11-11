@@ -477,7 +477,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
 
   test("a v2 hosted snapshot retires a promoted inbox document and restores its canonical owner", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-04-15T00:00:00.000Z"));
+    vi.setSystemTime(new Date("2026-05-01T00:00:00.000Z"));
     const workspaceRoot = await mkdtemp(
       path.join(tmpdir(), "murph-promoted-document-retention-proof-"),
     );
@@ -487,7 +487,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
     const artifactBytesByHash = new Map<string, Uint8Array>();
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const recordedAt = "2026-04-01T00:00:00.000Z";
-    const dueWakeAt = "2026-04-15T00:00:00.000Z";
+    const dueWakeAt = "2026-05-01T00:00:00.000Z";
     const documentBytes = Buffer.from("%PDF-1.7\nsynthetic hosted promoted document\n");
 
     try {

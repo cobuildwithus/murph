@@ -4444,6 +4444,31 @@ test.each(['send_message', 'skip'] as const)('group missed-day notifications iso
   } }))
 })
 
+test('recap recovery delivers one accepted fallback line and link without another model turn', async () => {
+  const eventId = 'game-recap:game_synthetic'
+  const chatLine = 'The morning walks made the week.\nWatch the recap: https://recaps.murph.test/recap/game_synthetic'
+  const request = vi.fn()
+    .mockResolvedValueOnce({ result: { status: 'ok', recapGame: { pendingRecapUsages: [] } } })
+    .mockResolvedValueOnce({ result: { status: 'ok', chatLine } })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    providerResult: createProviderResult({ response: 'The model must not run.' }),
+    turnId: 'turn-recovered-recap',
+  })
+  const scope = { eventId, gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const }
+  const result = await sendAssistantNotificationLocal({
+    channel: 'linq', deliveryIdempotencyKey: eventId, deliveryTarget: 'synthetic-game-thread',
+    executionContext: { hosted: { gameRecapScope: scope, groupTool: { request }, memberId: 'synthetic-group', userEnvKeys: [] } },
+    instructions: 'Recover and announce the game recap.',
+    responsePolicy: { kind: 'require_game_recap', ...scope },
+    threadId: 'synthetic-game-thread', threadIsDirect: false, vault: '/synthetic-vault',
+  })
+  expect(result.response).toBe(chatLine)
+  expect(request).toHaveBeenCalledTimes(2)
+  expect(request).toHaveBeenLastCalledWith({ action: 'read_game', origin: { kind: 'game_recap', gameId: scope.gameId, eventId }, recapRead: { kind: 'recover' } })
+  expect(deliverMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: chatLine, card: null, media: [] }))
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+})
+
 test.each(['game-recap:game_synthetic', 'game-recap:game_synthetic:synthetic_request'])('game recap notifications deliver and persist the accepted chat line exactly: %s', async (eventId) => {
   const savedChatLine = '  Ava won the mat jurisdiction case, 3–2.  \nWatch the recap: https://recaps.murph.test/recap/game_synthetic'
   const beforeDelivery = vi.fn()

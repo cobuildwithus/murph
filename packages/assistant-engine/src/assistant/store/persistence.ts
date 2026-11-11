@@ -77,7 +77,7 @@ export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
  * copy of what the member wrote and a count cap alone leaves it indefinitely.
  * This matches the capture-ledger window so one deadline covers both paths.
  */
-export const ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
+export const ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
 const ASSISTANT_SESSION_ROUTING_DATABASE_VERSION = 1
 const ASSISTANT_SESSION_ROUTING_DATABASE_NAME = 'session-routing.sqlite'

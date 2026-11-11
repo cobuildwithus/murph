@@ -49,7 +49,7 @@ describe.skipIf(!enabled)("ordinary encrypted cleanup after runtime migration", 
   });
   it.each([1, 201])("finishes ordinary cleanup for %i identities without migration enrollment", async count => {
     const ids = identities(count); const receipt = await cleanup(ids);
-    await prisma.hostedRuntimeOwner.create({ data: { userId: ids[0]!, migrationPhase: "postgres", generation: 11n } });
+    await prisma.hostedRuntimeOwner.create({ data: { userId: ids[0]!, generation: 11n } });
     expect(await runHostedAccountDeletionCleanup({ prisma, cleanupId: receipt.id })).toMatchObject({ cleanupPending: false });
     expect(await prisma.hostedAccountDeletionCleanup.findUnique({ where: { id: receipt.id } })).toBeNull();
     expect(await prisma.hostedRuntimeOwner.findUnique({ where: { userId: ids[0]! } })).toMatchObject({ generation: 11n });

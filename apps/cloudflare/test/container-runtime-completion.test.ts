@@ -213,6 +213,20 @@ describe("recordHostedContainerRuntimeCompletionBestEffort", () => {
 const COMPLETED_AT = "2026-01-01T00:00:00.000Z";
 
 describe("completion client, router, and native receipt composition", () => {
+  it("routes a retained small target completion to its original namespace", async () => {
+    const f = createRoutedCompletion();
+    const retainedTarget = `runner-small--v-release_1--${"1".repeat(32)}`;
+    f.owner.runnerContainerName = retainedTarget;
+    const primaryGet = vi.fn(() => { throw new Error("Wrong namespace"); });
+    const smallGet = vi.fn(() => f.container);
+    f.env.SMALL_RUNNER_CONTAINER = { getByName: smallGet };
+    f.env.RUNNER_CONTAINER = { getByName: primaryGet };
+    await recordHostedContainerRuntimeCompletionBestEffort({ ...f.input, fetchImpl: f.fetchImpl });
+    expect(f.responses).toEqual([{ completed: true }]);
+    expect(smallGet).toHaveBeenCalledExactlyOnceWith(retainedTarget);
+    expect(primaryGet).not.toHaveBeenCalled();
+  });
+
   it("records an early callback and its duplicate without claiming outer settlement", async () => {
     const f = createRoutedCompletion();
     const before = structuredClone(f.input);
@@ -413,7 +427,7 @@ function createRoutedCompletion(nativeIdentity?: RunnerInvocationIdentity | null
     responses.push(await response.clone().json());
     return response;
   });
-  const fixture = { input, identity, owner, state, env, receipts, nativeCompletion, recorded, getByName, fetchImpl, responses,
+  const fixture = { input, identity, owner, state, env, receipts, container, nativeCompletion, recorded, getByName, fetchImpl, responses,
     canonicalStatus: "updated" as "updated" | "stale" };
   vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
     if (command.operation === "reconcile") return state;
