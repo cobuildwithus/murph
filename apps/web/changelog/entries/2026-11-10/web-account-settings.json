@@ -12,7 +12,9 @@
       "account",
       "settings"
     ],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [
+      4829
+    ],
     "tryIt": {
       "label": "Open Settings",
       "href": "/settings"

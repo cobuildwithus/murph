@@ -1,6 +1,6 @@
 # Simplify frontend state ownership and recovery
 
-Status: active
+Status: completed
 Created: 2026-11-10
 Updated: 2026-11-10
 
@@ -56,7 +56,10 @@ Proof: Chromium verifies redirects and Settings rendering, plus account navigati
 - Final browser command: `VIEWPORT_OVERFLOW_PORT=3281 NEXT_DIST_DIR_SUFFIX=simplify-web MURPH_PLAYWRIGHT_GENERATED_INPUTS_PREPARED=1 pnpm --dir apps/web exec playwright test --config=playwright.config.ts settings-entry.spec.ts --workers=1`; both tests passed. CPU-heavy checks ran through the shared host-verification slot.
 - Chromium proof passed: six retired paths return Settings, Home callback query survives, signed-out Settings renders, and Settings navigation plus Edge-to-Pulse confirmation fit 390px and 1440px.
 - No remote services, billing mutations or production secrets used. Shared native decoder and export regression suites are included in the final run.
-- Storage guard reports four pre-existing unmanaged worktrees; parent notified. No worktree cleanup attempted.
+- `pnpm docs:drift` and `pnpm docs:gardening` passed; privacy and diff checks passed.
+- After excluding Voice, final route/telemetry suites passed 51 tests; web typecheck, complexity and both six-route/responsive Chromium tests passed again.
+- Initial storage guard reported four pre-existing unmanaged worktrees; parent notified. Commit-time storage guard later passed. No worktree cleanup attempted.
+- Draft PR: https://github.com/cobuildwithus/murph/pull/4829. The parent owns candidate review, final ReviewGPT, Ready admission and merge. The parent inspected all four synthetic mobile/desktop screenshots. Automatic branch previews are disabled; the parent authorized one preview-only deployment of the final pushed head, without production rollout or secret retrieval.
 
 
 ## Retained surfaces
@@ -65,3 +68,4 @@ Proof: Chromium verifies redirects and Settings rendering, plus account navigati
 - `/records/connect`, `/settings/accounts` and `/settings/data-privacy` remain explicit connection/native account handoffs.
 - Ops routes remain internal operations. Public marketing and Health Commons remain public.
 - Voice UI, APIs, runtime, design and proof tooling are excluded: a separate user-owned session is retiring that feature. All voice-specific edits in this task were restored to the branch base.
+Completed: 2026-11-10
