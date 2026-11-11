@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@cobuild/review-gpt@0.5.157>incur': 0.4.5
+  '@cobuild/review-gpt@0.5.157>incur': 0.4.25
   '@cloudflare/vitest-pool-workers@0.16.3>esbuild': 0.28.1
   '@coinbase/cdp-sdk@1.48.3>axios': 1.20.0
   '@lob/lob-typescript-sdk@1.4.0>axios': 1.20.0
@@ -16,7 +16,6 @@ overrides:
   '@metamask/utils@9.3.0>uuid': 11.1.1
   '@metamask/utils@11.11.0>uuid': 11.1.1
   '@modelcontextprotocol/sdk@1.29.0>hono': 4.13.11
-  incur@0.4.5>@modelcontextprotocol/server: 2.0.0-alpha.2
   '@privy-io/js-sdk-core@0.62.0>js-cookie': 3.0.8
   '@privy-io/react-auth@3.24.0>js-cookie': 3.0.8
   '@solana/rpc-subscriptions-channel-websocket@5.5.1>ws': 8.21.0
@@ -79,23 +78,17 @@ patchedDependencies:
     hash: 1f85f122210f2e6cb141f20bb4657d7b31b6bae5f5f91face7259905cf78bb1a
     path: patches/@cloudflare__containers@0.3.7.patch
   '@cobuild/repo-tools@0.1.18':
-    hash: 0d21e4ec1c27fc7a6e95eac1333851148ec73d0f1fb6bf7cceaaf2d24253e894
+    hash: 382a303ad07d81842b727bdca3ab10af1d2dab046cc75ebcae6a4b793b574691
     path: patches/@cobuild__repo-tools@0.1.18.patch
   '@cobuild/review-gpt@0.5.157':
-    hash: d7c877802e62eb3bd68c53169b7b4c0dfebdc7854ea2bd8c78b34f9bb2842a29
+    hash: fc9ed40b0390818a0e9ff74e6ad6b4b746b9cc8289fca7b95bfb97dbc1e74e0f
     path: patches/@cobuild__review-gpt@0.5.157.patch
   frog@1.1.0:
     hash: 753e3dd3975254bf8793addb8f0e8df9b2d0ede4f44603f0f876763171938f3a
     path: patches/frog@1.1.0.patch
-  incur@0.4.5:
-    hash: 0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3
-    path: patches/incur@0.4.5.patch
   incur@0.5.1:
     hash: 176de4224f3882268de92c7a86ff6ae0b56834d12bb90bf72dedeeef22e682d9
     path: patches/incur@0.5.1.patch
-  wrangler@4.90.0:
-    hash: 8fe3827042fda9e438aa439c2194bc2004447e4247b84b3c0650d394c5873d7a
-    path: patches/wrangler@4.90.0.patch
   wrangler@4.93.0:
     hash: 4034c9d23db261a0da21ef2d5ffa979a0ed4af7e395e09b0ac27db76ead6b83b
     path: patches/wrangler@4.93.0.patch
@@ -115,10 +108,10 @@ importers:
         version: 7.29.0
       '@cobuild/repo-tools':
         specifier: ^0.1.18
-        version: 0.1.18(patch_hash=0d21e4ec1c27fc7a6e95eac1333851148ec73d0f1fb6bf7cceaaf2d24253e894)
+        version: 0.1.18(patch_hash=382a303ad07d81842b727bdca3ab10af1d2dab046cc75ebcae6a4b793b574691)
       '@cobuild/review-gpt':
         specifier: 0.5.157
-        version: 0.5.157(patch_hash=d7c877802e62eb3bd68c53169b7b4c0dfebdc7854ea2bd8c78b34f9bb2842a29)(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
+        version: 0.5.157(patch_hash=fc9ed40b0390818a0e9ff74e6ad6b4b746b9cc8289fca7b95bfb97dbc1e74e0f)(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
       '@elevenlabs/elevenlabs-js':
         specifier: 2.62.0
         version: 2.62.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -2030,15 +2023,6 @@ packages:
     peerDependencies:
       '@cfworker/json-schema': ^4.1.1
       zod: 4.6.6
-    peerDependenciesMeta:
-      '@cfworker/json-schema':
-        optional: true
-
-  '@modelcontextprotocol/server@2.0.0-alpha.2':
-    resolution: {integrity: sha512-gmLgdHzlYM8L7Aw/+VE0kxjT25WKamtUSLNhdOgrJq5CrESvqVSoAfWSJJeNPUXNTluQ+dYDGFbKVitdsJtbPA==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      '@cfworker/json-schema': ^4.1.1
     peerDependenciesMeta:
       '@cfworker/json-schema':
         optional: true
@@ -5721,11 +5705,6 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  incur@0.4.5:
-    resolution: {integrity: sha512-4WFlqm5e+IKNoX+lDIjjpebO8ResPx3vPUBChxNfnNo3oGp0ooo6piiiTspOMub2dq2mcG/AmlUq0ejuGfKobg==}
-    engines: {node: '>=22'}
-    hasBin: true
-
   incur@0.5.1:
     resolution: {integrity: sha512-gEwPg0Rwf+Oi8pwySLumYgWk//Xiv2wRJhwsOwVskt7ZHrfwFTR7oQmANnyDqudRYhqK3I5/dp489kPehPjIww==}
     engines: {node: '>=22'}
@@ -8670,7 +8649,7 @@ snapshots:
       esbuild: 0.28.1
       miniflare: 4.20260507.1(@types/node@25.6.2)(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       vitest: 4.1.6(@opentelemetry/api@1.9.1)(@types/node@25.6.2)(@vitest/coverage-v8@4.1.6)(msw@2.14.6(@types/node@25.6.2)(typescript@7.0.2))(vite@8.1.6(@types/node@25.6.2)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.47.1)(tsx@4.21.0)(yaml@2.9.0))
-      wrangler: 4.90.0(patch_hash=8fe3827042fda9e438aa439c2194bc2004447e4247b84b3c0650d394c5873d7a)(@cloudflare/workers-types@4.20260518.1)(@types/node@25.6.2)(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      wrangler: 4.90.0(@cloudflare/workers-types@4.20260518.1)(@types/node@25.6.2)(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       zod: 3.25.76
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
@@ -8710,12 +8689,12 @@ snapshots:
 
   '@cloudflare/workers-types@4.20260518.1': {}
 
-  '@cobuild/repo-tools@0.1.18(patch_hash=0d21e4ec1c27fc7a6e95eac1333851148ec73d0f1fb6bf7cceaaf2d24253e894)': {}
+  '@cobuild/repo-tools@0.1.18(patch_hash=382a303ad07d81842b727bdca3ab10af1d2dab046cc75ebcae6a4b793b574691)': {}
 
-  '@cobuild/review-gpt@0.5.157(patch_hash=d7c877802e62eb3bd68c53169b7b4c0dfebdc7854ea2bd8c78b34f9bb2842a29)(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
+  '@cobuild/review-gpt@0.5.157(patch_hash=fc9ed40b0390818a0e9ff74e6ad6b4b746b9cc8289fca7b95bfb97dbc1e74e0f)(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
     dependencies:
-      '@cobuild/repo-tools': 0.1.18(patch_hash=0d21e4ec1c27fc7a6e95eac1333851148ec73d0f1fb6bf7cceaaf2d24253e894)
-      incur: 0.4.5(patch_hash=0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3)
+      '@cobuild/repo-tools': 0.1.18(patch_hash=382a303ad07d81842b727bdca3ab10af1d2dab046cc75ebcae6a4b793b574691)
+      incur: 0.4.25
       repomix: 1.16.0(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
@@ -9234,12 +9213,6 @@ snapshots:
       '@cfworker/json-schema': 4.1.1
     transitivePeerDependencies:
       - supports-color
-
-  '@modelcontextprotocol/server@2.0.0-alpha.2(@cfworker/json-schema@4.1.1)':
-    dependencies:
-      zod: 4.6.6
-    optionalDependencies:
-      '@cfworker/json-schema': 4.1.1
 
   '@modelcontextprotocol/server@2.0.0-alpha.4':
     dependencies:
@@ -13190,15 +13163,6 @@ snapshots:
       yaml: 2.9.0
       zod: 4.6.6
 
-  incur@0.4.5(patch_hash=0205cee2a49c283710c432d91b890aeea525b3aa30bcef68fa16b293f71de8a3):
-    dependencies:
-      '@cfworker/json-schema': 4.1.1
-      '@modelcontextprotocol/server': 2.0.0-alpha.2(@cfworker/json-schema@4.1.1)
-      '@toon-format/toon': 2.3.1
-      tokenx: 1.3.0
-      yaml: 2.9.0
-      zod: 4.6.6
-
   incur@0.5.1(patch_hash=176de4224f3882268de92c7a86ff6ae0b56834d12bb90bf72dedeeef22e682d9):
     dependencies:
       '@cfworker/json-schema': 4.1.1
@@ -15853,7 +15817,7 @@ snapshots:
       - utf-8-validate
       - ws
 
-  wrangler@4.90.0(patch_hash=8fe3827042fda9e438aa439c2194bc2004447e4247b84b3c0650d394c5873d7a)(@cloudflare/workers-types@4.20260518.1)(@types/node@25.6.2)(bufferutil@4.1.0)(utf-8-validate@6.0.6):
+  wrangler@4.90.0(@cloudflare/workers-types@4.20260518.1)(@types/node@25.6.2)(bufferutil@4.1.0)(utf-8-validate@6.0.6):
     dependencies:
       '@cloudflare/kv-asset-handler': 0.5.0
       '@cloudflare/unenv-preset': 2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260507.1)

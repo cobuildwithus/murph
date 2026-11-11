@@ -81,7 +81,7 @@ async function main(): Promise<void> {
     // checking against the index needs neither lazy fetches nor a checkout.
     runGit(["read-tree", "FETCH_HEAD"], upstreamRepository);
     runGit([
-      "apply", "--cached", "--check", path.join(repoRoot, "patches/codex-runtime.patch"),
+      "apply", "--cached", "--check", path.join(repoRoot, "patches/codex-websocket-ack.patch"),
     ], upstreamRepository);
 
     const sourceFiles = new Set(runGit([

@@ -50,7 +50,7 @@ describe("runner base image preparation", () => {
             ? options.encoding
             : null;
 
-      const content = String(sourcePath).endsWith("codex-runtime.patch")
+      const content = String(sourcePath).endsWith("codex-websocket-ack.patch")
         ? codexPatchText
         : dockerfileText;
       return encoding ? content : Buffer.from(content);
@@ -125,7 +125,7 @@ describe("runner base image preparation", () => {
     const { computeRunnerBaseImageSourceFingerprint } = await import("../scripts/runner-base-image.ts");
     const before = await computeRunnerBaseImageSourceFingerprint();
     vi.mocked(readFile).mockImplementation(async (sourcePath) => Buffer.from(
-      String(sourcePath).endsWith("codex-runtime.patch")
+      String(sourcePath).endsWith("codex-websocket-ack.patch")
         ? `${codexPatchText}new shutdown fix\n`
         : dockerfileText,
     ));
@@ -136,7 +136,7 @@ describe("runner base image preparation", () => {
     const { computeRunnerBaseImageSourceFingerprint } = await import("../scripts/runner-base-image.ts");
     const before = await computeRunnerBaseImageSourceFingerprint();
     vi.mocked(readFile).mockImplementation(async (sourcePath) => Buffer.from(
-      String(sourcePath).endsWith("codex-runtime.patch")
+      String(sourcePath).endsWith("codex-websocket-ack.patch")
         ? codexPatchText
         : dockerfileText.replace("24.22.1", "24.22.2"),
     ));
@@ -157,7 +157,7 @@ describe("runner base image preparation", () => {
   it("cannot reuse an image when the pinned native patch is missing", async () => {
     const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
     vi.mocked(readFile).mockImplementation(async (sourcePath) => {
-      if (String(sourcePath).endsWith("codex-runtime.patch")) {
+      if (String(sourcePath).endsWith("codex-websocket-ack.patch")) {
         throw new Error("native patch missing");
       }
       return Buffer.from(dockerfileText);
@@ -550,7 +550,7 @@ function expectedFingerprint(): string {
   return createHash("sha256")
     .update(`Dockerfile.cloudflare-hosted-runner-base\0${Buffer.byteLength(dockerfileText)}\0`)
     .update(Buffer.from(dockerfileText))
-    .update(`patches/codex-runtime.patch\0${Buffer.byteLength(codexPatchText)}\0`)
+    .update(`patches/codex-websocket-ack.patch\0${Buffer.byteLength(codexPatchText)}\0`)
     .update(Buffer.from(codexPatchText))
     .digest("hex");
 }

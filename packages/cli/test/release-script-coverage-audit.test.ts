@@ -1229,12 +1229,8 @@ describe('monorepo verification and review tooling audit', () => {
     expect(rootPackageJson.scripts?.['review:gpt']).toBe(
       'bash scripts/review-gpt-pr-head-preflight.sh --run',
     )
-    expect(reviewGptConfig).not.toContain('minimum_marked_response_ms=300000')
     expect(reviewGptPrHeadPreflight).toContain(
       'review_gpt_reject_repository_policy_overrides "$@"',
-    )
-    expect(reviewGptPrHeadPreflight).toContain(
-      '--minimum-marked-response-time 80s \\\n    "$@"',
     )
     expect(reviewGptPrHeadPreflight).not.toContain(
       'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=',
@@ -1264,7 +1260,7 @@ describe('monorepo verification and review tooling audit', () => {
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1],
     ).not.toContain('incur@')
     expect(pnpmWorkspace).toContain(
-      "  'incur@0.4.5>@modelcontextprotocol/server': 2.0.0-alpha.2",
+      "  '@cobuild/review-gpt@0.5.157>incur': 0.4.25",
     )
     expect(
       pnpmWorkspace
@@ -1278,9 +1274,7 @@ describe('monorepo verification and review tooling audit', () => {
         "'@cobuild/repo-tools@0.1.18': patches/@cobuild__repo-tools@0.1.18.patch",
         "'@cobuild/review-gpt@0.5.157': patches/@cobuild__review-gpt@0.5.157.patch",
         'frog@1.1.0: patches/frog@1.1.0.patch',
-        'incur@0.4.5: patches/incur@0.4.5.patch',
         'incur@0.5.1: patches/incur@0.5.1.patch',
-        'wrangler@4.90.0: patches/wrangler@4.90.0.patch',
         'wrangler@4.93.0: patches/wrangler@4.93.0.patch',
       ],
     )
@@ -1797,7 +1791,7 @@ describe('monorepo verification and review tooling audit', () => {
     expect(allPresetGroup).not.toMatch(/^\s*"completion-specialists"\s*\\?$/mu)
   })
 
-  it("keeps ReviewGPT's patched Incur MCP transport compatible with its pinned server", async () => {
+  it("keeps ReviewGPT's stock Incur MCP discovery and execution compatible", async () => {
     const reviewGptPackagePath = realpathSync(
       path.join(repoRoot, 'node_modules', '@cobuild', 'review-gpt', 'package.json'),
     )
@@ -1806,6 +1800,7 @@ describe('monorepo verification and review tooling audit', () => {
     const { Cli, Mcp } = await import(pathToFileURL(incurEntryPath).href)
     const cli = Cli.create('review-gpt-mcp-compatibility')
     cli.command('ping', {
+      mcp: { annotations: { readOnlyHint: true } },
       run: async () => ({ ok: true }),
     })
     const commands = Cli.toCommands.get(cli)
@@ -1858,16 +1853,38 @@ describe('monorepo verification and review tooling audit', () => {
     send({ jsonrpc: '2.0', method: 'notifications/initialized' })
     send({ id: 2, jsonrpc: '2.0', method: 'tools/list', params: {} })
     expect(await waitForResponse(2)).toMatchObject({
-      result: { tools: [{ name: 'ping' }] },
+      result: { tools: expect.arrayContaining([
+        expect.objectContaining({ name: 'search_tools' }),
+        expect.objectContaining({ name: 'get_tool_details' }),
+        expect.objectContaining({ name: 'call_read_tool' }),
+      ]) },
     })
 
     send({
       id: 3,
       jsonrpc: '2.0',
       method: 'tools/call',
-      params: { arguments: {}, name: 'ping' },
+      params: { arguments: { query: 'ping' }, name: 'search_tools' },
     })
     expect(await waitForResponse(3)).toMatchObject({
+      result: { content: [{ text: expect.stringContaining('"name":"ping"'), type: 'text' }] },
+    })
+    send({
+      id: 4,
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: { arguments: { name: 'ping' }, name: 'get_tool_details' },
+    })
+    expect(await waitForResponse(4)).toMatchObject({
+      result: { content: [{ text: expect.stringContaining('"inputSchema"'), type: 'text' }] },
+    })
+    send({
+      id: 5,
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: { arguments: { name: 'ping', arguments: {} }, name: 'call_read_tool' },
+    })
+    expect(await waitForResponse(5)).toMatchObject({
       result: { content: [{ text: '{"ok":true}', type: 'text' }] },
     })
     input.end()
@@ -1980,9 +1997,6 @@ describe('monorepo verification and review tooling audit', () => {
       expect(defaultResult.stdout).toContain(
         'Idle draft cleanup: close hidden, inactive unsent drafts after 1800000ms',
       )
-      expect(defaultResult.stdout).toContain(
-        'Minimum marked response time: 80000ms',
-      )
 
       writeHarnessFile(
         localConfigRoot,
@@ -1995,7 +2009,7 @@ describe('monorepo verification and review tooling audit', () => {
         'Response capture: enabled (7654321ms timeout)',
       )
       expect(localResult.stdout).toContain(
-        'Minimum marked response time: 80000ms',
+        'Minimum marked response time: 1ms',
       )
 
       writeHarnessFile(
@@ -2011,7 +2025,7 @@ describe('monorepo verification and review tooling audit', () => {
       const callbackResult = runRepositoryDry()
       expect(callbackResult.status, callbackResult.stderr).toBe(0)
       expect(callbackResult.stdout).toContain(
-        'Minimum marked response time: 80000ms',
+        'Minimum marked response time: 1ms',
       )
 
       const weakConfigPath = path.join(harnessRoot, 'weak-review-gpt.sh')
@@ -2035,8 +2049,11 @@ describe('monorepo verification and review tooling audit', () => {
         '42m',
         '--idle-draft-timeout',
         '2s',
+        '--minimum-marked-response-time',
+        '2ms',
       ])
       expect(perRunResult.status, perRunResult.stderr).toBe(0)
+      expect(perRunResult.stdout).toContain('Minimum marked response time: 2ms')
       expect(perRunResult.stdout).toContain(
         'Response capture: enabled (2520000ms timeout)',
       )
@@ -2543,7 +2560,7 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     }
   })
 
-  it('rejects package ReviewGPT policy overrides at the repository boundary', () => {
+  it('rejects ReviewGPT config overrides at the repository boundary', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'review-gpt-floor-'))
     const binRoot = path.join(harnessRoot, 'bin')
     const fakePnpmPath = path.join(binRoot, 'pnpm')
@@ -2562,10 +2579,6 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
         { mode: 0o755 },
       )
       for (const overrideArgs of [
-        ['--minimum-marked-response-time', '1s'],
-        ['--minimum-marked-response-time=1s'],
-        ['--minimumMarkedResponseTime', '1s'],
-        ['--minimumMarkedResponseTime=1s'],
         ['--config', weakConfigPath],
         [`--config=${weakConfigPath}`],
       ]) {
@@ -2940,7 +2953,7 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     ).toMatchObject({ evidence: null })
   })
 
-  it('fails closed marked concrete-model responses below five minutes', () => {
+  it('keeps upstream duration fallback when model evidence is absent', () => {
     const harness = loadReviewGptOpenTargetHarness(1)
 
     expect(

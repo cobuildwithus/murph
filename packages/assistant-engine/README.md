@@ -663,29 +663,25 @@ package suite.
 
 ## Real-Codex test fixtures
 
-Canonical live fixtures and the meal benchmark use the shared hosted Codex
-behavior builder. Their App Server launcher requires Murph's patched native
-`app-server --ignore-user-config` option: it excludes personal behavioral settings
-and global `AGENTS.md`/`AGENTS.override.md` inputs. It retains the original auth
-home, credential-store and keyring-backend selection, login/workspace restrictions,
-and ChatGPT auth endpoint in their normal configuration precedence. Managed
-requirements, project instructions, and exec rules still apply. Personal proxy
-preferences and other feature switches are not restored by this auth projection.
-CLI table overrides alone cannot provide isolation because native TOML merging
-preserves unspecified personal permission grants.
-Provider-key fixtures pass their trusted provider definition explicitly through
-the launcher, using the same serializer as the generated fixture home. Only
-provider metadata and the environment-variable name enter configuration; the
-credential value remains in the process environment and its name is omitted
-from shell-tool allowlists. Model, provider, reasoning, and approval selections
-remain explicit journey inputs.
+Live fixtures and the meal benchmark use the shared hosted Codex behavior
+builder with stock App Server configuration arguments. Provider-key mode uses
+an isolated temporary Codex home and supplies the trusted provider definition
+explicitly. Only provider metadata and the environment-variable name enter
+configuration; the credential value remains in the process environment and its
+name is omitted from shell-tool allowlists. This is the canonical configuration
+boundary for release evidence.
 
-Build from the exact source pin with `patches/codex-runtime.patch` applied,
-then select that local artifact with `pnpm test:assistant:live -- --test <name>
---codex-command <absolute-native-binary>`. The unpatched npm CLI does not support
-this App Server option. Keep the matching release's helper layout; the native
-build contract is documented in `apps/cloudflare/README.md`. Selecting a local
-verification binary does not install a global package or deploy the runner.
+Local subscription runs reuse their selected authentication home without copying
+auth material. They retain unspecified personal configuration, global AGENTS
+instructions and permission grants, so their results are developer-local evidence,
+not isolated production proof. CLI table overrides do not remove unspecified
+personal settings. Model, provider, reasoning and approval selections remain
+explicit journey inputs in both modes.
+
+The pinned npm CLI works directly. Use `--codex-command <absolute-native-binary>`
+only when verifying a particular native artifact; keep its matching helper layout.
+Selecting a local verification binary does not install a global package or deploy
+the runner.
 
 The isolated checkout and Node install are read-only local stand-ins for `/app`;
 credential-shaped files stay denied. Production permission profiles are

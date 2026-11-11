@@ -40,4 +40,4 @@ apps/cloudflare/.deploy/*
 !apps/cloudflare/.deploy/runner-bundle/**
 *.zip
 *.patch
-!patches/codex-runtime.patch
+!patches/codex-websocket-ack.patch

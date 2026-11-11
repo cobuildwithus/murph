@@ -272,9 +272,7 @@ review_gpt_option_requires_value() {
       | --token-limit \
       | --tokenLimit \
       | --token-offset \
-      | --tokenOffset \
-      | --minimum-marked-response-time \
-      | --minimumMarkedResponseTime)
+      | --tokenOffset)
       return 0
       ;;
   esac
@@ -287,11 +285,7 @@ review_gpt_reject_repository_policy_overrides() {
   for argument in "$@"; do
     case "$argument" in
       --config \
-        | --config=* \
-        | --minimum-marked-response-time \
-        | --minimum-marked-response-time=* \
-        | --minimumMarkedResponseTime \
-        | --minimumMarkedResponseTime=*)
+        | --config=*)
         echo "Error: Murph's repository ReviewGPT policy cannot be overridden on the command line." >&2
         return 64
         ;;
@@ -390,7 +384,6 @@ review_gpt_run() {
 
   exec pnpm exec cobuild-review-gpt \
     --config scripts/review-gpt.config.sh \
-    --minimum-marked-response-time 80s \
     "$@"
 }
 

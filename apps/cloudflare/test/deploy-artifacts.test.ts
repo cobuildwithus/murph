@@ -1013,7 +1013,7 @@ export function searchGeneratedHealthCommonsKnowledge() {
     const fixture = await createDeployArtifactFixture(sourceFixture);
     await mkdir(path.join(sourceFixture.repoRoot, "patches"), { recursive: true });
     await writeFile(
-      path.join(sourceFixture.repoRoot, "patches", "codex-runtime.patch"),
+      path.join(sourceFixture.repoRoot, "patches", "codex-websocket-ack.patch"),
       "synthetic native compatibility patch\n",
       "utf8",
     );

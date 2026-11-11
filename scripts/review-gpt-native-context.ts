@@ -5,7 +5,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const upstreamUrl = 'https://github.com/openai/codex.git'
-const patchPath = 'patches/codex-runtime.patch'
+const patchPath = 'patches/codex-websocket-ack.patch'
 const maxBytes = 12 * 1024 * 1024
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 

@@ -26,7 +26,7 @@ engineStrict: true
 managePackageManagerVersions: true
 minimumReleaseAge: 1440
 overrides:
-  '@cobuild/review-gpt@0.5.157>incur': 0.4.5
+  '@cobuild/review-gpt@0.5.157>incur': 0.4.25
   '@cloudflare/vitest-pool-workers@0.16.3>esbuild': 0.28.1
   '@coinbase/cdp-sdk@1.48.3>axios': 1.20.0
   '@lob/lob-typescript-sdk@1.4.0>axios': 1.20.0
@@ -37,7 +37,6 @@ overrides:
   '@metamask/utils@9.3.0>uuid': 11.1.1
   '@metamask/utils@11.11.0>uuid': 11.1.1
   '@modelcontextprotocol/sdk@1.29.0>hono': 4.13.11
-  'incur@0.4.5>@modelcontextprotocol/server': 2.0.0-alpha.2
   '@privy-io/js-sdk-core@0.62.0>js-cookie': 3.0.8
   '@privy-io/react-auth@3.24.0>js-cookie': 3.0.8
   '@solana/rpc-subscriptions-channel-websocket@5.5.1>ws': 8.21.0
@@ -111,14 +110,18 @@ minimumReleaseAgeExclude:
   - fast-xml-builder@1.2.0
 nodeVersion: 24.22.1
 packageManagerStrictVersion: true
+# @cloudflare/containers@0.3.7: Bounded startup probes and abort-listener cleanup.
+# @cobuild/repo-tools@0.1.18: Preserve scoped staging through ignores, renames and index refreshes.
+# @cobuild/review-gpt@0.5.157: Recover accepted reviews, inspect large archives and keep one session owner.
+# frog@1.1.0: Reuse the GitHub issue index across bounded publishing batches.
+# incur@0.5.1: CLI privacy-safe validation/errors and canonical skill hashes.
+# wrangler@4.93.0: Local container sidecar architecture and Docker tag lookup.
 patchedDependencies:
   '@cloudflare/containers@0.3.7': patches/@cloudflare__containers@0.3.7.patch
   '@cobuild/repo-tools@0.1.18': patches/@cobuild__repo-tools@0.1.18.patch
   '@cobuild/review-gpt@0.5.157': patches/@cobuild__review-gpt@0.5.157.patch
   frog@1.1.0: patches/frog@1.1.0.patch
-  incur@0.4.5: patches/incur@0.4.5.patch
   incur@0.5.1: patches/incur@0.5.1.patch
-  wrangler@4.90.0: patches/wrangler@4.90.0.patch
   wrangler@4.93.0: patches/wrangler@4.93.0.patch
 savePrefix: ''
 trustPolicy: no-downgrade

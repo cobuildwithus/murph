@@ -1249,23 +1249,19 @@ See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle
 
 The runner base image owns the native Codex build. Its Dockerfile pins the upstream
 release archive, Rust builder, and matching npm helper package, applies
-`patches/codex-runtime.patch`, and replaces only the CLI. The bundled Code Mode
+`patches/codex-websocket-ack.patch`, and replaces only the CLI. The bundled Code Mode
 host, shell resources, and sandbox helper remain from the same release. The image
 records the upstream revision and patch SHA-256 in `murph-source-revision`.
 Cargo concurrency is capped at two jobs so a high CPU count does not expand the
 native build's memory demand; the upstream release optimization profile is kept.
 
-For developer verification, the patch also exposes the opt-in App Server
-`--ignore-user-config` switch. It skips personal behavioral configuration and
-global user instructions while retaining the auth home, credential-store/keyring
-backend selection, login/workspace restrictions and ChatGPT auth endpoint at their
-normal layer precedence. It does not restore personal proxy preferences or other
-feature switches, or disable managed requirements, project instructions or exec rules. The default startup path is unchanged;
-canonical local journey launchers explicitly select this option. CLI overrides
-still supply the hosted behavior and local installation read roots.
+The sole native customization bounds the first WebSocket response frame to
+15 seconds while preserving the normal stream idle timeout after acknowledgement.
+This recovers silently dropped warm sockets without interrupting valid slow
+reasoning or compaction. Config loading and prompt caching use upstream defaults.
+Isolated provider fixtures prove hosted behavior; local subscription journeys
+reuse personal configuration and are developer evidence, not isolated proof.
 
-The runtime patch retains config isolation, a 15-second websocket acknowledgement
-bound, hosted prompt-cache options, and 12-hour cache-write token accounting.
 Browser live voice and its native wire adapter are retired; the Worker denies
 public Live creation and attachment. Historical usage remains readable.
 

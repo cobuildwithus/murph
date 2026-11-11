@@ -2056,3 +2056,5 @@ App image sizing and native decoding proof: [image sizing plan](exec-plans/compl
 Frog backlog resolution and verification: [execution record](exec-plans/completed/2026-11-10-frog-backlog.md).
 
 Browser live voice retirement is tracked in [the retirement plan](exec-plans/completed/2026-11-10-retire-live-voice.md); `../apps/web/README.md` owns the website boundary.
+
+Dependency patch reduction is tracked in [the cleanup plan](exec-plans/completed/2026-11-10-dependency-patch-cleanup.md).

@@ -29,7 +29,6 @@ import {
 import type {
   AssistantResponseMedia,
   AssistantSandbox,
-  AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   AssistantAcceptedTurnInputReferenceWindow,
@@ -570,7 +569,6 @@ export interface CodexAppServerTurnInput {
   // Sent on every turn/start: a value selects the tier, null explicitly
   // resets a sticky thread-level override back to the default tier.
   serviceTier?: AssistantProviderServiceTier | null
-  turnTrigger?: AssistantTurnTrigger | null
   progressDelivery?: AssistantProgressDelivery | null
   hostedToolContext?: AssistantHostedToolContext | null
   providerRequestOrdinal?: number | null

@@ -410,7 +410,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       "$review_gpt_base_oid"
   fi
 
-  if grep -Fxq 'patches/codex-runtime.patch' "$review_gpt_pr_context_dir/changed-files.txt"; then
+  if grep -Fxq 'patches/codex-websocket-ack.patch' "$review_gpt_pr_context_dir/changed-files.txt"; then
     pnpm exec tsx scripts/review-gpt-native-context.ts \
       "$review_gpt_head_oid" \
       "$review_gpt_pr_context_dir/changed-files.txt" \
