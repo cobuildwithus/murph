@@ -13,7 +13,7 @@ import {
   deviceSyncProviderManifests,
   deviceSyncProviderRuntimeSecretEnvKeys,
   deviceSyncProviderRuntimeVariableEnvKeys,
-  getConfiguredDeviceSyncProviderManifest,
+  requireConfiguredDeviceSyncProviderManifest,
   getConfiguredDeviceSyncProviderJobDefinition,
   JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
   listDeviceSyncProviderCatalog,
@@ -29,46 +29,13 @@ import {
   JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER,
 } from "@murphai/device-syncd/junction-resources";
 import { listConfiguredDeviceSyncPublicProviderDescriptors } from "@murphai/device-syncd/public-provider-descriptors";
-import {
-  configuredDeviceSyncProviderKeys as rootConfiguredDeviceSyncProviderKeys,
-  deviceSyncProviderManifests as rootDeviceSyncProviderManifests,
-  getConfiguredDeviceSyncProviderManifest as rootGetConfiguredDeviceSyncProviderManifest,
-  getConfiguredDeviceSyncProviderJobDefinition as rootGetConfiguredDeviceSyncProviderJobDefinition,
-  resolveJunctionBaseUrl,
-  resolveConfiguredDeviceSyncProviderManifest as rootResolveConfiguredDeviceSyncProviderManifest,
-} from "@murphai/device-syncd";
+import { resolveJunctionBaseUrl } from "@murphai/device-syncd";
 import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 import { normalizeJunctionDeviceSyncRuntimeConfig } from "../src/config/provider-manifests.ts";
 
 describe("deviceSyncProviderManifests", () => {
-  it("keeps provider ids, descriptors, and capabilities aligned", () => {
-    expect(deviceSyncProviderManifests.map((manifest) => manifest.provider)).toEqual(
-      configuredDeviceSyncProviderKeys,
-    );
-
-    for (const manifest of deviceSyncProviderManifests) {
-      expect(manifest.descriptor.provider).toBe(manifest.provider);
-      expect(manifest.capabilities.scheduledPoll).toBe(
-        manifest.descriptor.transportModes.includes("scheduled_poll"),
-      );
-      expect(manifest.capabilities.webhookPush).toBe(
-        manifest.descriptor.transportModes.includes("webhook_push"),
-      );
-      expect(manifest.capabilities.webhookAdmin).toBe(
-        Boolean(manifest.descriptor.webhook?.supportsAdmin),
-      );
-      expect(manifest.capabilities.tokenRefresh).toBe(
-        Boolean(manifest.descriptor.sync?.supportsTokenRefresh),
-      );
-      expect(manifest.capabilities.remoteDisconnect).toBe(
-        Boolean(manifest.descriptor.sync?.supportsRemoteDisconnect),
-      );
-      expect(Object.keys(manifest.jobs).length).toBeGreaterThan(0);
-    }
-  });
-
   it("pins Junction to provider_config credentials and validates its API key inputs", () => {
-    const junctionManifest = getConfiguredDeviceSyncProviderManifest("junction");
+    const junctionManifest = requireConfiguredDeviceSyncProviderManifest("junction");
 
     expect(junctionManifest.credentialPolicy).toEqual({
       kind: "provider_config",
@@ -678,10 +645,6 @@ it("shapes hosted hint payloads from the provider manifest", () => {
 
 });
 
-it("resolves typed manifests by provider key", () => {
-  expect(getConfiguredDeviceSyncProviderManifest("junction").provider).toBe("junction");
-});
-
 it("normalizes built-in job payloads through the manifest job definitions", () => {
   expect(
     normalizeConfiguredDeviceSyncJobInput("junction", {
@@ -803,25 +766,10 @@ it("rejects built-in job payloads that drift from the provider manifest", () => 
   ).toThrow(/objectId must be a string/);
 });
 
-it("re-exports the manifest registry through the package root barrel", () => {
-  expect(rootConfiguredDeviceSyncProviderKeys).toEqual(configuredDeviceSyncProviderKeys);
-  expect(rootDeviceSyncProviderManifests).toEqual(deviceSyncProviderManifests);
-  expect(rootGetConfiguredDeviceSyncProviderManifest("junction")).toBe(
-    getConfiguredDeviceSyncProviderManifest("junction"),
-  );
-  expect(rootGetConfiguredDeviceSyncProviderJobDefinition("junction", "resource")).toBe(
-    getConfiguredDeviceSyncProviderJobDefinition("junction", "resource"),
-  );
-  expect(rootResolveConfiguredDeviceSyncProviderManifest("junction")).toBe(
-    getConfiguredDeviceSyncProviderManifest("junction"),
-  );
-});
-
 it("freezes exported manifest shapes so callers cannot mutate shared registry state", () => {
-  const junctionManifest = getConfiguredDeviceSyncProviderManifest("junction");
+  const junctionManifest = requireConfiguredDeviceSyncProviderManifest("junction");
 
   expect(Object.isFrozen(junctionManifest)).toBe(true);
-  expect(Object.isFrozen(junctionManifest.capabilities)).toBe(true);
   expect(Object.isFrozen(junctionManifest.env)).toBe(true);
   expect(Object.isFrozen(junctionManifest.env.configKeys)).toBe(true);
   expect(Object.isFrozen(junctionManifest.jobs)).toBe(true);

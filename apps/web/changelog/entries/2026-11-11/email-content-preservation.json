@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 100,
+  "item": {
+    "id": "email-content-preservation",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Preserve more of each email",
+    "summary": "Emails containing several body sections keep their complete text, and attachments retain their original bytes.",
+    "details": "Sender-provided dates describe when the message was written; the trusted arrival time controls when Murph received it.",
+    "relevanceTags": [
+      "email"
+    ],
+    "sourcePullRequests": [
+      4862
+    ]
+  }
+}

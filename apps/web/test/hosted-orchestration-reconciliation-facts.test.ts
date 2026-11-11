@@ -284,11 +284,7 @@ describe("hosted orchestration reconciliation facts", () => {
       systemMailboxProgressGeneration: "7",
     }));
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { response, facts } = await readReconciliationFacts();
 
     expect(response.status).toBe(200);
     expect(facts.workspace).toMatchObject({
@@ -472,35 +468,36 @@ describe("hosted orchestration reconciliation facts", () => {
     },
   );
 
-  it("imports pending system mailbox work before applying model gates", async () => {
+  it.each([
+    {
+      scenario: "without a retention wake",
+      retentionWakeAt: null,
+      decision: buildUsageLimitExceededGateDecision(),
+    },
+    {
+      scenario: "ahead of due retention",
+      retentionWakeAt: FIXED_NOW,
+      decision: buildHostedAccessInactiveUsageGateDecision(),
+    },
+  ])("imports pending system work before model gates: $scenario", async ({ retentionWakeAt, decision }) => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      inboxMediaRetentionWakeAt: retentionWakeAt,
       redactedStatusJson: {
         conversationImportedSeq: "0",
         systemImportedSeq: "0",
       },
     }));
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "0",
-      },
-      {
-        lane: "system",
-        maxSeq: "1",
-      },
+      { lane: "conversation", maxSeq: "0" },
+      { lane: "system", maxSeq: "1" },
     ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: buildUsageLimitExceededGateDecision(),
-      status: "denied",
-    });
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ decision, status: "denied" });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { response, facts } = await readReconciliationFacts();
 
+    expect(response.status).toBe(200);
     expect(facts.blocked).toBeNull();
+    expect(facts.workspace?.inboxMediaRetentionWakeAt).toBe(retentionWakeAt);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
   });
@@ -519,11 +516,7 @@ describe("hosted orchestration reconciliation facts", () => {
       nextWakeReason: "device-sync.reconcile",
     }));
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
 
     expect(facts.blocked).toEqual({
       reason: "health_data_consent_withdrawn",
@@ -562,11 +555,7 @@ describe("hosted orchestration reconciliation facts", () => {
       },
     ]);
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { response, facts } = await readReconciliationFacts();
 
     expect(response.status).toBe(200);
     expect(facts.blocked).toBeNull();
@@ -593,43 +582,6 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.readHostedMailboxLatestPendingConversationItem).not.toHaveBeenCalled();
   });
 
-  it("imports pending system work before a due inbox media retention wake", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      inboxMediaRetentionWakeAt: FIXED_NOW,
-      redactedStatusJson: {
-        conversationImportedSeq: "0",
-        systemImportedSeq: "0",
-      },
-    }));
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "0",
-      },
-      {
-        lane: "system",
-        maxSeq: "1",
-      },
-    ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: buildHostedAccessInactiveUsageGateDecision(),
-      status: "denied",
-    });
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(facts.blocked).toBeNull();
-    expect(facts.workspace).toMatchObject({
-      inboxMediaRetentionWakeAt: FIXED_NOW,
-    });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-  });
-
   it.each([null, FIXED_NOW, "2026-05-20T12:14:00.000Z"])("preserves inactive workspace retention clocks for retention-only workflow dispatch (%s)", async (retentionWakeAt) => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "not_started",
@@ -641,11 +593,7 @@ describe("hosted orchestration reconciliation facts", () => {
       inboxMediaRetentionWakeAt: retentionWakeAt,
     }));
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { response, facts } = await readReconciliationFacts();
 
     expect(response.status).toBe(200);
     expect(facts.mailboxLag).toEqual([]);
@@ -684,11 +632,7 @@ describe("hosted orchestration reconciliation facts", () => {
     ]);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { response, facts } = await readReconciliationFacts();
 
     expect(response.status).toBe(200);
     expect(facts.blocked).toBeNull();
@@ -738,11 +682,7 @@ describe("hosted orchestration reconciliation facts", () => {
         laneSeq: "5",
       });
 
-      const response = await reconciliationRoute.GET(
-        requestForFacts(),
-        routeContext(),
-      );
-      const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+      const { response, facts } = await readReconciliationFacts();
 
       expect(response.status).toBe(200);
       expect(facts.workspace?.systemMailboxFrontier).toBe(expectedFrontier);
@@ -767,8 +707,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMailboxFirstLiveSystemItemAfterSeq
       .mockResolvedValueOnce({ dedupeKey: "assistant.ask.completed:synthetic", kind: "assistant.ask.completed", laneSeq: "5" })
       .mockResolvedValueOnce({ dedupeKey: "device-sync.wake:synthetic", kind: "device-sync.wake", laneSeq: "6" });
-    const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
     expect(facts.workspace?.systemMailboxFrontier).toBe("model_free");
     expect(facts.workspace?.hostedMailboxSystemHandledThroughSeq).toBe("4");
     expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenLastCalledWith({
@@ -821,7 +760,7 @@ describe("hosted orchestration reconciliation facts", () => {
         expect(facts.workspace?.hostedMailboxSystemHandledThroughSeq).toBe("4");
         expect(facts.blocked).toEqual({
           reason: "ai_usage_denied",
-          retryAt: buildUsageLimitExceededGateDecision().retryAfter.toISOString(),
+          retryAt: "2026-06-01T00:00:00.000Z",
         });
         vi.advanceTimersByTime(600_000);
       }
@@ -982,11 +921,7 @@ describe("hosted orchestration reconciliation facts", () => {
       laneSeq: "1",
     });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
 
     expect(facts.workspace?.systemMailboxFrontier).toBe("model_free");
     expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenCalledWith(
@@ -1013,11 +948,7 @@ describe("hosted orchestration reconciliation facts", () => {
     ]);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
 
     expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
@@ -1039,11 +970,7 @@ describe("hosted orchestration reconciliation facts", () => {
       status: "denied",
     });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { response, facts } = await readReconciliationFacts();
 
     expect(response.status).toBe(200);
     expect(facts.blocked).toEqual({
@@ -1062,92 +989,59 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
-  it("admits a due model-free assistant delivery retry while managed AI is denied", async () => {
+  it.each([
+    {
+      scenario: "due delivery without conversation work",
+      wakeAt: FIXED_NOW,
+      conversationMax: "2",
+      blocked: null,
+      usageReads: 0,
+    },
+    {
+      scenario: "future delivery ahead of the usage horizon",
+      wakeAt: "2026-05-20T12:05:00.000Z",
+      conversationMax: "3",
+      blocked: "ai_usage_denied",
+      usageReads: 1,
+    },
+    {
+      scenario: "due delivery ahead of denied conversation work",
+      wakeAt: FIXED_NOW,
+      conversationMax: "3",
+      blocked: null,
+      usageReads: 0,
+    },
+  ])("preserves model-free delivery scheduling: $scenario", async ({ wakeAt, conversationMax, blocked, usageReads }) => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: FIXED_NOW,
+      nextWakeAt: wakeAt,
       nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+      redactedStatusJson: {
+        conversationImportedSeq: "2",
+        systemImportedSeq: "0",
+      },
     }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      { lane: "conversation", maxSeq: conversationMax },
+      { lane: "system", maxSeq: "0" },
+    ]);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       decision: buildUsageLimitExceededGateDecision(),
       status: "denied",
     });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { response, facts } = await readReconciliationFacts();
 
     expect(response.status).toBe(200);
-    expect(facts.blocked).toBeNull();
+    expect(facts.blocked).toEqual(blocked === null ? null : {
+      reason: blocked,
+      retryAt: wakeAt,
+    });
     expect(facts.workspace).toMatchObject({
-      nextWakeAt: FIXED_NOW,
+      nextWakeAt: wakeAt,
       nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
     });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-  });
-
-  it("keeps a future assistant delivery retry ahead of the denied usage horizon", async () => {
-    const deliveryRetryAt = "2026-05-20T12:05:00.000Z";
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: deliveryRetryAt,
-      nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
-      redactedStatusJson: {
-        conversationImportedSeq: "2",
-        systemImportedSeq: "0",
-      },
-    }));
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      { lane: "conversation", maxSeq: "3" },
-      { lane: "system", maxSeq: "0" },
-    ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: buildUsageLimitExceededGateDecision(),
-      status: "denied",
-    });
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(facts.blocked).toEqual({
-      reason: "ai_usage_denied",
-      retryAt: deliveryRetryAt,
-    });
-    expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied)
-      .toHaveBeenCalledOnce();
-  });
-
-  it("admits a due assistant delivery retry ahead of fresh denied conversation work", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: FIXED_NOW,
-      nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
-      redactedStatusJson: {
-        conversationImportedSeq: "2",
-        systemImportedSeq: "0",
-      },
-    }));
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      { lane: "conversation", maxSeq: "3" },
-      { lane: "system", maxSeq: "0" },
-    ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      decision: buildUsageLimitExceededGateDecision(),
-      status: "denied",
-    });
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(facts.blocked).toBeNull();
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledTimes(usageReads);
+    expect(mocks.tryMarkHostedMailboxConversationAiUsageDenied).toHaveBeenCalledTimes(usageReads);
   });
 
   it.each(["allowed", "health_data_consent_withdrawn"] as const)(
@@ -1158,8 +1052,7 @@ describe("hosted orchestration reconciliation facts", () => {
       ]);
       mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status });
 
-      const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
-      const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+      const { response, facts } = await readReconciliationFacts();
 
       expect(response.status).toBe(200);
       expect(facts.blocked?.reason ?? null).toBe(
@@ -1331,11 +1224,7 @@ describe("hosted orchestration reconciliation facts", () => {
       status: "in_flight",
     });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
 
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
@@ -1381,11 +1270,7 @@ describe("hosted orchestration reconciliation facts", () => {
       status: "sent",
     });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
 
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
@@ -1425,11 +1310,7 @@ describe("hosted orchestration reconciliation facts", () => {
       buildPendingConversationItem({ laneSeq: "2" }),
     );
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
 
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
@@ -1472,11 +1353,7 @@ describe("hosted orchestration reconciliation facts", () => {
       status: "denied",
     });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
 
     expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
@@ -1521,11 +1398,7 @@ describe("hosted orchestration reconciliation facts", () => {
       status: "sent",
     });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
 
     expect(facts.blocked).toEqual({
       reason: "ai_usage_denied",
@@ -1575,11 +1448,7 @@ describe("hosted orchestration reconciliation facts", () => {
       nextWakeReason: "assistant_due",
     }));
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
 
     expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
@@ -1598,11 +1467,7 @@ describe("hosted orchestration reconciliation facts", () => {
       status: "denied",
     });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { response, facts } = await readReconciliationFacts();
 
     expect(response.status).toBe(200);
     expect(facts.blocked?.reason).toBe("ai_usage_denied");
@@ -1635,11 +1500,7 @@ describe("hosted orchestration reconciliation facts", () => {
       participantMemberId: "member_active_participant",
     });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { response, facts } = await readReconciliationFacts();
 
     expect(response.status).toBe(200);
     expect(facts.blocked).toBeNull();
@@ -1673,8 +1534,7 @@ describe("hosted orchestration reconciliation facts", () => {
           : { decision: buildUsageLimitExceededGateDecision(), status: "denied" },
       );
 
-      const response = await reconciliationRoute.GET(requestForFacts(), routeContext());
-      const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+      const { response, facts } = await readReconciliationFacts();
       expect(response.status).toBe(200);
       expect(facts.blocked?.reason ?? null).toBe(
         usageStatus === "allowed" ? null : "ai_usage_denied",
@@ -1715,11 +1575,7 @@ describe("hosted orchestration reconciliation facts", () => {
       status: "denied",
     });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
 
     expect(facts.blocked?.reason).toBe("ai_usage_denied");
     expect(facts.mailboxLag).toContainEqual({
@@ -1760,11 +1616,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
 
     expect(facts.blocked).toBeNull();
     expect(mocks.hasHostedMemberEstablishedLinqHomeRoute).not.toHaveBeenCalled();
@@ -1777,22 +1629,6 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
-  it("admits due model-capable workspace wakes for active access", async () => {
-    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
-      nextWakeAt: "2026-05-20T11:59:59.000Z",
-      nextWakeReason: "assistant_due",
-    }));
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
-
-    expect(facts.blocked).toBeNull();
-  });
-
   it("blocks inactive members while preserving workspace facts", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "not_started",
@@ -1801,11 +1637,7 @@ describe("hosted orchestration reconciliation facts", () => {
       billingStatus: "not_started",
     }));
 
-    const response = await reconciliationRoute.GET(
-      requestForFacts(),
-      routeContext(),
-    );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const { facts } = await readReconciliationFacts();
 
     expect(facts).toEqual({
       blocked: {
@@ -1826,6 +1658,12 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.hostedMemberFindUnique).toHaveBeenCalledTimes(1);
   });
 });
+
+async function readReconciliationFacts(search = "") {
+  const response = await reconciliationRoute.GET(requestForFacts(search), routeContext());
+  const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+  return { response, facts };
+}
 
 function requestForFacts(search = ""): Request {
   return new Request(

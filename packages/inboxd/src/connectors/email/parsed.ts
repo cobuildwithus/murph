@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 
 export interface ParsedEmailAttachment {
@@ -62,7 +63,8 @@ export function parseRawEmailMessage(
   input: Uint8Array | ArrayBuffer | string,
 ): ParsedEmailMessage {
   const rawBytes = toRawEmailBytes(input);
-  const rawText = utf8Decoder.decode(rawBytes);
+  // Preserve each MIME part's bytes until its transfer encoding and charset are known.
+  const rawText = Buffer.from(rawBytes).toString("latin1");
   const budget = createMimeParseBudget();
   const entity = parseMimeEntity(rawText, {
     budget,
@@ -82,7 +84,7 @@ export function parseRawEmailMessage(
     occurredAt: parseHeaderDate(entity.headers.date ?? null),
     rawHash: createHash("sha256").update(rawBytes).digest("hex"),
     rawSize: rawBytes.byteLength,
-    receivedAt: parseHeaderDate(entity.headers.date ?? null),
+    receivedAt: null,
     references: parseMessageIds(entity.headers.references ?? null),
     replyTo: splitEmailAddressList(entity.headers["reply-to"] ?? null),
     subject: decodeHeaderWords(entity.headers.subject ?? null),
@@ -206,7 +208,7 @@ function splitRawEmailEntity(rawEntity: string): {
   headers: Record<string, string>;
 } {
   const headerMatch = /\r?\n\r?\n/u.exec(rawEntity);
-  const headerText = readRawEmailHeaderBlock(rawEntity);
+  const headerText = utf8Decoder.decode(Buffer.from(readRawEmailHeaderBlock(rawEntity), "latin1"));
   if (!headerMatch || headerMatch.index === undefined) {
     return {
       bodyText: "",
@@ -278,32 +280,19 @@ function readRawEmailHeaderBlock(rawEntity: string): string {
 
 function splitMultipartBody(bodyText: string, boundary: string): string[] {
   const parts: string[] = [];
-  const normalizedBoundary = `--${boundary}`;
-  const closingBoundary = `--${boundary}--`;
-  const lines = bodyText.replace(/\r\n/gu, "\n").split("\n");
   let current: string[] | null = null;
-
-  for (const line of lines) {
-    if (line === normalizedBoundary) {
+  for (const [line] of bodyText.matchAll(/[^\n]*(?:\n|$)/gu)) {
+    const delimiter = line.replace(/\r?\n$/u, "").replace(/[ \t]+$/u, "");
+    if (delimiter === `--${boundary}` || delimiter === `--${boundary}--`) {
       if (current !== null) {
-        parts.push(current.join("\n"));
+        parts.push(current.join("").replace(/\r?\n$/u, ""));
       }
+      if (delimiter === `--${boundary}--`) break;
       current = [];
-      continue;
-    }
-
-    if (line === closingBoundary) {
-      if (current !== null) {
-        parts.push(current.join("\n"));
-      }
-      break;
-    }
-
-    if (current !== null) {
-      current.push(line);
+    } else {
+      current?.push(line);
     }
   }
-
   return parts.filter((part) => part.trim().length > 0);
 }
 
@@ -319,8 +308,13 @@ function collectMimeLeafContent(entity: ParsedMimeEntity, budget: MimeParseBudge
 
     for (const part of entity.parts) {
       const nested = collectMimeLeafContent(part, budget);
-      text ??= nested.text;
-      html ??= nested.html;
+      if (entity.contentType === "multipart/alternative") {
+        text ??= nested.text;
+        html ??= nested.html;
+      } else {
+        text = [text, nested.text].filter((part) => part !== null).join("\n\n") || null;
+        html = [html, nested.html].filter((part) => part !== null).join("\n") || null;
+      }
       attachments.push(...nested.attachments);
     }
 
@@ -415,7 +409,7 @@ function decodeMimeBodyBytes(bodyText: string, transferEncoding: string | null):
     case "quoted-printable":
       return decodeQuotedPrintableBytes(bodyText);
     default:
-      return utf8Encoder.encode(bodyText);
+      return new Uint8Array(Buffer.from(bodyText, "latin1"));
   }
 }
 

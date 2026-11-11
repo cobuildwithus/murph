@@ -19,6 +19,7 @@ export interface NormalizeParsedEmailMessageInput {
   accountAddress?: string | null;
   accountId?: string | null;
   message: ParsedEmailMessage;
+  receivedAt?: string | null;
   selfAddresses?: ReadonlyArray<string | null | undefined> | null;
   source?: string;
   threadIsDirect?: boolean | null;
@@ -29,6 +30,7 @@ export async function normalizeParsedEmailMessage({
   accountAddress = null,
   accountId = null,
   message,
+  receivedAt = null,
   selfAddresses = null,
   source = "email",
   threadIsDirect,
@@ -37,6 +39,7 @@ export async function normalizeParsedEmailMessage({
   const normalizedMessage = await toParsedEmailChatMessage({
     accountAddress,
     message,
+    receivedAt,
     selfAddresses,
     threadIsDirect,
     threadTarget,
@@ -52,6 +55,7 @@ export async function normalizeParsedEmailMessage({
 export async function toParsedEmailChatMessage(input: {
   accountAddress?: string | null;
   message: ParsedEmailMessage;
+  receivedAt?: string | null;
   selfAddresses?: ReadonlyArray<string | null | undefined> | null;
   threadIsDirect?: boolean | null;
   threadTarget?: string | null;
@@ -80,7 +84,7 @@ export async function toParsedEmailChatMessage(input: {
     externalId: `email:${input.message.messageId ?? input.message.rawHash.slice(0, 24)}`,
     occurredAt: toIsoTimestamp(input.message.occurredAt ?? new Date()),
     raw: sanitizeParsedEmailMessage(input.message),
-    receivedAt: input.message.receivedAt ?? input.message.occurredAt ?? null,
+    receivedAt: input.receivedAt ? toIsoTimestamp(input.receivedAt) : input.message.receivedAt ?? null,
     text: buildParsedEmailMessageText(input.message),
     thread: {
       id: serializeHostedEmailThreadTarget(resolvedThreadTarget),

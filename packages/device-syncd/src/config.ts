@@ -12,9 +12,7 @@ export {
 } from "./config/provider-configs.ts";
 export {
   deviceSyncProviderManifests,
-  getConfiguredDeviceSyncProviderManifest,
   listDeviceSyncProviderCatalog,
-  listConfiguredDeviceSyncProviderManifests,
   requireConfiguredDeviceSyncProviderManifest,
   resolveConfiguredDeviceSyncProviderManifest,
 } from "./config/provider-manifests.ts";
@@ -92,14 +90,12 @@ export type {
   JunctionConnectSourceTarget,
 } from "./config/junction-connect-sources.ts";
 export type {
-  ConfiguredDeviceSyncProviderCapabilities,
   DeviceSyncProviderCatalogEntry,
   DeviceSyncJobPayloadFieldKind,
   DeviceSyncJobPayloadFieldSpec,
   DeviceSyncProviderJobDefinition,
   DeviceSyncProviderJobDefinitionMap,
   DeviceSyncConfiguredProviderManifest,
-  DeviceSyncConfiguredProviderManifestByKey,
   HostedHintFieldKind,
   HostedHintPayloadFieldMap,
   SerializableConfigFieldKind,

@@ -103,6 +103,14 @@ const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0")
 const OFFER_GENERATION_A = "hgrpjog_aaaaaaaaaaaaaaaa";
 const OFFER_GENERATION_B = "hgrpjog_bbbbbbbbbbbbbbbb";
 
+const LINQ_JOIN_OFFER_ACCEPTANCE = {
+  affirmationEventId: "gesture_event_1",
+  channel: "linq" as const,
+  memberId: "member_grantor",
+  messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+  threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+};
+
 const JOIN_POLICY = {
   offerGeneration: OFFER_GENERATION_A,
   requestedVaultShareProjectionKinds: ["sleep-times.v0"],
@@ -975,19 +983,21 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(tx.hostedGroup.update).not.toHaveBeenCalled();
   });
 
-  it("rejects a source-aware selection when only aggregate Deep sleep was requested", async () => {
+  it.each([
+    { name: "an existing member", membershipId: "membership_existing" },
+    { name: "a new member", membershipId: null },
+  ])("rejects source-aware selection for $name under an aggregate policy", async ({ membershipId }) => {
     const tx = buildTx({
       activeGroupGrantCount: 0,
-      existingMembershipId: "membership_existing",
+      existingMembershipId: membershipId,
       requestedProjectionKinds: ["deep-sleep-days.v0"],
     });
-    const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinCodeTx({
-      expectedMembershipId: "membership_existing",
+      expectedMembershipId: membershipId,
       joinCode: "join_1",
       memberId: "member_grantor",
-      now,
+      now: new Date("2026-07-01T00:00:00.000Z"),
       selectedVaultShareProjectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
       tx,
     })).rejects.toMatchObject({
@@ -997,29 +1007,6 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
     expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
-    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
-  });
-
-  it("rejects a source-aware selection for a new member under an aggregate policy", async () => {
-    const tx = buildTx({
-      activeGroupGrantCount: 0,
-      requestedProjectionKinds: ["deep-sleep-days.v0"],
-    });
-    const now = new Date("2026-07-01T00:00:00.000Z");
-
-    await expect(acceptHostedGroupJoinCodeTx({
-      expectedMembershipId: null,
-      joinCode: "join_1",
-      memberId: "member_grantor",
-      now,
-      selectedVaultShareProjectionScopes: [DEEP_SLEEP_SOURCES_SCOPE],
-      tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_GROUP_PERMISSION_NOT_REQUESTED",
-      httpStatus: 400,
-    });
-
-    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
     expect(tx.hostedGroup.update).not.toHaveBeenCalled();
   });
 
@@ -1502,12 +1489,8 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinOfferTx({
-      affirmationEventId: "gesture_event_1",
-      channel: "linq",
-      memberId: "member_grantor",
-      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      ...LINQ_JOIN_OFFER_ACCEPTANCE,
       now,
-      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
       tx,
     })).resolves.toMatchObject({
       alreadyMember: true,
@@ -1551,12 +1534,8 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.revokeHostedVaultSharesTx.mockResolvedValueOnce(1);
 
     await expect(acceptHostedGroupJoinOfferTx({
-      affirmationEventId: "gesture_event_1",
-      channel: "linq",
-      memberId: "member_grantor",
-      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      ...LINQ_JOIN_OFFER_ACCEPTANCE,
       now,
-      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
       tx,
     })).resolves.toMatchObject({
       grantedVaultShareProjectionScopes: [PROFILE_SCOPE, DEEP_SLEEP_SOURCES_SCOPE],
@@ -1597,12 +1576,8 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     }));
 
     await expect(acceptHostedGroupJoinOfferTx({
-      affirmationEventId: "gesture_event_1",
-      channel: "linq",
-      memberId: "member_grantor",
-      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      ...LINQ_JOIN_OFFER_ACCEPTANCE,
       now: new Date("2026-07-01T00:00:00.000Z"),
-      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
       tx,
     })).rejects.toMatchObject({
       code: "HOSTED_CONSENT_REQUIRED",
@@ -1624,13 +1599,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
-      affirmationEventId: "gesture_event_1",
-      channel: "linq",
+      ...LINQ_JOIN_OFFER_ACCEPTANCE,
       confirmationPublicBaseUrl: "https://murph.example",
-      memberId: "member_grantor",
-      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now,
-      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
       tx,
     })).resolves.toMatchObject({
       alreadyMember: false,
@@ -1669,12 +1640,8 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinOfferTx({
-      affirmationEventId: "gesture_event_1",
-      channel: "linq",
-      memberId: "member_grantor",
-      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      ...LINQ_JOIN_OFFER_ACCEPTANCE,
       now,
-      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
       tx,
     })).resolves.toMatchObject({
       alreadyMember: true,
@@ -1778,12 +1745,8 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
-      affirmationEventId: "gesture_event_1",
-      channel: "linq",
-      memberId: "member_grantor",
-      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      ...LINQ_JOIN_OFFER_ACCEPTANCE,
       now: new Date("2026-07-01T00:06:00.000Z"),
-      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
       tx,
     })).rejects.toMatchObject({
       code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",

@@ -742,7 +742,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     ).toBeLessThan(
       mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
     );
-    expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
+    expect(prisma.hostedWebhookReceiptSideEffect?.upsert).not.toHaveBeenCalled();
 
     const rearmError = Object.assign(
       new Error("phone-call result recovery unavailable"),
@@ -2965,21 +2965,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         findUnique: vi.fn().mockResolvedValue(null),
         upsert: vi.fn().mockResolvedValue({}),
       },
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 333,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
     });
 
     await expect(handleHostedOnboardingTelegramWebhook({
@@ -3216,21 +3201,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         findUnique: vi.fn().mockResolvedValue(routingRecord),
         upsert: vi.fn().mockResolvedValue({}),
       },
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 334,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
     });
 
     await expect(handleHostedOnboardingTelegramWebhook({
@@ -3414,21 +3384,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
     const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 654,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
           member: {
@@ -3603,21 +3558,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
     const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
     const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 655,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
           member: {
@@ -3710,21 +3650,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       },
     ]);
     const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 321,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
       hostedMemberRouting: {
         findMany: hostedMemberRoutingFindMany,
       },
@@ -3792,21 +3717,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
   it("bounds hosted Telegram replyContextPreview before writing the hosted wake payload", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 322,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
           member: {
@@ -3868,272 +3778,49 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(preview).toMatch(/\.\.\.$/u);
   });
 
-  it("requires the hosted execution nudge before returning active-member success", async () => {
-    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 654,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          member: {
-            billingStatus: HostedBillingStatus.active,
-            id: "member_telegram_123",
-            suspendedAt: null,
-          },
-        }),
-      },
-    });
-
-    await expect(handleHostedOnboardingTelegramWebhook({
-      prisma,
-      rawBody: JSON.stringify({
-        message: {
-          chat: {
-            id: 123,
-            type: "private",
-          },
-          date: 1_774_522_600,
-          from: {
-            first_name: "Alice",
-            id: 456,
-          },
-          message_id: 1,
-          text: "hello",
-        },
-        update_id: 654,
-      }),
-      secretToken: "telegram-secret",
-    })).resolves.toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
-
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      onSignalStarted: expect.any(Function),
-      abortSignal: expect.any(AbortSignal),
-      expectedUserId: "member_telegram_123",
-      mailboxItemId: "mailbox_telegram:update:654",
-    });
-  });
-
-  it("signals Temporal for active-member Telegram messages", async () => {
-    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 655,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          member: {
-            billingStatus: HostedBillingStatus.active,
-            id: "member_telegram_123",
-            suspendedAt: null,
-          },
-        }),
-      },
-    });
-
-    await expect(handleHostedOnboardingTelegramWebhook({
-      prisma,
-      rawBody: JSON.stringify({
-        message: {
-          chat: {
-            id: 123,
-            type: "private",
-          },
-          date: 1_774_522_600,
-          from: {
-            first_name: "Alice",
-            id: 456,
-          },
-          message_id: 1,
-          text: "hello",
-        },
-        update_id: 655,
-      }),
-      secretToken: "telegram-secret",
-    })).resolves.toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
-
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      onSignalStarted: expect.any(Function),
-      abortSignal: expect.any(AbortSignal),
-      expectedUserId: "member_telegram_123",
-      mailboxItemId: "mailbox_telegram:update:655",
-    });
-  });
-
-  it("accepts Telegram webhooks whose secret header is missing", async () => {
-    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    const hostedMemberRoutingFindUnique = vi.fn().mockResolvedValue({
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_telegram_123",
-        invitedAt: "2026-03-01T00:00:00.000Z",
-        paymentGraceEndsAt: null,
-        stripeCurrentPeriodEndsAt: "2026-04-01T00:00:00.000Z",
-        stripeSubscriptionStatus: "active",
-        suspendedAt: null,
-      },
-    });
-    const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 321,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-      hostedMemberRouting: {
-        findUnique: hostedMemberRoutingFindUnique,
-      },
-    });
-
-    await expect(
-      handleHostedOnboardingTelegramWebhook({
-        prisma,
-        rawBody: JSON.stringify({
-          message: {
-            chat: {
-              id: 123,
-              type: "private",
-            },
-            date: 1_774_522_600,
-            from: {
-              first_name: "Alice",
-              id: 456,
-            },
-            message_id: 1,
-            text: "hello",
-          },
-          update_id: 321,
-        }),
-        secretToken: null,
-      }),
-    ).rejects.toMatchObject({
+  it.each([
+    {
+      name: "missing secret header",
+      configuredSecret: "telegram-secret",
+      secretToken: null,
       code: "TELEGRAM_WEBHOOK_SECRET_INVALID",
       httpStatus: 401,
-    });
-    expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-  });
-
-  it("rejects Telegram webhooks when the secret token does not match", async () => {
-    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    const hostedMemberRoutingFindUnique = vi.fn();
-    const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn(),
-        findUnique: vi.fn(),
-        updateMany: vi.fn(),
-      },
-      hostedMemberRouting: {
-        findUnique: hostedMemberRoutingFindUnique,
-      },
-    });
-
-    await expect(
-      handleHostedOnboardingTelegramWebhook({
-        prisma,
-        rawBody: JSON.stringify({
-          message: {
-            chat: {
-              id: 123,
-              type: "private",
-            },
-            date: 1_774_522_600,
-            from: {
-              first_name: "Alice",
-              id: 456,
-            },
-            message_id: 1,
-            text: "hello",
-          },
-          update_id: 321,
-        }),
-        secretToken: "wrong-secret",
-      }),
-    ).rejects.toMatchObject({
+    },
+    {
+      name: "mismatched secret header",
+      configuredSecret: "telegram-secret",
+      secretToken: "wrong-secret",
       code: "TELEGRAM_WEBHOOK_SECRET_INVALID",
       httpStatus: 401,
-    });
-    expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-  });
-
-  it("rejects Telegram webhooks when the server-side secret is not configured", async () => {
-    const hostedMemberRoutingFindUnique = vi.fn();
-    const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn(),
-        findUnique: vi.fn(),
-        updateMany: vi.fn(),
-      },
-      hostedMemberRouting: {
-        findUnique: hostedMemberRoutingFindUnique,
-      },
-    });
-
-    await expect(
-      handleHostedOnboardingTelegramWebhook({
-        prisma,
-        rawBody: JSON.stringify({
-          message: {
-            chat: {
-              id: 123,
-              type: "private",
-            },
-            date: 1_774_522_600,
-            from: {
-              first_name: "Alice",
-              id: 456,
-            },
-            message_id: 1,
-            text: "hello",
-          },
-          update_id: 321,
-        }),
-        secretToken: "telegram-secret",
-      }),
-    ).rejects.toMatchObject({
+    },
+    {
+      name: "unconfigured server secret",
+      configuredSecret: null,
+      secretToken: "telegram-secret",
       code: "TELEGRAM_WEBHOOK_SECRET_NOT_CONFIGURED",
       httpStatus: 500,
+    },
+  ])("rejects Telegram webhooks with $name before storage", async ({
+    configuredSecret,
+    secretToken,
+    code,
+    httpStatus,
+  }) => {
+    mocks.runtimeEnv.telegramWebhookSecret = configuredSecret;
+    const hostedMemberRoutingFindUnique = vi.fn();
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
+      },
     });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: buildDirectTelegramWebhookRawBody({ updateId: 321 }),
+      secretToken,
+    })).rejects.toMatchObject({ code, httpStatus });
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
@@ -4411,21 +4098,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedMemberRoutingFindUnique = vi.fn();
     const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 654,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
       hostedMemberRouting: {
         findUnique: hostedMemberRoutingFindUnique,
       },
@@ -4472,21 +4144,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedMemberRoutingFindUnique = vi.fn();
     const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 655,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
       hostedMemberRouting: {
         findUnique: hostedMemberRoutingFindUnique,
       },
@@ -4527,21 +4184,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
   it("dispatches direct-messages topic chats using the shared local direct-thread model", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 777,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
           member: {
@@ -4614,21 +4256,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       },
     });
     const prisma = withPrismaTransaction({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventPayload: {
-              updateId: 880,
-            },
-            receiptState: {
-              attemptCount: 1,
-              status: "processing",
-            },
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
       hostedMemberRouting: {
         findUnique: hostedMemberRoutingFindUnique,
       },
@@ -5108,47 +4735,6 @@ async function handleHostedOnboardingTelegramWebhook(
   input: HostedOnboardingTelegramWebhookTestInput,
 ) {
   return handleHostedOnboardingTelegramWebhookImpl(input as HostedOnboardingTelegramWebhookInput);
-}
-
-function readHostedWebhookSideEffectUpsertCalls(prisma: object | null | undefined): Record<string, unknown>[] {
-  const hostedWebhookReceiptSideEffect = (prisma as {
-    hostedWebhookReceiptSideEffect?: {
-      upsert?: {
-        mock?: {
-          calls?: unknown[][];
-        };
-      };
-    };
-  }).hostedWebhookReceiptSideEffect;
-
-  return (hostedWebhookReceiptSideEffect?.upsert?.mock?.calls ?? []).map((call) =>
-    normalizeHostedWebhookSideEffectUpsertCall(
-      ((call[0] as Record<string, unknown> | undefined) ?? {}),
-    )
-  );
-}
-
-function normalizeHostedWebhookSideEffectUpsertCall(
-  call: Record<string, unknown>,
-): Record<string, unknown> {
-  return {
-    ...call,
-    create: normalizeHostedWebhookSideEffectRecord(call.create),
-    update: normalizeHostedWebhookSideEffectRecord(call.update),
-  };
-}
-
-function normalizeHostedWebhookSideEffectRecord(value: unknown): Record<string, unknown> | unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return value;
-  }
-
-  const record = value as Record<string, unknown>;
-
-  return {
-    ...record,
-    dispatchPayloadJson: record.kind === "hosted_execution_dispatch" ? record.payloadJson ?? null : null,
-  };
 }
 
 function restoreEnvValue(key: string, value: string | undefined): void {

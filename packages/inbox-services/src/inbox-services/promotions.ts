@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
-import { readdir, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   acquireCanonicalWriteLock as acquireDefaultCanonicalWriteLock,
   normalizeOpaquePathSegment,
   normalizeRelativeVaultPath,
+  walkVaultFiles,
   withCanonicalWriteLockScope as withDefaultCanonicalWriteLockScope,
 } from '@murphai/core'
 import {
@@ -18,12 +19,12 @@ import {
   inboxPromotionStoreSchema,
   inboxPreserveDocumentAttachmentsResultSchema,
   type InboxPromotionEntry,
+  type InboxPromoteMealResult,
   type InboxPreservedDocument,
   type InboxPreserveDocumentAttachmentsResult,
 } from '@murphai/operator-config/inbox-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
-  CanonicalAttachmentPromotionResult,
   CanonicalPromotionLookupSpec,
   CanonicalPromotionManifest,
   CanonicalPromotionLookupTarget,
@@ -44,7 +45,6 @@ import type {
 import { isStoredDocumentAttachment } from './query.js'
 import { ensureInitialized } from './state.js'
 import {
-  fileExists,
   normalizeNullableString,
   relativeToVault,
 } from './shared.js'
@@ -52,7 +52,6 @@ import {
 const INBOX_PROMOTION_STORE_SCHEMA = 'murph.inbox-promotion-store.v1'
 const INBOX_PROMOTION_STORE_SCHEMA_VERSION = 1
 const RAW_MEALS_DIRECTORY = path.posix.join('raw', 'meals')
-const RAW_DOCUMENTS_DIRECTORY = path.posix.join('raw', 'documents')
 
 interface PromotionScope<TPrepared, TDerived> {
   input: PromoteInput
@@ -123,51 +122,36 @@ export async function persistPromotionEntry(input: {
   await writePromotionStore(input.paths, input.promotionStore)
 }
 
-export async function promoteCanonicalAttachmentImport<
-  TPrepared,
-  TAttachment extends RuntimeAttachmentRecord & { storedPath: string },
-  TManifest extends CanonicalPromotionManifest,
-  TContext,
-  TTarget extends CanonicalPromotionLookupTarget,
->(input: {
+export async function promoteMealAttachmentImport<TPrepared>(input: {
   input: PromoteInput
-  target: TTarget
   clock: () => Date
   loadInbox: () => Promise<InboxRuntimeModule>
   prepare(paths: InboxPaths): Promise<TPrepared>
   findRequiredAttachment(
     capture: RuntimeCaptureRecord,
-  ): TAttachment | undefined
+  ): (RuntimeAttachmentRecord & { storedPath: string }) | undefined
   missingAttachmentError(): VaultCliError
-  canonicalPromotionSpec: CanonicalPromotionLookupSpec<TManifest, TContext>
   buildCanonicalMatchContext(input: {
     paths: InboxPaths
     capture: RuntimeCaptureRecord
     prepared: TPrepared
-    attachment: TAttachment
-  }): Promise<TContext> | TContext
+    attachment: RuntimeAttachmentRecord & { storedPath: string }
+  }): Promise<{ photoSha256: string; audioSha256: string | null }>
   createPromotion(input: {
     paths: InboxPaths
     capture: RuntimeCaptureRecord
     prepared: TPrepared
-    attachment: TAttachment
+    attachment: RuntimeAttachmentRecord & { storedPath: string }
     metadata: CanonicalPromotionMetadata
   }): Promise<{
     lookupId: string
     relatedId: string
   }>
-  beforePersistPromotion?(input: {
-    attachment: TAttachment
-    capture: RuntimeCaptureRecord
-    paths: InboxPaths
-    prepared: TPrepared
-    relatedId: string
-  }): Promise<void>
-}): Promise<CanonicalAttachmentPromotionResult<TTarget>> {
-  return withPromotionScope<TPrepared, undefined, CanonicalAttachmentPromotionResult<TTarget>>(
+}): Promise<InboxPromoteMealResult> {
+  return withPromotionScope<TPrepared, undefined, InboxPromoteMealResult>(
     {
       input: input.input,
-      target: input.target,
+      target: 'meal',
       loadInbox: input.loadInbox,
       prepare: input.prepare,
       deriveBeforePromotionStore: () => undefined,
@@ -187,26 +171,27 @@ export async function promoteCanonicalAttachmentImport<
           throw input.missingAttachmentError()
         }
 
+        const context = await input.buildCanonicalMatchContext({
+          paths,
+          capture,
+          prepared,
+          attachment,
+        })
         const canonicalPromotion = await findCanonicalPromotionMatch({
           captureId: capture.captureId,
           absoluteVaultRoot: paths.absoluteVaultRoot,
-          spec: input.canonicalPromotionSpec,
-          context: await input.buildCanonicalMatchContext({
-            paths,
-            capture,
-            prepared,
-            attachment,
-          }),
+          spec: mealCanonicalPromotionSpec,
+          context,
+          manifestPaths: await listMealCanonicalManifestPaths(paths.absoluteVaultRoot),
           metadata,
         })
-        const beforePersistPromotion = input.beforePersistPromotion
         const promotion = await reconcileCanonicalImportPromotion({
           paths,
           promotionStore,
           existing,
           capture,
           clock: input.clock,
-          target: input.target,
+          target: 'meal',
           canonicalPromotion,
           note: metadata.note,
           createPromotion: () =>
@@ -217,25 +202,16 @@ export async function promoteCanonicalAttachmentImport<
               attachment,
               metadata,
             }),
-          beforePersistPromotion: beforePersistPromotion
-            ? (promotion) => beforePersistPromotion({
-              attachment,
-              capture,
-              paths,
-              prepared,
-              relatedId: promotion.relatedId,
-              })
-            : undefined,
         })
 
         return {
           vault: paths.absoluteVaultRoot,
           captureId: input.input.captureId,
-          target: input.target,
+          target: 'meal',
           lookupId: promotion.lookupId,
           relatedId: promotion.relatedId,
           created: promotion.created,
-        } as CanonicalAttachmentPromotionResult<TTarget>
+        }
       },
     },
   )
@@ -341,12 +317,12 @@ async function preserveCanonicalDocumentAttachmentsInternal(
       const evidenceByReceipt = new Map(
         evidenceGroups.map((group) => [documentReceiptKey(group), group.evidence]),
       )
-      const liveDocumentIdsByReceipt = new Map(
+      const manifestPathsByReceipt = new Map(
         evidenceGroups.map((group) => [
           documentReceiptKey(group),
           group.evidence === null
             ? null
-            : new Set(group.evidence.map((candidate) => candidate.documentId)),
+            : group.evidence.map((candidate) => candidate.manifestPath),
         ]),
       )
 
@@ -356,14 +332,14 @@ async function preserveCanonicalDocumentAttachmentsInternal(
           throw invalidExactDocumentAttachmentError()
         }
         const evidence = evidenceByReceipt.get(documentReceiptKey(receipt))
-        const liveDocumentIds = liveDocumentIdsByReceipt.get(
+        const manifestPaths = manifestPathsByReceipt.get(
           documentReceiptKey(receipt),
         )
         if (
           evidence === undefined ||
           evidence === null ||
-          liveDocumentIds === undefined ||
-          liveDocumentIds === null
+          manifestPaths === undefined ||
+          manifestPaths === null
         ) {
           throw canonicalDocumentPromotionMissingError(capture.captureId)
         }
@@ -406,7 +382,7 @@ async function preserveCanonicalDocumentAttachmentsInternal(
             documentSha256: receipt.sha256,
             title,
           },
-          liveRelatedIds: liveDocumentIds,
+          manifestPaths,
           metadata,
         })
         const promotion = canonicalPromotion
@@ -426,12 +402,14 @@ async function preserveCanonicalDocumentAttachmentsInternal(
               title: title ?? undefined,
               note: metadata.note ?? undefined,
               source: metadata.source ?? undefined,
-            }).then((result) => ({
-              created: true,
-              lookupId: result.documentId,
-              relatedId: result.documentId,
-            }))
-        liveDocumentIds.add(promotion.relatedId)
+            }).then((result) => {
+              manifestPaths.push(result.manifestPath)
+              return {
+                created: true,
+                lookupId: result.documentId,
+                relatedId: result.documentId,
+              }
+            })
 
         await core.recordInboxDocumentDefaultPromotion({
           attachmentId,
@@ -812,7 +790,6 @@ type CanonicalDocumentManifest = z.infer<typeof canonicalDocumentManifestSchema>
 
 export const mealCanonicalPromotionSpec = {
   target: 'meal',
-  manifestDirectory: RAW_MEALS_DIRECTORY,
   manifestSchema: canonicalMealManifestSchema,
   matchesManifest(
     manifest: CanonicalMealManifest,
@@ -843,7 +820,6 @@ export const mealCanonicalPromotionSpec = {
 
 export const documentCanonicalPromotionSpec = {
   target: 'document',
-  manifestDirectory: RAW_DOCUMENTS_DIRECTORY,
   manifestSchema: canonicalDocumentManifestSchema,
   matchesManifest(
     manifest: CanonicalDocumentManifest,
@@ -999,74 +975,54 @@ async function findCanonicalPromotionMatch<
   captureId: string
   absoluteVaultRoot: string
   context: TContext
-  liveRelatedIds?: ReadonlySet<string>
+  manifestPaths: readonly string[]
   metadata: CanonicalPromotionMetadata
   spec: CanonicalPromotionLookupSpec<TManifest, TContext>
 }): Promise<CanonicalPromotionMatch | null> {
-  const matches = (
-    await Promise.all(
-      (
-        await listCanonicalManifestPaths(
-          input.absoluteVaultRoot,
-          input.spec.manifestDirectory,
-        )
-      ).map(async (manifestPath) => {
-        const manifest = await readCanonicalManifest(
-          input.absoluteVaultRoot,
-          manifestPath,
-          input.spec.manifestSchema,
-        )
-        if (!manifest) {
-          return null
-        }
-
-        if (!input.spec.matchesManifest(manifest, input.context)) {
-          return null
-        }
-        if (
-          input.liveRelatedIds &&
-          !input.liveRelatedIds.has(manifest.importId)
-        ) {
-          return null
-        }
-        if (normalizeNullableString(manifest.source) !== input.metadata.source) {
-          return null
-        }
-
-        const occurredAt = extractCanonicalString(
-          manifest.provenance,
-          'occurredAt',
-        )
-        if (occurredAt !== input.metadata.occurredAt) {
-          return null
-        }
-
-        if (
-          normalizeNullableString(extractCanonicalString(manifest.provenance, 'note')) !==
-          input.metadata.note
-        ) {
-          return null
-        }
-
-        const lookupId =
-          normalizeNullableString(
-            extractCanonicalString(manifest.provenance, 'lookupId'),
-          ) ??
-          normalizeNullableString(
-            extractCanonicalString(manifest.provenance, 'eventId'),
-          )
-        if (!lookupId) {
-          return null
-        }
-
-        return {
-          lookupId,
-          promotedAt: manifest.importedAt,
-          relatedId: manifest.importId,
-        }
-      }),
+  const matches: CanonicalPromotionMatch[] = []
+  // Do not turn an unreadable authoritative record into permission to import again.
+  // Sequential reads bound open files while the canonical mutation lock is held.
+  for (const manifestPath of input.manifestPaths) {
+    const manifest = await readCanonicalManifest(
+      input.absoluteVaultRoot,
+      manifestPath,
+      input.spec.manifestSchema,
     )
-  ).filter((match): match is CanonicalPromotionMatch => match !== null)
+    if (!input.spec.matchesManifest(manifest, input.context)) {
+      continue
+    }
+    if (normalizeNullableString(manifest.source) !== input.metadata.source) {
+      continue
+    }
+
+    const occurredAt = extractCanonicalString(
+      manifest.provenance,
+      'occurredAt',
+    )
+    if (occurredAt !== input.metadata.occurredAt) {
+      continue
+    }
+
+    if (
+      normalizeNullableString(extractCanonicalString(manifest.provenance, 'note')) !==
+      input.metadata.note
+    ) {
+      continue
+    }
+
+    const lookupId =
+      normalizeNullableString(
+        extractCanonicalString(manifest.provenance, 'lookupId'),
+      ) ??
+      normalizeNullableString(
+        extractCanonicalString(manifest.provenance, 'eventId'),
+      )
+    if (!lookupId) {
+      continue
+    }
+
+    matches.push({ lookupId, promotedAt: manifest.importedAt, relatedId: manifest.importId })
+  }
 
   if (matches.length === 0) {
     return null
@@ -1148,9 +1104,6 @@ async function reconcileCanonicalImportPromotion(input: {
     lookupId: string
     relatedId: string
   }>
-  beforePersistPromotion?(input: {
-    relatedId: string
-  }): Promise<void>
 }): Promise<{
   lookupId: string
   relatedId: string
@@ -1162,9 +1115,6 @@ async function reconcileCanonicalImportPromotion(input: {
       input.canonicalPromotion,
       input.target,
     )
-    await input.beforePersistPromotion?.({
-      relatedId: input.canonicalPromotion.relatedId,
-    })
     await persistPromotionEntry({
       paths: input.paths,
       promotionStore: input.promotionStore,
@@ -1189,9 +1139,6 @@ async function reconcileCanonicalImportPromotion(input: {
   }
 
   const createdPromotion = await input.createPromotion()
-  await input.beforePersistPromotion?.({
-    relatedId: createdPromotion.relatedId,
-  })
   await persistPromotionEntry({
     paths: input.paths,
     promotionStore: input.promotionStore,
@@ -1311,64 +1258,23 @@ function isCanonicalWriteLockPort(value: unknown): value is CanonicalWriteLockPo
   )
 }
 
-async function listCanonicalManifestPaths(
+async function listMealCanonicalManifestPaths(
   absoluteVaultRoot: string,
-  manifestDirectory: string,
 ): Promise<string[]> {
-  return walkRelativeFiles(
-    absoluteVaultRoot,
-    manifestDirectory,
-    (fileName) =>
-      fileName === 'manifest.json' ||
-      (fileName.startsWith('manifest.') && fileName.endsWith('.json')),
-  )
-}
-
-async function walkRelativeFiles(
-  absoluteVaultRoot: string,
-  relativeDirectory: string,
-  matchesFileName: (fileName: string) => boolean,
-): Promise<string[]> {
-  const absoluteDirectory = path.join(absoluteVaultRoot, relativeDirectory)
-  if (!(await fileExists(absoluteDirectory))) {
-    return []
-  }
-
-  const matches: string[] = []
-  const stack = [absoluteDirectory]
-
-  while (stack.length > 0) {
-    const current = stack.pop()
-    if (!current) {
-      continue
-    }
-
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const absoluteEntry = path.join(current, entry.name)
-      if (entry.isDirectory()) {
-        stack.push(absoluteEntry)
-        continue
-      }
-      if (entry.isFile() && matchesFileName(entry.name)) {
-        matches.push(relativeToVault(absoluteVaultRoot, absoluteEntry))
-      }
-    }
-  }
-
-  return matches.sort((left, right) => left.localeCompare(right))
+  return (await walkVaultFiles(absoluteVaultRoot, RAW_MEALS_DIRECTORY, { extension: '.json' }))
+    .filter((relativePath) => {
+      const name = path.posix.basename(relativePath)
+      return name === 'manifest.json' || name.startsWith('manifest.')
+    })
 }
 
 async function readCanonicalManifest<TManifest>(
   absoluteVaultRoot: string,
   relativePath: string,
   schema: z.ZodType<TManifest>,
-): Promise<TManifest | null> {
-  try {
-    const raw = await readFile(path.join(absoluteVaultRoot, relativePath), 'utf8')
-    return schema.parse(JSON.parse(raw))
-  } catch {
-    return null
-  }
+): Promise<TManifest> {
+  const raw = await readFile(path.join(absoluteVaultRoot, relativePath), 'utf8')
+  return schema.parse(JSON.parse(raw))
 }
 
 function extractCanonicalString(

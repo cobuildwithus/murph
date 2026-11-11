@@ -33,7 +33,6 @@ export {
   deviceSyncProviderManifests,
   deviceSyncProviderRuntimeSecretEnvKeys,
   deviceSyncProviderRuntimeVariableEnvKeys,
-  getConfiguredDeviceSyncProviderManifest,
   getConfiguredDeviceSyncProviderJobDefinition,
   hasConfiguredDeviceSyncProviderConfigs,
   isDeviceConnectSourceAvailableForConnection,
@@ -42,7 +41,6 @@ export {
   listDeviceSyncProviderCatalog,
   listJunctionDeviceConnectRouteEntries,
   listJunctionLinkDeviceConnectRouteEntries,
-  listConfiguredDeviceSyncProviderManifests,
   listConfiguredDeviceSyncProviderNames,
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
@@ -64,7 +62,6 @@ export {
   shapeConfiguredDeviceSyncHostedHintPayload,
 } from "./config.ts";
 export type {
-  ConfiguredDeviceSyncProviderCapabilities,
   ConfiguredDeviceSyncProviderConfigByKey,
   ConfiguredDeviceSyncProviderConfigs,
   ConfiguredDeviceSyncProviderKey,
@@ -82,7 +79,6 @@ export type {
   DeviceSyncProviderJobDefinition,
   DeviceSyncProviderJobDefinitionMap,
   DeviceSyncConfiguredProviderManifest,
-  DeviceSyncConfiguredProviderManifestByKey,
   HostedHintFieldKind,
   HostedHintPayloadFieldMap,
   SerializableConfigFieldKind,

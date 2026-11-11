@@ -19,6 +19,7 @@ const END = "2026-04-02T00:00:00.000Z";
 
 function fixture(resource: string, overflowHours = false, overflowDay = "2026-04-01") {
   const requests: string[] = [];
+  const requestEnds: string[] = [];
   const imported: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = new URL(readUrl(input));
@@ -31,6 +32,7 @@ function fixture(resource: string, overflowHours = false, overflowDay = "2026-04
     assert.equal(url.pathname, `/v2/timeseries/junction-user-1/${resource}/grouped`);
     const start = requireValue(url.searchParams.get("start_date"), "query start");
     requests.push(start);
+    requestEnds.push(requireValue(url.searchParams.get("end_date"), "query end"));
     const timestamp = start.length === 10 ? `${start}T00:00:00.000Z` : start;
     return createJsonResponse({ groups: { garmin: [{
       data: Array.from({ length: start === overflowDay || overflowHours ? 25_001 : 1 }, () => ({
@@ -55,7 +57,7 @@ function fixture(resource: string, overflowHours = false, overflowDay = "2026-04
     eventType: `historical.data.${resource}.created`, resource, resourceCategory: "timeseries",
     sourceProviderSlug: "garmin", windowStart: START, windowEnd: END,
   });
-  return { provider, context, job, requests, imported };
+  return { provider, context, job, requests, requestEnds, imported };
 }
 
 test("resource record overflow resumes complete hours through the existing bounded owner", async () => {
@@ -73,14 +75,17 @@ test("resource record overflow resumes complete hours through the existing bound
     const before = f.requests.length;
     const restored = JSON.parse(JSON.stringify(continuation)) as DeviceSyncJobInput;
     result = await executeJunctionJob(f.provider, f.context, createJobFromInput(restored));
-    assert.ok(f.requests.length - before <= 1, "each durable suffix owns at most one complete hour");
+    assert.equal(f.requests.length - before, 1, "each durable suffix owns one complete hour");
     if (!result.scheduledJobs?.length) break;
     continuation = requireValue(result.scheduledJobs[0], "bounded suffix");
     assert.equal(continuation.payload?.timeseriesWindowHours, 1);
+    assert.equal(continuation.payload?.sourceProviderSlug, "garmin");
   }
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
   const hours = Array.from({ length: 24 }, (_, i) => new Date(Date.parse(START) + i * 3_600_000).toISOString());
   assert.deepEqual(f.requests.slice(1).map((value) => new Date(value).toISOString()), hours);
+  assert.deepEqual(f.requestEnds.slice(1).map((value) => new Date(value).toISOString()),
+    hours.map((value) => new Date(Date.parse(value) + 3_600_000).toISOString()));
   assert.deepEqual(f.imported.map((value) => new Date(value).toISOString()), hours);
 });
 
@@ -97,11 +102,61 @@ test("resource hourly overflow stays terminal to that attempt without partial im
   assert.deepEqual(f.imported, []);
 });
 
-test("daily aggregate resource overflow stays day-atomic", async () => {
-  const f = fixture("steps");
-  await assert.rejects(executeJunctionJob(f.provider, f.context, f.job));
-  assert.deepEqual(f.requests, ["2026-04-01"]);
+test("daily aggregate resource overflow stays day-atomic even with an hourly marker", async () => {
+  for (const marker of [undefined, 1]) {
+    const f = fixture("steps");
+    if (marker !== undefined) f.job.payload.timeseriesWindowHours = marker;
+    await assert.rejects(executeJunctionJob(f.provider, f.context, f.job));
+    assert.deepEqual(f.requests, ["2026-04-01"]);
+    assert.deepEqual(f.imported, []);
+  }
+});
+
+test("hourly resource continuation yields without reading or acknowledging the hour", async () => {
+  const f = fixture("heartrate");
+  f.job.payload.timeseriesWindowHours = 1;
+  f.context.shouldYield = () => true;
+  const result = await executeJunctionJob(f.provider, f.context, f.job);
+  assert.deepEqual(f.requests, []);
   assert.deepEqual(f.imported, []);
+  assert.equal(result.scheduledJobs?.[0]?.payload?.windowStart, START);
+  assert.equal(result.scheduledJobs?.[0]?.payload?.timeseriesWindowHours, 1);
+  assert.equal(result.continuationProgress, undefined);
+});
+
+test("hourly resource imports keep the post-fetch source admission check", async () => {
+  const f = fixture("heartrate");
+  f.job.payload.timeseriesWindowHours = 1;
+  f.context.listConnectionSources = async () => f.requests.length === 0
+    ? f.context.account.sources ?? []
+    : [];
+  await executeJunctionJob(f.provider, f.context, f.job);
+  assert.equal(f.requests.length, 1);
+  assert.deepEqual(f.imported, []);
+});
+
+test("hourly resource continuation rejects a partial-hour coordinate before collection", async () => {
+  const f = fixture("heartrate");
+  f.job.payload.timeseriesWindowHours = 1;
+  f.job.payload.windowStart = "2026-04-01T00:30:00.000Z";
+  await assert.rejects(executeJunctionJob(f.provider, f.context, f.job), {
+    code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID", retryable: false,
+  });
+  assert.deepEqual(f.requests, []);
+  assert.deepEqual(f.imported, []);
+});
+
+
+test("resource hourly reader rejects unsupported window markers before collection", async () => {
+  for (const marker of [0, 2, 24]) {
+    const f = fixture("heartrate");
+    f.job.payload.timeseriesWindowHours = marker;
+    await assert.rejects(executeJunctionJob(f.provider, f.context, f.job), {
+      code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID", retryable: false,
+    });
+    assert.deepEqual(f.requests, []);
+    assert.deepEqual(f.imported, []);
+  }
 });
 
 test("resource overflow preserves committed days before switching to hourly suffixes", async () => {
@@ -185,6 +240,16 @@ test("resource hourly recovery survives service enqueue, cold restore and hosted
     const [next] = runtime.store.listPendingJobsForAccount(account.id, 2);
     assert.equal(next?.payload.windowStart, "2026-04-01T01:00:00.000Z");
     assert.equal(next?.payload.timeseriesWindowHours, 1);
+    runtime.close();
+    now = requireValue(next, "next hourly suffix").availableAt;
+    runtime = open();
+    await runtime.service.runWorkerOnce(account.id);
+    assert.deepEqual(f.imported.map((value) => new Date(value).toISOString()), [
+      START, "2026-04-01T01:00:00.000Z",
+    ]);
+    const [following] = runtime.store.listPendingJobsForAccount(account.id, 2);
+    assert.equal(following?.payload.windowStart, "2026-04-01T02:00:00.000Z");
+    assert.equal(following?.payload.timeseriesWindowHours, 1);
   } finally {
     runtime.close();
     await rm(vaultRoot, { recursive: true, force: true });

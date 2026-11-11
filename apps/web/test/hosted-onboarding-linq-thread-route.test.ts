@@ -117,17 +117,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => {
   };
 });
 
-vi.mock("../src/lib/hosted-routing/thread-route-store", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("../src/lib/hosted-routing/thread-route-store")
-  >();
-  return {
-    ...actual,
-    requiresHostedThreadDeliveryRouteRefresh:
-      actual.requiresHostedThreadDeliveryRouteRefresh,
-  };
-});
-
 vi.mock("../src/lib/hosted-growth/usage-referral", () => ({
   bindArmedHostedUsageReferralToNewContainerTx:
     usageReferralMocks.bindArmedHostedUsageReferralToNewContainerTx,
@@ -1513,57 +1502,8 @@ function createStatefulThreadRoutePrisma() {
         ? { phoneNumberLookupKey: matched.phoneNumberLookupKey }
         : null;
     }),
-    updateMany: vi.fn().mockImplementation(async ({ data, where }: {
-      data: {
-        proactiveConversationCount?: { increment: number } | number;
-        proactiveConversationDayUtc?: Date;
-      };
-      where: {
-        OR?: Array<{
-          proactiveConversationDayUtc?: null | { not: Date };
-        }>;
-        phoneNumberLookupKey: string;
-        proactiveConversationCount?: { lt: number };
-        proactiveConversationDayUtc?: Date;
-      };
-    }) => {
-      const line = linqLines.get(where.phoneNumberLookupKey);
-      if (!line) {
-        return { count: 0 };
-      }
-      const sameDay =
-        where.proactiveConversationDayUtc === undefined
-        || line.proactiveConversationDayUtc?.getTime()
-          === where.proactiveConversationDayUtc.getTime();
-      const underLimit =
-        where.proactiveConversationCount === undefined
-        || (line.proactiveConversationCount ?? 0)
-          < where.proactiveConversationCount.lt;
-      const dayStartAllowed = Boolean(where.OR?.some((predicate) =>
-        predicate.proactiveConversationDayUtc === null
-          ? line.proactiveConversationDayUtc === null
-          : predicate.proactiveConversationDayUtc?.not
-            && line.proactiveConversationDayUtc?.getTime()
-              !== predicate.proactiveConversationDayUtc.not.getTime()
-      ));
-      if (
-        where.OR === undefined
-          ? !(sameDay && underLimit)
-          : !dayStartAllowed
-      ) {
-        return { count: 0 };
-      }
-      if (typeof data.proactiveConversationCount === "number") {
-        line.proactiveConversationCount = data.proactiveConversationCount;
-      } else if (data.proactiveConversationCount?.increment) {
-        line.proactiveConversationCount =
-          (line.proactiveConversationCount ?? 0)
-          + data.proactiveConversationCount.increment;
-      }
-      if (data.proactiveConversationDayUtc) {
-        line.proactiveConversationDayUtc = data.proactiveConversationDayUtc;
-      }
-      return { count: 1 };
+    updateMany: vi.fn(() => {
+      throw new Error("Group planning must defer line capacity claims to transport.");
     }),
   };
   const hostedLinqDelivery = {
@@ -5795,14 +5735,39 @@ describe("Linq group chat auto-provision", () => {
     }
   });
 
-  it("offers one group setup link for an unknown phone sender", async () => {
+  it.each([
+    {
+      label: "default admission",
+      requireFirstContactAdmission: undefined,
+      firstContactAdmissionDecision: undefined,
+    },
+    {
+      label: "disabled admission",
+      requireFirstContactAdmission: false,
+      firstContactAdmissionDecision: undefined,
+    },
+    {
+      label: "allowed admission",
+      requireFirstContactAdmission: true,
+      firstContactAdmissionDecision: {
+        confidence: 0.9,
+        kind: "allow",
+        source: "model",
+      } as const,
+    },
+  ])("offers one setup link to an unknown phone sender with $label", async ({
+    requireFirstContactAdmission,
+    firstContactAdmissionDecision,
+  }) => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
     mockSenderLookup(null);
 
     const plan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({}),
+      firstContactAdmissionDecision,
       prisma: prisma as never,
+      requireFirstContactAdmission,
     });
 
     expect(plan.response).toMatchObject({
@@ -5811,6 +5776,7 @@ describe("Linq group chat auto-provision", () => {
     });
     expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
       .toEqual(["group_setup"]);
+    expect(plan.firstContactAdmissionRequest).toBeUndefined();
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
   });
 
@@ -5896,31 +5862,6 @@ describe("Linq group chat auto-provision", () => {
     }
   });
 
-  it("offers the group setup link once first-contact admission allows the unknown sender", async () => {
-    const prisma = createStatefulThreadRoutePrisma();
-    prisma.seedActiveManagedLinqLine("+15550000000");
-    mockSenderLookup(null);
-
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
-      firstContactAdmissionDecision: {
-        confidence: 0.9,
-        kind: "allow",
-        source: "model",
-      },
-      prisma: prisma as never,
-      requireFirstContactAdmission: true,
-    });
-
-    expect(plan.response).toMatchObject({
-      ok: true,
-      reason: "sent-group-setup",
-    });
-    expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
-      .toEqual(["group_setup"]);
-    expect(plan.firstContactAdmissionRequest).toBeUndefined();
-  });
-
   it("plans one setup and private recovery link per day for an allowed unknown email sender", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
@@ -5974,28 +5915,6 @@ describe("Linq group chat auto-provision", () => {
     for (const effectId of effectIds(nextDay)) {
       expect(effectIds(firstOfDay)).not.toContain(effectId);
     }
-  });
-
-  it("offers the group setup link without an admission request when enforcement is off", async () => {
-    const prisma = createStatefulThreadRoutePrisma();
-    prisma.seedActiveManagedLinqLine("+15550000000");
-    mockSenderLookup(null);
-
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
-      prisma: prisma as never,
-      requireFirstContactAdmission: false,
-    });
-
-    // The gate is opt-in: with enforcement off the unknown sender is answered
-    // without asking the classifier.
-    expect(plan.response).toMatchObject({
-      ok: true,
-      reason: "sent-group-setup",
-    });
-    expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
-      .toEqual(["group_setup"]);
-    expect(plan.firstContactAdmissionRequest).toBeUndefined();
   });
 
   it("offers group setup to a known but inactive member without a first-contact admission request", async () => {
@@ -6327,7 +6246,16 @@ describe("Linq group chat auto-provision", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("uses another roster member's live setup when the sender is billing-inactive", async () => {
+  it.each([
+    {
+      label: "text",
+      parts: [{ type: "text" as const, value: "How did we sleep?" }],
+    },
+    {
+      label: "contentless",
+      parts: [{ type: "imessage_app" as const }],
+    },
+  ])("uses another roster member's live setup for an inactive sender's $label message", async ({ parts }) => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
     const setupOwnerMemberId = "member_other_live_setup";
@@ -6348,40 +6276,7 @@ describe("Linq group chat auto-provision", () => {
     });
 
     await expect(shouldPrepareHostedLinqThreadContainerCrypto({
-      event: buildLinqMessageReceivedEvent({}),
-      participantMemberIds: [setupOwnerMemberId],
-      prisma: prisma as never,
-    })).resolves.toBe(true);
-
-    expect(
-      pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx,
-    ).toHaveBeenCalled();
-  });
-
-  it("keeps another roster member's live setup for a contentless inactive-sender message", async () => {
-    const prisma = createStatefulThreadRoutePrisma();
-    prisma.seedActiveManagedLinqLine("+15550000000");
-    const setupOwnerMemberId = "member_other_contentless_setup";
-    pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx
-      .mockResolvedValue([{
-        armedAt: new Date("2026-06-24T00:00:00.000Z"),
-        id: "hpgs_other_contentless_owner",
-        ownerMemberId: setupOwnerMemberId,
-        recipientPhoneLookupKey: requireTestPhoneLookupKey("+15550000000"),
-      }]);
-    mockSenderLookup(senderCore);
-    prisma.hostedMember.findUnique.mockResolvedValue({
-      accountGroupMemberships: [],
-      billingStatus: HostedBillingStatus.canceled,
-      consentGrants: [],
-      suspendedAt: null,
-      threadContainer: null,
-    });
-
-    await expect(shouldPrepareHostedLinqThreadContainerCrypto({
-      event: buildLinqMessageReceivedEvent({
-        parts: [{ type: "imessage_app" }],
-      }),
+      event: buildLinqMessageReceivedEvent({ parts }),
       participantMemberIds: [setupOwnerMemberId],
       prisma: prisma as never,
     })).resolves.toBe(true);
@@ -7655,125 +7550,55 @@ describe("Linq group chat auto-provision", () => {
     },
   );
 
-  it("defers recovery sender capacity claims to transport", async () => {
+  it.each([
+    { label: "available", capped: false, pinnedHealth: null },
+    { label: "capped", capped: true, pinnedHealth: null },
+    { label: "missing", capped: false, pinnedHealth: null },
+    { label: "pinned healthy", capped: false, pinnedHealth: "healthy" },
+    { label: "pinned unhealthy", capped: false, pinnedHealth: "unhealthy" },
+  ] as const)("defers $label recovery sender selection and capacity to transport", async ({
+    label,
+    capped,
+    pinnedHealth,
+  }) => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000", {
       healthStatus: "unhealthy",
       providerReputationStatus: "CRITICAL",
     });
-    prisma.seedActiveManagedLinqLine("+15550000041", {
-      healthStatus: "healthy",
-      providerReputationStatus: "HEALTHY",
-    });
-    prisma.seedActiveManagedLinqLine("+15550000042", {
-      healthStatus: "healthy",
-      providerReputationStatus: "HEALTHY",
-    });
-    const lostLineLookupKey = createHostedPhoneLookupKey("+15550000041");
-    const selectedLineLookupKey = createHostedPhoneLookupKey("+15550000042");
-    if (!lostLineLookupKey || !selectedLineLookupKey) {
-      throw new Error("Expected recovery line lookup keys.");
-    }
-    const originalUpdateMany =
-      prisma.hostedLinqLine.updateMany.getMockImplementation();
-    if (!originalUpdateMany) {
-      throw new Error("Expected recovery line update fixture.");
-    }
-    prisma.hostedLinqLine.updateMany.mockImplementation(async (args: never) => {
-      const input = args as { where: { phoneNumberLookupKey: string } };
-      if (input.where.phoneNumberLookupKey === lostLineLookupKey) {
-        return { count: 0 };
+    if (label !== "missing") {
+      for (const phoneNumber of ["+15550000042", "+15550000043"]) {
+        prisma.seedActiveManagedLinqLine(phoneNumber, {
+          healthStatus: phoneNumber.endsWith("43") && pinnedHealth
+            ? pinnedHealth
+            : "healthy",
+          providerReputationStatus: phoneNumber.endsWith("43") && pinnedHealth === "unhealthy"
+            ? "CRITICAL"
+            : "HEALTHY",
+          maxNewConversationsPerDay: capped ? 1 : null,
+          proactiveConversationCount: capped ? 1 : null,
+          proactiveConversationDayUtc: capped ? new Date("2026-06-24T00:00:00.000Z") : null,
+        });
       }
-      return originalUpdateMany(args);
-    });
-    mockSenderLookup(senderCore);
-    mockHomeLinqRoute("+15550000000");
-    prisma.hostedMember.findUnique.mockResolvedValue({
-      accountGroupMemberships: [],
-      billingStatus: HostedBillingStatus.active,
-      suspendedAt: null,
-      threadContainer: null,
-    });
-
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
-      prisma: prisma as never,
-    });
-
-    expect(plan.response).toMatchObject({
-      ok: true,
-      reason: "sent-group-line-recovery",
-    });
-    expect(plan.desiredSideEffects[0]).toMatchObject({
-      payload: {
-        assignedRecipientPhone: null,
+    }
+    if (pinnedHealth) {
+      const effectId = buildHostedLinqGroupLineRecoveryEffectId({
         incomingRecipientPhone: "+15550000000",
-        template: "group_line_recovery",
-      },
-    });
-    expect(lostLineLookupKey).not.toBe(selectedLineLookupKey);
-    expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("defers capped healthy recovery senders to transport", async () => {
-    const prisma = createStatefulThreadRoutePrisma();
-    const dayUtc = new Date("2026-06-24T00:00:00.000Z");
-    prisma.seedActiveManagedLinqLine("+15550000000", {
-      healthStatus: "unhealthy",
-      providerReputationStatus: "CRITICAL",
-    });
-    for (const phoneNumber of ["+15550000042", "+15550000043"]) {
-      prisma.seedActiveManagedLinqLine(phoneNumber, {
-        healthStatus: "healthy",
-        maxNewConversationsPerDay: 1,
-        proactiveConversationCount: 1,
-        proactiveConversationDayUtc: dayUtc,
-        providerReputationStatus: "HEALTHY",
+        memberId: "member_owner_123",
+        threadId: "chat_group_123",
+      });
+      const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(effectId);
+      if (!idempotencyKey) {
+        throw new Error("Expected a recovery delivery lookup key.");
+      }
+      prisma.seedLinqDelivery({
+        id: "hld_group_recovery_retry",
+        idempotencyKey,
+        phoneNumberLookupKey: requireTestPhoneLookupKey("+15550000043"),
       });
     }
     mockSenderLookup(senderCore);
     mockHomeLinqRoute("+15550000000");
-    prisma.hostedMember.findUnique.mockResolvedValue({
-      accountGroupMemberships: [],
-      billingStatus: HostedBillingStatus.active,
-      suspendedAt: null,
-      threadContainer: null,
-    });
-
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
-      prisma: prisma as never,
-    });
-
-    expect(plan.response).toMatchObject({
-      ok: true,
-      reason: "sent-group-line-recovery",
-    });
-    expect(plan.response.ignored).toBeUndefined();
-    expect(plan.desiredSideEffects[0]).toMatchObject({
-      payload: {
-        assignedRecipientPhone: null,
-        incomingRecipientPhone: "+15550000000",
-        template: "group_line_recovery",
-      },
-    });
-    expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("defers missing healthy recovery senders to transport", async () => {
-    const prisma = createStatefulThreadRoutePrisma();
-    prisma.seedActiveManagedLinqLine("+15550000000", {
-      healthStatus: "unhealthy",
-      providerReputationStatus: "CRITICAL",
-    });
-    mockSenderLookup(senderCore);
-    mockHomeLinqRoute("+15550000000");
-    prisma.hostedMember.findUnique.mockResolvedValue({
-      accountGroupMemberships: [],
-      billingStatus: HostedBillingStatus.active,
-      suspendedAt: null,
-      threadContainer: null,
-    });
 
     const plan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({}),
@@ -7794,65 +7619,6 @@ describe("Linq group chat auto-provision", () => {
     });
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("does not inspect pinned recovery sender health during planning", async () => {
-    const prisma = createStatefulThreadRoutePrisma();
-    prisma.seedActiveManagedLinqLine("+15550000000", {
-      healthStatus: "unhealthy",
-      providerReputationStatus: "CRITICAL",
-    });
-    prisma.seedActiveManagedLinqLine("+15550000042", {
-      healthStatus: "healthy",
-      providerReputationStatus: "HEALTHY",
-    });
-    prisma.seedActiveManagedLinqLine("+15550000043", {
-      healthStatus: "unhealthy",
-      providerReputationStatus: "CRITICAL",
-    });
-    const effectId = buildHostedLinqGroupLineRecoveryEffectId({
-      incomingRecipientPhone: "+15550000000",
-      memberId: "member_owner_123",
-      threadId: "chat_group_123",
-    });
-    const idempotencyLookupKey =
-      createHostedLinqDeliveryIdempotencyLookupKey(effectId);
-    const pinnedLineLookupKey = createHostedPhoneLookupKey("+15550000043");
-    if (!idempotencyLookupKey || !pinnedLineLookupKey) {
-      throw new Error("Expected recovery delivery lookup keys.");
-    }
-    prisma.seedLinqDelivery({
-      id: "hld_group_recovery_unhealthy_retry",
-      idempotencyKey: idempotencyLookupKey,
-      phoneNumberLookupKey: pinnedLineLookupKey,
-    });
-    mockSenderLookup(senderCore);
-    mockHomeLinqRoute("+15550000000");
-    prisma.hostedMember.findUnique.mockResolvedValue({
-      accountGroupMemberships: [],
-      billingStatus: HostedBillingStatus.active,
-      suspendedAt: null,
-      threadContainer: null,
-    });
-
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
-      prisma: prisma as never,
-    });
-
-    expect(plan.response).toMatchObject({
-      ok: true,
-      reason: "sent-group-line-recovery",
-    });
-    expect(plan.response.ignored).toBeUndefined();
-    expect(plan.desiredSideEffects[0]).toMatchObject({
-      payload: {
-        assignedRecipientPhone: null,
-        incomingRecipientPhone: "+15550000000",
-        template: "group_line_recovery",
-      },
-    });
     expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
   });
 
@@ -7889,64 +7655,6 @@ describe("Linq group chat auto-provision", () => {
     expect(plan.desiredSideEffects).toEqual([]);
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("does not inspect pinned healthy recovery sender during planning", async () => {
-    const prisma = createStatefulThreadRoutePrisma();
-    prisma.seedActiveManagedLinqLine("+15550000000", {
-      healthStatus: "unhealthy",
-      providerReputationStatus: "CRITICAL",
-    });
-    prisma.seedActiveManagedLinqLine("+15550000042", {
-      healthStatus: "healthy",
-      providerReputationStatus: "HEALTHY",
-    });
-    prisma.seedActiveManagedLinqLine("+15550000043", {
-      healthStatus: "healthy",
-      providerReputationStatus: "HEALTHY",
-    });
-    const effectId = buildHostedLinqGroupLineRecoveryEffectId({
-      incomingRecipientPhone: "+15550000000",
-      memberId: "member_owner_123",
-      threadId: "chat_group_123",
-    });
-    const idempotencyLookupKey =
-      createHostedLinqDeliveryIdempotencyLookupKey(effectId);
-    const pinnedLineLookupKey = createHostedPhoneLookupKey("+15550000043");
-    if (!idempotencyLookupKey || !pinnedLineLookupKey) {
-      throw new Error("Expected recovery delivery lookup keys.");
-    }
-    prisma.seedLinqDelivery({
-      id: "hld_group_recovery_retry",
-      idempotencyKey: idempotencyLookupKey,
-      phoneNumberLookupKey: pinnedLineLookupKey,
-    });
-    mockSenderLookup(senderCore);
-    mockHomeLinqRoute("+15550000000");
-    prisma.hostedMember.findUnique.mockResolvedValue({
-      accountGroupMemberships: [],
-      billingStatus: HostedBillingStatus.active,
-      suspendedAt: null,
-      threadContainer: null,
-    });
-
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({}),
-      prisma: prisma as never,
-    });
-
-    expect(plan.response).toMatchObject({
-      ok: true,
-      reason: "sent-group-line-recovery",
-    });
-    expect(plan.desiredSideEffects[0]).toMatchObject({
-      payload: {
-        assignedRecipientPhone: null,
-        incomingRecipientPhone: "+15550000000",
-        template: "group_line_recovery",
-      },
-    });
     expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
   });
 

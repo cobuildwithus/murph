@@ -2429,24 +2429,12 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_CODE_FIELDS = [
   "providerRequestQueryParameterNames",
   "providerResponseErrorCode",
   "providerResponseShapeKind",
-  "providerOAuthErrorCode",
-  "providerOAuthGrantType",
-  "providerOAuthRequestBodyBuilderKind",
-  "providerOAuthRequestClientAuthPlacement",
-  "providerOAuthRequestContentType",
-  "providerOAuthRequestEncodingKind",
-  "providerOAuthRequestMethod",
-  "providerOAuthRequestParameterNames",
-  "providerOAuthRequestScopeValue",
-  "providerOAuthRequestTokenEndpointKind",
-  "providerOAuthResponseShapeKind",
 ] as const satisfies readonly DeviceSyncFailureDiagnosticStringField[];
 
 const DEVICE_SYNC_FAILURE_DIAGNOSTIC_REASON_FIELDS = [
   "failureErrorCause",
   "providerHttpStatusText",
   "providerResponseErrorDescription",
-  "providerOAuthErrorDescription",
 ] as const satisfies readonly DeviceSyncFailureDiagnosticStringField[];
 
 const DEVICE_SYNC_FAILURE_DIAGNOSTIC_NUMBER_FIELDS = [
@@ -2458,23 +2446,12 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_NUMBER_FIELDS = [
   "providerRequestCandidateCount",
   "providerRequestCandidateOrdinal",
   "providerRequestQueryParameterCount",
-  "providerOAuthRequestDuplicateParameterCount",
-  "providerOAuthRequestParameterCount",
-  "providerOAuthRequestScopeCount",
 ] as const satisfies readonly DeviceSyncFailureDiagnosticNumberField[];
 
 const DEVICE_SYNC_FAILURE_DIAGNOSTIC_BOOLEAN_FIELDS = [
   "providerRequestCredentialPresent",
   "providerResponseErrorDescriptionFieldPresent",
   "providerResponseErrorFieldPresent",
-  "providerOAuthRequestClientCredentialPresent",
-  "providerOAuthRequestClientIdPresent",
-  "providerOAuthRequestHasDuplicateParameters",
-  "providerOAuthRequestOfflineScopePresent",
-  "providerOAuthRequestRefreshCredentialPresent",
-  "providerOAuthRequestScopePresent",
-  "providerOAuthResponseErrorDescriptionFieldPresent",
-  "providerOAuthResponseErrorFieldPresent",
 ] as const satisfies readonly DeviceSyncFailureDiagnosticBooleanField[];
 
 const JUNCTION_ECG_DIAGNOSTIC_COUNT_FIELDS = [

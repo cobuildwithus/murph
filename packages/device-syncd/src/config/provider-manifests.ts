@@ -17,7 +17,7 @@ import { JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA, type SerializableConfigFi
 import { normalizeJunctionProviderFilter } from "./junction-connect-sources.ts";
 import { normalizeString } from "../shared.ts";
 
-import type { ConfiguredDeviceSyncProviderConfigByKey, ConfiguredDeviceSyncProviderKey, ConfiguredDeviceSyncProviderPresence, DeviceSyncEnvSource, JunctionDeviceSyncProviderConfig, SerializableConfiguredDeviceSyncProviderConfigByKey } from "./provider-types.ts";
+import type { ConfiguredDeviceSyncProviderKey, DeviceSyncEnvSource, JunctionDeviceSyncProviderConfig, SerializableConfiguredDeviceSyncProviderConfigByKey } from "./provider-types.ts";
 import type { DeviceSyncProviderCredentialPolicy } from "../types.ts";
 
 export type { SerializableConfigFieldKind } from "./serializable-provider-configs.ts";
@@ -64,14 +64,6 @@ export type DeviceSyncJobPayloadOf<Definition extends DeviceSyncProviderJobDefin
 
 export type HostedHintPayloadFieldMap = Readonly<Record<string, HostedHintFieldKind>>;
 
-export interface ConfiguredDeviceSyncProviderCapabilities {
-  remoteDisconnect: boolean;
-  scheduledPoll: boolean;
-  tokenRefresh: boolean;
-  webhookAdmin: boolean;
-  webhookPush: boolean;
-}
-
 export interface DeviceSyncProviderCatalogEntry {
   provider: ConfiguredDeviceSyncProviderKey;
   displayName: string;
@@ -81,28 +73,18 @@ export interface DeviceSyncProviderCatalogEntry {
   defaultScopes: string[];
 }
 
-export interface DeviceSyncConfiguredProviderManifest<
-  TProvider extends ConfiguredDeviceSyncProviderKey = ConfiguredDeviceSyncProviderKey,
-  TConfig extends ConfiguredDeviceSyncProviderConfigByKey[TProvider] = ConfiguredDeviceSyncProviderConfigByKey[TProvider],
-  TSerializableConfig extends SerializableConfiguredDeviceSyncProviderConfigByKey[TProvider] = SerializableConfiguredDeviceSyncProviderConfigByKey[TProvider],
-> {
-  provider: TProvider;
-  capabilities: ConfiguredDeviceSyncProviderCapabilities;
+export interface DeviceSyncConfiguredProviderManifest {
+  provider: ConfiguredDeviceSyncProviderKey;
   credentialPolicy: DeviceSyncProviderCredentialPolicy;
   descriptor: DeviceProviderDescriptor;
   disallowedSerializableFields?: Readonly<Record<string, string>>;
   env: DeviceSyncProviderEnvSpec;
   jobs: DeviceSyncProviderJobDefinitionMap;
-  readConfig(env: DeviceSyncEnvSource): TConfig | null;
-  serializableFields: Readonly<Record<Extract<keyof TSerializableConfig, string>, SerializableConfigFieldKind>>;
-}
-
-export interface DeviceSyncConfiguredProviderManifestByKey {
-  junction: DeviceSyncConfiguredProviderManifest<
-    "junction",
-    ConfiguredDeviceSyncProviderConfigByKey["junction"],
-    SerializableConfiguredDeviceSyncProviderConfigByKey["junction"]
-  >;
+  readConfig(env: DeviceSyncEnvSource): JunctionDeviceSyncProviderConfig | null;
+  serializableFields: Readonly<Record<
+    Extract<keyof SerializableConfiguredDeviceSyncProviderConfigByKey["junction"], string>,
+    SerializableConfigFieldKind
+  >>;
 }
 
 const JUNCTION_SYNC = requireDeviceProviderSyncDescriptor(
@@ -192,34 +174,26 @@ export type JunctionDeviceSyncJobPayloads = {
   >;
 };
 
-const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
-  "junction",
-  ConfiguredDeviceSyncProviderConfigByKey["junction"],
-  SerializableConfiguredDeviceSyncProviderConfigByKey["junction"]
->({
+const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = Object.freeze({
   provider: "junction",
   credentialPolicy: {
     kind: "provider_config",
     providerConfigKey: "junction",
   },
   descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
-  env: JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC,
+  env: freezeDeviceSyncProviderEnvSpec(JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC),
   readConfig: readConfiguredJunctionDeviceSyncProviderConfig,
   serializableFields: JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields,
   disallowedSerializableFields:
     JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields,
   jobs: freezeConfiguredDeviceSyncProviderJobDefinitions(JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS),
-});
-
-export const deviceSyncProviderManifestByKey = Object.freeze({
-  junction: JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST,
-} as const satisfies DeviceSyncConfiguredProviderManifestByKey);
+} satisfies DeviceSyncConfiguredProviderManifest);
 
 export { configuredDeviceSyncProviderKeys };
 
-export const deviceSyncProviderManifests = Object.freeze(
-  configuredDeviceSyncProviderKeys.map((provider) => deviceSyncProviderManifestByKey[provider]),
-);
+export const deviceSyncProviderManifests = Object.freeze([
+  JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST,
+]);
 
 export const deviceSyncProviderRuntimeSecretEnvKeys = Object.freeze(
   uniqueDeviceSyncProviderEnvKeys(
@@ -233,22 +207,12 @@ export const deviceSyncProviderRuntimeVariableEnvKeys = Object.freeze(
   ),
 );
 
-export function getConfiguredDeviceSyncProviderManifest<
-  TProvider extends ConfiguredDeviceSyncProviderKey,
->(provider: TProvider): DeviceSyncConfiguredProviderManifestByKey[TProvider] {
-  return deviceSyncProviderManifestByKey[provider];
-}
-
 export function resolveConfiguredDeviceSyncProviderManifest(
   provider: string,
 ): DeviceSyncConfiguredProviderManifest | undefined {
-  const key = normalizeDeviceProviderKey(provider);
-
-  if (!key || !isConfiguredDeviceSyncProviderKey(key)) {
-    return undefined;
-  }
-
-  return deviceSyncProviderManifestByKey[key];
+  return normalizeDeviceProviderKey(provider) === "junction"
+    ? JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST
+    : undefined;
 }
 
 export function requireConfiguredDeviceSyncProviderManifest(
@@ -265,14 +229,6 @@ export function requireConfiguredDeviceSyncProviderManifest(
 
 export { listConfiguredDeviceSyncProviderNames };
 
-export function listConfiguredDeviceSyncProviderManifests(
-  configs: ConfiguredDeviceSyncProviderPresence,
-): DeviceSyncConfiguredProviderManifest[] {
-  return listConfiguredDeviceSyncProviderNames(configs).map(
-    (provider) => deviceSyncProviderManifestByKey[provider],
-  );
-}
-
 export function listDeviceSyncProviderCatalog(): DeviceSyncProviderCatalogEntry[] {
   return deviceSyncProviderManifests.map((manifest) => {
     const connection = resolveDeviceProviderConnectionDescriptor(manifest.descriptor);
@@ -282,16 +238,10 @@ export function listDeviceSyncProviderCatalog(): DeviceSyncProviderCatalogEntry[
       displayName: manifest.descriptor.displayName,
       callbackPath: connection.callbackPath ?? null,
       webhookPath: manifest.descriptor.webhook?.path ?? null,
-      supportsWebhooks: manifest.capabilities.webhookPush,
+      supportsWebhooks: manifest.descriptor.transportModes.includes("webhook_push"),
       defaultScopes: [...(connection.defaultScopes ?? [])],
     };
   });
-}
-
-export function getConfiguredDeviceSyncProviderDescriptor<
-  TProvider extends ConfiguredDeviceSyncProviderKey,
->(provider: TProvider): DeviceSyncConfiguredProviderManifestByKey[TProvider]["descriptor"] {
-  return deviceSyncProviderManifestByKey[provider].descriptor;
 }
 
 export function resolveConfiguredDeviceSyncProviderDescriptor(
@@ -307,20 +257,6 @@ export interface NormalizedJunctionDeviceSyncRuntimeConfig {
   reconcileIntervalMs: number;
   summaryResources: string[];
   timeseriesResources: string[];
-}
-
-export function buildConfiguredDeviceSyncProviderRuntimeDescriptor<
-  TProvider extends ConfiguredDeviceSyncProviderKey,
->(
-  provider: TProvider,
-  config: ConfiguredDeviceSyncProviderConfigByKey[TProvider],
-): DeviceProviderDescriptor {
-  switch (provider) {
-    case "junction":
-      return buildJunctionDeviceSyncRuntimeDescriptor(
-        config as ConfiguredDeviceSyncProviderConfigByKey["junction"],
-      );
-  }
 }
 
 export function normalizeJunctionDeviceSyncRuntimeConfig(
@@ -368,7 +304,7 @@ export function buildJunctionDeviceSyncRuntimeDescriptor(
   const runtimeConfig = normalizeJunctionDeviceSyncRuntimeConfig(config);
 
   return {
-    ...getConfiguredDeviceSyncProviderDescriptor("junction"),
+    ...JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
     sync: {
       ...JUNCTION_SYNC,
       windows: {
@@ -529,46 +465,6 @@ function freezeConfiguredDeviceSyncProviderJobDefinitions(
       ),
     ),
   );
-}
-
-function defineConfiguredDeviceSyncProviderManifest<
-  TProvider extends ConfiguredDeviceSyncProviderKey,
-  TConfig extends ConfiguredDeviceSyncProviderConfigByKey[TProvider],
-  TSerializableConfig extends SerializableConfiguredDeviceSyncProviderConfigByKey[TProvider],
->(
-  input: Omit<
-    DeviceSyncConfiguredProviderManifest<TProvider, TConfig, TSerializableConfig>,
-    "capabilities"
-  >,
-): DeviceSyncConfiguredProviderManifest<TProvider, TConfig, TSerializableConfig> {
-  return Object.freeze({
-    ...input,
-    capabilities: Object.freeze(deriveConfiguredDeviceSyncProviderCapabilities(input.descriptor)),
-    disallowedSerializableFields: input.disallowedSerializableFields
-      ? Object.freeze({ ...input.disallowedSerializableFields })
-      : undefined,
-    env: freezeDeviceSyncProviderEnvSpec(input.env),
-    jobs: input.jobs,
-    serializableFields: Object.freeze({ ...input.serializableFields }),
-  });
-}
-
-function deriveConfiguredDeviceSyncProviderCapabilities(
-  descriptor: DeviceProviderDescriptor,
-): ConfiguredDeviceSyncProviderCapabilities {
-  return {
-    remoteDisconnect: Boolean(descriptor.sync?.supportsRemoteDisconnect),
-    scheduledPoll: descriptor.transportModes.includes("scheduled_poll"),
-    tokenRefresh: Boolean(descriptor.sync?.supportsTokenRefresh),
-    webhookAdmin: Boolean(descriptor.webhook?.supportsAdmin),
-    webhookPush: descriptor.transportModes.includes("webhook_push"),
-  };
-}
-
-function isConfiguredDeviceSyncProviderKey(
-  value: string,
-): value is ConfiguredDeviceSyncProviderKey {
-  return Object.prototype.hasOwnProperty.call(deviceSyncProviderManifestByKey, value);
 }
 
 function freezeDeviceSyncProviderEnvSpec(env: DeviceSyncProviderEnvSpec): DeviceSyncProviderEnvSpec {
