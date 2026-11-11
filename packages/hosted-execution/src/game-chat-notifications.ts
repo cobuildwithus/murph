@@ -254,7 +254,7 @@ export function buildGameEveningCheckInInstructions(input: {
   players: readonly { memberId: string; playerName: string; tasks: readonly { gameId: string; task: string }[] }[];
 }): string {
   return [
-    "This is the room's one evening check-in. Read the transcript in context. Omit a task only if its player clearly said they did it, will do it, or will not do it for the supplied date. Statements about another day or task do not count. Ask about any remaining tasks; if none remain, stay quiet.",
+    "This is an evening check-in opportunity. Read the transcript in context and the supplied accepted-message evidence. Omit a task only if its player clearly said they did it, will do it, or will not do it for the supplied date, or an equivalent reminder was already sent for that person, task and date. Statements about another day or task do not count. Keep other uncovered tasks and people. A reminder or stated intention is not completion. If nothing remains, stay quiet.",
     "Otherwise send one short, plain, friendly question addressed by name to everyone still open. Name each person's remaining tasks. For two people, ask one joint question with one question mark, for example: 'Ava, are you doing your pushups, and Bea, are you taking your walk today?' Do not write a separate question, sentence or message per person or game.",
     "Never shame, joke about bodies or weight, mention scores, ask another person to nudge them, name time zones, or say a reminder was scheduled. No vs., em dashes or spaced hyphens. Do not mention internal IDs or delivery details.",
     GAME_PRIZE_WORDS,

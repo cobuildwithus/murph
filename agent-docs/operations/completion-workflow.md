@@ -221,6 +221,10 @@ Treat review findings as claims to verify, not implementation instructions.
 Read the actual path and dependency contract. Accept bugs only with a realistic
 trigger, serious harm, and code-path evidence. Accept Complexity Collapse only
 with concrete removable complexity and proof of preserved behavior/invariants.
+This includes pre-existing complexity in the touched flow's connected owners,
+state, and recovery paths when the correction and its verification fit the PR's
+scope. Assess the surrounding design, not only added lines; reject unrelated
+rewrites and cleanup whose migration cost outweighs the simplification.
 Reject wrong, speculative,
 already-handled, disproportionate, or out-of-scope findings with a reason.
 Rejected findings need no reviewer agreement.
