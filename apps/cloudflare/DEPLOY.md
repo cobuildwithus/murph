@@ -2559,6 +2559,13 @@ native behavior proof can adopt a stale image.
 Registry errors, stale labels, wrong platforms, and deadline exhaustion fail
 closed without weakening normal image admission or native sandbox proof.
 
+An explicitly authorized operator can prebuild and publish through the same
+`--push` command before CI starts; see
+[Prebuild the native image locally](README.md#prebuild-the-native-image-locally)
+for GHCR authentication, builder setup, shared-tag coordination, and matching
+compiler settings. This publishes build artifacts and cache only. Production
+credentials and deployment remain in the protected private workflow.
+
 The public Web admission workflow runs this wait in a separate prerequisite job
 before entering the credentialed admission job or minting its one-hour private
 App token. The existing 80-minute admission job, 58-minute controller credential

@@ -16,7 +16,7 @@ export function hostedRunnerBaseImageFingerprintTag(fingerprint: string): string
   return `${hostedRunnerBaseImageRepository}:source-${fingerprint}`;
 }
 
-// Only the protected-main image publisher writes this cache. PRs and local
-// builds import it; the complete Dockerfile/patch fingerprint still admits images.
+// The protected-main publisher and authorized local prebuilds write this cache.
+// Ordinary local/PR builds import it; full source fingerprints still admit images.
 export const hostedRunnerBaseImageBuildCacheTag =
   `${hostedRunnerBaseImageRepository}:buildcache-main`;
