@@ -7493,6 +7493,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const yieldStates: boolean[] = [];
+    const yieldAfterImport: boolean[] = [];
+    let readYieldState = () => false;
 
     try {
       await saveAssistantAutomationState(vaultRoot, {
@@ -7514,7 +7516,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
-        async importItem(item) {
+        async importItem(item, context) {
           importedSeqs.push(item.item.laneSeq);
           if (item.item.laneSeq === "1") {
             return { status: "imported" };
@@ -7530,9 +7532,20 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             inputId: staged.inputId,
             vaultRoot,
           });
+          context?.onConversationInputStaged?.("linq");
           return {
             assistantInputId: staged.inputId,
             status: "imported",
+            async afterCheckpoint() {
+              yieldAfterImport.push(readYieldState());
+              return {
+                kind: "inbox_projection",
+                projectionUpdated: false,
+                attachmentEvidenceUpdated: false,
+                status: "succeeded",
+                reasonCode: null,
+              };
+            },
           };
         },
         limitPerLane: 10,
@@ -7543,6 +7556,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         requestId: "request_synthetic_runner_after_checkpoint_yield",
         runtimeWakeSignal,
         async runAssistantPhase(input) {
+          readYieldState = () => input.shouldYieldBackgroundMaintenance?.() ?? false;
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
           assert.equal(input.backgroundMaintenanceSignal?.aborted, false);
           return {
@@ -7622,6 +7636,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(importedSeqs, ["1", "2"]);
       assert.deepEqual(yieldStates, [false, true]);
+      assert.deepEqual(yieldAfterImport, [true]);
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "2");
       assert.equal(result.runtimeStateDirty, true);
       assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
