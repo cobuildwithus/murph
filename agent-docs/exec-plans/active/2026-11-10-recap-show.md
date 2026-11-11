@@ -40,6 +40,8 @@ Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the own
 
 25. **Round 2 canonical draft identity (B2, accepted):** hash the result of `gameRecapDraftSchema.parse`, so optional-card normalization cannot change a frozen selection solely by property order. The Postgres prepare → stage → accept path now covers zero, one and two valid cards with selected media, normalization and same-draft retries; changed content still rejects. All 90 game service cases pass.
 
+26. **Round 2 content-addressed retirement (B3, accepted):** retirement checks the exact owner prefix and encrypted suffix, then delegates media identity validation to `requireHostedRecapMediaId`, matching writes. Real Worker purge tests cover JPEG/MP3 hashes before and after upload, content-free tombstones, cross-owner denial and late/identical re-upload rejection. Account-deletion Postgres cases register keys through `recapMediaKey` and claim both retired receipts, including when the encryption owner survives. Six storage and 26 account-deletion cases pass.
+
 ## PR A execution
 
 Outcome: pair players receive one accepted themed recap through one text line and link. Full, sparse, failed-media and retired generations use the existing game authority; groups retain their current path. Proof includes contract fixtures, focused unit/Postgres checks and synthetic live parent journeys. Native visual implementation remains separate work; child forwarding is canceled.

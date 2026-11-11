@@ -1,6 +1,6 @@
 import type { R2BucketLike } from "./bundle-store.ts";
 import { requireHostedGameMediaEnvelope } from "./game-media-store.ts";
-import { hostedRecapMediaObjectKey, hostedRecapMediaUserPrefix } from "./storage-paths.ts";
+import { hostedRecapMediaObjectKey, hostedRecapMediaUserPrefix, requireHostedRecapMediaId } from "./storage-paths.ts";
 
 type Stored = { version: 1; hash: string; envelope: string } | { version: 1; retired: true };
 const decoder = new TextDecoder();
@@ -40,10 +40,11 @@ export function createRecapMediaStore(input: { bucket: R2BucketLike; userId: str
 
 export async function retireRecapMediaObject(input: { bucket: R2BucketLike; userId: string; objectKey: string }): Promise<void> {
   const prefix = hostedRecapMediaUserPrefix(input);
-  const suffix = input.objectKey.slice(prefix.length);
-  if (!input.objectKey.startsWith(prefix) || !/^recap\/[a-f0-9]{32}\/(?:scene-[0-6]\.jpg|song\.mp3)\.json\.enc$/u.test(suffix)) {
+  const suffix = ".json.enc";
+  if (!input.objectKey.startsWith(prefix) || !input.objectKey.endsWith(suffix)) {
     throw new TypeError("Recap retirement is outside its owner namespace.");
   }
+  requireHostedRecapMediaId(input.objectKey.slice(prefix.length, -suffix.length));
   await input.bucket.put(input.objectKey, tombstone, { httpMetadata: { contentType: "application/json" } });
 }
 

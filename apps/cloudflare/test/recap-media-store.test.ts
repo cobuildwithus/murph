@@ -1,3 +1,5 @@
+import { hostedRecapMediaObjectKey } from '../src/storage-paths.ts';
+import { purgeHostedRuntimeResource } from '../src/worker/route-handlers/runtime-resource-purge.ts';
 import { describe, expect, it } from "vitest";
 import { createRecapMediaStore, retireRecapMediaObject } from "../src/recap-media-store.ts";
 import { recapMediaRoutes } from "../src/worker/route-handlers/recap-media.ts";
@@ -32,6 +34,22 @@ describe("recap sealed storage", () => {
       await expect(store.write(id, envelope, "a".repeat(64))).rejects.toThrow("retired");
       expect(await store.read(id)).toBeNull();
       expect([...bucket.objects.values()]).toEqual(['{"version":1,"retired":true}']);
+    }
+  });
+  it.each(['jpg', 'mp3'])('tombstones content-hash %s keys through the real purge path before and after upload', async extension => {
+    const mediaId = `recap/${'b'.repeat(32)}/${'c'.repeat(64)}.${extension}`;
+    const userId = 'synthetic-surviving-owner';
+    for (const uploadFirst of [false, true]) {
+      const bucket = new ConditionalBucket();
+      const store = createRecapMediaStore({ bucket, userId });
+      const objectKey = hostedRecapMediaObjectKey({ userId, mediaId });
+      if (uploadFirst) await store.write(mediaId, envelope, 'c'.repeat(64));
+      await purgeHostedRuntimeResource({ source: { BUNDLES: bucket }, userId, resource: { kind: 'game_recap', objectKey } });
+      expect(bucket.objects.get(objectKey)).toBe('{"version":1,"retired":true}');
+      expect(await store.read(mediaId)).toBeNull();
+      await expect(store.write(mediaId, envelope, 'c'.repeat(64))).rejects.toThrow('retired');
+      await expect(store.write(mediaId, envelope, 'd'.repeat(64))).rejects.toThrow('retired');
+      await expect(purgeHostedRuntimeResource({ source: { BUNDLES: bucket }, userId: 'synthetic-other-owner', resource: { kind: 'game_recap', objectKey } })).rejects.toThrow();
     }
   });
   it("rejects plaintext, upload-family keys, oversized data and cross-owner retirement", async () => {

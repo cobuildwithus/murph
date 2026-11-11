@@ -1,3 +1,5 @@
+import { recapGenerationId, recapMediaKey } from '@/src/lib/game/recap-submission';
+import { claimHostedRuntimeResourceCleanup } from '@/src/lib/hosted-execution/runtime-resource-cleanup';
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { registerRecapAssetsTx } from "@/src/lib/game/recap-retirement";
 import { randomUUID } from "node:crypto";
@@ -175,8 +177,12 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     await words(leo, gameId, "Leo day one");
     await words(ava, gameId, "Ava day one");
     await getPrisma().game.update({ where: { id: gameId }, data: { recapEncrypted: "synthetic-must-clear" } });
-    await getPrisma().$transaction(tx => registerRecapAssetsTx(tx, { gameId, generationId: "a".repeat(32), ownerMemberId: leo,
-      storageKeys: [`recap/${"a".repeat(32)}/scene-0.jpg`], acceptedAt: new Date(), mediaDeadline: new Date(Date.now() + 600_000) }));
+    const recapEventId = `synthetic-recap:${gameId}`;
+    const storageKeys = (['image/jpeg', 'audio/mpeg'] as const).map((mediaType, index) => recapMediaKey(recapEventId, {
+      operationId: `synthetic-media-${index}`, path: 'media/synthetic', hash: String(index + 1).repeat(64), mediaType, byteLength: 100,
+    }));
+    await getPrisma().$transaction(tx => registerRecapAssetsTx(tx, { gameId, generationId: recapGenerationId(recapEventId), ownerMemberId: leo,
+      storageKeys, acceptedAt: new Date(), mediaDeadline: new Date(Date.now() + 600_000) }));
     const [gone, stays] = leaver === "creator" ? [leo, ava] : [ava, leo];
     expect(await deleteAccount(gone)).toEqual({ calledOff: 2, deleted: 0, kept: 2 });
     expect(await readGame(secondGame, stays)).toMatchObject({ status: "void" });
@@ -184,9 +190,15 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     const view = (await readGame(gameId, stays))!;
     expect(view).toMatchObject({ status: "void", result: null, tickets: [], settlesAt: null });
     expect((await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).recapEncrypted).toBeNull();
-    const receipt = await getPrisma().gameRecapAsset.findFirstOrThrow({ where: { resourceId: { startsWith: `${gameId}|` } } });
-    expect(receipt.retiredAt).not.toBeNull();
-    expect(receipt.userId).toBe(leo);
+    const receipts = await getPrisma().gameRecapAsset.findMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
+    expect(receipts).toHaveLength(2);
+    for (const receipt of receipts) {
+      expect(receipt.retiredAt).not.toBeNull();
+      expect(receipt.userId).toBe(leo);
+      expect(storageKeys.some(key => receipt.objectKey.endsWith(`${key}.json.enc`))).toBe(true);
+    }
+    const claimed = await claimHostedRuntimeResourceCleanup({ prisma: getPrisma(), now: new Date() });
+    expect(claimed.orphans.filter(row => row.kind === 'game_recap' && row.resourceId.startsWith(`${gameId}|`))).toHaveLength(2);
     await getPrisma().gameRecapAsset.deleteMany({ where: { userId: leo } });
     const left = view.players.find((player) => player.left);
     // The name the remaining player knew them by: Leo's own label for Ava, or Leo's own name.
