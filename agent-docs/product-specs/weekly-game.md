@@ -1079,8 +1079,10 @@ names only the requested changes and asks the other player naturally. It mention
 a date only for an explicit start-date change, omitting cutoff times and routine
 check-in preservation text. An
 ordinary contextual agreement is enough. App proposals, including Suggest
-changes on an invite, post their one model-written request right after the app
-write commits; the minute sweep is recovery only. A proposal made in chat is explained by Murph in its normal reply,
+changes on an invite, schedule their one model-written request after the app
+response. Talk notes and rematch announcements use the same post-response window.
+The accepted command and its delivery receipt commit first; the minute sweep
+recovers interrupted delivery. A proposal made in chat is explained by Murph in its normal reply,
 without a duplicate announcement. The app shows it waiting for agreement, not
 as a separately delivered notification. New group creation uses that same first
 message, rather than a generic opener followed by another message. Initial

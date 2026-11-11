@@ -6729,7 +6729,12 @@ Agreement atomically reserves an `awaiting_generation` row in the existing Linq
 delivery table, keyed `game-started:<gameId>`. App `change_proposed` events,
 including initial invite negotiation, reserve the ordinary
 `game-change:<gameId>:<proposalId>` identity. There is no separate negotiation
-intro. Chat-origin proposals instead store `origin: chat` and
+intro. The app schedules proposal, Talk and rematch delivery with Next `after`
+once the write commits; it does not await provider work before returning the
+accepted state. Outside a request, the caller awaits that same work. The existing
+lifecycle sweep recovers interrupted delivery. Pure database-to-rule conversion
+lives in `game/row.ts`, so Talk and reminder readers do not import the command
+service just to construct rule inputs. Chat-origin proposals instead store `origin: chat` and
 `deliveryStatus: conversation`: Murph's ordinary turn asks the other player,
 without a second backend notification or any claim that its reply was delivered.
 App notifications use shared instruction builders and `require_send`, not exact
