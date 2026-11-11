@@ -2225,12 +2225,20 @@
       "path": ".agents/friction-log/20261110150916-review-archive-fixtures/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#4836",
+      "path": ".agents/friction-log/20261110232635-worktree-storage-guard/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#4838",
       "path": ".agents/friction-log/20261111114337-browser-ci-cannot/friction.md"
     },
     {
       "issue": "cobuildwithus/murph#4855",
       "path": ".agents/friction-log/20261111162237-device-admission-proof/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4858",
+      "path": ".agents/friction-log/20261111165435-notification-history-fixture/friction.md"
     }
   ],
   "version": 1
