@@ -40,7 +40,8 @@ existing recap and silently retires its delivery receipt.
 - Focused deterministic proof passes: contracts/fixtures, file media and game
   tools, notification planning/failure, legacy mailbox no-op, private media
   retirement/account deletion, trusted scope and the single parallel-safe cap.
-  Latest focused Web PostgreSQL run: 187 tests across four suites.
+  Focused Web PostgreSQL: 187 tests across four suites pass both before and
+  after the post-deploy contract migration drops the column locally.
 - Complete first provider request capture with identical individual/group
   fixtures: 133248/147820 bytes at both base and candidate. The deferred media
   schema catalog shrinks 157 bytes; no exact Sol tokenizer is available.
@@ -54,4 +55,5 @@ existing recap and silently retires its delivery receipt.
   patched native Codex binary; the standard binary lacks `--ignore-user-config`.
   No paid calls or production actions have run. This is a proof gap, not a pass.
 
-Status: active; candidate implementation complete, live/native proof pending.
+Candidate PR: #4837. Status: active; implementation complete, live/native proof
+pending. No ReviewGPT requested or started.
