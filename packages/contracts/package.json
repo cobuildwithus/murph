@@ -53,7 +53,17 @@
       "import": "./dist/zod-runtime.js",
       "default": "./dist/zod-runtime.js"
     },
-    "./generated/*": "./generated/*"
+    "./generated/*": "./generated/*",
+    "./recap-show": {
+      "types": "./dist/recap-show.d.ts",
+      "import": "./dist/recap-show.js",
+      "default": "./dist/recap-show.js"
+    },
+    "./recap-validation": {
+      "types": "./dist/recap-validation.d.ts",
+      "import": "./dist/recap-validation.js",
+      "default": "./dist/recap-validation.js"
+    }
   },
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist tsconfig.build.tsbuildinfo tsconfig.scripts.tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json --pretty false && node ../../scripts/run-typescript.mjs package -p tsconfig.scripts.json --pretty false",
