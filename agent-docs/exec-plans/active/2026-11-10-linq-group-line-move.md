@@ -52,6 +52,18 @@ existing warnings; workspace typecheck and documentation drift pass, and
 complexity debt is unchanged. The new full review, exact-head CI and deployment
 remain gates.
 
+Round 2 full-snapshot ReviewGPT passes on candidate
+ca510a5905b085b0b4e099931e862331d71fe050 with no qualifying findings. CI exposed
+the already-recorded workspace wake timing flake; its isolated test passes.
+An upstream Ubuntu DNS outage repeatedly prevented the browser lanes from
+installing dependencies. The tooling-only correction permits an independent
+pinned-browser download after that failure, but requires real headed and
+headless launches under Xvfb before the unchanged browser tests. Download,
+native-library and launch failures remain fatal, and the 14-minute ceiling is
+unchanged. Focused installer and billing workflow tests pass (45 tests), as does
+workspace typecheck. The runtime design reviewed in round 2 is unchanged;
+this CI correction does not require another runtime review.
+
 ## Legacy route projection follow-up
 
 Outcome: an authorized silent move can start for a legacy route whose nullable

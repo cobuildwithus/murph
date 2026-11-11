@@ -22,4 +22,19 @@ Acquire::http::Timeout "$APT_TIMEOUT_SECONDS";
 Acquire::https::Timeout "$APT_TIMEOUT_SECONDS";
 EOF
 
-exec pnpm --dir apps/web exec playwright install --with-deps chromium
+if pnpm --dir apps/web exec playwright install --with-deps chromium; then
+  exit 0
+fi
+
+# An unavailable Ubuntu mirror need not block runners that already have the
+# browser libraries. Prove both browser modes before accepting that fallback;
+# the callers still run their normal rendering and hydration checks afterward.
+echo "Dependency installation failed; checking the installed browser runtime." >&2
+pnpm --dir apps/web exec playwright install chromium
+exec xvfb-run --auto-servernum pnpm --dir apps/web exec node --input-type=module -e '
+  import { chromium } from "@playwright/test";
+  for (const headless of [true, false]) {
+    const browser = await chromium.launch({ headless });
+    await browser.close();
+  }
+'

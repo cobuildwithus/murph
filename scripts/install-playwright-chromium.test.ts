@@ -37,7 +37,7 @@ function writeExecutable(filePath: string, contents: string): void {
 }
 
 /** Executes the shipped wrapper while replacing only its external commands. */
-function runWrapper(input: { pnpmExit?: number } = {}) {
+function runWrapper(input: { dependencyExit?: number; downloadExit?: number; browserExit?: number } = {}) {
   const sharedTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
   if (!sharedTempRoot) throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
   const root = mkdtempSync(path.join(sharedTempRoot, "playwright-install-"));
@@ -62,15 +62,25 @@ function runWrapper(input: { pnpmExit?: number } = {}) {
     [
       "#!/usr/bin/env bash",
       'printf \'%s\\n\' "$*" >> "$MURPH_TEST_STATE_DIR/pnpm-calls"',
-      'exit "${MURPH_TEST_PNPM_EXIT:-0}"',
+      'if [[ "$*" == *"install --with-deps"* ]]; then exit "$MURPH_TEST_DEPENDENCY_EXIT"; fi',
+      'if [[ "$*" == *"exec node"* ]]; then exit "$MURPH_TEST_BROWSER_EXIT"; fi',
+      'exit "$MURPH_TEST_DOWNLOAD_EXIT"',
     ].join("\n"),
   );
+  writeExecutable(path.join(binDirectory, "xvfb-run"), [
+    "#!/usr/bin/env bash",
+    '[[ "$1" == "--auto-servernum" ]] || exit 2',
+    'shift',
+    'exec "$@"',
+  ].join("\n"));
 
   const result = spawnSync("bash", [scriptPath], {
     encoding: "utf8",
     env: {
       ...process.env,
-      MURPH_TEST_PNPM_EXIT: String(input.pnpmExit ?? 0),
+      MURPH_TEST_DEPENDENCY_EXIT: String(input.dependencyExit ?? 0),
+      MURPH_TEST_DOWNLOAD_EXIT: String(input.downloadExit ?? 0),
+      MURPH_TEST_BROWSER_EXIT: String(input.browserExit ?? 0),
       MURPH_TEST_STATE_DIR: root,
       PATH: `${binDirectory}:${process.env.PATH ?? ""}`,
     },
@@ -107,12 +117,25 @@ describe("install-playwright-chromium.sh", () => {
     );
   });
 
-  it("propagates the one Playwright invocation's final status", () => {
-    const { result, root } = runWrapper({ pnpmExit: 7 });
+  it("requires a successful browser probe after a dependency failure", () => {
+    const { result, root } = runWrapper({ dependencyExit: 100 });
+    expect(result.status).toBe(0);
+    const calls = readFileSync(path.join(root, "pnpm-calls"), "utf8");
+    expect(calls).toContain("playwright install --with-deps chromium\n--dir apps/web exec playwright install chromium\n");
+    expect(calls).toContain("--dir apps/web exec node --input-type=module -e");
+  });
+
+  it("retains a failed browser download without launching a probe", () => {
+    const { result, root } = runWrapper({ dependencyExit: 100, downloadExit: 7 });
 
     expect(result.status).toBe(7);
     expect(readFileSync(path.join(root, "pnpm-calls"), "utf8").trim().split("\n"))
-      .toHaveLength(1);
+      .toHaveLength(2);
+  });
+
+  it("fails when the installed browser runtime cannot launch", () => {
+    const { result } = runWrapper({ dependencyExit: 100, browserExit: 9 });
+    expect(result.status).toBe(9);
   });
 
   it("keeps an overall timeout ceiling on every Ubuntu caller", () => {
