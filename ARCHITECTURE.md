@@ -4004,15 +4004,25 @@ reference can also start a legacy route.
 The legacy notice hash column remains nullable for rollout;
 new code omits it. Drain old Web before producing null-hash reservations.
 
-The pending-delivery veto excludes only empty historical runtime dispatch fences
-and accepted runtime/webhook sends after a 15-minute drain. Attempt and update
-times must both precede the cutoff, as must a non-null acceptance time for an
-accepted row. A dispatch fence must have no acceptance, message, failure or
-receipt evidence. All three payload fields must be absent. Other sources,
-generation work and saved obligations retain the veto regardless of age.
-This is a read-only interpretation of deduplication history, never a delivery
-success claim or ledger rewrite; mailbox/runtime and locked route checks still
-apply, and subsequent dispatches retain the existing move-aware route fence.
+The pending-delivery veto excludes accepted runtime/webhook history after a
+15-minute drain. Attempt, update and non-null acceptance times must precede
+the cutoff, and all three payload fields must be absent. An empty historical
+runtime dispatch fence additionally requires a trusted outbox-quiescence witness
+bound to the current member-owned workspace snapshot. The existing full outbox
+inventory at idle snapshot construction emits that witness only when no intent
+is active or awaiting delivery confirmation; failed or untrusted inventory
+clears it. Missing, stale, foreign or future snapshot evidence retains the veto.
+Both fence timestamps must precede that snapshot and the drain cutoff, with no
+acceptance, message, failure or receipt evidence. Age alone cannot exclude a
+retryable runtime obligation. Other sources, generation work and saved payloads
+retain the veto regardless of age.
+Start locks the runtime owner through reservation, serializing with runtime
+claims and checkpoints, and adds one indexed workspace metadata read when idle.
+Snapshot construction reuses its existing inventory without another scan or
+foreground work. Older writers cannot carry a witness onto a different snapshot;
+either-side rollback fails closed. This is a read-only interpretation of history,
+never a success claim or ledger rewrite. Mailbox and locked route checks still
+apply, and later dispatches retain the existing move-aware route fence.
 
 Cancellation claims `remove_started_at` once under the source-chat lock before
 dispatch and records `remove_accepted_at` only after a successful provider

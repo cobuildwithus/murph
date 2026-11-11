@@ -3748,6 +3748,8 @@ export const HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS = [
 ] as const;
 
 export type HostedRuntimeRedactedScalar = boolean | null | number | string;
+/** Snapshot-bound settlement evidence, produced only by the trusted full outbox scan. */
+export const HOSTED_OUTBOX_QUIESCENT_SNAPSHOT_STATUS_KEY = "hostedOutboxQuiescentSnapshotId";
 export type HostedRuntimeRedactedObject = Record<string, HostedRuntimeRedactedScalar>;
 export type HostedRuntimeRedactedValue =
   | HostedRuntimeRedactedScalar

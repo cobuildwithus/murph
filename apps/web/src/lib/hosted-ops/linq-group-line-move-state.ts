@@ -1,5 +1,8 @@
 import "server-only";
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { HOSTED_OUTBOX_QUIESCENT_SNAPSHOT_STATUS_KEY } from "@murphai/hosted-execution/runtime-control";
+import { isHostedWorkspaceSnapshotV2Ref, parseHostedExecutionSnapshotRef } from "@murphai/hosted-execution/parsers";
+import { lockHostedRuntimeOwnerRowTx } from "../hosted-execution/runtime-owner";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates, createHostedLinqChatLookupKeyReadCandidates, createHostedPhoneLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { getHostedLinqChatSummary, type HostedLinqChatSummary } from "../hosted-onboarding/linq-client";
@@ -16,7 +19,7 @@ export const groupMoveOperatorSelect = { ...linqGroupMoveSelect, addStartedAt: t
 export type OperatorGroupMove = Prisma.HostedLinqGroupLineMoveGetPayload<{ select: typeof groupMoveOperatorSelect }>;
 export const GROUP_MOVE_QUIET_MS = 60_000;
 export const GROUP_MOVE_ADOPTION_MS = 24 * 60 * 60_000;
-// Outlast provider dispatch and the three-minute terminal-retry horizon.
+// Drain recent provider work; age alone never proves runtime outbox settlement.
 const GROUP_MOVE_DELIVERY_DRAIN_MS = 15 * 60_000;
 
 export function groupMoveError(code: string): never {
@@ -106,7 +109,7 @@ export async function assertGroupMoveReservationAvailable(input: {
   if (conflict) groupMoveError("MOVE_CONFLICT");
 }
 
-/** Indexed existence probes, never payload scans or runtime workspace reads. */
+/** Indexed control metadata probes; never open payloads or the runtime archive. */
 export async function assertGroupMoveQuiet(input: { containerMemberId: string; chatId: string; prisma: Prisma.TransactionClient }) {
   const { prisma, containerMemberId } = input;
   const cutoff = new Date(Date.now() - GROUP_MOVE_QUIET_MS);
@@ -122,23 +125,42 @@ export async function assertGroupMoveQuiet(input: { containerMemberId: string; c
     progress.consumedSeqByLane.find(consumed => consumed.lane === row.lane)?.consumedSeq ?? "0"));
   const recentConversation = await prisma.hostedMailboxItem.findFirst({ where: { userId: containerMemberId,
     kind: "conversation.message", createdAt: { gte: cutoff } }, select: { id: true } });
-  const runtime = await prisma.hostedRuntimeOwner.findUnique({ where: { userId: containerMemberId }, select: { phase: true } });
+  const runtime = await lockHostedRuntimeOwnerRowTx(prisma, containerMemberId);
   const drainedBefore = new Date(Date.now() - GROUP_MOVE_DELIVERY_DRAIN_MS);
+  const settledBefore = runtime?.phase === "idle"
+    ? await readQuiescentSnapshotTime(prisma, containerMemberId) : null;
   const delivery = await prisma.hostedLinqDelivery.findFirst({ where: {
     OR: [{ linqChatLookupKey: { in: chatKeys } }, { payloadOwnerMemberId: containerMemberId }],
     status: { in: ["attempted", "provider_dispatch_started", "accepted", "awaiting_generation", "generation_queued"] },
-    // The ledger also retains deduplication history. Only known empty historical
-    // shapes cease to veto; saved obligations and unknown sources remain pending.
+    // Accepted sends also persist as deduplication history. An uncorrelated
+    // dispatch fence can still own a runtime outbox retry, regardless of age.
     NOT: {
       payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null,
       attemptedAt: { lt: drainedBefore }, updatedAt: { lt: drainedBefore },
       OR: [
         { status: "accepted", acceptedAt: { not: null, lt: drainedBefore },
           source: { in: ["hosted_runtime_linq_delivery", "hosted_webhook_side_effect"] } },
-        { status: "provider_dispatch_started", source: "hosted_runtime_linq_delivery",
-          acceptedAt: null, messageLookupKey: null, failedAt: null, failureCode: null, lastReceiptAt: null },
+        ...(settledBefore ? [{ status: "provider_dispatch_started", source: "hosted_runtime_linq_delivery",
+          attemptedAt: { lt: settledBefore }, updatedAt: { lt: settledBefore },
+          acceptedAt: null, deliveredAt: null, skippedAt: null, messageLookupKey: null,
+          failedAt: null, failureCode: null, lastReceiptAt: null, retryAfterAt: null }] : []),
       ],
     },
   }, select: { id: true } });
   if (pending || recentConversation || (runtime && runtime.phase !== "idle") || delivery) groupMoveError("WORK_PENDING");
+}
+
+async function readQuiescentSnapshotTime(prisma: Prisma.TransactionClient, userId: string): Promise<Date | null> {
+  const workspace = await prisma.hostedWorkspace.findUnique({ where: { userId },
+    select: { snapshotRef: true, redactedStatusJson: true } });
+  const status = workspace?.redactedStatusJson;
+  if (!status || typeof status !== "object" || Array.isArray(status)) return null;
+  try {
+    const snapshot = parseHostedExecutionSnapshotRef(workspace.snapshotRef);
+    if (!isHostedWorkspaceSnapshotV2Ref(snapshot) || snapshot.userId !== userId
+      || snapshot.encryption.aad.userId !== userId
+      || status[HOSTED_OUTBOX_QUIESCENT_SNAPSHOT_STATUS_KEY] !== snapshot.snapshotId) return null;
+    const at = new Date(snapshot.createdAt);
+    return Number.isFinite(at.getTime()) && at.getTime() <= Date.now() ? at : null;
+  } catch { return null; }
 }

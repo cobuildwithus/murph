@@ -4,38 +4,53 @@ Status: active
 Created: 2026-11-10
 Updated: 2026-11-11
 
-## Historical delivery quietness follow-up
+## Historical delivery settlement follow-up
 
-Outcome: an idle group can move despite historical delivery-ledger metadata,
-without treating saved obligations or current provider activity as settled.
-Reaches: operator starts after legacy runtime dispatches and confirmed sends.
-Proof: synthetic PostgreSQL cases must reproduce the historical veto, preserve
-the ledger byte-for-byte, and keep recent, incomplete and replayable work blocked.
+Outcome: existing groups can move past historical delivery metadata while every
+unsettled outbox obligation retains its original route and retry opportunity.
+Reaches: confirmed legacy sends, idle runtimes with deferred retries, and empty
+outboxes whose old Web dispatch fences have no terminal receipt.
+Proof: real PostgreSQL producer/consumer cases plus canonical outbox and snapshot
+publication tests; keep missing, stale, incomplete and active evidence fail-closed.
 
-The ledger is also a deduplication/receipt owner, not solely a pending-work queue.
-Legacy runtime and webhook sends can remain accepted without group receipts;
-an empty runtime dispatch fence carries no Web-owned retry payload. Exempt only
-these known shapes after a conservative 15-minute drain, checking both attempt
-and update times and an old acceptance time for accepted rows. Require all
-payload fields absent; uncorrelated runtime dispatches must also have no outcome
-or receipt evidence. Other sources, generation work and saved payloads continue
-to veto. Canonical mailbox progress, runtime idleness, source-chat locking and
-fresh route revalidation remain mandatory. No ledger rewrite, new state,
-migration, provider call or ingress/reply-path work is added.
+Review of candidate 06521196bafab6c80a9a853b5e8f0347fa1fd426 found one accepted
+High: an empty Web dispatch fence can still represent a checkpointed runtime
+outbox retry. Its timestamp does not advance on replay, and mailbox acknowledgement
+plus runtime idleness does not prove settlement. The 15-minute age-only exemption
+is removed. The regression reproduces the unsafe move through the production
+fence writer after a 31-minute idle interval, then proves rejection until the
+normal delivery outcome writer settles it. Confirmed historical sends retain
+the narrow age/source/payload exemption.
 
-The window exceeds the current three-minute terminal-retry horizon and bounded
-provider request. A new runtime dispatch still traverses the existing locked
-route/move authority. Existing consumers understand the same rows during skew;
-an older producer conservatively rejects starts. The canary remains pending
-until focused proof, review, exact-head CI and managed Web deployment complete.
+For unresolved historical fences, derive a snapshot-bound settlement witness from
+the existing complete outbox inventory in generated-delivery cleanup. It is true
+only for a trusted scan with no active or confirmation-pending intent. Snapshot
+completion writes the current snapshot ID or null in the existing checkpoint
+status; it never carries a prior witness into a replacement snapshot. No new
+scan, table, queue, provider call or model decision is needed. Old writers omit
+the witness or retain a mismatched old ID and cannot authorize the exception.
 
-The three historical-shape cases failed before the correction. All 109 focused
-producer/consumer PostgreSQL, move-unit and Ops-route tests now pass, including
-same-container adoption, duplicate-event suppression and departure after each
-historical shape. Thirteen veto cases preserve recent attempt/update/acceptance,
-the drain window, incomplete acceptance, each saved-payload field, unknown
-sources, generation and partial dispatch evidence. No prompt or model decision
-surface changes; deterministic provider-shaped proof is the applicable boundary.
+Operator start locks runtime ownership, requires idle, and checks the witness
+against the current validated member-bound snapshot. Only empty historical
+runtime dispatch fences older than that snapshot and the conservative drain can
+then cease to veto. Saved payloads, recent fences, partial outcomes and unknown
+sources still block. The ledger itself is never rewritten. One bounded workspace
+metadata read is added only to operator start; snapshot inventory work is reused.
+
+The current runtime and Web readers/writers must converge before the canary, then
+a fresh idle snapshot supplies the proof. Reverting either side loses the
+exception safely. This settlement extension changes a protocol/authority boundary
+after round 1 and therefore requires a fresh full final review on the stable head.
+The active plan stays open through the provider canary and duplicate repair.
+
+Focused settlement proof passes: 116 Web producer, consumer and route tests;
+43 engine residue tests; and all 158 snapshot bridge tests. The real-writer retry
+regression first reproduced the unsafe reservation on the age-only candidate.
+The corrected cases preserve its veto, then allow canonical acceptance or a
+current trusted snapshot to settle historical evidence. Web lint passes with
+existing warnings; workspace typecheck and documentation drift pass, and
+complexity debt is unchanged. The new full review, exact-head CI and deployment
+remain gates.
 
 ## Legacy route projection follow-up
 
