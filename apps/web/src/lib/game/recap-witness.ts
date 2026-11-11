@@ -1,4 +1,5 @@
 import "server-only";
+import { retireGameRecapAssetsTx } from "./recap-retirement";
 
 import type { Game, Prisma } from "@prisma/client";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
@@ -112,5 +113,9 @@ export function gameRecapStoryMayQuoteEntry(witness: readonly string[] | null, e
 /** Takedown, in its own game-locked transaction. */
 export async function clearGameRecapQuotingEntryTx(tx: Prisma.TransactionClient, gameId: string, entryId: string): Promise<void> {
   const witnesses = await readGameRecapStoryWitnesses(tx, [gameId]);
-  if (gameRecapStoryMayQuoteEntry(witnesses.get(gameId) ?? null, entryId)) await tx.game.update({ where: { id: gameId }, data: { recapEncrypted: null } });
+  if (gameRecapStoryMayQuoteEntry(witnesses.get(gameId) ?? null, entryId)) {
+    const game = await tx.game.findUniqueOrThrow({ where: { id: gameId }, select: { wordsOwnerMemberId: true } });
+    await retireGameRecapAssetsTx(tx, gameId, game.wordsOwnerMemberId);
+    await tx.game.update({ where: { id: gameId }, data: { recapEncrypted: null } });
+  }
 }

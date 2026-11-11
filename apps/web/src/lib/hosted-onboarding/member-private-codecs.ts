@@ -47,9 +47,6 @@ const HOSTED_MEMBER_BILLING_STRIPE_CHECKOUT_SESSION_FIELD =
 
 export interface HostedMemberIdentityPrivateState {
   phoneNumber: string | null;
-  signupPhoneCodeSendAttemptId: string | null;
-  signupPhoneCodeSendAttemptStartedAt: Date | null;
-  signupPhoneCodeSentAt: Date | null;
   signupPhoneNumber: string | null;
 }
 
@@ -77,9 +74,6 @@ export async function buildHostedMemberIdentityPrivateColumns(input: {
   phoneNumber: string | null;
   preparedRoot?: PreparedHostedWebEncryptionRoot;
   prisma?: HostedWebEncryptionPrismaClient;
-  signupPhoneCodeSendAttemptId: string | null;
-  signupPhoneCodeSendAttemptStartedAt: Date | null;
-  signupPhoneCodeSentAt: Date | null;
   signupPhoneNumber: string | null;
 }) {
   const encryptPrivateField = (field: string, value: string | null | undefined) =>
@@ -113,9 +107,6 @@ export async function buildHostedMemberIdentityPrivateColumns(input: {
           input.linqEmailHandle,
         ) }),
     phoneNumberEncrypted,
-    signupPhoneCodeSendAttemptId: normalizeNullableString(input.signupPhoneCodeSendAttemptId),
-    signupPhoneCodeSendAttemptStartedAt: input.signupPhoneCodeSendAttemptStartedAt,
-    signupPhoneCodeSentAt: input.signupPhoneCodeSentAt,
     signupPhoneNumberEncrypted,
   } as const;
 }
@@ -125,9 +116,6 @@ export async function readHostedMemberIdentityPrivateState(
     HostedMemberIdentity,
     | "memberId"
     | "phoneNumberEncrypted"
-    | "signupPhoneCodeSendAttemptId"
-    | "signupPhoneCodeSendAttemptStartedAt"
-    | "signupPhoneCodeSentAt"
     | "signupPhoneNumberEncrypted"
   >,
   prisma?: HostedWebEncryptionPrismaClient,
@@ -150,9 +138,6 @@ export async function readHostedMemberIdentityPrivateState(
 
   return {
     phoneNumber: phoneNumber ?? null,
-    signupPhoneCodeSendAttemptId: normalizeNullableString(identity.signupPhoneCodeSendAttemptId),
-    signupPhoneCodeSendAttemptStartedAt: identity.signupPhoneCodeSendAttemptStartedAt,
-    signupPhoneCodeSentAt: identity.signupPhoneCodeSentAt,
     signupPhoneNumber: signupPhoneNumber ?? null,
   };
 }
@@ -183,35 +168,6 @@ export async function readHostedMemberIdentityPhoneNumberBatch(
     prisma,
     signal,
   });
-}
-
-export async function readHostedMemberIdentityPhoneNumbers(
-  identity: Pick<
-    HostedMemberIdentity,
-    "memberId" | "phoneNumberEncrypted" | "signupPhoneNumberEncrypted"
-  >,
-  prisma?: HostedWebEncryptionPrismaClient,
-): Promise<{
-  phoneNumber: string | null;
-  signupPhoneNumber: string | null;
-}> {
-  const [phoneNumber, signupPhoneNumber] = await decryptHostedWebNullableFields({
-    entries: [{
-      field: HOSTED_MEMBER_IDENTITY_PHONE_NUMBER_FIELD,
-      memberId: identity.memberId,
-      value: identity.phoneNumberEncrypted,
-    }, {
-      field: HOSTED_MEMBER_IDENTITY_SIGNUP_PHONE_FIELD,
-      memberId: identity.memberId,
-      value: identity.signupPhoneNumberEncrypted,
-    }],
-    prisma,
-  });
-
-  return {
-    phoneNumber: phoneNumber ?? null,
-    signupPhoneNumber: signupPhoneNumber ?? null,
-  };
 }
 
 export async function buildHostedMemberRoutingPrivateColumns(input: {

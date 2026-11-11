@@ -571,7 +571,40 @@ resulting avatar. No private photo is shared with the subject or other players.
   pause future evenings until someone writes. Skips and failures do not count.
   The 90-day iMessage inactivity pause still applies. The feature is off unless
   `MURPH_GAME_EVENING_CHECK_IN_ENABLED` is exactly `true`.
-- **Hosted recap.** Settlement reserves one durable recap turn for the bound
+- **Pair recap show.** When `MURPH_GAME_RECAP_SHOW_ENABLED=true`, the parent
+  GPT-6.1 Sol turn reads retained shared material and the centralized craft guide,
+  composes five to seven authored pages, generates selected scenes and an optional
+  twenty-second theme song, previews and revises, then submits the finished show.
+  Whole real photos use contain sizing. Zero to two “Most likely to” cards get one
+  page each; the result remains canonical. The accepted delivery is exactly one
+  line plus the recap link, with no chat image or audio. Groups keep the existing
+  behavior below. The [presentation contract](../references/recap-show-contract.md)
+  owns the stable synthetic native fixtures and media authentication.
+  Failed scenes preserve setup and payoff; failed songs disappear. After two
+  exhausted attempts or the twenty-minute deadline, trusted code validates and seals
+  a plain three-page fallback from canonical facts. Revocation ends without save
+  or send. An accepted recap is replayed without further generation.
+
+  Activation order: apply the retirement and admission migrations, deploy the Web
+  control/storage consumers, deploy the Worker egress fence and runtime image,
+  ship the native decoder/player, then enable all pair shows. Keep the flag off
+  through incompatible producer/consumer skew. Cover and scene files default to
+  high quality at 1024×1536. Each generation allows six image attempts, two images
+  concurrently, one song, and $3.00 in prospective reservations. All references
+  fit within 1024×1024 before upload. Admission defaults to 36,847 input tokens
+  for photo edits, using the conservative legacy high-fidelity estimate documented
+  in the plan's amendment 19; Flare publishes no equivalent input-token guarantee.
+  `MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING` is an optional total-input override.
+  Ordinary Responses and Live traffic bypass recap admission; paid media alone
+  consults it. Recap turns disable Codex's native image tool.
+  `MURPH_GAME_RECAP_MEDIA_VISIBLE=false` hides generated media and cover previews;
+  it does not remove readable text. `MURPH_GAME_RECAP_MEDIA_DIR` is local-test
+  storage only. Once envelopes exist, retain compatible readers on rollback.
+  Provider scope requires the new Web consumer before Worker rollout. After an
+  authorized deployment, verify a synthetic show and regenerate the three
+  approved settled pairs through existing Ops. PR A performs no production work.
+
+- **Hosted recap (groups and legacy pairs).** Settlement reserves one durable recap turn for the bound
   group. The turn reads the finished shared game, a bounded current-room
   transcript and the authorized game audience's lore, then calls `write_recap` with
   three to seven story pages from the fixed page kit and `chatLine`. The prompt

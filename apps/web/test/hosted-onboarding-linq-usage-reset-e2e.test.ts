@@ -450,9 +450,6 @@ describe("hosted Linq usage reset e2e", () => {
         phoneNumber: SENDER_PHONE,
         phoneNumberVerifiedAt: new Date("2026-01-01T00:00:00.000Z"),
 
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
         signupPhoneNumber: null,
 
 

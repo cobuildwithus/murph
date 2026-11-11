@@ -181,8 +181,8 @@ export async function prepareHostedCredentialChange(input: {
     });
     if (change.method === "phone" && change.value) await upsertHostedMemberIdentity({
       ...identity, ...buildHostedMemberPhoneIdentityFields(change.value),
-      phoneNumberVerifiedAt: now, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null, signupPhoneNumber: null, preparedControlRoot: root, prisma: tx,
+      phoneNumberVerifiedAt: now,
+      signupPhoneNumber: null, preparedControlRoot: root, prisma: tx,
     });
     if (change.method === "telegram") {
       if (current.account) await adapter.delete({ model: "account", where: [{ field: "id", value: current.account.id }] });

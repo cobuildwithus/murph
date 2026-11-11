@@ -31,8 +31,7 @@ export const syntheticPhone = () => `+1555${randomInt(1_000_000, 9_999_999)}`;
 
 export async function rosterPhoneIdentity(prisma: PrismaClient, memberId: string, phoneNumber: string, verifiedAt = new Date()) {
   await upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(phoneNumber), memberId, prisma,
-    phoneNumberVerifiedAt: verifiedAt, signupPhoneNumber: null, signupPhoneCodeSentAt: null,
-    signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null });
+    phoneNumberVerifiedAt: verifiedAt, signupPhoneNumber: null });
 }
 
 export async function rosterRoute(prisma: PrismaClient, room: string, chatId: string, line: string) {

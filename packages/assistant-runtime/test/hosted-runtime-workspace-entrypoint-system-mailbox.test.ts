@@ -4795,7 +4795,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
 
       const publicationCheckpoint = checkpointRequests.at(-1);
       const expectedRetentionWakeAt = new Date(
-        Date.parse(conversationItem.createdAt) + 14 * 24 * 60 * 60 * 1000,
+        Date.parse(conversationItem.createdAt) + 30 * 24 * 60 * 60 * 1000,
       ).toISOString();
       assert.equal(forcedRefreshCalls, 2);
       assert.equal(published.status, "scheduled");

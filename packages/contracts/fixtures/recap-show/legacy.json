@@ -1,0 +1,107 @@
+{
+  "pages": [
+    {
+      "background": "night",
+      "blocks": [
+        {
+          "kind": "headline",
+          "text": "The Mat Takes the Stand"
+        },
+        {
+          "kind": "photo",
+          "entryIds": [
+            "synthetic-photo-a"
+          ],
+          "style": "print"
+        },
+        {
+          "kind": "kicker",
+          "text": "Breakfast is awarded"
+        }
+      ]
+    },
+    {
+      "background": "paper",
+      "blocks": [
+        {
+          "kind": "headline",
+          "text": "The evidence arrived"
+        },
+        {
+          "kind": "photo",
+          "style": "print",
+          "entryIds": [
+            "synthetic-photo-a"
+          ]
+        },
+        {
+          "kind": "headline",
+          "text": "The mat had receipts"
+        }
+      ]
+    },
+    {
+      "background": "slate",
+      "blocks": [
+        {
+          "kind": "headline",
+          "text": "A witness appears"
+        },
+        {
+          "kind": "headline",
+          "text": "The clipboard knows"
+        }
+      ]
+    },
+    {
+      "background": "sage",
+      "blocks": [
+        {
+          "kind": "quote",
+          "quote": {
+            "who": "Player B",
+            "text": "The mat knows"
+          }
+        }
+      ]
+    },
+    {
+      "background": "paper",
+      "blocks": [
+        {
+          "kind": "headline",
+          "text": "Both sides rested"
+        },
+        {
+          "kind": "photoPair",
+          "style": "print",
+          "entryIds": [
+            "synthetic-photo-a",
+            "synthetic-photo-b"
+          ]
+        }
+      ]
+    },
+    {
+      "background": "sienna",
+      "blocks": [
+        {
+          "kind": "stat",
+          "statValue": "4",
+          "text": "posts in evidence"
+        },
+        {
+          "kind": "contactSheet",
+          "style": "print",
+          "entryIds": [
+            "synthetic-photo-a",
+            "synthetic-photo-b",
+            "synthetic-photo-c"
+          ]
+        }
+      ]
+    }
+  ],
+  "chatLine": "Player A won 4 to 3. The mat has entered evidence.",
+  "scoreLine": "Player B owes Player A breakfast."
+}

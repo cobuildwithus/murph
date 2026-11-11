@@ -298,6 +298,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
     "physical_note_send",
     HOSTED_PHYSICAL_NOTES_PATH,
   ),
+  recapMediaAccess: defineHostedRunnerWebControlPostRoute(
+    "recap_media_access",
+    "/api/internal/hosted-execution/recap-media/access",
+  ),
   imageGenerationAccess: defineHostedRunnerWebControlPostRoute(
     "image_generation_access",
     HOSTED_RUNTIME_IMAGE_GENERATION_ACCESS_PATH,

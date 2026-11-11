@@ -47,14 +47,11 @@ type OrphanWhere = { userId_kind_resourceId: { userId: string; kind: string; res
 
 describe.skipIf(!enabled)("Postgres runtime ledger retention", () => {
   let prisma: PrismaClient;
-  let previousPhase: string;
   const users: string[] = [];
   const members: string[] = [];
 
   beforeAll(async () => {
     prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
-    previousPhase = (await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).phase;
-    await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "postgres" } });
   });
 
   afterAll(async () => {
@@ -65,9 +62,6 @@ describe.skipIf(!enabled)("Postgres runtime ledger retention", () => {
     await prisma.hostedRuntimeOrphan.deleteMany({ where });
     await prisma.hostedRuntimeOwner.deleteMany({ where });
     await prisma.hostedMember.deleteMany({ where: { id: { in: members } } });
-    if (previousPhase) {
-      await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: previousPhase } });
-    }
     await prisma.$disconnect();
   });
 
@@ -86,7 +80,7 @@ describe.skipIf(!enabled)("Postgres runtime ledger retention", () => {
 
   async function currentAttempt(userId: string, generation = 7n, attemptId = "attempt-current") {
     await prisma.hostedRuntimeOwner.create({
-      data: { userId, attemptId, generation, phase: "active", migrationPhase: "postgres", allocationId: "allocation",
+      data: { userId, attemptId, generation, phase: "active", allocationId: "allocation",
         processingMode: "default", runnerContainerName: "runner", workspaceVersion: 0n },
     });
   }

@@ -30,9 +30,9 @@ describe.skipIf(!enabled)("Postgres mailbox progress", () => {
           ('synthetic', 'conversation', 2), ('synthetic', 'system', 9007199254740993),
           ('empty', 'conversation', 9)`;
         await tx.$executeRaw`INSERT INTO hosted_mailbox_item VALUES
-          ('synthetic', 'conversation', 1, '2030-04-16 12:00:00', '2030-04-30 12:00:00', NULL),
+          ('synthetic', 'conversation', 1, '2030-03-31 12:00:00', '2030-04-30 12:00:00', NULL),
           ('synthetic', 'conversation', 3, '2030-04-30 11:00:00', '2030-04-30 11:00:00', '2030-04-30 12:00:00'),
-          ('synthetic', 'conversation', 5, '2030-04-16 12:00:00.001', '2030-04-30 10:00:00', NULL),
+          ('synthetic', 'conversation', 5, '2030-03-31 12:00:00.001', '2030-04-30 10:00:00', NULL),
           ('synthetic', 'conversation', 8, '2030-04-30 11:00:00', '2030-04-30 11:00:00', '2030-04-30 12:00:00.001'),
           ('synthetic', 'conversation', 10, '2030-04-30 11:00:00', '2030-04-30 11:00:00', '2030-04-30 12:00:00'),
           ('synthetic', 'system', 9007199254740992, '2030-04-30 11:00:00', '2030-04-30 11:00:00', NULL),

@@ -152,9 +152,6 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'phoneNumberEncrypted String? @map("phone_number_encrypted")',
     'phoneNumberVerifiedAt DateTime? @map("phone_number_verified_at")',
     'signupPhoneNumberEncrypted String? @map("signup_phone_number_encrypted")',
-    'signupPhoneCodeSentAt DateTime? @map("signup_phone_code_sent_at")',
-    'signupPhoneCodeSendAttemptId String? @map("signup_phone_code_send_attempt_id")',
-    'signupPhoneCodeSendAttemptStartedAt DateTime? @map("signup_phone_code_send_attempt_started_at")',
     'createdAt DateTime @default(now()) @map("created_at")',
     'updatedAt DateTime @updatedAt @map("updated_at")',
   ],
@@ -1268,6 +1265,8 @@ describe("hosted Prisma baseline migration", () => {
       "20261108010000_hosted_accepted_subscription_receipt",
       "20261110180000_hosted_linq_group_line_move",
       "20261110190000_linq_group_line_move_silent",
+      "20261110230000_game_recap_retirement",
+      "20261111001000_recap_media_admission",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

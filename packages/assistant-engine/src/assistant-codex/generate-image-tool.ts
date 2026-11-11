@@ -1,3 +1,5 @@
+import { generatedMediaFailureResult, mediaValidationError } from './generated-media-failure.js'
+import type { GeneratedMediaFileArgs, GeneratedMediaFileRuntime } from './generated-media-file.js'
 import { AssistantWorkspaceArtifactMaterializationError } from '../assistant/execution-context.js'
 import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 import { Buffer } from 'node:buffer'
@@ -52,7 +54,7 @@ import {
   type OpenAiImageSize,
 } from './openai-image-generation.js'
 
-export interface GenerateImageToolArgs {
+export interface GenerateImageToolArgs extends GeneratedMediaFileArgs {
   alt: string | null
   outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
@@ -115,6 +117,7 @@ export async function executeGenerateImageTool(input: {
   codexHome?: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
+  fileRuntime?: GeneratedMediaFileRuntime | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   persistGeneratedImageCapture?: (<T>(
     write: () => Promise<T>,
@@ -127,19 +130,16 @@ export async function executeGenerateImageTool(input: {
   ) => Promise<string | null>
   vaultRoot?: string | null
 }): Promise<GenerateImageToolResult> {
+  if (input.args.output === 'file' && !input.fileRuntime) return { rpcSuccess: false, rpcText: 'File output requires an authorized owning flow.' }
+  const fileRuntime = input.args.output === 'file' ? input.fileRuntime : null
+  if (fileRuntime && input.args.outputFormat !== 'jpeg') return generatedMediaFailureResult(mediaValidationError('image_format'))
   const apiKey = normalizeNullableString(input.env.OPENAI_API_KEY)
-  if (!apiKey) {
-    return {
-      failureDiagnostic: toolFailureDiagnostic('unavailable'),
-      rpcSuccess: false,
-      rpcText: 'image generation is not set up on this deployment, so no image was made',
-    }
-  }
+  if (!apiKey) return imageCredentialFailure(fileRuntime)
 
   const referenceImageRefs = input.args.referenceImageRefs ?? []
-  const vaultRoot = normalizeNullableString(input.vaultRoot)
+  const vaultRoot = fileRuntime ? null : normalizeNullableString(input.vaultRoot)
   const requireHostedPrivateImageDelivery =
-    input.requireHostedPrivateImageDelivery === true
+    !fileRuntime && input.requireHostedPrivateImageDelivery === true
   if (requireHostedPrivateImageDelivery && !vaultRoot) {
     return {
       failureDiagnostic: toolFailureDiagnostic('unavailable'),
@@ -159,7 +159,7 @@ export async function executeGenerateImageTool(input: {
   }
 
   if (
-    referenceImageRefs.length > 0 &&
+    !fileRuntime && referenceImageRefs.length > 0 &&
     !vaultRoot &&
     hasVaultReferenceImageRef(referenceImageRefs)
   ) {
@@ -209,113 +209,11 @@ export async function executeGenerateImageTool(input: {
     generatedImageBytes = existingCapture.bytes
     savedCapture = existingCapture.capture
   } else {
-    try {
-      referenceImages = referenceImageRefs.length > 0
-        ? await resolveGenerateImageReferences({
-            materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
-            refs: referenceImageRefs,
-            signal: input.abortSignal,
-            skillsRoot: resolveAssistantSkillsRoot(),
-            vaultRoot: vaultRoot ?? '',
-          })
-        : []
-    } catch (error) {
-      if (isGenerateImageControlFlowError(error)) {
-        throw error
-      }
-      return {
-        failureDiagnostic: toolFailureDiagnostic('handler_exception', error),
-        rpcSuccess: false,
-        rpcText: describeGenerateImageFailure(
-          'image references could not be loaded',
-          error,
-        ),
-      }
-    }
-
-    const referenceValidationFailure =
-      await input.validateResolvedReferenceImages?.(referenceImages) ?? null
-    if (referenceValidationFailure) {
-      return {
-        failureDiagnostic: toolFailureDiagnostic('authority_rejected'),
-        rpcSuccess: false,
-        rpcText: referenceValidationFailure,
-      }
-    }
-
-    const operationLabel = referenceImages.length > 0
-      ? 'image edit'
-      : 'image generation'
-    const operation: GenerateImageOperation = referenceImages.length > 0
-      ? 'image_generation_with_references'
-      : 'image_generation'
-    const usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath =
-      referenceImages.length > 0 ? 'openai.images.edit' : 'openai.images.generate'
-
-    let openAiResult: Awaited<ReturnType<typeof generateOpenAiImage>>
-    try {
-      openAiResult = await generateOpenAiImage({
-        abortSignal: input.abortSignal ?? null,
-        apiKey,
-        fetchImpl: input.fetchImpl,
-        ...(input.args.outputCompression !== undefined
-          ? { outputCompression: input.args.outputCompression }
-          : {}),
-        outputFormat: input.args.outputFormat,
-        prompt: buildGenerateImagePromptWithReferences({
-          prompt: input.args.prompt,
-          referenceImageCount: referenceImages.length,
-        }),
-        quality: input.args.quality,
-        referenceImages,
-        size: input.args.size,
-      })
-    } catch (error) {
-      if (isGenerateImageControlFlowError(error)) {
-        throw error
-      }
-      return {
-        failureDiagnostic: toolFailureDiagnostic('handler_exception', error),
-        rpcSuccess: false,
-        rpcText: describeGenerateImageFailure(
-          `${operationLabel} failed`,
-          error,
-        ),
-      }
-    }
-
-    const hasValidGeneratedImageBytes = isValidGeneratedImageBytes({
-      bytes: openAiResult.imageBytes,
-      outputFormat: input.args.outputFormat,
-    })
-    usageDraft = buildGeneratedImageUsageDraft({
-      args: input.args,
-      occurredAt: openAiResult.occurredAt,
-      operation,
-      providerRequestId: openAiResult.providerRequestId,
-      providerRequestOrdinal: input.providerRequestOrdinal,
-      providerRequestOutcome: hasValidGeneratedImageBytes ? 'succeeded' : 'partial',
-      rawUsageJson: openAiResult.rawUsageJson,
-      referenceImageCount: referenceImages.length,
-      referenceImageSha256s: referenceImages.map((reference) => reference.sha256),
-      referenceImageSourceRefSha256s: referenceImages.map(
-        (reference) => reference.sourceRefSha256,
-      ),
-      referenceImageTotalBytes: sumReferenceImageBytes(referenceImages),
-      usage: openAiResult.usage,
-      usageExtractionSourcePath,
-    })
-
-    if (!hasValidGeneratedImageBytes) {
-      return {
-        failureDiagnostic: toolFailureDiagnostic('invalid_result'),
-        rpcSuccess: false,
-        rpcText: `${operationLabel} returned invalid image data`,
-        usageDraft,
-      }
-    }
-
-    generatedImageBytes = openAiResult.imageBytes
+    const generated = await generateRecapOrChatImageBytes(input, fileRuntime, apiKey, vaultRoot)
+    if ('rpcSuccess' in generated) return generated
+    generatedImageBytes = generated.bytes
+    referenceImages = generated.references
+    usageDraft = generated.usageDraft
 
     if (vaultRoot) {
       try {
@@ -776,4 +674,131 @@ function sumReferenceImageBytes(
   referenceImages: readonly ResolvedGenerateImageReference[],
 ): number {
   return referenceImages.reduce((sum, reference) => sum + reference.bytes.byteLength, 0)
+}
+
+async function generateRecapOrChatImageBytes(input: Parameters<typeof executeGenerateImageTool>[0],
+  fileRuntime: GeneratedMediaFileRuntime | null | undefined, apiKey: string, vaultRoot: string | null): Promise<GenerateImageToolResult | {
+    bytes: Uint8Array; references: ResolvedGenerateImageReference[]; usageDraft: AssistantProviderUsageDraft | null
+  }> {
+  const referenceImageRefs = input.args.referenceImageRefs ?? []
+  let referenceImages: ResolvedGenerateImageReference[] = []
+  let usageDraft: AssistantProviderUsageDraft | null = null
+    try {
+      referenceImages = fileRuntime ? await fileRuntime.resolveReferences(referenceImageRefs) : referenceImageRefs.length > 0
+        ? await resolveGenerateImageReferences({
+            materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+            refs: referenceImageRefs,
+            signal: input.abortSignal,
+            skillsRoot: resolveAssistantSkillsRoot(),
+            vaultRoot: vaultRoot ?? '',
+          })
+        : []
+    } catch (error) {
+      if (isGenerateImageControlFlowError(error)) {
+        throw error
+      }
+      return imageExecutionFailure(error, fileRuntime, 'image references could not be loaded')
+    }
+
+    const referenceValidationFailure =
+      await input.validateResolvedReferenceImages?.(referenceImages) ?? null
+    if (referenceValidationFailure) {
+      return {
+        failureDiagnostic: toolFailureDiagnostic('authority_rejected'),
+        rpcSuccess: false,
+        rpcText: referenceValidationFailure,
+      }
+    }
+
+    const operationLabel = referenceImages.length > 0
+      ? 'image edit'
+      : 'image generation'
+    const operation: GenerateImageOperation = referenceImages.length > 0
+      ? 'image_generation_with_references'
+      : 'image_generation'
+    const usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath =
+      referenceImages.length > 0 ? 'openai.images.edit' : 'openai.images.generate'
+
+    let openAiResult: Awaited<ReturnType<typeof generateOpenAiImage>>
+    try {
+      openAiResult = await generateOpenAiImage({
+        abortSignal: fileRuntime?.signal ? AbortSignal.any([fileRuntime.signal, ...(input.abortSignal ? [input.abortSignal] : [])]) : input.abortSignal ?? null,
+        apiKey,
+        fetchImpl: fileRuntime?.fetchImpl ?? input.fetchImpl,
+        ...(input.args.outputCompression !== undefined
+          ? { outputCompression: input.args.outputCompression }
+          : {}),
+        outputFormat: input.args.outputFormat,
+        prompt: buildGenerateImagePromptWithReferences({
+          prompt: input.args.prompt,
+          referenceImageCount: referenceImages.length,
+        }),
+        quality: input.args.quality,
+        referenceImages,
+        size: input.args.size,
+      })
+    } catch (error) {
+      if (isGenerateImageControlFlowError(error)) {
+        throw error
+      }
+      return imageExecutionFailure(error, fileRuntime, `${operationLabel} failed`)
+    }
+
+    const hasValidGeneratedImageBytes = isValidGeneratedImageBytes({
+      bytes: openAiResult.imageBytes,
+      outputFormat: input.args.outputFormat,
+    })
+    usageDraft = buildGeneratedImageUsageDraft({
+      args: input.args,
+      occurredAt: openAiResult.occurredAt,
+      operation,
+      providerRequestId: openAiResult.providerRequestId,
+      providerRequestOrdinal: input.providerRequestOrdinal,
+      providerRequestOutcome: hasValidGeneratedImageBytes ? 'succeeded' : 'partial',
+      rawUsageJson: openAiResult.rawUsageJson,
+      referenceImageCount: referenceImages.length,
+      referenceImageSha256s: referenceImages.map((reference) => reference.sha256),
+      referenceImageSourceRefSha256s: referenceImages.map(
+        (reference) => reference.sourceRefSha256,
+      ),
+      referenceImageTotalBytes: sumReferenceImageBytes(referenceImages),
+      usage: openAiResult.usage,
+      usageExtractionSourcePath,
+    })
+
+    if (!hasValidGeneratedImageBytes) return {
+      ...imageBytesFailure(fileRuntime, openAiResult.imageBytes, operationLabel), usageDraft,
+    }
+
+    const generatedImageBytes = openAiResult.imageBytes
+    if (fileRuntime) {
+      try {
+        const receipt = await fileRuntime.save(generatedImageBytes, 'image/jpeg')
+        return { rpcSuccess: true, rpcText: JSON.stringify(receipt), usageDraft }
+      } catch (error) {
+        return { ...generatedMediaFailureResult(error), usageDraft }
+      }
+    }
+
+  return { bytes: generatedImageBytes, references: referenceImages, usageDraft }
+}
+
+
+function imageCredentialFailure(fileRuntime: GeneratedMediaFileRuntime | null | undefined): GenerateImageToolResult {
+  return fileRuntime ? generatedMediaFailureResult(mediaValidationError('credentials')) : {
+    failureDiagnostic: toolFailureDiagnostic('unavailable'), rpcSuccess: false,
+    rpcText: 'image generation is not set up on this deployment, so no image was made',
+  }
+}
+function imageExecutionFailure(error: unknown, fileRuntime: GeneratedMediaFileRuntime | null | undefined, label: string): GenerateImageToolResult {
+  return fileRuntime ? generatedMediaFailureResult(error) : {
+    failureDiagnostic: toolFailureDiagnostic('handler_exception', error), rpcSuccess: false,
+    rpcText: describeGenerateImageFailure(label, error),
+  }
+}
+function imageBytesFailure(fileRuntime: GeneratedMediaFileRuntime | null | undefined, bytes: Uint8Array, label: string): GenerateImageToolResult {
+  return fileRuntime ? generatedMediaFailureResult(mediaValidationError('image_format', bytes)) : {
+    failureDiagnostic: toolFailureDiagnostic('invalid_result'), rpcSuccess: false,
+    rpcText: `${label} returned invalid image data`,
+  }
 }

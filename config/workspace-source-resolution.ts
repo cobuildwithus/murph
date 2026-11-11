@@ -16,6 +16,7 @@ export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/health-metrics": "../../packages/health-metrics/src/index.ts",
   "@murphai/gateway-core": "../../packages/gateway-core/src/index.ts",
   "@murphai/hosted-execution": "../../packages/hosted-execution/src/index.ts",
+  "@murphai/operator-config": "../../packages/operator-config/package.json",
   "@murphai/messaging-ingress": "../../packages/messaging-ingress/package.json",
   "@murphai/runtime-state": "../../packages/runtime-state/src/index.ts",
   "@murphai/query": "../../packages/query/src/index.ts",

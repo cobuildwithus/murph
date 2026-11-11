@@ -189,8 +189,8 @@
     "murph.finish_without_reply": 450,
     "murph.game_lore": 250,
     "murph.game_photo": 2200,
-    "murph.generate_image": 2350,
-    "murph.generate_song": 1500,
+    "murph.generate_image": 2800,
+    "murph.generate_song": 1800,
     "murph.generate_voice_memo": 2900,
     "murph.get_phone_call_status": 800,
     "murph.get_sender_contact": 400,
@@ -211,6 +211,7 @@
     "murph.personalization": 2400,
     "murph.plan_usage": 800,
     "murph.poll": 2550,
+    "murph.preview_recap": 450,
     "murph.react_to_message": 450,
     "murph.read_game": 800,
     "murph.resolve_physical_note": 1150,
@@ -223,7 +224,7 @@
     "murph.subscription": 900,
     "murph.update_game": 5700,
     "murph.usage_diagnostics": 550,
-    "murph.write_recap": 2250
+    "murph.write_recap": 3150
   },
   "toolDescriptions": {
     "murph.analyze_video": 1250,
@@ -254,8 +255,8 @@
     "murph.finish_without_reply": 400,
     "murph.game_lore": 100,
     "murph.game_photo": 1700,
-    "murph.generate_image": 1250,
-    "murph.generate_song": 1250,
+    "murph.generate_image": 1450,
+    "murph.generate_song": 1400,
     "murph.generate_voice_memo": 1050,
     "murph.get_phone_call_status": 600,
     "murph.get_sender_contact": 250,
@@ -276,6 +277,7 @@
     "murph.personalization": 1000,
     "murph.plan_usage": 550,
     "murph.poll": 1550,
+    "murph.preview_recap": 300,
     "murph.react_to_message": 100,
     "murph.read_game": 550,
     "murph.resolve_physical_note": 550,
@@ -288,10 +290,10 @@
     "murph.subscription": 550,
     "murph.update_game": 900,
     "murph.usage_diagnostics": 400,
-    "murph.write_recap": 1000
+    "murph.write_recap": 1050
   },
   "toolRosters": {
-    "direct all capabilities": 146050,
-    "group all capabilities": 146100
+    "direct all capabilities": 146750,
+    "group all capabilities": 146800
   }
 }

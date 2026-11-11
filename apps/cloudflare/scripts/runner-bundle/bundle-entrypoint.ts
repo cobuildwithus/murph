@@ -325,7 +325,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // chunk-count budgets, and exact-base total-growth guard.
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 76_589;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 2_047_343;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET = 24;
+// The recap contracts extracted from the existing game-control schema are now
+// shared with the lazy file/preview tools. Esbuild emits that schema as one
+// additional static chunk (25 total); no provider implementation enters boot.
+// Retain the entry/static byte caps and forbidden-input guards.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET = 25;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 12_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
