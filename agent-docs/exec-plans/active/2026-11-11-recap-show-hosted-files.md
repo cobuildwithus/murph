@@ -15,3 +15,10 @@ Proof: a synthetic settled pair through the real pinned Linux Codex sandbox in t
 ## Delivery
 
 Runner-only deployment; no Web/schema/client/env changes. Parent owns review, merge and deployment. No ReviewGPT is started by this task.
+
+## Findings and decisions
+
+- Native AMD64 runner reproduction: Actions run `43003171519`, commit `ebc1731378a5`, pinned Codex 0.166.0. `read_game` returned the materialized manifest; the shell exited 1 before executing `cat` with `bwrap: Can't chdir to /tmp/mv/r-QY5WtH: No such file or directory`.
+- Exact synthetic command: `cat .runtime/tmp/recap/745d12188d17e92e80decb204ae2d72d/inputs/writing-guide.md .runtime/tmp/recap/745d12188d17e92e80decb204ae2d72d/inputs/game.json .runtime/tmp/recap/745d12188d17e92e80decb204ae2d72d/inputs/chat.jsonl`.
+- Test the concrete restored vault as the recap show's cwd instead of the procfs alias. Preserve the profile's denied workspace root, read-only task inputs and writable drafts/media/previews; ordinary and plain/group turns retain their stable cwd.
+- The Linux gate uses a scripted loopback model and the existing synthetic live-lane media fixture, real Codex sandbox/dynamic tools/preview/validator, and the actual outbox. It makes no paid provider calls. Local ARM emulation is not counted as Linux proof.
