@@ -6985,6 +6985,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         });
         return invocationResult;
       };
+      // A durable effect whose publication is due outranks the optional
+      // projection, like mayOfferVaultShareProjection after a checkpoint.
+      // Preemption keeps restored replay and projection-obligation retries on
+      // their existing path; other immediate checkpoints keep the projection.
+      const offerVaultShareProjectionUnlessPublicationDue =
+        async (): Promise<HostedVaultShareProjectionOpportunity> =>
+          hostedDurableEffectsCheckpointIsDue(pendingDurableCheckpointEffects)
+          && guardedRuntime.platform.vaultSharePort != null
+            ? { result: { outcome: "preempted" }, wake: null }
+            : await offerHostedVaultShareProjectionDuringIdle();
       const prepareInitialForegroundState = async (): Promise<void> => {
         result = await runForegroundPass({
           // Promotion already qualified a conversation batch. Import that batch
@@ -7025,7 +7035,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const drainRestoredEffects = !runtimeStateDirty || restoredEffectsPending;
         if (drainRestoredEffects) {
           const vaultShareOpportunity =
-            await offerHostedVaultShareProjectionDuringIdle();
+            await offerVaultShareProjectionUnlessPublicationDue();
           cleanVaultShareProjectionResult = vaultShareOpportunity.result;
           cleanVaultShareProjectionIncomplete =
             guardedRuntime.platform.vaultSharePort != null

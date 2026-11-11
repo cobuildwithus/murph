@@ -2094,7 +2094,11 @@ Current product admission, delivery and native runtime safety rules remain.
 - A successful hosted checkpoint gets one best-effort, wake-raced vault-share
   projection opportunity before device-sync dirty acknowledgement or the next
   complete device-sync-only maintenance prefix. A conversation wake preempts
-  immediately and leaves acknowledgement replayable. Projection errors remain
+  immediately and leaves acknowledgement replayable. On a cold start that
+  restored ready durable effects, a pending durable effect whose publication
+  deadline has passed preempts the same way, so the dirty runtime publishes
+  before the projection restores and captures a snapshot; the restored replay
+  still runs before that publication. Projection errors remain
   fail-soft to the completed personal import and foreground reply, but they do
   not consume the existing dirty or system-mailbox recording obligation; that
   owner reuses its bounded device-sync continuation before acknowledgement.
