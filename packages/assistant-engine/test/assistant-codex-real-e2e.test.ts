@@ -48145,7 +48145,7 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     const entries = material.days.flatMap(day => Object.entries(day.posts).flatMap(([playerName, post]) =>
       typeof post === 'object' && post ? [{ entryId: post.entryId, kind: post.kind, text: post.text, playerName, visibleToBoth: true }] : []))
     const scores = material.score.map((score, index) => ({ ...score, memberId: material.players[index]!.memberId }))
-    const { createRecapShowLiveProviders } = await import('./support/recap-show-live.js')
+    const { createRecapShowLiveProviders } = await import('@murphai/assistant-engine/recap-show-testkit')
     const providers = await createRecapShowLiveProviders({ game: material, players: material.players, entries, result: scores, chat: chatMessages })
     const events: unknown[] = []
     let rejectedWrites = 0

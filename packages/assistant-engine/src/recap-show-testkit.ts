@@ -8,7 +8,11 @@ import type { HostedGameToolResponse, HostedRuntimeGroupToolRequest } from '@mur
 
 const hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 
-/** Synthetic provider boundary for the sanctioned real-model lane. No media
+function requireReferenceHashes(photos: ReadonlyMap<string, Buffer>, descriptor: RecapProviderRequest, referenceIds: readonly string[] = []) {
+  if (descriptor.kind === 'image' && referenceIds.some((id, index) => !photos.has(id) || hash(photos.get(id)!) !== descriptor.referenceHashes[index])) throw new Error('Unapproved synthetic photo.')
+}
+
+/** Synthetic provider boundary shared by the live-model and hosted-container lanes. No media
  * request leaves this process. The model still uses the production file tools,
  * real byte decoders, reservation reducer, preview and submission dispatcher. */
 export async function createRecapShowLiveProviders(input: {
@@ -37,7 +41,7 @@ export async function createRecapShowLiveProviders(input: {
   const chat: RecapTranscriptMessage[] = input.chat.map((message, index) => ({ ...message, id: `synthetic-message-${index}`,
     at: new Date(Date.now() - 86_400_000 + index * 1000).toISOString(), source: 'player', laneSeq: String(index + 1) }))
   const image = await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="768" height="1024"><rect width="768" height="1024" fill="#2d3436"/><path d="M0 0H768V250Q384 80 0 250Z" fill="#9e5743"/><rect x="100" y="780" width="568" height="80" fill="#d4c4a8"/><circle cx="260" cy="490" r="70" fill="#d4c4a8"/><circle cx="510" cy="490" r="70" fill="#7a8c6e"/><path d="M180 780V600H340V780M430 780V600H590V780" fill="#d4c4a8"/></svg>')).jpeg().toBuffer()
-  const song = await readFile(new URL('../../../../fixtures/generated-audio/recap-synthetic-20s.mp3', import.meta.url))
+  const song = await readFile(new URL('../../../fixtures/generated-audio/recap-synthetic-20s.mp3', import.meta.url))
   let state: RecapAdmissionState = { v: 1, deadline: new Date(Date.now() + RECAP_DEADLINE_MS).toISOString(), runs: [], operations: [] }
   const reservations = new Map<string, { id: string; descriptor: RecapProviderRequest; consumed: boolean }>()
   const receipts = new Map<string, RecapFileReceipt>()
@@ -62,7 +66,7 @@ export async function createRecapShowLiveProviders(input: {
       recapGame = { id: command.id, bytes: bytes.toString('base64'), hash: hash(bytes), mediaType: 'image/jpeg', byteLength: bytes.length, width: meta.width, height: meta.height }
     } else if (command.kind === 'reserve') {
       const descriptor = command.providerRequest
-      if (descriptor.kind === 'image' && (command.referenceIds ?? []).some((id, index) => !photos.has(id) || hash(photos.get(id)!) !== descriptor.referenceHashes[index])) throw new Error('Unapproved synthetic photo.')
+      requireReferenceHashes(photos, descriptor, command.referenceIds)
       state = reserveRecapOperation(state, { id: command.operationId, runId: command.runId, request: descriptor,
         reserved: recapReservationMicrodollars(descriptor), now: new Date() })
       const token = hash(command.operationId)

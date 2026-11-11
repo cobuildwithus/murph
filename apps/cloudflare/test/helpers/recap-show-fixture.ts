@@ -3,7 +3,7 @@ import type { GameRecapStory, RecapFileReceipt } from '@murphai/contracts/recap-
 import { gameRecapToolResult, validateGameRecap } from '@murphai/contracts/recap-validation';
 import type { HostedGameToolResponse, HostedRuntimeGroupToolRequest } from '@murphai/hosted-execution/runtime-control';
 // Reuse the sanctioned live lane's synthetic media and real reservation/byte checks.
-import { createRecapShowLiveProviders } from '../../../../packages/assistant-engine/test/support/recap-show-live.js';
+import { createRecapShowLiveProviders } from '@murphai/assistant-engine/recap-show-testkit';
 
 export async function createHostedRecapFixture(gameId: string) {
   const players = [{ memberId: 'synthetic-a', name: 'Player A' }, { memberId: 'synthetic-b', name: 'Player B' }];
