@@ -831,7 +831,7 @@ describe.each(["foreground", "general"] as const)("Linq %s fast path", (entry) =
     expect((await f.read()).status).toBe("sent");
   });
 
-  it("publishes an approval cycle and adopted bytes before the reply consumes its input", async () => {
+  it("sends the approval-link reply inline, then publishes the approval cycle and adopted bytes", async () => {
     const f = await fixture("linq");
     const bytes = Buffer.from("%PDF-1.4\nSynthetic generated document\n%%EOF\n");
     const ref = ".runtime/operations/assistant/generated-deliveries/report.pdf";
@@ -856,28 +856,25 @@ describe.each(["foreground", "general"] as const)("Linq %s fast path", (entry) =
     const file = parked.media[0]!;
     if (file.kind !== "vault_file") throw new Error("Expected adopted file");
     expect(file.ref).not.toBe(ref);
+    // Replies never wait on publication: the approval-link reply reaches the
+    // provider inline, then requests an immediate snapshot for the parked cycle.
     const { post } = await f.phase(entry, [f.intent.intentId]);
-    expect(f.sends()).toBe(0);
-    expect(f.consumed.size).toBe(0);
-    expect(post?.afterDurableCheckpoint).toBeDefined();
+    expect(f.sends()).toBe(1);
+    expect(f.publications()).toBe(0);
+    expect(f.consumed.has("mailbox_publication")).toBe(true);
     const hooks = post?.afterDurableCheckpoint;
-    expect((typeof hooks === "function" ? [hooks] : hooks)?.map((hook) => hook.checkpointStartByMs)).toContain(Date.now() + (entry === "foreground" ? 0 : callbacks.HOSTED_PUBLISHED_CLAIM_MAX_WAIT_MS));
+    expect((typeof hooks === "function" ? [hooks] : hooks)?.map((hook) => hook.checkpointStartByMs)).toContain(Date.now());
     await f.publish();
     await runHostedWorkspaceDurableCheckpointEffects(post?.afterDurableCheckpoint);
     expect(f.sends()).toBe(1);
-    expect(f.consumed.has("mailbox_publication")).toBe(true);
     await f.restore();
+    expect((await f.read()).status).toBe("sent");
     expect((await f.read(parked.intentId)).status).toBe("awaiting_approval");
     const restoredBytes = await readFile(path.join(f.vaultRoot, file.ref));
     expect(createHash("sha256").update(restoredBytes).digest("hex")).toBe(file.sha256);
     expect(restoredBytes).toEqual(bytes);
-    // The restored reply is still sending. Replay that predecessor under its
-    // original key before selecting the same-boundary approval file.
-    vi.setSystemTime(new Date(Date.now() + 600_000));
-    const replay = await f.phase(entry, [f.intent.intentId]);
-    await runHostedWorkspaceDurableCheckpointEffects(replay.post?.afterDurableCheckpoint);
     expect(f.visibleReplies.size).toBe(1);
-    expect(f.wireKeys).toHaveLength(2);
+    expect(f.wireKeys).toHaveLength(1);
     approved = true;
     const effects = await f.collect([], [buildHostedActionApprovalOutcomeEffectId({ approvalGeneration, approvalId, expiresAt })]);
     // Provider upload is stubbed, but verifies the actual adopted file bytes.
@@ -1033,7 +1030,7 @@ it("publishes an accepted reply boundary when its obligation bubble yields", asy
   expect(await f.read(remaining.intentId)).toMatchObject({ intentId: remaining.intentId, followUpRequest });
 });
 
-it.each(["text", "voice"] as const)("publishes earlier bubbles when a non-idempotent boundary carries a %s obligation", async (obligation) => {
+it.each(["text", "voice"] as const)("sends every bubble inline when a non-idempotent boundary carries a %s obligation, then publishes", async (obligation) => {
   const f = await fixture("linq", obligation === "text" ? { followUpRequest } : {});
   vi.setSystemTime(new Date(Date.now() + 1));
   const voice = await createAssistantOutboxIntent({
@@ -1047,25 +1044,56 @@ it.each(["text", "voice"] as const)("publishes earlier bubbles when a non-idempo
   expect(voice.deliveryTransportIdempotent).toBe(false);
   const effects = await f.collect([f.intent.intentId, voice.intentId]);
   expect(effects.map((effect) => effect.effectId)).toEqual([f.intent.intentId, voice.intentId]);
-  expect(effects.every((effect) => effect.publishBeforeDispatch && !effect.publishAfterDispatch)).toBe(true);
+  expect(effects.every((effect) => effect.publishAfterDispatch && !effect.publishBeforeDispatch)).toBe(true);
   const { post } = await f.phase("foreground", [f.intent.intentId, voice.intentId]);
-  expect(f.providerFetch).not.toHaveBeenCalled();
-  expect(f.consumed.size).toBe(0);
-  await f.publish();
-  await runHostedWorkspaceDurableCheckpointEffects(post.afterDurableCheckpoint);
+  expect(f.publications()).toBe(0);
   expect(await f.read()).toMatchObject({ status: "sent" });
   expect(await f.read(voice.intentId)).toMatchObject({ status: "sent" });
   expect(f.wireKeys.filter((key) => key === "missing")).toHaveLength(1);
   expect(f.consumed.has("mailbox_publication")).toBe(true);
+  expect(post.afterDurableCheckpoint?.map((hook) => hook.checkpointStartByMs)).toContain(Date.now());
+  const sends = f.sends();
+  await f.publish();
+  await runHostedWorkspaceDurableCheckpointEffects(post.afterDurableCheckpoint);
+  expect(f.sends()).toBe(sends);
 });
 
-it.each(["fresh", "published"] as const)("does not treat %s Linq voice provider entry as acceptance or settle its obligation after restore", async (claim) => {
+it("sends a fresh Linq voice obligation inline and does not treat a killed provider entry as acceptance", async () => {
+  const f = await fixture("linq", { followUpRequest, media: [{
+    kind: "voice_memo", filename: "memo.mp3", transcript: "Requested voice reply.",
+    transport: { kind: "linq_attachment", attachmentId: "attachment_voice_fresh" },
+  }] });
+  expect(f.intent.deliveryTransportIdempotent).toBe(false);
+  expect(await f.collect([f.intent.intentId])).toEqual([
+    expect.objectContaining({ publishAfterDispatch: true }),
+  ]);
+  const controller = new AbortController();
+  f.setSignal(controller.signal);
+  f.providerFetch.mockImplementation(async () => {
+    controller.abort(new Error("Synthetic kill after provider entry"));
+    throw controller.signal.reason;
+  });
+  await f.phase("foreground", [f.intent.intentId]).catch(() => undefined);
+  // Provider entry happened before any publication. Without Web acceptance the
+  // input stays unconsumed, so replay (not loss) is the remaining exposure.
+  expect(f.sends()).toBe(1);
+  expect(f.publications()).toBe(0);
+  expect(f.consumed.size).toBe(0);
+  expect(await f.read()).toMatchObject({ delivery: null });
+  expect((await f.read()).status).not.toBe("sent");
+  expect(await listAutomations(f.vaultRoot)).toHaveLength(0);
+  expect((await readMemoryDocument(f.vaultRoot)).records).toHaveLength(0);
+});
+
+// A restored non-idempotent send keeps its published-claim fence; only fresh
+// replies skip publication (they send inline and publish right after).
+it("does not treat published Linq voice provider entry as acceptance or settle its obligation after restore", async () => {
   const f = await fixture("linq", { followUpRequest, media: [{
     kind: "voice_memo", filename: "memo.mp3", transcript: "Requested voice reply.",
     transport: { kind: "linq_attachment", attachmentId: "attachment_voice_publication" },
   }] });
   expect(f.intent.deliveryTransportIdempotent).toBe(false);
-  if (claim === "published") f.setCheckpoint(NOW);
+  f.setCheckpoint(NOW);
   const controller = new AbortController();
   f.setSignal(controller.signal);
   const { post } = await f.phase("foreground", [f.intent.intentId]);
