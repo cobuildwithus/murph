@@ -233,6 +233,17 @@ run, finish the cheap deterministic proof first:
 This order keeps stochastic evidence useful without making incidental model
 behavior or an avoidable late contradiction trigger repeated expensive runs.
 
+For stochastic base-versus-head comparisons, interleave balanced samples from
+both revisions in one shuffled batch with the same model, auth class, worker
+count, and competing workload. Record the sample counts and order. Separate
+batches can confound a code change with provider or host variation; do not
+attribute their pass-rate difference to the change without matched evidence.
+Keep setup/prerequisite failures separate from completed model outcomes.
+The meal-intake benchmark preflights selected image hashes and a bounded local
+labels read before any selected live journey starts. Missing benchmark inputs
+fail as `MEAL_BENCHMARK_PREREQUISITE`; unselected cases add no prerequisites.
+This verifies availability, not full corpus representativeness.
+
 Changes that can alter Murph's interpretation, tool choice or arguments,
 reply-versus-silence decision, or user-visible prose must apply
 `$verify-murph-assistant` after their deterministic boundary tests pass. Add a

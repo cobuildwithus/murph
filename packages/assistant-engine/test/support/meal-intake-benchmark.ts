@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import type { RunnerTestSuite, RunnerTask } from 'vitest'
 
 import { initializeVault, upsertMemory } from '@murphai/core'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
@@ -162,9 +163,58 @@ export function readMealIntakeBenchmarkEnvironment(env: NodeJS.ProcessEnv = proc
   const imageDirectory = env.MURPH_MEAL_INTAKE_BENCH_IMAGE_DIR?.trim()
   const dataApiProxy = env.MURPH_MEAL_INTAKE_BENCH_DATA_API_PROXY?.trim()
   if (!imageDirectory || !dataApiProxy) {
-    throw new Error('Set MURPH_MEAL_INTAKE_BENCH_IMAGE_DIR and MURPH_MEAL_INTAKE_BENCH_DATA_API_PROXY for the meal intake benchmark.')
+    throw new Error('MEAL_BENCHMARK_PREREQUISITE: set MURPH_MEAL_INTAKE_BENCH_IMAGE_DIR and MURPH_MEAL_INTAKE_BENCH_DATA_API_PROXY for the meal intake benchmark.')
   }
   return { dataApiProxy, imageDirectory, resultsPath: env.MURPH_MEAL_INTAKE_BENCH_RESULTS?.trim() || null }
+}
+
+// File-level preflight runs before any selected live journey, including when a
+// caller directly selects the whole live tag. Unselected benchmark cases do not
+// impose their local corpus/service requirements on ordinary journeys.
+export async function preflightSelectedMealIntakeBenchmarks(
+  suite: Pick<RunnerTestSuite, 'tasks'>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const names: string[] = []
+  const visit = (task: RunnerTask): void => {
+    if (task.mode === 'skip' || task.mode === 'todo') return
+    if (task.type === 'suite') task.tasks.forEach(visit)
+    else if (task.name.startsWith('meal intake speed: ')) names.push(task.name)
+  }
+  suite.tasks.forEach(visit)
+  if (names.length === 0) return
+  const selected = MEAL_INTAKE_BENCHMARK_CASES.filter(item => names.some(name => name === `meal intake speed: ${item.id}`))
+  if (selected.length !== names.length) throw new Error('MEAL_BENCHMARK_PREREQUISITE: unknown selected case.')
+  const config = readMealIntakeBenchmarkEnvironment(env)
+  for (const item of selected) {
+    if (!item.image) continue
+    let bytes: Buffer
+    try { bytes = await readFile(path.join(config.imageDirectory, item.image.file)) }
+    catch { throw new Error(`MEAL_BENCHMARK_PREREQUISITE: image unavailable for ${item.id}.`) }
+    if (createHash('sha256').update(bytes).digest('hex') !== item.image.sha256) {
+      throw new Error(`MEAL_BENCHMARK_PREREQUISITE: image hash mismatch for ${item.id}.`)
+    }
+  }
+  let proxy: URL
+  try { proxy = new URL(config.dataApiProxy) }
+  catch { throw new Error('MEAL_BENCHMARK_PREREQUISITE: local labels URL is invalid.') }
+  if (proxy.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(proxy.hostname)
+    || proxy.username || proxy.password || proxy.pathname !== '/' || proxy.search || proxy.hash) {
+    throw new Error('MEAL_BENCHMARK_PREREQUISITE: labels service must be a loopback HTTP origin.')
+  }
+  // Exercise the real read route, not just a listening port. Never include its
+  // response body, database errors, credentials or configured paths in failures.
+  try {
+    const response = await fetch(new URL('/api/foods?q=egg&limit=1', proxy), {
+      redirect: 'error', signal: AbortSignal.timeout(5_000),
+    })
+    if (!response.ok) throw new Error('unavailable')
+    const body: unknown = await response.json()
+    if (!body || typeof body !== 'object' || !('items' in body)
+      || !Array.isArray(body.items)) throw new Error('invalid response')
+  } catch {
+    throw new Error('MEAL_BENCHMARK_PREREQUISITE: local labels read failed or returned an invalid response.')
+  }
 }
 
 export async function runMealIntakeBenchmarkCase(input: {

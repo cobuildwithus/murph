@@ -221,7 +221,7 @@ export function requireSingleAssistantRealCodexTest(
     // pnpm can precede the JSON with engine warnings. Accept only its finite
     // warning lines; arbitrary stdout still fails closed.
     const json = listOutput.split('\n').filter((line) =>
-      !/^\s*(?:\S+\s+)?(?:WARN|WARN\u2009|\u2009WARN\u2009)\s+Unsupported engine:/.test(line),
+      !/^\s*(?:\S+\s+(?:\|\s+)?)?(?:WARN|WARN\u2009|\u2009WARN\u2009)\s+Unsupported engine:/.test(line),
     ).join('\n')
     listed = JSON.parse(json)
   } catch {
