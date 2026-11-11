@@ -73,7 +73,7 @@ interface ProjectionReplacementStore {
   replaceCaptureProjection(
     entries: ReadonlyArray<InboxCaptureProjectionEntry>,
     options: { enqueueParserJobs: boolean },
-  ): void;
+  ): number;
 }
 
 export interface InboxCaptureMutationRecord {
@@ -1287,7 +1287,7 @@ function createInboxRuntimeStore(
         },
       }));
 
-      withTransaction(database, () => {
+      return withTransaction(database, () => {
         const previousNextCursor = readCurrentMutationCursor();
         const previousCaptureIds = new Set(
           (
@@ -1324,6 +1324,7 @@ function createInboxRuntimeStore(
 
           deleteCaptureProjectionRow(captureId, { recordTombstone: true });
         }
+        return replayedCaptureIds.size;
       });
     },
   };
@@ -1333,12 +1334,12 @@ export function replaceInboxCaptureProjection(input: {
   databasePath: string;
   enqueueParserJobs: boolean;
   entries: ReadonlyArray<InboxCaptureProjectionEntry>;
-}): void {
+}): number {
   const database = openInboxRuntimeDatabaseForPath(input.databasePath);
   const runtime = createInboxRuntimeStore(database, input.databasePath);
 
   try {
-    runtime.replaceCaptureProjection(input.entries, {
+    return runtime.replaceCaptureProjection(input.entries, {
       enqueueParserJobs: input.enqueueParserJobs,
     });
   } finally {

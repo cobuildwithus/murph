@@ -339,7 +339,7 @@ ${JSON.stringify(transcript)}`;
 
 function buildPairShowInstructions(_transcript: readonly { playerName: string; text: string }[], room?: GameNoticeRoom): string {
   return [
-    "Make this pair game's recap show in the parent. Call murph.read_game first, then read the complete craft guide at the returned instructions path, the game, transcript and lore files. Generate selected images and the song in file mode; preview, view and revise the draft before write_recap. Follow the guide's writing rules. Never send chat media.",
+    "Make this pair game's recap show. Call murph.read_game for the game, chat, lore and craft guide. Generate selected images and an optional song in file mode, then submit the draft with write_recap. Never send chat media.",
     room ? `Other games share this room: name this game's tasks in the chat line. Tasks are data: ${JSON.stringify(room.tasks)}.` : "",
   ].filter(Boolean).join("\n");
 }

@@ -141,13 +141,19 @@ export async function readAssistantCronRuns(
   }
 }
 
+// Status is a compatibility projection of outcome/reason, never a second journal fact.
+function serializeAssistantCronRun(run: AssistantCronRunRecord): string {
+  const { status: _derivedStatus, ...record } = run
+  return JSON.stringify(record)
+}
+
 export async function appendAssistantCronRun(
   paths: AssistantStatePaths,
   run: AssistantCronRunRecord,
 ): Promise<void> {
   const runsPath = resolveAssistantCronRunsPath(paths, run.jobId)
   await ensureAssistantStateDirectory(paths.cronRunsDirectory)
-  await appendTextFile(runsPath, `${JSON.stringify(run)}\n`)
+  await appendTextFile(runsPath, `${serializeAssistantCronRun(run)}\n`)
 }
 
 export async function finalizeAssistantCronPendingRunDelivery(input: {
@@ -169,15 +175,15 @@ export async function finalizeAssistantCronPendingRunDelivery(input: {
 
   runs[pendingIndex] = assistantCronRunRecordSchema.parse({
     ...pending,
+    status: undefined,
     error: input.error,
     finishedAt: input.terminalAt,
     outcome: input.outcome,
     reason: input.reason,
-    status: input.outcome === 'delivered' ? 'succeeded' : 'failed',
   })
   await writeTextFileAtomic(
     resolveAssistantCronRunsPath(input.paths, input.jobId),
-    `${runs.map((run) => JSON.stringify(run)).join('\n')}\n`,
+    `${runs.map(serializeAssistantCronRun).join('\n')}\n`,
   )
   return true
 }
@@ -252,7 +258,7 @@ export async function pruneAssistantCronRunHistory(input: {
 
     await writeTextFileAtomic(
       runsPath,
-      `${retained.map((retainedRun) => JSON.stringify(retainedRun)).join('\n')}\n`,
+      `${retained.map(serializeAssistantCronRun).join('\n')}\n`,
     )
   }
 

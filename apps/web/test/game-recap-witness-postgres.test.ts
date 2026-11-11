@@ -156,6 +156,44 @@ describe.skipIf(!enabled)("recap moderation witness PostgreSQL proof", () => {
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members.splice(0) } } });
   });
 
+  it.each([false, true])('completes failed shows: regeneration=%s', async regeneration => {
+    const initial = await fixture();
+    const f = regeneration ? await regenerate(initial) : initial;
+    vi.stubEnv('MURPH_GAME_RECAP_SHOW_ENABLED', 'true');
+    const before = (await story(f)).recapEncrypted;
+    const complete = () => handleGameChatTool({ memberId: f.room, runtimeIdentity: null, request: {
+      action: 'read_game', origin: { kind: 'game_recap', gameId: f.gameId, eventId: f.eventId }, recapRead: { kind: 'recover', failed: true },
+    } });
+    const result = await complete();
+    if (regeneration) {
+      expect(result.result).toMatchObject({ status: 'unavailable', error: GAME_RECAP_GENERATION_RETIRED });
+      expect(result.result.chatLine).toBeUndefined();
+      expect((await story(f)).recapEncrypted).toBe(before);
+      expect((await receipt(f)).status).toBe('skipped');
+      expect(await f.db.gameEvent.count({ where: { commandKey: `${f.eventId}:accepted` } })).toBe(0);
+      expect((await requestGameRecapRegeneration({ gameId: f.gameId, regenerationId: 'later_synthetic_retry', execute: true, operatorMemberId: 'system' })).outcome).toBe('reserved');
+    } else {
+      expect(result.result).toMatchObject({ status: 'ok', recap: { pages: expect.any(Array) } });
+      expect(result.result.chatLine?.split('\n')).toHaveLength(2);
+      expect((await readGame(f.gameId, f.players[0]!))?.recap?.pages).toHaveLength(3);
+      expect((await story(f)).recapEncrypted).not.toBeNull();
+      expect(await complete()).toEqual(result);
+    }
+    expect(await f.db.hostedMailboxItem.count({ where: { userId: f.room } })).toBe(0);
+  });
+
+  it('replays accepted regeneration before handling a reported turn failure', async () => {
+    const f = await regenerate(await fixture());
+    vi.stubEnv('MURPH_GAME_RECAP_SHOW_ENABLED', 'true');
+    await sealGameRecap({ ...f.sealInput, recap: cleanRecap, assets: [] });
+    const before = (await story(f)).recapEncrypted;
+    const result = await handleGameChatTool({ memberId: f.room, runtimeIdentity: null, request: {
+      action: 'read_game', origin: { kind: 'game_recap', gameId: f.gameId, eventId: f.eventId }, recapRead: { kind: 'recover', failed: true },
+    } });
+    expect(result.result).toMatchObject({ status: 'ok', recap: cleanRecap });
+    expect((await story(f)).recapEncrypted).toBe(before);
+    expect((await receipt(f)).status).toBe('generation_queued');
+  });
   describe("retirement activation", () => {
     const unavailable = (action: "read_game" | "write_recap") => ({ action, result: { status: "unavailable", error: "recap_authority_unavailable" } });
     const terminal = (action: "read_game" | "write_recap") => ({ action, result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } });

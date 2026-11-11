@@ -1,8 +1,6 @@
 import { createCaptureCheckpoint } from '@murphai/inboxd/checkpoint'
 import {
-  type InboxConnectorConfig,
   type InboxPromotionEntry,
-  type InboxRuntimeConfig,
 } from '@murphai/operator-config/inbox-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type {
@@ -10,10 +8,8 @@ import type {
   RuntimeCaptureRecord,
   RuntimeStore,
 } from '../inbox-app/types.js'
-import { requireConnector } from './state.js'
 import {
   isParseableAttachment,
-  runtimeNamespaceAccountId,
 } from './shared.js'
 
 export function hasStoredPath(
@@ -146,19 +142,4 @@ export function requireAttachmentRecord(
     'INBOX_ATTACHMENT_NOT_FOUND',
     `Inbox attachment "${attachmentId}" was not found.`,
   )
-}
-
-export function resolveSourceFilter(
-  config: InboxRuntimeConfig,
-  sourceId: string | null,
-): { source: string; accountId: string | null } | null {
-  if (!sourceId) {
-    return null
-  }
-
-  const connector = requireConnector(config, sourceId)
-  return {
-    source: connector.source,
-    accountId: runtimeNamespaceAccountId(connector),
-  }
 }

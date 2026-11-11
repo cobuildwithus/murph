@@ -1,8 +1,5 @@
-import { expect } from 'vitest';
-import type { GameRecapStory, RecapFileReceipt } from '@murphai/contracts/recap-show';
-import { gameRecapToolResult, validateGameRecap } from '@murphai/contracts/recap-validation';
-import type { HostedGameToolResponse, HostedRuntimeGroupToolRequest } from '@murphai/hosted-execution/runtime-control';
-// Reuse the sanctioned live lane's synthetic media and real reservation/byte checks.
+import type { GameRecapStory } from '@murphai/contracts/recap-show';
+// Synthetic transport shared with the live lane.
 import { createRecapShowLiveProviders } from '@murphai/assistant-engine/recap-show-testkit';
 
 export async function createHostedRecapFixture(gameId: string, mediaFails = false) {
@@ -11,9 +8,6 @@ export async function createHostedRecapFixture(gameId: string, mediaFails = fals
   const result = players.map((player, index) => ({ ...player, score: 3 - index }));
   const chat = [{ playerName: 'Player B', text: 'The laundry basket supervises.' }];
   const providers = await createRecapShowLiveProviders({ game: { id: gameId, maxPlayers: 2, recapShow: true }, players, entries, result, chat, ...(mediaFails ? { mediaFetch: async () => Response.json({ error: { message: 'Synthetic provider unavailable' } }, { status: 503 }) } : {}) });
-  const receipts: RecapFileReceipt[] = [];
-  const saved: GameRecapStory[] = [];
-  const phases: string[] = [];
   const story: GameRecapStory = {
     treatment: 'Laundry space opera',
     chatLine: 'Player A won 3–2. The laundry basket supervised the entire mission.',
@@ -38,21 +32,5 @@ export async function createHostedRecapFixture(gameId: string, mediaFails = fals
       ] },
     ],
   };
-  expect(validateGameRecap({ recap: story, players: players.map(player => player.name), entries, result, chatMessages: chat, show: true })).toEqual([]);
-  const control = async (request: HostedRuntimeGroupToolRequest): Promise<HostedGameToolResponse> => {
-    if (request.action === 'read_game') {
-      const response = await providers.control(request);
-      if (request.recapRead?.kind === 'finished' && request.recapRead.receipt) receipts.push(request.recapRead.receipt);
-      return response;
-    }
-    if (request.action !== 'write_recap') throw new Error('Unexpected synthetic action.');
-    const errors = validateGameRecap({ recap: request.recap, players: players.map(player => player.name), entries, result, chatMessages: chat, show: true });
-    if (errors.length) return { action: 'write_recap', result: { status: 'rejected', recapOutcome: gameRecapToolResult(errors) } };
-    phases.push(request.phase ?? 'missing');
-    if (request.phase === 'prepare') return { action: 'write_recap', result: { status: 'ok', recapGame: providers.prepare({ story: request.recap, files: request.files }) } };
-    providers.accept();
-    saved.push(request.recap);
-    return { action: 'write_recap', result: { status: 'ok', recap: request.recap, recapOutcome: gameRecapToolResult([]), chatLine: `${request.recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/${gameId}` } };
-  };
-  return { ...providers, control, story, receipts, saved, phases };
+  return { ...providers, story };
 }

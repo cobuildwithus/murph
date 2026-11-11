@@ -3,10 +3,6 @@ import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import type {
-  InboxConnectorConfig,
-  InboxRuntimeConfig,
-} from '@murphai/operator-config/inbox-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   resolveRuntimePaths,
@@ -28,7 +24,6 @@ import {
   isStoredImageAttachment,
   requireAttachmentRecord,
   requireCapture,
-  resolveSourceFilter,
   summarizeCapture,
   toCliAttachment,
 } from '../src/inbox-services/query.ts'
@@ -38,15 +33,10 @@ import {
   occurredDayFromCapture,
   relativeToVault,
   resolveAttachmentParseState,
-  runtimeNamespaceAccountId,
 } from '../src/inbox-services/shared.ts'
 import {
-  ensureConfigFile,
   ensureDirectory,
-  findConnector,
-  readConfig,
   rebuildRuntime,
-  requireConnector,
 } from '../src/inbox-services/state.ts'
 import type {
   InboxPaths,
@@ -75,17 +65,6 @@ async function createTempVault(): Promise<RuntimePaths> {
   tempRoots.push(tempRoot)
   await mkdir(tempRoot, { recursive: true })
   return resolveRuntimePaths(tempRoot)
-}
-
-function createConnector(
-  overrides: Partial<InboxConnectorConfig> & Pick<InboxConnectorConfig, 'id' | 'source'>,
-): InboxConnectorConfig {
-  return {
-    accountId: null,
-    enabled: true,
-    options: {},
-    ...overrides,
-  }
 }
 
 function createCapture(
@@ -243,13 +222,6 @@ test('service-layer helpers cover query, state, and vault path branches', async 
     (error: unknown) => error instanceof VaultCliError && error.code === 'ASSISTANT_PATH_OUTSIDE_VAULT',
   )
 
-  const connector = createConnector({
-    id: 'telegram:bot',
-    source: 'telegram',
-    accountId: null,
-    options: { backfillLimit: 10 },
-  })
-  assert.equal(runtimeNamespaceAccountId(connector), 'bot')
   assert.equal(normalizeLimit(undefined, 20, 50), 20)
   assert.equal(normalizeLimit(25, 20, 50), 25)
   assert.throws(() => normalizeLimit(100, 20, 50), /Limit must be an integer/)
@@ -295,33 +267,6 @@ test('service-layer helpers cover query, state, and vault path branches', async 
   assert.throws(() => requireCapture(runtime, 'missing'), /was not found/)
   assert.equal(requireAttachmentRecord(runtime, 'attachment-1').attachment.attachmentId, 'attachment-1')
   assert.throws(() => requireAttachmentRecord(runtime, 'missing'), /was not found/)
-  const config: InboxRuntimeConfig = {
-    connectors: [connector],
-  }
-  assert.equal(resolveSourceFilter(config, null), null)
-  assert.deepEqual(resolveSourceFilter(config, 'telegram:bot'), {
-    accountId: 'bot',
-    source: 'telegram',
-  })
-  assert.deepEqual(
-    resolveSourceFilter(
-      {
-        connectors: [
-          createConnector({
-            id: 'linq:legacy',
-            source: 'linq',
-            accountId: null,
-          }),
-        ],
-      },
-      'linq:legacy',
-    ),
-    {
-      accountId: 'default',
-      source: 'linq',
-    },
-  )
-
   assert.equal(resolveAttachmentParseState(attachment, []), 'succeeded')
   assert.equal(
     occurredDayFromCapture(detailedCapture),
@@ -329,17 +274,10 @@ test('service-layer helpers cover query, state, and vault path branches', async 
   )
 
   const configPaths = await createTempVault()
-  await ensureDirectory(path.dirname(configPaths.inboxConfigPath), [], configPaths.absoluteVaultRoot)
-  await ensureConfigFile(configPaths as InboxPaths, [])
-  assert.deepEqual(await readConfig(configPaths as InboxPaths), { connectors: [] })
-  const persistedConfig = { connectors: [{ ...connector, accountId: 'bot' }] }
-  assert.equal(findConnector(persistedConfig, 'telegram:bot')?.accountId, 'bot')
-  assert.equal(findConnector(persistedConfig, 'telegram:bot')?.id, 'telegram:bot')
-  assert.equal(requireConnector(persistedConfig, 'telegram:bot').id, 'telegram:bot')
-  assert.throws(() => requireConnector(persistedConfig, 'missing'), /is not configured/)
   const rebuildRuntimeFromVaultMock = vi.fn(
     async (input: Parameters<InboxRuntimeModule['rebuildRuntimeFromVault']>[0]) => {
       assert.equal(input.enqueueParserJobs, true)
+      return 400
     },
   )
   const rebuildCount = await rebuildRuntime(
@@ -392,10 +330,8 @@ test('service-layer helpers cover query, state, and vault path branches', async 
           listAttachmentParseJobs() {
             return []
           },
-          listCaptures(filters) {
-            const limit = filters?.limit ?? 0
-            const count = limit < 800 ? limit : 400
-            return Array.from({ length: count }, () => createCapture())
+          listCaptures() {
+            throw new Error('rebuild must use the returned count, not list captures')
           },
           requeueAttachmentParseJobs() {
             return 0
@@ -407,7 +343,7 @@ test('service-layer helpers cover query, state, and vault path branches', async 
         }
       },
       async rebuildRuntimeFromVault(input) {
-        await rebuildRuntimeFromVaultMock(input)
+        return await rebuildRuntimeFromVaultMock(input)
       },
       runInboxEnvelopeMigration,
     } as InboxRuntimeModule,

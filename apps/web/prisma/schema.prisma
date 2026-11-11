@@ -369,8 +369,6 @@ model ClinicalRecordRetrievalRun {
   fetchedBytes         Int                              @default(0) @map("fetched_bytes")
   egressBytes          Int                              @default(0) @map("egress_bytes")
   providerRequestCount Int                              @default(0) @map("provider_request_count")
-  importedCount        Int                              @default(0) @map("imported_count")
-  reviewCount          Int                              @default(0) @map("review_count")
   lastErrorCode        String?                          @map("last_error_code")
   outcomeCountsJson    Json?                            @map("outcome_counts_json")
   createdAt            DateTime                         @default(now()) @map("created_at")
@@ -1307,7 +1305,6 @@ model HostedUserCryptoAudit {
 /// No expiry grants replacement authority; retirement requires adapter proof.
 model HostedRuntimeOwner {
   // Sticky until trusted recap finalization or invocation turnover; no game FK.
-  recapMediaScope           Json?    @map("recap_media_scope")
   userId                    String   @id @map("user_id")
   generation                BigInt   @default(0)
   attemptId                 String?  @map("attempt_id")

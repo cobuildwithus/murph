@@ -1,3 +1,4 @@
+import { seedStoredAccount } from "./store-test-helpers.ts";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -212,7 +213,7 @@ test("local summary import observes a disconnect projected by fresh inventory", 
   const imported: string[] = [];
   const service = createDeviceSyncService({
     secret: "synthetic-device-sync-secret",
-    config: { vaultRoot, stateDatabasePath, publicBaseUrl: "https://sync.example.test" },
+    config: { vaultRoot, stateDatabasePath },
     clock: { now: () => new Date(now) },
     store,
     providers: [createJunctionProvider(async (input) => {
@@ -238,7 +239,7 @@ test("local summary import observes a disconnect projected by fresh inventory", 
     },
   });
   try {
-    const account = store.upsertAccount({
+    const account = seedStoredAccount(store, {
       provider: "junction", externalAccountId: "junction-user-1", scopes: [],
       credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
       connectedAt: now, nextReconcileAt: null,

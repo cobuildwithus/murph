@@ -3408,15 +3408,23 @@ Current product admission, delivery and native runtime safety rules remain.
   provider has accepted a send, one boundary keeps the accepted outcome: a later
   cleanup, staging or wake-projection failure logs
   `assistant_after_checkpoint_failed` and leaves a prompt recovery wake.
-  A Linq reply boundary carrying a parked file-approval cycle publishes its
-  prepared claims and obligations before any reply bubble can consume the input.
-  Follow-up requests and direct nutrition invitations send first only when every
-  send in their reply boundary is transport-idempotent. Otherwise, the whole
-  obligation boundary publishes first, including earlier reply bubbles. Before
-  a send-first drain, the existing durable-effect deadline requests immediate
-  workspace publication; rejection or later drain failure preserves the request.
-  Accepted risk: a runner that dies after Linq acceptance and before publication
-  finishes can lose the follow-up or the nutrition invitation memory. Immediate
+  Member-visible replies never wait on publication (owner rule, 2026-11-11). A
+  Linq reply boundary carrying a parked file-approval cycle, a follow-up request
+  or a direct nutrition invitation sends every bubble first, idempotent or not.
+  Before that send-first drain, the existing durable-effect deadline requests
+  immediate workspace publication; rejection or later drain failure preserves
+  the request. Accepted risk, by crash point, when no snapshot holds the fresh
+  turn: before Web commits Linq acceptance, the input replays and a
+  non-idempotent bubble can send again under a new intent; after acceptance
+  consumes the input, nothing replays, so the parked approval file (an approval
+  link with nothing behind it), the follow-up's source evidence (its automation
+  then skips), the nutrition invitation's settlement, and any later unsent
+  bubbles in that reply can be lost. Once a snapshot holds the outbox state,
+  existing claim recovery, receipt repair and settlement retry apply. Exposure
+  runs from acceptance to successful publication, including the rest of the
+  drain and any scheduling wait before the snapshot starts, so it can exceed
+  snapshot build time. A completed graceful-shutdown checkpoint closes it on
+  normal deploys. Immediate
   publication reduces the normal exposure from the idle window of up to ten
   minutes to publication time, roughly seven to twelve seconds; it does not
   guarantee completion within that time. Non-idempotent retries, durable-pending

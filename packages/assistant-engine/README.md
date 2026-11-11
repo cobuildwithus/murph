@@ -71,6 +71,28 @@ and `errorCode IN ('ASSISTANT_CODEX_FAILED', 'ASSISTANT_CODEX_CONNECTION_LOST',
 Keep missing values separate from `false`, select metadata only, and do not
 induce failures. An empty window is not evidence that the path works.
 
+## Cron occurrence and history ownership
+
+Canonical automation policy and local device-triggered occurrences retain their
+existing stores and claim identities. One execution-result transition applies
+failure counts, success/failure timestamps, claim release and pending-delivery
+bookkeeping to both representations; each owner retains its schedule, cursor,
+session binding and terminal-removal rules. A full store migration is not implied.
+
+New and rewritten cron journals persist `outcome` and `reason`, omitting the
+redundant `status`. The contract reader derives that optional compatibility field
+for existing API consumers and continues to read old status-only records. Current
+readers already accept outcome-bearing records without status, so mixed runner
+versions need no storage migration; rollback must retain that outcome reader.
+
+Historical onboarding prompt fingerprints and one-shot conversion remain finite
+compatibility work. Remove them only after old active/paused definitions and their
+pending delivery references are gone from all supported restorable snapshots.
+Old mailbox input JSON and v1 pending-index readers have the same restore gate;
+a quiet traffic window does not prove sleeping workspaces have converged. These
+readers must not be replaced by loose metadata matching or replaying ambiguous
+inputs. Current authorities and the existing maintenance owner remain unchanged.
+
 ## Cron delivery reconciliation telemetry
 
 Cron wake selection uses the same canonical schedule and runtime projection as

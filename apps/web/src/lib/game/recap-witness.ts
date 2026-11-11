@@ -62,7 +62,7 @@ export async function readGameRecapEntryIdsTx(tx: Prisma.TransactionClient, game
 export const GAME_RECAP_RETIRED = "game_recap_retired";
 
 /** Only published, unclaimed work. Claimed provider work keeps its uncertainty; unpublished work exposed nothing and gets a clean witness. */
-async function retireGameRecapGenerationTx(tx: Prisma.TransactionClient, eventId: string): Promise<void> {
+export async function retireGameRecapGenerationTx(tx: Prisma.TransactionClient, eventId: string): Promise<void> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(eventId);
   if (!idempotencyKey) return;
   await tx.hostedLinqDelivery.updateMany({ where: { idempotencyKey, source: "game_lifecycle", template: "game_recap", status: "generation_queued" },

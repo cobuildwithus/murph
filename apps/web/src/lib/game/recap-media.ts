@@ -1,3 +1,13 @@
+import type { Prisma } from '@prisma/client';
+import type { HostedGameToolRequest } from '@murphai/hosted-execution/runtime-control';
+import { recapAssetSchema } from '@murphai/contracts/recap-show';
+import { getPrisma } from '../prisma';
+import { readGameChatAudience, readGameChatAuthority } from './chat-membership';
+import { readGameRecapEntryIdsTx, readLatestGameRecapEventIdTx } from './recap-witness';
+import { readRecapSourceReferences } from './recap-inputs';
+import { recapReferencesCurrent } from './recap-asset-access';
+import { registerRecapAssetsTx } from './recap-retirement';
+import type { readGameRecapMaterial } from './service';
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -96,4 +106,46 @@ function localFile(input: Identity): string {
 function hasCode(value: unknown, code: string): boolean { return typeof value === "object" && value !== null && "code" in value && value.code === code; }
 function isStored(value: unknown): value is { envelope: string; hash: string } {
   return typeof value === "object" && value !== null && "envelope" in value && typeof value.envelope === "string" && "hash" in value && typeof value.hash === "string";
+}
+
+export const recapGenerationId = (eventId: string) => createHash('sha256').update(`recap-generation:${eventId}`).digest('hex').slice(0, 32);
+
+/** The host supplies actual file bytes and its private source association. */
+export async function uploadRecapMedia(input: {
+  gameId: string; eventId: string; memberId: string;
+  material: NonNullable<Awaited<ReturnType<typeof readGameRecapMaterial>>>;
+  beforeMutationTx: (tx: Prisma.TransactionClient) => Promise<void>;
+  file: Extract<NonNullable<Extract<HostedGameToolRequest, { action: 'read_game' }>['recapRead']>, { kind: 'upload' }>;
+}) {
+  const bytes = Buffer.from(input.file.bytes, 'base64');
+  const generationId = recapGenerationId(input.eventId);
+  const hash = createHash('sha256').update(bytes).digest('hex');
+  const storageKey = `recap/${generationId}/${hash}.${input.file.mediaType === 'image/jpeg' ? 'jpg' : 'mp3'}`;
+  const available = await readRecapSourceReferences(input.material, input.eventId);
+  const references = input.file.referenceIds.map(id => {
+    const reference = available.find(value => value.id === id);
+    if (!reference) throw new Error('A selected photo is no longer available.');
+    const { id: _id, ...source } = reference;
+    return source;
+  });
+  const audience = await readGameChatAudience(input.memberId);
+  const now = new Date();
+  const ownerMemberId = await getPrisma().$transaction(async tx => {
+    await input.beforeMutationTx(tx);
+    await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
+    const game = await tx.game.findUnique({ where: { id: input.gameId }, include: { players: { take: 3 }, invitees: true } });
+    if (!game || game.status !== 'settled' || game.maxPlayers !== 2
+      || !await readGameChatAuthority(game, input.memberId, audience, tx)
+      || await readLatestGameRecapEventIdTx(tx, game.id) !== input.eventId
+      || !await readGameRecapEntryIdsTx(tx, game, input.eventId)
+      || !await recapReferencesCurrent(tx, game.id, [{ references }])) throw new Error('Recap media is no longer authorized.');
+    await registerRecapAssetsTx(tx, { gameId: game.id, generationId, ownerMemberId: game.wordsOwnerMemberId,
+      storageKeys: [storageKey], acceptedAt: now, recoveryUntil: new Date(now.getTime() + 86400_000) });
+    return game.wordsOwnerMemberId;
+  });
+  const metadata = await putRecapMedia({ storageKey, ownerMemberId, bytes,
+    ...(input.file.mediaType === 'audio/mpeg' ? { durationMs: 20_000 } : {}) });
+  const { bytes: byteLength, ...media } = metadata;
+  return recapAssetSchema.parse({ slot: input.file.slot, kind: input.file.mediaType === 'image/jpeg' ? 'image' : 'song',
+    recipeId: hash, storageKey, references, byteLength, ...media });
 }

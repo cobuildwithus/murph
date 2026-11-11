@@ -598,7 +598,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget
         ? {
-            ...(input.defaults ?? {}),
+            ...input.defaults,
             backend: input.executionContext.hosted.defaultTarget,
           }
         : (input.defaults ?? null),
@@ -1913,7 +1913,7 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
     resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget
         ? {
-            ...(input.defaults ?? {}),
+            ...input.defaults,
             backend: input.executionContext.hosted.defaultTarget,
           }
         : (input.defaults ?? null),
@@ -2091,7 +2091,7 @@ test('sendAssistantNotificationLocal derives hosted notification keys from resol
     resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget
         ? {
-            ...(input.defaults ?? {}),
+            ...input.defaults,
             backend: input.executionContext.hosted.defaultTarget,
           }
         : (input.defaults ?? null),
@@ -2272,7 +2272,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
     resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget
         ? {
-            ...(input.defaults ?? {}),
+            ...input.defaults,
             backend: input.executionContext.hosted.defaultTarget,
           }
         : (input.defaults ?? null),
@@ -2439,7 +2439,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget
         ? {
-            ...(input.defaults ?? {}),
+            ...input.defaults,
             backend: input.executionContext.hosted.defaultTarget,
           }
         : (input.defaults ?? null),
@@ -4448,7 +4448,6 @@ test('recap recovery delivers one accepted fallback line and link without anothe
   const eventId = 'game-recap:game_synthetic'
   const chatLine = 'The morning walks made the week.\nWatch the recap: https://recaps.murph.test/recap/game_synthetic'
   const request = vi.fn()
-    .mockResolvedValueOnce({ result: { status: 'ok', recapGame: { pendingRecapUsages: [] } } })
     .mockResolvedValueOnce({ result: { status: 'ok', chatLine } })
   const { deliverMessage, mocks, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
     providerResult: createProviderResult({ response: 'The model must not run.' }),
@@ -4463,10 +4462,31 @@ test('recap recovery delivers one accepted fallback line and link without anothe
     threadId: 'synthetic-game-thread', threadIsDirect: false, vault: '/synthetic-vault',
   })
   expect(result.response).toBe(chatLine)
-  expect(request).toHaveBeenCalledTimes(2)
+  expect(request).toHaveBeenCalledTimes(1)
   expect(request).toHaveBeenLastCalledWith({ action: 'read_game', origin: { kind: 'game_recap', gameId: scope.gameId, eventId }, recapRead: { kind: 'recover' } })
   expect(deliverMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: chatLine, card: null, media: [] }))
   expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+})
+
+test('failed recap regeneration completes silently using the normal turn profile', async () => {
+  const scope = { eventId: 'game-recap:game_synthetic:replacement', gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const }
+  const request = vi.fn().mockResolvedValueOnce({ result: { status: 'ok', recapGame: { recovered: false } } })
+    .mockResolvedValueOnce({ result: { status: 'unavailable', error: 'recap_generation_retired' } })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    providerResult: createProviderResult({ response: 'unused' }), turnId: 'failed-recap-replacement',
+    onExecuteCodexTurnWithRecovery: async () => { throw new Error('Synthetic provider failure') },
+  })
+  const result = await sendAssistantNotificationLocal({ channel: 'linq', deliveryIdempotencyKey: scope.eventId,
+    deliveryTarget: 'synthetic-game-thread', threadId: 'synthetic-game-thread', threadIsDirect: false,
+    executionContext: { hosted: { gameRecapScope: scope, groupTool: { request }, memberId: 'synthetic-group', userEnvKeys: [] } },
+    instructions: 'Make the game recap.', responsePolicy: { kind: 'require_game_recap', ...scope }, vault: '/synthetic-vault' })
+  expect(result.decision.kind).toBe('skip')
+  expect(result.response).toBeNull()
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(request).toHaveBeenLastCalledWith({ action: 'read_game', origin: { kind: 'game_recap', gameId: scope.gameId, eventId: scope.eventId }, recapRead: { kind: 'recover', failed: true } })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    profile: { promptProfile: 'conversation', threadScope: 'isolated-thread', toolProfile: 'provider-turn' },
+  }))
 })
 
 test.each(['game-recap:game_synthetic', 'game-recap:game_synthetic:synthetic_request'])('game recap notifications deliver and persist the accepted chat line exactly: %s', async (eventId) => {
@@ -5135,7 +5155,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget
         ? {
-            ...(input.defaults ?? {}),
+            ...input.defaults,
             backend: input.executionContext.hosted.defaultTarget,
           }
         : (input.defaults ?? null),
@@ -5302,7 +5322,7 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
     resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget
         ? {
-            ...(input.defaults ?? {}),
+            ...input.defaults,
             backend: input.executionContext.hosted.defaultTarget,
           }
         : (input.defaults ?? null),
@@ -5429,7 +5449,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget
         ? {
-            ...(input.defaults ?? {}),
+            ...input.defaults,
             backend: input.executionContext.hosted.defaultTarget,
           }
         : (input.defaults ?? null),
@@ -5623,7 +5643,7 @@ test('sendAssistantNotificationLocal drops generated email thread subjects befor
     resolveAssistantExecutionOperatorDefaults: vi.fn((input) =>
       input.executionContext?.hosted?.defaultTarget
         ? {
-            ...(input.defaults ?? {}),
+            ...input.defaults,
             backend: input.executionContext.hosted.defaultTarget,
           }
         : (input.defaults ?? null),
@@ -6313,7 +6333,7 @@ async function loadNotificationTurnHarness(input: {
     resolveAssistantExecutionOperatorDefaults: vi.fn((targetInput) =>
       targetInput.executionContext?.hosted?.defaultTarget
         ? {
-            ...(targetInput.defaults ?? {}),
+            ...targetInput.defaults,
             backend: targetInput.executionContext.hosted.defaultTarget,
           }
         : (targetInput.defaults ?? null),

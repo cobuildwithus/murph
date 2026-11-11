@@ -1,3 +1,4 @@
+import { seedStoredAccount } from "./store-test-helpers.ts";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -118,7 +119,7 @@ test("Junction batched history survives durable restart and provider retry befor
     const store = new SqliteDeviceSyncStore(stateDatabasePath);
     const service = createDeviceSyncService({
       secret: "synthetic-device-sync-secret",
-      config: { vaultRoot, stateDatabasePath, publicBaseUrl: "https://sync.example.test" },
+      config: { vaultRoot, stateDatabasePath },
       store,
       clock: { now: () => now },
       providers: [createJunctionProvider(async (input) => {
@@ -133,7 +134,7 @@ test("Junction batched history survives durable restart and provider retry befor
   };
   let fixture = open();
   try {
-    const account = fixture.store.upsertAccount({
+    const account = seedStoredAccount(fixture.store, {
       provider: "junction", externalAccountId: "junction-user-1",
       displayName: "Junction", scopes: [], status: "active",
       credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },

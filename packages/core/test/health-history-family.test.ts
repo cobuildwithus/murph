@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
+import { bloodTestImportPayloadSchema, immunizationImportPayloadSchema } from "@murphai/contracts";
 
 import {
   appendJsonlRecord,
@@ -2365,4 +2366,46 @@ test("family and genetics upserts require canonical title and familyMemberId fie
       } as Parameters<typeof upsertGeneticVariant>[0] & { label?: string }),
     /title is required/u,
   );
+});
+
+test("clinical import schemas compose directly with canonical history writers", async () => {
+  const vaultRoot = await makeTempDirectory("murph-clinical-import-types");
+  await initializeVault({ vaultRoot });
+  const common = {
+    eventId: null,
+    occurredAt: "2026-11-10T12:00:00.000Z",
+    recordedAt: null,
+    source: "",
+    title: "Synthetic imported record",
+    note: null,
+    tags: null,
+    links: null,
+    rawRefs: null,
+  };
+  const blood = await appendBloodTest({
+    ...bloodTestImportPayloadSchema.parse({
+      ...common,
+      testName: "Synthetic panel",
+      resultStatus: null,
+      results: [{ analyte: "Synthetic marker", value: 3, unit: null }],
+    }),
+    vaultRoot,
+  });
+  const immunization = await appendImmunization({
+    ...immunizationImportPayloadSchema.parse({
+      ...common,
+      vaccineName: "Synthetic vaccine",
+      manufacturer: null,
+      targetDiseases: null,
+    }),
+    vaultRoot,
+  });
+  for (const result of [blood, immunization]) {
+    const stored = await readHistoryEvent({ vaultRoot, eventId: result.record.id });
+    assert.equal(stored.record.source, "manual");
+    assert.equal(stored.record.note, undefined);
+    assert.equal(stored.record.occurredAt, common.occurredAt);
+  }
+  assert.equal(blood.record.results?.[0]?.unit, undefined);
+  assert.equal(immunization.record.manufacturer, undefined);
 });

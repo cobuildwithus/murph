@@ -1,4 +1,3 @@
-import { generatedMediaFailureResult } from './generated-media-failure.js'
 import { readMaterializeVaultMediaToolRequest, materializeVaultMedia } from './dynamic-tools/materialize-vault-media.js'
 import { sleepSummaryCardRequestSchema } from '@murphai/contracts'
 import { resolveTrustedSleepSummaryCard } from './dynamic-tools/sleep-summary-card.js'
@@ -475,7 +474,6 @@ const sendProgressUpdateArgumentsSchema = z
 const generateImageArgumentsSchema = z
   .object({
     output: z.enum(['chat', 'file']).optional(),
-    operationId: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u).optional(),
     alt: z.string().trim().min(1).max(500).nullable().default(null),
     outputFormat: z.enum(['webp', 'png', 'jpeg']).default('webp'),
     prompt: z.string().trim().min(1).max(4000),
@@ -1864,8 +1862,7 @@ export function readMurphDynamicToolRequest(
         }
       }
 
-      return {
-        ...(parsed.groupChallenge
+      return (parsed.groupChallenge
           ? {
               input: parsed.input,
               kind: 'attach-group-challenge-response-card' as const,
@@ -1873,8 +1870,7 @@ export function readMurphDynamicToolRequest(
           : {
               card: parsed.card,
               kind: 'attach-response-card' as const,
-            }),
-      }
+            })
     }
     case MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name: {
       const parsed = parseAttachExerciseRoutineCardArguments(request.arguments)
@@ -3085,11 +3081,9 @@ async function executeGetPhoneCallStatusDynamicTool(
   }
 
   try {
-    const result = await status({
-      ...(request.phoneCallId
+    const result = await status((request.phoneCallId
         ? { phoneCallId: request.phoneCallId }
-        : {}),
-    }, {
+        : {}), {
       signal: input.abortSignal ?? null,
     })
     return toolTextResult(
@@ -8701,7 +8695,7 @@ async function maybeExecuteRecapImage(input: ExecuteMurphDynamicToolRequestInput
       if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
       const result = await executeGenerateImageTool({ args: request.args, fileRuntime,
         abortSignal: input.abortSignal, env: input.env, fetchImpl: input.fetchImpl,
-        providerRequestOrdinal: input.nextUsageOrdinal() }).finally(() => fileRuntime.finish?.())
+        providerRequestOrdinal: input.nextUsageOrdinal() })
       return { ...toolTextResult(result.rpcSuccess, result.rpcText), ...toolFailureMetadata(result), usageDraft: result.usageDraft ?? null }
     } catch (error) { return recapMediaToolFailure(error) }
   }
@@ -8714,7 +8708,7 @@ async function executeSongToolRequest(input: ExecuteMurphDynamicToolRequestInput
         try {
           const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'song', args: input.request.args }, input.fetchImpl)
           if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
-          return await executeGenerateSongDynamicTool({ args: input.request.args, env: input.env, fileRuntime, abortSignal: input.abortSignal }).finally(() => fileRuntime.finish?.())
+          return await executeGenerateSongDynamicTool({ args: input.request.args, env: input.env, fileRuntime, abortSignal: input.abortSignal })
         } catch (error) { return recapMediaToolFailure(error) }
       }
       if (input.hostedToolContext?.currentGameRecapScope?.()?.show) return toolTextResult(false, 'Recap media requires output=file.', 'authority_rejected')
@@ -8730,7 +8724,6 @@ async function executeSongToolRequest(input: ExecuteMurphDynamicToolRequestInput
       })
 }
 
-function recapMediaToolFailure(error: unknown): MurphDynamicToolExecutionResult {
-  const result = generatedMediaFailureResult(error)
-  return { ...toolTextResult(false, result.rpcText), ...toolFailureMetadata(result) }
+function recapMediaToolFailure(error: unknown) {
+  return toolTextResult(false, error instanceof Error ? error.message : 'Media generation failed.', 'handler_exception', error)
 }

@@ -390,7 +390,7 @@ function createProviderAttemptResult(): AssistantProviderTurnAttemptResult {
 }
 
 describe('Codex provider routing', () => {
-  it('keeps the recap local environment with only its exact task directory writable', async () => {
+  it('uses the ordinary hosted workspace profile for recap turns', async () => {
     const route = createRoute(), session = createAssistantSession({ providerOptions: route.providerOptions })
     const input = { prompt: 'Build the synthetic recap.', vault: '/vaults/test' }
     const scope = { gameId: 'synthetic-game', eventId: 'synthetic-event', pairFingerprint: 'a'.repeat(32), show: true as const }
@@ -402,7 +402,7 @@ describe('Codex provider routing', () => {
         currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
         computerToolsAvailable: false, vaultFileSendAvailable: false,
         sendVaultFile: async () => { throw new Error('Recaps never send chat media.') } }, input,
-      profile: { promptProfile: 'system-notification', toolProfile: 'game-host-turn', threadScope: 'isolated-thread' },
+      profile: { promptProfile: 'conversation', toolProfile: 'provider-turn', threadScope: 'isolated-thread' },
       promptTimeContext: { currentLocalDate: '2026-11-10', currentTimeZone: 'UTC' },
       route, sharedPlan: createSharedPlan(), progressDelivery: null, turnId: 'synthetic-recap-turn',
     } satisfies AssistantCodexTurnExecutionPlan)
@@ -418,15 +418,11 @@ describe('Codex provider routing', () => {
       route, turnCreatedAt: '2026-11-10T00:00:00.000Z', turnId: 'synthetic-recap-turn' })
     expect(outcome.kind).toBe('succeeded')
     const provider = providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-    expect(provider.environments).toBeUndefined()
-    expect(provider.permissions).toBe('murph-recap')
-    expect(provider.codexThreadConfig).toMatchObject({ 'features.shell_tool': true, 'features.multi_agent': false, 'features.image_generation': false })
-    // RPC override keys use raw dot segments; TOML quotes would become literal key bytes.
-    const { recapTaskDirectory } = await import('../src/assistant/recap-workspace.js')
-    const root = path.relative(input.vault, recapTaskDirectory(input.vault, scope.eventId))
-    expect(provider.codexThreadConfig['permissions.murph-recap.filesystem.:workspace_roots']).toEqual({
-      [`${root}/inputs`]: 'read', [`${root}/drafts`]: 'write', [`${root}/media`]: 'write', [`${root}/previews`]: 'write',
-    })
+    expect(provider.environments).toEqual([{ PRIVATE_ENVIRONMENT: 'must-not-pass' }])
+    expect(provider.permissions).toBe(MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE)
+    expect(provider.codexThreadConfig).toBeNull()
+    expect(provider.workingDirectory).toBe('/vaults/test')
+    expect(provider.runtimeWorkspaceRoots).toEqual(['/vaults/test'])
   })
 
   it('emits only the final provider reasoning effort after routing overrides resolve', async () => {

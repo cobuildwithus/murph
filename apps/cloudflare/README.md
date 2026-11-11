@@ -1273,8 +1273,9 @@ compilation inputs unchanged.
 
 The protected-main base-image publisher exports intermediate BuildKit layers to
 `ghcr.io/cobuildwithus/murph-cloudflare-runner-base:buildcache-main` in `mode=max`.
-Only that publisher writes the cache; local builds, PR checks, and the private
-protected deploy build import it read-only. Published image reuse still requires
+The protected publisher and explicitly authorized local prebuilds write the
+cache; ordinary local builds, PR checks, and the private protected deploy build
+import it read-only. Published image reuse still requires
 the complete source fingerprint. A cache miss compiles the exact pinned source
 and runs all existing image checks. The compiler output layer retains only the
 installed binaries, not Cargo targets and downloads. The publisher is serialized
@@ -1284,6 +1285,49 @@ The native permission workflow re-solves the prepared native target with invalid
 Node pins and requires the Cargo vertex to report `CACHED`, recording elapsed time
 without rebuilding or exporting a second image. Native package updates must update
 the archive checksum alongside the version.
+
+### Prebuild the native image locally
+
+With explicit operator authorization, use the existing publisher before merging
+native-image changes or starting dependent CI. It uploads both the Linux/AMD64
+image and its intermediate compiler cache to GHCR:
+
+```sh
+pnpm install --frozen-lockfile
+CODEX_CARGO_JOBS=2 pnpm --dir apps/cloudflare runner:docker:base -- --push
+pnpm --dir apps/cloudflare runner:docker:base -- --wait-published
+```
+
+Docker must already be signed in to GHCR with package write access. GitHub's
+[Container registry guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
+documents authentication with a classic personal access token carrying
+`write:packages`; a working `gh` repository login alone does not establish
+registry write access. Keep credentials in the Docker credential manager.
+
+Use a Buildx builder supporting registry cache export. Docker's default driver
+supports it with the containerd image store; otherwise create a dedicated
+builder without changing the globally selected builder:
+
+```sh
+docker buildx create --name murph-native-publisher --driver docker-container
+BUILDX_BUILDER=murph-native-publisher CODEX_CARGO_JOBS=2 \
+  pnpm --dir apps/cloudflare runner:docker:base -- --push
+```
+
+Reuse that named builder on later runs. The publisher writes the shared version
+tag, exact source-fingerprint tag, and `buildcache-main`; publish only the
+intended reviewed source and coordinate with an active publisher. Complete the
+upload before starting CI: an already-running build does not adopt a cache
+published partway through its solve. Keep the two-job setting aligned with CI;
+changing this build argument invalidates the compiler layer's cache key.
+
+Apple Silicon builds the required AMD64 image through emulation, so local
+compilation is not necessarily faster. The benefit is preparing the artifact
+before CI needs it. The native sandbox proof still requires a native AMD64
+host. CI continues source-fingerprint checks, forced source builds with imported
+BuildKit cache, smoke tests, and the protected production deployment.
+
+### Updating the native patch
 
 To update the patch, regenerate it against the exact pinned release, retain its
 focused upstream tests and generated protocol schemas, and run

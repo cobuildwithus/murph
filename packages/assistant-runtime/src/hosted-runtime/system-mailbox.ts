@@ -1733,10 +1733,6 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   vaultRoot: string | null;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
   if (input.record.kind !== "game.recap-lore-checkpointed") return recordHostedSystemMailboxPostCheckpointRecordLegacy({ ...input, record: input.record });
-  const port = input.runtime.platform.groupToolPort;
-  if (!port) throw new Error("Recap checkpoint control is unavailable.");
-  const acknowledged = await port.request({ action: "read_game", origin: { kind: "game_recap", gameId: input.record.gameId, eventId: input.record.eventId }, recapRead: { kind: "lore_checkpointed", generationIds: input.record.generationIds } }, { signal: input.signal });
-  if (acknowledged.result.status !== "ok") throw new Error("Recap lore checkpoint was not acknowledged.");
   return { newerRevisionPending: false, nextWakeAt: null, recorded: 1, stillDirty: false };
 }
 

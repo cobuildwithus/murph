@@ -1,3 +1,4 @@
+import { seedStoredAccount } from "./store-test-helpers.ts";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -44,7 +45,7 @@ async function createBurstFixture(batching = true) {
       return pass;
     };
   }
-  const account = store.upsertAccount({
+  const account = seedStoredAccount(store, {
     provider: "junction", externalAccountId: "junction-user-1", scopes: [],
     credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
     connectedAt: NOW, nextReconcileAt: null,
@@ -56,7 +57,7 @@ async function createBurstFixture(batching = true) {
   });
   const service = createDeviceSyncService({
     secret: "synthetic-device-secret",
-    config: { vaultRoot, publicBaseUrl: "https://sync.example.test", log: { warn() {}, error() {} },
+    config: { vaultRoot, log: { warn() {}, error() {} },
       shouldYieldJobExecution: () => controls.yield },
     clock: { now: () => new Date(controls.now) }, store, providers: [provider],
     listConnectionSourcesForJob: async () => {

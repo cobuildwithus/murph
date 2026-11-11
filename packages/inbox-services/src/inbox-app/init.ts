@@ -1,6 +1,6 @@
 import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import type { InboxAppEnvironment, InboxServices } from './types.js'
-import { ensureConfigFile, ensureDirectory, rebuildRuntime } from '../inbox-services/state.js'
+import { ensureDirectory, rebuildRuntime } from '../inbox-services/state.js'
 import { fileExists, relativeToVault } from '../inbox-services/shared.js'
 
 export function createInboxInitOps(env: InboxAppEnvironment): Pick<InboxServices, 'init'> {
@@ -21,7 +21,6 @@ export function createInboxInitOps(env: InboxAppEnvironment): Pick<InboxServices
       createdPaths,
       paths.absoluteVaultRoot,
     )
-    await ensureConfigFile(paths, createdPaths)
 
     if (!(await fileExists(paths.inboxDbPath))) {
       createdPaths.push(relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath))
@@ -46,7 +45,6 @@ export function createInboxInitOps(env: InboxAppEnvironment): Pick<InboxServices
         paths.inboxRuntimeRoot,
       ),
       databasePath: relativeToVault(paths.absoluteVaultRoot, paths.inboxDbPath),
-      configPath: relativeToVault(paths.absoluteVaultRoot, paths.inboxConfigPath),
       createdPaths,
       rebuiltCaptures,
     }

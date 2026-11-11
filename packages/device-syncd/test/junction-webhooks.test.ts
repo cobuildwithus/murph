@@ -21,6 +21,9 @@ import path from "node:path";
 import { test } from "vitest";
 
 import { createDeviceSyncService } from "../src/service.ts";
+import { createDeviceSyncPublicIngress } from "../src/public-ingress.ts";
+import { DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED } from "../src/types.ts";
+import { InMemoryPublicIngressStore } from "./public-ingress-store-fixture.ts";
 import { buildJunctionProviderSourceInstanceKey } from "../src/config/junction-connect-sources.ts";
 import { DeviceSyncError } from "../src/errors.ts";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
@@ -28,8 +31,8 @@ import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { createJsonResponse, makeTempDirectory, readUrl } from "./helpers.ts";
 import {
+  seedStoredAccount,
   countJobsForAccountForTesting,
-  readWebhookTraceStatusForTesting,
 } from "./store-test-helpers.ts";
 
 import type { DeviceSyncImporterPort } from "../src/types.ts";
@@ -205,7 +208,6 @@ async function createWebhookFixture() {
     secret: "secret-for-tests",
     config: {
       vaultRoot,
-      publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
       log: {
         warn() {
@@ -218,7 +220,7 @@ async function createWebhookFixture() {
     store,
   });
 
-  const account = store.upsertAccount({
+  const account = seedStoredAccount(store, {
     provider: "junction",
     externalAccountId: "junction-user-1",
     displayName: "Junction",
@@ -232,8 +234,34 @@ async function createWebhookFixture() {
     connectedAt: iso(nowMs - 30 * 24 * 60 * 60_000),
   });
 
+  const ingressStore = new InMemoryPublicIngressStore();
+  ingressStore.getConnectionByExternalAccount = (providerName, externalAccountId) => {
+    const stored = store.getAccountByExternalAccount(providerName, externalAccountId);
+    return stored ? service.getAccount(stored.id) : null;
+  };
+  ingressStore.getConnectionById = (accountId) => service.getAccount(accountId);
+  ingressStore.listConnectionSources = (input) => store.listConnectionSources(input);
+  ingressStore.upsertConnectionSource = (input) => store.upsertConnectionSource(input);
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: service.registry,
+    store: ingressStore,
+    log: { warn() {} },
+    hooks: {
+      onWebhookAccepted({ account: acceptedAccount, claimToken, provider: acceptedProvider, traceId, webhook }) {
+        for (const job of webhook.jobs) {
+          store.enqueueJob({ ...job, accountId: acceptedAccount.id, provider: acceptedProvider.provider });
+        }
+        assert.ok(ingressStore.completeWebhookTrace(acceptedProvider.provider, traceId, claimToken));
+        return DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED;
+      },
+    },
+  });
+
   return {
     account,
+    ingress,
+    ingressStore,
     imports,
     nowMs,
     requests,
@@ -304,7 +332,7 @@ test("enriched activity webhooks direct-import and sleep webhooks with embedded 
         endOffsetMs,
         messageId: `msg_activity_${index + 1}`,
       });
-      const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+      const accepted = await fixture.ingress.handleWebhook("junction", webhook.headers, webhook.rawBody);
       assert.equal(accepted.accepted, true);
       await service.drainWorker(100);
     }
@@ -336,7 +364,7 @@ test("enriched activity webhooks direct-import and sleep webhooks with embedded 
       user_id: "junction-user-1",
       data: sleepRecord,
     }, "msg_sleep_with_data_1");
-    const sleepAccepted = await service.handleWebhook("junction", sleepWebhook.headers, sleepWebhook.rawBody);
+    const sleepAccepted = await fixture.ingress.handleWebhook("junction", sleepWebhook.headers, sleepWebhook.rawBody);
     assert.equal(sleepAccepted.accepted, true);
     await service.drainWorker(100);
 
@@ -349,7 +377,7 @@ test("enriched activity webhooks direct-import and sleep webhooks with embedded 
   }
 });
 
-test("production service ranks canonical and legacy Junction sources consistently", async () => {
+test("shared ingress and worker rank canonical and legacy Junction sources consistently", async () => {
   const fixture = await createWebhookFixture();
   const { account, imports, nowMs, service, store } = fixture;
   const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
@@ -376,13 +404,12 @@ test("production service ranks canonical and legacy Junction sources consistentl
     const importsBefore = imports.length;
     const { messageId, webhook } = buildWebhook();
 
-    const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+    const accepted = await fixture.ingress.handleWebhook("junction", webhook.headers, webhook.rawBody);
 
     assert.equal(accepted.accepted, true);
     assert.equal(countJobsForAccountForTesting(store, account.id), jobsBefore + 1);
     assert.equal(
-      readWebhookTraceStatusForTesting(
-        store,
+      fixture.ingressStore.readWebhookTraceStatus(
         "junction",
         scopeWebhookTraceId("junction", account.externalAccountId, messageId),
       ),
@@ -397,7 +424,7 @@ test("production service ranks canonical and legacy Junction sources consistentl
     const { messageId, webhook } = buildWebhook();
 
     await assert.rejects(
-      service.handleWebhook("junction", webhook.headers, webhook.rawBody),
+      fixture.ingress.handleWebhook("junction", webhook.headers, webhook.rawBody),
       (error: unknown) =>
         error instanceof DeviceSyncError
         && error.code === "WEBHOOK_SOURCE_NOT_READY"
@@ -407,8 +434,7 @@ test("production service ranks canonical and legacy Junction sources consistentl
     assert.equal(countJobsForAccountForTesting(store, account.id), jobsBefore);
     assert.equal(imports.length, importsBefore);
     assert.equal(
-      readWebhookTraceStatusForTesting(
-        store,
+      fixture.ingressStore.readWebhookTraceStatus(
         "junction",
         scopeWebhookTraceId("junction", account.externalAccountId, messageId),
       ),
@@ -490,7 +516,7 @@ test("sleep webhook with a metric-free embedded record imports inline once the u
         source: { provider: "whoop_v2" },
       },
     }, "msg_sleep_without_data_1");
-    const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+    const accepted = await fixture.ingress.handleWebhook("junction", webhook.headers, webhook.rawBody);
     assert.equal(accepted.accepted, true);
     await service.drainWorker(100);
 
@@ -527,7 +553,7 @@ test("enriched sleep webhook with an unknown resource-name override still import
       user_id: "junction-user-1",
       data: sleepRecord,
     }, "msg_sleep_override_1");
-    const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+    const accepted = await fixture.ingress.handleWebhook("junction", webhook.headers, webhook.rawBody);
     assert.equal(accepted.accepted, true);
     await service.drainWorker(100);
 
@@ -563,8 +589,8 @@ test("mixed due queue (activity direct + sleep direct) loses neither job", async
       data: buildLiveWhoopSleepRecord(nowMs, "sleep-mixed-1"),
     }, "msg_mixed_sleep_1");
 
-    await service.handleWebhook("junction", activityWebhook.headers, activityWebhook.rawBody);
-    await service.handleWebhook("junction", sleepWebhook.headers, sleepWebhook.rawBody);
+    await fixture.ingress.handleWebhook("junction", activityWebhook.headers, activityWebhook.rawBody);
+    await fixture.ingress.handleWebhook("junction", sleepWebhook.headers, sleepWebhook.rawBody);
     await service.drainWorker(100);
 
     const counts = summaryRecordCounts(imports);
@@ -598,7 +624,7 @@ test("direct-import completions do not starve the scheduled reconcile (June 2026
         endOffsetMs: 60_000 + index * 1_000,
         messageId: `msg_starvation_activity_${index + 1}`,
       });
-      const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+      const accepted = await fixture.ingress.handleWebhook("junction", webhook.headers, webhook.rawBody);
       assert.equal(accepted.accepted, true);
       await service.drainWorker(100);
     }
@@ -655,7 +681,7 @@ test("direct-import completion preserves an earlier scheduled reconcile (min-onl
       endOffsetMs: 60_000,
       messageId: "msg_minonly_activity_1",
     });
-    const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+    const accepted = await fixture.ingress.handleWebhook("junction", webhook.headers, webhook.rawBody);
     assert.equal(accepted.accepted, true);
     await service.drainWorker(100);
 
@@ -689,7 +715,7 @@ test("floor owns source projection; direct imports never call listUserProviders"
         endOffsetMs: 60_000 + index * 1_000,
         messageId: `msg_floor_projection_activity_${index + 1}`,
       });
-      const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+      const accepted = await fixture.ingress.handleWebhook("junction", webhook.headers, webhook.rawBody);
       assert.equal(accepted.accepted, true);
       await service.drainWorker(100);
     }
@@ -810,7 +836,7 @@ for (const fixtureCase of importOrFetchFixtures) {
 
     try {
       const webhook = fixtureCase.build(nowMs, `msg_iof_${fixtureCase.name.replace(/[^a-z0-9]+/giu, "_")}`);
-      const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+      const accepted = await fixture.ingress.handleWebhook("junction", webhook.headers, webhook.rawBody);
       assert.equal(accepted.accepted, true);
 
       // Drain until the queue settles: floor-reconcile follow-ups re-enqueue, so
@@ -869,7 +895,7 @@ test("unconfigured-resource burst coalesces to a single floor reconcile (storm-s
       const webhook = buildUnconfiguredResourceWebhook(nowMs, `msg_storm_profile_${index + 1}`, {
         occurredAtMs: midDayMs + index * 60_000,
       });
-      const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+      const accepted = await fixture.ingress.handleWebhook("junction", webhook.headers, webhook.rawBody);
       assert.equal(accepted.accepted, true);
     }
 

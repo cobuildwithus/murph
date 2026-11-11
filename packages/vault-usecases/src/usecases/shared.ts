@@ -494,16 +494,12 @@ export function asListEnvelope<
   }
 }
 
-export function recordPath(record: JsonObject) {
-  const relativePath =
-    typeof record.relativePath === "string"
-      ? record.relativePath
-      : typeof record.document === "object" &&
-          record.document !== null &&
-          !Array.isArray(record.document) &&
-          typeof (record.document as JsonObject).relativePath === "string"
-        ? (record.document as JsonObject).relativePath
-        : undefined
+export function recordPath(record: object) {
+  const ownPath = Reflect.get(record, "relativePath")
+  if (typeof ownPath === "string") return ownPath
+  const document = Reflect.get(record, "document")
+  if (typeof document !== "object" || document === null || Array.isArray(document)) return undefined
+  const relativePath = Reflect.get(document, "relativePath")
   return typeof relativePath === "string" ? relativePath : undefined
 }
 

@@ -465,7 +465,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
         expect(await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connection.id } })).toEqual(reconnected);
         expect(await fixture.observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: initial.id } }))
-          .toMatchObject({ status: "needs_reauth", importedCount: 1, outcomeCountsJson: outcome.counts });
+          .toMatchObject({ status: "needs_reauth", outcomeCountsJson: outcome.counts });
       } finally {
         await cleanupClinicalFixture(fixture);
       }

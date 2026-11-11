@@ -1,7 +1,6 @@
-import { inspectRecapProviderRequest, type RecapProviderRequest } from "@murphai/contracts/recap-admission";
 import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
 import { HOSTED_RUNTIME_DATA_API_PATHS } from "@murphai/hosted-execution/routes";
-import { readNativeRuntimeProviderAuthority, type RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
+import { readNativeRuntimeProviderAuthority, readNativeRuntimeProviderContainer, type RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
 import { Buffer } from "node:buffer";
 import { waitUntil } from "cloudflare:workers";
 
@@ -253,6 +252,7 @@ interface HostedProviderEgressAuthorization {
   durationMs: number;
   mode: HostedProviderEgressValidationMode;
   platformAiUsageAllowed?: boolean;
+  recapMediaScoped?: boolean;
   rejectReason?: HostedProviderEgressRejectReason;
   userId: string | null;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
@@ -1211,13 +1211,8 @@ async function maybeHandleOpenAiRequest(input: {
   if (bodyRead instanceof Response) return bodyRead;
   const { boundedBody, imageGenerationRequested } = bodyRead;
 
-  const recapAccess = await checkRecapOpenAiRequest({ authorization, env: input.env,
-    request: input.request, pathnameSuffix, boundedBody, imageGenerationRequested });
-  if (recapAccess instanceof Response) return recapAccess;
-  // A consumed recap reservation is the server-owned spending authority for
-  // this one request. The room itself need not own an ordinary image subscription.
-  const imageDenied = recapAccess === 'authorized_recap' ? null : await checkHostedOpenAiImageRequestAccess({
-    request: input.request, env: input.env, authorization, pathnameSuffix, imageGenerationRequested,
+  const imageDenied = await checkHostedOpenAiImageRequestAccess({
+    request: input.request, env: input.env, authorization, pathnameSuffix, imageGenerationRequested, boundedBody,
   });
   if (imageDenied) return imageDenied;
 
@@ -1271,24 +1266,17 @@ async function maybeHandleOpenAiRequest(input: {
   return response;
 }
 
-async function checkRecapOpenAiRequest(input: {
-  request: Request; env: RunnerOutboundEnvironmentSource; authorization: HostedProviderEgressAuthorization;
-  pathnameSuffix: string; boundedBody: ArrayBuffer | undefined; imageGenerationRequested: boolean;
-}): Promise<Response | 'authorized_recap' | null> {
-  // Text model traffic and opaque transports must not acquire a Web dependency.
-  // Recap turns disable Codex's native image tool in their trusted configuration.
-  if (input.request.method !== "POST" || !input.request.headers.has('x-murph-recap-reservation')) return null;
-  const imageEndpoint = input.pathnameSuffix === "/v1/images/generations" || input.pathnameSuffix === "/v1/images/edits";
-  if (!imageEndpoint && !input.imageGenerationRequested) return null;
-  return checkRecapProviderRequest({ authorization: input.authorization, env: input.env,
-    request: new Request(input.request.url, { method: input.request.method, headers: input.request.headers, body: input.boundedBody }),
-    media: imageEndpoint, nativeImage: input.imageGenerationRequested });
-}
-
 async function checkHostedOpenAiImageRequestAccess(input: {
   request: Request; env: RunnerOutboundEnvironmentSource; authorization: HostedProviderEgressAuthorization;
-  pathnameSuffix: string; imageGenerationRequested: boolean;
+  pathnameSuffix: string; imageGenerationRequested: boolean; boundedBody: ArrayBuffer | undefined;
 }): Promise<Response | null> {
+  if (input.authorization.recapMediaScoped && (input.imageGenerationRequested || input.pathnameSuffix.startsWith('/v1/images/'))) {
+    if (input.imageGenerationRequested || !await boundedRecapImage(new Request(input.request.url, { method: 'POST', headers: input.request.headers, body: input.boundedBody }))) return new Response('Use the file image tool with one bounded image.', { status: 400 });
+    const result = await consumeRecapMediaRequest(input.env, input.authorization);
+    if (result !== true) return result;
+    input.authorization.platformAiUsageAllowed = true;
+    return null;
+  }
   // An opaque Responses socket cannot inspect later image-tool requests.
   if (input.request.method === "GET" && input.pathnameSuffix === "/v1/responses") {
     const denied = await checkHostedImageGenerationAccess(input);
@@ -1358,10 +1346,12 @@ async function maybeHandleElevenLabsRequest(input: {
     return disallowedProviderEgress();
   }
 
-  const recapAccess = await checkRecapProviderRequest({ authorization, env: input.env,
-    request: new Request(input.request.url, { method: 'POST', headers: input.request.headers, body: requestBody }),
-    media: pathnameSuffix === '/v1/music', nativeImage: pathnameSuffix !== '/v1/music' });
-  if (recapAccess instanceof Response) return recapAccess;
+  if (authorization.recapMediaScoped) {
+    if (providerRequest.kind !== 'music' || providerRequest.durationMs !== 20_000) return new Response('Recap music uses a twenty-second song.', { status: 400 });
+    const consumed = await consumeRecapMediaRequest(input.env, authorization);
+    if (consumed instanceof Response) return consumed;
+    authorization.platformAiUsageAllowed = true;
+  }
 
   const token = readRequiredInterceptSecret(
     input.env.ELEVENLABS_API_KEY,
@@ -2238,6 +2228,10 @@ function isAllowedTelegramOperation(operation: string): boolean {
     || operation === "getFile";
 }
 
+function isScopedRecapMedia(owner: { recapMediaScoped?: boolean }, providerKind: string, pathname = ''): boolean {
+  return owner.recapMediaScoped === true && (providerKind === 'elevenlabs' || providerKind === 'openai' && pathname.startsWith('/v1/images/'));
+}
+
 async function authorizeHostedProviderEgress(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
@@ -2256,14 +2250,14 @@ async function authorizeHostedProviderEgress(input: {
     });
     if (smoke) return smoke;
   }
-  const settlementPending = owner?.settlementPending
+  const settlementPending = owner?.settlementPending && !isScopedRecapMedia(owner, input.providerKind, input.openAiPathnameSuffix)
     && (HOSTED_PLATFORM_METERED_PROVIDER_KINDS.has(input.providerKind) || input.providerKind === "workers_ai_transcribe");
   return {
     caller: input.ctx,
     authorized: Boolean(owner) && !owner?.retiring && !settlementPending,
     durationMs: Date.now() - startedAt, mode: "native_container",
     userId: owner?.userId ?? null,
-    ...(owner ? { platformAiUsageAllowed: owner.platformAiUsageAllowed } : {}),
+    ...(owner ? { platformAiUsageAllowed: owner.platformAiUsageAllowed, recapMediaScoped: owner.recapMediaScoped } : {}),
     ...(settlementPending ? { rejectReason: "usage_settlement_pending" as const }
       : !owner || owner.retiring ? { rejectReason: "bound_container_inactive" as const } : {}),
     writeFence: owner ? { attemptId: owner.attemptId, leaseGeneration: owner.generation,
@@ -2592,7 +2586,6 @@ function stripHostedProviderUpstreamHeaders(headers: Headers): Headers {
   stripped.delete("xi-api-key");
   stripped.delete("x-murph-api-key");
   stripped.delete("x-murph-data-api-key");
-  stripped.delete("x-murph-recap-reservation");
   stripped.delete("openai-organization");
   stripped.delete("openai-project");
   return stripped;
@@ -3021,37 +3014,21 @@ async function checkHostedImageGenerationAccess(input: {
   } }, { status: 503 });
 }
 
-/** Only reservation-bearing media requests acquire the recap admission dependency. */
-async function checkRecapProviderRequest(input: {
-  authorization: HostedProviderEgressAuthorization; env: RunnerOutboundEnvironmentSource;
-  request: Request; media: boolean; nativeImage: boolean;
-}): Promise<Response | 'authorized_recap' | null> {
-  if (!input.request.headers.has('x-murph-recap-reservation')) return null;
-  const token = input.request.headers.get('x-murph-recap-reservation');
-  if (!token || !/^[a-f0-9]{64}$/u.test(token)) return new Response('Invalid recap reservation.', { status: 403 });
-  // This separate bounded smoke owner has no member runtime or recap scope.
-  if (input.authorization.authorized && input.authorization.mode === 'deploy_smoke_live_model_turn') return null;
-  try {
-    const fence = requireHostedDirectUsageWriteFence(input.authorization);
-    let providerRequest: RecapProviderRequest | null = null;
-    let invalidMedia = false;
-    if (input.media) {
-      try { providerRequest = await inspectRecapProviderRequest(input.request); }
-      catch { invalidMedia = true; }
-    }
-    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
-    const result = await fetchHostedWebControlPlaneJson({
-      body: { attemptId: fence.attemptId, generation: fence.leaseGeneration,
-        token, providerRequest,
-        opaque: false, nativeImage: input.nativeImage || invalidMedia },
-      boundUserId: fence.userId, description: 'Recap provider admission', fetchImpl: fetch,
-      route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.recapMediaAccess, timeoutMs: environment.webControlTimeoutMs,
-      transport: { callbackSigning: environment.webCallbackSigning, mode: 'direct', webControlBaseUrl: environment.hostedWebBaseUrl, workspaceCheckpointBridge: null },
-    });
-    if (result && typeof result === 'object' && 'allowed' in result && result.allowed === true
-      && 'scoped' in result && result.scoped === true) return 'authorized_recap';
-    return new Response('Recap provider admission rejected this request.', { status: 403 });
-  } catch {
-    return new Response('Recap provider admission is unavailable.', { status: 503 });
-  }
+/** One native in-memory counter; failed forwarded requests remain spent. */
+async function consumeRecapMediaRequest(env: RunnerOutboundEnvironmentSource, authorization: HostedProviderEgressAuthorization): Promise<true | Response> {
+  const fence = requireHostedDirectUsageWriteFence(authorization);
+  return await readNativeRuntimeProviderContainer(env, authorization.caller)?.consumeRecapMediaRequest?.({
+    userId: fence.userId, attemptId: fence.attemptId, generation: fence.leaseGeneration })
+    ? true : new Response('Recap media request limit reached.', { status: 429 });
+}
+
+async function boundedRecapImage(request: Request): Promise<boolean> {
+  const multipart = request.headers.get('content-type')?.includes('multipart/form-data');
+  const value = multipart ? await request.formData() : await request.json() as Record<string, unknown>;
+  const get = (key: string) => value instanceof FormData ? value.get(key) : value[key];
+  return get('model') === 'gpt-image-2.6-flare' && (get('n') == null || get('n') === 1 || get('n') === '1')
+    && ['1024x1024', '1024x1536', '1536x1024'].includes(String(get('size')))
+    && ['low', 'medium', 'high'].includes(String(get('quality'))) && get('output_format') === 'jpeg'
+    && String(get('prompt') ?? '').length <= 16_384
+    && (!(value instanceof FormData) || value.getAll('image[]').length + value.getAll('image').length <= 3);
 }

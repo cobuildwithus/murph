@@ -2369,6 +2369,36 @@ column are incompatible. A rollback to them requires a separately reviewed
 schema restoration and compatible deployment. No production deployment,
 database mutation, secret access, or rollback is part of preparing this PR.
 
+## Clinical outcome count cleanup
+
+Clinical retrieval uses `outcome_counts_json` as its persisted count owner.
+Connection responses derive imported and review counts from `createdCount` and
+`reviewDecisionCount`; the public response shape is unchanged. The predeploy
+`20261111000000_normalize_clinical_retrieval_phase` migration maps the retired
+`importing` status to `retrieving`, already understood by prior Web versions.
+No current producer writes `importing`.
+
+The original control-plane change (`d01e2d7828`) introduced both scalar columns
+and the receipt together; its outcome update writes all three atomically. The
+later needs-reauth receipt writer (`e84ae74020`) does the same. The intervening
+`861896d182` change only adjusts the connection read projection. No historical
+scalar-only writer needs a backfill. Workflow/step dependency tracing at those
+three revisions and the cleanup base finds no clinical retrieval row reader:
+these calls run through current-deployment HTTP routes, not deployment-pinned
+Workflow steps.
+
+`20261111000100_drop_clinical_outcome_counter_copies` removes the redundant
+`imported_count` and `review_count` columns through the existing postdeploy
+contract lane. Deploy the receipt-derived reader/writer, prove every production
+alias serves it, and complete the lane's prior-function drain before contraction.
+Old in-flight functions may finish their duplicate writes before that drain.
+An old in-flight scalar reader can briefly show stale counts for an outcome
+written by the new version; the persisted receipt and new reader stay correct.
+The receipt-derived Web revision is the rollback floor once the columns are
+dropped. Restored databases must run the same predeploy and contract migrations;
+the receipt survives both. Verify complete and needs-reauth outcomes still show
+their saved counts and confirm both columns are absent after contraction.
+
 ## Workflow SDK v5
 
 Web uses `workflow@5.2.3`, including Core and Vercel World 5.2.3, Next
@@ -2834,11 +2864,13 @@ Public provider-facing routes:
 - `POST /api/hosted-onboarding/linq/webhook`
 - `POST /api/hosted-onboarding/telegram/webhook`
 
-Local-agent routes:
+Hosted agent-session routes:
 
-- `POST /api/device-sync/agent/connections/:connectionId/export-token-bundle`
-- `POST /api/device-sync/agent/connections/:connectionId/refresh-token-bundle`
-- `POST /api/device-sync/agent/connections/:connectionId/local-heartbeat`
+- `POST /api/device-sync/agents/pair`
+- `POST /api/device-sync/agent/session/revoke`
+
+Companion authentication remains supported through the shared session owner.
+Local wearable token export, refresh and heartbeat routes are retired.
 
 Internal hosted maintenance and Cloudflare callback routes:
 

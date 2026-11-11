@@ -48,6 +48,28 @@ describe("native supervised invocation", () => {
     vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValue(false);
   });
 
+  it('counts six media forwards in memory and scopes the allowance to the current invocation', async () => {
+    const { create, sql } = harness();
+    const receipts = new RunnerInvocationReceiptStore(sql);
+    receipts.register({ attemptId: 'attempt-a', generation: '1' });
+    receipts.restoreProviderContext({ attemptId: 'attempt-a', generation: '1' }, { workspaceVersion: '0', platformAiUsageAllowed: false });
+    const container = create();
+    const identity = { userId, attemptId: 'attempt-a', generation: '1' };
+    expect(await container.consumeRecapMediaRequest(identity)).toBe(false);
+    await container.setRecapMediaScope({ ...identity, attemptId: 'stale', eventId: 'game-recap:synthetic' });
+    expect((await container.readProviderAuthority())?.recapMediaScoped).toBe(false);
+    await container.setRecapMediaScope({ ...identity, eventId: 'game-recap:synthetic' });
+    expect((await container.readProviderAuthority())?.recapMediaScoped).toBe(true);
+    const results = await Promise.all(Array.from({ length: 9 }, () => container.consumeRecapMediaRequest(identity)));
+    expect(results.filter(Boolean)).toHaveLength(6);
+    await container.setRecapMediaScope({ ...identity, eventId: 'game-recap:synthetic' });
+    expect(await container.consumeRecapMediaRequest(identity)).toBe(false);
+    await container.setRecapMediaScope({ ...identity, eventId: null });
+    expect((await container.readProviderAuthority())?.recapMediaScoped).toBe(false);
+    await container.setRecapMediaScope({ ...identity, eventId: 'game-recap:next-synthetic' });
+    expect(await container.consumeRecapMediaRequest(identity)).toBe(true);
+    expect((await create().readProviderAuthority())?.recapMediaScoped).toBe(false);
+  });
   it("reads admitted provider authority after restart without Web and revokes it at native retirement/completion", async () => {
     const { create, pending, binding } = harness();
     const container = create();

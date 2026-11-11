@@ -1,5 +1,6 @@
-import { MURPH_RECAP_IMAGE_TOOL, MURPH_RECAP_SONG_TOOL } from '../../assistant-codex/dynamic-tool-catalog.js'
-import { MURPH_PREVIEW_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL } from '../../assistant-codex/dynamic-tools/games.js'
+import { MURPH_GENERATE_SONG_TOOL } from '../../assistant-codex/dynamic-tools/generate-song.js'
+import { MURPH_GENERATE_IMAGE_TOOL } from '../../assistant-codex/dynamic-tool-catalog.js'
+import { MURPH_WRITE_RECAP_FILE_TOOL } from '../../assistant-codex/dynamic-tools/games.js'
 import { GAME_PHOTO_CHAT_GUIDANCE, GAME_RESIDENT_GROUP_POINTER, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
 import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
 import { supportsCodexTurnDeveloperInstructions } from '../../assistant-codex/config.js'
@@ -468,7 +469,6 @@ function areConversationGamesAvailable(input: AssistantRouteTurnPlanInput, accep
 export function resolveAssistantGameHostDynamicTools(
   context: Pick<AssistantHostedToolContext, 'currentGameRecapScope' | 'currentGameMissedCheckInScope'> | null,
 ): MurphDynamicTool[] {
-  if (context?.currentGameRecapScope?.()?.show) return [MURPH_READ_GAME_RECAP_TOOL, MURPH_PREVIEW_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL, MURPH_GAME_LORE_TOOL, MURPH_RECAP_IMAGE_TOOL, MURPH_RECAP_SONG_TOOL]
   if (context?.currentGameRecapScope?.() != null) {
     return [MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL]
   }
@@ -1316,7 +1316,7 @@ export async function resolveAssistantRouteTurnPlan(
     outputOnlyTurn,
     scheduledAutomationId: input.input.scheduledInvocationAuthority?.automationId,
   })
-  const dynamicTools = specializedDynamicTools ?? resolveMurphDynamicTools({
+  let dynamicTools = specializedDynamicTools ?? resolveMurphDynamicTools({
         gameReadAvailable: isConversationGameReadAvailable(input, userActionAcceptedInputIds, conversationScope, scheduledInvocationScope),
         myGameRemindersAvailable: privateGameReminderAvailable(input, conversationScope, userActionAcceptedInputIds),
         gamesAvailable: areConversationGamesAvailable(input, userActionAcceptedInputIds, conversationScope),
@@ -1373,6 +1373,9 @@ export async function resolveAssistantRouteTurnPlan(
         askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,
       })
+  dynamicTools = recapShowTools(dynamicTools, input.hostedToolContext);
+
+
   const messageTargetDynamicToolsAvailable =
     dynamicTools.some(
       (tool) => tool.namespace === 'murph' && tool.name === 'select_reply_target',
@@ -1952,4 +1955,12 @@ function hasProductFeedbackAuthority(
   return resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? []).length > 0
     || resolveUsageOptimizerFeedbackScope({ conversationScope, executionContext: input.executionContext,
       messageInput: input.input }) !== null
+}
+
+function recapShowTools(dynamicTools: ReturnType<typeof resolveMurphDynamicTools>, context: AssistantHostedToolContext | null | undefined): ReturnType<typeof resolveMurphDynamicTools> {
+  if (!context?.currentGameRecapScope?.()?.show) return dynamicTools;
+  return [
+    ...dynamicTools.filter(tool => !['read_game', 'write_recap', 'game_lore', 'generate_image', 'generate_song'].includes(tool.name)),
+    MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL, MURPH_GAME_LORE_TOOL, MURPH_GENERATE_IMAGE_TOOL, MURPH_GENERATE_SONG_TOOL,
+  ];
 }

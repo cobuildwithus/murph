@@ -33,8 +33,16 @@ describe("recap presentation compatibility", () => {
     expect(view.show?.pages[0].imageIndex).toBe(2);
     expect(view.show?.pages[0].blocks.map(block => block.text)).toEqual(["Day three", "The door opens", "The mat objects"]);
   });
+  it("accepts a descriptive show treatment without the legacy copy cutoff", () => {
+    const treatment = "A silent-film domestic melodrama about the purple mat and the missing breakfast";
+    const draft = gameRecapDraftSchema.parse({ story: { ...story, treatment }, files: [] });
+    expect(draft.story.treatment).toBe(treatment);
+    const stored = storedGameRecapEnvelopeSchema.parse({ ...envelope, story: draft.story });
+    expect(presentGameRecap({ ...input, stored }).show?.treatment).toBe(treatment);
+    expect(gameRecapWriterSchema.safeParse(draft.story).success).toBe(false);
+  });
   it("accepts selected local files but rejects host authority and duplicate slots", () => {
-    const selected = { slot: "scene-0", receipt: { operationId: "op-1", path: "media/one.jpg", hash: "a".repeat(64), mediaType: "image/jpeg", byteLength: 123, width: 100, height: 200 } };
+    const selected = { slot: "scene-0", path: "media/one.jpg" };
     expect(gameRecapDraftSchema.safeParse({ story, files: [selected] }).success).toBe(true);
     expect(gameRecapDraftSchema.safeParse({ story, files: [selected, selected] }).success).toBe(false);
     expect(gameRecapDraftSchema.safeParse({ story, files: [{ ...selected, storageKey: "forged" }] }).success).toBe(false);

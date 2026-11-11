@@ -311,6 +311,9 @@ export interface HostedExecutionContainerStubLike extends Partial<HostedRunnerSl
   beginRuntimeUsageSettlement?(input: { userId: string; attemptId: string; generation: string; reportId: string }): Promise<boolean>;
   finishRuntimeUsageSettlement?(input: { userId: string; attemptId: string; generation: string; reportId: string; allowed: boolean }): Promise<void>;
   readProviderAuthority?(): Promise<RunnerProviderAuthority | null>;
+  setRecapMediaScope?(input: { userId: string; attemptId: string; generation: string; eventId: string | null }): Promise<void>;
+  consumeRecapMediaRequest?(input: { userId: string; attemptId: string; generation: string }): Promise<boolean>;
+
   runtimeUsageSettlementAllowsProviders?(input: { userId: string; attemptId: string; generation: string }): Promise<boolean>;
   onRuntimeCompletionRecorded?(
     input: RunnerContainerRuntimeCompletionRecordedInput,
@@ -640,6 +643,7 @@ export class RunnerContainer extends Container {
   // This discriminator is namespace identity, not a second lifecycle owner.
   protected readonly slotNamespace: "runner" | "standby" | "small" = "runner";
   private slotStore: RunnerSlotBindingStore | null = null;
+  private recapMedia: { attemptId: string; generation: string; eventId: string; active: boolean; count: number } | null = null;
   private invocationReceipts: RunnerInvocationReceiptStore | null = null;
   private readonly durableObjectName: string | null;
   private lifecycleLock: Promise<void> = Promise.resolve();
@@ -1077,6 +1081,31 @@ export class RunnerContainer extends Container {
     return this.requireInvocationReceiptStore().usageSettlementAllowsProviders(input);
   }
 
+  /** Only the Worker calls this after an authenticated Web authorization response. */
+  async setRecapMediaScope(input: { userId: string; attemptId: string; generation: string; eventId: string | null }): Promise<void> {
+    this.authorizeBoundUser(input.userId);
+    const invocation = this.requireInvocationReceiptStore().readProviderInvocation();
+    if (!invocation || invocation.attemptId !== input.attemptId || invocation.generation !== input.generation) return;
+    if (input.eventId === null) {
+      if (this.recapMedia?.attemptId === input.attemptId && this.recapMedia.generation === input.generation) this.recapMedia.active = false;
+    } else this.recapMedia = { attemptId: input.attemptId, generation: input.generation, eventId: input.eventId, active: true,
+      count: this.recapMedia?.eventId === input.eventId ? this.recapMedia.count : 0 };
+  }
+
+  async consumeRecapMediaRequest(input: { userId: string; attemptId: string; generation: string }): Promise<boolean> {
+    this.authorizeBoundUser(input.userId);
+    const invocation = this.requireInvocationReceiptStore().readProviderInvocation();
+    const scope = this.recapMedia;
+    if (!invocation || !scope?.active || invocation.attemptId !== input.attemptId || invocation.generation !== input.generation
+      || scope.attemptId !== input.attemptId || scope.generation !== input.generation || scope.count >= 6) return false;
+    scope.count += 1;
+    return true;
+  }
+
+  private hasRecapMediaScope(invocation: { attemptId: string; generation: string }): boolean {
+    return this.recapMedia?.active === true && this.recapMedia.attemptId === invocation.attemptId && this.recapMedia.generation === invocation.generation;
+  }
+
   async readProviderAuthority(): Promise<RunnerProviderAuthority | null> {
     const binding = this.readRunnerSlotBindingOptional();
     if (!binding?.userId || (binding.state !== "bound" && binding.state !== "retiring")) return null;
@@ -1098,7 +1127,7 @@ export class RunnerContainer extends Container {
     const state = this.readRunnerSlotBindingOptional()?.state;
     if (state !== "bound" && state !== "retiring") return null;
     return invocation?.context ? { retiring: state === "retiring", userId: binding.userId, attemptId: invocation.attemptId,
-      generation: invocation.generation, ...invocation.context, settlementPending: invocation.settlementPending } : null;
+      generation: invocation.generation, ...invocation.context, recapMediaScoped: this.hasRecapMediaScope(invocation), settlementPending: invocation.settlementPending } : null;
   }
 
   private requireInvocationReceiptStore(): RunnerInvocationReceiptStore {
@@ -1204,6 +1233,7 @@ export class RunnerContainer extends Container {
     input: RunnerContainerRuntimeCompletionRecordedInput,
   ): Promise<void> {
     this.authorizeBoundUser(input.userId);
+    if (this.recapMedia?.attemptId === input.attemptId && this.recapMedia.generation === input.leaseGeneration) this.recapMedia.active = false;
     const pending = await this.withLifecycleLock(async () => {
       this.authorizeBoundUser(input.userId);
       const pending = this.pendingCompletionCleanup;

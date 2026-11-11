@@ -3,30 +3,8 @@ import {
   isoTimestampSchema,
   pathSchema,
 } from './vault-cli-contracts.js'
-import { normalizeNullableString } from './text/shared.js'
-import { VaultCliError } from './vault-cli-errors.js'
 
-export const inboxSourceValues = ['telegram', 'linq'] as const
 export const inboxPromotionTargetValues = ['meal', 'document', 'journal', 'experiment-note'] as const
-
-export const inboxConnectorOptionsSchema = z.object({
-  backfillLimit: z.number().int().positive().max(5000).optional(),
-  linqWebhookHost: z.string().min(1).nullable().optional(),
-  linqWebhookPath: z.string().min(1).nullable().optional(),
-  linqWebhookPort: z.number().int().positive().max(65535).nullable().optional(),
-})
-
-export const inboxConnectorConfigSchema = z.object({
-  id: z.string().min(1),
-  source: z.enum(inboxSourceValues),
-  enabled: z.boolean(),
-  accountId: z.string().min(1).nullable(),
-  options: inboxConnectorOptionsSchema,
-})
-
-export const inboxRuntimeConfigSchema = z.object({
-  connectors: z.array(inboxConnectorConfigSchema),
-})
 
 export const inboxPromotionEntrySchema = z.object({
   captureId: z.string().min(1),
@@ -107,7 +85,6 @@ export const inboxInitResultSchema = z.object({
   vault: pathSchema,
   runtimeDirectory: pathSchema,
   databasePath: pathSchema,
-  configPath: pathSchema,
   createdPaths: z.array(pathSchema),
   rebuiltCaptures: z.number().int().nonnegative(),
 })
@@ -115,7 +92,6 @@ export const inboxInitResultSchema = z.object({
 export const inboxListResultSchema = z.object({
   vault: pathSchema,
   filters: z.object({
-    sourceId: z.string().min(1).nullable(),
     limit: z.number().int().positive().max(200),
     afterCreatedAt: isoTimestampSchema.nullable().optional(),
     afterOccurredAt: isoTimestampSchema.nullable(),
@@ -148,7 +124,6 @@ export const inboxSearchResultSchema = z.object({
   vault: pathSchema,
   filters: z.object({
     text: z.string().min(1),
-    sourceId: z.string().min(1).nullable(),
     limit: z.number().int().positive().max(200),
   }),
   hits: z.array(inboxSearchHitSchema),
@@ -272,9 +247,6 @@ export const inboxAttachmentStatusResultSchema = z.object({
   jobs: z.array(inboxAttachmentParseJobSchema),
 })
 
-export type InboxConnectorConfig = z.infer<typeof inboxConnectorConfigSchema>
-export type InboxRuntimeConfig = z.infer<typeof inboxRuntimeConfigSchema>
-export type InboxSource = (typeof inboxSourceValues)[number]
 export type InboxPromotionEntry = z.infer<typeof inboxPromotionEntrySchema>
 export type InboxPromotionStore = z.infer<typeof inboxPromotionStoreSchema>
 export type InboxInitResult = z.infer<typeof inboxInitResultSchema>
@@ -287,46 +259,6 @@ export type InboxParserAttemptCompactionResult = z.infer<
 >
 export type InboxPromoteMealResult = z.infer<typeof inboxPromoteMealResultSchema>
 
-export function normalizeInboxConnectorAccountId(
-  source: InboxSource,
-  value: string | null | undefined,
-): string | null {
-  const normalized = normalizeNullableString(value)
-
-  switch (source) {
-    case 'telegram':
-      return normalized ?? 'bot'
-    case 'linq':
-      return normalized ?? 'default'
-    default: {
-      throw new VaultCliError(
-        'INBOX_SOURCE_UNSUPPORTED',
-        `Inbox source "${source}" is not supported.`,
-      )
-    }
-  }
-}
-
-export function normalizeInboxConnectorConfig(
-  config: InboxConnectorConfig,
-): InboxConnectorConfig {
-  return {
-    ...config,
-    accountId: normalizeInboxConnectorAccountId(
-      config.source,
-      config.accountId,
-    ),
-  }
-}
-
-export function normalizeInboxRuntimeConfig(
-  config: InboxRuntimeConfig,
-): InboxRuntimeConfig {
-  return {
-    ...config,
-    connectors: config.connectors.map(normalizeInboxConnectorConfig),
-  }
-}
 export type InboxPromoteDocumentResult = z.infer<typeof inboxPromoteDocumentResultSchema>
 export type InboxPreservedDocument = z.infer<typeof inboxPreservedDocumentSchema>
 export type InboxPreserveDocumentAttachmentsResult = z.infer<

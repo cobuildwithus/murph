@@ -10,7 +10,7 @@ import { readRecapFile, saveRecapMediaFile } from '../src/assistant/recap-files.
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
-const relativeRoot = '.runtime/tmp/recap/synthetic'
+const relativeRoot = 'tmp/recap/synthetic'
 async function vault() { const root = await mkdtemp(path.join(tmpdir(), 'recap-files-')); roots.push(root); return root }
 
 test('file image uses normal provider accounting and creates no capture or response media', async () => {
@@ -21,8 +21,8 @@ test('file image uses normal provider accounting and creates no capture or respo
     usage: { input_tokens: 12, output_tokens: 42, total_tokens: 54 } }))
   const result = await executeGenerateImageTool({ env: { OPENAI_API_KEY: 'synthetic-key' }, fetchImpl, vaultRoot: root,
     persistGeneratedImageCapture: persist, requireHostedPrivateImageDelivery: true, providerRequestOrdinal: 1,
-    args: { output: 'file', operationId: 'cover', outputFormat: 'jpeg', prompt: 'Synthetic paper theatre.', alt: null, quality: 'medium', size: '1024x1024' },
-    fileRuntime: { fetchImpl, resolveReferences: async () => [], save: (data, mediaType) => saveRecapMediaFile({ vault: root, relativeRoot, operationId: 'cover', bytes: data, mediaType }) } })
+    args: { output: 'file', outputFormat: 'jpeg', prompt: 'Synthetic paper theatre.', alt: null, quality: 'medium', size: '1024x1024' },
+    fileRuntime: { fetchImpl, resolveReferences: async () => [], save: (data, mediaType) => saveRecapMediaFile({ vault: root, relativeRoot, bytes: data, mediaType }) } })
   expect(result.rpcSuccess).toBe(true)
   expect(result.responseMedia).toBeUndefined()
   expect(result.savedCaptureId).toBeUndefined()
@@ -30,7 +30,7 @@ test('file image uses normal provider accounting and creates no capture or respo
   expect(fetchImpl).toHaveBeenCalledTimes(1)
   expect(result.usageDraft).toMatchObject({ provider: 'openai-images', providerRequestOutcome: 'succeeded' })
   const receipt = JSON.parse(result.rpcText)
-  expect(receipt).toMatchObject({ width: 64, height: 96, hash: createHash('sha256').update(bytes).digest('hex') })
+  expect(receipt.path).toContain(createHash('sha256').update(bytes).digest('hex'))
   expect(await readFile(path.join(root, receipt.path))).toEqual(bytes)
   expect(result.rpcText).not.toContain(root)
 })
@@ -38,9 +38,9 @@ test('file image uses normal provider accounting and creates no capture or respo
 test.each(['environment', 'host-only runtime'] as const)('file song uses %s credentials without a voice-memo channel or chat attachment', async credentialSource => {
   const bytes = await readFile(new URL('../../../fixtures/generated-audio/music.mp3', import.meta.url))
   const fetchImpl = vi.fn<typeof fetch>(async () => new Response(bytes))
-  const save = vi.fn(async () => ({ operationId: 'theme', path: `${relativeRoot}/media/theme.mp3`, hash: 'a'.repeat(64), byteLength: bytes.length, mediaType: 'audio/mpeg' as const, durationMs: 20_000 }))
+  const save = vi.fn(async () => `${relativeRoot}/media/theme.mp3`)
   const result = await executeGenerateSongTool({ env: credentialSource === 'environment' ? { ELEVENLABS_API_KEY: 'synthetic-key' } : {},
-    args: { output: 'file', operationId: 'theme', durationSeconds: 20, instrumental: false, prompt: 'An original playful song for Player A and Player B.' },
+    args: { output: 'file', durationSeconds: 20, instrumental: false, prompt: 'An original playful song for Player A and Player B.' },
     fileRuntime: { elevenLabsApiKey: credentialSource === 'host-only runtime' ? 'synthetic-key' : undefined, fetchImpl, resolveReferences: async () => [], save } })
   expect(result.rpcSuccess).toBe(true)
   expect(result.responseMedia).toBeUndefined()
@@ -54,13 +54,11 @@ test.each(['environment', 'host-only runtime'] as const)('file song uses %s cred
 test('candidate files reject traversal, symlinks, oversized bytes and tampering', async () => {
   const root = await vault()
   const bytes = await sharp({ create: { width: 64, height: 64, channels: 3, background: 'white' } }).jpeg().toBuffer()
-  const input = { vault: root, relativeRoot, operationId: 'cover', bytes, mediaType: 'image/jpeg' as const }
+  const input = { vault: root, relativeRoot, bytes, mediaType: 'image/jpeg' as const }
   const receipt = await saveRecapMediaFile(input)
   await expect(saveRecapMediaFile(input)).resolves.toEqual(receipt)
   await expect(readRecapFile({ vault: root, relativeRoot, file: `${relativeRoot}/../private`, maxBytes: 100 })).rejects.toThrow('outside')
-  await expect(saveRecapMediaFile({ ...input, bytes: new Uint8Array(2 * 1024 * 1024 + 1) })).rejects.toMatchObject({ code: 'RECAP_MEDIA_VALIDATION_FAILED', context: { mediaFailureReason: 'image_byte_limit', mediaSizeClass: 'le_10mib' } })
-  await writeFile(path.join(root, receipt.path), 'tampered')
-  await expect(saveRecapMediaFile(input)).rejects.toThrow('integrity')
-  await symlink(path.join(root, receipt.path), path.join(root, relativeRoot, 'media/link.jpg'))
+  await expect(saveRecapMediaFile({ ...input, bytes: new Uint8Array(2 * 1024 * 1024 + 1) })).rejects.toThrow('2 MiB')
+  await symlink(path.join(root, receipt), path.join(root, relativeRoot, 'media/link.jpg'))
   await expect(readRecapFile({ vault: root, relativeRoot, file: `${relativeRoot}/media/link.jpg`, maxBytes: 2000 })).rejects.toThrow()
 })

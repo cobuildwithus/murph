@@ -64,7 +64,7 @@ export interface WorkerRuntimeCompletionReceipt {
 }
 
 export interface WorkerRunnerContainerStubLike extends Pick<HostedExecutionContainerStubLike,
-  "beginRuntimeUsageSettlement" | "finishRuntimeUsageSettlement" | "readProviderAuthority" | "runtimeUsageSettlementAllowsProviders" | "readSupervisedInvocation" | "recordSupervisedRuntimeCompletion"
+  "setRecapMediaScope" | "consumeRecapMediaRequest" | "beginRuntimeUsageSettlement" | "finishRuntimeUsageSettlement" | "readProviderAuthority" | "runtimeUsageSettlementAllowsProviders" | "readSupervisedInvocation" | "recordSupervisedRuntimeCompletion"
 > {
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
 }

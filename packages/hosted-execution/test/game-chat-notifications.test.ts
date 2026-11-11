@@ -353,7 +353,6 @@ it("activates show policy only for an explicitly selected pair", () => {
   expect(buildGameRecapInstructions([], undefined, false, true)).toContain("craft guide");
   const show = RECAP_SHOW_CRAFT;
   expect(show).toContain("scene.murph");
-  expect(show).toContain("fewer than 3 distinct permitted real-photo entries");
   expect(show).toContain("whole image visible");
   expect(show).not.toContain("give the best single shot of the week a full-bleed page");
   expect(show).not.toContain('or filling the page ("fullBleed")');

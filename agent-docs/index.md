@@ -1,3 +1,9 @@
+Repository tooling uses installed registry dependencies, one prepared-runtime
+build owner, author-controlled PR readiness, and structural documentation checks.
+The [verification owner](operations/verification-and-runtime.md),
+[plan lifecycle](PLANS.md), and [CI proof map](references/testing-ci-map.md)
+describe these contracts.
+
 Home restoration and Training retirement are recorded in the
 [follow-up plan](exec-plans/completed/2026-11-11-restore-home-after-training-retirement.md);
 [Frontend](FRONTEND.md#authenticated-product-scope) owns the retained surface.
@@ -6,9 +12,16 @@ Home restoration and Training retirement are recorded in the
 
 Shared reminder awareness is owned by the [assistant engine](../packages/assistant-engine/README.md) and [assistant runtime](../packages/assistant-runtime/README.md); the [execution plan](exec-plans/completed/2026-11-10-reminder-awareness.md) records the implementation and proof.
 
+Assistant cron history stores outcomes once and derives compatibility status;
+shared occurrence bookkeeping and phase-result composition stay at their existing
+owners. [Execution plan](exec-plans/completed/2026-11-10-simplify-assistant-state.md),
+[engine contract](../packages/assistant-engine/README.md#cron-occurrence-and-history-ownership)
+and [runtime owner](../packages/assistant-runtime/README.md) record the scope and
+remaining snapshot retirement gates.
+
 [Hosted Linux recap file access](exec-plans/completed/2026-11-11-recap-show-hosted-files.md) records the restricted mount fix, host-only song credentials and native container proof.
 
-[Pair recap show presentation](references/recap-show-contract.md) owns the final-at-acceptance native presentation payload and synthetic decoder fixtures. Implementation follows the [active plan](exec-plans/active/2026-11-10-recap-show.md).
+[Pair recap show presentation](references/recap-show-contract.md) owns the final-at-acceptance native presentation payload and synthetic decoder fixtures. Implementation evidence is recorded in the [simplification plan](exec-plans/completed/2026-11-11-recap-show-simplify.md).
 
 Bound pair and group games tolerate bystanders while retaining current-player,
 route and restriction checks. [Architecture](../ARCHITECTURE.md),
@@ -85,6 +98,10 @@ Delivery publication fences and reply deadlines are owned by [the invariants](..
 Native game write outcomes, the empty-slot post guard and the Messages member-action session recheck are owned by [Weekly Game](product-specs/weekly-game.md) and [Security](SECURITY.md).
 
 The two-lane production Web admission, the Cloudflare predeploy gates, and the private nightly proof that owns reminder, foreground, and Codex cache-prefix journeys are owned by [Hosted Temporal orchestration](references/hosted-temporal-orchestration.md) and `../apps/cloudflare/DEPLOY.md`.
+
+Authorized local native-image prebuilds use the existing publisher; see
+[Prebuild the native image locally](../apps/cloudflare/README.md#prebuild-the-native-image-locally)
+for registry authentication, shared-cache coordination, and CI reuse limits.
 
 Vault display-name replication and deterministic actions are owned by
 [Architecture](../ARCHITECTURE.md#vault-display-name-projection-and-actions);
@@ -1150,7 +1167,7 @@ Package verifier worker-exit result preservation is tracked in
 | `docs/architecture.md` | Concise architecture summary, repo-shape overview, package-boundary hygiene notes, and hosted ownership baseline. | Current architectural baseline | High | 2026-05-13 |
 | `docs/contracts/` | Frozen contract docs for vault layout, schemas, commands, and cross-cutting invariants. | Canonical vault interface decisions | High | 2026-07-20 |
 | `docs/contracts/06-hosted-workspace-file-count.md` | Hosted workspace checkpoint/restore and canonical receipt media recovery contract. | Hosted workspace checkpoint/restore contract | High | 2026-09-10 |
-| `docs/device-sync-hosted-control-plane.md` | Junction-only hosted device control plane; companion ingestion and source-labelled reads. | Device-sync architecture direction | Medium | 2026-09-08 |
+| `docs/device-sync-hosted-control-plane.md` | Junction-only hosted device control plane; companion ingestion, hosted agent sessions and source-labelled reads. | Device-sync architecture direction | Medium | 2026-09-08 |
 | `docs/device-provider-contribution-kit.md` | Junction transport and source-normalization contribution boundaries. | Provider contribution workflow | Medium | 2026-05-13 |
 | `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations. | Device-provider normalization planning | Medium | 2026-07-14 |
 | `docs/hosted-auth-migration.md` | Four-stage Privy removal, reviewed candidate heads, merge/deploy order, transition-only import, session continuity, recovery and guarded schema/vendor retirement. | Hosted auth migration rollout | High | 2026-09-10 |
@@ -1248,10 +1265,10 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/references/game-selfplay-qa.md` | Synthetic game state map, native self-play rounds, canonical chat edits, confirmed fixes and remaining coverage gaps. | Game QA evidence | Medium | 2026-11-09 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
-| `agent-docs/references/app-state-machines.md` | 88 cross-repository state families, invariants, transitions, confirmed failure schedules, retired Web dashboard lifecycles, group recovery retry ownership, the unified native reminder lifecycle, regression proof and release evidence. | Shared Murph/iOS audit | Medium | 2026-11-07 |
+| `agent-docs/references/app-state-machines.md` | 88 cross-repository state families, invariants, transitions, confirmed failure schedules, retired Web dashboard lifecycles, group recovery retry ownership, the unified native reminder lifecycle, clinical receipt-derived outcomes, regression proof and release evidence. | Shared Murph/iOS audit | Medium | 2026-11-07 |
 | `agent-docs/exec-plans/completed/2026-11-06-state-machine-shipping.md` | Completed architecture simplifications, backend production receipts, native main fixes and linked final verification. | Historical shipping evidence | High | 2026-11-07 |
 | `agent-docs/references/recap-show-contract.md` | Final-at-acceptance pair recap presentation, authenticated media and synthetic native decoder fixtures. | Native recap contract | High | 2026-11-11 |
-| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, locked usage-period acquisition, full canonical Codex tool-contract/CLI-upgrade guards and payload captures, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, shared runtime fixture preparation, compiler cache policy, and current coverage owners after OpenClaw and local setup retirement, including composed vault-share deadline, device dirty-payload classification/reconnect PostgreSQL proof, encrypted-only phone-call guard PostgreSQL proof, encrypted v2 hosted-local snapshot fixtures and canonical assertion readers with marked Docker bridge admission and canonical base64url IV validation, and independent system-work checkpoint ownership, active replica content, and metadata-only checkpoint timing with exact future-continuation owner release, accepted-runtime admission observation for reminder/device fairness, real Junction replay through a retained consumer wake and strict hosted completion with progress/auth checks, restored system-work completion after foreground replacement with real retry and second-message preemption proof, structural provider-stub failure diagnostics, shared Linq fixture CDN origins that preserve canonical metadata authentication, standby deadline fixtures, contention-aware PostgreSQL milestone proof, and monotonic foreground mailbox frontiers with same-user successor continuation evidence. Includes explicit native-binary selection, bounded live selector diagnostics, read-only exact-name discovery, selectable latency-query correctness and stress proof, migrated-database setup for the composed usage-denial proof, and bounded signed Linq webhook redelivery proof, plus deployed-binary Codex WebSocket acknowledgement and stall proof, and real-binary SSE/WebSocket instant-steering proof. Includes bounded official Stripe fixture step/status and closed provider rejection categories with composed sanitizer proof. Includes native runner recap filesystem, media, preview and acceptance proof. | Testing and CI truth | High | 2026-11-11 |
+| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, locked usage-period acquisition, full canonical Codex tool-contract/CLI-upgrade guards and payload captures, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, shared runtime fixture preparation, compiler cache policy, and current coverage owners after OpenClaw and local setup retirement, including composed vault-share deadline, device dirty-payload classification/reconnect PostgreSQL proof, encrypted-only phone-call guard PostgreSQL proof, encrypted v2 hosted-local snapshot fixtures and canonical assertion readers with marked Docker bridge admission and canonical base64url IV validation, and independent system-work checkpoint ownership, active replica content, and metadata-only checkpoint timing with exact future-continuation owner release, accepted-runtime admission observation for reminder/device fairness, real Junction replay through a retained consumer wake and strict hosted completion with progress/auth checks, restored system-work completion after foreground replacement with real retry and second-message preemption proof, structural provider-stub failure diagnostics, shared Linq fixture CDN origins that preserve canonical metadata authentication, standby deadline fixtures, contention-aware PostgreSQL milestone proof, and monotonic foreground mailbox frontiers with same-user successor continuation evidence. Includes explicit native-binary selection, bounded live selector diagnostics, read-only exact-name discovery, selectable latency-query correctness and stress proof, migrated-database setup for the composed usage-denial proof, and bounded signed Linq webhook redelivery proof, plus deployed-binary Codex WebSocket acknowledgement and stall proof, and real-binary SSE/WebSocket instant-steering proof. Includes bounded official Stripe fixture step/status and closed provider rejection categories with composed sanitizer proof. Includes normal-profile native recap sandbox proof and the canonical synthetic Web bridge for real-image show journeys. | Testing and CI truth | High | 2026-11-11 |
 | `packages/core/bench/README.md` | Secret-free Docker import and hydration reproduction, required one-vCPU latency CI budgets, and sizing evidence limits. | Container CPU benchmark | Medium | 2026-09-04 |
 | `packages/core/bench/container-sizing.md` | Synthetic Docker CPU/RAM sizing matrix, foreground profiling, and limits of production downsizing evidence. | Container sizing investigation | Medium | 2026-09-09 |
 | `packages/query/bench/README.md` | Reproduce synthetic query resource measurements through public canonical and query APIs in constrained Docker containers. | Query resource benchmarks | Medium | 2026-09-09 |
@@ -2076,10 +2093,19 @@ App image sizing and native decoding proof: [image sizing plan](exec-plans/compl
 
 Frog backlog resolution and verification: [execution record](exec-plans/completed/2026-11-10-frog-backlog.md).
 
+Canonical outcome authority, runtime loader reduction and retired inbox configuration
+are recorded in [the simplification plan](exec-plans/completed/2026-11-10-simplify-canonical-state.md).
+Current compatibility gates remain in `../packages/core/README.md` and
+`../packages/inbox-services/README.md`; loader boundaries remain in
+`../packages/vault-usecases/README.md`.
+
+Downstream canonical type composition and existing group-room audit value support
+are recorded in [the correction proof](exec-plans/completed/2026-11-10-canonical-type-composition.md).
+
 Browser live voice retirement is tracked in [the retirement plan](exec-plans/completed/2026-11-10-retire-live-voice.md); `../apps/web/README.md` owns the website boundary.
 
 Dependency patch reduction is tracked in [the cleanup plan](exec-plans/completed/2026-11-10-dependency-patch-cleanup.md).
 
-Invite phone-code lifecycle retirement is owned by [hosted authentication migration](../docs/hosted-auth-migration.md#retired-invite-phone-code-lifecycle); the [execution plan](exec-plans/active/2026-11-10-simplify-auth-lifecycle.md) records validation and remaining audit dispositions.
+Invite phone-code lifecycle retirement is owned by [hosted authentication migration](../docs/hosted-auth-migration.md#retired-invite-phone-code-lifecycle); the [execution plan](exec-plans/completed/2026-11-10-simplify-auth-lifecycle.md) records validation and remaining audit dispositions.
 
 Game delivery timing and row conversion use the [weekly game contract](product-specs/weekly-game.md) and [architecture](../ARCHITECTURE.md#weekly-game). The simplification decisions and verification are recorded in the [execution record](exec-plans/completed/2026-11-10-simplify-game-state.md).

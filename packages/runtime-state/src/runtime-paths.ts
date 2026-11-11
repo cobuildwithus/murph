@@ -25,7 +25,6 @@ export const QUERY_PROJECTION_SECTION_RELATIVE_PATHS = Object.freeze({
 });
 export const INBOX_DB_RELATIVE_PATH = `${RUNTIME_PROJECTION_ROOT_RELATIVE_PATH}/inboxd.sqlite`;
 export const INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/inbox`;
-export const INBOX_CONFIG_RELATIVE_PATH = `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH}/config.json`;
 export const INBOX_STATE_RELATIVE_PATH = `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH}/state.json`;
 export const INBOX_PROMOTIONS_RELATIVE_PATH = `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH}/promotions.json`;
 export const DEVICE_SYNC_DB_RELATIVE_PATH = `${RUNTIME_OPERATIONAL_ROOT_RELATIVE_PATH}/device-sync/state.sqlite`;
@@ -48,7 +47,6 @@ export interface RuntimePaths {
   tempRoot: string;
   inboxDbPath: string;
   inboxRuntimeRoot: string;
-  inboxConfigPath: string;
   inboxStatePath: string;
   inboxPromotionsPath: string;
   deviceSyncDbPath: string;
@@ -68,7 +66,6 @@ export type InboxRuntimePaths = Pick<
   | "projectionsRoot"
   | "inboxDbPath"
   | "inboxRuntimeRoot"
-  | "inboxConfigPath"
   | "inboxStatePath"
   | "inboxPromotionsPath"
 >;
@@ -113,7 +110,6 @@ export function resolveRuntimePaths(vaultRoot: string): RuntimePaths {
     tempRoot: path.join(absoluteVaultRoot, RUNTIME_TEMP_ROOT_RELATIVE_PATH),
     inboxDbPath: path.join(absoluteVaultRoot, INBOX_DB_RELATIVE_PATH),
     inboxRuntimeRoot: path.join(absoluteVaultRoot, INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH),
-    inboxConfigPath: path.join(absoluteVaultRoot, INBOX_CONFIG_RELATIVE_PATH),
     inboxStatePath: path.join(absoluteVaultRoot, INBOX_STATE_RELATIVE_PATH),
     inboxPromotionsPath: path.join(absoluteVaultRoot, INBOX_PROMOTIONS_RELATIVE_PATH),
     deviceSyncDbPath: path.join(absoluteVaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH),
@@ -136,7 +132,6 @@ export function resolveInboxRuntimePaths(vaultRoot: string): InboxRuntimePaths {
     projectionsRoot: runtimePaths.projectionsRoot,
     inboxDbPath: runtimePaths.inboxDbPath,
     inboxRuntimeRoot: runtimePaths.inboxRuntimeRoot,
-    inboxConfigPath: runtimePaths.inboxConfigPath,
     inboxStatePath: runtimePaths.inboxStatePath,
     inboxPromotionsPath: runtimePaths.inboxPromotionsPath,
   };

@@ -1038,14 +1038,27 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
     const store = new SqliteDeviceSyncStore(":memory:");
     try {
-      const account = store.upsertAccount({
-        provider: "junction",
-        externalAccountId: "synthetic-progress-account",
+      const account = store.hydrateHostedAccount({
+        connection: {
+          provider: "junction",
+          externalAccountId: "synthetic-progress-account",
+          connectedAt: "2026-04-06T09:00:00.000Z",
+          displayName: null,
+          scopes: [],
+          metadata: metadata,
+          status: "active",
+          updatedAt: "2026-04-06T09:00:00.000Z",
+        },
         credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
-        scopes: [],
-        metadata,
-        connectedAt: "2026-04-06T09:00:00.000Z",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
       });
+      if (!account) throw new Error("Expected hydrated account.");
       store.markSyncSucceeded(account.id, "2026-04-06T10:05:00.000Z", account.disconnectGeneration, {
         metadataPatch: {
           junctionProfileSummaryCheckedAt: "2026-04-06T10:05:00.000Z",

@@ -1,11 +1,8 @@
-import { mediaValidationError } from '../assistant-codex/generated-media-failure.js'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open, realpath } from 'node:fs/promises'
 import path from 'node:path'
-import sharp from 'sharp'
-import { recapFileReceiptSchema, type RecapFileReceipt } from '@murphai/contracts/recap-show'
-import { inspectGeneratedMp3Audio } from '@murphai/operator-config/generated-audio'
+import { gameRecapDraftSchema } from '@murphai/contracts/recap-show'
 
 /** Refuse symlinks, including intermediate components, before trusted file IO. */
 export async function recapDirectory(vault: string, relative: string): Promise<string> {
@@ -20,39 +17,19 @@ export async function recapDirectory(vault: string, relative: string): Promise<s
   return current
 }
 
-export async function saveRecapMediaFile(input: {
-  vault: string; relativeRoot: string; operationId: string; bytes: Uint8Array;
-  mediaType: 'image/jpeg' | 'audio/mpeg';
-}): Promise<RecapFileReceipt> {
-  if (!/^[a-zA-Z0-9_-]{1,80}$/u.test(input.operationId)) throw new TypeError('Invalid media operation.')
-  const bytes = input.bytes
-  if (!bytes.length || bytes.length > (input.mediaType === 'image/jpeg' ? 2 : 1) * 1024 * 1024) throw mediaValidationError(input.mediaType === 'image/jpeg' ? 'image_byte_limit' : 'audio_byte_limit', bytes)
-  let dimensions: { width: number; height: number } | { durationMs: number }
-  if (input.mediaType === 'image/jpeg') {
-    const image = sharp(bytes, { limitInputPixels: 4_000_000, failOn: 'warning' })
-    const metadata = await image.metadata().catch(() => { throw mediaValidationError('image_decode', bytes) })
-    if (metadata.format !== 'jpeg') throw mediaValidationError('image_format', bytes)
-    if (!metadata.width || !metadata.height || metadata.width > 2048 || metadata.height > 2048) throw mediaValidationError('image_dimensions', bytes)
-    await image.raw().toBuffer().catch(() => { throw mediaValidationError('image_decode', bytes) }) // Decode all pixels before issuing a receipt.
-    dimensions = { width: metadata.width, height: metadata.height }
-  } else {
-    dimensions = await inspectGeneratedMp3Audio(bytes).catch(() => { throw mediaValidationError('audio_decode', bytes) })
-    if (Math.abs(dimensions.durationMs - 20_000) > 500) throw mediaValidationError('audio_duration', bytes)
-  }
-  const hash = createHash('sha256').update(bytes).digest('hex')
+export async function saveRecapMediaFile(input: { vault: string; relativeRoot: string; bytes: Uint8Array; mediaType: 'image/jpeg' | 'audio/mpeg' }): Promise<string> {
+  if (!input.bytes.length || input.bytes.length > 2 * 1024 * 1024) throw new TypeError('Media file exceeds 2 MiB.')
+  const hash = createHash('sha256').update(input.bytes).digest('hex')
   const directory = await recapDirectory(input.vault, `${input.relativeRoot}/media`)
-  const filename = `${input.operationId}-${hash}.${input.mediaType === 'image/jpeg' ? 'jpg' : 'mp3'}`
-  const file = path.join(directory, filename)
-  try {
-    const handle = await open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
-    try { await handle.writeFile(bytes) } finally { await handle.close() }
-  } catch (error) {
-    if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'EEXIST') throw error
-    const prior = await readRecapFile({ vault: input.vault, relativeRoot: input.relativeRoot, file: `${input.relativeRoot}/media/${filename}`, maxBytes: bytes.length })
-    if (createHash('sha256').update(prior).digest('hex') !== hash) throw new TypeError('Existing recap file failed integrity verification.')
-  }
-  return recapFileReceiptSchema.parse({ operationId: input.operationId, path: `${input.relativeRoot}/media/${filename}`, hash,
-    mediaType: input.mediaType, byteLength: bytes.length, ...dimensions })
+  const filename = `${hash}.${input.mediaType === 'image/jpeg' ? 'jpg' : 'mp3'}`
+  const handle = await open(path.join(directory, filename), constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600)
+  try { await handle.writeFile(input.bytes) } finally { await handle.close() }
+  return `${input.relativeRoot}/media/${filename}`
+}
+
+export async function readRecapDraftFile(input: { vault: string; relativeRoot: string; draftPath: string }) {
+  const bytes = await readRecapFile({ ...input, file: input.draftPath, maxBytes: 128 * 1024 })
+  return gameRecapDraftSchema.parse(JSON.parse(bytes.toString('utf8')))
 }
 
 export async function readRecapFile(input: { vault: string; relativeRoot: string; file: string; maxBytes: number }): Promise<Buffer> {

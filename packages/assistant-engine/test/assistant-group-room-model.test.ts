@@ -2,6 +2,7 @@ import { readFile, rm, writeFile } from 'node:fs/promises'
 import { afterEach, expect, test } from 'vitest'
 
 import { initializeVault } from '@murphai/core'
+import { auditRecordSchema } from '@murphai/contracts'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
 import {
@@ -20,6 +21,7 @@ import {
   ASSISTANT_GROUP_ROOM_MODEL_FILE_MAX_BYTES,
   ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
   ASSISTANT_GROUP_ROOM_MODEL_SLUG,
+  deleteAssistantGroupRoomModel,
   initializeAssistantGroupRoomModel,
   readAssistantGroupRoomModelState,
   readAssistantGroupRoomModelBody,
@@ -28,6 +30,7 @@ import {
 } from '../src/assistant/group-room-model.ts'
 import { assistantConversationHistoryUtf8Bytes } from '../src/assistant/shared.ts'
 import { createTempVaultContext } from './test-helpers.js'
+import { readCanonicalAuditRecords } from './canonical-audit-test-helpers.js'
 
 const cleanupPaths: string[] = []
 
@@ -63,6 +66,26 @@ async function resolveRoomModelPagePath(vaultRoot: string): Promise<string> {
     'file path',
   )
 }
+
+test('room model replacement and deletion emit valid canonical audit records', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-room-model-audit-')
+  cleanupPaths.push(parentRoot)
+  await initializeVault({ vaultRoot })
+  const missing = await readAssistantGroupRoomModelState({ vaultRoot })
+  if (missing.kind !== 'missing') throw new Error('Expected a missing room model.')
+  const saved = await replaceAssistantGroupRoomModel({
+    vaultRoot,
+    expectedDigest: missing.digest,
+    body: '## Explicit setup\n\nKeep replies brief.',
+  })
+  await deleteAssistantGroupRoomModel({ vaultRoot, expectedDigest: saved.digest })
+
+  const actions = (await readCanonicalAuditRecords(vaultRoot))
+    .map(record => auditRecordSchema.parse(record).action)
+  expect(actions).toContain('group_room_model_replace')
+  expect(actions).toContain('group_room_model_delete')
+  expect(await readAssistantGroupRoomModelState({ vaultRoot })).toEqual(missing)
+})
 
 test('renders a complete body beyond the retired authored-body threshold', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
