@@ -324,6 +324,12 @@ export function buildHostedWebNextConfig(
       tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
     },
     webpack: (config, context) => configureHostedWebWebpack(config, context, environment),
+    // Redirect before account layouts or client auth mount; Next preserves queries.
+    redirects: async () => ["/training", "/history", "/journal", "/labs", "/overview"].map((source) => ({
+      source,
+      destination: "/settings",
+      permanent: true,
+    })),
     headers: async () => [
       {
         source: HOSTED_WEB_HEADER_SOURCE,

@@ -2,7 +2,7 @@ export const SCREENSHOT_CATEGORIES = [
   {
     id: "home",
     label: "Home and public pages",
-    description: "Homepage, onboarding, referrals, and member home states.",
+    description: "Homepage, onboarding, and referrals.",
   },
   {
     id: "account",
@@ -19,7 +19,7 @@ export const SCREENSHOT_CATEGORIES = [
     id: "health",
     label: "Health and data",
     description:
-      "Connected sources, Environment, Patterns, training, and experiments.",
+      "Connected sources and health-data handoffs.",
   },
   {
     id: "messages",

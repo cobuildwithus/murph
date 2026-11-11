@@ -1,4 +1,5 @@
 import "server-only";
+import { toRuleState } from "./row";
 
 import type { Game, GameInvitee, GamePlayer, Prisma } from "@prisma/client";
 import { isRecord } from "../primitives";
@@ -77,7 +78,6 @@ export async function readCurrentGameTalk(db: Prisma.TransactionClient, gameId: 
     const contacts = await talkAuthorContacts(request.actor, prepared);
     const keys = await verifiedGameContactKeys(db, request.actor, contacts);
     if (!(await verifiedGameContactKeys(db, request.actor, audience.contacts)).length) return null;
-    const { toRuleState } = await import("./service");
     const entries = await db.gameEntry.findMany({ where: { gameId, dayIndex: game.lengthDays - 1 } });
     const state = toRuleState(game, entries);
     const clock = new Date(now.getTime() + Number(game.devClockOffsetMs ?? 0));

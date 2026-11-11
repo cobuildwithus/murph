@@ -35,7 +35,7 @@ import {
   type AssistantModelArtworkVariant,
 } from "./assistant-model-artwork";
 import { SettingsStatusLine } from "./connected-account-card";
-import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
+import { HostedPlanChangeButton } from "./hosted-plan-change-button";
 
 const ASSISTANT_MODEL_SETTINGS_URL = "/api/settings/assistant-model";
 const SOL_REQUIRES_SUBSCRIPTION_ERROR_CODE = "ASSISTANT_MODEL_SOL_REQUIRES_SUBSCRIPTION";
@@ -264,13 +264,15 @@ function HostedAssistantModelSettingsForm(
           && !availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL)
           && props.canUpgradeToEdge ? (
           <div className="flex w-full justify-end px-1">
-            <UpgradeToEdgeButton
+            <HostedPlanChangeButton
+              mode="upgrade"
+              targetPlanCode="launch_edge_monthly"
               expectedCurrentPlanCode={
                 props.expectedCurrentPlanCode ?? "launch_monthly"
               }
             >
               Upgrade to Edge
-            </UpgradeToEdgeButton>
+            </HostedPlanChangeButton>
           </div>
         ) : null}
 

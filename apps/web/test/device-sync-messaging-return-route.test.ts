@@ -146,7 +146,7 @@ describe("device sync messaging return route", () => {
     expect(html).not.toContain("http-equiv=\"refresh\"");
     expect(html).not.toContain("I+just+connected+my+Oura");
     expect(html).not.toContain(">Text Murph</a>");
-    expect(html).toContain('href="/home"');
+    expect(html).toContain('href="/settings"');
   });
 
   it("falls back to the Murph Telegram bot when a configured bot username is unavailable", async () => {

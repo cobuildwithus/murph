@@ -9,7 +9,7 @@ const FAQ_ITEMS = [
   ],
   [
     "Do I need a computer?",
-    "The web dashboard works on any device with a browser. For daily guidance, Murph texts you through iMessage, Telegram, or email.",
+    "Account settings work on any device with a browser. For daily guidance, Murph texts you through iMessage, Telegram, or email.",
   ],
   [
     "Do I need a wearable?",

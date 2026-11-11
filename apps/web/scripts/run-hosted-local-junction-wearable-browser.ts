@@ -187,7 +187,7 @@ async function main(): Promise<void> {
 
     setStage("murph_connected_completion");
     await page.waitForURL(
-      (url) => url.origin === config.webOrigin && url.pathname === "/home",
+      (url) => url.origin === config.webOrigin && url.pathname === "/settings",
       { timeout: config.timeoutMs },
     );
     await page.getByRole("heading", { name: `${config.label} is connected` }).waitFor({

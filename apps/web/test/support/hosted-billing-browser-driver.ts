@@ -128,9 +128,7 @@ export class HostedBillingBrowserDriver {
       // tree is necessarily committed. Waiting on DOMContentLoaded here only
       // observes the invite document's already-fired lifecycle event, so a
       // following document navigation can race the still-pending Home commit.
-      const homeEyebrow = actor.page.getByText("Live Well", { exact: true });
-      await homeEyebrow.waitFor();
-      await homeEyebrow.locator("xpath=parent::div").getByRole("heading", {
+      await actor.page.getByRole("heading", {
         exact: true,
         name: "Welcome to Murph",
       }).waitFor();

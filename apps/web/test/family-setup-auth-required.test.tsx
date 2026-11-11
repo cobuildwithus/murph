@@ -5,7 +5,7 @@ import { renderClientComponent } from "./render-client-component";
 
 type AuthCompletion = {
   joinUrl: string;
-  stage: "active" | "activating" | "blocked" | "checkout";
+  stage: "active" | "blocked" | "checkout";
 };
 
 const mocks = vi.hoisted(() => ({

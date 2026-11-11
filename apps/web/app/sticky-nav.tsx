@@ -24,7 +24,7 @@ const NAV_LINKS: ReadonlyArray<{
   { href: "/security", label: "Security" },
 ];
 
-// Large tap rows matching the /home sidebar's mobile nav sizing.
+// Large tap rows matching the account sidebar's mobile nav sizing.
 const MOBILE_MENU_ROW =
   "rounded-lg px-5 py-6 text-xl font-medium text-[#2d3436] transition-colors hover:bg-[#c4a882]/10 active:bg-[#c4a882]/15";
 
@@ -33,8 +33,8 @@ function getStickyNavAuthLabel(
   unauthenticatedAuthLabel: string | undefined,
 ): string {
   return authenticated
-    ? "Dashboard"
-    : unauthenticatedAuthLabel ?? "Dashboard";
+    ? "Home"
+    : unauthenticatedAuthLabel ?? "Home";
 }
 
 export function StickyNav({
