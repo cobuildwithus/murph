@@ -478,6 +478,30 @@ df_output="$(LC_ALL=C df -Pk "${disk_paths[@]}" 2>/dev/null)" || df_status=$?
 if (( df_status != 0 )); then
   printf 'worktree storage guard: `df -Pk` exited with status %d while probing %d filesystem path(s); verify every registered worktree filesystem is mounted and readable\n' \
     "$df_status" "$df_probe_count" >&2
+  # Diagnose only the captured inventory, without printing paths or df output.
+  # A successful follow-up never admits the failed batch: retry the whole guard.
+  probe_number=0
+  probe_failed=0
+  for disk_path in "${disk_paths[@]}"; do
+    probe_number=$((probe_number + 1))
+    if [[ ! -e "$disk_path" ]]; then
+      printf 'worktree storage guard: filesystem probe %d/%d: path no longer accessible; check for concurrent retirement or an unavailable mount\n' \
+        "$probe_number" "$df_probe_count" >&2
+      probe_failed=1
+      break
+    fi
+    probe_status=0
+    LC_ALL=C df -Pk "$disk_path" >/dev/null 2>&1 || probe_status=$?
+    if (( probe_status != 0 )); then
+      printf 'worktree storage guard: filesystem probe %d/%d: path accessible; `df -Pk` exited with status %d\n' \
+        "$probe_number" "$df_probe_count" "$probe_status" >&2
+      probe_failed=1
+      break
+    fi
+  done
+  if (( probe_failed == 0 )); then
+    printf 'worktree storage guard: individual filesystem probes now succeed; retry the guarded operation\n' >&2
+  fi
   exit 1
 fi
 minimum_kib=$((min_free_gib * 1024 * 1024))

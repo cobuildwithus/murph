@@ -2452,6 +2452,64 @@ printf '%s\n' 'network 100000000 100000000 90000000 40% snapshot 50000000 1 1000
     expect(result.stderr).not.toContain(harness.primary)
   })
 
+  it('identifies a path lost after inventory without granting storage admission', () => {
+    const harness = createHarness()
+    const sibling = path.join(harness.root, 'retiring-checkout')
+    runGit(harness.primary, ['worktree', 'add', '-b', 'retiring', sibling])
+    executable(
+      path.join(harness.fakeBin, 'df'),
+      `#!/usr/bin/env bash
+if [[ $# -gt 2 ]]; then
+  mv "$3" "$3.retired"
+  printf 'private filesystem error: %s\\n' "$3" >&2
+  exit 23
+fi
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'
+printf 'testfs 100000000 10000000 90000000 10%% /\\n'
+`,
+    )
+
+    const result = runScript(harness, 'worktree-storage-guard')
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('filesystem probe 2/2: path no longer accessible')
+    expect(result.stderr).not.toContain(harness.root)
+    expect(result.stderr).not.toContain('private filesystem error')
+    expect(existsSync(path.join(harness.state, 'regular-worktree-ceiling'))).toBe(false)
+  })
+
+  it('identifies an accessible path whose individual filesystem probe still fails', () => {
+    const harness = createHarness()
+    executable(path.join(harness.fakeBin, 'df'), '#!/usr/bin/env bash\nexit 23\n')
+
+    const result = runScript(harness, 'worktree-storage-guard')
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('filesystem probe 1/1: path accessible; `df -Pk` exited with status 23')
+    expect(result.stderr).not.toContain(harness.root)
+  })
+
+  it('keeps a failed batch rejected when every diagnostic probe subsequently succeeds', () => {
+    const harness = createHarness()
+    const target = path.join(harness.root, 'target')
+    mkdirSync(target)
+    executable(
+      path.join(harness.fakeBin, 'df'),
+      `#!/usr/bin/env bash
+[[ $# -le 2 ]] || exit 23
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'
+printf 'testfs 100000000 10000000 90000000 10%% /\\n'
+`,
+    )
+
+    const result = runScript(harness, 'worktree-storage-guard', ['--target-path', target])
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('individual filesystem probes now succeed; retry the guarded operation')
+    expect(result.stderr).not.toContain(harness.root)
+    expect(existsSync(path.join(harness.state, 'regular-worktree-ceiling'))).toBe(false)
+  })
+
   it('reports a bounded malformed capacity row without exposing probe paths', () => {
     const harness = createHarness()
     executable(
