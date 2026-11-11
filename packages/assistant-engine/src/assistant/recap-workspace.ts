@@ -1,6 +1,7 @@
+import { recapDirectory } from './recap-files.js'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { access, mkdir, writeFile } from 'node:fs/promises'
+import { access, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -21,9 +22,8 @@ export async function materializeRecapWorkspace(input: {
 }): Promise<{ root: string; material: RecapMaterial; chat: RecapTranscriptMessage[]; manifest: unknown }> {
   const material = recapMaterialSchema.parse(input.material)
   const root = recapTaskDirectory(input.vault, input.eventId)
-  await mkdir(path.join(root, 'inputs'), { recursive: true })
-  await mkdir(path.join(root, 'media'), { recursive: true })
-  await mkdir(path.join(root, 'previews'), { recursive: true })
+  const relativeRoot = path.relative(input.vault, root)
+  for (const name of ['inputs', 'media', 'previews', 'drafts']) await recapDirectory(input.vault, `${relativeRoot}/${name}`)
   const chat: RecapTranscriptMessage[] = []
   let after: string | undefined
   let through: string | undefined
@@ -47,7 +47,6 @@ export async function materializeRecapWorkspace(input: {
   const replies = await readCommittedRecapReplies(input.vault, input.sessionId, material.startedAt, material.settledAt)
   chat.push(...replies.messages)
   chat.sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || (a.laneSeq && b.laneSeq ? Number(BigInt(a.laneSeq) - BigInt(b.laneSeq)) : a.id.localeCompare(b.id)))
-  const relativeRoot = path.relative(input.vault, root)
   const initialReferences = material.references.filter(reference => reference.kind === 'profile' || reference.kind === 'murph')
   for (const player of material.result) {
     if (!initialReferences.some(reference => reference.memberId === player.memberId)) {
@@ -64,6 +63,7 @@ export async function materializeRecapWorkspace(input: {
       gaps: [...(incomplete ? ['Some player history is unavailable or exceeds the export bound.'] : []),
         ...(replies.incomplete ? ['Earlier committed Murph replies may have been trimmed.'] : [])] } }
   await Promise.all([
+    writeFile(path.join(root, 'inputs/material.json'), JSON.stringify(material) + '\n'),
     writeFile(path.join(root, 'inputs/game.json'), JSON.stringify(material.game, null, 2) + '\n'),
     writeFile(path.join(root, 'inputs/chat.jsonl'), chat.map(message => JSON.stringify(message)).join('\n') + '\n'),
     writeFile(path.join(root, 'inputs/lore.txt'), input.lore),

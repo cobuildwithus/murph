@@ -23,8 +23,13 @@ export const MURPH_MY_GAME_REMINDERS_TOOL = {
 export const GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE = 'For game reminders, use murph.my_game_reminders.'
 export const MURPH_READ_GAME_RECAP_TOOL = {
   namespace: 'murph', name: 'read_game',
-  description: 'Read the finished game bound to this recap turn. Returns its players, terms, result, and each day’s posts or misses with entry IDs and post details; call it first.',
-  inputSchema: { type: 'object', additionalProperties: false, properties: {}, required: [] },
+  description: 'Read the finished game bound to this recap turn. For a show, returns local game, chat, lore and reference files with coverage gaps; call it first. Pass referenceIds from the manifest to materialize more permitted photos.',
+  inputSchema: { type: 'object', additionalProperties: false, properties: { referenceIds: { type: 'array', maxItems: 9, items: { type: 'string', pattern: '^[a-f0-9]{64}$' } } }, required: [] },
+} as const
+export const MURPH_PREVIEW_RECAP_TOOL = {
+  namespace: 'murph', name: 'preview_recap',
+  description: 'Validate a local {story, files} recap draft with the real validator and render its pages and contact sheet as PNGs. Read the returned errors, view the PNGs, revise the draft, then preview again before submitting. This is an authoring preview; iOS owns native layout.',
+  inputSchema: { type: 'object', additionalProperties: false, required: ['draftPath'], properties: { draftPath: { type: 'string', minLength: 1, maxLength: 512 } } },
 } as const
 export const MURPH_WRITE_RECAP_TOOL = {
   namespace: 'murph', name: 'write_recap',
@@ -99,8 +104,12 @@ const rawUpdateArguments = z.object({ messageRef: z.string().min(1).max(128), op
   }
   return { messageRef, update: parsed.data }
 })
-export type GameDynamicRequest = { action: 'my_game_reminders'; operation: 'read' | 'set'; messageRef?: string; minutes?: number; gameId?: string; on?: boolean; everyDay?: boolean; text?: boolean; push?: boolean } | { action: 'read_game'; messageRef?: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto } | { action: 'write_recap'; recap: HostedGameRecap } | { action: 'game_lore'; operation: 'read' | 'replace'; content?: string }
+export type GameDynamicRequest = { action: 'my_game_reminders'; operation: 'read' | 'set'; messageRef?: string; minutes?: number; gameId?: string; on?: boolean; everyDay?: boolean; text?: boolean; push?: boolean } | { action: 'read_game'; messageRef?: string; referenceIds?: string[] } | { action: 'preview_recap'; draftPath: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto } | { action: 'write_recap'; recap: HostedGameRecap } | { action: 'game_lore'; operation: 'read' | 'replace'; content?: string }
 export function readGameDynamicToolRequest(input: { arguments: unknown; tool: string | null }) {
+  if (input.tool === 'preview_recap') {
+    const parsed = parseDynamicToolArguments({ schema: z.object({ draftPath: z.string().min(1).max(512) }).strict(), value: input.arguments, toolName: 'murph.preview_recap' })
+    return parsed.ok ? { kind: 'game' as const, request: { action: 'preview_recap' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
+  }
   if (input.tool === 'my_game_reminders') {
     const schema = z.object({ operation: z.enum(['read', 'set']), messageRef: z.string().min(1).max(128).optional(),
       minutes: z.number().int().min(0).max(1439).optional(), gameId: z.string().min(8).max(64).optional(),
@@ -121,7 +130,7 @@ export function readGameDynamicToolRequest(input: { arguments: unknown; tool: st
     return parsed.ok ? { kind: 'game' as const, request: { action: 'write_recap' as const, recap: parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'read_game') {
-    const parsed = parseDynamicToolArguments({ schema: z.object({ messageRef: z.string().min(1).max(128).optional() }).strict(), value: input.arguments, schemaRootKeys: ['messageRef'], toolName: 'murph.read_game' })
+    const parsed = parseDynamicToolArguments({ schema: z.object({ messageRef: z.string().min(1).max(128).optional(), referenceIds: z.array(z.string().regex(/^[a-f0-9]{64}$/u)).max(9).optional() }).strict(), value: input.arguments, schemaRootKeys: ['messageRef', 'referenceIds'], toolName: 'murph.read_game' })
     return parsed.ok ? { kind: 'game' as const, request: { action: 'read_game' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'game_photo') {
@@ -143,7 +152,7 @@ async function executeTrustedGameRecapTool(input: { request: GameDynamicRequest;
   const origin = { kind: 'game_recap' as const, gameId: recapScope.gameId, eventId: recapScope.eventId }
   try {
     return input.request.action === 'read_game'
-      ? await executeTrustedGameRecapRead({ origin, tool, context: input.context })
+      ? await executeTrustedGameRecapRead({ origin, tool, context: input.context, referenceIds: input.request.referenceIds })
       : await executeTrustedGameRecapWrite({ context: input.context, origin, recap: input.request.recap, tool })
   } catch (error) {
     return toolTextResult(false, 'The recap action could not be confirmed. Read the game and fix every reported problem before trying again.', 'handler_exception', error)
@@ -157,10 +166,15 @@ function unavailableGameRecapToolResult(action: 'read_game' | 'write_recap'): Re
 }
 
 async function executeTrustedGameRecapRead(input: {
+  referenceIds?: string[]
   context: AssistantHostedToolContext | null
   origin: { kind: 'game_recap'; gameId: string; eventId: string }
   tool: NonNullable<AssistantHostedToolContext['groupTool']>
 }): Promise<ReturnType<typeof toolTextResult>> {
+  if (input.referenceIds?.length) {
+    if (!input.context?.currentGameRecapScope?.()?.show || !input.context.materializeGameRecapReferences) return toolTextResult(false, 'Recap photos are unavailable.', 'authority_rejected')
+    return toolTextResult(true, JSON.stringify(await input.context.materializeGameRecapReferences(input.referenceIds)))
+  }
   const result = await input.tool.request({ action: 'read_game', origin: input.origin })
   if (input.context?.currentGameRecapScope?.()?.show && result.result.status === 'ok') {
     const game = 'recapGame' in result.result ? result.result.recapGame : null
@@ -268,6 +282,11 @@ function gameReadGuidance(result: Awaited<ReturnType<NonNullable<AssistantHosted
 }
 
 export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null }) {
+  if (input.request.action === 'preview_recap') {
+    if (!input.context?.currentGameRecapScope?.()?.show || !input.context.previewGameRecap) return toolTextResult(false, 'Preview requires a bound pair show.', 'authority_rejected')
+    try { return toolTextResult(true, JSON.stringify(await input.context.previewGameRecap(input.request.draftPath))) }
+    catch (error) { return toolTextResult(false, 'Preview failed. Check the draft JSON and selected file hashes.', 'invalid_result', error) }
+  }
   if (input.request.action === 'my_game_reminders') {
     const scope = input.context?.currentUserActionScope?.()
     const tool = input.context?.myGameRemindersTool
