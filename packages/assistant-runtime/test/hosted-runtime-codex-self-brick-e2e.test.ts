@@ -1,3 +1,4 @@
+import { snapshotHostedWorkspaceFixture, restoreHostedWorkspaceFixture } from "./hosted-workspace-snapshot-fixture.ts";
 import assert from "node:assert/strict";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,10 +6,6 @@ import path from "node:path";
 
 import { afterEach, test } from "vitest";
 
-import {
-  restoreHostedExecutionContext,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
 
 import {
   prepareHostedCodexRuntimeEnvironment,
@@ -66,12 +63,12 @@ test("hosted Codex cannot permanently brick later wakes by corrupting its writab
     "utf8",
   );
 
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshot = await snapshotHostedWorkspaceFixture({
     operatorHomeRoot: firstOperatorHomeRoot,
     vaultRoot: firstVaultRoot,
   });
   const restoredWorkspaceRoot = await createTemporaryDirectory("hosted-codex-self-brick-restored-");
-  const restored = await restoreHostedExecutionContext({
+  const restored = await restoreHostedWorkspaceFixture({
     bundle: snapshot.bundle,
     workspaceRoot: restoredWorkspaceRoot,
   });

@@ -75,7 +75,7 @@ beforeEach(() => {
       provider: input.route.provider, providerOptions: input.route.providerOptions,
       productFeedbackCandidate: candidate, rawEvents: [], response,
       responseDeliveryContextOrdinal: 0, responseMedia: [], route: input.route,
-      session: input.resolvedSession, stderr: '', stdout: '', transcriptResponse: response,
+      session: input.resolvedSession, stderr: '',  transcriptResponse: response,
       usage: null, workingDirectory: input.plan.requestedWorkingDirectory,
     } }
   })

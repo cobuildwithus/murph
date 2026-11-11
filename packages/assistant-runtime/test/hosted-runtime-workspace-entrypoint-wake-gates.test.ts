@@ -1,4 +1,5 @@
 import {
+  createWorkspaceRunRequest,
   TEST_NOW,
   TEST_USER_ID,
   createSnapshotFixtureRef,
@@ -21,68 +22,30 @@ import {
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import assert from "node:assert/strict";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  addCaptureWithLookup,
-  CURRENT_VAULT_FORMAT_VERSION,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  buildIntegrationEvidencePart,
-  buildIntegrationIngestRecord,
-  findCaptureByLookup,
   initializeVault,
-  patchAutomation,
-  readJsonlRecords,
-  repairVault,
-  runCanonicalWrite,
-  showAutomation,
-  upsertAutomation,
-  validateVault,
 } from "@murphai/core";
 import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   readAssistantInputEvent,
-  shouldGroupAdjacentAssistantInputCandidates,
-  updateAssistantInputAttachmentEvidence,
-  updateAssistantInputProjection,
-  upsertAssistantInputEvent,
-  writeAssistantAutoReplyReplyTerminalEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  readHostedRuntimeFailurePhaseCode,
   type HostedMailboxFetchRequest,
-  type HostedMailboxFetchResponse,
   type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
-  type HostedMailboxPayloadFetchResponse,
   type HostedRuntimeRedactedJson,
-  type HostedRuntimeLatencyTraceRequest,
-  type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
-  type HostedWorkspaceCheckpointResponse,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
-  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, test, vi } from "vitest";
 import {
   createCoalescingRuntimeWakeSignal,
-  HostedRuntimeCheckpointInterruptedByWakeError,
-  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
-  HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
-  type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
   readHostedProviderCleanupCheckpoint,
@@ -144,9 +107,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_conversation_preempt",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -1378,61 +1339,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps one projectio
       assert.equal(result.nextWakeAt, initialDeviceSyncWakeAt);
     } finally {
       runtimeAbortController.abort(runtimeAbortReason);
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
-  test("dirty runtime checkpoints after the idle delay", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
-    const events: string[] = [];
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const startedAt = performance.now();
-      await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_synthetic_runtime_idle_checkpoint_timer",
-            runnerIdleTtlMs: 250,
-            leaseGeneration: "9",
-            userId: TEST_USER_ID,
-            workspaceVersion: "4",
-          },
-        }),
-        {
-          async createCheckpointSnapshot(snapshotInput) {
-            assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
-            return {
-              snapshotRef: createSnapshotFixtureRef({
-                hash: "d".repeat(64),
-                size: 640,
-              }),
-            };
-          },
-          async importItem() {
-            return { status: "imported" };
-          },
-          platform: createPlatform({
-            mailboxPort: createMailboxPort({
-              events,
-              items: [createMailboxItem({ laneSeq: "1" })],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({ version: "4" }),
-            }),
-          }),
-          vaultRoot,
-        },
-      );
-
-      const elapsedMs = performance.now() - startedAt;
-      assert.equal(checkpointRequests.length, 1);
-      assert.ok(elapsedMs >= 200);
-      assert.ok(elapsedMs < 5_000);
-    } finally {
       await removeTempRoot(vaultRoot);
     }
   });

@@ -40,6 +40,7 @@ import {
   inspectAssistantSessionStorage,
   isAssistantSessionExpired,
   loadResolvedSession,
+  persistResolvedSession,
   pruneAssistantTranscriptRetention,
   readAssistantRecentSessionIds,
   readAssistantSession,
@@ -77,6 +78,108 @@ afterEach(async () => {
 })
 
 describe('assistant store persistence seams', () => {
+  it('preserves routing boundaries, permits explicit rebinding, and skips expired sessions', async () => {
+    const paths = await createAssistantPaths('assistant-infra-persistence-')
+    await ensureAssistantState(paths)
+
+    const session = createSession()
+    await writeAssistantSession(paths, session)
+
+    const transcriptPath = resolveAssistantTranscriptPath(paths, session.sessionId)
+    await appendTranscriptEntries(paths, session.sessionId, [])
+    await expect(access(transcriptPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+
+    const unchanged = await persistResolvedSession(paths, session, {
+      alias: session.alias,
+      bindingPatch: {},
+      lookupSource: 'session-id',
+    })
+    expect(unchanged).toMatchObject({
+      alias: session.alias,
+      sessionId: session.sessionId,
+      binding: {
+        channel: 'telegram',
+        identityId: 'user-1',
+        threadId: 'thread-1',
+        threadIsDirect: true,
+      },
+    })
+    expect(unchanged.updatedAt).toEqual(expect.any(String))
+
+    await expect(
+      persistResolvedSession(paths, session, {
+        alias: session.alias,
+        bindingPatch: {
+          threadId: 'thread-2',
+        },
+        lookupSource: 'alias',
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_ROUTING_CONFLICT',
+    })
+
+    const rebound = await persistResolvedSession(paths, session, {
+      allowBindingRebind: true,
+      alias: session.alias,
+      bindingPatch: {
+        threadId: 'thread-2',
+      },
+      lookupSource: 'session-id',
+    })
+    expect(rebound.binding.threadId).toBe('thread-2')
+    expect(rebound.sessionId).toBe(session.sessionId)
+
+    // Audience is part of the conversation key, so a mismatched index must not
+    // silently rebind direct continuity into a group session.
+    await expect(
+      persistResolvedSession(paths, session, {
+        alias: session.alias,
+        bindingPatch: {
+          threadIsDirect: false,
+        },
+        lookupSource: 'conversation-key',
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_ROUTING_CONFLICT',
+    })
+
+    // But a conversation-key conflict on a routing-boundary field (identity)
+    // must still fail closed rather than silently rebind across the boundary.
+    await expect(
+      persistResolvedSession(paths, session, {
+        alias: session.alias,
+        bindingPatch: {
+          identityId: 'user-2',
+        },
+        lookupSource: 'conversation-key',
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_SESSION_ROUTING_CONFLICT',
+    })
+
+    await expect(
+      loadResolvedSession({
+        maxSessionAgeMs: 1,
+        now: new Date('2027-01-01T00:00:00.000Z'),
+        paths,
+        persistenceInput: {
+          alias: null,
+          bindingPatch: {},
+          lookupSource: 'session-id',
+        },
+        sessionId: session.sessionId,
+        skipIfExpired: true,
+      }),
+    ).resolves.toBeNull()
+
+    const sessionPath = resolveAssistantSessionPath(paths, session.sessionId)
+    expect(JSON.parse(await readFile(sessionPath, 'utf8'))).toMatchObject({
+      conversationId: session.sessionId,
+    })
+  })
+
   it('creates assistant state directories, persists Codex sessions, and appends or replaces transcripts', async () => {
     const paths = await createAssistantPaths('assistant-store-persistence-roundtrip-')
     const session = createSession()

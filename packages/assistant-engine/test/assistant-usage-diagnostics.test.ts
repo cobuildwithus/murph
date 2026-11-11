@@ -51,7 +51,7 @@ describe('private usage diagnostics', () => {
   })
   it.each([{ days: 0 }, { days: 32 }, { limit: 0 }, { limit: 21 }, { days: 1.5 }, { memberId: 'other' }, { limit: '10' }])('rejects invalid selector %j', async (value) => {
     const hosted = context()
-    expect(parse(value).kind).toBe('invalid-usage-diagnostics-arguments')
+    expect(parse(value).kind).toBe('invalid-tool-arguments')
     expect((await execute(hosted, value)).rpcResult.success).toBe(false)
     expect(hosted.usageDiagnostics?.read).not.toHaveBeenCalled()
   })

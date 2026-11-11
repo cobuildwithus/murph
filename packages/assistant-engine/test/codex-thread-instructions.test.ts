@@ -65,7 +65,6 @@ describe('Codex thread instructions', () => {
       providerActionCount: 0,
       sessionId: 'thread-1',
       stderr: '',
-      stdout: '',
       threadId: 'thread-1',
       turnId: 'turn-1',
     })
@@ -147,7 +146,6 @@ describe('Codex thread instructions', () => {
         providerActionCount: 0,
         sessionId: `restricted-thread-${index}`,
         stderr: '',
-        stdout: '',
         threadId: `restricted-thread-${index}`,
         turnId: `restricted-turn-${index}`,
       })
@@ -230,7 +228,6 @@ describe('Codex thread instructions', () => {
       providerActionCount: 0,
       sessionId: 'thread-resume',
       stderr: '',
-      stdout: '',
       threadId: 'thread-resume',
       turnId: 'turn-resume',
     })
@@ -273,7 +270,6 @@ describe('Codex thread instructions', () => {
       providerActionCount: 0,
       sessionId: 'thread-resume',
       stderr: '',
-      stdout: '',
       threadId: 'thread-resume',
       turnId: 'turn-resume',
     })
@@ -313,7 +309,6 @@ describe('Codex thread instructions', () => {
       providerActionCount: 0,
       sessionId: 'thread-cold-old',
       stderr: '',
-      stdout: '',
       threadId: 'thread-cold-old',
       turnId: 'turn-native-resume',
     })
@@ -399,7 +394,6 @@ describe('Codex thread instructions', () => {
       providerActionCount: 0,
       sessionId: 'thread-legacy',
       stderr: '',
-      stdout: '',
       threadId: 'thread-legacy',
       turnId: 'turn-legacy',
     })

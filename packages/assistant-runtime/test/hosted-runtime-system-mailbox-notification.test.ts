@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import * as mailboxState from "../src/hosted-runtime/system-mailbox-state.ts";
-import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  readFile,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -93,6 +98,19 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 const FIXED_NOW = "2026-04-27T00:00:00.000Z";
+
+const DIRECT_LINQ_NOTIFICATION_ROUTE = {
+  actorId: "+15550001111",
+  channel: "linq",
+  delivery: {
+    kind: "thread",
+    target: "linq_thread_123",
+  },
+  identityId: "hbidx:phone:v1:test",
+  threadId: "linq_thread_123",
+  threadIsDirect: true,
+} as const;
+
 
 it.each([
   "pending", "recording", "unmarked", "sending", "unimported-owner", "duplicate-owner",
@@ -260,14 +278,7 @@ type HostedSystemMailboxRuntimeForTest =
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.executeHostedMailboxEvent.mockResolvedValue({
-    bootstrapResult: null,
-    conversationMetrics: null,
-    mailboxLane: "assistant-notification",
-    nextWakeAt: null,
-    postCheckpointRecord: null,
-    redactedLogEntries: [],
-  });
+  mocks.executeHostedMailboxEvent.mockResolvedValue(createAssistantNotificationMailboxMetrics());
 });
 
 describe("game recap generation retirement", () => {
@@ -289,9 +300,11 @@ describe("game recap generation retirement", () => {
     const request = vi.fn<NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]>().mockResolvedValue(response());
     const runtime = createRuntime({ groupToolPort: { request } });
     const generationIds = ["game-recap:synthetic_prior"];
-    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({ bootstrapResult: null, conversationMetrics: null,
-      mailboxLane: "assistant-notification", nextWakeAt: null, redactedLogEntries: [], deliveryIntentIds: [],
-      postCheckpointRecord: { kind: "game.recap-lore-checkpointed", gameId: "synthetic_game", eventId, generationIds, resume } });
+    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+      ...createAssistantNotificationMailboxMetrics(),
+      deliveryIntentIds: [],
+      postCheckpointRecord: { kind: "game.recap-lore-checkpointed", gameId: "synthetic_game", eventId, generationIds, resume },
+    });
     try {
       await enqueueHostedSystemMailboxItem({ item: createResolvedNotificationItem({ dedupeKey: eventId }), wake: wake(), vaultRoot: workspace.vaultRoot });
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({ executionContext: null, now: () => FIXED_NOW,
@@ -478,17 +491,7 @@ describe("hosted system mailbox notification execution context", () => {
       memberId: "member_123",
       notification: {
         instructions: "Send the prepared account update.",
-        route: {
-          actorId: "+15550001111",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "linq_thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "linq_thread_123",
-          threadIsDirect: true,
-        },
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
       },
       occurredAt: FIXED_NOW,
     });
@@ -695,17 +698,7 @@ describe("hosted system mailbox notification execution context", () => {
       memberId: "member_123",
       notification: {
         instructions: "Send the prepared account update.",
-        route: {
-          actorId: "+15550001111",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "linq_thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "linq_thread_123",
-          threadIsDirect: true,
-        },
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
       },
       occurredAt: FIXED_NOW,
     });
@@ -1784,17 +1777,7 @@ describe("hosted system mailbox notification execution context", () => {
       memberId: "member_123",
       notification: {
         instructions: "Send the prepared account update.",
-        route: {
-          actorId: "+15550001111",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "linq_thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "linq_thread_123",
-          threadIsDirect: true,
-        },
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
       },
       occurredAt: FIXED_NOW,
     });
@@ -1868,25 +1851,13 @@ describe("hosted system mailbox notification execution context", () => {
       memberId: "member_123",
       notification: {
         instructions: "Process the dirty ack.",
-        route: {
-          actorId: "+15550001111",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "linq_thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "linq_thread_123",
-          threadIsDirect: true,
-        },
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
       },
       occurredAt: FIXED_NOW,
     });
     mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-      bootstrapResult: null,
-      conversationMetrics: null,
+      ...createAssistantNotificationMailboxMetrics(),
       mailboxLane: "device-sync",
-      nextWakeAt: null,
       postCheckpointRecord: {
         completedImports: [{
           dirtyPayloadId: "dsp_payload_1",
@@ -1900,7 +1871,6 @@ describe("hosted system mailbox notification execution context", () => {
         processedDirtyPayloadIds: ["dsp_payload_1"],
         processedRevision: "12",
       },
-      redactedLogEntries: [],
     });
 
     try {
@@ -1914,24 +1884,8 @@ describe("hosted system mailbox notification execution context", () => {
 
       const runtime = createRuntime({
         deviceSyncPort: {
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called");
-          },
+          ...createDeviceSyncPortStub(),
           ackDirtyStateProcessed,
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called");
-          },
-          async fetchDirtyStates() {
-            return {
-              hasMore: false,
-              items: [],
-              nextWakeAt: null,
-              userId: "member_123",
-            };
-          },
-          async fetchSnapshot() {
-            throw new Error("fetchSnapshot should not be called");
-          },
         },
       });
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
@@ -1976,6 +1930,7 @@ describe("hosted system mailbox notification execution context", () => {
     const localRetryAt = "2026-04-05T00:05:00.000Z";
     const runtime = createRuntime({
       deviceSyncPort: {
+        ...createDeviceSyncPortStub(),
         async ackDirtyStateProcessed() {
           return {
             connectionId: "dsc_dirty_newer_revision",
@@ -1986,23 +1941,6 @@ describe("hosted system mailbox notification execution context", () => {
             stillDirty: true,
             userId: "member_123",
           };
-        },
-        async applyUpdates() {
-          throw new Error("applyUpdates should not be called");
-        },
-        async createConnectLink() {
-          throw new Error("createConnectLink should not be called");
-        },
-        async fetchDirtyStates() {
-          return {
-            hasMore: false,
-            items: [],
-            nextWakeAt: null,
-            userId: "member_123",
-          };
-        },
-        async fetchSnapshot() {
-          throw new Error("fetchSnapshot should not be called");
         },
       },
     });
@@ -2033,17 +1971,7 @@ describe("hosted system mailbox notification execution context", () => {
       memberId: "member_123",
       notification: {
         instructions: "Reconcile the prepared clinical outcome.",
-        route: {
-          actorId: "+15550001111",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "linq_thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "linq_thread_123",
-          threadIsDirect: true,
-        },
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
       },
       occurredAt: FIXED_NOW,
     });
@@ -2064,15 +1992,12 @@ describe("hosted system mailbox notification execution context", () => {
       status: "completed" as const,
     };
     mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-      bootstrapResult: null,
-      conversationMetrics: null,
+      ...createAssistantNotificationMailboxMetrics(),
       mailboxLane: "clinical-records",
-      nextWakeAt: null,
       postCheckpointRecord: {
         kind: "clinical-records.outcome-recorded",
         request,
       },
-      redactedLogEntries: [],
     });
 
     try {
@@ -2284,25 +2209,13 @@ describe("hosted system mailbox notification execution context", () => {
       memberId: "member_123",
       notification: {
         instructions: "Process the dirty ack batch.",
-        route: {
-          actorId: "+15550001111",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "linq_thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "linq_thread_123",
-          threadIsDirect: true,
-        },
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
       },
       occurredAt: FIXED_NOW,
     });
     mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-      bootstrapResult: null,
-      conversationMetrics: null,
+      ...createAssistantNotificationMailboxMetrics(),
       mailboxLane: "device-sync",
-      nextWakeAt: null,
       postCheckpointRecord: {
         kind: "device-sync.dirty-processed-batch",
         nextWakeAt: "2026-04-05T00:07:00.000Z",
@@ -2321,7 +2234,6 @@ describe("hosted system mailbox notification execution context", () => {
           },
         ],
       },
-      redactedLogEntries: [],
     });
 
     try {
@@ -2335,24 +2247,8 @@ describe("hosted system mailbox notification execution context", () => {
 
       const runtime = createRuntime({
         deviceSyncPort: {
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called");
-          },
+          ...createDeviceSyncPortStub(),
           ackDirtyStateProcessed,
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called");
-          },
-          async fetchDirtyStates() {
-            return {
-              hasMore: false,
-              items: [],
-              nextWakeAt: null,
-              userId: "member_123",
-            };
-          },
-          async fetchSnapshot() {
-            throw new Error("fetchSnapshot should not be called");
-          },
         },
       });
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
@@ -2424,25 +2320,13 @@ describe("hosted system mailbox notification execution context", () => {
       memberId: "member_123",
       notification: {
         instructions: "Process the still-dirty ack batch.",
-        route: {
-          actorId: "+15550001111",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "linq_thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "linq_thread_123",
-          threadIsDirect: true,
-        },
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
       },
       occurredAt: FIXED_NOW,
     });
     mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-      bootstrapResult: null,
-      conversationMetrics: null,
+      ...createAssistantNotificationMailboxMetrics(),
       mailboxLane: "device-sync",
-      nextWakeAt: null,
       postCheckpointRecord: {
         kind: "device-sync.dirty-processed-batch",
         records: [
@@ -2458,7 +2342,6 @@ describe("hosted system mailbox notification execution context", () => {
           },
         ],
       },
-      redactedLogEntries: [],
     });
 
     try {
@@ -2472,24 +2355,8 @@ describe("hosted system mailbox notification execution context", () => {
 
       const runtime = createRuntime({
         deviceSyncPort: {
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called");
-          },
+          ...createDeviceSyncPortStub(),
           ackDirtyStateProcessed,
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called");
-          },
-          async fetchDirtyStates() {
-            return {
-              hasMore: false,
-              items: [],
-              nextWakeAt: null,
-              userId: "member_123",
-            };
-          },
-          async fetchSnapshot() {
-            throw new Error("fetchSnapshot should not be called");
-          },
         },
       });
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
@@ -2556,25 +2423,13 @@ describe("hosted system mailbox notification execution context", () => {
       memberId: "member_123",
       notification: {
         instructions: "Process the dirty ack batch retry.",
-        route: {
-          actorId: "+15550001111",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "linq_thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "linq_thread_123",
-          threadIsDirect: true,
-        },
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
       },
       occurredAt: FIXED_NOW,
     });
     mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-      bootstrapResult: null,
-      conversationMetrics: null,
+      ...createAssistantNotificationMailboxMetrics(),
       mailboxLane: "device-sync",
-      nextWakeAt: null,
       postCheckpointRecord: {
         kind: "device-sync.dirty-processed-batch",
         records: [
@@ -2590,7 +2445,6 @@ describe("hosted system mailbox notification execution context", () => {
           },
         ],
       },
-      redactedLogEntries: [],
     });
 
     try {
@@ -2604,24 +2458,8 @@ describe("hosted system mailbox notification execution context", () => {
 
       const runtime = createRuntime({
         deviceSyncPort: {
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called");
-          },
+          ...createDeviceSyncPortStub(),
           ackDirtyStateProcessed,
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called");
-          },
-          async fetchDirtyStates() {
-            return {
-              hasMore: false,
-              items: [],
-              nextWakeAt: null,
-              userId: "member_123",
-            };
-          },
-          async fetchSnapshot() {
-            throw new Error("fetchSnapshot should not be called");
-          },
         },
       });
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
@@ -2740,12 +2578,9 @@ describe("hosted system mailbox notification execution context", () => {
       },
     });
     mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-      bootstrapResult: null,
-      conversationMetrics: null,
+      ...createAssistantNotificationMailboxMetrics(),
       mailboxLane: "runtime-control",
-      nextWakeAt: null,
       postCheckpointRecord: { kind: "vault-share.projection" },
-      redactedLogEntries: [],
     });
 
     try {
@@ -2854,20 +2689,13 @@ describe("hosted system mailbox notification execution context", () => {
     });
     mocks.executeHostedMailboxEvent
       .mockResolvedValueOnce({
-        bootstrapResult: null,
-        conversationMetrics: null,
+        ...createAssistantNotificationMailboxMetrics(),
         mailboxLane: "runtime-control",
-        nextWakeAt: null,
         postCheckpointRecord: { kind: "vault-share.projection" },
-        redactedLogEntries: [],
       })
       .mockResolvedValueOnce({
-        bootstrapResult: null,
-        conversationMetrics: null,
+        ...createAssistantNotificationMailboxMetrics(),
         mailboxLane: "runtime-control",
-        nextWakeAt: null,
-        postCheckpointRecord: null,
-        redactedLogEntries: [],
       });
 
     try {
@@ -2966,12 +2794,9 @@ describe("hosted system mailbox notification execution context", () => {
       },
     });
     mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-      bootstrapResult: null,
-      conversationMetrics: null,
+      ...createAssistantNotificationMailboxMetrics(),
       mailboxLane: "runtime-control",
-      nextWakeAt: null,
       postCheckpointRecord: { kind: "vault-share.projection" },
-      redactedLogEntries: [],
     });
     try {
       await enqueueHostedSystemMailboxItem({
@@ -3063,12 +2888,9 @@ describe("hosted system mailbox notification execution context", () => {
       },
     });
     mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
-      bootstrapResult: null,
-      conversationMetrics: null,
+      ...createAssistantNotificationMailboxMetrics(),
       mailboxLane: "runtime-control",
-      nextWakeAt: null,
       postCheckpointRecord: { kind: "vault-share.projection" },
-      redactedLogEntries: [],
     });
 
     try {
@@ -5553,17 +5375,7 @@ describe("hosted system mailbox notification execution context", () => {
       memberId: "member_123",
       notification: {
         instructions: "Send the prepared account update.",
-        route: {
-          actorId: "+15550001111",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "linq_thread_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "linq_thread_123",
-          threadIsDirect: true,
-        },
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
       },
       occurredAt: "2026-04-27T00:00:01.000Z",
     });
@@ -5968,12 +5780,8 @@ describe("hosted system mailbox notification execution context", () => {
       mocks.executeHostedMailboxEvent.mockImplementationOnce(async (input) => {
         expect(input.preferenceCausalSeq).toBe("12");
         return {
-          bootstrapResult: null,
-          conversationMetrics: null,
+          ...createAssistantNotificationMailboxMetrics(),
           mailboxLane: "member-preferences-updated",
-          nextWakeAt: null,
-          postCheckpointRecord: null,
-          redactedLogEntries: [],
         };
       });
 
@@ -6054,12 +5862,8 @@ describe("hosted system mailbox notification execution context", () => {
           input.preferenceAppliedAt,
         );
         return {
-          bootstrapResult: null,
-          conversationMetrics: null,
+          ...createAssistantNotificationMailboxMetrics(),
           mailboxLane: "member-preferences-updated",
-          nextWakeAt: null,
-          postCheckpointRecord: null,
-          redactedLogEntries: [],
         };
       });
 
@@ -6199,8 +6003,7 @@ describe("hosted system mailbox notification execution context", () => {
       // Web's skipped empty reservation yields unavailable. The real engine's
       // recovery maps it to skip; the notification owner returns these no-send
       // metrics (covered separately at both boundaries), not a retryable error.
-      mocks.executeHostedMailboxEvent.mockResolvedValue({ bootstrapResult: null, conversationMetrics: null,
-        mailboxLane: "assistant-notification", nextWakeAt: null, postCheckpointRecord: null, redactedLogEntries: [] });
+      mocks.executeHostedMailboxEvent.mockResolvedValue(createAssistantNotificationMailboxMetrics());
       const retryAt = "2026-04-27T00:01:00.000Z";
       expect(await prepare(retryAt)).toMatchObject({ status: "processed", itemId: "bootstrap-old" });
       expect(await prepare(retryAt)).toMatchObject({ status: "processed", itemId: "bootstrap-next" });
@@ -6426,12 +6229,8 @@ describe("hosted system mailbox notification execution context", () => {
           input.preferenceAppliedAt,
         );
         return {
-          bootstrapResult: null,
-          conversationMetrics: null,
+          ...createAssistantNotificationMailboxMetrics(),
           mailboxLane: "member-preferences-updated",
-          nextWakeAt: null,
-          postCheckpointRecord: null,
-          redactedLogEntries: [],
         };
       });
 
@@ -6506,12 +6305,8 @@ describe("hosted system mailbox notification execution context", () => {
           input.preferenceAppliedAt,
         );
         return {
-          bootstrapResult: null,
-          conversationMetrics: null,
+          ...createAssistantNotificationMailboxMetrics(),
           mailboxLane: "member-preferences-updated",
-          nextWakeAt: null,
-          postCheckpointRecord: null,
-          redactedLogEntries: [],
         };
       });
 

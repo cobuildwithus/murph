@@ -88,11 +88,8 @@ import {
 import {
   resolveAssistantStatePaths,
   sha256HostedBundleHex,
-  createHostedPortableWorkspaceManifestFromBundle,
   listPendingAssistantRuntimeIssueRecords,
   restoreHostedBundleRoots,
-  restoreHostedExecutionContext,
-  snapshotHostedPortableWorkspaceDelta,
   snapshotHostedBundleRoots,
   writePendingAssistantRuntimeIssueRecord,
   writeHostedBundleTextFile,
@@ -201,7 +198,6 @@ type HostedWorkspaceEntrypointMockName =
   | "refreshHostedBrowserVaultReplicaFromRuntime"
   | "runAssistantAutomationPass"
   | "runHostedIdleCheckpointMaintenance"
-  | "snapshotHostedPortableWorkspaceDelta"
   | "summarizeWearableSleepRuntime";
 
 type HostedWorkspaceEntrypointMocks = {
@@ -269,7 +265,6 @@ const mocks: HostedWorkspaceEntrypointMocks = vi.hoisted(() => ({
   runAssistantAutomationPass: vi.fn(),
   runHostedIdleCheckpointMaintenance: vi.fn(),
   summarizeWearableSleepRuntime: vi.fn(),
-  snapshotHostedPortableWorkspaceDelta: vi.fn(),
   cancelPendingWarmCodexPreinitialization: vi.fn(async () => undefined),
 }));
 
@@ -398,18 +393,6 @@ vi.mock("@murphai/query", async (importOriginal) => {
     summarizeWearableSleepRuntime:
       mocks.summarizeWearableSleepRuntime.mockImplementation(
         actual.summarizeWearableSleepRuntime,
-      ),
-  };
-});
-
-vi.mock("@murphai/runtime-state/node", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@murphai/runtime-state/node")>();
-
-  return {
-    ...actual,
-    snapshotHostedPortableWorkspaceDelta:
-      mocks.snapshotHostedPortableWorkspaceDelta.mockImplementation(
-        actual.snapshotHostedPortableWorkspaceDelta,
       ),
   };
 });

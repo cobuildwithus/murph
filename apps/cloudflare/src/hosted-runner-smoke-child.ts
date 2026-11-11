@@ -22,7 +22,7 @@ import {
 } from "@murphai/contracts";
 import {
   decodeHostedBundleBase64,
-  restoreHostedExecutionContext,
+  restoreHostedBundleRoots,
 } from "@murphai/runtime-state/node";
 import {
   buildMurphHostedPermissionProfileTomlLines,
@@ -106,20 +106,24 @@ async function main(): Promise<void> {
       throw new Error("Hosted runner smoke input bundle must decode to bytes.");
     }
 
-    const restored = await restoreHostedExecutionContext({
-      bundle,
-      workspaceRoot,
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "home");
+    await mkdir(operatorHomeRoot, { recursive: true, mode: 0o700 });
+    await restoreHostedBundleRoots({
+      bytes: bundle,
+      expectedKind: "vault",
+      roots: { vault: vaultRoot },
     });
 
     const result = await withSmokeProcessEnvironment(
       {
         envOverrides: {},
-        operatorHomeRoot: restored.operatorHomeRoot,
-        vaultRoot: restored.vaultRoot,
+        operatorHomeRoot,
+        vaultRoot,
       },
       async () => runSmokeChecks({
         expectedVaultId: input.expectedVaultId,
-        vaultRoot: restored.vaultRoot,
+        vaultRoot,
         wavRelativePath: input.wavRelativePath,
         workspaceRoot,
       }),

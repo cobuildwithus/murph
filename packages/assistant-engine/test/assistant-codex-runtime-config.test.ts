@@ -1,6 +1,9 @@
 import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
 import { supportsCodexTurnDeveloperInstructions, withCodexAppServerRuntimeFeatureOverrides } from '../src/assistant-codex/config.ts'
 import {
+  writeCompletedTurn,
+  mockCodexProcess,
+  initializeWarmTurn,
   cliTimingLaunchArgs,
   codexSteeringLaunchArgs,
   MURPH_DYNAMIC_TOOLS,
@@ -1425,100 +1428,69 @@ describe('assistant codex runtime', () => {
         status: 200,
       })
     })
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-image-order', 'turn-image-order')
+      child.stdout.write(
+        jsonLine({
+          id: 61,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'generate_image',
+            arguments: {
+              prompt: 'Render the product.',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          id: 62,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'attach_response_media',
+            arguments: {
+              media: [],
+            },
+          },
+        }),
+      )
+      releaseImageFetch.resolve()
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-image-order',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-image-order',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              id: 61,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'generate_image',
-                arguments: {
-                  prompt: 'Render the product.',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              id: 62,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'attach_response_media',
-                arguments: {
-                  media: [],
-                },
-              },
-            }),
-          )
-          releaseImageFetch.resolve()
-
-          const messages = await waitForRpcMessages(child, 6)
-          expect(messages[4]).toMatchObject({
-            id: 61,
-            result: { success: true },
-          })
-          expect(messages[5]).toMatchObject({
-            id: 62,
-            result: { success: true },
-          })
-
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-image-order',
-                  type: 'agentMessage',
-                  text: 'Ordered media complete',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-image-order',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
+      const messages = await waitForRpcMessages(child, 6)
+      expect(messages[4]).toMatchObject({
+        id: 61,
+        result: { success: true },
+      })
+      expect(messages[5]).toMatchObject({
+        id: 62,
+        result: { success: true },
       })
 
-      return child
+      child.stdout.write(
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-image-order',
+              type: 'agentMessage',
+              text: 'Ordered media complete',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-image-order',
+              status: 'completed',
+            },
+          },
+        }),
+      )
     })
 
     await expect(
@@ -1610,94 +1582,75 @@ describe('assistant codex runtime', () => {
       }),
     }
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-configuration-order', 'turn-configuration-order')
+      child.stdout.write(jsonLine({
+        id: 71,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            action: 'update',
+            model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+          },
+          namespace: 'murph',
+          tool: 'assistant_configuration',
+        },
+      }))
+      child.stdout.write(jsonLine({
+        id: 72,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            action: 'update',
+            model: HOSTED_ASSISTANT_DEFAULT_MODEL,
+          },
+          namespace: 'murph',
+          tool: 'assistant_configuration',
+        },
+      }))
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: 2,
-            result: { thread: { id: 'thread-configuration-order' } },
-          }))
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: 3,
-            result: { turn: { id: 'turn-configuration-order' } },
-          }))
-          child.stdout.write(jsonLine({
-            id: 71,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                action: 'update',
-                model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
-              },
-              namespace: 'murph',
-              tool: 'assistant_configuration',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            id: 72,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                action: 'update',
-                model: HOSTED_ASSISTANT_DEFAULT_MODEL,
-              },
-              namespace: 'murph',
-              tool: 'assistant_configuration',
-            },
-          }))
+      await firstUpdateStarted.promise
+      try {
+        expect(configurationCalls).toEqual([
+          `update:${HOSTED_ASSISTANT_GPT_61_SOL_MODEL}`,
+        ])
+      } finally {
+        releaseFirstUpdate.resolve()
+      }
 
-          await firstUpdateStarted.promise
-          try {
-            expect(configurationCalls).toEqual([
-              `update:${HOSTED_ASSISTANT_GPT_61_SOL_MODEL}`,
-            ])
-          } finally {
-            releaseFirstUpdate.resolve()
-          }
-
-          const messages = await waitForRpcMessages(child, 6)
-          expect(messages[4]).toMatchObject({
-            id: 71,
-            result: { success: true },
-          })
-          expect(messages[5]).toMatchObject({
-            id: 72,
-            result: { success: true },
-          })
-          expect(configurationCalls).toEqual([
-            `update:${HOSTED_ASSISTANT_GPT_61_SOL_MODEL}`,
-            `update:${HOSTED_ASSISTANT_DEFAULT_MODEL}`,
-          ])
-
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-configuration-order',
-                text: 'Configuration updates complete',
-                type: 'agentMessage',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-configuration-order',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
+      const messages = await waitForRpcMessages(child, 6)
+      expect(messages[4]).toMatchObject({
+        id: 71,
+        result: { success: true },
       })
+      expect(messages[5]).toMatchObject({
+        id: 72,
+        result: { success: true },
+      })
+      expect(configurationCalls).toEqual([
+        `update:${HOSTED_ASSISTANT_GPT_61_SOL_MODEL}`,
+        `update:${HOSTED_ASSISTANT_DEFAULT_MODEL}`,
+      ])
 
-      return child
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'assistant-configuration-order',
+            text: 'Configuration updates complete',
+            type: 'agentMessage',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-configuration-order',
+            status: 'completed',
+          },
+        },
+      }))
     })
 
     await expect(executeCodexAppServerTurn({
@@ -1764,83 +1717,64 @@ describe('assistant codex runtime', () => {
       subscriptionTool,
     }
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-subscription-order', 'turn-subscription-order')
+      child.stdout.write(jsonLine({
+        id: 73,
+        method: 'item/tool/call',
+        params: {
+          arguments: { action: 'start_pulse_now' },
+          namespace: 'murph',
+          tool: 'subscription',
+        },
+      }))
+      child.stdout.write(jsonLine({
+        id: 74,
+        method: 'item/tool/call',
+        params: {
+          arguments: { action: 'upgrade_edge' },
+          namespace: 'murph',
+          tool: 'subscription',
+        },
+      }))
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: 2,
-            result: { thread: { id: 'thread-subscription-order' } },
-          }))
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: 3,
-            result: { turn: { id: 'turn-subscription-order' } },
-          }))
-          child.stdout.write(jsonLine({
-            id: 73,
-            method: 'item/tool/call',
-            params: {
-              arguments: { action: 'start_pulse_now' },
-              namespace: 'murph',
-              tool: 'subscription',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            id: 74,
-            method: 'item/tool/call',
-            params: {
-              arguments: { action: 'upgrade_edge' },
-              namespace: 'murph',
-              tool: 'subscription',
-            },
-          }))
+      await firstRequestStarted.promise
+      try {
+        expect(subscriptionCalls).toEqual(['start_pulse_now'])
+      } finally {
+        releaseFirstRequest.resolve()
+      }
 
-          await firstRequestStarted.promise
-          try {
-            expect(subscriptionCalls).toEqual(['start_pulse_now'])
-          } finally {
-            releaseFirstRequest.resolve()
-          }
-
-          const messages = await waitForRpcMessages(child, 6)
-          expect(messages[4]).toMatchObject({
-            id: 73,
-            result: { success: true },
-          })
-          expect(messages[5]).toMatchObject({
-            id: 74,
-            result: { success: false },
-          })
-          expect(subscriptionCalls).toEqual(['start_pulse_now'])
-
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-subscription-order',
-                text: 'Subscription actions complete',
-                type: 'agentMessage',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-subscription-order',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
+      const messages = await waitForRpcMessages(child, 6)
+      expect(messages[4]).toMatchObject({
+        id: 73,
+        result: { success: true },
       })
+      expect(messages[5]).toMatchObject({
+        id: 74,
+        result: { success: false },
+      })
+      expect(subscriptionCalls).toEqual(['start_pulse_now'])
 
-      return child
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'assistant-subscription-order',
+            text: 'Subscription actions complete',
+            type: 'agentMessage',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-subscription-order',
+            status: 'completed',
+          },
+        },
+      }))
     })
 
     await expect(executeCodexAppServerTurn({
@@ -1920,109 +1854,78 @@ describe('assistant codex runtime', () => {
       throw new Error(`Unexpected fetch URL: ${requestUrl}`)
     })
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-computer-order', 'turn-computer-order')
+      child.stdout.write(
+        jsonLine({
+          id: 61,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'computer_act',
+            arguments: {
+              code: "await page.goto('https://shop.example.test/checkout');",
+              runId: 'run_123',
+              timeoutMs: 25000,
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          id: 62,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'computer_pause_for_user',
+            arguments: {
+              handoffPurpose: 'manual_browser_help',
+              reason: 'final_confirmation',
+              runId: 'run_123',
+              suggestedReply: 'done',
+            },
+          },
+        }),
+      )
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-computer-order',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-computer-order',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              id: 61,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'computer_act',
-                arguments: {
-                  code: "await page.goto('https://shop.example.test/checkout');",
-                  runId: 'run_123',
-                  timeoutMs: 25000,
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              id: 62,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'computer_pause_for_user',
-                arguments: {
-                  handoffPurpose: 'manual_browser_help',
-                  reason: 'final_confirmation',
-                  runId: 'run_123',
-                  suggestedReply: 'done',
-                },
-              },
-            }),
-          )
+      await actStarted.promise
+      await Promise.resolve()
+      expect(fetchOrder).toEqual(['act:start'])
+      releaseAct.resolve()
 
-          await actStarted.promise
-          await Promise.resolve()
-          expect(fetchOrder).toEqual(['act:start'])
-          releaseAct.resolve()
-
-          const messages = await waitForRpcMessages(child, 6)
-          expect(messages[4]).toMatchObject({
-            id: 61,
-            result: { success: true },
-          })
-          expect(messages[5]).toMatchObject({
-            id: 62,
-            result: { success: true },
-          })
-
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-computer-order',
-                  type: 'agentMessage',
-                  text: scenario.modelMessage,
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-computer-order',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
+      const messages = await waitForRpcMessages(child, 6)
+      expect(messages[4]).toMatchObject({
+        id: 61,
+        result: { success: true },
+      })
+      expect(messages[5]).toMatchObject({
+        id: 62,
+        result: { success: true },
       })
 
-      return child
+      child.stdout.write(
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-computer-order',
+              type: 'agentMessage',
+              text: scenario.modelMessage,
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-computer-order',
+              status: 'completed',
+            },
+          },
+        }),
+      )
     })
 
     await expect(
@@ -2080,113 +1983,82 @@ describe('assistant codex runtime', () => {
       })
     })
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-computer-pause-live-turn', 'turn-computer-pause-live-turn')
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-computer-pause-live-turn',
+            },
+          },
+        }),
+      )
+      await liveTurnReady.promise
+      child.stdout.write(
+        jsonLine({
+          id: 61,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'computer_pause_for_user',
+            arguments: {
+              handoffPurpose: 'manual_browser_help',
+              reason: 'final_confirmation',
+              runId: 'run_123',
+              suggestedReply: 'yes',
+            },
+          },
+        }),
+      )
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-computer-pause-live-turn',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-computer-pause-live-turn',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/started',
-              params: {
-                turn: {
-                  id: 'turn-computer-pause-live-turn',
-                },
-              },
-            }),
-          )
-          await liveTurnReady.promise
-          child.stdout.write(
-            jsonLine({
-              id: 61,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'computer_pause_for_user',
-                arguments: {
-                  handoffPurpose: 'manual_browser_help',
-                  reason: 'final_confirmation',
-                  runId: 'run_123',
-                  suggestedReply: 'yes',
-                },
-              },
-            }),
-          )
+      await pauseRequestStarted.promise
+      try {
+        expect(liveTurnReleased).toBe(1)
+        expect(liveTurn).not.toBeNull()
+        await expect(liveTurn!.steer({
+          prompt: 'yes, continue while pause is saving',
+        })).rejects.toMatchObject({
+          code: 'ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE',
+        })
+      } finally {
+        releasePauseRequest.resolve()
+      }
 
-          await pauseRequestStarted.promise
-          try {
-            expect(liveTurnReleased).toBe(1)
-            expect(liveTurn).not.toBeNull()
-            await expect(liveTurn!.steer({
-              prompt: 'yes, continue while pause is saving',
-            })).rejects.toMatchObject({
-              code: 'ASSISTANT_CODEX_APP_SERVER_LIVE_TURN_INACTIVE',
-            })
-          } finally {
-            releasePauseRequest.resolve()
-          }
-
-          await expect(waitForRpcResponse(child, 61)).resolves.toMatchObject({
-            id: 61,
-            result: { success: true },
-          })
-          expect(
-            readWrittenRpcMessages(child).some((message) =>
-              message.method === 'turn/steer'
-            ),
-          ).toBe(false)
-
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-computer-pause-live-turn',
-                  type: 'agentMessage',
-                  text: 'Paused for confirmation.',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-computer-pause-live-turn',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
+      await expect(waitForRpcResponse(child, 61)).resolves.toMatchObject({
+        id: 61,
+        result: { success: true },
       })
+      expect(
+        readWrittenRpcMessages(child).some((message) =>
+          message.method === 'turn/steer'
+        ),
+      ).toBe(false)
 
-      return child
+      child.stdout.write(
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-computer-pause-live-turn',
+              type: 'agentMessage',
+              text: 'Paused for confirmation.',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-computer-pause-live-turn',
+              status: 'completed',
+            },
+          },
+        }),
+      )
     })
 
     await expect(
@@ -2241,165 +2113,134 @@ describe('assistant codex runtime', () => {
       })
     })
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-computer-pause-no-reply',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-computer-pause-no-reply',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              id: 59,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'finish_without_reply',
-                arguments: {},
-              },
-            }),
-          )
-          await expect(waitForRpcResponse(child, 59)).resolves.toMatchObject({
-            id: 59,
-            result: { success: true },
-          })
-
-          child.stdout.write([
-            jsonLine({
-              id: 60,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'finish_without_reply',
-                arguments: {},
-              },
-            }),
-            jsonLine({
-              id: 61,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'computer_pause_for_user',
-                arguments: {
-                  handoffPurpose: 'manual_browser_help',
-                  reason: 'final_confirmation',
-                  runId: 'run_123',
-                  suggestedReply: 'done',
-                },
-              },
-            }),
-          ].join(''))
-          await expect(waitForRpcResponse(child, 60)).resolves.toMatchObject({
-            id: 60,
-            result: { success: false },
-          })
-          await expect(waitForRpcResponse(child, 61)).resolves.toMatchObject({
-            id: 61,
-            result: { success: true },
-          })
-
-          child.stdout.write(
-            jsonLine({
-              id: 62,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'computer_act',
-                arguments: {
-                  code: "await page.getByRole('button', { name: 'Place your order' }).click();",
-                  runId: 'run_123',
-                  timeoutMs: 25000,
-                },
-              },
-            }),
-          )
-          await expect(waitForRpcResponse(child, 62)).resolves.toEqual({
-            id: 62,
-            result: {
-              success: false,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'computer run is paused for user input; end this turn and wait for the next user reply',
-                },
-              ],
-            },
-          })
-
-          child.stdout.write(
-            jsonLine({
-              id: 63,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'finish_without_reply',
-                arguments: {},
-              },
-            }),
-          )
-          await expect(waitForRpcResponse(child, 63)).resolves.toEqual({
-            id: 63,
-            result: {
-              success: false,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'finish_without_reply is unavailable after pausing a computer run for the user',
-                },
-              ],
-            },
-          })
-
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-computer-pause-no-reply',
-                  type: 'agentMessage',
-                  text:
-                    'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-computer-pause-no-reply',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-computer-pause-no-reply', 'turn-computer-pause-no-reply')
+      child.stdout.write(
+        jsonLine({
+          id: 59,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'finish_without_reply',
+            arguments: {},
+          },
+        }),
+      )
+      await expect(waitForRpcResponse(child, 59)).resolves.toMatchObject({
+        id: 59,
+        result: { success: true },
       })
 
-      return child
+      child.stdout.write([
+        jsonLine({
+          id: 60,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'finish_without_reply',
+            arguments: {},
+          },
+        }),
+        jsonLine({
+          id: 61,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'computer_pause_for_user',
+            arguments: {
+              handoffPurpose: 'manual_browser_help',
+              reason: 'final_confirmation',
+              runId: 'run_123',
+              suggestedReply: 'done',
+            },
+          },
+        }),
+      ].join(''))
+      await expect(waitForRpcResponse(child, 60)).resolves.toMatchObject({
+        id: 60,
+        result: { success: false },
+      })
+      await expect(waitForRpcResponse(child, 61)).resolves.toMatchObject({
+        id: 61,
+        result: { success: true },
+      })
+
+      child.stdout.write(
+        jsonLine({
+          id: 62,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'computer_act',
+            arguments: {
+              code: "await page.getByRole('button', { name: 'Place your order' }).click();",
+              runId: 'run_123',
+              timeoutMs: 25000,
+            },
+          },
+        }),
+      )
+      await expect(waitForRpcResponse(child, 62)).resolves.toEqual({
+        id: 62,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'computer run is paused for user input; end this turn and wait for the next user reply',
+            },
+          ],
+        },
+      })
+
+      child.stdout.write(
+        jsonLine({
+          id: 63,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'finish_without_reply',
+            arguments: {},
+          },
+        }),
+      )
+      await expect(waitForRpcResponse(child, 63)).resolves.toEqual({
+        id: 63,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'finish_without_reply is unavailable after pausing a computer run for the user',
+            },
+          ],
+        },
+      })
+
+      child.stdout.write(
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-computer-pause-no-reply',
+              type: 'agentMessage',
+              text:
+                'Open the secure checkout: https://web.example.test/computer/handoff/raw-token',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-computer-pause-no-reply',
+              status: 'completed',
+            },
+          },
+        }),
+      )
     })
 
     await expect(
@@ -2491,122 +2332,103 @@ describe('assistant codex runtime', () => {
       vaultFileSendAvailable: true,
     })
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-vault-approval-url', 'turn-vault-approval-url')
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: 2,
-            result: { thread: { id: 'thread-vault-approval-url' } },
-          }))
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: 3,
-            result: { turn: { id: 'turn-vault-approval-url' } },
-          }))
-
-          let pendingNoReplyResponse: Promise<unknown> | null = null
-          if (scenario.noReplyBeforeApproval !== 'none') {
-            child.stdout.write(jsonLine({
-              id: 70,
-              method: 'item/tool/call',
-              params: {
-                arguments: {},
-                namespace: 'murph',
-                tool: 'finish_without_reply',
-              },
-            }))
-            pendingNoReplyResponse = waitForRpcResponse(child, 70)
-            if (scenario.noReplyBeforeApproval === 'applied') {
-              await expect(pendingNoReplyResponse).resolves.toMatchObject({
-                id: 70,
-                result: { success: true },
-              })
-              pendingNoReplyResponse = null
-            }
-          }
-
-          for (let approvalIndex = 0; approvalIndex < approvalCount; approvalIndex += 1) {
-            const requestId = 71 + approvalIndex
-            child.stdout.write(jsonLine({
-              id: requestId,
-              method: 'item/tool/call',
-              params: {
-                arguments: { ref: `documents/report-${approvalIndex + 1}.pdf` },
-                callId: `call-vault-approval-${approvalIndex + 1}`,
-                namespace: 'murph',
-                tool: 'send_vault_file',
-              },
-            }))
-            await expect(waitForRpcResponse(child, requestId)).resolves.toEqual({
-              id: requestId,
-              result: {
-                contentItems: [{
-                  text: JSON.stringify({
-                    filename: `report-${approvalIndex + 1}.pdf`,
-                    status: 'pending',
-                  }),
-                  type: 'inputText',
-                }],
-                success: true,
-              },
-            })
-          }
-
-          if (pendingNoReplyResponse) {
-            await expect(pendingNoReplyResponse).resolves.toMatchObject({
-              id: 70,
-              result: { success: true },
-            })
-          }
-
-          child.stdout.write(jsonLine({
-            id: 80,
-            method: 'item/tool/call',
-            params: {
-              arguments: {},
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 80)).resolves.toEqual({
-            id: 80,
-            result: {
-              contentItems: [{
-                text: 'finish_without_reply is unavailable while a vault-file approval link must be delivered',
-                type: 'inputText',
-              }],
-              success: false,
-            },
+      let pendingNoReplyResponse: Promise<unknown> | null = null
+      if (scenario.noReplyBeforeApproval !== 'none') {
+        child.stdout.write(jsonLine({
+          id: 70,
+          method: 'item/tool/call',
+          params: {
+            arguments: {},
+            namespace: 'murph',
+            tool: 'finish_without_reply',
+          },
+        }))
+        pendingNoReplyResponse = waitForRpcResponse(child, 70)
+        if (scenario.noReplyBeforeApproval === 'applied') {
+          await expect(pendingNoReplyResponse).resolves.toMatchObject({
+            id: 70,
+            result: { success: true },
           })
+          pendingNoReplyResponse = null
+        }
+      }
 
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-vault-approval-url',
-                text: 'Approval is required.',
-                type: 'agentMessage',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-vault-approval-url',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
+      for (let approvalIndex = 0; approvalIndex < approvalCount; approvalIndex += 1) {
+        const requestId = 71 + approvalIndex
+        child.stdout.write(jsonLine({
+          id: requestId,
+          method: 'item/tool/call',
+          params: {
+            arguments: { ref: `documents/report-${approvalIndex + 1}.pdf` },
+            callId: `call-vault-approval-${approvalIndex + 1}`,
+            namespace: 'murph',
+            tool: 'send_vault_file',
+          },
+        }))
+        await expect(waitForRpcResponse(child, requestId)).resolves.toEqual({
+          id: requestId,
+          result: {
+            contentItems: [{
+              text: JSON.stringify({
+                filename: `report-${approvalIndex + 1}.pdf`,
+                status: 'pending',
+              }),
+              type: 'inputText',
+            }],
+            success: true,
+          },
+        })
+      }
+
+      if (pendingNoReplyResponse) {
+        await expect(pendingNoReplyResponse).resolves.toMatchObject({
+          id: 70,
+          result: { success: true },
+        })
+      }
+
+      child.stdout.write(jsonLine({
+        id: 80,
+        method: 'item/tool/call',
+        params: {
+          arguments: {},
+          namespace: 'murph',
+          tool: 'finish_without_reply',
+        },
+      }))
+      await expect(waitForRpcResponse(child, 80)).resolves.toEqual({
+        id: 80,
+        result: {
+          contentItems: [{
+            text: 'finish_without_reply is unavailable while a vault-file approval link must be delivered',
+            type: 'inputText',
+          }],
+          success: false,
+        },
       })
 
-      return child
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'assistant-vault-approval-url',
+            text: 'Approval is required.',
+            type: 'agentMessage',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-vault-approval-url',
+            status: 'completed',
+          },
+        },
+      }))
     })
 
     const result = await executeCodexAppServerTurn({
@@ -2875,112 +2697,93 @@ describe('assistant codex runtime', () => {
       vaultFileSendAvailable: true,
     })
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-vault-send-order', 'turn-vault-send-order')
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: 2,
-            result: { thread: { id: 'thread-vault-send-order' } },
-          }))
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: 3,
-            result: { turn: { id: 'turn-vault-send-order' } },
-          }))
+      for (const requestId of [91, 92]) {
+        child.stdout.write(jsonLine({
+          id: requestId,
+          method: 'item/tool/call',
+          params: {
+            arguments: { ref: 'documents/report.pdf' },
+            callId: `call-vault-send-order-${requestId}`,
+            namespace: 'murph',
+            tool: 'send_vault_file',
+          },
+        }))
+      }
 
-          for (const requestId of [91, 92]) {
-            child.stdout.write(jsonLine({
-              id: requestId,
-              method: 'item/tool/call',
-              params: {
-                arguments: { ref: 'documents/report.pdf' },
-                callId: `call-vault-send-order-${requestId}`,
-                namespace: 'murph',
-                tool: 'send_vault_file',
-              },
-            }))
-          }
+      await firstSendStarted.promise
+      try {
+        expect(sendVaultFile).toHaveBeenCalledOnce()
+      } finally {
+        releaseFirstSend.resolve()
+      }
 
-          await firstSendStarted.promise
-          try {
-            expect(sendVaultFile).toHaveBeenCalledOnce()
-          } finally {
-            releaseFirstSend.resolve()
-          }
-
-          await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
-            id: 91,
-            result: { success: true },
-          })
-          await expect(waitForRpcResponse(child, 92)).resolves.toEqual({
-            id: 92,
-            result: {
-              contentItems: [{
-                text: 'vault-file sending cannot be combined with other response media',
-                type: 'inputText',
-              }],
-              success: false,
-            },
-          })
-
-          child.stdout.write(jsonLine({
-            id: 94,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                media: [{
-                  alt: 'A second attachment',
-                  kind: 'image',
-                  source: 'second-attachment',
-                  url: 'https://cdn.example.test/assistant/second.png',
-                }],
-              },
-              namespace: 'murph',
-              tool: 'attach_response_media',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 94)).resolves.toEqual({
-            id: 94,
-            result: {
-              contentItems: [{
-                text: 'response media cannot be changed after a vault-file send',
-                type: 'inputText',
-              }],
-              success: false,
-            },
-          })
-
-          child.stdout.write(jsonLine({
-            id: 93,
-            method: 'item/tool/call',
-            params: {
-              arguments: {},
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 93)).resolves.toMatchObject({
-            id: 93,
-            result: { success: true },
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-vault-send-order',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
+      await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
+        id: 91,
+        result: { success: true },
+      })
+      await expect(waitForRpcResponse(child, 92)).resolves.toEqual({
+        id: 92,
+        result: {
+          contentItems: [{
+            text: 'vault-file sending cannot be combined with other response media',
+            type: 'inputText',
+          }],
+          success: false,
+        },
       })
 
-      return child
+      child.stdout.write(jsonLine({
+        id: 94,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            media: [{
+              alt: 'A second attachment',
+              kind: 'image',
+              source: 'second-attachment',
+              url: 'https://cdn.example.test/assistant/second.png',
+            }],
+          },
+          namespace: 'murph',
+          tool: 'attach_response_media',
+        },
+      }))
+      await expect(waitForRpcResponse(child, 94)).resolves.toEqual({
+        id: 94,
+        result: {
+          contentItems: [{
+            text: 'response media cannot be changed after a vault-file send',
+            type: 'inputText',
+          }],
+          success: false,
+        },
+      })
+
+      child.stdout.write(jsonLine({
+        id: 93,
+        method: 'item/tool/call',
+        params: {
+          arguments: {},
+          namespace: 'murph',
+          tool: 'finish_without_reply',
+        },
+      }))
+      await expect(waitForRpcResponse(child, 93)).resolves.toMatchObject({
+        id: 93,
+        result: { success: true },
+      })
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-vault-send-order',
+            status: 'completed',
+          },
+        },
+      }))
     })
 
     await expect(executeCodexAppServerTurn({
@@ -3043,105 +2846,86 @@ describe('assistant codex runtime', () => {
     let requestsBeforeClarificationReleased = 0
     let noticesBeforeClarificationReleased = 0
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-current-sender-order', 'turn-current-sender-order')
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: 2,
-            result: { thread: { id: 'thread-current-sender-order' } },
-          }))
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: 3,
-            result: { turn: { id: 'turn-current-sender-order' } },
-          }))
+      child.stdout.write(jsonLine({
+        id: 91,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            action: 'clarify_current_sender',
+            message_ref: earlierInputId,
+          },
+          namespace: 'murph',
+          tool: 'group_consult',
+        },
+      }))
+      child.stdout.write(jsonLine({
+        id: 93,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            action: 'ask_current_sender',
+            message_ref: independentInputId,
+          },
+          namespace: 'murph',
+          tool: 'group_consult',
+        },
+      }))
+      child.stdout.write(jsonLine({
+        id: 92,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            action: 'continue_current_sender_in_group',
+            message_ref: laterInputId,
+          },
+          namespace: 'murph',
+          tool: 'group_consult',
+        },
+      }))
 
-          child.stdout.write(jsonLine({
-            id: 91,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                action: 'clarify_current_sender',
-                message_ref: earlierInputId,
-              },
-              namespace: 'murph',
-              tool: 'group_consult',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            id: 93,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                action: 'ask_current_sender',
-                message_ref: independentInputId,
-              },
-              namespace: 'murph',
-              tool: 'group_consult',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            id: 92,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                action: 'continue_current_sender_in_group',
-                message_ref: laterInputId,
-              },
-              namespace: 'murph',
-              tool: 'group_consult',
-            },
-          }))
+      await clarificationStarted.promise
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      requestsBeforeClarificationReleased = groupRequest.mock.calls.length
+      noticesBeforeClarificationReleased =
+        progressDelivery.send.mock.calls.length
+      releaseClarification.resolve()
 
-          await clarificationStarted.promise
-          await new Promise((resolve) => setTimeout(resolve, 0))
-          requestsBeforeClarificationReleased = groupRequest.mock.calls.length
-          noticesBeforeClarificationReleased =
-            progressDelivery.send.mock.calls.length
-          releaseClarification.resolve()
-
-          await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
-            id: 91,
-            result: { success: true },
-          })
-          await expect(waitForRpcResponse(child, 92)).resolves.toMatchObject({
-            id: 92,
-            result: { success: true },
-          })
-          await expect(waitForRpcResponse(child, 93)).resolves.toMatchObject({
-            id: 93,
-            result: { success: true },
-          })
-          expect(groupRequest).toHaveBeenCalledTimes(3)
-
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-current-sender-order',
-                text: 'I still need a destination.',
-                type: 'agentMessage',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-current-sender-order',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
+      await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
+        id: 91,
+        result: { success: true },
       })
+      await expect(waitForRpcResponse(child, 92)).resolves.toMatchObject({
+        id: 92,
+        result: { success: true },
+      })
+      await expect(waitForRpcResponse(child, 93)).resolves.toMatchObject({
+        id: 93,
+        result: { success: true },
+      })
+      expect(groupRequest).toHaveBeenCalledTimes(3)
 
-      return child
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'assistant-current-sender-order',
+            text: 'I still need a destination.',
+            type: 'agentMessage',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-current-sender-order',
+            status: 'completed',
+          },
+        },
+      }))
     })
 
     await expect(executeCodexAppServerTurn({
@@ -3196,73 +2980,54 @@ describe('assistant codex runtime', () => {
       sentProgressResult('system'),
     )
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-current-sender-decision', 'turn-current-sender-decision')
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: 2,
-            result: { thread: { id: 'thread-current-sender-decision' } },
-          }))
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: 3,
-            result: { turn: { id: 'turn-current-sender-decision' } },
-          }))
+      child.stdout.write(jsonLine({
+        id: 94,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            action: 'continue_current_sender_privately',
+            message_ref: inputId,
+          },
+          namespace: 'murph',
+          tool: 'group_consult',
+        },
+      }))
+      await privateStarted.promise
+      child.stdout.write(jsonLine({
+        id: 95,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            action: 'ask_current_sender',
+            message_ref: inputId,
+          },
+          namespace: 'murph',
+          tool: 'group_consult',
+        },
+      }))
 
-          child.stdout.write(jsonLine({
-            id: 94,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                action: 'continue_current_sender_privately',
-                message_ref: inputId,
-              },
-              namespace: 'murph',
-              tool: 'group_consult',
-            },
-          }))
-          await privateStarted.promise
-          child.stdout.write(jsonLine({
-            id: 95,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                action: 'ask_current_sender',
-                message_ref: inputId,
-              },
-              namespace: 'murph',
-              tool: 'group_consult',
-            },
-          }))
-
-          await expect(waitForRpcResponse(child, 95)).resolves.toMatchObject({
-            id: 95,
-            result: { success: false },
-          })
-          expect(progressDelivery.send).not.toHaveBeenCalled()
-          expect(groupRequest).toHaveBeenCalledTimes(1)
-
-          releasePrivate.resolve()
-          const interrupt = await waitForRpcMethod(child, 'turn/interrupt')
-          child.stdout.write(jsonLine({ id: interrupt.id, result: {} }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-current-sender-decision',
-                status: 'interrupted',
-              },
-            },
-          }))
-        })()
+      await expect(waitForRpcResponse(child, 95)).resolves.toMatchObject({
+        id: 95,
+        result: { success: false },
       })
+      expect(progressDelivery.send).not.toHaveBeenCalled()
+      expect(groupRequest).toHaveBeenCalledTimes(1)
 
-      return child
+      releasePrivate.resolve()
+      const interrupt = await waitForRpcMethod(child, 'turn/interrupt')
+      child.stdout.write(jsonLine({ id: interrupt.id, result: {} }))
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-current-sender-decision',
+            status: 'interrupted',
+          },
+        },
+      }))
     })
 
     await expect(executeCodexAppServerTurn({
@@ -3340,81 +3105,62 @@ describe('assistant codex runtime', () => {
       sentProgressResult('system'),
     )
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-current-sender-arrival-order', 'turn-current-sender-arrival-order')
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: 2,
-            result: { thread: { id: 'thread-current-sender-arrival-order' } },
-          }))
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: 3,
-            result: { turn: { id: 'turn-current-sender-arrival-order' } },
-          }))
-
-          child.stdout.write([
-            jsonLine({
-              id: 96,
-              method: 'item/tool/call',
-              params: {
-                arguments: {
-                  action: earlierAction,
-                  message_ref: inputId,
-                },
-                namespace: 'murph',
-                tool: 'group_consult',
-              },
-            }),
-            jsonLine({
-              id: 97,
-              method: 'item/tool/call',
-              params: {
-                arguments: {
-                  action: laterAction,
-                  message_ref: inputId,
-                },
-                namespace: 'murph',
-                tool: 'group_consult',
-              },
-            }),
-          ].join(''))
-
-          try {
-            laterResponse = await waitForRpcResponse(child, 97)
-          } finally {
-            releaseSecondPreTool.resolve()
-          }
-          earlierResponse = await waitForRpcResponse(child, 96)
-
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-current-sender-arrival-order',
-                text: 'Should I share that here or send it privately?',
-                type: 'agentMessage',
-              },
+      child.stdout.write([
+        jsonLine({
+          id: 96,
+          method: 'item/tool/call',
+          params: {
+            arguments: {
+              action: earlierAction,
+              message_ref: inputId,
             },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-current-sender-arrival-order',
-                status: 'completed',
-              },
+            namespace: 'murph',
+            tool: 'group_consult',
+          },
+        }),
+        jsonLine({
+          id: 97,
+          method: 'item/tool/call',
+          params: {
+            arguments: {
+              action: laterAction,
+              message_ref: inputId,
             },
-          }))
-        })()
-      })
+            namespace: 'murph',
+            tool: 'group_consult',
+          },
+        }),
+      ].join(''))
 
-      return child
+      try {
+        laterResponse = await waitForRpcResponse(child, 97)
+      } finally {
+        releaseSecondPreTool.resolve()
+      }
+      earlierResponse = await waitForRpcResponse(child, 96)
+
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'assistant-current-sender-arrival-order',
+            text: 'Should I share that here or send it privately?',
+            type: 'agentMessage',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-current-sender-arrival-order',
+            status: 'completed',
+          },
+        },
+      }))
     })
 
     await expect(executeCodexAppServerTurn({
@@ -3461,104 +3207,85 @@ describe('assistant codex runtime', () => {
       vaultFileSendAvailable: true,
     })
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-vault-send-steer', 'turn-vault-send-steer')
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'user-vault-send-steer-1',
+            content: [{ type: 'text', text: 'Send the report.' }],
+            type: 'userMessage',
+          },
+        },
+      }))
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: 2,
-            result: { thread: { id: 'thread-vault-send-steer' } },
-          }))
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: 3,
-            result: { turn: { id: 'turn-vault-send-steer' } },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'user-vault-send-steer-1',
-                content: [{ type: 'text', text: 'Send the report.' }],
-                type: 'userMessage',
-              },
-            },
-          }))
-
-          child.stdout.write(jsonLine({
-            id: 95,
-            method: 'item/tool/call',
-            params: {
-              arguments: { ref: 'documents/report.pdf' },
-              callId: 'call-vault-send-steer',
-              namespace: 'murph',
-              tool: 'send_vault_file',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 95)).resolves.toMatchObject({
-            id: 95,
-            result: { success: true },
-          })
-
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'user-vault-send-steer-2',
-                content: [{
-                  type: 'text',
-                  text: 'Now attach a different image.',
-                }],
-                type: 'userMessage',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            id: 96,
-            method: 'item/tool/call',
-            params: {
-              arguments: { media: [media] },
-              namespace: 'murph',
-              tool: 'attach_response_media',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 96)).resolves.toEqual({
-            id: 96,
-            result: {
-              contentItems: [{
-                text: '1 response image attached',
-                type: 'inputText',
-              }],
-              success: true,
-            },
-          })
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-vault-send-steer-2',
-                text: 'Here is the separate image.',
-                type: 'agentMessage',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-vault-send-steer',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
+      child.stdout.write(jsonLine({
+        id: 95,
+        method: 'item/tool/call',
+        params: {
+          arguments: { ref: 'documents/report.pdf' },
+          callId: 'call-vault-send-steer',
+          namespace: 'murph',
+          tool: 'send_vault_file',
+        },
+      }))
+      await expect(waitForRpcResponse(child, 95)).resolves.toMatchObject({
+        id: 95,
+        result: { success: true },
       })
 
-      return child
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'user-vault-send-steer-2',
+            content: [{
+              type: 'text',
+              text: 'Now attach a different image.',
+            }],
+            type: 'userMessage',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        id: 96,
+        method: 'item/tool/call',
+        params: {
+          arguments: { media: [media] },
+          namespace: 'murph',
+          tool: 'attach_response_media',
+        },
+      }))
+      await expect(waitForRpcResponse(child, 96)).resolves.toEqual({
+        id: 96,
+        result: {
+          contentItems: [{
+            text: '1 response image attached',
+            type: 'inputText',
+          }],
+          success: true,
+        },
+      })
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'assistant-vault-send-steer-2',
+            text: 'Here is the separate image.',
+            type: 'agentMessage',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-vault-send-steer',
+            status: 'completed',
+          },
+        },
+      }))
     })
 
     await expect(executeCodexAppServerTurn({
@@ -3595,68 +3322,44 @@ describe('assistant codex runtime', () => {
     const onFinishWithoutReplyAccepted = vi.fn()
     const onFinishWithoutReplyRecorded = vi.fn()
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-vault-approval-failure',
-            turnId: 'turn-vault-approval-failure',
-          })
-          child.stdout.write(jsonLine({
-            id: 81,
-            method: 'item/tool/call',
-            params: {
-              arguments: {},
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 81)).resolves.toMatchObject({
-            id: 81,
-            result: { success: true },
-          })
-          child.stdout.write(jsonLine({
-            id: 82,
-            method: 'item/tool/call',
-            params: {
-              arguments: { ref: 'documents/report.pdf' },
-              namespace: 'murph',
-              tool: 'send_vault_file',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 82)).resolves.toEqual({
-            id: 82,
-            result: {
-              contentItems: [{
-                text: JSON.stringify({
-                  filename: 'report.pdf',
-                  status: 'pending',
-                }),
-                type: 'inputText',
-              }],
-              success: true,
-            },
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              threadId: 'thread-vault-approval-failure',
-              turn: {
-                id: 'turn-vault-approval-failure',
-                status: 'failed',
-              },
-            },
-          }))
-        })()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-vault-approval-failure', 'turn-vault-approval-failure')
+      child.stdout.write(jsonLine({
+        id: 81,
+        method: 'item/tool/call',
+        params: {
+          arguments: {},
+          namespace: 'murph',
+          tool: 'finish_without_reply',
+        },
+      }))
+      await expect(waitForRpcResponse(child, 81)).resolves.toMatchObject({
+        id: 81,
+        result: { success: true },
       })
-
-      return child
+      child.stdout.write(jsonLine({
+        id: 82,
+        method: 'item/tool/call',
+        params: {
+          arguments: { ref: 'documents/report.pdf' },
+          namespace: 'murph',
+          tool: 'send_vault_file',
+        },
+      }))
+      await expect(waitForRpcResponse(child, 82)).resolves.toEqual({
+        id: 82,
+        result: {
+          contentItems: [{
+            text: JSON.stringify({
+              filename: 'report.pdf',
+              status: 'pending',
+            }),
+            type: 'inputText',
+          }],
+          success: true,
+        },
+      })
+      writeCompletedTurn(child, 'thread-vault-approval-failure', 'turn-vault-approval-failure', 'failed')
     })
 
     const error: unknown = await executeCodexAppServerTurn({
@@ -3716,66 +3419,35 @@ describe('assistant codex runtime', () => {
         }),
     )
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-image-failure',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-image-failure',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              id: 71,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'generate_image',
-                arguments: {
-                  prompt: 'Render the product.',
-                },
-              },
-            }),
-          )
-          await imageFetchStarted.promise
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-image-failure',
-                  status: 'failed',
-                },
-              },
-            }),
-          )
-          child.emit('exit', 0, null)
-          child.emit('close', 0, null)
-        })()
-      })
-
-      return child
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-image-failure', 'turn-image-failure')
+      child.stdout.write(
+        jsonLine({
+          id: 71,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'generate_image',
+            arguments: {
+              prompt: 'Render the product.',
+            },
+          },
+        }),
+      )
+      await imageFetchStarted.promise
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-image-failure',
+              status: 'failed',
+            },
+          },
+        }),
+      )
+      child.emit('exit', 0, null)
+      child.emit('close', 0, null)
     })
 
     const error: unknown = await executeCodexAppServerTurn({
@@ -3828,103 +3500,72 @@ describe('assistant codex runtime', () => {
       send: vi.fn(async (_text: string) => sentProgressResult()),
     }
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-image-progress', 'turn-image-progress')
+      child.stdout.write(
+        jsonLine({
+          id: 81,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'generate_image',
+            arguments: {
+              prompt: 'Render the product.',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          id: 82,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'send_progress_update',
+            arguments: {
+              text: 'Still generating the image.',
+            },
+          },
+        }),
+      )
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-image-progress',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-image-progress',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              id: 81,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'generate_image',
-                arguments: {
-                  prompt: 'Render the product.',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              id: 82,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'send_progress_update',
-                arguments: {
-                  text: 'Still generating the image.',
-                },
-              },
-            }),
-          )
+      // The progress response must arrive while the image fetch is held.
+      const messages = await waitForRpcMessages(child, 5)
+      expect(messages[4]).toMatchObject({
+        id: 82,
+        result: { success: true },
+      })
+      releaseImageFetch.resolve()
 
-          // The progress response must arrive while the image fetch is held.
-          const messages = await waitForRpcMessages(child, 5)
-          expect(messages[4]).toMatchObject({
-            id: 82,
-            result: { success: true },
-          })
-          releaseImageFetch.resolve()
-
-          const allMessages = await waitForRpcMessages(child, 6)
-          expect(allMessages[5]).toMatchObject({
-            id: 81,
-            result: { success: true },
-          })
-
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-image-progress',
-                  type: 'agentMessage',
-                  text: 'Progress and image complete',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-image-progress',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
+      const allMessages = await waitForRpcMessages(child, 6)
+      expect(allMessages[5]).toMatchObject({
+        id: 81,
+        result: { success: true },
       })
 
-      return child
+      child.stdout.write(
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-image-progress',
+              type: 'agentMessage',
+              text: 'Progress and image complete',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-image-progress',
+              status: 'completed',
+            },
+          },
+        }),
+      )
     })
 
     await expect(
@@ -3978,124 +3619,93 @@ describe('assistant codex runtime', () => {
       source: 'media-limit-source',
     }))
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-image-limit',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-image-limit',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              id: 91,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'attach_response_media',
-                arguments: {
-                  media: attachedMedia,
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              id: 92,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'generate_image',
-                arguments: {
-                  prompt: 'Render one more image.',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              id: 93,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'generate_image',
-                arguments: {
-                  prompt: 'Render one image after the limit is full.',
-                },
-              },
-            }),
-          )
-
-          const messages = await waitForRpcMessages(child, 7)
-          expect(messages[4]).toMatchObject({
-            id: 91,
-            result: { success: true },
-          })
-          expect(messages[5]).toMatchObject({
-            id: 92,
-            result: { success: true },
-          })
-          expect(messages[6]).toEqual({
-            id: 93,
-            result: {
-              success: false,
-              contentItems: [
-                {
-                  type: 'inputText',
-                  text: 'response media limit reached',
-                },
-              ],
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-image-limit', 'turn-image-limit')
+      child.stdout.write(
+        jsonLine({
+          id: 91,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'attach_response_media',
+            arguments: {
+              media: attachedMedia,
             },
-          })
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          id: 92,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'generate_image',
+            arguments: {
+              prompt: 'Render one more image.',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          id: 93,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'generate_image',
+            arguments: {
+              prompt: 'Render one image after the limit is full.',
+            },
+          },
+        }),
+      )
 
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-image-limit',
-                  type: 'agentMessage',
-                  text: 'Media limit handled',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-image-limit',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
+      const messages = await waitForRpcMessages(child, 7)
+      expect(messages[4]).toMatchObject({
+        id: 91,
+        result: { success: true },
+      })
+      expect(messages[5]).toMatchObject({
+        id: 92,
+        result: { success: true },
+      })
+      expect(messages[6]).toEqual({
+        id: 93,
+        result: {
+          success: false,
+          contentItems: [
+            {
+              type: 'inputText',
+              text: 'response media limit reached',
+            },
+          ],
+        },
       })
 
-      return child
+      child.stdout.write(
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-image-limit',
+              type: 'agentMessage',
+              text: 'Media limit handled',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-image-limit',
+              status: 'completed',
+            },
+          },
+        }),
+      )
     })
 
     const result = await executeCodexAppServerTurn({

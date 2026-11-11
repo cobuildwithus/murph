@@ -1,5 +1,7 @@
 import { SYNTHETIC_SLEEP_CARD } from './support/sleep-card-fixture.js'
 import {
+  mockCodexProcess,
+  initializeWarmTurn,
   DAILY_NUTRITION_RESPONSE_CARD,
   MockChildProcess,
   OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
@@ -236,345 +238,316 @@ describe('steered final segments', () => {
     const workingDirectory = await createTempDir('assistant-codex-steered-finals-work-')
     const codexHome = await createTempDir('assistant-codex-steered-finals-home-')
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      const deferredToolResponses: Promise<unknown>[] = []
+      await initializeWarmTurn(child, 'thread-steered-finals', 'turn-steered-finals')
+      child.stdout.write(jsonLine({
+        method: 'turn/started',
+        params: {
+          turn: {
+            id: 'turn-steered-finals',
+          },
+        },
+      }))
 
-      queueMicrotask(() => {
-        void (async () => {
-          const deferredToolResponses: Promise<unknown>[] = []
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+      for (const step of steps) {
+        if (isCallbackStep(step)) {
+          await step.run()
+          continue
+        }
 
-          const threadStart = await waitForRpcMethod(child, 'thread/start')
+        if (isAttachResponseCardStep(step)) {
           child.stdout.write(jsonLine({
-            id: threadStart.id,
-            result: {
-              thread: {
-                id: 'thread-steered-finals',
-              },
-            },
-          }))
-
-          const turnStart = await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: turnStart.id,
-            result: {
-              turn: {
-                id: 'turn-steered-finals',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
+            id: step.id,
+            method: 'item/tool/call',
             params: {
-              turn: {
-                id: 'turn-steered-finals',
-              },
+              namespace: 'murph',
+              tool: step.tool ?? 'attach_response_card',
+              arguments: step.tool === 'attach_sleep_card'
+                ? { date: '2026-11-03' }
+                : { card: step.card },
+              turnId: 'turn-steered-finals',
             },
           }))
-
-          for (const step of steps) {
-            if (isCallbackStep(step)) {
-              await step.run()
-              continue
-            }
-
-            if (isAttachResponseCardStep(step)) {
-              child.stdout.write(jsonLine({
-                id: step.id,
-                method: 'item/tool/call',
-                params: {
-                  namespace: 'murph',
-                  tool: step.tool ?? 'attach_response_card',
-                  arguments: step.tool === 'attach_sleep_card'
-                    ? { date: '2026-11-03' }
-                    : { card: step.card },
-                  turnId: 'turn-steered-finals',
+          const responseAssertion = expect(
+            waitForRpcResponse(child, step.id),
+          ).resolves.toEqual({
+            id: step.id,
+            result: {
+              success: step.expectedSuccess ?? true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: step.expectedText,
                 },
-              }))
-              const responseAssertion = expect(
-                waitForRpcResponse(child, step.id),
-              ).resolves.toEqual({
-                id: step.id,
-                result: {
-                  success: step.expectedSuccess ?? true,
-                  contentItems: [
-                    {
-                      type: 'inputText',
-                      text: step.expectedText,
-                    },
-                  ],
-                },
-              })
-              if (step.deferResponse === true) {
-                deferredToolResponses.push(responseAssertion)
-              } else {
-                await responseAssertion
-              }
-              continue
-            }
-
-            if (isAttachResponseMediaStep(step)) {
-              child.stdout.write(jsonLine({
-                id: step.id,
-                method: 'item/tool/call',
-                params: {
-                  namespace: 'murph',
-                  tool: 'attach_response_media',
-                  arguments: {
-                    media: step.media,
-                  },
-                  turnId: 'turn-steered-finals',
-                },
-              }))
-              const responseAssertion = expect(
-                waitForRpcResponse(child, step.id),
-              ).resolves.toEqual({
-                id: step.id,
-                result: {
-                  success: step.expectedSuccess ?? true,
-                  contentItems: [
-                    {
-                      type: 'inputText',
-                      text: step.expectedText,
-                    },
-                  ],
-                },
-              })
-              if (step.deferResponse === true) {
-                deferredToolResponses.push(responseAssertion)
-              } else {
-                await responseAssertion
-              }
-              continue
-            }
-
-            if (isFinishWithoutReplyStep(step)) {
-              child.stdout.write(jsonLine({
-                id: step.id,
-                method: 'item/tool/call',
-                params: {
-                  namespace: 'murph',
-                  tool: 'finish_without_reply',
-                  arguments: {},
-                  turnId: 'turn-steered-finals',
-                },
-              }))
-              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
-                id: step.id,
-                result: {
-                  success: step.expectedSuccess ?? true,
-                  contentItems: [
-                    {
-                      type: 'inputText',
-                      text: step.expectedText,
-                    },
-                  ],
-                },
-              })
-              continue
-            }
-
-            if (isSendVaultFileStep(step)) {
-              child.stdout.write(jsonLine({
-                id: step.id,
-                method: 'item/tool/call',
-                params: {
-                  arguments: { ref: step.ref },
-                  callId: `call-steered-vault-${step.id}`,
-                  namespace: 'murph',
-                  tool: 'send_vault_file',
-                  turnId: 'turn-steered-finals',
-                },
-              }))
-              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
-                id: step.id,
-                result: {
-                  contentItems: [{
-                    text: step.expectedText,
-                    type: 'inputText',
-                  }],
-                  success: step.expectedSuccess ?? true,
-                },
-              })
-              continue
-            }
-
-            if (isGenerateVoiceMemoStep(step)) {
-              child.stdout.write(jsonLine({
-                id: step.id,
-                method: 'item/tool/call',
-                params: {
-                  arguments: { text: step.text },
-                  namespace: 'murph',
-                  tool: 'generate_voice_memo',
-                  turnId: 'turn-steered-finals',
-                },
-              }))
-              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
-                id: step.id,
-                result: {
-                  contentItems: [{
-                    text: step.expectedText,
-                    type: 'inputText',
-                  }],
-                  success: step.expectedSuccess ?? true,
-                },
-              })
-              continue
-            }
-
-            if (isGenerateImageStep(step)) {
-              child.stdout.write(jsonLine({
-                id: step.id,
-                method: 'item/tool/call',
-                params: {
-                  arguments: { prompt: step.prompt },
-                  namespace: 'murph',
-                  tool: 'generate_image',
-                  turnId: 'turn-steered-finals',
-                },
-              }))
-              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
-                id: step.id,
-                result: {
-                  contentItems: [{
-                    text: step.expectedText,
-                    type: 'inputText',
-                  }],
-                  success: step.expectedSuccess ?? true,
-                },
-              })
-              continue
-            }
-
-            if (isListMembershipsStep(step)) {
-              child.stdout.write(jsonLine({
-                id: step.id,
-                method: 'item/tool/call',
-                params: {
-                  namespace: 'murph',
-                  tool: 'group_membership',
-                  arguments: { action: 'list_memberships' },
-                  turnId: 'turn-steered-finals',
-                },
-              }))
-              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
-                id: step.id,
-                result: {
-                  success: true,
-                  contentItems: [
-                    {
-                      type: 'inputText',
-                      text: step.expectedText,
-                    },
-                  ],
-                },
-              })
-              continue
-            }
-
-            if (isOfferAccessStep(step)) {
-              child.stdout.write(jsonLine({
-                id: step.id,
-                method: 'item/tool/call',
-                params: {
-                  namespace: 'murph',
-                  tool: 'group_data',
-                  arguments: { action: 'offer_access' },
-                  turnId: 'turn-steered-finals',
-                },
-              }))
-              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
-                id: step.id,
-                result: {
-                  success: true,
-                  contentItems: [
-                    {
-                      type: 'inputText',
-                      text: step.expectedText,
-                    },
-                  ],
-                },
-              })
-              continue
-            }
-
-            if (isReactToMessageStep(step)) {
-              child.stdout.write(jsonLine({
-                id: step.id,
-                method: 'item/tool/call',
-                params: {
-                  namespace: 'murph',
-                  tool: 'react_to_message',
-                  arguments: {
-                    message_ref: step.messageRef,
-                    reaction: step.reaction,
-                  },
-                  turnId: 'turn-steered-finals',
-                },
-              }))
-              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
-                id: step.id,
-                result: {
-                  success: step.expectedSuccess ?? true,
-                  contentItems: [
-                    {
-                      type: 'inputText',
-                      text: step.expectedText,
-                    },
-                  ],
-                },
-              })
-              continue
-            }
-
-            if (isSelectReplyTargetStep(step)) {
-              child.stdout.write(jsonLine({
-                id: step.id,
-                method: 'item/tool/call',
-                params: {
-                  namespace: 'murph',
-                  tool: 'select_reply_target',
-                  arguments: {
-                    message_ref: step.messageRef,
-                  },
-                  turnId: 'turn-steered-finals',
-                },
-              }))
-              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
-                id: step.id,
-                result: {
-                  success: step.expectedSuccess ?? true,
-                  contentItems: [
-                    {
-                      type: 'inputText',
-                      text: step.expectedText,
-                    },
-                  ],
-                },
-              })
-              continue
-            }
-
-            child.stdout.write(jsonLine(normalizeScriptedSteeredFinalEvent(step)))
+              ],
+            },
+          })
+          if (step.deferResponse === true) {
+            deferredToolResponses.push(responseAssertion)
+          } else {
+            await responseAssertion
           }
+          continue
+        }
 
-          await Promise.all(deferredToolResponses)
-
+        if (isAttachResponseMediaStep(step)) {
           child.stdout.write(jsonLine({
-            method: 'turn/completed',
+            id: step.id,
+            method: 'item/tool/call',
             params: {
-              turn: {
-                id: 'turn-steered-finals',
-                status: input.turnStatus ?? 'completed',
+              namespace: 'murph',
+              tool: 'attach_response_media',
+              arguments: {
+                media: step.media,
               },
+              turnId: 'turn-steered-finals',
             },
           }))
-        })()
-      })
+          const responseAssertion = expect(
+            waitForRpcResponse(child, step.id),
+          ).resolves.toEqual({
+            id: step.id,
+            result: {
+              success: step.expectedSuccess ?? true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: step.expectedText,
+                },
+              ],
+            },
+          })
+          if (step.deferResponse === true) {
+            deferredToolResponses.push(responseAssertion)
+          } else {
+            await responseAssertion
+          }
+          continue
+        }
 
-      return child
+        if (isFinishWithoutReplyStep(step)) {
+          child.stdout.write(jsonLine({
+            id: step.id,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+              arguments: {},
+              turnId: 'turn-steered-finals',
+            },
+          }))
+          await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+            id: step.id,
+            result: {
+              success: step.expectedSuccess ?? true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: step.expectedText,
+                },
+              ],
+            },
+          })
+          continue
+        }
+
+        if (isSendVaultFileStep(step)) {
+          child.stdout.write(jsonLine({
+            id: step.id,
+            method: 'item/tool/call',
+            params: {
+              arguments: { ref: step.ref },
+              callId: `call-steered-vault-${step.id}`,
+              namespace: 'murph',
+              tool: 'send_vault_file',
+              turnId: 'turn-steered-finals',
+            },
+          }))
+          await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+            id: step.id,
+            result: {
+              contentItems: [{
+                text: step.expectedText,
+                type: 'inputText',
+              }],
+              success: step.expectedSuccess ?? true,
+            },
+          })
+          continue
+        }
+
+        if (isGenerateVoiceMemoStep(step)) {
+          child.stdout.write(jsonLine({
+            id: step.id,
+            method: 'item/tool/call',
+            params: {
+              arguments: { text: step.text },
+              namespace: 'murph',
+              tool: 'generate_voice_memo',
+              turnId: 'turn-steered-finals',
+            },
+          }))
+          await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+            id: step.id,
+            result: {
+              contentItems: [{
+                text: step.expectedText,
+                type: 'inputText',
+              }],
+              success: step.expectedSuccess ?? true,
+            },
+          })
+          continue
+        }
+
+        if (isGenerateImageStep(step)) {
+          child.stdout.write(jsonLine({
+            id: step.id,
+            method: 'item/tool/call',
+            params: {
+              arguments: { prompt: step.prompt },
+              namespace: 'murph',
+              tool: 'generate_image',
+              turnId: 'turn-steered-finals',
+            },
+          }))
+          await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+            id: step.id,
+            result: {
+              contentItems: [{
+                text: step.expectedText,
+                type: 'inputText',
+              }],
+              success: step.expectedSuccess ?? true,
+            },
+          })
+          continue
+        }
+
+        if (isListMembershipsStep(step)) {
+          child.stdout.write(jsonLine({
+            id: step.id,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'group_membership',
+              arguments: { action: 'list_memberships' },
+              turnId: 'turn-steered-finals',
+            },
+          }))
+          await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+            id: step.id,
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: step.expectedText,
+                },
+              ],
+            },
+          })
+          continue
+        }
+
+        if (isOfferAccessStep(step)) {
+          child.stdout.write(jsonLine({
+            id: step.id,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'group_data',
+              arguments: { action: 'offer_access' },
+              turnId: 'turn-steered-finals',
+            },
+          }))
+          await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+            id: step.id,
+            result: {
+              success: true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: step.expectedText,
+                },
+              ],
+            },
+          })
+          continue
+        }
+
+        if (isReactToMessageStep(step)) {
+          child.stdout.write(jsonLine({
+            id: step.id,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'react_to_message',
+              arguments: {
+                message_ref: step.messageRef,
+                reaction: step.reaction,
+              },
+              turnId: 'turn-steered-finals',
+            },
+          }))
+          await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+            id: step.id,
+            result: {
+              success: step.expectedSuccess ?? true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: step.expectedText,
+                },
+              ],
+            },
+          })
+          continue
+        }
+
+        if (isSelectReplyTargetStep(step)) {
+          child.stdout.write(jsonLine({
+            id: step.id,
+            method: 'item/tool/call',
+            params: {
+              namespace: 'murph',
+              tool: 'select_reply_target',
+              arguments: {
+                message_ref: step.messageRef,
+              },
+              turnId: 'turn-steered-finals',
+            },
+          }))
+          await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+            id: step.id,
+            result: {
+              success: step.expectedSuccess ?? true,
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: step.expectedText,
+                },
+              ],
+            },
+          })
+          continue
+        }
+
+        child.stdout.write(jsonLine(normalizeScriptedSteeredFinalEvent(step)))
+      }
+
+      await Promise.all(deferredToolResponses)
+
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-steered-finals',
+            status: input.turnStatus ?? 'completed',
+          },
+        },
+      }))
     })
 
     return await executeCodexAppServerTurn({
@@ -2266,116 +2239,89 @@ describe('steered final segments', () => {
       vault: '/vaults/test',
     })
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-batched-steer', 'turn-batched-steer')
+      child.stdout.write(jsonLine({
+        method: 'turn/started',
+        params: {
+          turn: {
+            id: 'turn-batched-steer',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'user-initial-question',
+            content: [{ type: 'text', text: 'Initial question' }],
+            type: 'userMessage',
+          },
+          threadId: 'thread-batched-steer',
+          turnId: 'turn-batched-steer',
+        },
+      }))
 
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-          const threadStart = await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: threadStart.id,
-            result: {
-              thread: {
-                id: 'thread-batched-steer',
-              },
+      await liveTurnReady.promise
+      const steerRequest = await waitForRpcMethod(child, 'turn/steer')
+      expect(asRecord(steerRequest.params).input).toEqual([
+        {
+          type: 'text',
+          text: 'Clarification accepted by the provider',
+        },
+        expect.objectContaining({
+          detail: 'high',
+          type: 'localImage',
+        }),
+      ])
+      child.stdout.write([
+        jsonLine({ id: steerRequest.id, result: {} }),
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-before-batched-steer',
+              text: 'First response.',
+              type: 'agentMessage',
             },
-          }))
-          const turnStart = await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: turnStart.id,
-            result: {
-              turn: {
-                id: 'turn-batched-steer',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: 'turn-batched-steer',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'user-initial-question',
-                content: [{ type: 'text', text: 'Initial question' }],
-                type: 'userMessage',
-              },
-              threadId: 'thread-batched-steer',
-              turnId: 'turn-batched-steer',
-            },
-          }))
-
-          await liveTurnReady.promise
-          const steerRequest = await waitForRpcMethod(child, 'turn/steer')
-          expect(asRecord(steerRequest.params).input).toEqual([
-            {
-              type: 'text',
-              text: 'Clarification accepted by the provider',
-            },
-            expect.objectContaining({
-              detail: 'high',
-              type: 'localImage',
-            }),
-          ])
-          child.stdout.write([
-            jsonLine({ id: steerRequest.id, result: {} }),
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-before-batched-steer',
-                  text: 'First response.',
-                  type: 'agentMessage',
-                },
-                threadId: 'thread-batched-steer',
-                turnId: 'turn-batched-steer',
-              },
-            }),
-          ].join(''))
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'user-batched-steer',
-                content: [{ type: 'text', text: 'Clarification accepted by the provider' }],
-                type: 'userMessage',
-              },
-              threadId: 'thread-batched-steer',
-              turnId: 'turn-batched-steer',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-after-batched-steer',
-                text: 'Revised response.',
-                type: 'agentMessage',
-              },
-              threadId: 'thread-batched-steer',
-              turnId: 'turn-batched-steer',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-batched-steer',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
+            threadId: 'thread-batched-steer',
+            turnId: 'turn-batched-steer',
+          },
+        }),
+      ].join(''))
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'user-batched-steer',
+            content: [{ type: 'text', text: 'Clarification accepted by the provider' }],
+            type: 'userMessage',
+          },
+          threadId: 'thread-batched-steer',
+          turnId: 'turn-batched-steer',
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'assistant-after-batched-steer',
+            text: 'Revised response.',
+            type: 'agentMessage',
+          },
+          threadId: 'thread-batched-steer',
+          turnId: 'turn-batched-steer',
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-batched-steer',
+            status: 'completed',
+          },
+        },
+      }))
     })
 
     try {
@@ -2910,100 +2856,71 @@ it('rejects finish_without_reply after context compaction progress was sent', as
   const codexHome = await createTempDir('assistant-codex-context-compact-no-reply-home-')
   const progressDelivery = createProgressDeliveryMock(sentProgressResult('system'))
 
-  codexMocks.spawn.mockImplementation(() => {
-    const child = new MockChildProcess()
+  mockCodexProcess(async (child) => {
+    await initializeWarmTurn(child, 'thread-context-compact-no-reply', 'turn-context-compact-no-reply')
+    child.stdout.write(jsonLine({
+      method: 'turn/started',
+      params: {
+        turn: {
+          id: 'turn-context-compact-no-reply',
+        },
+      },
+    }))
 
-    queueMicrotask(() => {
-      void (async () => {
-        const initialize = await waitForRpcMethod(child, 'initialize')
-        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+    writeContextCompactionStarted({
+      child,
+      itemId: 'context-compact-no-reply',
+      threadId: 'thread-context-compact-no-reply',
+    })
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (progressDelivery.send.mock.calls.length > 0) {
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
 
-        const threadStart = await waitForRpcMethod(child, 'thread/start')
-        child.stdout.write(jsonLine({
-          id: threadStart.id,
-          result: {
-            thread: {
-              id: 'thread-context-compact-no-reply',
-            },
+    child.stdout.write(jsonLine({
+      id: 81,
+      method: 'item/tool/call',
+      params: {
+        namespace: 'murph',
+        tool: 'finish_without_reply',
+        arguments: {},
+        turnId: 'turn-context-compact-no-reply',
+      },
+    }))
+    await expect(waitForRpcResponse(child, 81)).resolves.toEqual({
+      id: 81,
+      result: {
+        success: false,
+        contentItems: [
+          {
+            type: 'inputText',
+            text: 'finish_without_reply unavailable after assistant output',
           },
-        }))
-
-        const turnStart = await waitForRpcMethod(child, 'turn/start')
-        child.stdout.write(jsonLine({
-          id: turnStart.id,
-          result: {
-            turn: {
-              id: 'turn-context-compact-no-reply',
-            },
-          },
-        }))
-        child.stdout.write(jsonLine({
-          method: 'turn/started',
-          params: {
-            turn: {
-              id: 'turn-context-compact-no-reply',
-            },
-          },
-        }))
-
-        writeContextCompactionStarted({
-          child,
-          itemId: 'context-compact-no-reply',
-          threadId: 'thread-context-compact-no-reply',
-        })
-        for (let attempt = 0; attempt < 200; attempt += 1) {
-          if (progressDelivery.send.mock.calls.length > 0) {
-            break
-          }
-          await new Promise((resolve) => setTimeout(resolve, 0))
-        }
-
-        child.stdout.write(jsonLine({
-          id: 81,
-          method: 'item/tool/call',
-          params: {
-            namespace: 'murph',
-            tool: 'finish_without_reply',
-            arguments: {},
-            turnId: 'turn-context-compact-no-reply',
-          },
-        }))
-        await expect(waitForRpcResponse(child, 81)).resolves.toEqual({
-          id: 81,
-          result: {
-            success: false,
-            contentItems: [
-              {
-                type: 'inputText',
-                text: 'finish_without_reply unavailable after assistant output',
-              },
-            ],
-          },
-        })
-
-        child.stdout.write(jsonLine({
-          method: 'item/completed',
-          params: {
-            item: {
-              id: 'assistant-context-compact-no-reply-final',
-              type: 'agentMessage',
-              text: 'Final answer after system progress.',
-            },
-          },
-        }))
-        child.stdout.write(jsonLine({
-          method: 'turn/completed',
-          params: {
-            turn: {
-              id: 'turn-context-compact-no-reply',
-              status: 'completed',
-            },
-          },
-        }))
-      })()
+        ],
+      },
     })
 
-    return child
+    child.stdout.write(jsonLine({
+      method: 'item/completed',
+      params: {
+        item: {
+          id: 'assistant-context-compact-no-reply-final',
+          type: 'agentMessage',
+          text: 'Final answer after system progress.',
+        },
+      },
+    }))
+    child.stdout.write(jsonLine({
+      method: 'turn/completed',
+      params: {
+        turn: {
+          id: 'turn-context-compact-no-reply',
+          status: 'completed',
+        },
+      },
+    }))
   })
 
   const result = await executeCodexAppServerTurn({

@@ -262,7 +262,7 @@ describe('read_shared semantic rejection reason at the actual parser and issue b
   it.each(cases)('distinguishes $name with exact legacy model feedback and no effects', async ({ args, reason }) => {
     const ports = harness()
     const request = readRequest(args)
-    expect(request.kind).toBe('invalid-group-arguments')
+    expect(request.kind).toBe('invalid-tool-arguments')
     if (!('validationDigest' in request)) throw new Error('Expected rejection')
     const digest = request.validationDigest
     expect(digest.semanticRejection).toBe(reason)

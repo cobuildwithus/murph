@@ -90,7 +90,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     const generateAndUpload = vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>()
 
     expect(request).toMatchObject({
-      kind: 'invalid-response-media-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_media_arguments',
     })
 
     const result = await executeMurphDynamicToolRequest({
@@ -145,7 +145,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     const generateAndUpload = vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>()
 
     expect(request).toMatchObject({
-      kind: 'invalid-response-media-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_media_arguments',
     })
 
     const result = await executeMurphDynamicToolRequest({
@@ -201,7 +201,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     const generateAndUpload = vi.fn<LinqVoiceMemoRuntime['generateAndUpload']>()
 
     expect(request).toMatchObject({
-      kind: 'invalid-generate-voice-memo-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_generate_voice_memo_arguments',
     })
 
     const result = await executeMurphDynamicToolRequest({
@@ -251,7 +251,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
         tool: 'attach_response_media',
       },
     })
-    expect(request).toMatchObject({ kind: 'invalid-response-media-arguments' })
+    expect(request).toMatchObject({ kind: 'invalid-tool-arguments', errorCode: 'invalid_response_media_arguments' })
 
     const fetchImpl = vi.fn<typeof fetch>()
     const nextUsageOrdinal = vi.fn(() => 99)
@@ -307,7 +307,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
 
     expect(accepted).toMatchObject({ kind: 'generate-voice-memo' })
     expect(rejected).toMatchObject({
-      kind: 'invalid-generate-voice-memo-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_generate_voice_memo_arguments',
     })
   })
 

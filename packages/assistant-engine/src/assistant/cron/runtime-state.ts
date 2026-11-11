@@ -1,6 +1,5 @@
 import { readFile } from 'node:fs/promises'
 import * as z from '@murphai/contracts/zod-runtime'
-import { quarantineAssistantStateFile } from '../quarantine.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import {
   ensureAssistantStateDirectory,
@@ -94,23 +93,17 @@ export async function readAssistantCronCanonicalRuntimeStore(
 ): Promise<AssistantCronCanonicalRuntimeStore> {
   await ensureAssistantStateDirectory(paths.cronDirectory)
 
-  let raw: string | null = null
   try {
-    raw = await readFile(paths.cronAutomationStatePath, 'utf8')
+    const raw = await readFile(paths.cronAutomationStatePath, 'utf8')
     return normalizeAssistantCronCanonicalRuntimeStore(JSON.parse(raw), policy)
   } catch (error) {
     if (isMissingFileError(error)) {
       return createEmptyAssistantCronCanonicalRuntimeStore()
     }
 
-    await quarantineAssistantStateFile({
-      artifactKind: 'cron-store',
-      error,
-      ...(raw === null ? {} : { expectedContent: raw }),
-      filePath: paths.cronAutomationStatePath,
-      paths,
-    }).catch(() => undefined)
-    return createEmptyAssistantCronCanonicalRuntimeStore()
+    // Existing execution evidence must survive failed reads and validation.
+    // Quarantining it would make the next read look like a fresh scheduler.
+    throw error
   }
 }
 

@@ -416,7 +416,7 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "arm_usage_referral",
       policyCodes: ["active_group_v1", "active_group_v1"],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "cancel_usage_referral",
@@ -463,7 +463,7 @@ describe("murph.group dynamic tool", () => {
       action: "share_contact_card",
       avatarAlt: "A friendly Murph portrait",
       avatarPrompt: "A friendly square portrait of Murph",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     // Photo quality is not a member-visible choice, so the schema must not
     // offer the model a hidden latency/cost/fidelity control.
@@ -471,7 +471,7 @@ describe("murph.group dynamic tool", () => {
       action: "share_contact_card",
       avatarPrompt: "A friendly square portrait of Murph",
       avatarQuality: "high",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "share_contact_card",
@@ -521,18 +521,18 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "share_contact_card",
       linqThread: { chatId: "chat_hijack" },
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
       messageTemplate: "Model-authored consent copy must not cross the boundary.",
       linqThread: { chatId: "chat_hijack" },
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "read_chat_participants",
       chatId: "chat_hijack",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     for (const invalid of [
       { action: "revoke_own_email_share" },
@@ -554,7 +554,7 @@ describe("murph.group dynamic tool", () => {
       { action: "revoke_own_email_share", message_ref: "provider-message-id" },
     ]) {
       expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind)
-        .toBe("invalid-group-arguments");
+        .toBe("invalid-tool-arguments");
     }
   });
 
@@ -591,7 +591,7 @@ describe("murph.group dynamic tool", () => {
         },
       ]) {
         expect(readMurphDynamicToolRequest(groupToolCall(invalid)))
-          .toMatchObject({ kind: "invalid-group-arguments" });
+          .toMatchObject({ kind: "invalid-tool-arguments", errorCode: "invalid_group_arguments" });
       }
     }
 
@@ -612,12 +612,12 @@ describe("murph.group dynamic tool", () => {
       expect(readMurphDynamicToolRequest(groupToolCall({
         action,
         messageRef: FRESH_ASSISTANT_INPUT_ID,
-      }))).toMatchObject({ kind: "invalid-group-arguments" });
+      }))).toMatchObject({ kind: "invalid-tool-arguments", errorCode: "invalid_group_arguments" });
       expect(readMurphDynamicToolRequest(groupToolCall({
         action,
         memberId: "model-supplied",
         message_ref: FRESH_ASSISTANT_INPUT_ID,
-      }))).toMatchObject({ kind: "invalid-group-arguments" });
+      }))).toMatchObject({ kind: "invalid-tool-arguments", errorCode: "invalid_group_arguments" });
     }
   });
 
@@ -1171,26 +1171,26 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "set_chat_avatar",
       avatarSource: "generate",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "set_chat_avatar",
       avatarSource: "image_ref",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "set_chat_avatar",
       avatarSource: "image_ref",
       groupChatIconUrl: "https://example.com/avatar.png",
       imageRef: "raw/inbox/avatar.png",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "set_chat_avatar",
       avatarSource: "image_ref",
       chatId: "chat_hijack",
       imageRef: "raw/inbox/avatar.png",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
   });
 
   it("passes the bounded included-usage progress field through to the model", async () => {
@@ -1250,7 +1250,7 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "read_current",
       linqSenderHandles: ["member@example.test"],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
   });
 
   it("redacts member identity from a successful read_current result", async () => {
@@ -1397,7 +1397,7 @@ describe("murph.group dynamic tool", () => {
       { ...args, freshness: [{ projectionScopeKey: "steps-days.v0", date: "2026-09-18" }] },
       { ...args, audience: "group_email" },
     ]) {
-      expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind).toBe("invalid-group-arguments");
+      expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind).toBe("invalid-tool-arguments");
     }
     if (!request || request.kind !== "group") throw new Error("Expected history read");
     const groupSharedReadRequest = vi.fn(async () => ({ status: "ok" as const, members: [], requestedProjectionScopeKeys: ["steps-days.v0"] }));
@@ -1548,7 +1548,7 @@ describe("murph.group dynamic tool", () => {
       },
     ]) {
       expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind)
-        .toBe("invalid-group-arguments");
+        .toBe("invalid-tool-arguments");
     }
   });
 
@@ -2532,7 +2532,7 @@ describe("murph.group dynamic tool", () => {
         membershipId: "membership_morning_movers",
         [field]: "model-supplied",
         question: "What exercises are assigned today?",
-      }))?.kind).toBe("invalid-group-arguments");
+      }))?.kind).toBe("invalid-tool-arguments");
     }
   });
 
@@ -2564,7 +2564,7 @@ describe("murph.group dynamic tool", () => {
         context: "A bounded fact.",
         membershipId: "membership_lifting_club",
         [field]: "model-supplied",
-      }))?.kind).toBe("invalid-group-arguments");
+      }))?.kind).toBe("invalid-tool-arguments");
     }
   });
 
@@ -2595,7 +2595,7 @@ describe("murph.group dynamic tool", () => {
       },
     ]) {
       expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind)
-        .toBe("invalid-group-arguments");
+        .toBe("invalid-tool-arguments");
     }
   });
 
@@ -2738,7 +2738,7 @@ describe("murph.group dynamic tool", () => {
       },
     ]) {
       expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind)
-        .toBe("invalid-group-arguments");
+        .toBe("invalid-tool-arguments");
     }
   });
 
@@ -3345,7 +3345,7 @@ describe("murph.group dynamic tool", () => {
       },
     ]) {
       expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind)
-        .toBe("invalid-group-arguments");
+        .toBe("invalid-tool-arguments");
     }
   });
 
@@ -3650,17 +3650,17 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "leave_membership",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "leave_membership",
       groupId: "hgrp_hijack",
       membershipId: "hgm_self_123",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "leave_membership",
       membershipId: "hgm_self_123",
       permissionsUrl: "https://example.test/groups/join/reusable",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
   });
 
   it("parses and executes personal membership reads", async () => {
@@ -3690,13 +3690,13 @@ describe("murph.group dynamic tool", () => {
       cursor: "x".repeat(
         HOSTED_RUNTIME_GROUP_MEMBERSHIP_CURSOR_MAX_CODE_POINTS + 1,
       ),
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "list_memberships",
       disclosureGrantCursor: "x".repeat(
         HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS + 1,
       ),
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     const response = {
       action: "list_memberships" as const,
@@ -3786,29 +3786,29 @@ describe("murph.group dynamic tool", () => {
   it("rejects invalid update_display_name arguments", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "update_display_name",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "update_display_name",
       displayName: " ",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "update_display_name",
       displayName: "x".repeat(121),
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "update_display_name",
       displayName: "Valid name",
       groupId: "hgrp_hijack",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "update_display_name",
       displayName: "Valid name",
       linqThread: { chatId: "chat_hijack" },
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
   });
 
   it("parses one provider-neutral access offer", () => {
@@ -3881,32 +3881,32 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "create_join_link",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "post_join_offer",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
   });
 
   it("rejects unsupported group kinds and projection kinds", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
       kind: "everyone",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
       projectionScopes: [{ projectionKind: "all-health-data" }],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
       projectionScopes: [{ projectionKind: "activity-minutes-days.v1" }],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
       projectionScopes: [{ projectionKind: "activity-distance-days.v1" }],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
@@ -3914,7 +3914,7 @@ describe("murph.group dynamic tool", () => {
         projectionKind: "activity-session-count-days.v1",
         selector: { activityKind: "running+walking" },
       }],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
@@ -3922,7 +3922,7 @@ describe("murph.group dynamic tool", () => {
         projectionKind: "activity-distance-days.v1",
         selector: { activityKind: "sleep" },
       }],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
@@ -3930,35 +3930,35 @@ describe("murph.group dynamic tool", () => {
         projectionKind: "activity-session-count-days.v1",
         selector: { activityKind: "sleep" },
       }],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
       intro: "Like this to join.",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
       displayName: "   ",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
       displayName: "a".repeat(121),
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
       projectionScopes: [{ projectionKind: "all-health-data" }],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
       messageTemplate: "Model-authored offer copy.",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
@@ -3966,12 +3966,12 @@ describe("murph.group dynamic tool", () => {
         { projectionKind: "sleep-times.v0" },
         { projectionKind: "sleep-times.v0" },
       ],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
       standaloneLink: "yes",
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
   });
 
   it("maps provider-neutral access offers to native consent or an exact link", async () => {
@@ -4372,7 +4372,7 @@ describe("murph.group dynamic tool", () => {
       action: "offer_access",
       messageTemplate: modelAuthoredCopy,
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
-    }))?.kind).toBe("invalid-group-arguments");
+    }))?.kind).toBe("invalid-tool-arguments");
 
     const groupRequest = vi.fn<GroupToolRequest>(async () => ({
       action: "post_join_offer",

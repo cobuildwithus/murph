@@ -15,7 +15,6 @@ import { promisify } from "node:util";
 import { test } from "vitest";
 
 import {
-  clearHostedAssistantRuntimeHotState,
   collectHostedWorkspaceSnapshotArchivePlan,
   pruneHostedCodexHomeToSessionReferencedRollouts,
   resolveAssistantStatePaths,
@@ -273,37 +272,6 @@ test("warm restore retains only bounded Codex memory read artifacts", async () =
         code: "ENOENT",
       });
     }
-  } finally {
-    await rm(workspaceRoot, { force: true, recursive: true });
-  }
-});
-
-test("legacy hot cleanup clears Codex home in one delete", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-codex-memory-hot-clear-"));
-
-  try {
-    const durableRoot = path.join(workspaceRoot, "durable");
-    const operatorHomeRoot = path.join(durableRoot, "home");
-    const vaultRoot = path.join(durableRoot, "vault");
-    const memoryPath = path.join(
-      operatorHomeRoot,
-      ".codex-hosted",
-      "memories",
-      "nested",
-      "MEMORY.md",
-    );
-    await mkdir(path.dirname(memoryPath), { recursive: true });
-    await mkdir(vaultRoot, { recursive: true });
-    await writeFile(memoryPath, "memory\n", "utf8");
-
-    await clearHostedAssistantRuntimeHotState({
-      operatorHomeRoot,
-      vaultRoot,
-    });
-
-    await assert.rejects(readFile(memoryPath, "utf8"), {
-      code: "ENOENT",
-    });
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }

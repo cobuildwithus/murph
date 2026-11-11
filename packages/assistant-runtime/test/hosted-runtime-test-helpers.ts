@@ -3,9 +3,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import type {
-  HostedWorkspaceArtifactPersistInput,
-} from "@murphai/runtime-state/node";
-import type {
   HostedExecutionResolvedLinqDeliveryRoute,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -185,24 +182,5 @@ export function createHostedRuntimeEffectsPortStub(
       return record;
     },
     ...overrides,
-  };
-}
-
-export function createHostedWorkspaceArtifactPersistInput(input: {
-  bytes: Uint8Array;
-  path?: string;
-  root?: string;
-  sha256: string;
-}): HostedWorkspaceArtifactPersistInput {
-  const relativePath = input.path ?? "vault/raw/example.bin";
-  return {
-    absolutePath: path.join("/", relativePath),
-    bytes: input.bytes,
-    path: relativePath,
-    ref: {
-      byteSize: input.bytes.byteLength,
-      sha256: input.sha256,
-    },
-    root: input.root ?? "vault",
   };
 }

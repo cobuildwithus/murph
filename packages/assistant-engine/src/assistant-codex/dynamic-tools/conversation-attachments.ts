@@ -41,7 +41,7 @@ export type ConversationAttachmentsArgs = z.infer<typeof argumentsSchema>
 export function readConversationAttachmentsToolRequest(value: unknown) {
   const parsed = parseDynamicToolArguments({ schema: argumentsSchema, toolName: 'murph.conversation_attachments', value })
   return parsed.ok ? { kind: 'conversation-attachments' as const, args: parsed.args }
-    : { kind: 'invalid-conversation-attachments-arguments' as const, validationDigest: parsed.validationDigest }
+    : { kind: 'invalid-tool-arguments' as const, errorCode: 'invalid_conversation_attachments_arguments', validationDigest: parsed.validationDigest }
 }
 
 export function currentConversationMediaScope(context: AssistantHostedToolContext | null | undefined) {

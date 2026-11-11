@@ -1,3 +1,4 @@
+import type { AskGrokTurnState } from '../assistant-codex/ask-grok-tool.js'
 import { relative } from 'node:path'
 import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import {
@@ -219,6 +220,7 @@ export async function executeCodexTurnWithRecovery(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   allowFinishWithoutReply?: boolean | null
+  askGrokTurnState?: AskGrokTurnState | null
   analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   input: AssistantMessageInput
@@ -261,6 +263,7 @@ export async function executeCodexTurnWithRecovery(input: {
   try {
     return await executeAssistantCodexAttempt({
       allocateUsageRecordOrdinal: input.allocateUsageRecordOrdinal,
+      askGrokTurnState: input.askGrokTurnState,
       analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
       attemptPlan,
       executionPlan,
@@ -354,7 +357,7 @@ async function maybeRouteAssistantReaction(
       codexThreadId: attemptPlan.routePlan.resume?.codexThreadId ?? null,
       rawEvents: [], acceptedNoReplyDeliveryContextOrdinals: [0], finalAction: { kind: 'none' },
       response: '', transcriptResponse: null, responseDeliveryContextOrdinal: 0,
-      stderr: '', stdout: '', usage: null,
+      stderr: '', usage: null,
     },
   }
 }
@@ -466,6 +469,7 @@ function emitCodexPlanTraceEvent(input: {
 
 type AssistantCodexAttemptInput = {
   allocateUsageRecordOrdinal?: () => number
+  askGrokTurnState?: AskGrokTurnState | null
   analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   attemptPlan: AssistantCodexAttemptPlan
   executionPlan: AssistantCodexTurnExecutionPlan
@@ -827,6 +831,7 @@ function buildCodexAttemptProviderInput(
       abortSignal: serviceTier === 'flex'
         ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
         : executionPlan.input.abortSignal,
+      askGrokTurnState: input.askGrokTurnState,
       analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
       activeTurnId: executionPlan.turnId,
       activeTurnSteering: executionPlan.activeTurnSteering,

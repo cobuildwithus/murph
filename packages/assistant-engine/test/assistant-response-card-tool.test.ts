@@ -752,7 +752,7 @@ describe('murph.attach_response_card', () => {
           version: 1,
         },
       },
-    })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+    })).toMatchObject({ kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments' })
     expect(readCardToolRequest({
       ...CHALLENGE_CARD_AUTHORING_INPUT,
       scoreInput: {
@@ -760,7 +760,7 @@ describe('murph.attach_response_card', () => {
         participants: CHALLENGE_CARD_AUTHORING_INPUT.participantObservations,
         scorecard: CHALLENGE_DEFINITION.scorecard,
       },
-    })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+    })).toMatchObject({ kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments' })
   })
 
   it('uses the strict card contract at the model-facing boundary', () => {
@@ -769,10 +769,10 @@ describe('murph.attach_response_card', () => {
       kind: 'attach-response-card',
     })
     expect(readCardToolRequest({ card: LEGACY_CARD_V1 })).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
     expect(readCardToolRequest({ card: CHALLENGE_CARD })).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
     expect(readCardToolRequest(CHALLENGE_CARD_AUTHORING_INPUT)).toEqual({
       input: CHALLENGE_CARD_AUTHORING_INPUT,
@@ -783,13 +783,13 @@ describe('murph.attach_response_card', () => {
       participantObservations:
         CHALLENGE_CARD_AUTHORING_INPUT.participantObservations,
     })).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
     expect(readCardToolRequest({
       ...CHALLENGE_CARD_AUTHORING_INPUT,
       entries: CHALLENGE_CARD.entries,
     })).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
     const workoutAuthoringInput = buildWorkoutCardAuthoringInput(
       REALISTIC_LATE_WORKOUT_CARD,
@@ -833,19 +833,19 @@ describe('murph.attach_response_card', () => {
       { card: { ...ROUTINE_CARD, footer: '' } },
       'attach_exercise_routine_card',
     )).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
     expect(readCardToolRequest(
       { card: { ...ROUTINE_CARD, subtitle: 42 } },
       'attach_exercise_routine_card',
     )).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
     expect(readCardToolRequest(
       { card: CARD },
       'attach_exercise_routine_card',
     )).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
     expect(readCardToolRequest(
       { card: TELEGRAM_RICH_CONTENT_CARD },
@@ -858,7 +858,7 @@ describe('murph.attach_response_card', () => {
       { card: TELEGRAM_RICH_CONTENT_CARD },
       'attach_response_card',
     )).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
     expect(readCardToolRequest(
       {
@@ -869,7 +869,7 @@ describe('murph.attach_response_card', () => {
       },
       'attach_telegram_rich_content',
     )).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
     const ordinaryTable = {
       kind: 'compact_table',
@@ -892,10 +892,10 @@ describe('murph.attach_response_card', () => {
         subtitle: '18/24 sets complete',
       },
     })).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
     expect(readCardToolRequest({ card: CARD, extra: true })).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
     expect(readCardToolRequest({
       card: {
@@ -903,7 +903,7 @@ describe('murph.attach_response_card', () => {
         kind: 'unknown_card',
       },
     })).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
 
     for (const metric of [
@@ -921,7 +921,7 @@ describe('murph.attach_response_card', () => {
             [metric]: null,
           },
         },
-      })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+      })).toMatchObject({ kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments' })
     }
     expect(readCardToolRequest({
       card: {
@@ -1039,7 +1039,7 @@ describe('murph.attach_response_card', () => {
       },
     }
     expect(readCardToolRequest({ card: invalidWorkout })).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
     })
   })
 
@@ -2130,5 +2130,5 @@ it.each([
   { target: 100 },
 ])('preserves validation for malformed nutrition goals: %j', (goal) => {
   expect(readCardToolRequest({ card: { ...CARD, goals: { ...CARD.goals, proteinGrams: goal } } }))
-    .toMatchObject({ kind: 'invalid-response-card-arguments' })
+    .toMatchObject({ kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments' })
 })

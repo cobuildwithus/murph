@@ -2,6 +2,7 @@ import { assistantVaultFileMaxBytes } from "@murphai/operator-config/assistant-c
 import { readVerifiedAssistantVaultImageBytes, resolveAssistantVaultFileResponseMedia, resolveAssistantVaultImageResponseMedia } from "@murphai/assistant-engine/assistant-outbox";
 import { materializeVaultMedia, resolveGenerateImageReferences } from "@murphai/assistant-engine/assistant-codex";
 import { HostedRuntimeMediaReadError } from "../src/hosted-runtime/platform.ts";
+import { createHostedRuntimeArtifactStoreStub } from "./hosted-runtime-test-helpers.ts";
 import { createMealMediaStore } from "./hosted-meal-media.harness.ts";
 import { runHostedMealMediaMaintenance, createHostedMealMediaBudget } from "../src/hosted-runtime/meal-media-maintenance.ts";
 import { HostedRuntimeMediaWriteError } from "../src/hosted-runtime/platform.ts";
@@ -54,16 +55,11 @@ import { createPlatform, createSnapshotFixtureRef, createWorkspaceState } from "
 
 import {
   createHostedArtifactMaterializer,
-  createHostedArtifactUploadSink,
 } from "../src/hosted-runtime/artifacts.ts";
 import {
   externalizeHostedCanonicalWriteMediaPayloads,
   applyHostedCanonicalWriteReceiptWithMedia,
 } from "../src/hosted-runtime/canonical-write-media.ts";
-import {
-  createHostedRuntimeArtifactStoreStub,
-  createHostedWorkspaceArtifactPersistInput,
-} from "./hosted-runtime-test-helpers.ts";
 import type {
   HostedRuntimeMediaStore,
 } from "../src/hosted-runtime/platform.ts";
@@ -134,58 +130,6 @@ test.each(["warm", "restored"])("retires an expired generated capture in a %s wo
     clock.mockRestore();
     await rm(vaultRoot, { recursive: true, force: true });
   }
-});
-
-test("hosted artifact upload sink skips known and already uploaded hashes", async () => {
-  const { artifactStore, putCalls } = createHostedRuntimeArtifactStoreStub();
-  const uploadArtifact = createHostedArtifactUploadSink({
-    artifactStore,
-    knownArtifactHashes: new Set(["sha_known"]),
-  });
-
-  await uploadArtifact(
-    createHostedWorkspaceArtifactPersistInput({
-      bytes: new Uint8Array([1]),
-      sha256: "sha_known",
-    }),
-  );
-  await uploadArtifact(
-    createHostedWorkspaceArtifactPersistInput({
-      bytes: new Uint8Array([2, 3]),
-      sha256: "sha_uploaded",
-    }),
-  );
-  await uploadArtifact(
-    createHostedWorkspaceArtifactPersistInput({
-      bytes: new Uint8Array([4, 5]),
-      sha256: "sha_uploaded",
-    }),
-  );
-
-  assert.equal(putCalls.length, 1);
-  assert.equal(putCalls[0]?.sha256, "sha_uploaded");
-  assert.deepEqual(Array.from(putCalls[0]?.bytes ?? []), [2, 3]);
-});
-
-test("hosted artifact upload sink clones bytes before sending them to the store", async () => {
-  const sourceBytes = new Uint8Array([9, 8, 7]);
-  const { artifactStore, putCalls, storedBytesByHash } = createHostedRuntimeArtifactStoreStub();
-  const uploadArtifact = createHostedArtifactUploadSink({
-    artifactStore,
-    knownArtifactHashes: new Set(),
-  });
-
-  await uploadArtifact(
-    createHostedWorkspaceArtifactPersistInput({
-      bytes: sourceBytes,
-      sha256: "sha_clone",
-    }),
-  );
-  sourceBytes[0] = 0;
-
-  assert.notEqual(putCalls[0]?.bytes, sourceBytes);
-  assert.deepEqual(Array.from(putCalls[0]?.bytes ?? []), [9, 8, 7]);
-  assert.deepEqual(Array.from(storedBytesByHash.get("sha_clone") ?? []), [9, 8, 7]);
 });
 
 test("v2 materialization derives bounded local file availability without a cache index", async () => {

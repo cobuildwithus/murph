@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   decodeHostedRunnerSecretsPayload,
@@ -6,10 +6,16 @@ import {
 import { buildHostedStorageAad } from "../src/crypto-context.js";
 import { writeEncryptedR2Payload } from "../src/crypto.js";
 import { hostedRunnerSecretsObjectKey } from "../src/storage-paths.js";
-import { RunnerSecretsService } from "../src/user-runner/runner-secrets.js";
+import { loadRunnerStores } from "../src/user-runner/runner-stores.ts";
+import * as runtimeCrypto from "../src/hosted-crypto/runtime-user-crypto-context.ts";
+import { readHostedExecutionEnvironment } from "../src/env.ts";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
+import { createTestHostedRuntimeCryptoContext } from "./hosted-runtime-crypto-fixtures.ts";
 import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
 
 const HOSTED_RUNNER_SECRETS_SCHEMA = "murph.hosted-runner-secrets.v1";
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("hosted runner secrets reads", () => {
   it.each([
@@ -21,7 +27,7 @@ describe("hosted runner secrets reads", () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const get = vi.spyOn(bucket, "get").mockRejectedValue(new Error("Storage unavailable"));
 
-    await expect(createRunnerSecretsService(bucket, allowedKeys).readRunnerSecrets("member_test"))
+    await expect(readRunnerSecrets(bucket, allowedKeys))
       .resolves.toEqual({});
     expect(get).not.toHaveBeenCalled();
   });
@@ -31,7 +37,7 @@ describe("hosted runner secrets reads", () => {
     await bucket.put(await hostedRunnerSecretsObjectKey({ userId: "member_test" }), "corrupt envelope");
     const get = vi.spyOn(bucket, "get");
 
-    await expect(createRunnerSecretsService(bucket).readRunnerSecrets("member_test"))
+    await expect(readRunnerSecrets(bucket))
       .resolves.toEqual({});
     expect(get).not.toHaveBeenCalled();
   });
@@ -41,8 +47,7 @@ describe("hosted runner secrets reads", () => {
     await writeRunnerSecrets(bucket, { CUSTOM_API_KEY: "custom-secret" });
     const get = vi.spyOn(bucket, "get");
 
-    await expect(createRunnerSecretsService(bucket, " custom_api_key, OPENAI_API_KEY ")
-      .readRunnerSecrets("member_test")).resolves.toEqual({ CUSTOM_API_KEY: "custom-secret" });
+    await expect(readRunnerSecrets(bucket, " custom_api_key, OPENAI_API_KEY ")).resolves.toEqual({ CUSTOM_API_KEY: "custom-secret" });
     expect(get).toHaveBeenCalledOnce();
   });
 
@@ -51,8 +56,7 @@ describe("hosted runner secrets reads", () => {
     await writeRunnerSecrets(bucket, { OPENAI_API_KEY: "forbidden-secret" });
     const get = vi.spyOn(bucket, "get");
 
-    await expect(createRunnerSecretsService(bucket, "CUSTOM_API_KEY")
-      .readRunnerSecrets("member_test")).rejects.toThrow("Hosted runner secret key is not allowed: OPENAI_API_KEY");
+    await expect(readRunnerSecrets(bucket, "CUSTOM_API_KEY")).rejects.toThrow("Hosted runner secret key is not allowed: OPENAI_API_KEY");
     expect(get).toHaveBeenCalledOnce();
   });
 
@@ -60,8 +64,7 @@ describe("hosted runner secrets reads", () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const get = vi.spyOn(bucket, "get").mockRejectedValue(new Error("Storage unavailable"));
 
-    await expect(createRunnerSecretsService(bucket, "CUSTOM_API_KEY")
-      .readRunnerSecrets("member_test")).rejects.toThrow("Storage unavailable");
+    await expect(readRunnerSecrets(bucket, "CUSTOM_API_KEY")).rejects.toThrow("Storage unavailable");
     expect(get).toHaveBeenCalledOnce();
   });
 });
@@ -161,18 +164,28 @@ describe("hosted runner secrets payload decoding", () => {
   });
 });
 
-function createRunnerSecretsService(
-  bucket: MemoryEncryptedR2Bucket,
-  allowedKeys?: string,
-): RunnerSecretsService {
-  return new RunnerSecretsService(
+async function readRunnerSecrets(bucket: MemoryEncryptedR2Bucket, allowedKeys?: string) {
+  const context = await createTestHostedRuntimeCryptoContext("member_test");
+  vi.spyOn(runtimeCrypto, "requireHostedUserCryptoContextFromEnvironment").mockResolvedValue({
+    cacheMaxAgeMs: 60_000,
+    cryptoContextVersion: null,
+    domain: "runtime",
+    envelope: context.envelopes.runtime,
+    fetchedAtMs: Date.now(),
+    keysById: { "test-root": createTestRootKey() },
+    resolveKeyById: async () => null,
+    rootKey: createTestRootKey(),
+    rootKeyId: "test-root",
+  });
+  const stores = await loadRunnerStores({
     bucket,
-    createTestRootKey(),
-    "test-root",
-    { "test-root": createTestRootKey() },
-    async () => null,
-    { HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: allowedKeys },
-  );
+    env: readHostedExecutionEnvironment({
+      ...createHostedExecutionTestEnv(),
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: allowedKeys,
+    }),
+    userId: "member_test",
+  });
+  return stores.readRunnerSecrets();
 }
 
 async function writeRunnerSecrets(

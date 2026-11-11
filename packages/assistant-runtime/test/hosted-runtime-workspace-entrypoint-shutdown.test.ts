@@ -1,4 +1,5 @@
 import {
+  createWorkspaceRunRequest,
   TEST_NOW,
   TEST_USER_ID,
   createSnapshotFixtureRef,
@@ -23,107 +24,103 @@ import {
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import assert from "node:assert/strict";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   addCaptureWithLookup,
-  CURRENT_VAULT_FORMAT_VERSION,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  buildIntegrationEvidencePart,
-  buildIntegrationIngestRecord,
-  findCaptureByLookup,
   initializeVault,
-  patchAutomation,
-  readJsonlRecords,
-  repairVault,
-  runCanonicalWrite,
-  showAutomation,
-  upsertAutomation,
-  validateVault,
 } from "@murphai/core";
 import {
-  openInboxRuntime,
   persistCanonicalInboxCapture,
-  rebuildRuntimeFromVault,
 } from "@murphai/inboxd";
 import {
   readAssistantInputEvent,
-  shouldGroupAdjacentAssistantInputCandidates,
-  updateAssistantInputAttachmentEvidence,
-  updateAssistantInputProjection,
-  upsertAssistantInputEvent,
-  writeAssistantAutoReplyReplyTerminalEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
-  resolveAssistantStatePaths,
   sha256HostedBundleHex,
-  createHostedPortableWorkspaceManifestFromBundle,
-  listPendingAssistantRuntimeIssueRecords,
-  restoreHostedBundleRoots,
-  restoreHostedExecutionContext,
-  snapshotHostedPortableWorkspaceDelta,
   snapshotHostedBundleRoots,
-  writePendingAssistantRuntimeIssueRecord,
-  writeHostedBundleTextFile,
 } from "@murphai/runtime-state/node";
 import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  readHostedRuntimeFailurePhaseCode,
-  type HostedMailboxFetchRequest,
-  type HostedMailboxFetchResponse,
-  type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
-  type HostedMailboxPayloadFetchResponse,
-  type HostedRuntimeRedactedJson,
-  type HostedRuntimeLatencyTraceRequest,
-  type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
-  type HostedWorkspaceCheckpointResponse,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
-  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, test, vi } from "vitest";
 import {
   createCoalescingRuntimeWakeSignal,
-  HostedRuntimeCheckpointInterruptedByWakeError,
-  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
-  HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
-  type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import type {
   RuntimeWakeSignal,
 } from "../src/hosted-runtime/runtime-wake.ts";
 import {
-  collectHostedPendingAssistantInputMediaRetentionProtections,
   compactHostedPendingAssistantInputIds,
-  enqueueHostedPendingAssistantInputId,
-  ensureHostedPendingAssistantInputIndex,
-  inspectHostedPendingAssistantInputWakeCandidate,
-  readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
-  createEmptyHostedMailboxImportState,
-  HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
-  HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
-  HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH,
   readHostedMailboxImportState,
-  writeHostedMailboxImportState,
-  type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   readHostedSystemMailboxState,
-  updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
+
+function createDirtyWaitRuntimeWakeSignal(assistantPhaseFinished: () => boolean) {
+  const firstDirtyWaitStarted = createDeferred<void>();
+  const retainedDirtyWaitStarted = createDeferred<void>();
+  let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
+  let dirtyWaitCount = 0;
+  const runtimeWakeSignal: RuntimeWakeSignal = {
+    consumePending() {
+      return null;
+    },
+    notify(input) {
+      const notifiedAtEpochMs =
+        typeof input === "number" ? input : input?.notifiedAtEpochMs ?? Date.now();
+      activeDirtyWake?.({ notifiedAtEpochMs });
+    },
+    wait(signal) {
+      if (signal?.aborted) {
+        return Promise.reject(
+          signal.reason instanceof Error
+            ? signal.reason
+            : new DOMException("Runtime wake wait was aborted.", "AbortError"),
+        );
+      }
+      return new Promise((resolve, reject) => {
+        const resolveCurrent = (notification: { notifiedAtEpochMs: number }) => {
+          cleanup();
+          resolve(notification);
+        };
+        const abort = () => {
+          cleanup();
+          reject(
+            signal?.reason instanceof Error
+              ? signal.reason
+              : new DOMException("Runtime wake wait was aborted.", "AbortError"),
+          );
+        };
+        const cleanup = () => {
+          signal?.removeEventListener("abort", abort);
+          if (activeDirtyWake === resolveCurrent) {
+            activeDirtyWake = null;
+          }
+        };
+        if (assistantPhaseFinished()) {
+          dirtyWaitCount += 1;
+          activeDirtyWake = resolveCurrent;
+          if (dirtyWaitCount === 1) {
+            firstDirtyWaitStarted.resolve();
+          } else if (dirtyWaitCount === 2) {
+            retainedDirtyWaitStarted.resolve();
+          }
+        }
+        signal?.addEventListener("abort", abort, { once: true });
+      });
+    },
+  };
+  return { firstDirtyWaitStarted, retainedDirtyWaitStarted, runtimeWakeSignal };
+}
 
 describe("hosted runtime shutdown signal", () => {
   test("an already-signalled shutdown checkpoints immediately instead of waiting out the idle window", async () => {
@@ -144,12 +141,8 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_signal_pre",
-            // Far longer than the test timeout: only the shutdown signal can
-            // start the idle checkpoint this fast.
             runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -249,8 +242,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_preserved_due_wake",
             runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -389,8 +380,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_generated_retention_wake_shutdown",
             runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -573,8 +562,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_image_shutdown_handoff_first",
             runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -723,9 +710,7 @@ describe("hosted runtime shutdown signal", () => {
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_image_shutdown_handoff_second",
-              runnerIdleTtlMs: 1,
               leaseGeneration: "8",
-              userId: TEST_USER_ID,
               workspaceVersion: secondWorkspace.version,
             },
           }),
@@ -823,8 +808,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_pending_runtime_wake",
             runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -888,62 +871,11 @@ describe("hosted runtime shutdown signal", () => {
     const mailboxItems: ReturnType<typeof createMailboxItem>[] = [
       createMailboxItem({ id: "mailbox_item_initial_conversation" }),
     ];
-    const firstDirtyWaitStarted = createDeferred<void>();
-    const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
-    let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
     let assistantPhaseFinished = false;
     let assistantPhaseCalls = 0;
-    let dirtyWaitCount = 0;
-    const runtimeWakeSignal: RuntimeWakeSignal = {
-      consumePending() {
-        return null;
-      },
-      notify(input) {
-        const notifiedAtEpochMs =
-          typeof input === "number" ? input : input?.notifiedAtEpochMs ?? Date.now();
-        activeDirtyWake?.({ notifiedAtEpochMs });
-      },
-      wait(signal) {
-        if (signal?.aborted) {
-          return Promise.reject(
-            signal.reason instanceof Error
-              ? signal.reason
-              : new DOMException("Runtime wake wait was aborted.", "AbortError"),
-          );
-        }
-        return new Promise((resolve, reject) => {
-          const resolveCurrent = (notification: { notifiedAtEpochMs: number }) => {
-            cleanup();
-            resolve(notification);
-          };
-          const abort = () => {
-            cleanup();
-            reject(
-              signal?.reason instanceof Error
-                ? signal.reason
-                : new DOMException("Runtime wake wait was aborted.", "AbortError"),
-            );
-          };
-          const cleanup = () => {
-            signal?.removeEventListener("abort", abort);
-            if (activeDirtyWake === resolveCurrent) {
-              activeDirtyWake = null;
-            }
-          };
-          if (assistantPhaseFinished) {
-            dirtyWaitCount += 1;
-            activeDirtyWake = resolveCurrent;
-            if (dirtyWaitCount === 1) {
-              firstDirtyWaitStarted.resolve();
-            } else if (dirtyWaitCount === 2) {
-              retainedDirtyWaitStarted.resolve();
-            }
-          }
-          signal?.addEventListener("abort", abort, { once: true });
-        });
-      },
-    };
+    const { firstDirtyWaitStarted, retainedDirtyWaitStarted, runtimeWakeSignal } =
+      createDirtyWaitRuntimeWakeSignal(() => assistantPhaseFinished);
 
     try {
       process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
@@ -955,8 +887,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_stale_runtime_wake",
             runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1070,65 +1000,14 @@ describe("hosted runtime shutdown signal", () => {
     const mailboxItems: ReturnType<typeof createMailboxItem>[] = [
       createMailboxItem({ id: "mailbox_item_initial_conversation" }),
     ];
-    const firstDirtyWaitStarted = createDeferred<void>();
-    const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
-    let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
     let assistantPhaseFinished = false;
     let assistantPhaseCalls = 0;
-    let dirtyWaitCount = 0;
     const checkpointSnapshotTriggers: Array<
       HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"]
     > = [];
-    const runtimeWakeSignal: RuntimeWakeSignal = {
-      consumePending() {
-        return null;
-      },
-      notify(input) {
-        const notifiedAtEpochMs =
-          typeof input === "number" ? input : input?.notifiedAtEpochMs ?? Date.now();
-        activeDirtyWake?.({ notifiedAtEpochMs });
-      },
-      wait(signal) {
-        if (signal?.aborted) {
-          return Promise.reject(
-            signal.reason instanceof Error
-              ? signal.reason
-              : new DOMException("Runtime wake wait was aborted.", "AbortError"),
-          );
-        }
-        return new Promise((resolve, reject) => {
-          const resolveCurrent = (notification: { notifiedAtEpochMs: number }) => {
-            cleanup();
-            resolve(notification);
-          };
-          const abort = () => {
-            cleanup();
-            reject(
-              signal?.reason instanceof Error
-                ? signal.reason
-                : new DOMException("Runtime wake wait was aborted.", "AbortError"),
-            );
-          };
-          const cleanup = () => {
-            signal?.removeEventListener("abort", abort);
-            if (activeDirtyWake === resolveCurrent) {
-              activeDirtyWake = null;
-            }
-          };
-          if (assistantPhaseFinished) {
-            dirtyWaitCount += 1;
-            activeDirtyWake = resolveCurrent;
-            if (dirtyWaitCount === 1) {
-              firstDirtyWaitStarted.resolve();
-            } else if (dirtyWaitCount === 2) {
-              retainedDirtyWaitStarted.resolve();
-            }
-          }
-          signal?.addEventListener("abort", abort, { once: true });
-        });
-      },
-    };
+    const { firstDirtyWaitStarted, retainedDirtyWaitStarted, runtimeWakeSignal } =
+      createDirtyWaitRuntimeWakeSignal(() => assistantPhaseFinished);
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -1139,8 +1018,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_after_idle_window_trigger",
             runnerIdleTtlMs: 50,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1291,8 +1168,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_during_post_checkpoint_wake",
             runnerIdleTtlMs: 50,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1422,8 +1297,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_after_no_work_conversation",
             runnerIdleTtlMs: 50,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1536,8 +1409,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_after_system_import",
             runnerIdleTtlMs: 50,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1708,8 +1579,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_after_consumed_replay",
             runnerIdleTtlMs: 50,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1807,9 +1676,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_after_consumed_replay_replacement",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "8",
-            userId: TEST_USER_ID,
             workspaceVersion: "1",
           },
         }),
@@ -1922,8 +1789,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_after_post_checkpoint_import",
             runnerIdleTtlMs: 50,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2014,65 +1879,14 @@ describe("hosted runtime shutdown signal", () => {
     const mailboxItems: ReturnType<typeof createMailboxItem>[] = [
       createMailboxItem({ id: "mailbox_item_initial_conversation" }),
     ];
-    const firstDirtyWaitStarted = createDeferred<void>();
-    const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
-    let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
     let assistantPhaseFinished = false;
     let assistantPhaseCalls = 0;
-    let dirtyWaitCount = 0;
     const checkpointSnapshotTriggers: Array<
       HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"]
     > = [];
-    const runtimeWakeSignal: RuntimeWakeSignal = {
-      consumePending() {
-        return null;
-      },
-      notify(input) {
-        const notifiedAtEpochMs =
-          typeof input === "number" ? input : input?.notifiedAtEpochMs ?? Date.now();
-        activeDirtyWake?.({ notifiedAtEpochMs });
-      },
-      wait(signal) {
-        if (signal?.aborted) {
-          return Promise.reject(
-            signal.reason instanceof Error
-              ? signal.reason
-              : new DOMException("Runtime wake wait was aborted.", "AbortError"),
-          );
-        }
-        return new Promise((resolve, reject) => {
-          const resolveCurrent = (notification: { notifiedAtEpochMs: number }) => {
-            cleanup();
-            resolve(notification);
-          };
-          const abort = () => {
-            cleanup();
-            reject(
-              signal?.reason instanceof Error
-                ? signal.reason
-                : new DOMException("Runtime wake wait was aborted.", "AbortError"),
-            );
-          };
-          const cleanup = () => {
-            signal?.removeEventListener("abort", abort);
-            if (activeDirtyWake === resolveCurrent) {
-              activeDirtyWake = null;
-            }
-          };
-          if (assistantPhaseFinished) {
-            dirtyWaitCount += 1;
-            activeDirtyWake = resolveCurrent;
-            if (dirtyWaitCount === 1) {
-              firstDirtyWaitStarted.resolve();
-            } else if (dirtyWaitCount === 2) {
-              retainedDirtyWaitStarted.resolve();
-            }
-          }
-          signal?.addEventListener("abort", abort, { once: true });
-        });
-      },
-    };
+    const { firstDirtyWaitStarted, retainedDirtyWaitStarted, runtimeWakeSignal } =
+      createDirtyWaitRuntimeWakeSignal(() => assistantPhaseFinished);
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -2083,8 +1897,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_after_pre_checkpoint_import",
             runnerIdleTtlMs: 50,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2199,65 +2011,14 @@ describe("hosted runtime shutdown signal", () => {
     const mailboxItems: ReturnType<typeof createMailboxItem>[] = [
       createMailboxItem({ id: "mailbox_item_initial_conversation" }),
     ];
-    const firstDirtyWaitStarted = createDeferred<void>();
-    const retainedDirtyWaitStarted = createDeferred<void>();
     const shutdownController = new AbortController();
-    let activeDirtyWake: ((notification: { notifiedAtEpochMs: number }) => void) | null = null;
     let assistantPhaseFinished = false;
     let assistantPhaseCalls = 0;
-    let dirtyWaitCount = 0;
     const checkpointSnapshotTriggers: Array<
       HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"]
     > = [];
-    const runtimeWakeSignal: RuntimeWakeSignal = {
-      consumePending() {
-        return null;
-      },
-      notify(input) {
-        const notifiedAtEpochMs =
-          typeof input === "number" ? input : input?.notifiedAtEpochMs ?? Date.now();
-        activeDirtyWake?.({ notifiedAtEpochMs });
-      },
-      wait(signal) {
-        if (signal?.aborted) {
-          return Promise.reject(
-            signal.reason instanceof Error
-              ? signal.reason
-              : new DOMException("Runtime wake wait was aborted.", "AbortError"),
-          );
-        }
-        return new Promise((resolve, reject) => {
-          const resolveCurrent = (notification: { notifiedAtEpochMs: number }) => {
-            cleanup();
-            resolve(notification);
-          };
-          const abort = () => {
-            cleanup();
-            reject(
-              signal?.reason instanceof Error
-                ? signal.reason
-                : new DOMException("Runtime wake wait was aborted.", "AbortError"),
-            );
-          };
-          const cleanup = () => {
-            signal?.removeEventListener("abort", abort);
-            if (activeDirtyWake === resolveCurrent) {
-              activeDirtyWake = null;
-            }
-          };
-          if (assistantPhaseFinished) {
-            dirtyWaitCount += 1;
-            activeDirtyWake = resolveCurrent;
-            if (dirtyWaitCount === 1) {
-              firstDirtyWaitStarted.resolve();
-            } else if (dirtyWaitCount === 2) {
-              retainedDirtyWaitStarted.resolve();
-            }
-          }
-          signal?.addEventListener("abort", abort, { once: true });
-        });
-      },
-    };
+    const { firstDirtyWaitStarted, retainedDirtyWaitStarted, runtimeWakeSignal } =
+      createDirtyWaitRuntimeWakeSignal(() => assistantPhaseFinished);
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -2268,8 +2029,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_during_pre_checkpoint_pass",
             runnerIdleTtlMs: 50,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2396,8 +2155,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_due_assistant_handoff",
             runnerIdleTtlMs: 50,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2475,8 +2232,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_during_due_assistant_import",
             runnerIdleTtlMs: 50,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2572,8 +2327,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_pending_import_wake",
             runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2737,10 +2490,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId,
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2887,10 +2637,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_checkpoint_accepted_wake",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -3009,10 +2756,7 @@ describe("hosted runtime shutdown signal", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_shutdown_durable_effect_handoff",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -3188,8 +2932,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_due_retention_wake",
             runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -3259,8 +3001,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_retention_beats_assistant_wake",
             runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -3340,8 +3080,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_after_projected_wake_retention",
             runnerIdleTtlMs: 75,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -3436,8 +3174,6 @@ describe("hosted runtime shutdown signal", () => {
             attemptId: "attempt_synthetic_shutdown_signal_mid",
             runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {

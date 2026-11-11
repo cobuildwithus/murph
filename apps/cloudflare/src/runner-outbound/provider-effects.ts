@@ -229,26 +229,6 @@ function readHostedProviderEffectErrorResponse(
     ? record.context as Record<string, unknown>
     : null;
   const code = typeof record?.code === "string" ? record.code : null;
-  const providerMessageIds =
-    readStringArray(record?.providerMessageIds)
-    ?? readStringArray(context?.providerMessageIds)
-    ?? null;
-  const cleanupMessages =
-    readCleanupMessages(record?.cleanupMessages)
-    ?? readCleanupMessages(context?.cleanupMessages)
-    ?? null;
-  const cleanupTargetAliases =
-    readStringArray(record?.cleanupTargetAliases)
-    ?? readStringArray(context?.cleanupTargetAliases)
-    ?? null;
-  const providerMessageId =
-    readOptionalString(record?.providerMessageId)
-    ?? providerMessageIds?.at(-1)
-    ?? null;
-  const target =
-    readOptionalString(record?.target)
-    ?? readOptionalString(context?.target)
-    ?? null;
   const upstreamStatus =
     readProviderEffectStatus(record?.status)
     ?? readProviderEffectStatus(record?.statusCode);
@@ -258,16 +238,9 @@ function readHostedProviderEffectErrorResponse(
   });
 
   return {
-    error: code === "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS"
-      ? "Telegram delivery outcome is ambiguous."
-      : "Provider effect failed.",
+    error: "Provider effect failed.",
     ...(code ? { code } : {}),
     ...(responseContext ? { context: responseContext } : {}),
-    ...(providerMessageId ? { providerMessageId } : {}),
-    ...(providerMessageIds ? { providerMessageIds } : {}),
-    ...(cleanupMessages ? { cleanupMessages } : {}),
-    ...(cleanupTargetAliases ? { cleanupTargetAliases } : {}),
-    ...(target ? { target } : {}),
   };
 }
 
@@ -291,39 +264,6 @@ function sanitizeProviderEffectContext(
   context: Record<string, unknown>,
 ): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
-  const cleanupMessages = readCleanupMessages(context.cleanupMessages);
-  const cleanupTargetAliases = readStringArray(context.cleanupTargetAliases);
-  const providerMessageIds = readStringArray(context.providerMessageIds);
-  const originalFailure = readOptionalString(context.originalFailure);
-  const operation = readOptionalString(context.operation);
-  const provider = readOptionalString(context.provider);
-  const rollbackFailure = readOptionalString(context.rollbackFailure);
-  const target = readOptionalString(context.target);
-
-  if (cleanupMessages) {
-    sanitized.cleanupMessages = cleanupMessages;
-  }
-  if (cleanupTargetAliases) {
-    sanitized.cleanupTargetAliases = cleanupTargetAliases;
-  }
-  if (originalFailure) {
-    sanitized.originalFailure = originalFailure;
-  }
-  if (providerMessageIds) {
-    sanitized.providerMessageIds = providerMessageIds;
-  }
-  if (provider) {
-    sanitized.provider = provider;
-  }
-  if (operation) {
-    sanitized.operation = operation;
-  }
-  if (rollbackFailure) {
-    sanitized.rollbackFailure = rollbackFailure;
-  }
-  if (target) {
-    sanitized.target = target;
-  }
   copySafeProviderEffectContextScalar(sanitized, context, "errorCode");
   copySafeProviderEffectContextScalar(sanitized, context, "errorSubcode");
   copySafeProviderEffectContextScalar(sanitized, context, "errorType");
@@ -348,39 +288,6 @@ function copySafeProviderEffectContextScalar(
   ) {
     target[key] = value;
   }
-}
-
-function readCleanupMessages(value: unknown) {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-  const cleanupMessages = value.flatMap((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      return [];
-    }
-    const messageId = readOptionalString((entry as Record<string, unknown>).messageId);
-    const target = readOptionalString((entry as Record<string, unknown>).target);
-    return messageId && target ? [{ messageId, target }] : [];
-  });
-  return cleanupMessages.length > 0 ? cleanupMessages : null;
-}
-
-function readStringArray(value: unknown): string[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-  const values = value
-    .map(readOptionalString)
-    .filter((entry): entry is string => entry !== null);
-  return values.length > 0 ? [...new Set(values)] : null;
-}
-
-function readOptionalString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }
 
 function readProviderEffectStatus(value: unknown): number | null {

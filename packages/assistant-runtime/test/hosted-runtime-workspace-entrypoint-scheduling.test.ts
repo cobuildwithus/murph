@@ -1,9 +1,8 @@
 import {
-  REAL_SET_TIMEOUT,
+  createWorkspaceRunRequest,
   TEST_NOW,
   ensureHostedBootstrapMetadataForSystemMailboxTest,
   TEST_USER_ID,
-  createAssistantAskRequestedWake,
   createSnapshotFixtureRef,
   createDeferred,
   createDeviceSyncResolvedConfig,
@@ -21,9 +20,7 @@ import {
   readCapturedRuntimePhaseLogs,
   readCheckpointConversationWatermark,
   removeTempRoot,
-  requireEventIndex,
   stageAssistantInputEventForMailboxItem,
-  stagePendingHostedImageCompletionInputForMailboxItem,
   stagePendingLinqAssistantInputForMailboxItem,
   waitForFakeTimerScheduled,
   waitUntil,
@@ -33,93 +30,39 @@ import {
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import assert from "node:assert/strict";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  addCaptureWithLookup,
-  CURRENT_VAULT_FORMAT_VERSION,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  buildIntegrationEvidencePart,
-  buildIntegrationIngestRecord,
-  findCaptureByLookup,
   initializeVault,
-  patchAutomation,
-  readJsonlRecords,
-  repairVault,
   runCanonicalWrite,
   showAutomation,
   upsertAutomation,
-  validateVault,
 } from "@murphai/core";
 import {
-  appendAssistantTranscriptEntries,
-  createAssistantOutboxIntent,
-  ensureAutomaticMealCloseoutAutomation,
-  getAssistantCronStatus,
-  listAssistantTranscriptEntries,
-  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
-  listAssistantOutboxIntents,
-  markAssistantOutboxIntentSentById,
-  readAssistantContextSnapshotState,
-  refreshAssistantContextSnapshotBestEffort,
   recordHostedMailboxAssistantInputItem,
-  saveAssistantOutboxIntent,
-  saveAssistantSession,
-  type AssistantHostedImageGenerationLauncher,
-  type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import {
-  resolveAssistantStatePaths,
   sha256HostedBundleHex,
-  createHostedPortableWorkspaceManifestFromBundle,
-  listPendingAssistantRuntimeIssueRecords,
-  restoreHostedBundleRoots,
-  restoreHostedExecutionContext,
-  snapshotHostedPortableWorkspaceDelta,
   snapshotHostedBundleRoots,
-  writePendingAssistantRuntimeIssueRecord,
-  writeHostedBundleTextFile,
 } from "@murphai/runtime-state/node";
 import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  readHostedRuntimeFailurePhaseCode,
-  type HostedMailboxFetchRequest,
-  type HostedMailboxFetchResponse,
   type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
   type HostedMailboxPayloadFetchResponse,
-  type HostedRuntimeRedactedJson,
-  type HostedRuntimeLatencyTraceRequest,
-  type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
-  type HostedWorkspaceCheckpointResponse,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
-  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
-import { buildHostedExecutionLayeredSnapshotRef } from "@murphai/hosted-execution/parsers";
+
 import { describe, expect, test, vi } from "vitest";
 import { runHostedWorkspaceAssistantPhase } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import { createEmptyHostedMailboxImportState, writeHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   createCoalescingRuntimeWakeSignal,
-  HostedRuntimeCheckpointInterruptedByWakeError,
-  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
-  HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
   type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
-import {
-  enqueueHostedSystemMailboxItem,
-} from "../src/hosted-runtime/system-mailbox.ts";
+
 import {
   readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
@@ -591,8 +534,6 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
               maxMailboxItems: 1,
             },
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1215,10 +1156,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
-          request: {
-            runnerIdleTtlMs: 1,
-            workspaceVersion: "0",
-          },
+          request: {},
         }),
         {
           async createCheckpointSnapshot() {
@@ -1529,8 +1467,6 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             attemptId: "attempt_synthetic_stale_supersede",
             runnerIdleTtlMs: 25,
             leaseGeneration: "3",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1763,8 +1699,6 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
             attemptId: "attempt_synthetic_stale_device_wake_preserved",
             runnerIdleTtlMs: 25,
             leaseGeneration: "3",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2104,8 +2038,6 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_browser_refresh_browser_only_wake",
-            runnerIdleTtlMs: 1,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2246,10 +2178,7 @@ test("reports mailbox budget exhaustion only after deferring an overflow item", 
       const artifactBytesByHash = new Map([[initialSnapshot.hash, initialSnapshot.bytes]]);
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
-          request: {
-            runnerIdleTtlMs: 1,
-            workspaceVersion: "0",
-          },
+          request: {},
           resolvedConfig: createDeviceSyncResolvedConfig(),
         }),
         {

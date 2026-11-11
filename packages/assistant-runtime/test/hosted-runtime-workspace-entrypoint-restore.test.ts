@@ -1,4 +1,3 @@
-import { snapshotHostedPortableWorkspaceDelta } from "@murphai/runtime-state/node";
 import type {
   HostedMailboxFetchRequest,
   HostedMailboxFetchResponse,
@@ -567,16 +566,10 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     const restoreBuilder =
       mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.getMockImplementation();
-    const restorePortableSnapshot =
-      mocks.snapshotHostedPortableWorkspaceDelta.getMockImplementation();
     mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockClear();
-    mocks.snapshotHostedPortableWorkspaceDelta.mockClear();
     mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockImplementation((...args) => {
       assert.ok(restoreBuilder);
       return { ...restoreBuilder(...args), createRequest, checkpoint: async () => createRequest() };
-    });
-    mocks.snapshotHostedPortableWorkspaceDelta.mockImplementation(() => {
-      throw new Error("Foreground test should not snapshot portable workspace deltas.");
     });
     const checkpointStarted = createDeferred<void>();
     const checkpointResponse = createDeferred<HostedWorkspaceCheckpointResponse>();
@@ -649,17 +642,11 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       expect(mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder).toHaveBeenCalled();
       expect(createRequest).toHaveBeenCalledOnce();
-      expect(mocks.snapshotHostedPortableWorkspaceDelta).not.toHaveBeenCalled();
       expect(createCheckpointSnapshot).not.toHaveBeenCalled();
     } finally {
       if (restoreBuilder) {
         mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mockImplementation(
           restoreBuilder,
-        );
-      }
-      if (restorePortableSnapshot) {
-        mocks.snapshotHostedPortableWorkspaceDelta.mockImplementation(
-          restorePortableSnapshot,
         );
       }
       checkpointResponse.resolve({
@@ -1190,9 +1177,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_foreground_shutdown_handoff_second",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "8",
-            userId: TEST_USER_ID,
             workspaceVersion: secondWorkspace.version,
           },
         }),

@@ -1,4 +1,5 @@
 import {
+  createWorkspaceRunRequest,
   TEST_NOW,
   TEST_USER_ID,
   createSnapshotFixtureRef,
@@ -21,58 +22,25 @@ import {
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import assert from "node:assert/strict";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
 import {
-  addCaptureWithLookup,
-  CURRENT_VAULT_FORMAT_VERSION,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  buildIntegrationEvidencePart,
-  buildIntegrationIngestRecord,
-  findCaptureByLookup,
   initializeVault,
-  patchAutomation,
-  readJsonlRecords,
-  repairVault,
-  runCanonicalWrite,
-  showAutomation,
-  upsertAutomation,
-  validateVault,
 } from "@murphai/core";
 import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  readHostedRuntimeFailurePhaseCode,
-  type HostedMailboxFetchRequest,
-  type HostedMailboxFetchResponse,
   type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
-  type HostedMailboxPayloadFetchResponse,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeLatencyTraceRequest,
-  type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
-  type HostedWorkspaceCheckpointResponse,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
-  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, test, vi } from "vitest";
 import {
   createCoalescingRuntimeWakeSignal,
-  HostedRuntimeCheckpointInterruptedByWakeError,
-  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
-  HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
-  type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 
 describe("hosted workspace runtime entrypoint", () => {
@@ -520,10 +488,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_durable_effect_success",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -681,8 +646,6 @@ describe("hosted workspace runtime entrypoint", () => {
               attemptId: "attempt_synthetic_durable_effect_external_wake",
               runnerIdleTtlMs: 180_000,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -814,8 +777,6 @@ describe("hosted workspace runtime entrypoint", () => {
               attemptId: "attempt_round1_durable_wake_survives_reschedule",
               runnerIdleTtlMs,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -946,8 +907,6 @@ describe("hosted workspace runtime entrypoint", () => {
               attemptId: "attempt_round3_hot_work_durable_reconcile_waits",
               runnerIdleTtlMs,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -1092,8 +1051,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_effects_blocked_due_wake",
             runnerIdleTtlMs: 25,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1177,20 +1134,6 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             }
 
-            if (assistantPass === 3) {
-              // The service pass runs only after the checkpoint committed the
-              // pending durable effects.
-              assert.ok(events.includes("durable-effect"), events.join(","));
-              assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
-              assert.equal(input.workspace?.nextWakeReason, "assistant");
-              return {
-                checkpointReason: "assistant_runtime_commit",
-                nextWakeAt: null,
-                nextWakeReason: null,
-                progressed: true,
-              };
-            }
-
             throw new Error("Effects-blocked due wake should be serviced exactly once.");
           },
           runtimeWakeSignal,
@@ -1239,17 +1182,33 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("source-blind pre-checkpoint wakes preserve durable-effects-blocked due wakes", async () => {
+  test.each([
+    {
+      name: "source-blind pre-checkpoint wakes preserve durable-effects-blocked due wakes",
+      key: "effects_blocked_dirty_wake",
+      blockedDelayMs: 1_000,
+      competingDelayMs: null,
+    },
+    {
+      name: "source-blind competing wakes preserve durable-effects-blocked assistant wakes as checkpoint wakes",
+      key: "competing_effects_blocked_wake",
+      blockedDelayMs: 30_000,
+      competingDelayMs: 60_000,
+    },
+  ])("$name", async ({ key, blockedDelayMs, competingDelayMs }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems = [
       createMailboxItem({
-        id: "mailbox_item_entrypoint_effects_blocked_dirty_wake_001",
+        id: `mailbox_item_entrypoint_${key}_001`,
         laneSeq: "1",
       }),
     ];
-    const dueWakeAt = new Date(Date.now() - 1_000).toISOString();
+    const dueWakeAt = new Date(Date.now() - blockedDelayMs).toISOString();
+    const competingWakeAt = competingDelayMs === null
+      ? null
+      : new Date(Date.now() - competingDelayMs).toISOString();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
@@ -1265,11 +1224,9 @@ describe("hosted workspace runtime entrypoint", () => {
         runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: {
-              attemptId: "attempt_synthetic_effects_blocked_dirty_wake",
+              attemptId: `attempt_synthetic_${key}`,
               runnerIdleTtlMs: 25,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -1308,7 +1265,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   afterCheckpoint: async () => {
                     events.push("assistant.afterCheckpoint:1");
                     mailboxItems.push(createMailboxItem({
-                      id: "mailbox_item_entrypoint_effects_blocked_dirty_wake_002",
+                      id: `mailbox_item_entrypoint_${key}_002`,
                       laneSeq: "2",
                     }));
                     runtimeWakeSignal.notify();
@@ -1327,7 +1284,7 @@ describe("hosted workspace runtime entrypoint", () => {
               if (assistantPass === 2) {
                 assert.ok(
                   events.includes(
-                    "mailbox.importItem:mailbox_item_entrypoint_effects_blocked_dirty_wake_002",
+                    `mailbox.importItem:mailbox_item_entrypoint_${key}_002`,
                   ),
                   events.join(","),
                 );
@@ -1338,20 +1295,8 @@ describe("hosted workspace runtime entrypoint", () => {
                 );
                 return {
                   checkpointReason: "assistant_runtime_commit",
-                  nextWakeAt: null,
-                  nextWakeReason: null,
-                  progressed: true,
-                };
-              }
-
-              if (assistantPass === 3) {
-                assert.ok(events.includes("durable-effect"), events.join(","));
-                assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
-                assert.equal(input.workspace?.nextWakeReason, "assistant");
-                return {
-                  checkpointReason: "assistant_runtime_commit",
-                  nextWakeAt: null,
-                  nextWakeReason: null,
+                  nextWakeAt: competingWakeAt,
+                  nextWakeReason: competingWakeAt ? "assistant" : null,
                   progressed: true,
                 };
               }
@@ -1371,149 +1316,6 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "assistant");
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, dueWakeAt);
-      const publication = events.indexOf("workspace.checkpoint");
-      assert.ok(publication >= 0);
-      assert.ok(!events.slice(publication + 1).some((event) => event.startsWith("assistant:")), events.join(","));
-      assert.equal(durableEffect.mock.calls.length, 1);
-      assert.ok(publication < events.indexOf("durable-effect"));
-    } finally {
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
-  test("source-blind competing wakes preserve durable-effects-blocked assistant wakes as checkpoint wakes", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const events: string[] = [];
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const mailboxItems = [
-      createMailboxItem({
-        id: "mailbox_item_entrypoint_competing_effects_blocked_wake_001",
-        laneSeq: "1",
-      }),
-    ];
-    const blockedWakeAt = new Date(Date.now() - 30_000).toISOString();
-    const competingWakeAt = new Date(Date.now() - 60_000).toISOString();
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const durableEffect = vi.fn(async () => {
-      events.push("durable-effect");
-      return {};
-    });
-    let assistantPass = 0;
-    let snapshotCount = 0;
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-
-      const result = await withRealTimeout(
-        runHostedWorkspaceRuntimeJobInProcess(
-          createWorkspaceRuntimeJobInput({
-            request: {
-              attemptId: "attempt_synthetic_competing_effects_blocked_wake",
-              runnerIdleTtlMs: 25,
-              leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
-            },
-          }),
-          {
-            async createCheckpointSnapshot(snapshotInput) {
-              snapshotCount += 1;
-              events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
-              return {
-                snapshotRef: createSnapshotFixtureRef({
-                  hash: String(snapshotCount).repeat(64),
-                  size: 512,
-                }),
-              };
-            },
-            async importItem(item) {
-              events.push(`mailbox.importItem:${item.item.id}`);
-              return { status: "imported" };
-            },
-            platform: createPlatform({
-              mailboxPort: createMailboxPort({
-                events,
-                items: mailboxItems,
-              }),
-              workspacePort: createWorkspacePort({
-                checkpointRequests,
-                events,
-                workspace: createWorkspaceState({ version: "0" }),
-              }),
-            }),
-            runtimeWakeSignal,
-            async runAssistantPhase(input) {
-              assistantPass += 1;
-              events.push(`assistant:${assistantPass}`);
-
-              if (assistantPass === 1) {
-                return {
-                  afterCheckpoint: async () => {
-                    events.push("assistant.afterCheckpoint:1");
-                    mailboxItems.push(createMailboxItem({
-                      id: "mailbox_item_entrypoint_competing_effects_blocked_wake_002",
-                      laneSeq: "2",
-                    }));
-                    runtimeWakeSignal.notify();
-                    return {
-                      afterDurableCheckpoint: durableEffect,
-                      checkpointReason: "system_mailbox_receipt",
-                    };
-                  },
-                  checkpointReason: "system_mailbox_receipt",
-                  nextWakeAt: blockedWakeAt,
-                  nextWakeReason: "assistant",
-                  progressed: true,
-                };
-              }
-
-              if (assistantPass === 2) {
-                assert.ok(
-                  events.includes(
-                    "mailbox.importItem:mailbox_item_entrypoint_competing_effects_blocked_wake_002",
-                  ),
-                  events.join(","),
-                );
-                assert.notEqual(input.workspace?.nextWakeAt, blockedWakeAt);
-                assert.ok(
-                  !events.includes("workspace.checkpoint"),
-                  events.join(","),
-                );
-                return {
-                  checkpointReason: "assistant_runtime_commit",
-                  nextWakeAt: competingWakeAt,
-                  nextWakeReason: "assistant",
-                  progressed: true,
-                };
-              }
-
-              if (assistantPass === 3) {
-                assert.ok(events.includes("durable-effect"), events.join(","));
-                assert.equal(input.workspace?.nextWakeAt, blockedWakeAt);
-                assert.equal(input.workspace?.nextWakeReason, "assistant");
-                return {
-                  checkpointReason: "assistant_runtime_commit",
-                  nextWakeAt: null,
-                  nextWakeReason: null,
-                  progressed: true,
-                };
-              }
-
-              throw new Error("Durable-effects-blocked wake should service once after checkpoint.");
-            },
-            vaultRoot,
-          },
-        ),
-        15_000,
-        () => events.join(","),
-      );
-
-      assert.equal(assistantPass, 2, events.join(","));
-      assert.equal(checkpointRequests.length, 1, events.join(","));
-      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, blockedWakeAt);
-      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "assistant");
-      assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, blockedWakeAt);
       const publication = events.indexOf("workspace.checkpoint");
       assert.ok(publication >= 0);
       assert.ok(!events.slice(publication + 1).some((event) => event.startsWith("assistant:")), events.join(","));
@@ -1549,8 +1351,6 @@ describe("hosted workspace runtime entrypoint", () => {
               attemptId: "attempt_synthetic_checkpoint_gated_dirty_wake",
               runnerIdleTtlMs: 25,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -1625,18 +1425,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 };
               }
 
-              if (assistantPass === 3) {
-                assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
-                assert.equal(input.workspace?.nextWakeReason, "assistant");
-                assert.ok(events.includes("workspace.checkpoint"), events.join(","));
-                return {
-                  checkpointReason: "assistant_runtime_commit",
-                  nextWakeAt: null,
-                  nextWakeReason: null,
-                  progressed: true,
-                };
-              }
-
               throw new Error("Checkpoint-gated dirty wake should service once after checkpoint.");
             },
             vaultRoot,
@@ -1685,8 +1473,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_durable_effect_follow_up_due_wake",
             runnerIdleTtlMs: 25,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1792,8 +1578,6 @@ describe("hosted workspace runtime entrypoint", () => {
               attemptId: "attempt_synthetic_follow_up_fresh_due_wake",
               runnerIdleTtlMs: 25,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -1951,8 +1735,6 @@ describe("hosted workspace runtime entrypoint", () => {
               attemptId: "attempt_synthetic_follow_up_preempted_replacement_wake",
               runnerIdleTtlMs: 25,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -2058,8 +1840,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_projected_follow_up_due_wake",
             runnerIdleTtlMs: 25,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2153,10 +1933,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_checkpoint_blocked_due_wake",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2267,8 +2044,6 @@ describe("hosted workspace runtime entrypoint", () => {
               attemptId: "attempt_synthetic_replaced_plain_due_wake",
               runnerIdleTtlMs: 25,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {

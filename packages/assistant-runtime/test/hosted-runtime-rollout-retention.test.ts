@@ -1,3 +1,4 @@
+import { snapshotHostedWorkspaceFixture, restoreHostedWorkspaceFixture } from "./hosted-workspace-snapshot-fixture.ts";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -12,8 +13,6 @@ import {
 import { createAssistantModelTarget } from "@murphai/operator-config/assistant-backend";
 import {
   collectHostedWorkspaceSnapshotArchivePlan,
-  restoreHostedExecutionContext,
-  snapshotHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import { runHostedIdleCheckpointMaintenance } from "../src/hosted-runtime/idle-maintenance.ts";
 
@@ -87,7 +86,7 @@ it("retires idle resumes before snapshot and converges after a lost checkpoint o
     expect(await readFile(path.join(home, successor.rollout))).toEqual(successor.rolloutBytes);
   };
   await assertSuccessorRouting(vaultRoot, operatorHomeRoot);
-  const oldSnapshot = await snapshotHostedExecutionContext({ vaultRoot, operatorHomeRoot });
+  const oldSnapshot = await snapshotHostedWorkspaceFixture({ vaultRoot, operatorHomeRoot });
   expect(oldSnapshot.codexHomeSnapshotDiagnostics?.codexResumeThreadCount).toBe(5);
 
   const maintain = (vault: string) => runHostedIdleCheckpointMaintenance({
@@ -108,8 +107,8 @@ it("retires idle resumes before snapshot and converges after a lost checkpoint o
   expect(archive.codexHomeSnapshotDiagnostics?.codexResumeThreadCount).toBe(2);
   expect(archive.entries.filter((entry) => entry.root === "operator-home" && entry.kind === "file")
     .map((entry) => entry.relativePath).sort()).toEqual(sessions.filter((item) => !item.retire).map((item) => item.rollout).sort());
-  const snapshot = await snapshotHostedExecutionContext({ vaultRoot, operatorHomeRoot });
-  const restored = await restoreHostedExecutionContext({ bundle: snapshot.bundle, workspaceRoot: path.join(durableRoot, "new-restore") });
+  const snapshot = await snapshotHostedWorkspaceFixture({ vaultRoot, operatorHomeRoot });
+  const restored = await restoreHostedWorkspaceFixture({ bundle: snapshot.bundle, workspaceRoot: path.join(durableRoot, "new-restore") });
   await assertSuccessorRouting(restored.vaultRoot, restored.operatorHomeRoot);
   for (const item of sessions) {
     const current = await getAssistantSession(restored.vaultRoot, item.session.sessionId);
@@ -124,7 +123,7 @@ it("retires idle resumes before snapshot and converges after a lost checkpoint o
     }
   }
   // A crash losing the local workspace restores the old complete checkpoint.
-  const oldRestore = await restoreHostedExecutionContext({ bundle: oldSnapshot.bundle, workspaceRoot: path.join(durableRoot, "old-restore") });
+  const oldRestore = await restoreHostedWorkspaceFixture({ bundle: oldSnapshot.bundle, workspaceRoot: path.join(durableRoot, "old-restore") });
   await assertSuccessorRouting(oldRestore.vaultRoot, oldRestore.operatorHomeRoot);
   for (const item of sessions) {
     expect((await getAssistantSession(oldRestore.vaultRoot, item.session.sessionId)).codexResume).toEqual(item.session.codexResume);
@@ -133,6 +132,6 @@ it("retires idle resumes before snapshot and converges after a lost checkpoint o
   await maintain(oldRestore.vaultRoot);
   await assertSuccessorRouting(oldRestore.vaultRoot, oldRestore.operatorHomeRoot);
   expect(await getAssistantSession(oldRestore.vaultRoot, predecessor.session.sessionId)).toMatchObject({ codexResume: null, resumeState: null });
-  const converged = await snapshotHostedExecutionContext(oldRestore);
+  const converged = await snapshotHostedWorkspaceFixture(oldRestore);
   expect(converged.codexHomeSnapshotDiagnostics?.codexResumeThreadCount).toBe(2);
 });

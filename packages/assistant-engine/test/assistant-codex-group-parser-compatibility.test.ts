@@ -212,7 +212,7 @@ describe("murph.group parser-first family compatibility", () => {
         expect(
           readMurphDynamicToolRequest(groupToolCall(familyName, argumentsValue)),
           `${familyName}:${action}`,
-        ).toMatchObject({ kind: "invalid-group-arguments" });
+        ).toMatchObject({ kind: "invalid-tool-arguments", errorCode: "invalid_group_arguments" });
       }
     }
   });
@@ -240,7 +240,7 @@ describe("murph.group parser-first family compatibility", () => {
           message_ref: MESSAGE_REF,
           [field]: fieldValue,
         })), `${action}:${field}`).toMatchObject({
-          kind: "invalid-group-arguments",
+          kind: "invalid-tool-arguments", errorCode: "invalid_group_arguments",
         });
       }
     }
@@ -276,7 +276,7 @@ describe("murph.group parser-first family compatibility", () => {
     expect(readMurphDynamicToolRequest(
       groupToolCall("group_consult", crossActionArguments),
     )).toMatchObject({
-      kind: "invalid-group-arguments",
+      kind: "invalid-tool-arguments", errorCode: "invalid_group_arguments",
       validationDigest: { issueCodes: ["unrecognized_key"] },
     });
 
@@ -287,13 +287,13 @@ describe("murph.group parser-first family compatibility", () => {
     expect(schemaAdvertisesGroupConsultObjectShape(legacyArguments)).toBe(false);
     expect(readMurphDynamicToolRequest(
       groupToolCall("group_consult", legacyArguments),
-    )).toMatchObject({ kind: "invalid-group-arguments" });
+    )).toMatchObject({ kind: "invalid-tool-arguments", errorCode: "invalid_group_arguments" });
   });
 
   it("does not treat unknown or legacy-only actions as read_current", () => {
     expect(readMurphDynamicToolRequest(groupToolCall("group_membership", {
       action: "future_group_action",
-    }))).toMatchObject({ kind: "invalid-group-arguments" });
+    }))).toMatchObject({ kind: "invalid-tool-arguments", errorCode: "invalid_group_arguments" });
 
     expect(readMurphDynamicToolRequest(groupToolCall("group_membership", {
       action: "read_current",
@@ -308,7 +308,7 @@ describe("murph.group parser-first family compatibility", () => {
       action: "set_chat_avatar",
       avatarSource: "image_ref",
     }))).toMatchObject({
-      kind: "invalid-group-arguments",
+      kind: "invalid-tool-arguments", errorCode: "invalid_group_arguments",
       validationDigest: {
         schemaName: "murph.group_chat.input",
         toolName: "murph.group_chat",

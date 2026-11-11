@@ -82,10 +82,10 @@ describe('voice memo voice request policy', () => {
       kind: 'generate-voice-memo',
     })
     expect(legacyVoice).toMatchObject({
-      kind: 'invalid-generate-voice-memo-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_generate_voice_memo_arguments',
     })
     expect(legacyVoiceId).toMatchObject({
-      kind: 'invalid-generate-voice-memo-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_generate_voice_memo_arguments',
     })
   })
 

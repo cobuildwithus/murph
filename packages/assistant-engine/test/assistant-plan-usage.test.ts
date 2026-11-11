@@ -191,7 +191,7 @@ describe("assistant plan usage tool", () => {
         namespace: "murph",
         tool: "plan_usage",
       },
-    })?.kind).toBe("invalid-plan-usage-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
   });
 
   it("requests a quote only for an explicit direct plan target", () => {

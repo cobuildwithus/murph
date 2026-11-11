@@ -34,7 +34,7 @@ describe("assistant configuration tool", () => {
           namespace: "murph",
           tool: "assistant_configuration",
         },
-      })?.kind).toBe("invalid-assistant-configuration-arguments");
+      })?.kind).toBe("invalid-tool-arguments");
     }
     for (const arguments_ of [
       { action: "update", model: "gpt-6-luna", reasoningEffort: "high" },
@@ -575,7 +575,7 @@ describe("assistant configuration tool", () => {
         namespace: "murph",
         tool: "assistant_configuration",
       },
-    })?.kind).toBe("invalid-assistant-configuration-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
     expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -586,7 +586,7 @@ describe("assistant configuration tool", () => {
         namespace: "murph",
         tool: "assistant_configuration",
       },
-    })?.kind).toBe("invalid-assistant-configuration-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
   });
 });
 

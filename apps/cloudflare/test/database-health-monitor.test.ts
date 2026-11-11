@@ -607,61 +607,6 @@ describe("database health monitor", () => {
     ).resolves.toMatchObject({ to: ["+12025550123"] });
   });
 
-  it("attempts the healthy secondary when primary identity is known but its chat is unhealthy", async () => {
-    const harness = createMonitorHarness({
-      linqChatHealthStatus: "AT_RISK",
-      metricsBody: buildMetricsBody({
-        branchId: BRANCH_ID,
-        clientWaitSeconds: 8,
-      }),
-    });
-
-    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
-      .toMatchObject({ outcome: "alert_failed" });
-    expect(harness.allLinqRequests).toHaveLength(1);
-    await expect(
-      readLinqRequestBody(harness.allLinqRequests[0]),
-    ).resolves.toMatchObject({
-      message: {
-        idempotency_key: "murph-db-1-1-recipient-2",
-      },
-      to: ["+12025550124"],
-    });
-    expect(harness.monitor.readAlertState()).toMatchObject({
-      pendingAlertIdempotencyKey: "murph-db-1-1",
-      pendingAlertMessage: expect.any(String),
-    });
-  });
-
-  it("attempts the healthy secondary when primary identity is known but its line health is unavailable", async () => {
-    const harness = createMonitorHarness({
-      linqHealthResponses: [
-        () => Response.json(createLinqChatResponseBody()),
-        () => new Response(null, { status: 503 }),
-      ],
-      metricsBody: buildMetricsBody({
-        branchId: BRANCH_ID,
-        clientWaitSeconds: 8,
-      }),
-    });
-
-    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
-      .toMatchObject({ outcome: "alert_failed" });
-    expect(harness.allLinqRequests).toHaveLength(1);
-    await expect(
-      readLinqRequestBody(harness.allLinqRequests[0]),
-    ).resolves.toMatchObject({
-      message: {
-        idempotency_key: "murph-db-1-1-recipient-2",
-      },
-      to: ["+12025550124"],
-    });
-    expect(harness.monitor.readAlertState()).toMatchObject({
-      pendingAlertIdempotencyKey: "murph-db-1-1",
-      pendingAlertMessage: expect.any(String),
-    });
-  });
-
   it("replays stable per-recipient keys after an unhealthy primary recovers", async () => {
     const harness = createMonitorHarness({
       linqHealthResponses: [
@@ -716,18 +661,11 @@ describe("database health monitor", () => {
     });
   });
 
-  it("fails closed when the secondary direct chat is missing", () => {
-    expect(() =>
-      createMonitorHarness({ omitSecondaryLinqChatId: true })
-    ).toThrowError(
-      "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID is required.",
-    );
-  });
-
-  it("fails closed when the secondary direct chat is blank", () => {
-    expect(() =>
-      createMonitorHarness({ secondaryLinqChatId: "   " })
-    ).toThrowError(
+  it.each([
+    { label: "missing", omitSecondaryLinqChatId: true },
+    { label: "blank", secondaryLinqChatId: "   " },
+  ])("fails closed when the secondary direct chat is $label", ({ label: _label, ...input }) => {
+    expect(() => createMonitorHarness(input)).toThrowError(
       "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID is required.",
     );
   });
@@ -830,51 +768,39 @@ describe("database health monitor", () => {
     ).toContain("Checked 00:45 UTC");
   });
 
-  it.each(["AT_RISK", "CRITICAL", "OPTED_OUT"] as const)(
-    "suppresses the message post when Linq chat health is %s",
-    async (linqChatHealthStatus) => {
-      const harness = createMonitorHarness({
-        linqChatHealthStatus,
-        metricsBody: buildMetricsBody({
-          branchId: BRANCH_ID,
-          clientWaitSeconds: 8,
-        }),
-      });
-
-      await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
-        .toMatchObject({ outcome: "alert_failed" });
-
-      expect(harness.primaryLinqHealthRequests).toHaveLength(2);
-      expect(harness.primaryLinqRequests).toEqual([]);
-      expect(harness.allLinqRequests).toHaveLength(1);
-      await expect(
-        readLinqRequestBody(harness.allLinqRequests[0]),
-      ).resolves.toMatchObject({ to: ["+12025550124"] });
+  it.each([
+    { label: "at-risk chat", linqChatHealthStatus: "AT_RISK" },
+    { label: "critical chat", linqChatHealthStatus: "CRITICAL" },
+    { label: "opted-out chat", linqChatHealthStatus: "OPTED_OUT" },
+    { label: "at-risk line", linqLineReputationStatus: "AT_RISK" },
+    { label: "critical line", linqLineReputationStatus: "CRITICAL" },
+    {
+      label: "unavailable line health",
+      linqHealthResponses: [
+        () => Response.json(createLinqChatResponseBody()),
+        () => new Response(null, { status: 503 }),
+      ],
     },
-  );
+  ] as const)("preserves the pending page and sends only to the healthy secondary for $label", async (input) => {
+    const harness = createMonitorHarness({
+      ...input,
+      metricsBody: buildMetricsBody({ branchId: BRANCH_ID, clientWaitSeconds: 8 }),
+    });
 
-  it.each(["AT_RISK", "CRITICAL"] as const)(
-    "suppresses the message post when Linq line reputation is %s",
-    async (linqLineReputationStatus) => {
-      const harness = createMonitorHarness({
-        linqLineReputationStatus,
-        metricsBody: buildMetricsBody({
-          branchId: BRANCH_ID,
-          clientWaitSeconds: 8,
-        }),
-      });
-
-      await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
-        .toMatchObject({ outcome: "alert_failed" });
-
-      expect(harness.primaryLinqHealthRequests).toHaveLength(2);
-      expect(harness.primaryLinqRequests).toEqual([]);
-      expect(harness.allLinqRequests).toHaveLength(1);
-      await expect(
-        readLinqRequestBody(harness.allLinqRequests[0]),
-      ).resolves.toMatchObject({ to: ["+12025550124"] });
-    },
-  );
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_failed" });
+    expect(harness.primaryLinqHealthRequests).toHaveLength(2);
+    expect(harness.primaryLinqRequests).toEqual([]);
+    expect(harness.allLinqRequests).toHaveLength(1);
+    await expect(readLinqRequestBody(harness.allLinqRequests[0])).resolves.toMatchObject({
+      message: { idempotency_key: "murph-db-1-1-recipient-2" },
+      to: ["+12025550124"],
+    });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: "murph-db-1-1",
+      pendingAlertMessage: expect.any(String),
+    });
+  });
 
   it.each([
     {
@@ -1004,73 +930,26 @@ describe("database health monitor", () => {
     expect(harness.allLinqRequests).toEqual([]);
   });
 
-  it("cancels a Linq health body whose declared length exceeds the response cap", async () => {
+  it.each([
+    { label: "declared oversized body", contentLength: 256 * 1_024 + 1, chunkSizes: [1] },
+    { label: "underreported stream", contentLength: 1, chunkSizes: [256 * 1_024, 1] },
+  ])("cancels a Linq health $label at the response cap", async ({ contentLength, chunkSizes }) => {
     const cancelBody = vi.fn();
     const harness = createMonitorHarness({
-      linqHealthResponses: [
-        () =>
-          new Response(
-            new ReadableStream<Uint8Array>({
-              cancel: cancelBody,
-              start(controller) {
-                controller.enqueue(new Uint8Array([123]));
-              },
-            }),
-            {
-              headers: {
-                "content-length": String(256 * 1_024 + 1),
-              },
-              status: 200,
-            },
-          ),
-      ],
-      metricsBody: buildMetricsBody({
-        branchId: BRANCH_ID,
-        clientWaitSeconds: 8,
-      }),
+      linqHealthResponses: [() => new Response(
+        new ReadableStream<Uint8Array>({
+          cancel: cancelBody,
+          start(controller) {
+            for (const size of chunkSizes) controller.enqueue(new Uint8Array(size));
+          },
+        }),
+        { headers: { "content-length": String(contentLength) }, status: 200 },
+      )],
+      metricsBody: buildMetricsBody({ branchId: BRANCH_ID, clientWaitSeconds: 8 }),
     });
 
     await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
       .toMatchObject({ outcome: "alert_failed" });
-
-    expect(cancelBody).toHaveBeenCalledTimes(1);
-    expect(harness.allLinqRequests).toEqual([]);
-    expect(harness.monitor.readAlertState()).toMatchObject({
-      pendingAlertIdempotencyKey: expect.any(String),
-      pendingAlertMessage: expect.any(String),
-    });
-  });
-
-  it("cancels an underreported Linq health stream after it crosses the response cap", async () => {
-    const cancelBody = vi.fn();
-    const harness = createMonitorHarness({
-      linqHealthResponses: [
-        () =>
-          new Response(
-            new ReadableStream<Uint8Array>({
-              cancel: cancelBody,
-              start(controller) {
-                controller.enqueue(new Uint8Array(256 * 1_024));
-                controller.enqueue(new Uint8Array(1));
-              },
-            }),
-            {
-              headers: {
-                "content-length": "1",
-              },
-              status: 200,
-            },
-          ),
-      ],
-      metricsBody: buildMetricsBody({
-        branchId: BRANCH_ID,
-        clientWaitSeconds: 8,
-      }),
-    });
-
-    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
-      .toMatchObject({ outcome: "alert_failed" });
-
     expect(cancelBody).toHaveBeenCalledTimes(1);
     expect(harness.allLinqRequests).toEqual([]);
     expect(harness.monitor.readAlertState()).toMatchObject({
@@ -1371,19 +1250,20 @@ describe("database health monitor", () => {
     expect(harness.primaryLinqRequests).toEqual([]);
   });
 
-  it("retries a safe partial scrape when the connection-error family is missing", async () => {
+  it.each([
+    "planetscale_edge_postgres_connection_errors_total",
+    "planetscale_postgres_connection_state",
+  ])("confirms a safe missing %s family before counting the check", async (missingMetric) => {
     const completeMetricsBody = buildMetricsBody({ branchId: BRANCH_ID });
     const partialMetricsBody = completeMetricsBody.replace(
-      /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
+      new RegExp(`^${missingMetric}.*$`, "gmu"),
       "",
     );
     let scrapeAttempt = 0;
     const harness = createMonitorHarness({
       readMetricsBody() {
         scrapeAttempt += 1;
-        return scrapeAttempt === 1
-          ? partialMetricsBody
-          : completeMetricsBody;
+        return scrapeAttempt === 1 ? partialMetricsBody : completeMetricsBody;
       },
     });
 
@@ -1392,7 +1272,6 @@ describe("database health monitor", () => {
       outcome: "healthy",
       sampleStatus: "ok",
     });
-
     expect(harness.planetScaleRequests).toHaveLength(4);
     expect(harness.retryWaits).toEqual([1_000]);
     expect(harness.monitor.readRecentSamples()).toEqual([
@@ -1403,32 +1282,6 @@ describe("database health monitor", () => {
       }),
     ]);
     expect(harness.primaryLinqRequests).toEqual([]);
-  });
-
-  it("confirms a safe missing Postgres-state family before counting the check", async () => {
-    const completeMetricsBody = buildMetricsBody({ branchId: BRANCH_ID });
-    const partialMetricsBody = completeMetricsBody.replace(
-      /^planetscale_postgres_connection_state.*$/gmu,
-      "",
-    );
-    let scrapeAttempt = 0;
-    const harness = createMonitorHarness({
-      readMetricsBody() {
-        scrapeAttempt += 1;
-        return scrapeAttempt === 1
-          ? partialMetricsBody
-          : completeMetricsBody;
-      },
-    });
-
-    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toEqual({
-      conditions: [],
-      outcome: "healthy",
-      sampleStatus: "ok",
-    });
-
-    expect(harness.planetScaleRequests).toHaveLength(4);
-    expect(harness.retryWaits).toEqual([1_000]);
     expect(harness.monitor.readAlertState()).toMatchObject({
       consecutiveScrapeFailures: 0,
       incidentOpen: false,
@@ -2543,28 +2396,6 @@ describe("database health monitor", () => {
     expect(harness.retryWaits).toEqual([1_000]);
   });
 
-  it("pages an available unsafe signal without retrying a missing connection-error family", async () => {
-    const partialMetricsBody = buildMetricsBody({
-      branchId: BRANCH_ID,
-      clientWaitSeconds: 8,
-    }).replace(
-      /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
-      "",
-    );
-    const harness = createMonitorHarness({ metricsBody: partialMetricsBody });
-
-    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
-      .toMatchObject({
-        conditions: [{ kind: "client_wait", seconds: 8 }],
-        outcome: "alert_sent",
-        sampleStatus: "failed",
-      });
-
-    expect(harness.planetScaleRequests).toHaveLength(2);
-    expect(harness.retryWaits).toEqual([]);
-    expect(harness.primaryLinqRequests).toHaveLength(1);
-  });
-
   it("does not delay a known pooled delta when the direct port is missing", async () => {
     let metricsBody = buildMetricsBody({
       branchId: BRANCH_ID,
@@ -3084,67 +2915,35 @@ describe("database health monitor", () => {
     });
   });
 
-  it("keeps an available unsafe signal when a present family lacks its required pod label", async () => {
-    const completeMaxConnectionsLine =
-      "planetscale_postgres_settings_max_connections{"
-      + `planetscale_database_branch_id="${BRANCH_ID}",`
-      + 'planetscale_pod="pod-primary",planetscale_role="primary"} 50';
-    const structurallyIncompleteMetricsBody = buildMetricsBody({
-      branchId: BRANCH_ID,
-      clientWaitSeconds: 8,
-    }).replace(
-      completeMaxConnectionsLine,
-      "planetscale_postgres_settings_max_connections{"
-      + `planetscale_database_branch_id="${BRANCH_ID}",`
-      + 'planetscale_role="primary"} 50',
-    );
-    const harness = createMonitorHarness({
-      metricsBody: structurallyIncompleteMetricsBody,
-    });
-
-    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
-      .toMatchObject({
-        conditions: [
-          {
-            kind: "client_wait",
-            seconds: 8,
-            waitingConnections: 3,
-          },
-        ],
-        outcome: "alert_sent",
-        sampleStatus: "failed",
-      });
-    expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
-      clientWaitSeconds: 8,
-      failureCode: "required_metrics_missing",
+  it.each([
+    {
+      label: "missing connection errors",
+      pattern: /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
+      replacement: "",
+      postgresMaxConnections: 50,
+    },
+    {
+      label: "missing max connections",
+      pattern: /^planetscale_postgres_settings_max_connections.*$/gmu,
+      replacement: "",
       postgresMaxConnections: null,
-      scrapeStatus: "failed",
+    },
+    {
+      label: "max connections without a pod label",
+      pattern: /^(planetscale_postgres_settings_max_connections\{[^\n]*)planetscale_pod="pod-primary",/gmu,
+      replacement: "$1",
+      postgresMaxConnections: null,
+    },
+  ])("pages available pressure without retrying $label", async ({ pattern, replacement, postgresMaxConnections }) => {
+    const metricsBody = buildMetricsBody({ branchId: BRANCH_ID, clientWaitSeconds: 8 })
+      .replace(pattern, replacement);
+    const harness = createMonitorHarness({ metricsBody });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves.toMatchObject({
+      conditions: [{ kind: "client_wait", seconds: 8, waitingConnections: 3 }],
+      outcome: "alert_sent",
+      sampleStatus: "failed",
     });
-  });
-
-  it("still pages an available unsafe signal when another metric is missing", async () => {
-    const partialMetricsBody = buildMetricsBody({
-      branchId: BRANCH_ID,
-      clientWaitSeconds: 8,
-    }).replace(
-      /^planetscale_postgres_settings_max_connections.*$/mu,
-      "",
-    );
-    const harness = createMonitorHarness({ metricsBody: partialMetricsBody });
-
-    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
-      .toMatchObject({
-        conditions: [
-          {
-            kind: "client_wait",
-            seconds: 8,
-            waitingConnections: 3,
-          },
-        ],
-        outcome: "alert_sent",
-        sampleStatus: "failed",
-      });
-
     expect(harness.primaryLinqRequests).toHaveLength(1);
     expect(harness.planetScaleRequests).toHaveLength(2);
     expect(harness.retryWaits).toEqual([]);
@@ -3153,7 +2952,7 @@ describe("database health monitor", () => {
     expect(harness.monitor.readRecentSamples()[0]).toMatchObject({
       clientWaitSeconds: 8,
       failureCode: "required_metrics_missing",
-      postgresMaxConnections: null,
+      postgresMaxConnections,
       scrapeStatus: "failed",
     });
   });
@@ -4961,7 +4760,7 @@ describe("database health monitor", () => {
 function createMonitorHarness(input: {
   linqApiBaseUrl?: string;
   linqChatHealthStatus?: "AT_RISK" | "CRITICAL" | "HEALTHY" | "OPTED_OUT";
-  linqHealthResponses?: Array<() => Response | Promise<Response>>;
+  linqHealthResponses?: ReadonlyArray<() => Response | Promise<Response>>;
   linqLineReputationStatus?: "AT_RISK" | "CRITICAL" | "HEALTHY";
   linqPhoneNumbersBody?: unknown;
   linqResponses?: Array<() => Response | Promise<Response>>;

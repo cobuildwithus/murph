@@ -1328,6 +1328,14 @@ function mockProcessGroupSignalsForChildren(children: readonly MockChildProcess[
   })
 }
 
+function mockCodexProcess(run: (child: MockChildProcess) => Promise<void>): void {
+  codexMocks.spawn.mockImplementation(() => {
+    const child = new MockChildProcess()
+    queueMicrotask(() => { void run(child) })
+    return child
+  })
+}
+
 function mockWarmCodexProcess(
   children: MockChildProcess[],
   pidBase: number,
@@ -1509,6 +1517,7 @@ function writeStartedTurn(
 }
 
 function writeTokenUsage(input: {
+  modelContextWindow?: number | null
   child: MockChildProcess
   last: Record<string, number>
   threadId: string
@@ -1521,7 +1530,7 @@ function writeTokenUsage(input: {
       threadId: input.threadId,
       tokenUsage: {
         last: input.last,
-        modelContextWindow: null,
+        modelContextWindow: input.modelContextWindow ?? null,
         total: input.total,
       },
       turnId: input.turnId,
@@ -1677,6 +1686,7 @@ export {
   initializeWarmTurn,
   isTestRecord,
   jsonLine,
+  mockCodexProcess,
   mockHostedCodexIdentityServer,
   mockProcessGroupSignalsForChildren,
   mockWarmCodexProcess,

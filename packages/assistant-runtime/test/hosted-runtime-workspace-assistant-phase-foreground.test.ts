@@ -897,20 +897,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
+        ...createSentDeliveryOutcome(),
         deliveryChannel: "linq",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
         effectFingerprint: deliveryEffect.fingerprint,
         effectId: deliveryEffect.effectId,
-        journalMethod: "PUT",
-        journalStatus: "200",
         providerMessageId: "provider_completion_123",
-        providerMessageIds: [],
         providerThreadId: "linq_source_thread",
-        retryable: false,
         target: "linq_source_thread",
         targetKind: "explicit",
       },
@@ -2682,75 +2674,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
-  it("finishes member activation after the first foreground reply", async () => {
-    const sequence: string[] = [];
-    const activationItem = createMemberActivationSignupWelcomeSystemMailboxItem();
-    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
-      async (preparationInput) => {
-        if (
-          preparationInput.allowedRouteActions?.includes("apply-member-activation")
-          && preparationInput.allowedWakeKinds?.includes("member.activated")
-        ) {
-          sequence.push("member-activation");
-          return {
-            item: activationItem,
-            itemId: activationItem.itemId,
-            metrics: {
-              bootstrapResult: null,
-              conversationMetrics: null,
-              mailboxLane: "member-activated" as const,
-              nextWakeAt: null,
-              postCheckpointRecord: null,
-              redactedLogEntries: [],
-            },
-            status: "processed" as const,
-          };
-        }
-        return null;
-      },
-    );
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
-      sequence.push("provider");
-      return {
-        assistantAutomationCurrentTurnDeliveryIntentIds: [],
-        assistantAutomationProgressed: true,
-        deviceSyncProcessed: 0,
-        deviceSyncSkipped: true,
-        nextWakeAt: null,
-        parserProcessed: 0,
-        postCheckpointRecord: null,
-        progressed: true,
-        redactedLogEntries: [],
-      };
-    });
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 1,
-    }));
-
-    expect(sequence).toEqual(["provider"]);
-
-    const postCheckpoint = await result.afterCheckpoint?.();
-
-    expect(sequence).toEqual(["provider", "member-activation"]);
-    expect(
-      mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls.at(-1)?.[0],
-    ).toEqual(expect.objectContaining({
-      allowedRouteActions: [
-        "apply-member-activation",
-        "apply-member-action",
-      ],
-      allowedWakeKinds: [
-        "member.activated",
-        "member.action.requested",
-      ],
-      shouldYieldBackgroundMaintenance: null,
-    }));
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      checkpointReason: "system_mailbox_receipt",
-    }));
-  });
-
   it("removes a real queued member activation after the first foreground reply", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-member-activation-"));
@@ -2998,22 +2921,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
+        ...createSentDeliveryOutcome(),
         effectFingerprint: deliveryEffect.fingerprint,
         effectId: deliveryEffect.effectId,
-        journalMethod: "PUT",
-        journalStatus: "200",
-        providerMessageId: null,
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -3151,22 +3061,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
+        ...createSentDeliveryOutcome(),
         deliveryChannel: "linq",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
         providerMessageId: "provider_message_from_reply",
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -3214,22 +3111,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
+        ...createSentDeliveryOutcome(),
         deliveryChannel: "linq",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
         providerMessageId: "provider_message_from_active_turn",
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -3264,22 +3148,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
+        ...createSentDeliveryOutcome(),
         deliveryChannel: "linq",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
         providerMessageId: "provider_message_from_reply",
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -3325,22 +3196,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
+        ...createSentDeliveryOutcome(),
         deliveryChannel: "linq",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
         providerMessageId: "provider_message_from_reply",
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -3384,22 +3242,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
+        ...createSentDeliveryOutcome(),
         deliveryChannel: "linq",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
         providerMessageId: "provider_message_from_active_turn",
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -4408,22 +4253,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       .mockResolvedValueOnce(null);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
+        ...createSentDeliveryOutcome(),
         deliveryChannel: "linq",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
         providerMessageId: "provider_synthetic",
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -4522,22 +4354,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
+        ...createSentDeliveryOutcome(),
         effectFingerprint: deliveryEffect.fingerprint,
         effectId: deliveryEffect.effectId,
-        journalMethod: "PUT",
-        journalStatus: "200",
         providerMessageId: "provider_synthetic",
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -4584,22 +4404,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
+        ...createSentDeliveryOutcome(),
         effectFingerprint: deliveryEffect.fingerprint,
         effectId: deliveryEffect.effectId,
-        journalMethod: "PUT",
-        journalStatus: "200",
         providerMessageId: "provider_synthetic",
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -4998,22 +4806,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
+        ...createSentDeliveryOutcome(),
         effectFingerprint: deferredDeliveryEffect.fingerprint,
         effectId: deferredDeliveryEffect.effectId,
-        journalMethod: "PUT",
-        journalStatus: "200",
-        providerMessageId: null,
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
     mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValueOnce({

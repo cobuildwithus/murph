@@ -1,12 +1,8 @@
 import { AssistantWorkspaceArtifactMaterializationError } from "@murphai/assistant-engine";
-import type {
-  HostedWorkspaceArtifactPersistInput,
-} from "@murphai/runtime-state/node";
 import { canonicalRawArtifactIsPrivacyTombstone, isVaultError, resolveVaultPathOnDisk } from "@murphai/core";
 import { lstat } from "node:fs/promises";
 
 import type {
-  HostedRuntimeArtifactStore,
   HostedRuntimeMediaStore,
 } from "./platform.ts";
 import type {
@@ -16,22 +12,6 @@ import { toHostedArtifactPathKey } from "./artifact-paths.ts";
 import {
   materializeHostedWorkspaceMediaReferences,
 } from "./media-references.ts";
-
-export function createHostedArtifactUploadSink(input: {
-  artifactStore: HostedRuntimeArtifactStore;
-  knownArtifactHashes: ReadonlySet<string>;
-}) {
-  const uploadedHashes = new Set<string>();
-
-  return async (artifact: HostedWorkspaceArtifactPersistInput) => {
-    if (input.knownArtifactHashes.has(artifact.ref.sha256) || uploadedHashes.has(artifact.ref.sha256)) {
-      return;
-    }
-
-    await uploadHostedArtifact(input, artifact);
-    uploadedHashes.add(artifact.ref.sha256);
-  };
-}
 
 export function createHostedArtifactMaterializer(input: {
   mediaStore?: HostedRuntimeMediaStore | null;
@@ -107,18 +87,4 @@ async function hostedLocalArtifactUnavailableReason(input: {
   } catch {
     return "missing";
   }
-}
-
-async function uploadHostedArtifact(
-  input: {
-    artifactStore: HostedRuntimeArtifactStore;
-  },
-  artifact: HostedWorkspaceArtifactPersistInput,
-): Promise<void> {
-  const uploadBytes = new Uint8Array(artifact.bytes.byteLength);
-  uploadBytes.set(artifact.bytes);
-  await input.artifactStore.put({
-    bytes: uploadBytes,
-    sha256: artifact.ref.sha256,
-  });
 }

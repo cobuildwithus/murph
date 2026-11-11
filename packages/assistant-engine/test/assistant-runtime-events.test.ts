@@ -10,7 +10,9 @@ import {
 } from '../src/assistant/quarantine.ts'
 import { compactAssistantEventLogsAtPaths } from '../src/assistant/event-log-retention.ts'
 import {
+  appendAssistantRuntimeEvent,
   appendAssistantRuntimeEventAtPaths,
+  listAssistantRuntimeEvents,
   listAssistantRuntimeEventsAtPath,
 } from '../src/assistant/runtime-events.ts'
 import { runAssistantRuntimeMaintenance } from '../src/assistant/runtime-budgets.ts'
@@ -42,7 +44,8 @@ describe('assistant runtime events', () => {
 
     const paths = await createAssistantPaths('assistant-runtime-events-append-')
 
-    const first = await appendAssistantRuntimeEventAtPaths(paths, {
+    const first = await appendAssistantRuntimeEvent({
+      vault: paths.absoluteVaultRoot,
       code: 'ASSISTANT_PROVIDER_SESSION_UPSERTED',
       component: 'provider',
       data: {
@@ -86,7 +89,10 @@ describe('assistant runtime events', () => {
       },
     })
 
-    const listed = await listAssistantRuntimeEventsAtPath(paths.runtimeEventsPath, 10)
+    const listed = await listAssistantRuntimeEvents({
+      limit: 10,
+      vault: paths.absoluteVaultRoot,
+    })
 
     expect(listed).toEqual([second, first])
   })

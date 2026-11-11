@@ -996,7 +996,7 @@ describe('murph.generate_image dynamic tool execution', () => {
     })
 
     expect(request).toMatchObject({
-      kind: 'invalid-generate-image-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_generate_image_arguments',
       validationDigest: {
         detailsSchema: 'murph.tool-call-validation-digest.v1',
         toolName: 'murph.generate_image',
@@ -1009,7 +1009,7 @@ describe('murph.generate_image dynamic tool execution', () => {
         unknownKeyCount: 3,
       },
     })
-    if (!request || request.kind !== 'invalid-generate-image-arguments') {
+    if (!request || request.kind !== 'invalid-tool-arguments') {
       throw new Error('expected invalid generate image arguments')
     }
 

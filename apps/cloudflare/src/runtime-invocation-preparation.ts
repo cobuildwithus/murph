@@ -72,10 +72,8 @@ import type {
   RunnerWriteFenceToken,
 } from "./runtime-invocation-token.js";
 
-import {
-  RunnerStoreCache,
-  type RunnerUserStores,
-} from "./user-runner/runner-store-cache.js";
+import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
+import type { RunnerUserStores } from "./user-runner/runner-stores.js";
 
 const HOSTED_RUNNER_NATIVE_PROVIDER_EGRESS_ENV = [
   "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "OPENAI_API_KEY",
@@ -116,7 +114,7 @@ export class RuntimeInvocationPreparation {
     env: HostedExecutionEnvironment;
     runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
     runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
-    runnerStoreCache: RunnerStoreCache;
+    loadRunnerStores(userId: string, options: { webControlTimeoutMs: number }): Promise<RunnerUserStores>;
     assertWorkspaceBelongsToRunnerUser(workspace: HostedWorkspaceState | null, userId: string): void;
     readHostedWorkspaceFromWeb(userId: string, input?: { timeoutMs?: number }): Promise<HostedWorkspaceReadResponse>;
     bindInvocation(input: {
@@ -156,7 +154,7 @@ export class RuntimeInvocationPreparation {
     const [workspaceRead, stores] = await Promise.all([
       this.input.readHostedWorkspaceFromWeb(input.input.userId, { timeoutMs })
         .finally(() => { workspaceReadElapsedMs = Math.max(0, Date.now() - startedAtMs); }),
-      this.input.runnerStoreCache.ensure(input.input.userId, { webControlTimeoutMs: timeoutMs })
+      this.input.loadRunnerStores(input.input.userId, { webControlTimeoutMs: timeoutMs })
         .finally(() => { runtimeStoreEnsureElapsedMs = Math.max(0, Date.now() - startedAtMs); }),
     ]);
     this.input.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.input.userId);
@@ -290,7 +288,11 @@ export class RuntimeInvocationPreparation {
       forwardedEnv.HOSTED_ASSISTANT_REASONING_EFFORT =
         input.hostedAssistantReasoningEffortOverride;
     }
-    const configSource = this.input.runnerStoreCache.readRuntimeConfigSource();
+    const configSource: StringEnvSource = {
+      ...toStringEnvSource(this.input.runnerRuntimeEnvSource),
+      HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS:
+        this.input.env.allowedRunnerSecretKeys ?? undefined,
+    };
     // Worker-only allowlist: only the per-member boolean reaches the runner.
     if (configSource.MURPH_NATIVE_SLEEP_CARD_MEMBER_IDS
       ?.split(",").some((memberId) => memberId.trim() === input.userId)) {
@@ -298,7 +300,7 @@ export class RuntimeInvocationPreparation {
     }
     const stores = input.stores;
     const readRunnerSecrets = async () =>
-      await stores.runnerSecrets.readRunnerSecrets(input.userId);
+      await stores.readRunnerSecrets();
     const emitSnapshotRestorePreparationUnavailableLog = (error: unknown): void => {
       emitHostedExecutionStructuredLog({
         component: "runner",

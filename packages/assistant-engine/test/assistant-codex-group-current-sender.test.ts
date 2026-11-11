@@ -176,7 +176,7 @@ describe("murph.group current-sender intent", () => {
       },
     ]) {
       expect(readMurphDynamicToolRequest(groupToolCall(argumentsValue)))
-        .toMatchObject({ kind: "invalid-group-arguments" });
+        .toMatchObject({ kind: "invalid-tool-arguments", errorCode: "invalid_group_arguments" });
     }
 
     expect(MURPH_GROUP_CONSULT_TOOL.inputSchema.oneOf).toEqual(
@@ -725,7 +725,7 @@ describe("murph.group record_current_sender_daily_metric", () => {
       metric: "steps",
       unit: "count",
       value: 8_000,
-    }))).toMatchObject({ kind: "invalid-group-arguments" });
+    }))).toMatchObject({ kind: "invalid-tool-arguments", errorCode: "invalid_group_arguments" });
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "record_current_sender_daily_metric",
       date: "2026-08-13",
@@ -734,7 +734,7 @@ describe("murph.group record_current_sender_daily_metric", () => {
       metric: "steps",
       unit: "count",
       value: 8_000,
-    }))).toMatchObject({ kind: "invalid-group-arguments" });
+    }))).toMatchObject({ kind: "invalid-tool-arguments", errorCode: "invalid_group_arguments" });
   });
 
   it("binds the report to the selected accepted group input", async () => {

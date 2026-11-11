@@ -56,9 +56,10 @@ import {
   MockChildProcess,
   mockProcessGroupSignalsForChildren,
   waitForRpcMethod,
+  waitForRpcResponse,
 } from './assistant-codex-runtime.harness.ts'
 import { executeCodexAssistantTurnAttempt } from '../src/assistant/codex-runtime.ts'
-import { executeMurphDynamicToolRequest } from '../src/assistant-codex/dynamic-tools.ts'
+import { executeMurphDynamicToolRequest, MURPH_ASK_GROK_TOOL } from '../src/assistant-codex/dynamic-tools.ts'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { ASSISTANT_GROUP_REPLY_RECONSIDERATION_INSTRUCTION } from '../src/assistant/group-reply-reconsideration.ts'
 
@@ -5166,6 +5167,10 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
     plan: { ...sharedPlan, persistUserPromptOnFailure: false },
     session,
   })
+  const xSearchFetch = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+    status: 'completed',
+    output: [{ type: 'message', content: [{ type: 'output_text', text: 'Synthetic search result.' }] }],
+  })))
   const requestZeroLive = createDeferred<void>()
   const requestOneLive = createDeferred<void>()
   const providerConfig = normalizeAssistantProviderConfig({
@@ -5272,6 +5277,24 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
             turnId: providerTurnId,
           },
         }))
+        for (let search = 0; search < (providerRequestOrdinal === 0 ? 3 : 1); search += 1) {
+          const id = 100 + search
+          child.stdout.write(jsonLine({
+            id,
+            method: 'item/tool/call',
+            params: {
+              threadId: 'provider-thread-group-composed',
+              turnId: providerTurnId,
+              callId: `search-${providerRequestOrdinal}-${search}`,
+              namespace: 'murph',
+              tool: 'ask_grok',
+              arguments: { question: 'What is the synthetic source reporting?' },
+            },
+          }))
+          expect(await waitForRpcResponse(child, id)).toMatchObject({
+            result: { success: providerRequestOrdinal === 0 },
+          })
+        }
         const response = providerRequestOrdinal === 0
           ? 'Provisional response to only the second request.'
           : 'One final response covering all three requests.'
@@ -5324,8 +5347,11 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
             return release
           },
         },
+        askGrokTurnState: providerInput.askGrokTurnState,
         analyzeVideoTurnState: providerInput.analyzeVideoTurnState,
-        dynamicTools: [],
+        dynamicTools: [MURPH_ASK_GROK_TOOL],
+        env: { XAI_API_KEY: 'synthetic-key' },
+        providerFetch: xSearchFetch,
         groupConversation: true,
         processLifetime: 'one-shot',
         providerConfig,
@@ -5434,6 +5460,12 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
       ([providerInput]) => providerInput.providerRequestOrdinal,
     ),
   ).toEqual([0, 1])
+  expect(xSearchFetch).toHaveBeenCalledTimes(3)
+  const searchStates = mocks.executeCodexTurnWithRecovery.mock.calls.map(
+    ([providerInput]) => providerInput.askGrokTurnState,
+  )
+  expect(searchStates[1]).toBe(searchStates[0])
+  expect(searchStates[0]?.providerCallCount).toBe(3)
   const analyzeVideoTurnStates =
     mocks.executeCodexTurnWithRecovery.mock.calls.map(
       ([providerInput]) => providerInput.analyzeVideoTurnState,

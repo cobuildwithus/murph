@@ -4,6 +4,11 @@ Workspace-private headless hosted/runtime surface for Murph assistant execution.
 
 This package exists so hosted runtimes such as `apps/cloudflare` do not need to import their execution seams directly from the public `@murphai/murph` CLI package.
 
+Invocations pass environment and workspace roots explicitly. Child-process env
+projection does not replace the parent environment or change its working directory.
+Email retention uses the trusted mailbox occurrence time as receipt time; the
+sender-controlled message Date header is message metadata only.
+
 Background notifications yield at the existing delivery checkpoint before
 another automation decision or managed-automation setup. Queue-only cron work
 also yields after creating pending output. The existing outbox dispatch and

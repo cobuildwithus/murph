@@ -267,7 +267,6 @@ export async function collectHostedPendingAssistantInputMediaRetentionProtection
 }
 
 export async function runHostedPendingAssistantInputContentRetention(input: {
-  events?: readonly AssistantInputEventRecord[];
   now?: Date | string;
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -275,11 +274,11 @@ export async function runHostedPendingAssistantInputContentRetention(input: {
   input.signal?.throwIfAborted();
   const now = normalizeHostedPendingInputRetentionNow(input.now);
   const cutoffMs = now.getTime() - INBOX_TEXT_RETENTION_WINDOW_MS;
-  const events = input.events ?? (await listAssistantInputEvents({
+  const { events } = await listAssistantInputEvents({
     limit: Number.MAX_SAFE_INTEGER,
     signal: input.signal,
     vault: input.vaultRoot,
-  })).events;
+  });
   const candidates: Array<{
     event: AssistantInputEventRecord;
     terminal: boolean;

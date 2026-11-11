@@ -103,22 +103,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     });
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
+        ...createSentDeliveryOutcome(),
         effectFingerprint: deferredDeliveryEffect.fingerprint,
         effectId: deferredDeliveryEffect.effectId,
         journalMethod: "POST",
-        journalStatus: "200",
         providerMessageId: "provider_deferred_foreground",
-        providerMessageIds: [],
         providerThreadId: null,
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -524,22 +514,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     );
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
+        ...createSentDeliveryOutcome(),
         effectFingerprint: deferredDeliveryEffect.fingerprint,
         effectId: deferredDeliveryEffect.effectId,
-        journalMethod: "PUT",
-        journalStatus: "200",
-        providerMessageId: null,
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -581,22 +558,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     });
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
+        ...createSentDeliveryOutcome(),
         deliveryChannel: "linq",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
         effectFingerprint: deliveryEffect.fingerprint,
         effectId: deliveryEffect.effectId,
         journalMethod: "POST",
-        journalStatus: "200",
         providerMessageId: "provider_synthetic",
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -769,23 +736,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       expect(input.shouldYieldBackgroundDelivery?.()).toBe(false);
       input.onBackgroundDeliveryYield?.({ yieldedEffectCount: 1 });
       return [{
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "linq",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: firstDeliveryEffect.fingerprint,
-        effectId: firstDeliveryEffect.effectId,
-        journalMethod: "PUT",
-        journalStatus: "200",
-        providerMessageId: "provider_late_yield_first",
-        providerMessageIds: [],
-        providerThreadId: "thread_late_yield_first",
-        retryable: false,
-        target: null,
-        targetKind: null,
-      }];
+                ...createSentDeliveryOutcome(),
+                deliveryChannel: "linq",
+                effectFingerprint: firstDeliveryEffect.fingerprint,
+                effectId: firstDeliveryEffect.effectId,
+                providerMessageId: "provider_late_yield_first",
+                providerThreadId: "thread_late_yield_first",
+              }];
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -1209,24 +1166,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
       now = "2026-05-08T16:00:08.000Z";
       return [
-        {
-          cleanupMessages: [],
-          cleanupTargetAliases: [],
-          deliveryChannel: "telegram",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint_synthetic",
-          effectId: "effect_synthetic",
-          journalMethod: "PUT",
-          journalStatus: "200",
-          providerMessageId: null,
-          providerMessageIds: [],
-          providerThreadId: "thread_synthetic",
-          retryable: false,
-          target: null,
-          targetKind: null,
-        },
+        createSentDeliveryOutcome(),
       ];
     });
 
@@ -1276,24 +1216,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       createDeliveryEffect(),
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
-      {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
-        providerMessageId: null,
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
-      },
+      createSentDeliveryOutcome(),
     ]);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -1334,24 +1257,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
       now = "2026-05-08T16:00:08.000Z";
       return [
-        {
-          cleanupMessages: [],
-          cleanupTargetAliases: [],
-          deliveryChannel: "telegram",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint_synthetic",
-          effectId: "effect_synthetic",
-          journalMethod: "PUT",
-          journalStatus: "200",
-          providerMessageId: null,
-          providerMessageIds: [],
-          providerThreadId: "thread_synthetic",
-          retryable: false,
-          target: null,
-          targetKind: null,
-        },
+        createSentDeliveryOutcome(),
       ];
     });
 
@@ -1393,22 +1299,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       now = "2026-05-08T16:00:08.000Z";
       return [
         {
-          cleanupMessages: [],
-          cleanupTargetAliases: [],
+          ...createSentDeliveryOutcome(),
           deliveryChannel: "linq",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint_synthetic",
-          effectId: "effect_synthetic",
-          journalMethod: "PUT",
-          journalStatus: "200",
           providerMessageId: "provider_synthetic",
-          providerMessageIds: [],
-          providerThreadId: "thread_synthetic",
-          retryable: false,
-          target: null,
-          targetKind: null,
         },
       ];
     });
@@ -1456,22 +1349,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       now = "2026-05-08T16:00:08.000Z";
       return [
         {
-          cleanupMessages: [],
-          cleanupTargetAliases: [],
+          ...createSentDeliveryOutcome(),
           deliveryChannel: "linq",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint_synthetic",
-          effectId: "effect_synthetic",
-          journalMethod: "PUT",
-          journalStatus: "200",
           providerMessageId: "provider_synthetic",
-          providerMessageIds: [],
-          providerThreadId: "thread_synthetic",
-          retryable: false,
-          target: null,
-          targetKind: null,
         },
       ];
     });
@@ -2583,24 +2463,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       createDeliveryEffect(),
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
-      {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
-        providerMessageId: null,
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
-      },
+      createSentDeliveryOutcome(),
     ]);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -3283,24 +3146,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       createDeliveryEffect(),
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
-      {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
-        providerMessageId: null,
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
-      },
+      createSentDeliveryOutcome(),
     ]);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -3346,24 +3192,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       createDeliveryEffect(),
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
-      {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
-        providerMessageId: null,
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
-      },
+      createSentDeliveryOutcome(),
     ]);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -3473,24 +3302,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
         createDeliveryEffect(),
       ]);
       mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
-        {
-          cleanupMessages: [],
-          cleanupTargetAliases: [],
-          deliveryChannel: "telegram",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint_synthetic",
-          effectId: "effect_synthetic",
-          journalMethod: "PUT",
-          journalStatus: "200",
-          providerMessageId: null,
-          providerMessageIds: [],
-          providerThreadId: "thread_synthetic",
-          retryable: false,
-          target: null,
-          targetKind: null,
-        },
+        createSentDeliveryOutcome(),
       ]);
 
       const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -3540,24 +3352,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       createDeliveryEffect(),
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
-      {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
-        providerMessageId: null,
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
-      },
+      createSentDeliveryOutcome(),
     ]);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -3590,22 +3385,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
+        ...createSentDeliveryOutcome(),
         deliveryChannel: "linq",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
         providerMessageId: "provider_synthetic",
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -3635,22 +3417,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
+        ...createSentDeliveryOutcome(),
         deliveryChannel: "linq",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
         providerMessageId: "provider_synthetic",
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -3672,22 +3441,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
+        ...createSentDeliveryOutcome(),
         deliveryErrorCode: "HOSTED_PROVIDER_FETCH_UNAVAILABLE",
         deliveryErrorMessage: "redacted",
         deliveryStatus: "failed_ambiguous",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
         journalStatus: "500",
-        providerMessageId: null,
-        providerMessageIds: [],
         providerThreadId: null,
         retryable: true,
-        target: null,
-        targetKind: null,
       },
     ]);
 
@@ -4440,7 +4200,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       runtimeIssueInputs: [],
       sessionId: "codex-thread-notification-validation",
       stderr: "",
-      stdout: "",
       targetInputId: null,
       threadId: "codex-thread-notification-validation",
       transcriptMessage: hostileResponseMarker,
@@ -4932,22 +4691,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     );
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
+        ...createSentDeliveryOutcome(),
         effectFingerprint: deliveryEffect.fingerprint,
         effectId: deliveryEffect.effectId,
         journalMethod: "POST",
-        journalStatus: "200",
         providerMessageId: "provider_signup_welcome",
-        providerMessageIds: [],
         providerThreadId: null,
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 

@@ -1,4 +1,5 @@
 import {
+  createWorkspaceRunRequest,
   HOSTED_CONTAINER_CA_ENV_KEYS,
   HOSTED_UNSTABLE_PROCESS_ENV_KEYS,
   TEST_NOW,
@@ -39,63 +40,41 @@ import type {
 
 import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import {
-  addCaptureWithLookup,
   CURRENT_VAULT_FORMAT_VERSION,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
   buildIntegrationEvidencePart,
   buildIntegrationIngestRecord,
-  findCaptureByLookup,
   initializeVault,
-  patchAutomation,
   readIntegrationIngestEntries,
-  readJsonlRecords,
-  repairVault,
   runCanonicalWrite,
-  showAutomation,
-  upsertAutomation,
-  validateVault,
 } from "@murphai/core";
 import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  readHostedRuntimeFailurePhaseCode,
   type HostedMailboxFetchRequest,
-  type HostedMailboxFetchResponse,
   type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
   type HostedMailboxPayloadFetchResponse,
-  type HostedRuntimeRedactedJson,
   type HostedRuntimeAssistantAskControlRequest,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
-  type HostedWorkspaceCheckpointResponse,
   type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
-  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, test, vi } from "vitest";
 import {
   createCoalescingRuntimeWakeSignal,
-  HostedRuntimeCheckpointInterruptedByWakeError,
-  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
-  HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
-  type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
   runHostedWorkspaceAssistantPhase,
@@ -105,31 +84,18 @@ import {
 } from "../src/hosted-runtime/runtime-logs.ts";
 import {
   createHostedAssistantTurnEnvironment,
-  normalizeHostedAssistantRuntimeConfig,
 } from "../src/hosted-runtime/environment.ts";
 import {
   createEmptyHostedMailboxImportState,
-  HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
-  HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
-  HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH,
-  readHostedMailboxImportState,
-  writeHostedMailboxImportState,
-  type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   enqueueHostedSystemMailboxItem,
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   readHostedSystemMailboxState,
-  updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
-  HostedRuntimeArtifactReadError,
-  type HostedRuntimeDeviceSyncPort,
   type HostedRuntimeMailboxPort,
-  type HostedRuntimePlatform,
-  type HostedRuntimeWorkspacePort,
-  type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
 
 describe("hosted workspace runtime entrypoint", () => {
@@ -152,8 +118,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId,
             leaseGeneration: "7",
             processingMode: "system_mailbox",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -237,8 +201,6 @@ describe("hosted workspace runtime entrypoint", () => {
       request: {
         attemptId,
         leaseGeneration: "7",
-        userId: TEST_USER_ID,
-        workspaceVersion: "0",
       },
     }), {
       async createCheckpointSnapshot() {
@@ -308,10 +270,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_host_abort_during_checkpoint",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -396,8 +355,6 @@ describe("hosted workspace runtime entrypoint", () => {
           request: {
             attemptId: "attempt_synthetic_host_abort_during_mailbox_import",
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -464,8 +421,6 @@ describe("hosted workspace runtime entrypoint", () => {
           request: {
             attemptId: "attempt_synthetic_host_abort_before_mailbox_import_failure",
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -530,8 +485,6 @@ describe("hosted workspace runtime entrypoint", () => {
           request: {
             attemptId: "attempt_synthetic_host_abort_during_codex_prepare",
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -608,8 +561,6 @@ describe("hosted workspace runtime entrypoint", () => {
           request: {
             attemptId: "attempt_synthetic_codex_preinitialization_overlap",
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -732,10 +683,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_codex_preinitialization_snapshot_join",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -906,10 +854,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_codex_preinitialization_fallback",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1056,10 +1001,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: `attempt_provider_start_timing_${scenario.outcome}`,
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1155,10 +1097,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_email_first_preinitialization_veto",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1262,8 +1201,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_host_abort_during_foreground_projection",
             runnerIdleTtlMs: 180_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1391,8 +1328,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_detached_ask_concurrency",
             runnerIdleTtlMs: boundary === "shutdown" ? 120_000 : 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1579,10 +1514,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_detached_ask_concurrency",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1728,8 +1660,6 @@ describe("hosted workspace runtime entrypoint", () => {
     ];
     const conversationItem = createMailboxItem({
       id: "mailbox_item_entrypoint_approved_foreground_conversation",
-      lane: "conversation",
-      laneSeq: "1",
       occurredAt: "2026-04-27T00:00:01.000Z",
     });
     let firstAskAbortObserved = false;
@@ -1762,8 +1692,6 @@ describe("hosted workspace runtime entrypoint", () => {
             attemptId: "attempt_synthetic_approved_ask_foreground",
             runnerIdleTtlMs: 120_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1944,8 +1872,6 @@ describe("hosted workspace runtime entrypoint", () => {
               attemptId: "attempt_synthetic_detached_share_regrant",
               runnerIdleTtlMs: 120_000,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -2126,8 +2052,6 @@ describe("hosted workspace runtime entrypoint", () => {
               attemptId: "attempt_synthetic_detached_share_authority_unavailable",
               runnerIdleTtlMs: 120_000,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -2560,8 +2484,6 @@ describe("hosted workspace runtime entrypoint", () => {
         request: {
           attemptId: "attempt_synthetic_phase_boundaries",
           leaseGeneration: "7",
-          userId: TEST_USER_ID,
-          workspaceVersion: "0",
         },
       }), {
         async createCheckpointSnapshot() {
@@ -2678,8 +2600,6 @@ describe("hosted workspace runtime entrypoint", () => {
         request: {
           attemptId: "attempt_synthetic_legacy_vault_format_migration",
           leaseGeneration: "7",
-          userId: TEST_USER_ID,
-          workspaceVersion: "0",
         },
       }), {
         async createCheckpointSnapshot() {
@@ -2754,8 +2674,6 @@ describe("hosted workspace runtime entrypoint", () => {
         request: {
           attemptId: "attempt_synthetic_interrupted_ingest_archive",
           leaseGeneration: "8",
-          userId: TEST_USER_ID,
-          workspaceVersion: "0",
         },
       }), {
         async createCheckpointSnapshot() {
@@ -3263,9 +3181,7 @@ describe("hosted workspace runtime entrypoint", () => {
           request: {
             attemptId,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
             workspace: suppliedWorkspace,
-            workspaceVersion: "0",
           },
         }),
         {

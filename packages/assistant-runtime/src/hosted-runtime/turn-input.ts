@@ -2,7 +2,6 @@ import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
   assistantInputCandidateFromStoredEvent,
   compareAssistantInputCursors,
-  listAssistantInputEvents,
   isSameAssistantConversationRef,
   isAssistantHostedImageCompletionEvent,
   parseAssistantHostedImageCompletionOriginText,
@@ -413,11 +412,8 @@ export async function selectHostedAssistantInputIds(
 ): Promise<HostedAssistantInputSelection> {
   if (input.mode === "background") {
     input.signal?.throwIfAborted();
-    const { events: storedEvents } = await listAssistantInputEvents({
-      limit: Number.MAX_SAFE_INTEGER, signal: input.signal, vault: input.vaultRoot,
-    });
     await runHostedPendingAssistantInputContentRetention({
-      events: storedEvents, signal: input.signal, vaultRoot: input.vaultRoot,
+      signal: input.signal, vaultRoot: input.vaultRoot,
     });
     const pendingInputIds = await compactHostedPendingAssistantInputIds({
       signal: input.signal, vaultRoot: input.vaultRoot,

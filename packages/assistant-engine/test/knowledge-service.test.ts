@@ -40,6 +40,12 @@ afterEach(async () => {
 })
 
 describe('knowledge service helpers', () => {
+  it('rejects blank knowledge search queries', async () => {
+    const vaultRoot = await createKnowledgeVaultRoot('murph-knowledge-empty-search-')
+    await expect(searchKnowledgePages({ query: '   ', vault: vaultRoot }))
+      .rejects.toMatchObject({ code: 'knowledge_search_query_required' })
+  })
+
   it('rejects duplicate slugs with action-specific guidance and page-path context', () => {
     const graph = createKnowledgeGraph([
       createKnowledgeNode({
@@ -132,6 +138,17 @@ describe('knowledge service helpers', () => {
         },
       ],
       limit: 1,
+      logPath: DERIVED_KNOWLEDGE_LOG_PATH,
+      vault: vaultRoot,
+    })
+
+    await expect(tailKnowledgeLog(
+      { limit: Number.NaN, vault: vaultRoot },
+      { readTextFile: async () => 'this markdown has no structured log headings' },
+    )).resolves.toEqual({
+      count: 0,
+      entries: [],
+      limit: 20,
       logPath: DERIVED_KNOWLEDGE_LOG_PATH,
       vault: vaultRoot,
     })
