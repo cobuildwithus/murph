@@ -9,7 +9,7 @@
     "summary": "Open your wearable connections directly from Wearables in the website sidebar.",
     "details": "The shortcut sits between Home and Settings and opens the existing page for connecting and managing devices.",
     "relevanceTags": ["wearables", "navigation"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [4843],
     "tryIt": {
       "label": "Manage wearables",
       "href": "/connect"
