@@ -14,8 +14,7 @@ import {
 } from '@murphai/hosted-execution/env'
 import { buildCalendarEventUrl, compactTableCardV1Bounds, goalMetricTargetSchema } from '@murphai/contracts'
 import {
-  listHostedBundleInlineFiles,
-  snapshotHostedExecutionContext,
+  collectHostedWorkspaceSnapshotArchivePlan,
 } from '@murphai/runtime-state/node'
 import {
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
@@ -510,13 +509,13 @@ async function createWorkoutCsvTestResultPath(): Promise<string> {
 async function expectWorkoutCsvScratchExcludedFromHostedSnapshot(
   workingDirectory: string,
 ): Promise<void> {
-  const snapshot = await snapshotHostedExecutionContext({
+  const snapshot = await collectHostedWorkspaceSnapshotArchivePlan({
+    durableRoot: path.dirname(workingDirectory),
     vaultRoot: workingDirectory,
   })
-  const snapshottedPaths = listHostedBundleInlineFiles({
-    bytes: snapshot.bundle,
-    expectedKind: 'vault',
-  }).map((file) => file.path)
+  const snapshottedPaths = snapshot.entries
+    .filter((entry) => entry.root === 'vault')
+    .map((entry) => entry.relativePath)
 
   expect(snapshottedPaths.filter((filePath) =>
     filePath.startsWith('.runtime/tmp/workout-csv-import/')),
@@ -8980,10 +8979,10 @@ text(JSON.stringify(result));
     const scenario = await prepareScriptedTurnScenario()
     const progressUpdates: string[] = []
     const progressDelivery = {
-      send: async (text: string) => {
+      send: vi.fn(async (text: string) => {
         progressUpdates.push(text)
         return { kind: 'sent' as const, source: 'model' as const }
-      },
+      }),
     }
     const dynamicTools = resolveMurphDynamicTools({
       progressUpdatesAvailable: true,
@@ -9020,6 +9019,10 @@ text(JSON.stringify(result));
     expect(resumed.finalMessage).toBe('COLD_TOOL_RESUME_OK')
     expect(resumed.threadId).toBe(first.threadId)
     expect(progressUpdates).toEqual(['Cold-resume progress update.'])
+    expect(progressDelivery.send).toHaveBeenCalledExactlyOnceWith(
+      'Cold-resume progress update.',
+      { deliveryContextOrdinal: 0, source: 'model' },
+    )
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })
 

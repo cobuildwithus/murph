@@ -39,7 +39,7 @@ beforeEach(() => {
     codexContinuation: { kind: 'explicit-structured-history' }, codexThreadId: null,
     provider: input.route.provider, providerOptions: input.route.providerOptions,
     rawEvents: [], response: 'Synthetic reply.', responseDeliveryContextOrdinal: 0, responseMedia: [], route: input.route,
-    session: input.resolvedSession, stderr: '', stdout: '', transcriptResponse: 'Synthetic reply.',
+    session: input.resolvedSession, stderr: '',  transcriptResponse: 'Synthetic reply.',
     usage: null, workingDirectory: input.plan.requestedWorkingDirectory,
   } }))
   boundary.deliver.mockReset().mockImplementation(async () => ({ kind: 'sent', deliveryError: null, session: null,

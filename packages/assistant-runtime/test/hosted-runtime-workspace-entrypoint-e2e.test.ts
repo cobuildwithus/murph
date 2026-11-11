@@ -25,91 +25,34 @@ import {
 
 import { updateHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 import assert from "node:assert/strict";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  addCaptureWithLookup,
-  CURRENT_VAULT_FORMAT_VERSION,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  buildIntegrationEvidencePart,
-  buildIntegrationIngestRecord,
-  findCaptureByLookup,
   initializeVault,
-  patchAutomation,
-  readJsonlRecords,
-  repairVault,
-  runCanonicalWrite,
-  showAutomation,
-  upsertAutomation,
-  validateVault,
 } from "@murphai/core";
 import {
-  appendAssistantTranscriptEntries,
-  createAssistantOutboxIntent,
-  ensureAutomaticMealCloseoutAutomation,
-  getAssistantCronStatus,
-  listAssistantTranscriptEntries,
-  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
-  listAssistantOutboxIntents,
-  markAssistantOutboxIntentSentById,
-  readAssistantContextSnapshotState,
-  refreshAssistantContextSnapshotBestEffort,
   recordHostedMailboxAssistantInputItem,
-  saveAssistantOutboxIntent,
-  saveAssistantSession,
-  type AssistantHostedImageGenerationLauncher,
-  type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  readHostedRuntimeFailurePhaseCode,
   type HostedMailboxFetchRequest,
-  type HostedMailboxFetchResponse,
   type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
-  type HostedMailboxPayloadFetchResponse,
-  type HostedRuntimeRedactedJson,
-  type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
-  type HostedWorkspaceCheckpointResponse,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
-  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, test, vi } from "vitest";
 import {
   createCoalescingRuntimeWakeSignal,
-  HostedRuntimeCheckpointInterruptedByWakeError,
-  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
-  HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
-  type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
-  collectHostedPendingAssistantInputMediaRetentionProtections,
-  compactHostedPendingAssistantInputIds,
-  enqueueHostedPendingAssistantInputId,
-  ensureHostedPendingAssistantInputIndex,
-  inspectHostedPendingAssistantInputWakeCandidate,
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
-  createEmptyHostedMailboxImportState,
-  HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
-  HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
-  HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH,
   readHostedMailboxImportState,
-  writeHostedMailboxImportState,
-  type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,

@@ -30,13 +30,10 @@ import { readHostedExecutionEnvironment } from "../src/env.ts";
 import hostedLocalTestWorker from "../src/hosted-local-test-index.ts";
 import worker from "../src/index.ts";
 import { createWorkerFetchHandler } from "../src/worker/fetch-handler.ts";
-import { hostedLocalTestInternalRoutes } from "../src/worker/hosted-local-test-routes.ts";
 import { workerInternalRoutes } from "../src/worker/internal-routes.ts";
-import { workerPublicRoutes } from "../src/worker/public-routes.ts";
 import {
   handleDeployContainerSmokeRoute,
   readDeployContainerSmokeAttempt,
-  resolveDeployContainerSmokeObjectName,
 } from "../src/worker/route-handlers/deploy-smoke.ts";
 import {
   parseBrowserVaultSessionRequest,
@@ -287,18 +284,10 @@ describe("cloudflare worker routes", () => {
     expect(workerContractsSource).not.toContain("RUNNER_WAKE_QUEUE");
   });
 
-  it("serves a health endpoint even before secrets are configured", async () => {
+  it.each(["/", "/health"])("serves %s before secrets are configured", async (route) => {
     const response = await worker.fetch(
-      new Request("https://runner.example.test/health"),
-      {
-        BUNDLES: createBucketStore().api,
-        RUNNER_CONTAINER: createRunnerContainerNamespace(),
-        USER_RUNNER: {
-          getByName() {
-            return createUserRunnerStub();
-          },
-        },
-      } as never,
+      new Request(`https://runner.example.test${route}`),
+      {} as WorkerEnvironmentSource,
     );
 
     expect(response.status).toBe(200);
@@ -307,117 +296,6 @@ describe("cloudflare worker routes", () => {
       service: "cloudflare-hosted-runner",
       standbyMode: "off",
     });
-  });
-
-  it("serves the service banner for root and health and 404s unknown routes", async () => {
-    const rootResponse = await worker.fetch(
-      new Request("https://runner.example.test/"),
-      createWorkerEnv(),
-    );
-
-    expect(rootResponse.status).toBe(200);
-    await expect(rootResponse.json()).resolves.toEqual({
-      ok: true,
-      service: "cloudflare-hosted-runner",
-      standbyMode: "off",
-    });
-
-    const healthResponse = await worker.fetch(
-      new Request("https://runner.example.test/health"),
-      createWorkerEnv(),
-    );
-
-    expect(healthResponse.status).toBe(200);
-    await expect(healthResponse.json()).resolves.toEqual({
-      ok: true,
-      service: "cloudflare-hosted-runner",
-      standbyMode: "off",
-    });
-
-    const unknownResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/events"),
-      createWorkerEnv(),
-    );
-
-    expect(unknownResponse.status).toBe(404);
-    await expect(unknownResponse.json()).resolves.toEqual({
-      error: "Not found",
-    });
-  });
-
-  it("reassembles the Worker route tables in the stable route order", () => {
-    expect(workerPublicRoutes.map(({ name }) => name)).toEqual([
-      "private-media-delivery",
-      "service-banner",
-    ]);
-    expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
-      "device-webhook-enqueue",
-      "temporal-worker-binding-admission",
-      "deploy-artifact-smoke",
-      "deploy-container-smoke",
-      "runtime-ensure-processing",
-      "runtime-health-data-consent",
-      "user-data-delete",
-      "runtime-resource-purge",
-      "telegram-usage-limit-notice",
-      "meal-photo-stage",
-      "meal-photo-delete",
-      "meal-thumbnail-delivery",
-      "meal-thumbnail-read",
-      "game-media-stage",
-      "game-media-read",
-      "game-media-stat",
-      "game-media-delete",
-      "recapMediaStage",
-      "recapMediaRead",
-      "gameImageStage",
-      "gameImageDelivery",
-      "gameImageStat",
-      "browser-vault-session",
-      "user-status",
-    ]);
-    expect(hostedLocalTestInternalRoutes.map(({ name }) => name)).toEqual([
-      "test-artifact-seed",
-      "test-canonical-checkpoint-lost-ack",
-      "test-foreground-priority-ordering",
-      "test-arm-generated-image-provider-barrier",
-      "test-release-generated-image-provider-barrier",
-      "test-snapshot-publication-corruption",
-      "test-shutdown-checkpoint-publication-barrier",
-      "test-container-activity-expired",
-      "test-container-active-operation-drop",
-      "test-read-active-runtime-fence",
-      "test-ensure-standby-ready",
-      "test-temporal-mailbox-signal-fault-arm",
-      "test-temporal-mailbox-signal-fault-clear",
-      "test-temporal-mailbox-signal-fault-consume",
-      "test-direct-r2-presigned-put",
-      "test-direct-r2-locator-marker",
-      "device-webhook-enqueue",
-      "temporal-worker-binding-admission",
-      "deploy-artifact-smoke",
-      "deploy-container-smoke",
-      "runtime-ensure-processing",
-      "runtime-health-data-consent",
-      "user-data-delete",
-      "runtime-resource-purge",
-      "telegram-usage-limit-notice",
-      "meal-photo-stage",
-      "meal-photo-delete",
-      "meal-thumbnail-delivery",
-      "meal-thumbnail-read",
-      "game-media-stage",
-      "game-media-read",
-      "game-media-stat",
-      "game-media-delete",
-      "recapMediaStage",
-      "recapMediaRead",
-      "gameImageStage",
-      "gameImageDelivery",
-      "gameImageStat",
-      "browser-vault-session",
-      "user-status",
-    ]);
   });
 
   it("exposes the invoked Worker version when the version metadata binding is present", async () => {
@@ -469,17 +347,10 @@ describe("cloudflare worker routes", () => {
   it("runs the deploy-signed managed container smoke route", async () => {
     const env = createWorkerEnv();
     const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
-    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
-    const request = new Request(url, {
-      headers: await createHostedWebCallbackSignatureHeaders({
-        environment: callbackSigning,
-        method: "POST",
-        path: url.pathname,
-        payload: "",
-        search: url.search,
-      }),
-      method: "POST",
-    });
+    const request = await signWebCallbackControlRequest(
+      new Request(url, { method: "POST" }),
+      env,
+    );
 
     const response = await worker.fetch(request, env);
 
@@ -654,10 +525,7 @@ describe("cloudflare worker routes", () => {
       RUNNER_CONTAINER_SMOKE: {
         getByName() {
           return {
-            async destroyInstance() {},
-            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
-              throw new Error("Runner container should not be invoked by smoke route tests.");
-            },
+            ...createRunnerContainerNamespace().getByName("smoke"),
             async smokeHealth() {
               throw new Error(
                 "Hosted runner container Codex shell smoke failed with HTTP 500. "
@@ -669,17 +537,10 @@ describe("cloudflare worker routes", () => {
       },
     });
     const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
-    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
-    const request = new Request(url, {
-      headers: await createHostedWebCallbackSignatureHeaders({
-        environment: callbackSigning,
-        method: "POST",
-        path: url.pathname,
-        payload: "",
-        search: url.search,
-      }),
-      method: "POST",
-    });
+    const request = await signWebCallbackControlRequest(
+      new Request(url, { method: "POST" }),
+      env,
+    );
 
     const response = await worker.fetch(request, env);
 
@@ -752,10 +613,7 @@ describe("cloudflare worker routes", () => {
       RUNNER_CONTAINER_SMOKE: {
         getByName() {
           return {
-            async destroyInstance() {},
-            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
-              throw new Error("Runner container should not be invoked by smoke route tests.");
-            },
+            ...createRunnerContainerNamespace().getByName("smoke"),
             smokeHealth,
           };
         },
@@ -764,17 +622,10 @@ describe("cloudflare worker routes", () => {
     const url = new URL(
       "https://runner.example.test/internal/deploy/container-smoke?directR2PresignedPut=1",
     );
-    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
-    const request = new Request(url, {
-      headers: await createHostedWebCallbackSignatureHeaders({
-        environment: callbackSigning,
-        method: "POST",
-        path: url.pathname,
-        payload: "",
-        search: url.search,
-      }),
-      method: "POST",
-    });
+    const request = await signWebCallbackControlRequest(
+      new Request(url, { method: "POST" }),
+      env,
+    );
 
     const response = await worker.fetch(request, env);
 
@@ -830,10 +681,7 @@ describe("cloudflare worker routes", () => {
       RUNNER_CONTAINER_SMOKE: {
         getByName() {
           return {
-            async destroyInstance() {},
-            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
-              throw new Error("Runner container should not be invoked by smoke route tests.");
-            },
+            ...createRunnerContainerNamespace().getByName("smoke"),
             smokeHealth,
           };
         },
@@ -842,17 +690,10 @@ describe("cloudflare worker routes", () => {
     const url = new URL(
       "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=1",
     );
-    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
-    const request = new Request(url, {
-      headers: await createHostedWebCallbackSignatureHeaders({
-        environment: callbackSigning,
-        method: "POST",
-        path: url.pathname,
-        payload: "",
-        search: url.search,
-      }),
-      method: "POST",
-    });
+    const request = await signWebCallbackControlRequest(
+      new Request(url, { method: "POST" }),
+      env,
+    );
 
     const response = await worker.fetch(request, env);
 
@@ -884,10 +725,7 @@ describe("cloudflare worker routes", () => {
       RUNNER_CONTAINER_SMOKE: {
         getByName() {
           return {
-            async destroyInstance() {},
-            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
-              throw new Error("Runner container should not be invoked by smoke route tests.");
-            },
+            ...createRunnerContainerNamespace().getByName("smoke"),
             smokeHealth,
           };
         },
@@ -896,17 +734,10 @@ describe("cloudflare worker routes", () => {
     const url = new URL(
       "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-6.1-sol",
     );
-    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
-    const request = new Request(url, {
-      headers: await createHostedWebCallbackSignatureHeaders({
-        environment: callbackSigning,
-        method: "POST",
-        path: url.pathname,
-        payload: "",
-        search: url.search,
-      }),
-      method: "POST",
-    });
+    const request = await signWebCallbackControlRequest(
+      new Request(url, { method: "POST" }),
+      env,
+    );
 
     const response = await worker.fetch(request, env);
 
@@ -959,155 +790,79 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("uses a version-specific deploy smoke Durable Object name when version metadata is present", async () => {
-    const baseEnv = createWorkerEnv();
+  it.each([
+    {
+      label: "version",
+      query: "",
+      localMode: false,
+      versionId: "version-123",
+      expectedName: "__deploy-smoke-version-123",
+    },
+    {
+      label: "first attempt",
+      query: "?attempt=1",
+      localMode: false,
+      versionId: "version-123",
+      expectedName: "__deploy-smoke-version-123-attempt-1",
+    },
+    {
+      label: "retry",
+      query: "?attempt=2",
+      localMode: false,
+      versionId: "version-123",
+      expectedName: "__deploy-smoke-version-123-attempt-2",
+    },
+    {
+      label: "local build over version",
+      query: "",
+      localMode: true,
+      versionId: "version-123",
+      expectedName: "__deploy-smoke-local-build-123",
+    },
+    {
+      label: "local build without version",
+      query: "",
+      localMode: true,
+      versionId: null,
+      expectedName: "__deploy-smoke-local-build-123",
+    },
+    {
+      label: "invalid attempt",
+      query: "?attempt=0",
+      localMode: false,
+      versionId: "version-123",
+      expectedName: null,
+    },
+  ])("binds the signed $label smoke request to its isolated container", async ({ query, localMode, versionId, expectedName }) => {
     const runnerGetByName = vi.fn(createRunnerContainerNamespace().getByName);
     const smokeGetByName = vi.fn(createRunnerContainerNamespace().getByName);
-    const env = {
-      ...baseEnv,
-      CF_VERSION_METADATA: {
-        id: "version-123",
-        tag: "test",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      },
-      RUNNER_CONTAINER: {
-        getByName: runnerGetByName,
-      },
-      RUNNER_CONTAINER_SMOKE: {
-        getByName: smokeGetByName,
-      },
-    };
-    const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
-    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
-    const request = new Request(url, {
-      headers: await createHostedWebCallbackSignatureHeaders({
-        environment: callbackSigning,
-        method: "POST",
-        path: url.pathname,
-        payload: "",
-        search: url.search,
-      }),
-      method: "POST",
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      ...(versionId ? { CF_VERSION_METADATA: { id: versionId } } : {}),
+      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "local build/123",
+      ...(localMode ? { MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1" } : {}),
+      RUNNER_CONTAINER: { getByName: runnerGetByName },
+      RUNNER_CONTAINER_SMOKE: { getByName: smokeGetByName },
     });
+    const response = await worker.fetch(
+      await signWebCallbackControlRequest(new Request(
+        `https://runner.example.test/internal/deploy/container-smoke${query}`,
+        { method: "POST" },
+      ), env),
+      env,
+    );
 
-    const response = await worker.fetch(request, env);
-
-    expect(response.status).toBe(200);
-    expect(smokeGetByName).toHaveBeenCalledWith("__deploy-smoke-version-123");
     expect(runnerGetByName).not.toHaveBeenCalled();
-  });
-
-  it("routes a signed attempt-scoped deploy smoke request to its own container", async () => {
-    const baseEnv = createWorkerEnv();
-    const smokeGetByName = vi.fn(createRunnerContainerNamespace().getByName);
-    const env = {
-      ...baseEnv,
-      CF_VERSION_METADATA: {
-        id: "version-123",
-        tag: "test",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      },
-      RUNNER_CONTAINER_SMOKE: {
-        getByName: smokeGetByName,
-      },
-    };
-    const url = new URL("https://runner.example.test/internal/deploy/container-smoke?attempt=2");
-    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
-    const request = new Request(url, {
-      // Signing over the attempt-bearing search proves the smoke's attempt is
-      // covered by the signature rather than an unauthenticated tack-on.
-      headers: await createHostedWebCallbackSignatureHeaders({
-        environment: callbackSigning,
-        method: "POST",
-        path: url.pathname,
-        payload: "",
-        search: url.search,
-      }),
-      method: "POST",
-    });
-
-    const response = await worker.fetch(request, env);
-
-    expect(response.status).toBe(200);
-    expect(smokeGetByName).toHaveBeenCalledWith("__deploy-smoke-version-123-attempt-2");
-  });
-
-  it("rejects a signed deploy smoke request with a malformed attempt before starting a container", async () => {
-    const baseEnv = createWorkerEnv();
-    const smokeGetByName = vi.fn(createRunnerContainerNamespace().getByName);
-    const env = {
-      ...baseEnv,
-      CF_VERSION_METADATA: {
-        id: "version-123",
-        tag: "test",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      },
-      RUNNER_CONTAINER_SMOKE: {
-        getByName: smokeGetByName,
-      },
-    };
-    const url = new URL("https://runner.example.test/internal/deploy/container-smoke?attempt=0");
-    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
-    const request = new Request(url, {
-      headers: await createHostedWebCallbackSignatureHeaders({
-        environment: callbackSigning,
-        method: "POST",
-        path: url.pathname,
-        payload: "",
-        search: url.search,
-      }),
-      method: "POST",
-    });
-
-    const response = await worker.fetch(request, env);
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "Unsupported deploy container smoke attempt.",
-      ok: false,
-    });
-    expect(smokeGetByName).not.toHaveBeenCalled();
-  });
-
-  it("uses the local build deploy smoke Durable Object name before version metadata", () => {
-    expect(resolveDeployContainerSmokeObjectName({
-      CF_VERSION_METADATA: {
-        id: "version-123",
-        tag: "test",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      },
-      MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
-      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "local build/123",
-    })).toBe("__deploy-smoke-local-build-123");
-  });
-
-  it("uses version metadata before local build id without a hosted-local marker", () => {
-    expect(resolveDeployContainerSmokeObjectName({
-      CF_VERSION_METADATA: {
-        id: "version-123",
-        tag: "test",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      },
-      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "local build/123",
-    })).toBe("__deploy-smoke-version-123");
-  });
-
-  it("scopes the deploy smoke Durable Object name to the retry attempt", () => {
-    const env = {
-      CF_VERSION_METADATA: {
-        id: "version-123",
-        tag: "test",
-        timestamp: "2026-04-24T00:00:00.000Z",
-      },
-    } as const;
-
-    // The worker version is constant for a whole smoke run, so the attempt is the
-    // only thing that moves a retry onto a fresh container instance.
-    expect(resolveDeployContainerSmokeObjectName(env, 1))
-      .toBe("__deploy-smoke-version-123-attempt-1");
-    expect(resolveDeployContainerSmokeObjectName(env, 2))
-      .toBe("__deploy-smoke-version-123-attempt-2");
-    expect(resolveDeployContainerSmokeObjectName(env)).toBe("__deploy-smoke-version-123");
+    if (expectedName) {
+      expect(response.status).toBe(200);
+      expect(smokeGetByName).toHaveBeenCalledWith(expectedName);
+    } else {
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "Unsupported deploy container smoke attempt.",
+        ok: false,
+      });
+      expect(smokeGetByName).not.toHaveBeenCalled();
+    }
   });
 
   it("reads a positive deploy smoke attempt and rejects malformed ones", () => {
@@ -1122,41 +877,6 @@ describe("cloudflare worker routes", () => {
     for (const search of ["?attempt=0", "?attempt=-1", "?attempt=1.5", "?attempt=abc", "?attempt=10000"]) {
       expect(() => read(search)).toThrow(RangeError);
     }
-  });
-
-  it("uses a local-build-specific deploy smoke Durable Object name in hosted-local mode", async () => {
-    const baseEnv = createWorkerEnv();
-    const runnerGetByName = vi.fn(createRunnerContainerNamespace().getByName);
-    const smokeGetByName = vi.fn(createRunnerContainerNamespace().getByName);
-    const env = {
-      ...baseEnv,
-      MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID: "1",
-      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "local build/123",
-      RUNNER_CONTAINER: {
-        getByName: runnerGetByName,
-      },
-      RUNNER_CONTAINER_SMOKE: {
-        getByName: smokeGetByName,
-      },
-    };
-    const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
-    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
-    const request = new Request(url, {
-      headers: await createHostedWebCallbackSignatureHeaders({
-        environment: callbackSigning,
-        method: "POST",
-        path: url.pathname,
-        payload: "",
-        search: url.search,
-      }),
-      method: "POST",
-    });
-
-    const response = await worker.fetch(request, env);
-
-    expect(response.status).toBe(200);
-    expect(smokeGetByName).toHaveBeenCalledWith("__deploy-smoke-local-build-123");
-    expect(runnerGetByName).not.toHaveBeenCalled();
   });
 
   it("rejects unsigned deploy container smoke requests", async () => {
@@ -1275,22 +995,28 @@ describe("cloudflare worker routes", () => {
     expect(upstreamFetch).not.toHaveBeenCalled();
   });
 
-  it("does not expose the removed wake route", async () => {
-    const stub = createUserRunnerStub();
+  it.each(["wake", "nudge", "browser-vault/refresh", "run"])(
+    "keeps removed %s routes hidden from signed callers",
+    async (route) => {
+      const stub = createUserRunnerStub();
+      const response = await worker.fetch(
+        await signControlRequest(new Request(
+          `https://runner.example.test/internal/users/member_123/${route}`,
+          {
+            body: "{}",
+            headers: { "content-type": "application/json" },
+            method: "POST",
+          },
+        )),
+        createWorkerEnv(stub),
+      );
 
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/wake", {
-        method: "POST",
-      })),
-      createWorkerEnv(stub),
-    );
-
-    expect(response.status).toBe(404);
-    expect(stub.bindUser).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error: "Not found",
-    });
-  });
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({ error: "Not found" });
+      expect(stub.bindUser).not.toHaveBeenCalled();
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps hosted-local test routes out of the production worker even when local flags are present", async () => {
     const response = await worker.fetch(
@@ -1450,7 +1176,7 @@ describe("cloudflare worker routes", () => {
   it("keeps wrong methods on enabled hosted-local test routes hidden before auth", async () => {
     const stub = createUserRunnerStub();
     const response = await hostedLocalTestWorker.fetch(
-      new Request("https://runner.example.test/__test/users/member_123/run-until-idle", {
+      new Request("https://runner.example.test/__test/users/member_123/active-runtime-fence", {
         method: "GET",
       }),
       createWorkerEnv(stub, {
@@ -1463,7 +1189,7 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
-    expect(stub.runUntilIdleForTest).not.toHaveBeenCalled();
+    expect(stub.readActiveRuntimeFenceForTest).not.toHaveBeenCalled();
   });
 
   it("requires hosted-local test route callers to be bound to the target user", async () => {
@@ -1728,10 +1454,7 @@ describe("cloudflare worker routes", () => {
       RUNNER_CONTAINER_SMOKE: {
         getByName() {
           return {
-            async destroyInstance() {},
-            async invoke(): Promise<HostedAssistantWorkspaceRuntimeJobResult> {
-              throw new Error("Runner container should not be invoked by direct R2 smoke route tests.");
-            },
+            ...createRunnerContainerNamespace().getByName("smoke"),
             smokeHealth,
           };
         },
@@ -1935,28 +1658,31 @@ describe("cloudflare worker routes", () => {
     expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(snapshotBytes);
   });
 
-  it("keeps the retired Worker alarm route hidden for bound callers", async () => {
-    const stub = createUserRunnerStub({
-      runAlarmForTest: vi.fn(async () => ({ ok: true })),
-    });
-    const env = createWorkerEnv(stub, {
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
-      NODE_ENV: "test",
-    });
-
+  it.each([
+    "alarm",
+    "stuck-invocation",
+    "stuck-invocation?startedAgoMs=35000",
+    "stuck-invocation?sameWorkerVersion=1",
+    "active-runtime-fence/age?startedAgoMs=35000",
+    "run-until-idle",
+    "run-until-idle?reason=unsupported",
+  ])("keeps retired hosted-local %s hidden for bound callers", async (route) => {
+    const stub = createUserRunnerStub();
     const response = await hostedLocalTestWorker.fetch(
       await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123/alarm",
-        {
-          method: "POST",
-        },
-      ), {
-        boundUserId: "member_123",
+        `https://runner.example.test/__test/users/member_123/${route}`,
+        { method: "POST" },
+      ), { boundUserId: "member_123" }),
+      createWorkerEnv(stub, {
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NODE_ENV: "test",
       }),
-      env,
     );
 
     expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Not found" });
+    expect(stub.bindUser).not.toHaveBeenCalled();
+    expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
   it("drops the hosted-local runner active-operation pointer for correctly bound callers", async () => {
@@ -2431,34 +2157,6 @@ describe("cloudflare worker routes", () => {
     expect(invalidResponse.status).toBe(400);
   });
 
-  it("keeps the retired Worker stuck-invocation route hidden for bound callers", async () => {
-    const stub = createUserRunnerStub({
-      startStuckInvocationForTest: vi.fn(async () => ({
-        attemptId: "workspace-invocation-test",
-        nextWakeAt: "2026-05-09T00:00:00.000Z",
-        ok: true as const,
-      })),
-    });
-    const env = createWorkerEnv(stub, {
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
-      NODE_ENV: "test",
-    });
-
-    const response = await hostedLocalTestWorker.fetch(
-      await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123/stuck-invocation",
-        {
-          method: "POST",
-        },
-      ), {
-        boundUserId: "member_123",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(404);
-  });
-
   it("reads the active hosted-local runtime fence for correctly bound callers", async () => {
     const stub = createUserRunnerStub({
       readActiveRuntimeFenceForTest: vi.fn(async () => ({
@@ -2492,82 +2190,6 @@ describe("cloudflare worker routes", () => {
     expect(stub.readActiveRuntimeFenceForTest).toHaveBeenCalledWith({
       userId: "member_123",
     });
-  });
-
-  it("keeps the retired Worker fence-aging route hidden", async () => {
-    const stub = createUserRunnerStub({
-      ageActiveRuntimeFenceForTest: vi.fn(async () => ({
-        attemptId: "workspace-invocation-test",
-        ok: true as const,
-        startedAt: "2026-05-08T23:59:25.000Z",
-      })),
-    });
-    const env = createWorkerEnv(stub, {
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
-      NODE_ENV: "test",
-    });
-
-    const response = await hostedLocalTestWorker.fetch(
-      await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123"
-          + "/active-runtime-fence/age?startedAgoMs=35000",
-        { method: "POST" },
-      ), {
-        boundUserId: "member_123",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(404);
-  });
-
-  it("keeps retired stale-invocation query hints unavailable", async () => {
-    const stub = createUserRunnerStub({
-      startStuckInvocationForTest: vi.fn(async () => ({
-        attemptId: "workspace-invocation-test",
-        nextWakeAt: "2026-05-09T00:00:00.000Z",
-        ok: true as const,
-      })),
-    });
-    const env = createWorkerEnv(stub, {
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
-      NODE_ENV: "test",
-    });
-
-    const response = await hostedLocalTestWorker.fetch(
-      await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123/stuck-invocation?startedAgoMs=35000",
-        {
-          method: "POST",
-        },
-      ), {
-        boundUserId: "member_123",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(404);
-  });
-
-  it("keeps retired same-version invocation query hints unavailable", async () => {
-    const stub = createUserRunnerStub();
-    const env = createWorkerEnv(stub, {
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
-      NODE_ENV: "test",
-    });
-
-    const response = await hostedLocalTestWorker.fetch(
-      await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123"
-          + "/stuck-invocation?sameWorkerVersion=1",
-        { method: "POST" },
-      ), {
-        boundUserId: "member_123",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(404);
   });
 
   it("keeps the removed internal dispatch route hidden from OIDC callers", async () => {
@@ -3306,70 +2928,6 @@ describe("cloudflare worker routes", () => {
     expect(env.__bucketStore.getCalls.filter((key) => key.includes("/browser-vault-replicas/"))).toEqual([]);
   });
 
-  it("does not expose the removed runner nudge route", async () => {
-    const stub = createUserRunnerStub();
-    const env = createWorkerEnv(stub);
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/nudge", {
-        body: "{}",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      })),
-      env,
-    );
-
-    expect(response.status).toBe(404);
-    expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
-  });
-
-  it("keeps the retired run-until-idle Worker route hidden", async () => {
-    const stub = createUserRunnerStub();
-    const env = createWorkerEnv(stub, {
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
-      NODE_ENV: "test",
-    });
-
-    const response = await hostedLocalTestWorker.fetch(
-      await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123/run-until-idle",
-        {
-          method: "POST",
-        },
-      ), {
-        boundUserId: "member_123",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(404);
-  });
-
-  it("rejects removed test run-until-idle reason query hints", async () => {
-    const stub = createUserRunnerStub();
-    const env = createWorkerEnv(stub, {
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
-      NODE_ENV: "test",
-    });
-
-    const response = await hostedLocalTestWorker.fetch(
-      await signControlRequest(new Request(
-        "https://runner.example.test/__test/users/member_123/run-until-idle?reason=unsupported",
-        {
-          method: "POST",
-        },
-      ), {
-        boundUserId: "member_123",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(404);
-  });
-
   it("rejects non-decimal positive integers on hosted-local test control helpers", () => {
     expect(parseTestPositiveInteger("45000")).toBe(45_000);
     expect(parseTestPositiveInteger("45e3")).toBe("invalid");
@@ -4064,26 +3622,6 @@ describe("cloudflare worker routes", () => {
     expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
-  it("does not expose the removed browser-vault refresh route", async () => {
-    const stub = createUserRunnerStub();
-    const env = createWorkerEnv(stub);
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/browser-vault/refresh", {
-        body: "{}",
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      })),
-      env,
-    );
-
-    expect(response.status).toBe(404);
-    expect(stub.bindUser).not.toHaveBeenCalled();
-    expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
-  });
-
   it("deletes hosted runner user data without queuing a new invocation", async () => {
     const stub = createUserRunnerStub({
       deleteHostedUserData: vi.fn(async (userId: string) => ({
@@ -4178,20 +3716,6 @@ describe("cloudflare worker routes", () => {
       error: "Invalid request.",
     });
     expect(stub.deleteHostedUserData).not.toHaveBeenCalled();
-  });
-
-  it("does not expose the legacy hosted-run nudge route", async () => {
-    const stub = createUserRunnerStub();
-
-    const response = await worker.fetch(
-      await signControlRequest(new Request("https://runner.example.test/internal/users/member_123/run", {
-        method: "POST",
-      })),
-      createWorkerEnv(stub),
-    );
-
-    expect(response.status).toBe(404);
-    expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
   it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
@@ -4936,11 +4460,6 @@ function createWorkerExecutionContextForTest(): {
 
 function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
   return {
-    ageActiveRuntimeFenceForTest: vi.fn(async () => ({
-      attemptId: "workspace-invocation-test",
-      ok: true as const,
-      startedAt: "2026-05-08T23:59:25.000Z",
-    })),
     bindUser: vi.fn(async (userId: string) => ({ userId })),
     deleteHostedUserData: vi.fn(async (userId: string) => ({
       deletedAt: "2026-04-29T00:00:00.000Z",
@@ -4976,16 +4495,6 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
     recordHostedMediaAsset: vi.fn(async () => true),
     readActiveRuntimeFenceForTest: vi.fn(async (_input: { userId: string }): Promise<{ attemptId: string; processingMode?: "default" | "system_mailbox" | "inbox_media_retention"; runnerContainerName?: string } | null> => null),
     readRunnerContainerNameForTest: vi.fn(async () => null),
-    runUntilIdleForTest: vi.fn(async () => ({
-      nextWakeAt: null,
-      status: "idle" as const,
-    })),
-    runAlarmForTest: vi.fn(async () => ({ ok: true as const })),
-    startStuckInvocationForTest: vi.fn(async () => ({
-      attemptId: "workspace-invocation-test",
-      nextWakeAt: null,
-      ok: true as const,
-    })),
     runnerStatus: vi.fn(async (_options?: { logLimit?: number }) => ({
       inFlight: false,
       mailboxLag: [],

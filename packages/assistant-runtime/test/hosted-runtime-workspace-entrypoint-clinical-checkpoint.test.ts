@@ -8,6 +8,7 @@ import { expect, test, vi } from "vitest";
 import * as clinicalEnrichment from "../src/hosted-runtime/clinical-enrichment.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime.ts";
 import {
+  createWorkspaceRunRequest,
   TEST_NOW, TEST_USER_ID, createDeferred, createMailboxItem, createMailboxPort, createPlatform,
   createSnapshotFixtureRef, createWorkspacePort, createWorkspaceRuntimeJobInput,
   createWorkspaceState, removeTempRoot, runHostedWorkspaceRuntimeJobInProcess,
@@ -62,8 +63,7 @@ test("drains checkpoint-ready effects before restarting an unfinished clinical p
     const result = await withRealTimeout(runHostedWorkspaceRuntimeJobInProcess(
       createWorkspaceRuntimeJobInput({ request: {
         attemptId: "attempt_synthetic_clinical_checkpoint_effects",
-        userId: TEST_USER_ID, leaseGeneration: "7", workspaceVersion: "0",
-        runnerIdleTtlMs: 1,
+        leaseGeneration: "7",
       } }),
       {
         vaultRoot, runtimeWakeSignal,
@@ -146,8 +146,7 @@ test("resumes clinical work when fresh input continues the invocation after a ch
     await withRealTimeout(runHostedWorkspaceRuntimeJobInProcess(
       createWorkspaceRuntimeJobInput({ request: {
         attemptId: "attempt_synthetic_clinical_continuation",
-        userId: TEST_USER_ID, leaseGeneration: "7", workspaceVersion: "0",
-        runnerIdleTtlMs: 1,
+        leaseGeneration: "7",
       } }),
       {
         vaultRoot, runtimeWakeSignal,

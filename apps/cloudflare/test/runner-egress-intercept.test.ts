@@ -142,11 +142,12 @@ function createOpenAiAuthorizationAlertTestNamespace(
   return { getByName, namespace: { getByName } };
 }
 
-function createWaitUntilCollector() {
+function createWaitUntilCollector(containerId = "synthetic-container") {
   const promises: Promise<unknown>[] = [];
   return {
     context: {
-      className: "RunnerContainer", containerId: "synthetic-container",
+      className: "RunnerContainer",
+      containerId,
       waitUntil(promise: Promise<unknown>): void {
         promises.push(promise);
       },
@@ -255,14 +256,73 @@ function createHostedGeminiVideoAnalysisRequestBody(
   };
 }
 
-function createDeploySmokeOpenAiRequestBody(input: {
+function createXaiResponsesRequest(input: {
+  body?: Record<string, unknown>;
+  headers?: Record<string, string>;
+} = {}): Request {
+  return new Request("https://api.x.ai/v1/responses", {
+    body: JSON.stringify(input.body ?? createHostedXaiResponsesRequestBody()),
+    headers: {
+      ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+      "content-type": "application/json",
+      ...input.headers,
+    },
+    method: "POST",
+  });
+}
+
+function createGeminiVideoAnalysisRequest(input: {
+  url?: string;
+  body?: Record<string, unknown>;
+  headers?: Record<string, string>;
+} = {}): Request {
+  return new Request(
+    input.url ?? `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+    {
+      body: JSON.stringify(input.body ?? createHostedGeminiVideoAnalysisRequestBody()),
+      headers: {
+        ...BOUND_USER_WRITE_FENCE_HEADERS,
+        "content-type": "application/json",
+        "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        ...input.headers,
+      },
+      method: "POST",
+    },
+  );
+}
+
+function createElevenLabsRequest(input: {
+  url: string;
+  body: Record<string, unknown>;
+  headers?: Record<string, string>;
+}): Request {
+  return new Request(input.url, {
+    body: JSON.stringify(input.body),
+    headers: {
+      ...BOUND_USER_WRITE_FENCE_HEADERS,
+      "content-type": "application/json",
+      "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+      ...input.headers,
+    },
+    method: "POST",
+  });
+}
+
+function createDeploySmokeOpenAiRequest(input: {
   model?: string;
-} = {}): Record<string, unknown> {
-  return {
-    input: "anything Codex emits",
-    model: input.model ?? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-    stream: true,
-  };
+} = {}): Request {
+  return new Request("https://api.openai.com/v1/responses", {
+    body: JSON.stringify({
+      input: "anything Codex emits",
+      model: input.model ?? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+      stream: true,
+    }),
+    headers: {
+      authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+      "content-type": "application/json",
+    },
+    method: "POST",
+  });
 }
 
 function createProviderEgressTokenValidationResult(input: {
@@ -307,13 +367,6 @@ async function createProviderCredentialAuthorizationHeader(
   };
 }
 
-function createLegacyBooleanProviderEgressTokenValidationResult(
-  value: boolean,
-): TestProviderContext {
-  // Simulates an old Durable Object RPC payload crossing the runtime boundary.
-  return value as never;
-}
-
 function testByteLength(value: string): number {
   return TEST_TEXT_ENCODER.encode(value).byteLength;
 }
@@ -343,28 +396,6 @@ function readCapturedOpenAiDiagnostic(): Record<string, unknown> {
   const details = captureCall?.[0].details;
   expect(details && typeof details === "object").toBe(true);
   return details as Record<string, unknown>;
-}
-
-function readDiagnosticInputMetric(
-  diagnostic: Record<string, unknown>,
-  kind: string,
-): { bytes: number; count: number } | null {
-  const kinds = diagnostic.inputNestedMetricKinds;
-  const counts = diagnostic.inputNestedMetricCounts;
-  const bytes = diagnostic.inputNestedMetricBytes;
-  if (!Array.isArray(kinds) || !Array.isArray(counts) || !Array.isArray(bytes)) {
-    throw new TypeError("Expected aligned input diagnostic metric arrays.");
-  }
-  const index = kinds.indexOf(kind);
-  if (index < 0) {
-    return null;
-  }
-  const count = counts[index];
-  const byteCount = bytes[index];
-  if (typeof count !== "number" || typeof byteCount !== "number") {
-    throw new TypeError("Expected numeric input diagnostic metrics.");
-  }
-  return { bytes: byteCount, count };
 }
 
 const interceptControl = new WeakMap<Readonly<Record<string, unknown>>, {
@@ -1703,7 +1734,8 @@ describe("hostedRunnerIntercept", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
-    const waitUntilPromises: Promise<unknown>[] = [];
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("member_123--v-version_1");
 
     const response = await hostedRunnerIntercept(
       new Request(url, {
@@ -1722,13 +1754,7 @@ describe("hostedRunnerIntercept", () => {
         ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
         validateRuntimeWriteFence,
       }),
-      {
-        className: "RunnerContainer",
-        containerId: "member_123--v-version_1",
-        waitUntil: (promise) => {
-          waitUntilPromises.push(promise);
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(200);
@@ -1790,32 +1816,22 @@ describe("hostedRunnerIntercept", () => {
       new Response("upstream unavailable", { status: 503 })
     );
     vi.stubGlobal("fetch", fetchMock);
-    const waitUntilPromises: Promise<unknown>[] = [];
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("member_123--v-version_1");
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128",
+        body: {
           model_id: "eleven_multilingual_v2",
           text: "Short memo.",
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
       }),
       createInterceptEnv({
         ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
         validateRuntimeWriteFence: async () => true,
       }),
-      {
-        className: "RunnerContainer",
-        containerId: "member_123--v-version_1",
-        waitUntil: (promise) => {
-          waitUntilPromises.push(promise);
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(503);
@@ -1884,17 +1900,12 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128",
+        body: {
           model_id: "eleven_multilingual_v2",
           text: "x".repeat(33 * 1024),
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
       }),
       createInterceptEnv({
         ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
@@ -1912,68 +1923,46 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const invalidRequests = [
-      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128",
+        body: {
           model_id: "eleven_multilingual_v2",
           text: "Short memo.",
           voice_settings: {
             stability: 1,
           },
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
       }),
-      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128",
+        body: {
           model_id: "eleven_multilingual_v2",
           text: "Short memo.",
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "text/plain",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
+        headers: {
+          "content-type": "text/plain",
+        },
       }),
-      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128",
+        body: {
           model_id: "eleven_multilingual_v2",
           text: "x".repeat(4_001),
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
       }),
-      new Request("https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128", {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128",
+        body: {
           model_id: "eleven_monolingual_v1",
           text: "Short memo.",
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
       }),
-      new Request(`https://api.elevenlabs.io/v1/text-to-speech/${"v".repeat(201)}?output_format=mp3_44100_128`, {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: `https://api.elevenlabs.io/v1/text-to-speech/${"v".repeat(201)}?output_format=mp3_44100_128`,
+        body: {
           model_id: "eleven_multilingual_v2",
           text: "Short memo.",
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
       }),
     ];
 
@@ -2009,14 +1998,9 @@ describe("hostedRunnerIntercept", () => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
     const response = await hostedRunnerIntercept(
-      new Request("https://api.elevenlabs.io/v1/text-to-dialogue?output_format=mp3_44100_128", {
-        body: JSON.stringify(body),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-        },
-        method: "POST",
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/text-to-dialogue?output_format=mp3_44100_128",
+        body,
       }),
       createInterceptEnv({
         ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
@@ -2048,34 +2032,24 @@ describe("hostedRunnerIntercept", () => {
       });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const waitUntilPromises: Promise<unknown>[] = [];
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("member_123--v-version_1");
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192", {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
+        body: {
           force_instrumental: true,
           model_id: "music_v2",
           music_length_ms: 45_000,
           prompt: "Upbeat lo-fi piano motif",
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
       }),
       createInterceptEnv({
         ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
         validateRuntimeWriteFence: async () => true,
       }),
-      {
-        className: "RunnerContainer",
-        containerId: "member_123--v-version_1",
-        waitUntil: (promise) => {
-          waitUntilPromises.push(promise);
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(200);
@@ -2125,78 +2099,53 @@ describe("hostedRunnerIntercept", () => {
 
     const invalidRequests = [
       // missing output_format
-      new Request("https://api.elevenlabs.io/v1/music", {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/music",
+        body: {
           force_instrumental: false,
           model_id: "music_v2",
           music_length_ms: 30_000,
           prompt: "x",
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
       }),
       // wrong output_format
-      new Request("https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128", {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128",
+        body: {
           force_instrumental: false,
           model_id: "music_v2",
           music_length_ms: 30_000,
           prompt: "x",
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
       }),
       // unsupported model
-      new Request("https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192", {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
+        body: {
           force_instrumental: false,
           model_id: "music_v1",
           music_length_ms: 30_000,
           prompt: "x",
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
       }),
       // duration out of range
-      new Request("https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192", {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
+        body: {
           force_instrumental: false,
           model_id: "music_v2",
           music_length_ms: 1_500,
           prompt: "x",
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
       }),
       // missing force_instrumental field (exact-keys check)
-      new Request("https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192", {
-        body: JSON.stringify({
+      createElevenLabsRequest({
+        url: "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
+        body: {
           model_id: "music_v2",
           music_length_ms: 30_000,
           prompt: "x",
-        }),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "xi-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
         },
-        method: "POST",
       }),
     ];
 
@@ -2257,35 +2206,24 @@ describe("hostedRunnerIntercept", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
-    const waitUntilPromises: Promise<unknown>[] = [];
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("member_123--v-version_1");
     const requestBody = createHostedGeminiVideoAnalysisRequestBody();
 
     const response = await hostedRunnerIntercept(
-      new Request(
-        `https://generativelanguage.googleapis.com${path}`,
-        {
-          body: JSON.stringify(requestBody),
-          headers: {
-            ...BOUND_USER_WRITE_FENCE_HEADERS,
-            "content-type": "application/json",
-            cookie: "session=user-supplied-cookie",
-            "proxy-authorization": "Bearer user-supplied-proxy-token",
-            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-          },
-          method: "POST",
+      createGeminiVideoAnalysisRequest({
+        url: `https://generativelanguage.googleapis.com${path}`,
+        body: requestBody,
+        headers: {
+          cookie: "session=user-supplied-cookie",
+          "proxy-authorization": "Bearer user-supplied-proxy-token",
         },
-      ),
+      }),
       createInterceptEnv({
         GEMINI_API_KEY: "gemini-worker-secret",
         validateRuntimeWriteFence,
       }),
-      {
-        className: "RunnerContainer",
-        containerId: "member_123--v-version_1",
-        waitUntil: (promise) => {
-          waitUntilPromises.push(promise);
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(200);
@@ -2349,32 +2287,16 @@ describe("hostedRunnerIntercept", () => {
       return Response.json(upstreamPayload);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const waitUntilPromises: Promise<unknown>[] = [];
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector(RUNNER_CONTAINER_NAME);
 
     const response = await hostedRunnerIntercept(
-      new Request(
-        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
-        {
-          body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
-          headers: {
-            ...BOUND_USER_WRITE_FENCE_HEADERS,
-            "content-type": "application/json",
-            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-          },
-          method: "POST",
-        },
-      ),
+      createGeminiVideoAnalysisRequest(),
       createInterceptEnv({
         GEMINI_API_KEY: "gemini-worker-secret",
         validateRuntimeWriteFence: async () => true,
       }),
-      {
-        className: "RunnerContainer",
-        containerId: RUNNER_CONTAINER_NAME,
-        waitUntil: (promise) => {
-          waitUntilPromises.push(promise);
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(200);
@@ -2426,18 +2348,7 @@ describe("hostedRunnerIntercept", () => {
     try {
       const response = await Promise.race([
         hostedRunnerIntercept(
-          new Request(
-            `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
-            {
-              body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
-              headers: {
-                ...BOUND_USER_WRITE_FENCE_HEADERS,
-                "content-type": "application/json",
-                "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-              },
-              method: "POST",
-            },
-          ),
+          createGeminiVideoAnalysisRequest(),
           createInterceptEnv({
             GEMINI_API_KEY: "gemini-worker-secret",
             validateRuntimeWriteFence: async () => true,
@@ -2494,32 +2405,16 @@ describe("hostedRunnerIntercept", () => {
     };
     const fetchMock = vi.fn<typeof fetch>(async () => Response.json(upstreamPayload));
     vi.stubGlobal("fetch", fetchMock);
-    const waitUntilPromises: Promise<unknown>[] = [];
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector(RUNNER_CONTAINER_NAME);
 
     const response = await hostedRunnerIntercept(
-      new Request(
-        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
-        {
-          body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
-          headers: {
-            ...BOUND_USER_WRITE_FENCE_HEADERS,
-            "content-type": "application/json",
-            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-          },
-          method: "POST",
-        },
-      ),
+      createGeminiVideoAnalysisRequest(),
       createInterceptEnv({
         GEMINI_API_KEY: "gemini-worker-secret",
         validateRuntimeWriteFence: async () => true,
       }),
-      {
-        className: "RunnerContainer",
-        containerId: RUNNER_CONTAINER_NAME,
-        waitUntil: (promise) => {
-          waitUntilPromises.push(promise);
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(502);
@@ -2550,18 +2445,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await hostedRunnerIntercept(
-      new Request(
-        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
-        {
-          body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
-          headers: {
-            ...BOUND_USER_WRITE_FENCE_HEADERS,
-            "content-type": "application/json",
-            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-          },
-          method: "POST",
-        },
-      ),
+      createGeminiVideoAnalysisRequest(),
       createInterceptEnv({
         GEMINI_API_KEY: "gemini-worker-secret",
         validateRuntimeWriteFence: async () => true,
@@ -2579,26 +2463,20 @@ describe("hostedRunnerIntercept", () => {
     const baseUrl = "https://generativelanguage.googleapis.com";
     const valid = createHostedGeminiVideoAnalysisRequestBody();
     const cases = [
-      new Request(`${baseUrl}/v1beta/models/gemini-other:generateContent`, {
-        body: JSON.stringify(valid),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-        },
-        method: "POST",
+      createGeminiVideoAnalysisRequest({
+        url: `${baseUrl}/v1beta/models/gemini-other:generateContent`,
+        body: valid,
       }),
-      new Request(`${baseUrl}${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`, {
-        body: JSON.stringify(valid),
+      createGeminiVideoAnalysisRequest({
+        url: `${baseUrl}${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        body: valid,
         headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
           "x-goog-api-key": "caller-key",
         },
-        method: "POST",
       }),
-      new Request(`${baseUrl}${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`, {
-        body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody({
+      createGeminiVideoAnalysisRequest({
+        url: `${baseUrl}${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        body: createHostedGeminiVideoAnalysisRequestBody({
           contents: [{
             parts: [
               {
@@ -2612,13 +2490,7 @@ describe("hostedRunnerIntercept", () => {
             ],
             role: "user",
           }],
-        })),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          "content-type": "application/json",
-          "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
-        },
-        method: "POST",
+        }),
       }),
     ];
 
@@ -2666,32 +2538,23 @@ describe("hostedRunnerIntercept", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
-    const waitUntilPromises: Promise<unknown>[] = [];
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("member_123--v-version_1");
 
     const requestBody = createHostedXaiResponsesRequestBody();
     const response = await hostedRunnerIntercept(
-      new Request("https://api.x.ai/v1/responses", {
-        body: JSON.stringify(requestBody),
+      createXaiResponsesRequest({
+        body: requestBody,
         headers: {
-          ...BOUND_USER_WRITE_FENCE_HEADERS,
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
           cookie: "session=user-supplied-cookie",
-          "content-type": "application/json",
           "proxy-authorization": "Bearer user-supplied-proxy-token",
         },
-        method: "POST",
       }),
       createInterceptEnv({
         validateRuntimeWriteFence,
         XAI_API_KEY: "xai-worker-secret",
       }),
-      {
-        className: "RunnerContainer",
-        containerId: "member_123--v-version_1",
-        waitUntil: (promise) => {
-          waitUntilPromises.push(promise);
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(200);
@@ -2776,14 +2639,7 @@ describe("hostedRunnerIntercept", () => {
     try {
       const response = await Promise.race([
         hostedRunnerIntercept(
-          new Request("https://api.x.ai/v1/responses", {
-            body: JSON.stringify(createHostedXaiResponsesRequestBody()),
-            headers: {
-              ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-              "content-type": "application/json",
-            },
-            method: "POST",
-          }),
+          createXaiResponsesRequest(),
           createInterceptEnv({
             validateRuntimeWriteFence: async () => true,
             XAI_API_KEY: "xai-worker-secret",
@@ -2848,14 +2704,7 @@ describe("hostedRunnerIntercept", () => {
     try {
       const response = await Promise.race([
         hostedRunnerIntercept(
-          new Request("https://api.x.ai/v1/responses", {
-            body: JSON.stringify(createHostedXaiResponsesRequestBody()),
-            headers: {
-              ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-              "content-type": "application/json",
-            },
-            method: "POST",
-          }),
+          createXaiResponsesRequest(),
           createInterceptEnv({
             validateRuntimeWriteFence: async () => true,
             XAI_API_KEY: "xai-worker-secret",
@@ -2894,28 +2743,16 @@ describe("hostedRunnerIntercept", () => {
         new Response("upstream unavailable", { status })
       );
       vi.stubGlobal("fetch", fetchMock);
-      const waitUntilPromises: Promise<unknown>[] = [];
+      const { context: waitUntilContext, promises: waitUntilPromises } =
+        createWaitUntilCollector("member_123--v-version_1");
 
       const response = await hostedRunnerIntercept(
-        new Request("https://api.x.ai/v1/responses", {
-          body: JSON.stringify(createHostedXaiResponsesRequestBody()),
-          headers: {
-            ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-            "content-type": "application/json",
-          },
-          method: "POST",
-        }),
+        createXaiResponsesRequest(),
         createInterceptEnv({
           validateRuntimeWriteFence: async () => true,
           XAI_API_KEY: "xai-worker-secret",
         }),
-        {
-          className: "RunnerContainer",
-          containerId: "member_123--v-version_1",
-          waitUntil: (promise) => {
-            waitUntilPromises.push(promise);
-          },
-        },
+        waitUntilContext,
       );
 
       expect(response.status).toBe(status);
@@ -2937,28 +2774,16 @@ describe("hostedRunnerIntercept", () => {
       return Response.json({ output: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const waitUntilPromises: Promise<unknown>[] = [];
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("member_123--v-version_1");
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.x.ai/v1/responses", {
-        body: JSON.stringify(createHostedXaiResponsesRequestBody()),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-          "content-type": "application/json",
-        },
-        method: "POST",
-      }),
+      createXaiResponsesRequest(),
       createInterceptEnv({
         validateRuntimeWriteFence: async () => true,
         XAI_API_KEY: "xai-worker-secret",
       }),
-      {
-        className: "RunnerContainer",
-        containerId: "member_123--v-version_1",
-        waitUntil: (promise) => {
-          waitUntilPromises.push(promise);
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(200);
@@ -3074,13 +2899,8 @@ describe("hostedRunnerIntercept", () => {
 
     for (const body of invalidBodies) {
       const response = await hostedRunnerIntercept(
-        new Request("https://api.x.ai/v1/responses", {
-          body: JSON.stringify(body),
-          headers: {
-            ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-            "content-type": "application/json",
-          },
-          method: "POST",
+        createXaiResponsesRequest({
+          body,
         }),
         createInterceptEnv({
           validateRuntimeWriteFence: async () => true,
@@ -3093,13 +2913,10 @@ describe("hostedRunnerIntercept", () => {
 
     // Non-JSON content types never reach upstream either.
     const nonJsonResponse = await hostedRunnerIntercept(
-      new Request("https://api.x.ai/v1/responses", {
-        body: JSON.stringify(createHostedXaiResponsesRequestBody()),
+      createXaiResponsesRequest({
         headers: {
-          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
           "content-type": "text/plain",
         },
-        method: "POST",
       }),
       createInterceptEnv({
         validateRuntimeWriteFence: async () => true,
@@ -3137,15 +2954,10 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.x.ai/v1/responses", {
-        body: JSON.stringify(createHostedXaiResponsesRequestBody({
+      createXaiResponsesRequest({
+        body: createHostedXaiResponsesRequestBody({
           input: "x".repeat(33 * 1024),
-        })),
-        headers: {
-          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
-          "content-type": "application/json",
-        },
-        method: "POST",
+        }),
       }),
       createInterceptEnv({
         validateRuntimeWriteFence: async () => true,
@@ -3275,14 +3087,7 @@ describe("hostedRunnerIntercept", () => {
     });
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify(createDeploySmokeOpenAiRequestBody()),
-        headers: {
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
-          "content-type": "application/json",
-        },
-        method: "POST",
-      }),
+      createDeploySmokeOpenAiRequest(),
       env,
       { className: "DeploySmokeRunnerContainer", containerId: "deploy-smoke-container-id" },
     );
@@ -3321,27 +3126,13 @@ describe("hostedRunnerIntercept", () => {
     });
 
     const firstResponse = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify(createDeploySmokeOpenAiRequestBody()),
-        headers: {
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
-          "content-type": "application/json",
-        },
-        method: "POST",
-      }),
+      createDeploySmokeOpenAiRequest(),
       env,
       { className: "DeploySmokeRunnerContainer", containerId: "deploy-smoke-container-id" },
     );
 
     const secondResponse = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify(createDeploySmokeOpenAiRequestBody()),
-        headers: {
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
-          "content-type": "application/json",
-        },
-        method: "POST",
-      }),
+      createDeploySmokeOpenAiRequest(),
       env,
       { className: "DeploySmokeRunnerContainer", containerId: "deploy-smoke-container-id" },
     );
@@ -3396,14 +3187,7 @@ describe("hostedRunnerIntercept", () => {
     });
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify(createDeploySmokeOpenAiRequestBody({ model: "gpt-smoke-mismatch" })),
-        headers: {
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
-          "content-type": "application/json",
-        },
-        method: "POST",
-      }),
+      createDeploySmokeOpenAiRequest({ model: "gpt-smoke-mismatch" }),
       env,
       { className: "DeploySmokeRunnerContainer", containerId: "deploy-smoke-container-id" },
     );
@@ -3424,14 +3208,7 @@ describe("hostedRunnerIntercept", () => {
     });
 
     const response = await hostedRunnerIntercept(
-      new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify(createDeploySmokeOpenAiRequestBody()),
-        headers: {
-          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
-          "content-type": "application/json",
-        },
-        method: "POST",
-      }),
+      createDeploySmokeOpenAiRequest(),
       env,
       { className: "DeploySmokeRunnerContainer", containerId: "deploy-smoke-container-id" },
     );
@@ -4058,19 +3835,9 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("emits OpenAI cache diagnostics as redacted structured metadata without a Web runtime-log POST", async () => {
-    const waitUntilPromises: Promise<unknown>[] = [];
-    const fetchMock = vi.fn<typeof fetch>(async (target) => {
-      const url = new URL(readFetchTargetUrl(target));
-      if (url.hostname === "web.example.test") {
-        return new Response(JSON.stringify({ loggedCount: 1 }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-      return new Response("ok");
-    });
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("opaque-container-id");
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
     const syntheticCacheNamespace = "cache-namespace-synthetic-1234567890";
@@ -4111,13 +3878,7 @@ describe("hostedRunnerIntercept", () => {
         OPENAI_API_KEY: "openai-worker-secret",
         validateRuntimeWriteFence,
       }),
-      {
-        className: "RunnerContainer",
-        containerId: "opaque-container-id",
-        waitUntil: (promise) => {
-          waitUntilPromises.push(Promise.resolve(promise));
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(200);
@@ -4224,19 +3985,9 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("records Codex compaction metadata without raw turn identifiers", async () => {
-    const waitUntilPromises: Promise<unknown>[] = [];
-    const fetchMock = vi.fn<typeof fetch>(async (target) => {
-      const url = new URL(readFetchTargetUrl(target));
-      if (url.hostname === "web.example.test") {
-        return new Response(JSON.stringify({ loggedCount: 1 }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-      return new Response("ok");
-    });
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("opaque-container-id");
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
     const sensitiveSessionId = "session-sensitive-diagnostic-id";
@@ -4276,13 +4027,7 @@ describe("hostedRunnerIntercept", () => {
         OPENAI_API_KEY: "openai-worker-secret",
         validateRuntimeWriteFence,
       }),
-      {
-        className: "RunnerContainer",
-        containerId: "opaque-container-id",
-        waitUntil: (promise) => {
-          waitUntilPromises.push(Promise.resolve(promise));
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(200);
@@ -4310,19 +4055,9 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("emits OpenAI cache diagnostics for provider-token egress without a Web runtime-log POST", async () => {
-    const waitUntilPromises: Promise<unknown>[] = [];
-    const fetchMock = vi.fn<typeof fetch>(async (target) => {
-      const url = new URL(readFetchTargetUrl(target));
-      if (url.hostname === "web.example.test") {
-        return new Response(JSON.stringify({ loggedCount: 1 }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-      return new Response("ok");
-    });
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("member_123");
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
@@ -4355,13 +4090,7 @@ describe("hostedRunnerIntercept", () => {
         providerContext: validateRuntimeProviderEgressToken,
         validateRuntimeWriteFence,
       }),
-      {
-        className: "RunnerContainer",
-        containerId: "member_123",
-        waitUntil: (promise) => {
-          waitUntilPromises.push(Promise.resolve(promise));
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(200);
@@ -4378,18 +4107,7 @@ describe("hostedRunnerIntercept", () => {
   });
 
   it("emits OpenAI cache diagnostics when background work is unavailable without a Web runtime-log POST", async () => {
-    const fetchMock = vi.fn<typeof fetch>(async (target) => {
-      const url = new URL(readFetchTargetUrl(target));
-      if (url.hostname === "web.example.test") {
-        return new Response(JSON.stringify({ loggedCount: 1 }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
-      }
-      return new Response("ok");
-    });
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await hostedRunnerIntercept(
@@ -6334,7 +6052,8 @@ describe("maybeHandleHostedTranscribeRequest", () => {
 
       userId: string;
     }) => createProviderEgressCredentialValidationResult(input));
-    const waitUntilPromises: Promise<unknown>[] = [];
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("opaque-container-id");
 
     const response = await hostedRunnerIntercept(
       await createAuthorizedTranscribeRequest({
@@ -6348,13 +6067,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         AI: { run: aiRun },
         providerContext: validateRuntimeProviderEgressCredential,
       }),
-      {
-        className: "RunnerContainer",
-        containerId: "opaque-container-id",
-        waitUntil: (promise) => {
-          waitUntilPromises.push(promise);
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(200);
@@ -6417,7 +6130,8 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       new Response("usage recording rejected", { status: 500 }));
     vi.stubGlobal("fetch", fetchMock);
-    const waitUntilPromises: Promise<unknown>[] = [];
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("opaque-container-id");
 
     const response = await hostedRunnerIntercept(
       await createAuthorizedTranscribeRequest({
@@ -6432,13 +6146,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
           })),
         },
       }),
-      {
-        className: "RunnerContainer",
-        containerId: "opaque-container-id",
-        waitUntil: (promise) => {
-          waitUntilPromises.push(promise);
-        },
-      },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(200);
@@ -6639,10 +6347,8 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         usageId: "usage_1",
       }));
     vi.stubGlobal("fetch", fetchMock);
-    const waitUntilPromises: Promise<unknown>[] = [];
-    const waitUntil = (promise: Promise<unknown>): void => {
-      waitUntilPromises.push(promise);
-    };
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("opaque-container-id");
     const oversized = await hostedRunnerIntercept(
       await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
@@ -6654,7 +6360,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       createTranscribeInterceptEnv({
         AI: { run: vi.fn() },
       }),
-      { className: "RunnerContainer", containerId: "opaque-container-id", waitUntil },
+      waitUntilContext,
     );
     expect(oversized.status).toBe(413);
 
@@ -6670,7 +6376,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
           }),
         },
       }),
-      { className: "RunnerContainer", containerId: "opaque-container-id", waitUntil },
+      waitUntilContext,
     );
     expect(failing.status).toBe(502);
     expect(await failing.text()).toBe("Hosted transcription failed.");
@@ -6703,10 +6409,8 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         usageId: "usage_1",
       }));
     vi.stubGlobal("fetch", fetchMock);
-    const waitUntilPromises: Promise<unknown>[] = [];
-    const waitUntil = (promise: Promise<unknown>): void => {
-      waitUntilPromises.push(promise);
-    };
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("opaque-container-id");
     const response = await hostedRunnerIntercept(
       await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
@@ -6719,7 +6423,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
           })),
         },
       }),
-      { className: "RunnerContainer", containerId: "opaque-container-id", waitUntil },
+      waitUntilContext,
     );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -6760,7 +6464,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
           })),
         },
       }),
-      { className: "RunnerContainer", containerId: "opaque-container-id", waitUntil },
+      waitUntilContext,
     );
     expect(malformedSegments.status).toBe(200);
     // The invalid transcription_info duration falls back to the furthest
@@ -6796,10 +6500,8 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         usageId: "usage_1",
       }));
     vi.stubGlobal("fetch", fetchMock);
-    const waitUntilPromises: Promise<unknown>[] = [];
-    const waitUntil = (promise: Promise<unknown>): void => {
-      waitUntilPromises.push(promise);
-    };
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("opaque-container-id");
     const segments = Array.from({ length: 10_001 }, (_, index) => ({
       end: index + 1,
       start: index,
@@ -6819,7 +6521,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
           })),
         },
       }),
-      { className: "RunnerContainer", containerId: "opaque-container-id", waitUntil },
+      waitUntilContext,
     );
 
     expect(response.status).toBe(200);
@@ -6851,16 +6553,14 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         usageId: "usage_1",
       }));
     vi.stubGlobal("fetch", fetchMock);
-    const waitUntilPromises: Promise<unknown>[] = [];
-    const waitUntil = (promise: Promise<unknown>): void => {
-      waitUntilPromises.push(promise);
-    };
+    const { context: waitUntilContext, promises: waitUntilPromises } =
+      createWaitUntilCollector("opaque-container-id");
     const emptyBody = await hostedRunnerIntercept(
       await createAuthorizedTranscribeRequest({ method: "POST" }),
       createTranscribeInterceptEnv({
         AI: { run: vi.fn() },
       }),
-      { className: "RunnerContainer", containerId: "opaque-container-id", waitUntil },
+      waitUntilContext,
     );
     expect(emptyBody.status).toBe(400);
     expect(await emptyBody.text()).toBe(
@@ -6885,7 +6585,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         createTranscribeInterceptEnv({
           AI: { run: vi.fn(async () => output) },
         }),
-        { className: "RunnerContainer", containerId: "opaque-container-id", waitUntil },
+        waitUntilContext,
       );
       // 422 keeps the parser's 5xx retry from re-running a billed run.
       expect(response.status).toBe(422);

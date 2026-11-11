@@ -1,4 +1,5 @@
 import {
+  createWorkspaceRunRequest,
   TEST_NOW,
   TEST_USER_ID,
   createSnapshotFixtureRef,
@@ -25,58 +26,33 @@ import {
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import assert from "node:assert/strict";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  addCaptureWithLookup,
-  CURRENT_VAULT_FORMAT_VERSION,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  buildIntegrationEvidencePart,
-  buildIntegrationIngestRecord,
-  findCaptureByLookup,
   initializeVault,
-  patchAutomation,
-  readJsonlRecords,
-  repairVault,
-  runCanonicalWrite,
-  showAutomation,
-  upsertAutomation,
-  validateVault,
 } from "@murphai/core";
 import {
-  buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionLinqConversationMessageWake,
-  buildHostedExecutionMemberActivatedWake,
-  buildHostedExecutionRuntimeControlWake,
-  deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
 } from "@murphai/hosted-execution/env";
 import {
-  appendAssistantTranscriptEntries,
   createAssistantOutboxIntent,
-  ensureAutomaticMealCloseoutAutomation,
-  getAssistantCronStatus,
-  listAssistantTranscriptEntries,
-  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentSentById,
-  readAssistantContextSnapshotState,
-  refreshAssistantContextSnapshotBestEffort,
-  recordHostedMailboxAssistantInputItem,
-  saveAssistantOutboxIntent,
-  saveAssistantSession,
   type AssistantHostedImageGenerationLauncher,
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import {
   readAssistantInputEvent,
   shouldGroupAdjacentAssistantInputCandidates,
-  updateAssistantInputAttachmentEvidence,
   updateAssistantInputProjection,
-  upsertAssistantInputEvent,
   writeAssistantAutoReplyReplyTerminalEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
@@ -84,37 +60,17 @@ import {
   updateAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
 import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  readHostedRuntimeFailurePhaseCode,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
   type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
-  type HostedMailboxPayloadFetchResponse,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeLatencyTraceRequest,
-  type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
-  type HostedWorkspaceCheckpointResponse,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
-  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, test, vi } from "vitest";
 import {
   createCoalescingRuntimeWakeSignal,
-  HostedRuntimeCheckpointInterruptedByWakeError,
-  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
-  HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
-  type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
   runHostedWorkspaceAssistantPhase,
@@ -123,15 +79,12 @@ import {
   importHostedConversationMailboxItem,
 } from "../src/hosted-runtime/mailbox-conversation-import.ts";
 import {
-  collectHostedPendingAssistantInputMediaRetentionProtections,
   compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
   inspectHostedPendingAssistantInputWakeCandidate,
-  readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
-  createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
 } from "../src/hosted-runtime/environment.ts";
 import {
@@ -139,12 +92,8 @@ import {
   selectHostedAssistantInputIds,
 } from "../src/hosted-runtime/turn-input.ts";
 import {
-  HostedRuntimeArtifactReadError,
-  type HostedRuntimeDeviceSyncPort,
   type HostedRuntimeMailboxPort,
   type HostedRuntimePlatform,
-  type HostedRuntimeWorkspacePort,
-  type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
 
 describe("hosted workspace runtime entrypoint", () => {test("late foreground input outranks a due mailbox owner handoff before idle checkpointing", async () => {
@@ -623,9 +572,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
               budget: {
                 maxMailboxItems: 1,
               },
-              runnerIdleTtlMs: 1,
               leaseGeneration: "9",
-              userId: TEST_USER_ID,
               workspaceVersion: "4",
             },
           }),
@@ -767,9 +714,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             budget: {
               maxMailboxItems: 4,
             },
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -1081,8 +1026,6 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     const reminderWakeAt = "2026-04-27T06:00:00.000Z";
     const freshMailboxItem = createMailboxItem({
       id: "mailbox_item_entrypoint_unindexed_reminder_fresh",
-      laneSeq: "1",
-      occurredAt: TEST_NOW,
     });
     const firstPhaseObserved = createDeferred<void>();
     const olderInputServiced = createDeferred<number>();
@@ -1288,10 +1231,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             request: {
               attemptId: `attempt_foreground_delivery_image_${scenario}`,
               budget: { maxMailboxItems: 10 },
-              runnerIdleTtlMs: 1,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -1823,8 +1763,6 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             budget: { maxMailboxItems: 10 },
             runnerIdleTtlMs: 180_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2590,8 +2528,6 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           budget: { maxMailboxItems: 10 },
           runnerIdleTtlMs: 50,
           leaseGeneration,
-          userId: TEST_USER_ID,
-          workspaceVersion: "0",
         },
       });
       const firstRuntimeJobInput = createRuntimeJobInput(
@@ -3221,9 +3157,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_abort_first",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -3318,9 +3252,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_abort_second",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "10",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -3422,9 +3354,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_projection_retry",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -3653,9 +3583,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_device_pressure",
             budget: { maxMailboxItems: 3 },
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -3924,9 +3852,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_hidden_command",
             budget: { maxMailboxItems: 3 },
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -4028,9 +3954,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             attemptId:
               "attempt_synthetic_runtime_vault_share_hidden_command_continuation",
             budget: { maxMailboxItems: 8 },
-            runnerIdleTtlMs: 1,
             leaseGeneration: "10",
-            userId: TEST_USER_ID,
             workspaceVersion: secondWorkspace.version,
           },
         }),
@@ -4141,9 +4065,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_classifier_fallback",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -4342,9 +4264,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_checkpoint_classifier_shutdown",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -4484,9 +4404,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_checkpoint_fallback_shutdown",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -4637,9 +4555,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_vault_share_device_shutdown",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),

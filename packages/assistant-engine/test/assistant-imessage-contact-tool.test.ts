@@ -84,7 +84,7 @@ describe("assistant iMessage contact tool", () => {
         namespace: "murph",
         tool: "imessage_contact",
       },
-    })?.kind).toBe("invalid-imessage-contact-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
   });
 
   it("gives safe recovery guidance when no number is assigned", async () => {

@@ -197,7 +197,6 @@ function createProviderTurn(input: {
     route: input.input.route,
     session: input.input.resolvedSession,
     stderr: '',
-    stdout: '',
     transcriptResponse: input.response,
     usage: null,
     workingDirectory: input.input.plan.requestedWorkingDirectory,

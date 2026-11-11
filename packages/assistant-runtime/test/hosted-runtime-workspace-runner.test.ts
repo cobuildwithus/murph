@@ -57,7 +57,6 @@ import type {
   HostedMailboxPayloadFetchResponse,
   HostedRuntimeLatencyTraceStagedMilestones,
   HostedRuntimeLogRequest,
-  HostedRuntimeRedactedJson,
   HostedWorkspaceCheckpointRequest,
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceState,
@@ -94,7 +93,6 @@ import { describe, expect, test, vi } from "vitest";
 import { persistCanonicalInboxCapture } from "@murphai/inboxd";
 
 import {
-  HostedMailboxImportCheckpointConflictError,
   createCoalescingRuntimeWakeSignal,
   createHostedWorkspaceCheckpointRequestBuilder,
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
@@ -172,6 +170,20 @@ const TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT = "2026-04-26T00:00:30.000Z";
 const TEST_USER_ID = "member_synthetic_workspace_runner";
 const TERMINAL_EVIDENCE_SCHEMA =
   "murph.assistant-auto-reply-terminal-evidence.v1";
+
+function createRunnerCheckpointBuilder(
+  overrides: Partial<Parameters<typeof createHostedWorkspaceCheckpointRequestBuilder>[0]>,
+) {
+  return createHostedWorkspaceCheckpointRequestBuilder({
+    attemptId: "attempt_synthetic_runner",
+    expectedWorkspaceVersion: "0",
+    leaseGeneration: "1",
+    nextWakeAt: null,
+    nextWakeReason: null,
+    snapshotRef: null,
+    ...overrides,
+  });
+}
 
 function createInboxProjectionEffectResult(
   overrides: Partial<HostedMailboxPostCheckpointEffectResult> = {},
@@ -537,13 +549,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             barrier.foregroundConversationWorkObserved(),
           );
         },
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: options.attemptId,
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -688,13 +695,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch;
         initialMailboxImport?: HostedMailboxImportCheckpointResult;
       }) => await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: options.attemptId,
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -829,13 +831,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_pre_reply_input_tail",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -923,13 +920,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_sole_pre_reply_input",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -1016,13 +1008,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_all_pending_selection",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -1191,13 +1178,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_stale_runtime_wake",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -1255,13 +1237,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const runnerPromise = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_initial_import_track",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -1333,13 +1310,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const runnerPromise = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_aborted_follow_on_import",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -1357,8 +1329,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             items: [
               createMailboxItem({
                 id: "mailbox_item_runner_aborted_follow_on_conversation",
-                lane: "conversation",
-                laneSeq: "1",
               }),
               createMailboxItem({
                 id: "mailbox_item_runner_aborted_follow_on_system",
@@ -1423,13 +1393,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       abortController.abort(hostAbortReason);
 
       runnerPromise = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_aborted_foreground_loop",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -1609,13 +1574,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_coalesced_runtime_wake",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -1873,8 +1833,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       checkpointed: true,
       workspace: createWorkspaceState({
         inboxMediaRetentionWakeAt: null,
-        nextWakeAt: null,
-        nextWakeReason: null,
         version: "2",
       }),
     });
@@ -2087,9 +2045,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       try {
         await started.promise;
         builder.recordCheckpoint({ checkpointed: true, workspace: createWorkspaceState({
-          version: "3", snapshotRef: createWorkspaceSnapshotV2Ref("newer-status-snapshot"),
-          nextWakeAt: null, nextWakeReason: null, inboxMediaRetentionWakeAt: null,
-          nextDefaultProcessingWakeAt: null, nextDefaultProcessingWakeReason: null,
+          version: "3",
+          snapshotRef: createWorkspaceSnapshotV2Ref("newer-status-snapshot"),
+          inboxMediaRetentionWakeAt: null,
+          nextDefaultProcessingWakeAt: null,
+          nextDefaultProcessingWakeReason: null,
           systemMailboxProgressGeneration: "5",
         }) });
       } finally {
@@ -2118,10 +2078,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     });
     const events: string[] = [];
     const items = [
-      createMailboxItem({
-        id: "mailbox_item_runner_001",
-        laneSeq: "1",
-      }),
+      createMailboxItem({}),
     ];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const { mailboxPort } = createMailboxPort({ fetchRequests, items });
@@ -2143,14 +2100,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       resultPromise = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_001",
           browserVaultReplicaRef: TEST_BROWSER_VAULT_REPLICA_REF,
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         trackDeferredUsageCapture(capture) {
@@ -2294,13 +2246,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_system_fallback",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -2375,13 +2322,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       }));
 
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_stale_prefetch",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -2463,13 +2405,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       }));
 
       const firstResult = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_established_prefetch",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -2504,13 +2441,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(firstResult.latestMailboxImport.state.watermarks.system, "1");
 
       const secondResult = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_established_prefetch_followup",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -2588,13 +2520,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       }));
 
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_established_system_prefetch",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -2670,13 +2597,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_preferences_barrier",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -2753,13 +2675,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_background_preferences_barrier",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -2838,13 +2755,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_pre_auto_reply_system",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -2933,13 +2845,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_pre_auto_reply_late_wake",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -3080,13 +2987,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_empty_system_high_water",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -3166,13 +3068,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_pre_auto_reply_system_budget",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         foregroundImportItem: async (item) => {
@@ -3252,13 +3149,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_pre_auto_reply_system_cap",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -3337,13 +3229,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_system_after_replay_only",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -3449,13 +3336,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_replay_continuation",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -3518,13 +3400,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_late_yield_system",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -3620,13 +3497,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           barrierWaitStarted.resolve();
           await barrierRelease.promise;
         },
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_exact_barrier",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -3736,12 +3608,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(artifactGetCalls, [baseHash]);
 
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_live_state",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
           snapshotRef,
         }),
         expectedUserId: TEST_USER_ID,
@@ -3807,13 +3675,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     try {
       await withTestTimeout(
         runHostedWorkspaceUntilIdleOrBudget({
-          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          checkpointRequestBuilder: createRunnerCheckpointBuilder({
             attemptId: "attempt_synthetic_runner_prompt_preparation_effect",
-            expectedWorkspaceVersion: "0",
-            leaseGeneration: "1",
-            nextWakeAt: null,
-            nextWakeReason: null,
-            snapshotRef: null,
           }),
           expectedUserId: TEST_USER_ID,
           async importItem(item) {
@@ -3825,8 +3688,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 events.push("mailbox:afterCheckpoint:done");
                 return createInboxProjectionEffectResult({
                   attachmentEvidenceUpdated: true,
-                  projectionUpdated: true,
-                  status: "succeeded",
                 });
               },
               status: "imported",
@@ -3889,13 +3750,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       resultPromise = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_stop_loop_before_import_effect",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -3914,8 +3770,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 const result = await new Promise<HostedMailboxPostCheckpointEffectResult>((resolve) => {
                   effectRelease.current = () => resolve(createInboxProjectionEffectResult({
                     attachmentEvidenceUpdated: true,
-                    projectionUpdated: true,
-                    status: "succeeded",
                   }));
                   effectStartedResolve?.();
                 });
@@ -4006,13 +3860,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       resultPromise = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_import_effect_background",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -4024,8 +3873,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               return await new Promise<HostedMailboxPostCheckpointEffectResult>((resolve) => {
                 effectRelease.current = () => resolve(createInboxProjectionEffectResult({
                   attachmentEvidenceUpdated: true,
-                  projectionUpdated: true,
-                  status: "succeeded",
                 }));
               });
             },
@@ -4110,13 +3957,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_no_usage_drain",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -4160,13 +4002,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_projection_checkpoint",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -4210,13 +4047,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       await assert.rejects(
         () =>
           runHostedWorkspaceUntilIdleOrBudget({
-            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            checkpointRequestBuilder: createRunnerCheckpointBuilder({
               attemptId: "attempt_synthetic_runner_missing_checkpoint_reason",
-              expectedWorkspaceVersion: "0",
-              leaseGeneration: "1",
-              nextWakeAt: null,
-              nextWakeReason: null,
-              snapshotRef: null,
             }),
             expectedUserId: TEST_USER_ID,
             async importItem() {
@@ -4260,13 +4092,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_deferred_import_covered",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -4476,13 +4303,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               });
               return { checkpointed: true, workspace };
             },
-            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            checkpointRequestBuilder: createRunnerCheckpointBuilder({
               attemptId: `attempt_deferred_canonical_write_${writeIndex}`,
               expectedWorkspaceVersion: workspace.version,
-              leaseGeneration: "1",
-              nextWakeAt: null,
-              nextWakeReason: null,
-              snapshotRef: null,
             }),
             expectedUserId: TEST_USER_ID,
             async importItem() {
@@ -4576,13 +4399,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           });
           return { checkpointed: true, workspace };
         },
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: `attempt_threshold_rollback_${writeIndex}`,
           expectedWorkspaceVersion: workspace.version,
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -4709,13 +4528,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               expectedWorkspaceVersion: "1",
               leaseGeneration: "1",
             }),
-          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          checkpointRequestBuilder: createRunnerCheckpointBuilder({
             attemptId: "attempt_delayed_canonical_write",
             expectedWorkspaceVersion: "1",
-            leaseGeneration: "1",
-            nextWakeAt: null,
-            nextWakeReason: null,
-            snapshotRef: null,
           }),
           expectedUserId: TEST_USER_ID,
           async importItem() {
@@ -4820,13 +4635,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               }),
             };
           },
-          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          checkpointRequestBuilder: createRunnerCheckpointBuilder({
             attemptId: "attempt_synthetic_runner_saturated_receipt_log",
-            expectedWorkspaceVersion: "0",
-            leaseGeneration: "1",
-            nextWakeAt: null,
-            nextWakeReason: null,
-            snapshotRef: null,
           }),
           expectedUserId: TEST_USER_ID,
           async importItem() {
@@ -4917,13 +4727,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             checkpointAttempted = true;
             throw new Error("Artifact upload failure must prevent checkpointing.");
           },
-          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          checkpointRequestBuilder: createRunnerCheckpointBuilder({
             attemptId: "attempt_synthetic_runner_failed_artifact_upload",
-            expectedWorkspaceVersion: "0",
-            leaseGeneration: "1",
-            nextWakeAt: null,
-            nextWakeReason: null,
-            snapshotRef: null,
           }),
           expectedUserId: TEST_USER_ID,
           async importItem() {
@@ -5004,13 +4809,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           checkpointRequests,
           leaseGeneration: "1",
         }),
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_mailbox_receipt",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -5106,13 +4906,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           events.push("checkpoint:done");
           return result;
         },
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_durable_mailbox_receipt",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -5186,13 +4981,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           checkpointAttempted = true;
           throw new Error("Synthetic canonical receipt checkpoint failure.");
         },
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_failed_receipt_checkpoint",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -5282,13 +5072,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           runtimeCheckpointInputs.push(checkpointInput);
           return await checkpointRuntimeRedactedStatus(checkpointInput);
         },
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_snapshot_dirty",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -5367,13 +5152,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_snapshot_pending",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -5432,13 +5212,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           checkpointRequests,
           leaseGeneration: "1",
         }),
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_snapshot_audit_only",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -5609,13 +5384,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_deferred_import_idle",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -5694,13 +5464,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         },
       };
       const operation = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_attachment_start",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
           attemptId: "attempt_synthetic_attachment_start",
@@ -5925,13 +5690,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       vaultRoot,
     });
     const run = (ordinal: 1 | 2) => runHostedWorkspaceUntilIdleOrBudget({
-      checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+      checkpointRequestBuilder: createRunnerCheckpointBuilder({
         attemptId: `attempt_synthetic_contention_${ordinal}`,
-        expectedWorkspaceVersion: "0",
-        leaseGeneration: "1",
-        nextWakeAt: null,
-        nextWakeReason: null,
-        snapshotRef: null,
       }),
       checkpointRuntimeRedactedStatus: createRuntimeRedactedStatusCheckpoint({
         attemptId: `attempt_synthetic_contention_${ordinal}`,
@@ -6050,13 +5810,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_active_turn_projection",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -6145,13 +5900,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_before_assistant_error",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -6206,14 +5956,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_liveness_optional_degraded",
           browserVaultReplicaRef: null,
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -6301,13 +6046,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       await assert.rejects(
         () =>
           runHostedWorkspaceUntilIdleOrBudget({
-            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            checkpointRequestBuilder: createRunnerCheckpointBuilder({
               attemptId: "attempt_synthetic_runner_after_checkpoint_error",
-              expectedWorkspaceVersion: "0",
-              leaseGeneration: "1",
-              nextWakeAt: null,
-              nextWakeReason: null,
-              snapshotRef: null,
             }),
             expectedUserId: TEST_USER_ID,
             async importItem(item) {
@@ -6371,13 +6111,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       await assert.rejects(
         () =>
           runHostedWorkspaceUntilIdleOrBudget({
-            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            checkpointRequestBuilder: createRunnerCheckpointBuilder({
               attemptId: "attempt_synthetic_runner_reset_before_assistant",
-              expectedWorkspaceVersion: "0",
-              leaseGeneration: "1",
-              nextWakeAt: null,
-              nextWakeReason: null,
-              snapshotRef: null,
             }),
             expectedUserId: TEST_USER_ID,
             async importItem(item) {
@@ -6411,13 +6146,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       );
 
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_reset_replay",
           expectedWorkspaceVersion: "1",
           leaseGeneration: "2",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -6488,13 +6220,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_blocked",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "2",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -6650,13 +6378,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         version: 1,
       });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_active_turn",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -6920,13 +6644,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_wake_timing",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item, context) {
@@ -7038,13 +6758,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         version: 1,
       });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_active_turn_yield",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -7192,13 +6908,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_staging_yield",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         foregroundImportItem: async (item, context) => {
@@ -7334,13 +7046,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_stop_aborts_projection",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         foregroundImportItem: async (item, context) => {
@@ -7427,13 +7135,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_system_wake_no_yield",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -7507,13 +7211,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         version: 1,
       });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_after_checkpoint_yield",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item, context) {
@@ -7688,13 +7388,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         version: 1,
       });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_generic_runtime_wake",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -7795,13 +7491,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         version: 1,
       });
       const runner = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_active_turn_yield_during_import",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item, context) {
@@ -7955,13 +7647,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         version: 1,
       });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_unstaged_wake",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -8050,13 +7738,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
       const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_no_active_turn_late_input",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -8505,13 +8189,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         vaultRoot,
       });
       resultPromise = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_usage_flush_delivery_order",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -8621,13 +8300,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       resultPromise = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_no_progress_usage",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -8724,13 +8398,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_late_usage",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -8825,13 +8494,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       resultPromise = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_parallel_usage_flush",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -8934,13 +8598,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     try {
       await assert.rejects(
         runHostedWorkspaceUntilIdleOrBudget({
-          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          checkpointRequestBuilder: createRunnerCheckpointBuilder({
             attemptId: "attempt_synthetic_runner_usage_flush_pending_input_failure",
-            expectedWorkspaceVersion: "0",
-            leaseGeneration: "1",
-            nextWakeAt: null,
-            nextWakeReason: null,
-            snapshotRef: null,
           }),
           expectedUserId: TEST_USER_ID,
           async importItem(item) {
@@ -9062,13 +8721,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_inbox_retry_backoff",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -9139,13 +8794,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_initial_fresh_incomplete_pending",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
           nextWakeAt: reminderWakeAt,
           nextWakeReason: "assistant",
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -9221,13 +8874,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_active_turn_blocked_yield",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -9315,13 +8964,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_active_turn_blocked_later",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "4",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -9469,13 +9114,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     try {
       await assert.rejects(
         runHostedWorkspaceUntilIdleOrBudget({
-          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          checkpointRequestBuilder: createRunnerCheckpointBuilder({
             attemptId: "attempt_synthetic_runner_rejected_admission",
-            expectedWorkspaceVersion: "0",
             leaseGeneration: "5",
-            nextWakeAt: null,
-            nextWakeReason: null,
-            snapshotRef: null,
           }),
           expectedUserId: TEST_USER_ID,
           async importItem() {
@@ -9516,13 +9157,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_idle",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -9540,66 +9176,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.equal(result.assistantPhaseResult, null);
       assert.equal(result.initialMailboxImport.stateChanged, false);
-      assert.deepEqual(checkpointRequests, []);
-    } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("runs mailbox post-checkpoint effects without foreground checkpointing when no assistant phase runs", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const events: string[] = [];
-    const { mailboxPort } = createMailboxPort({
-      items: [
-        createMailboxItem({
-          id: "mailbox_item_runner_projection_no_assistant",
-          laneSeq: "1",
-        }),
-      ],
-    });
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-
-    try {
-      const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_projection_no_assistant",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem(item) {
-          events.push(`import:${item.item.laneSeq}`);
-          return {
-            afterCheckpoint: async () => {
-              events.push("mailbox:afterCheckpoint");
-              return createInboxProjectionEffectResult();
-            },
-            status: "imported",
-          };
-        },
-        limitPerLane: 10,
-        platform: createPlatform({
-          mailboxPort,
-          workspacePort: createWorkspacePort({ checkpointRequests }),
-        }),
-        requestId: "request_synthetic_runner_projection_no_assistant",
-        vaultRoot,
-        workspace: null,
-        now: () => TEST_NOW,
-      });
-
-      assert.deepEqual(events, [
-        "import:1",
-        "mailbox:afterCheckpoint",
-      ]);
-      assert.equal(result.assistantPhaseResult, null);
-      assert.equal(result.latestWorkspace, null);
       assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, {
@@ -9631,13 +9207,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       resultPromise = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_projection_no_assistant_blocking",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "0",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -9752,13 +9324,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const resultPromise = runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_projection_import_timeout",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -9845,13 +9412,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_projection_failed_log",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -9927,13 +9489,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_projection_partial_log",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -10046,13 +9603,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_attachment_update_failed_log",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -10123,13 +9675,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_projection_reason_log",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "1",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -10174,13 +9721,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_post_checkpoint",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "3",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -10257,13 +9800,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_post_checkpoint_replace_wake",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "3",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -10320,20 +9859,32 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("preserves an invocation-local retry before a later post-checkpoint assistant wake", async () => {
+  test.each([
+    {
+      name: "preserves an invocation-local retry before a later post-checkpoint assistant wake",
+      suffix: "local_retry",
+      initial: {},
+      completed: {
+        nextWakeAt: "2026-04-26T07:00:00.000Z",
+        nextWakeReason: "assistant" as const,
+      },
+    },
+    {
+      name: "preserves an invocation-local retry when post-checkpoint work has no wake",
+      suffix: "local_retry_null",
+      initial: { nextWakeReason: "assistant" as const },
+      completed: { nextWakeAt: null, nextWakeReason: null },
+    },
+  ])("$name", async ({ suffix, initial, completed }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({ items: [] });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_post_checkpoint_local_retry",
-          expectedWorkspaceVersion: "0",
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
+          attemptId: `attempt_synthetic_runner_post_checkpoint_${suffix}`,
           leaseGeneration: "3",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -10344,79 +9895,18 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
-        requestId: "request_synthetic_runner_post_checkpoint_local_retry",
+        requestId: `request_synthetic_runner_post_checkpoint_${suffix}`,
         async runAssistantPhase() {
           const invocationLocalAssistantWakeAt = "2026-04-26T00:00:30.000Z";
           return {
             afterCheckpoint: async () => ({
               checkpointReason: "assistant_runtime_commit",
-              nextWakeAt: "2026-04-26T07:00:00.000Z",
-              nextWakeReason: "assistant",
+              ...completed,
             }),
             checkpointReason: "canonical_runtime_commit",
             invocationLocalAssistantWakeAt,
+            ...initial,
             nextWakeAt: invocationLocalAssistantWakeAt,
-            progressed: true,
-          };
-        },
-        vaultRoot,
-        workspace: createWorkspaceState({ version: "0" }),
-      });
-
-      assert.equal(
-        result.assistantPhaseResult?.nextWakeAt,
-        "2026-04-26T00:00:30.000Z",
-      );
-      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
-      assert.equal(
-        result.assistantPhaseResult?.invocationLocalAssistantWakeAt,
-        "2026-04-26T00:00:30.000Z",
-      );
-    } finally {
-      await rm(vaultRoot, {
-        force: true,
-        recursive: true,
-      });
-    }
-  });
-
-  test("preserves an invocation-local retry when post-checkpoint work has no wake", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
-    const { mailboxPort } = createMailboxPort({ items: [] });
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-
-    try {
-      const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_post_checkpoint_local_retry_null",
-          expectedWorkspaceVersion: "0",
-          leaseGeneration: "3",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
-        }),
-        expectedUserId: TEST_USER_ID,
-        async importItem() {
-          throw new Error("Import should not run without mailbox items.");
-        },
-        limitPerLane: 10,
-        platform: createPlatform({
-          mailboxPort,
-          workspacePort: createWorkspacePort({ checkpointRequests }),
-        }),
-        requestId: "request_synthetic_runner_post_checkpoint_local_retry_null",
-        async runAssistantPhase() {
-          const invocationLocalAssistantWakeAt = "2026-04-26T00:00:30.000Z";
-          return {
-            afterCheckpoint: async () => ({
-              checkpointReason: "assistant_runtime_commit",
-              nextWakeAt: null,
-              nextWakeReason: null,
-            }),
-            checkpointReason: "canonical_runtime_commit",
-            invocationLocalAssistantWakeAt,
-            nextWakeAt: invocationLocalAssistantWakeAt,
-            nextWakeReason: "assistant",
             progressed: true,
           };
         },
@@ -10461,13 +9951,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         version: 1,
       });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_post_checkpoint_late_input",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "3",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -10560,13 +10046,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         version: 1,
       });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_post_checkpoint_stop_late_input",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "3",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -10655,13 +10137,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         version: 1,
       });
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_post_checkpoint_stop_null_late_input",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "3",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem(item) {
@@ -10747,13 +10225,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_post_checkpoint_cleared_wake",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "3",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -10818,13 +10292,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       try {
         const result = await runHostedWorkspaceUntilIdleOrBudget({
-          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          checkpointRequestBuilder: createRunnerCheckpointBuilder({
             attemptId: `attempt_synthetic_runner_${checkpointReason}`,
-            expectedWorkspaceVersion: "0",
             leaseGeneration: "3",
-            nextWakeAt: null,
-            nextWakeReason: null,
-            snapshotRef: null,
           }),
           expectedUserId: TEST_USER_ID,
           async importItem() {
@@ -10887,13 +10357,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_post_assistant_cleanup_failed",
-          expectedWorkspaceVersion: "0",
           leaseGeneration: "3",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -10987,13 +10453,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       await assert.rejects(
         () =>
           runHostedWorkspaceUntilIdleOrBudget({
-            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            checkpointRequestBuilder: createRunnerCheckpointBuilder({
               attemptId: "attempt_synthetic_runner_mismatch",
-              expectedWorkspaceVersion: "0",
-              leaseGeneration: "1",
-              nextWakeAt: null,
-              nextWakeReason: null,
-              snapshotRef: null,
             }),
             expectedUserId: TEST_USER_ID,
             async importItem() {
@@ -11038,13 +10499,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       await assert.rejects(
         () =>
           runHostedWorkspaceUntilIdleOrBudget({
-            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            checkpointRequestBuilder: createRunnerCheckpointBuilder({
               attemptId: "attempt_synthetic_runner_workspace_mismatch",
-              expectedWorkspaceVersion: "0",
-              leaseGeneration: "1",
-              nextWakeAt: null,
-              nextWakeReason: null,
-              snapshotRef: null,
             }),
             expectedUserId: TEST_USER_ID,
             async importItem() {
@@ -11105,13 +10561,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
           attemptId: "attempt_synthetic_runner_stale",
           expectedWorkspaceVersion: "7",
           leaseGeneration: "2",
-          nextWakeAt: null,
-          nextWakeReason: null,
-          snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() {
@@ -11304,13 +10757,8 @@ async function runConversationHandledThroughScenario(input: {
     }
 
     return await runHostedWorkspaceUntilIdleOrBudget({
-      checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+      checkpointRequestBuilder: createRunnerCheckpointBuilder({
         attemptId: "attempt_synthetic_runner_handled_prefix",
-        expectedWorkspaceVersion: "0",
-        leaseGeneration: "1",
-        nextWakeAt: null,
-        nextWakeReason: null,
-        snapshotRef: null,
       }),
       expectedUserId: TEST_USER_ID,
       async importItem(item) {
@@ -11697,13 +11145,8 @@ async function runFastDispatchCrashWindowAttempt(input: {
 }) {
   const { mailboxPort } = createMailboxPort({ items: [] });
   return await runHostedWorkspaceUntilIdleOrBudget({
-    checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+    checkpointRequestBuilder: createRunnerCheckpointBuilder({
       attemptId: "attempt_synthetic_fast_dispatch_crash_window",
-      expectedWorkspaceVersion: "0",
-      leaseGeneration: "1",
-      nextWakeAt: null,
-      nextWakeReason: null,
-      snapshotRef: null,
     }),
     expectedUserId: TEST_USER_ID,
     async importItem() {
@@ -12232,9 +11675,8 @@ describe("foreground device ingestion", () => {
     const owner = createHostedWorkspaceSystemWork({
       preparation: fixture.ownerInput,
       runnerInput: {
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_completion_race", expectedWorkspaceVersion: "0",
-          leaseGeneration: "1", nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
+          attemptId: "attempt_synthetic_completion_race",
         }),
         expectedUserId: TEST_USER_ID,
         async importItem() { throw new Error("Completion race does not import mailbox items."); },
@@ -12287,9 +11729,8 @@ describe("foreground device ingestion", () => {
       const owner = createHostedWorkspaceSystemWork({
         preparation: fixture.ownerInput,
         runnerInput: {
-          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-            attemptId: "attempt_synthetic_system_capacity", expectedWorkspaceVersion: "0",
-            leaseGeneration: "1", nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
+          checkpointRequestBuilder: createRunnerCheckpointBuilder({
+            attemptId: "attempt_synthetic_system_capacity",
           }),
           expectedUserId: TEST_USER_ID,
           async importItem() { throw new Error("No mailbox import in capacity proof."); },
@@ -12877,9 +12318,9 @@ async function createForegroundDeviceFixture(limitPerLane = 10, history?: { now:
     },
     run(runAssistantPhase: NonNullable<Parameters<typeof runHostedWorkspaceUntilIdleOrBudget>[0]["runAssistantPhase"]>) {
       const runnerInput: HostedWorkspaceRunnerInput = {
-        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_concurrent_device", expectedWorkspaceVersion: fixture.workspace.version,
-          leaseGeneration: "1", nextWakeAt: null, nextWakeReason: null, snapshotRef: null,
+        checkpointRequestBuilder: createRunnerCheckpointBuilder({
+          attemptId: "attempt_concurrent_device",
+          expectedWorkspaceVersion: fixture.workspace.version,
         }),
         async checkpointRuntimeRedactedStatus(input) {
           const log = await readHostedCanonicalWriteReceiptLog({

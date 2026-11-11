@@ -153,9 +153,9 @@ describe('game dynamic tools', () => {
       port.mockClear()
       expect((await execute({ messageRef: inputId, ...update })).rpcResult.success).toBe(true)
       expect(port).toHaveBeenCalledExactlyOnceWith(parseHostedRuntimeGroupToolRequest({ action: 'update_game', origin, update }))
-      expect(parse('update_game', { messageRef: inputId, ...update, actorMemberId: 'player_sam' })?.kind).toBe('invalid-game-arguments')
+      expect(parse('update_game', { messageRef: inputId, ...update, actorMemberId: 'player_sam' })?.kind).toBe('invalid-tool-arguments')
     }
-    expect(parse('update_game', { messageRef: inputId, operation: 'create', gameId: 'game_setup', terms: { ...terms, stakes: [{ kind: 'per_miss', item: 'Lunch' }] } })?.kind).toBe('invalid-game-arguments')
+    expect(parse('update_game', { messageRef: inputId, operation: 'create', gameId: 'game_setup', terms: { ...terms, stakes: [{ kind: 'per_miss', item: 'Lunch' }] } })?.kind).toBe('invalid-tool-arguments')
     expect(MURPH_UPDATE_GAME_TOOL.description).not.toContain(GAME_SETUP_CHAT_GUIDANCE)
   })
   it('binds the selected accepted message instead of using a model actor or last speaker', async () => {
@@ -168,7 +168,7 @@ describe('game dynamic tools', () => {
     { ...approval, operation: 'apply' }, { ...approval, change: { kind: 'start_now' } },
     { ...approval, operation: 'propose', expectedTermsVersion: 1, change: { kind: 'edit', schedule: { days: [7] } } },
   ])('rejects selectors or invalid operations %j', (args) => {
-    expect(parse('update_game', args)?.kind).toBe('invalid-game-arguments')
+    expect(parse('update_game', args)?.kind).toBe('invalid-tool-arguments')
   })
   it('rejects stale messages and direct contexts without forwarding', async () => {
     port.mockClear()
@@ -236,7 +236,7 @@ describe('game dynamic tools', () => {
   })
   it('names a missing expectedTermsVersion instead of blaming the gameId', async () => {
     const args = { messageRef: inputId, operation: 'propose', gameId: 'game_synthetic', proposalId: 'proposal_synthetic', change: { kind: 'edit', stakes: [{ kind: 'prize', item: 'Breakfast in bed' }] } }
-    expect(parse('update_game', args)?.kind).toBe('invalid-game-arguments')
+    expect(parse('update_game', args)?.kind).toBe('invalid-tool-arguments')
     const result = await execute(args)
     expect(result.rpcResult.success).toBe(false)
     expect(result.rpcResult.contentItems[0]?.text).toContain('(check: expectedTermsVersion)')
@@ -247,7 +247,7 @@ describe('game dynamic tools', () => {
     const request = {action:'update_game',origin,update:{operation:'propose',gameId:approval.gameId,proposalId:approval.proposalId,expectedTermsVersion:1,change}}
     expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request)
     expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change})?.kind).toBe('game')
-    expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change:{...change,stakesApplyToWholeGame:false}})?.kind).toBe('invalid-game-arguments')
+    expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change:{...change,stakesApplyToWholeGame:false}})?.kind).toBe('invalid-tool-arguments')
   })
 })
 
@@ -445,7 +445,7 @@ describe('game photo dynamic contract', () => {
     if (!request) throw new Error('Expected photo request')
     await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'game_photo', origin, photo: { operation: 'save', gameId: 'game_synthetic', sourceMessageRef: args.sourceMessageRef, attachmentOrdinal: 1 } })
-    for (const extra of [{ url: 'https://example.test/a.jpg' }, { memberId: 'other' }, { captureAgeMs: 10 }, { mediaKeys: ['arbitrary'] }]) expect(parse('game_photo', { ...args, ...extra })?.kind).toBe('invalid-game-arguments')
+    for (const extra of [{ url: 'https://example.test/a.jpg' }, { memberId: 'other' }, { captureAgeMs: 10 }, { mediaKeys: ['arbitrary'] }]) expect(parse('game_photo', { ...args, ...extra })?.kind).toBe('invalid-tool-arguments')
   })
   it('reads introduction state for the selected sender in a compound group turn', async () => {
     port.mockClear()
@@ -474,7 +474,7 @@ it.each(['mark_incomplete', 'mark_complete', 'restore_day'])('binds %s to the cu
   const args = { messageRef: inputId, operation, gameId: 'game_synthetic', date: '2030-04-01' }
   expect((await execute(args)).rpcResult.success).toBe(true)
   expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation, gameId: 'game_synthetic', date: '2030-04-01' } })
-  expect(parse('update_game', { ...args, memberId: 'another-player' })?.kind).toBe('invalid-game-arguments')
+  expect(parse('update_game', { ...args, memberId: 'another-player' })?.kind).toBe('invalid-tool-arguments')
 })
 
 it('offers Murph one way to count a day as done, on the player’s word', () => {
@@ -489,8 +489,8 @@ it('passes the speaker’s own words for a counted day only on mark_complete', a
   const args = { messageRef: inputId, operation: 'mark_complete', gameId: 'game_synthetic', date: '2030-04-01', text: 'Read a chapter' }
   expect((await execute(args)).rpcResult.success).toBe(true)
   expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation: 'mark_complete', gameId: 'game_synthetic', date: '2030-04-01', text: 'Read a chapter' } })
-  expect(parse('update_game', { ...args, operation: 'mark_incomplete' })?.kind).toBe('invalid-game-arguments')
-  expect(parse('update_game', { ...args, text: 'x'.repeat(141) })?.kind).toBe('invalid-game-arguments')
+  expect(parse('update_game', { ...args, operation: 'mark_incomplete' })?.kind).toBe('invalid-tool-arguments')
+  expect(parse('update_game', { ...args, text: 'x'.repeat(141) })?.kind).toBe('invalid-tool-arguments')
 })
 
 it('cancels a not-yet-started game for the current speaker with no proposal or extra selector', async () => {
@@ -498,7 +498,7 @@ it('cancels a not-yet-started game for the current speaker with no proposal or e
   const args = { messageRef: inputId, operation: 'cancel_game', gameId: 'game_synthetic' }
   expect((await execute(args)).rpcResult.success).toBe(true)
   expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation: 'cancel_game', gameId: 'game_synthetic' } })
-  expect(parse('update_game', { ...args, proposalId: 'proposal_synthetic' })?.kind).toBe('invalid-game-arguments')
+  expect(parse('update_game', { ...args, proposalId: 'proposal_synthetic' })?.kind).toBe('invalid-tool-arguments')
   expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.operation.enum).toContain('cancel_game')
 })
 
@@ -507,7 +507,7 @@ it('calls off a live game only as an ask every remaining player agrees to, then 
   port.mockClear()
   expect((await execute(callOff)).rpcResult.success).toBe(true)
   expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation: 'propose', gameId: 'game_synthetic', proposalId: 'proposal_synthetic', expectedTermsVersion: 3, change: { kind: 'call_off' } } })
-  expect(parse('update_game', { ...callOff, change: { kind: 'call_off', lengthDays: 5 } })?.kind).toBe('invalid-game-arguments')
+  expect(parse('update_game', { ...callOff, change: { kind: 'call_off', lengthDays: 5 } })?.kind).toBe('invalid-tool-arguments')
   expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.change.properties.kind.enum).toEqual(['start_now', 'edit', 'call_off'])
 })
 

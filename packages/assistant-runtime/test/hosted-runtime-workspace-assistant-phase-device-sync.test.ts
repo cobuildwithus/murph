@@ -1,4 +1,5 @@
 import {
+  createSentDeliveryOutcome,
   createDeliveryEffect,
   createDueAssistantWorkspace,
   createNoDirtyRuntimeDeviceSyncPortMethods,
@@ -460,17 +461,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      workspace: createDueAssistantWorkspace({}),
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions();
@@ -553,17 +544,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      workspace: createDueAssistantWorkspace({}),
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions();
@@ -813,17 +794,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         secret: "synthetic-device-sync-secret",
       },
       shouldYieldBackgroundMaintenance,
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      workspace: createDueAssistantWorkspace({}),
     }));
 
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
@@ -846,17 +817,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         secret: "synthetic-device-sync-secret",
       },
       shouldYieldBackgroundMaintenance,
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      workspace: createDueAssistantWorkspace({}),
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions();
@@ -884,17 +845,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
+      workspace: createDueAssistantWorkspace({
         nextWakeReason: null,
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      }),
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions();
@@ -920,17 +873,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      workspace: createDueAssistantWorkspace({}),
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions({
@@ -970,17 +913,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      workspace: createDueAssistantWorkspace({}),
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions();
@@ -1075,17 +1008,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
       importedCount: 0,
       logRequests,
       now: () => "2026-04-27T00:00:00.000Z",
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
+      workspace: createDueAssistantWorkspace({
         nextWakeAt: existingWakeAt,
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      }),
     }));
     await drainHostedRuntimeLogWritesBestEffort();
 
@@ -1172,17 +1097,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      workspace: createDueAssistantWorkspace({}),
     }));
 
     expect(result).toEqual(expect.objectContaining({
@@ -1203,17 +1118,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
+      workspace: createDueAssistantWorkspace({
         nextWakeAt,
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      }),
     }));
 
     expect(result).toEqual(expect.objectContaining({
@@ -1231,17 +1138,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      workspace: createDueAssistantWorkspace({}),
     }));
 
     expect(result).toEqual(expect.objectContaining({
@@ -1255,17 +1152,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      workspace: createDueAssistantWorkspace({}),
     }));
 
     expect(result).toEqual({
@@ -1291,17 +1178,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
+      workspace: createDueAssistantWorkspace({
         nextWakeReason: "device-sync.reconcile",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      }),
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions({
@@ -2787,22 +2666,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     ]);
     mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
       {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
+        ...createSentDeliveryOutcome(),
         providerMessageId: "provider_synthetic",
-        providerMessageIds: [],
         providerThreadId: null,
-        retryable: false,
-        target: null,
-        targetKind: null,
       },
     ]);
 

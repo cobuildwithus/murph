@@ -2,6 +2,7 @@ import { createMealMediaStore } from "./hosted-meal-media.harness.ts";
 import { publishHostedWorkspaceMediaReferencesForSnapshot, readHostedMediaReferenceCatalogue } from "../src/hosted-runtime/media-references.ts";
 import { createHostedMealMediaBudget, runHostedMealMediaMaintenance } from "../src/hosted-runtime/meal-media-maintenance.ts";
 import {
+  createWorkspaceRunRequest,
   TEST_NOW,
   TEST_USER_ID,
   createSnapshotFixtureRef,
@@ -24,25 +25,25 @@ import {
 import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 
 import assert from "node:assert/strict";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   addCaptureWithLookup,
   addMeasurement,
   appendJsonlRecord,
-  CURRENT_VAULT_FORMAT_VERSION,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  buildIntegrationEvidencePart,
-  buildIntegrationIngestRecord,
   findCaptureByLookup,
   initializeVault,
-  patchAutomation,
   readJsonlRecords,
   repairVault,
-  runCanonicalWrite,
-  showAutomation,
-  upsertAutomation,
   upsertEvent,
   validateVault,
 } from "@murphai/core";
@@ -55,64 +56,26 @@ import {
 } from "@murphai/inboxd";
 import {
   appendAssistantTranscriptEntries,
-  createAssistantOutboxIntent,
-  ensureAutomaticMealCloseoutAutomation,
-  getAssistantCronStatus,
   listAssistantTranscriptEntries,
-  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
-  listAssistantOutboxIntents,
-  markAssistantOutboxIntentSentById,
-  readAssistantContextSnapshotState,
-  refreshAssistantContextSnapshotBestEffort,
-  recordHostedMailboxAssistantInputItem,
-  saveAssistantOutboxIntent,
-  saveAssistantSession,
-  type AssistantHostedImageGenerationLauncher,
-  type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import {
   readAssistantInputEvent,
-  shouldGroupAdjacentAssistantInputCandidates,
   updateAssistantInputAttachmentEvidence,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
-  writeAssistantAutoReplyReplyTerminalEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   saveAssistantAutomationState,
-  updateAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
 import {
   resolveAssistantStatePaths,
   sha256HostedBundleHex,
-  createHostedPortableWorkspaceManifestFromBundle,
-  listPendingAssistantRuntimeIssueRecords,
-  restoreHostedBundleRoots,
-  restoreHostedExecutionContext,
-  snapshotHostedPortableWorkspaceDelta,
   snapshotHostedBundleRoots,
-  writePendingAssistantRuntimeIssueRecord,
-  writeHostedBundleTextFile,
 } from "@murphai/runtime-state/node";
 import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  readHostedRuntimeFailurePhaseCode,
-  type HostedMailboxFetchRequest,
-  type HostedMailboxFetchResponse,
-  type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
-  type HostedMailboxPayloadFetchResponse,
-  type HostedRuntimeRedactedJson,
-  type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
-  type HostedWorkspaceCheckpointResponse,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, test, vi } from "vitest";
@@ -121,35 +84,21 @@ import {
   HostedRuntimeCheckpointInterruptedByWakeError,
   HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
   HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
-  type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
   compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
-  ensureHostedPendingAssistantInputIndex,
-  inspectHostedPendingAssistantInputWakeCandidate,
-  readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
-  writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
   createHostedAssistantInputSource,
-  selectHostedAssistantInputIds,
 } from "../src/hosted-runtime/turn-input.ts";
 import {
-  HostedRuntimeArtifactReadError,
   type HostedRuntimeDeviceSyncPort,
-  type HostedRuntimeMailboxPort,
-  type HostedRuntimePlatform,
-  type HostedRuntimeWorkspacePort,
-  type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
 
 describe("hosted workspace runtime entrypoint", () => {test("carries inbox media retention wake through the idle checkpoint", async () => {
@@ -168,10 +117,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_retention_wake",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -278,10 +224,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_retention_follow_up_wake",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -424,10 +367,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_due_retention_wake",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -558,11 +498,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_promoted_document_retention",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             processingMode: "inbox_media_retention",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -820,10 +757,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_generated_image_retention_recovery",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "8",
             processingMode: "inbox_media_retention",
-            userId: TEST_USER_ID,
             workspaceVersion: workspaceAfterCrash.version,
           },
         }),
@@ -1109,11 +1044,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_message_retention_proof",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             processingMode: "inbox_media_retention",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1279,8 +1211,9 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       artifactBytesByHash.set(hash, bundle);
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({ request: {
-          attemptId: "attempt_synthetic_retention_blocker", leaseGeneration: "7",
-          processingMode: "inbox_media_retention", userId: TEST_USER_ID, workspaceVersion: "0",
+          attemptId: "attempt_synthetic_retention_blocker",
+          leaseGeneration: "7",
+          processingMode: "inbox_media_retention",
         } }),
         {
           async createCheckpointSnapshot() {
@@ -1457,11 +1390,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_retention_only",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             processingMode: "inbox_media_retention",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1611,11 +1541,8 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_retention_only_shutdown_pending_wake",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
             processingMode: "inbox_media_retention",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1699,8 +1626,6 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
               attemptId: "attempt_synthetic_durable_effect_follow_up_checkpoint",
               runnerIdleTtlMs,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -1799,10 +1724,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_import_enrichment_checkpoint_barrier",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1905,10 +1827,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_durable_effect_checkpoint_wake_drain",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2005,10 +1924,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_durable_effect_failure_isolated",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2289,10 +2205,7 @@ describe("hosted workspace runtime entrypoint", () => {test("carries inbox media
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
           attemptId: "attempt_synthetic_phase_checkpoint",
-          runnerIdleTtlMs: 1,
           leaseGeneration: "7",
-          userId: TEST_USER_ID,
-          workspaceVersion: "0",
         },
       }), {
         async createCheckpointSnapshot(snapshotInput) {

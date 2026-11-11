@@ -15,7 +15,6 @@ import {
 } from "@murphai/hosted-execution/env";
 
 import {
-  HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES,
   HOSTED_SHARED_INGRESS_ONLY_SECRET_ENV_NAMES,
   HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES,
   HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES,
@@ -242,7 +241,6 @@ const HOSTED_RUNTIME_USER_ENV_DENYLIST_PREFIXES = [
   "npm_config_",
   "WRANGLER_",
 ] as const;
-let hostedProcessEnvironmentQueue: Promise<void> = Promise.resolve();
 
 const hostedParserToolNames = [
   "ffmpeg",
@@ -279,16 +277,6 @@ export function normalizeHostedAssistantRuntimeConfig(
     platformEnv,
     resolvedConfig: cloneHostedAssistantRuntimeResolvedConfig(input?.resolvedConfig),
     userEnv,
-  };
-}
-
-export function buildHostedPlatformBackedRuntimeEnv(input: {
-  forwardedEnv: Readonly<Record<string, string>>;
-  platformEnv?: Readonly<Record<string, string>>;
-}): Record<string, string> {
-  return {
-    ...sanitizeHostedAssistantRuntimeForwardedEnv(input.forwardedEnv),
-    ...sanitizeHostedAssistantRuntimeChannelPlatformEnv(input.platformEnv ?? {}),
   };
 }
 
@@ -389,15 +377,6 @@ export function sanitizeHostedAssistantRuntimePlatformEnv(
   }
 
   return sanitized;
-}
-
-function sanitizeHostedAssistantRuntimeChannelPlatformEnv(
-  platformEnv: Readonly<Record<string, string>>,
-): Record<string, string> {
-  const allowedKeys = new Set<string>(HOSTED_SHARED_CHANNEL_PLATFORM_ENV_NAMES);
-  return Object.fromEntries(
-    Object.entries(platformEnv).filter(([key]) => allowedKeys.has(key)),
-  );
 }
 
 export function sanitizeHostedAssistantRuntimeUserEnv(input: {
@@ -572,54 +551,6 @@ function cloneHostedManagedAutoReplyChannel(
   };
 }
 
-export async function withHostedProcessEnvironment<T>(input: {
-  envOverrides: Record<string, string>;
-  operatorHomeRoot: string;
-  vaultRoot: string;
-}, run: () => Promise<T>): Promise<T> {
-  let releaseEnvironmentLock = () => {};
-  const previousEnvironmentLock = hostedProcessEnvironmentQueue;
-  hostedProcessEnvironmentQueue = new Promise<void>((resolve) => {
-    releaseEnvironmentLock = resolve;
-  });
-  await previousEnvironmentLock;
-
-  try {
-    return await runWithHostedProcessEnvironment(input, run);
-  } finally {
-    releaseEnvironmentLock();
-  }
-}
-
-async function runWithHostedProcessEnvironment<T>(input: {
-  envOverrides: Record<string, string>;
-  operatorHomeRoot: string;
-  vaultRoot: string;
-}, run: () => Promise<T>): Promise<T> {
-  const previousEnvironment = { ...process.env };
-  const previousWorkingDirectory = process.cwd();
-  const nextEnvironment: NodeJS.ProcessEnv = {
-    ...buildHostedBaseProcessEnvironment(previousEnvironment),
-    ...input.envOverrides,
-    HOME: input.operatorHomeRoot,
-    [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: "1",
-    VAULT: input.vaultRoot,
-  };
-
-  replaceProcessEnvironment(nextEnvironment);
-
-  try {
-    process.chdir(input.vaultRoot);
-    return await run();
-  } finally {
-    try {
-      process.chdir(previousWorkingDirectory);
-    } finally {
-      replaceProcessEnvironment(previousEnvironment);
-    }
-  }
-}
-
 function buildHostedBaseProcessEnvironment(
   source: Readonly<Record<string, string | undefined>>,
 ): Record<string, string> {
@@ -649,16 +580,4 @@ function buildHostedPlatformTransportProcessEnvironment(
   }
 
   return env;
-}
-
-function replaceProcessEnvironment(nextEnvironment: NodeJS.ProcessEnv): void {
-  for (const key of Object.keys(process.env)) {
-    delete process.env[key];
-  }
-
-  for (const [key, value] of Object.entries(nextEnvironment)) {
-    if (typeof value === "string") {
-      process.env[key] = value;
-    }
-  }
 }

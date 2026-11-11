@@ -611,7 +611,7 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
 
     expect(request).toMatchObject({
-      kind: 'invalid-generate-image-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_generate_image_arguments',
     })
   })
 
@@ -673,7 +673,7 @@ describe('murph.generate_image dynamic tool schema', () => {
         tool: MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name,
       },
     })).toMatchObject({
-      kind: 'invalid-response-media-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_media_arguments',
     })
   })
 })

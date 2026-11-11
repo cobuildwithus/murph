@@ -57,7 +57,7 @@ describe('murph.attach_response_card compact tables', () => {
           entityId: 'workout-123',
         },
       },
-    })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+    })).toMatchObject({ kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments' })
 
     expect(readCardToolRequest({
       card: {
@@ -67,14 +67,14 @@ describe('murph.attach_response_card compact tables', () => {
           entityId: TRACKED_WORKOUT_CARD.tracking.entityId,
         },
       },
-    })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+    })).toMatchObject({ kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments' })
 
     expect(readCardToolRequest({
       card: {
         ...TRACKED_WORKOUT_CARD,
         rows: [{ label: 'Bench press', values: ['2 sets'] }],
       },
-    })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+    })).toMatchObject({ kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments' })
   })
 
   it('keeps compact tables private-direct and mutually exclusive with media', async () => {

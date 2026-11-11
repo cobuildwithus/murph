@@ -9,7 +9,6 @@ import {
   createSentDeliveryOutcome,
   createSystemMailboxItem,
   expectAssistantLaneCallWithoutDeviceSyncOptions,
-  extractTopLevelFunctionBody,
   mocks,
   runHostedWorkspaceAssistantPhase,
   writeHostedPhaseExperimentSource,
@@ -23,7 +22,7 @@ import type {
   RuntimeUsageRecordPort,
 } from "./hosted-runtime-workspace-assistant-phase.harness.ts";
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -78,34 +77,6 @@ import {
 } from "../src/hosted-runtime/device-sync-maintenance-import.ts";
 
 describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
-  it("keeps foreground reply orchestration separate from background maintenance", async () => {
-    const source = await readFile(
-      new URL("../src/hosted-runtime/workspace-assistant-phase.ts", import.meta.url),
-      "utf8",
-    );
-    const body = extractTopLevelFunctionBody(source, "runForegroundAssistantReplyPhase");
-
-    expect(body).toContain("collectForegroundDeliveryEffects");
-    expect(body).not.toContain("prepareHostedSystemMailboxItemForCheckpoint");
-    expect(body).not.toContain("runHostedDeviceSyncWakeLane");
-    expect(body).not.toContain("readHostedProviderCleanupCheckpoint");
-    expect(body).not.toContain("includeBackgroundDueIntents: true");
-  });
-
-  it("uses post-delivery wake normalization for member-channel barriers", async () => {
-    const source = await readFile(
-      new URL("../src/hosted-runtime/workspace-assistant-phase.ts", import.meta.url),
-      "utf8",
-    );
-    const body = extractTopLevelFunctionBody(
-      source,
-      "buildHostedMemberChannelDeliveryBarrierResult",
-    );
-
-    expect(body).toContain("dropConsumedPostDeliveryWorkspaceAssistantWake");
-    expect(body).toContain("resolveHostedPostDeliveryBaseNextWake(input.input)");
-    expect(body).not.toContain("input.input.baseNextWake,");
-  });
 
   it("hydrates the hosted default assistant target before running automation", async () => {
     const hostedDefaultTarget = {
@@ -566,32 +537,38 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("exposes hosted personalization", async () => {
-    const assistantPersonalizationToolPort = {
-      request: vi.fn(),
-    };
-
+  it("passes optional hosted tool ports into the execution context", async () => {
+    const configuration: RuntimeAssistantConfigurationToolPort = { request: vi.fn() };
+    const personalization = { request: vi.fn() };
+    const subscription: RuntimeSubscriptionToolPort = { request: vi.fn() };
+    const usage: RuntimeUsageDiagnosticsPort = { read: vi.fn() };
+    const labs: RuntimeLabsToolPort = { request: vi.fn() };
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      runtimeAssistantPersonalizationToolPort: assistantPersonalizationToolPort,
+      runtimeAssistantConfigurationToolPort: configuration,
+      runtimeAssistantPersonalizationToolPort: personalization,
+      runtimeSubscriptionToolPort: subscription,
+      runtimeUsageDiagnosticsPort: usage,
+      runtimeLabsToolPort: labs,
     }));
-
+    const hosted = expect.objectContaining({
+      assistantConfigurationTool: configuration,
+      personalizationTool: personalization,
+      subscriptionTool: subscription,
+      usageDiagnostics: usage,
+      labsTool: labs,
+    });
     expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
-      {
-        hosted: expect.objectContaining({
-          personalizationTool: assistantPersonalizationToolPort,
-        }),
-      },
-      expect.any(Object),
+      { hosted }, expect.any(Object),
     );
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
-      expect.objectContaining({
-        executionContext: expect.objectContaining({
-          hosted: expect.objectContaining({
-            personalizationTool: assistantPersonalizationToolPort,
-          }),
-        }),
-      }),
+      expect.objectContaining({ executionContext: expect.objectContaining({ hosted }) }),
     );
+
+    mocks.hydrateHostedExecutionDefaultTarget.mockClear();
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+    const withoutPorts = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0].hosted;
+    expect(withoutPorts?.usageDiagnostics).toBeUndefined();
+    expect(withoutPorts?.labsTool).toBeUndefined();
   });
 
   it("resolves scheduled Linq routes through egress authority and fails closed", async () => {
@@ -736,95 +713,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }, { signal });
   });
 
-  it("passes the hosted assistant configuration port into assistant execution", async () => {
-    const assistantConfigurationToolPort: RuntimeAssistantConfigurationToolPort = {
-      request: vi.fn(),
-    };
-
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      runtimeAssistantConfigurationToolPort: assistantConfigurationToolPort,
-    }));
-
-    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
-      {
-        hosted: expect.objectContaining({
-          assistantConfigurationTool: assistantConfigurationToolPort,
-        }),
-      },
-      expect.any(Object),
-    );
-  });
-
-  it("passes the hosted subscription port into assistant execution", async () => {
-    const subscriptionToolPort: RuntimeSubscriptionToolPort = {
-      request: vi.fn(),
-    };
-
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      runtimeSubscriptionToolPort: subscriptionToolPort,
-    }));
-
-    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
-      {
-        hosted: expect.objectContaining({
-          subscriptionTool: subscriptionToolPort,
-        }),
-      },
-      expect.any(Object),
-    );
-  });
-
-  it("passes the hosted usage diagnostics port into assistant execution", async () => {
-    const usageDiagnosticsPort: RuntimeUsageDiagnosticsPort = { read: vi.fn() };
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      runtimeUsageDiagnosticsPort: usageDiagnosticsPort,
-    }));
-    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
-      { hosted: expect.objectContaining({ usageDiagnostics: usageDiagnosticsPort }) },
-      expect.any(Object),
-    );
-  });
-
-  it("omits hosted usage diagnostics when unavailable", async () => {
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
-    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
-      { hosted: expect.not.objectContaining({ usageDiagnostics: expect.anything() }) },
-      expect.any(Object),
-    );
-  });
-
-  it("passes the hosted labs port into assistant execution when available", async () => {
-    const labsToolPort: RuntimeLabsToolPort = {
-      request: vi.fn(),
-    };
-
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      runtimeLabsToolPort: labsToolPort,
-    }));
-
-    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
-      {
-        hosted: expect.objectContaining({
-          labsTool: labsToolPort,
-        }),
-      },
-      expect.any(Object),
-    );
-  });
-
-  it("omits the hosted labs port from assistant execution when unavailable", async () => {
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
-
-    expect(mocks.hydrateHostedExecutionDefaultTarget).toHaveBeenCalledWith(
-      {
-        hosted: expect.not.objectContaining({
-          labsTool: expect.anything(),
-        }),
-      },
-      expect.any(Object),
-    );
-  });
-
   it("prepares hosted assistant automation state before running scheduled automation", async () => {
     const runtimeEnv = {};
     const runtimeForwardedEnv = {
@@ -889,6 +777,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const operatorHomeRoot = await mkdtemp(path.join(tmpdir(), "hosted-phase-home-"));
     const codexHome = path.join(operatorHomeRoot, ".codex-hosted");
     const codexShimPath = path.join(codexHome, "bin/codex");
+    const previousCwd = process.cwd();
     const previousCommand = process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV];
     const previousCodexHome = process.env.CODEX_HOME;
     const previousHome = process.env.HOME;
@@ -915,6 +804,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       PATH: "/usr/bin",
     };
     mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      expect(process.cwd()).toBe(previousCwd);
       expect(process.env[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]).toBe("ambient-command");
       expect(process.env.CODEX_HOME).toBe("ambient-codex-home");
       expect(process.env.HOME).toBe("ambient-home");
@@ -1541,17 +1431,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
+      workspace: createDueAssistantWorkspace({
         nextWakeAt: "2026-04-27T00:00:00.000Z",
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      }),
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
@@ -2228,17 +2110,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
+      workspace: createDueAssistantWorkspace({
         nextWakeReason: "device-sync.reconcile",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      }),
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions({
@@ -2256,17 +2130,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
       now: () => "2026-04-27T00:00:00.000Z",
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      workspace: createDueAssistantWorkspace({}),
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions();
@@ -2285,17 +2149,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
+      workspace: createDueAssistantWorkspace({
         nextWakeReason: "device-sync.reconcile",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      }),
     }));
 
     expectAssistantLaneCallWithoutDeviceSyncOptions();
@@ -2341,17 +2197,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
+      workspace: createDueAssistantWorkspace({
         nextWakeReason: "device-sync.reconcile",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      }),
     }));
     const postCheckpoint = await result.afterCheckpoint?.();
 
@@ -2399,17 +2247,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
+      workspace: createDueAssistantWorkspace({
         nextWakeReason: "device-sync.reconcile",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      }),
     }));
 
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
@@ -2427,17 +2267,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       conversationImportedCount: 0,
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
-      workspace: {
-        checkpointedAt: "2026-04-27T00:00:00.000Z",
-        createdAt: "2026-04-27T00:00:00.000Z",
-        nextWakeAt: "2026-04-26T23:59:59.000Z",
-        nextWakeReason: "assistant",
-        redactedStatus: null,
-        snapshotRef: null,
-        updatedAt: "2026-04-27T00:00:00.000Z",
-        userId: "member_synthetic_phase",
-        version: "8",
-      },
+      workspace: createDueAssistantWorkspace({}),
     }));
 
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();

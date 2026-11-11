@@ -17,7 +17,6 @@ import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 import {
   createAssistantBindingDelivery,
   createAssistantChannelAdapter,
-  inferBindingDeliveryForChannel,
   normalizeOptionalText,
   readDeliveredProviderMessageId,
   readDeliveredProviderThreadId,
@@ -25,7 +24,6 @@ import {
   resolveDeliveryCandidates,
   resolveRequiredDeliveryCandidate,
 } from '../src/assistant/channels/helpers.ts'
-import { inferAssistantBindingDelivery } from '../src/assistant/channels/registry.ts'
 import type {
   AssistantChannelActivityHandle,
   AssistantChannelDependencies,
@@ -92,190 +90,6 @@ describe('channel helper seams', () => {
       expect(error.code).toBe('ASSISTANT_CHANNEL_TARGET_REQUIRED')
       expect(error.message).toBe('target required')
     }
-  })
-
-  it('resolves explicit and inferred binding delivery through the gateway-owned channel helper', () => {
-    const conversation = createConversation({
-      directness: 'direct',
-      participantId: 'participant-1',
-      threadId: 'thread-1',
-    })
-
-    expect(
-      inferBindingDeliveryForChannel({
-        channel: 'telegram',
-        conversation,
-        deliveryKind: 'thread',
-        deliveryTarget: '  explicit-thread  ',
-      }),
-    ).toEqual({
-      kind: 'thread',
-      target: 'explicit-thread',
-    })
-
-    expect(
-      inferBindingDeliveryForChannel({
-        channel: 'telegram',
-        conversation,
-        deliveryKind: 'thread',
-        deliveryTarget: '   ',
-      }),
-    ).toEqual({
-      kind: 'thread',
-      target: 'thread-1',
-    })
-
-    expect(
-      inferBindingDeliveryForChannel({
-        channel: 'telegram',
-        conversation,
-        deliveryKind: 'participant',
-        deliveryTarget: '  explicit-participant  ',
-      }),
-    ).toEqual({
-      kind: 'participant',
-      target: 'explicit-participant',
-    })
-
-    expect(
-      inferBindingDeliveryForChannel({
-        channel: 'telegram',
-        conversation,
-      }),
-    ).toEqual({
-      kind: 'thread',
-      target: 'thread-1',
-    })
-
-    expect(
-      inferBindingDeliveryForChannel({
-        channel: 'telegram',
-        conversation: createConversation({
-          participantId: 'participant-2',
-          threadId: null,
-        }),
-      }),
-    ).toEqual({
-      kind: 'participant',
-      target: 'participant-2',
-    })
-
-    expect(
-      inferBindingDeliveryForChannel({
-        channel: 'linq',
-        conversation: createConversation({
-          participantId: 'participant-2',
-          threadId: null,
-        }),
-      }),
-    ).toBeNull()
-
-    expect(
-      inferBindingDeliveryForChannel({
-        channel: 'linq',
-        conversation: createConversation({
-          participantId: 'participant-2',
-          threadId: null,
-        }),
-        deliveryKind: 'participant',
-      }),
-    ).toEqual({
-      kind: 'participant',
-      target: 'participant-2',
-    })
-
-    expect(
-      inferBindingDeliveryForChannel({
-        channel: 'custom-channel',
-        conversation: createConversation({
-          directness: 'group',
-          participantId: 'participant-3',
-          threadId: 'thread-3',
-        }),
-      }),
-    ).toEqual({
-      kind: 'thread',
-      target: 'thread-3',
-    })
-
-    expect(
-      inferBindingDeliveryForChannel({
-        channel: 'custom-channel',
-        conversation: createConversation({
-          directness: 'direct',
-          participantId: 'participant-4',
-          threadId: 'thread-4',
-        }),
-      }),
-    ).toEqual({
-      kind: 'participant',
-      target: 'participant-4',
-    })
-
-    expect(
-      inferBindingDeliveryForChannel({
-        channel: 'custom-channel',
-        conversation: createConversation({
-          directness: 'direct',
-          participantId: null,
-          threadId: 'thread-5',
-        }),
-      }),
-    ).toEqual({
-      kind: 'thread',
-      target: 'thread-5',
-    })
-
-    expect(
-      inferBindingDeliveryForChannel({
-        channel: 'custom-channel',
-        conversation: createConversation({
-          directness: 'direct',
-          participantId: null,
-          threadId: null,
-        }),
-      }),
-    ).toBeNull()
-  })
-
-  it('uses channel-specific inference rules and unknown-channel fallback delivery', () => {
-    const participantOnlyConversation = createConversation({
-      channel: 'telegram',
-      participantId: 'participant-9',
-      threadId: null,
-    })
-
-    expect(
-      inferAssistantBindingDelivery({
-        channel: 'telegram',
-        conversation: participantOnlyConversation,
-      }),
-    ).toEqual({
-      kind: 'participant',
-      target: 'participant-9',
-    })
-
-    expect(
-      inferAssistantBindingDelivery({
-        channel: 'linq',
-        conversation: participantOnlyConversation,
-      }),
-    ).toBeNull()
-
-    expect(
-      inferAssistantBindingDelivery({
-        channel: 'unknown-channel',
-        conversation: createConversation({
-          channel: null,
-          directness: 'group',
-          participantId: 'participant-10',
-          threadId: 'thread-10',
-        }),
-      }),
-    ).toEqual({
-      kind: 'thread',
-      target: 'thread-10',
-    })
   })
 
   it('normalizes optional text and delivered identifiers from adapter responses', () => {

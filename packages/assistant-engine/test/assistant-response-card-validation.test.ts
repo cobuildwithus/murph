@@ -143,7 +143,7 @@ describe('response-card validation feedback', () => {
     ]) {
       const request = readCardToolRequest(card)
       expect(request).toMatchObject({
-        kind: 'invalid-response-card-arguments',
+        kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
         validationDigest: {
           pathIssues: [{
             path: 'card.kind',
@@ -152,7 +152,7 @@ describe('response-card validation feedback', () => {
           }],
         },
       })
-      if (!request || request.kind !== 'invalid-response-card-arguments') {
+      if (!request || request.kind !== 'invalid-tool-arguments') {
         throw new Error('expected response-card family choice feedback')
       }
       expect(JSON.parse(buildResponseCardValidationFeedback(
@@ -183,7 +183,7 @@ describe('response-card validation feedback', () => {
       typo: { marker: 'synthetic-private-marker' },
     }, 'private')
     expect(privateRequest).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
       validationDigest: {
         pathIssues: expect.arrayContaining([
           expect.objectContaining({ path: 'card' }),
@@ -198,7 +198,7 @@ describe('response-card validation feedback', () => {
 
     const groupRequest = readCardToolArguments({}, 'group')
     expect(groupRequest).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
       validationDigest: {
         pathIssues: expect.arrayContaining([
           expect.objectContaining({ path: 'challengeSlug' }),
@@ -208,7 +208,7 @@ describe('response-card validation feedback', () => {
       },
     })
     expect(
-      groupRequest?.kind === 'invalid-response-card-arguments'
+      groupRequest?.kind === 'invalid-tool-arguments'
         ? groupRequest.validationDigest.pathIssues
         : [],
     ).not.toEqual(expect.arrayContaining([
@@ -218,8 +218,8 @@ describe('response-card validation feedback', () => {
 
   it('returns complete validation reasons and accepts the corrected retry', async () => {
     const request = readCardToolRequest(INVALID_TABLE)
-    expect(request?.kind).toBe('invalid-response-card-arguments')
-    if (!request || request.kind !== 'invalid-response-card-arguments') {
+    expect(request?.kind).toBe('invalid-tool-arguments')
+    if (!request || request.kind !== 'invalid-tool-arguments') {
       throw new Error('expected invalid response card arguments')
     }
 
@@ -243,7 +243,7 @@ describe('response-card validation feedback', () => {
       }],
     })
     expect(invalidCellRequest).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
       validationDigest: {
         pathIssues: expect.arrayContaining([
           expect.objectContaining({
@@ -339,7 +339,7 @@ describe('response-card validation feedback', () => {
         tool: MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL.name,
       },
     })
-    expect(request).toMatchObject({ kind: 'invalid-response-card-arguments' })
+    expect(request).toMatchObject({ kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments' })
 
     const result = await executeMurphDynamicToolRequest({
       currentResponseCard: null,
@@ -385,7 +385,7 @@ describe('response-card validation feedback', () => {
     }
     const genericRequest = readCardToolRequest(genericWithoutColumns)
     expect(genericRequest).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
       validationDigest: {
         pathIssues: expect.arrayContaining([
           expect.objectContaining({ path: 'card.columns' }),
@@ -413,7 +413,7 @@ describe('response-card validation feedback', () => {
       },
     })
     expect(workoutRequest).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
       validationDigest: {
         pathIssues: expect.arrayContaining([
           expect.objectContaining({ path: 'card.workout.exercises' }),
@@ -438,7 +438,7 @@ describe('response-card validation feedback', () => {
       },
     })
     expect(workoutWithoutDetailRequest).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
       validationDigest: {
         pathIssues: expect.arrayContaining([
           expect.objectContaining({ path: 'card.workout' }),
@@ -455,7 +455,7 @@ describe('response-card validation feedback', () => {
       },
     })
     expect(trackedGenericRequest).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
       validationDigest: {
         pathIssues: expect.arrayContaining([
           expect.objectContaining({ path: 'card.columns' }),
@@ -472,7 +472,7 @@ describe('response-card validation feedback', () => {
       },
     })
     expect(conflictingShapeRequest).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
       validationDigest: {
         pathIssues: [{
           path: 'card',
@@ -490,7 +490,7 @@ describe('response-card validation feedback', () => {
       tracking: null,
     })
     expect(shapeChoiceRequest).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
       validationDigest: {
         pathIssues: [{
           path: 'card',
@@ -500,7 +500,7 @@ describe('response-card validation feedback', () => {
     })
     if (
       !shapeChoiceRequest
-      || shapeChoiceRequest.kind !== 'invalid-response-card-arguments'
+      || shapeChoiceRequest.kind !== 'invalid-tool-arguments'
     ) {
       throw new Error('expected compact-table shape choice feedback')
     }
@@ -522,7 +522,7 @@ describe('response-card validation feedback', () => {
       INVALID_NUTRITION_MEAL_COUNT_CARD,
     )
     expect(nutritionMealCountRequest).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
       validationDigest: {
         pathIssues: expect.arrayContaining([
           expect.objectContaining({
@@ -535,7 +535,7 @@ describe('response-card validation feedback', () => {
     })
     if (
       !nutritionMealCountRequest
-      || nutritionMealCountRequest.kind !== 'invalid-response-card-arguments'
+      || nutritionMealCountRequest.kind !== 'invalid-tool-arguments'
     ) {
       throw new Error('expected nutrition meal-count relation to fail')
     }
@@ -567,7 +567,7 @@ describe('response-card validation feedback', () => {
       } as const
       const hybridRequest = readCardToolRequest(hybridMetricCard)
       expect(hybridRequest).toMatchObject({
-        kind: 'invalid-response-card-arguments',
+        kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
         validationDigest: {
           pathIssues: [{
             path: 'card.totals.proteinGrams.mealCount',
@@ -578,7 +578,7 @@ describe('response-card validation feedback', () => {
       })
       if (
         !hybridRequest
-        || hybridRequest.kind !== 'invalid-response-card-arguments'
+        || hybridRequest.kind !== 'invalid-tool-arguments'
       ) {
         throw new Error('expected optional metric relation to fail')
       }
@@ -612,7 +612,7 @@ describe('response-card validation feedback', () => {
       INVALID_PENDING_ACTUAL_WORKOUT_CARD,
     )
     expect(pendingActualRequest).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
       validationDigest: {
         pathIssues: expect.arrayContaining([
           expect.objectContaining({
@@ -637,7 +637,7 @@ describe('response-card validation feedback', () => {
     const oversizedCard = buildOversizedGenericTableCard()
     const oversizedRequest = readCardToolRequest(oversizedCard)
     expect(oversizedRequest).toMatchObject({
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments',
       validationDigest: {
         pathIssues: expect.arrayContaining([
           expect.objectContaining({
@@ -648,7 +648,7 @@ describe('response-card validation feedback', () => {
         ]),
       },
     })
-    if (!oversizedRequest || oversizedRequest.kind !== 'invalid-response-card-arguments') {
+    if (!oversizedRequest || oversizedRequest.kind !== 'invalid-tool-arguments') {
       throw new Error('expected oversized response card arguments to fail')
     }
     const feedback = buildResponseCardValidationFeedback(
@@ -755,8 +755,8 @@ describe('compact-table debug: argument admission', () => {
       expect(result.responseCardTextFallbackPatch).toBeUndefined()
       expect(result.usageDraft ?? null).toBeNull()
       if (issue) {
-        expect(request.kind).toBe('invalid-response-card-arguments')
-        if (request.kind !== 'invalid-response-card-arguments') {
+        expect(request.kind).toBe('invalid-tool-arguments')
+        if (request.kind !== 'invalid-tool-arguments') {
           throw new Error('Expected argument rejection, not envelope recovery.')
         }
         expect(request.validationDigest.pathIssues).toEqual([

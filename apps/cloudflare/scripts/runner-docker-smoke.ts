@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   encodeHostedBundleBase64,
-  snapshotHostedExecutionContext,
+  snapshotHostedBundleRoots,
 } from "@murphai/runtime-state/node";
 
 import {
@@ -27,10 +27,11 @@ const SMOKE_BUNDLE_DIR = path.join(appDir, ".deploy", "runner-smoke-bundle");
 
 async function main(): Promise<void> {
   try {
-    const snapshot = await snapshotHostedExecutionContext({
-      vaultRoot: FIXTURE_VAULT_ROOT,
+    const snapshot = await snapshotHostedBundleRoots({
+      kind: "vault",
+      roots: [{ root: FIXTURE_VAULT_ROOT, rootKey: "vault" }],
     });
-    const bundle = encodeHostedBundleBase64(snapshot.bundle);
+    const bundle = encodeHostedBundleBase64(snapshot);
 
     if (!bundle) {
       throw new Error("Could not encode the hosted runner smoke fixture bundle.");

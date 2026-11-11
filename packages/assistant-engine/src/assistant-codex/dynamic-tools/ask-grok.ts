@@ -70,7 +70,7 @@ export async function executeAskGrokDynamicTool(input: {
     abortSignal: input.abortSignal ?? null,
     args: input.args,
     runtime: input.askGrokRuntime ?? null,
-    turnState: input.askGrokTurnState ?? null,
+    turnState: input.askGrokTurnState,
   })
   return {
     ...toolFailureMetadata(result),

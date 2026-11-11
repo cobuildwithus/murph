@@ -446,10 +446,7 @@ describe("hosted mailbox import loop", () => {
   });
 
   test("fetches after runtime watermarks and advances only after durable import", async () => {
-    const first = createMailboxItem({
-      id: "mailbox_item_conversation_001",
-      laneSeq: "1",
-    });
+    const first = createMailboxItem({});
     const second = createMailboxItem({
       id: "mailbox_item_conversation_002",
       laneSeq: "2",
@@ -1517,10 +1514,7 @@ describe("hosted mailbox import loop", () => {
   test("flags nothing as durably consumed when the fetch response omits consumedSeqByLane", async () => {
     const { mailboxPort } = createMailboxPort({
       items: [
-        createMailboxItem({
-          id: "mailbox_item_conversation_001",
-          laneSeq: "1",
-        }),
+        createMailboxItem({}),
         createMailboxItem({
           id: "mailbox_item_conversation_002",
           laneSeq: "2",
@@ -1684,10 +1678,7 @@ describe("hosted mailbox import loop", () => {
       lane: "system",
       laneSeq: "3",
     });
-    const conversation = createMailboxItem({
-      id: "mailbox_item_conversation_001",
-      laneSeq: "1",
-    });
+    const conversation = createMailboxItem({});
     const { mailboxPort } = createMailboxPort({
       items: [firstSystem, secondSystem, thirdSystem, conversation],
     });
@@ -1820,9 +1811,7 @@ describe("hosted mailbox import loop", () => {
   test("terminal-skips payloadless conversation tombstones and continues the prefix", async () => {
     const tombstone = createMailboxItem({
       id: "mailbox_item_conversation_payloadless_tombstone",
-      laneSeq: "1",
       payloadInlineCiphertext: null,
-      payloadRef: null,
     });
     const retainedNext = createMailboxItem({
       id: "mailbox_item_conversation_after_payloadless_tombstone",
@@ -1941,9 +1930,7 @@ describe("hosted mailbox import loop", () => {
   test("quarantines malformed route metadata without exposing payload details", async () => {
     const item = createMailboxItem({
       id: "mailbox_item_system_bad_lane",
-      kind: "conversation.message",
       lane: "system",
-      laneSeq: "1",
     });
     const { mailboxPort } = createMailboxPort({
       items: [item],

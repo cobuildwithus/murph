@@ -1,6 +1,5 @@
 import type {
   HostedRuntimeProviderFileResponse,
-  HostedRuntimeTelegramCleanupMessage,
   HostedRuntimeTelegramDownloadFileRequest,
   HostedRuntimeTelegramFile,
   HostedRuntimeTelegramGetFileRequest,
@@ -22,16 +21,11 @@ const PROVIDER_EFFECT_PATHS = new Set([
 ]);
 
 export interface HostedRunnerProviderEffectErrorResponse {
-  cleanupMessages?: HostedRuntimeTelegramCleanupMessage[];
-  cleanupTargetAliases?: string[];
   code?: string;
   context?: Record<string, unknown>;
   deliveryMayHaveSucceeded?: boolean;
   error: string;
-  providerMessageId?: string | null;
-  providerMessageIds?: string[];
   retryable?: boolean;
-  target?: string;
 }
 
 export interface HostedRunnerPrivateImageUrlPublishRequest {
@@ -163,22 +157,7 @@ export function parseHostedRunnerProviderEffectErrorResponse(
     ...(typeof record.deliveryMayHaveSucceeded === "boolean"
       ? { deliveryMayHaveSucceeded: record.deliveryMayHaveSucceeded }
       : {}),
-    ...(record.providerMessageId === null || typeof record.providerMessageId === "string"
-      ? { providerMessageId: record.providerMessageId }
-      : {}),
-    ...(Array.isArray(record.providerMessageIds)
-      ? { providerMessageIds: readRequiredStringArray(record.providerMessageIds, "providerMessageIds") }
-      : {}),
-    ...(Array.isArray(record.cleanupTargetAliases)
-      ? { cleanupTargetAliases: readRequiredStringArray(record.cleanupTargetAliases, "cleanupTargetAliases") }
-      : {}),
     ...(typeof record.retryable === "boolean" ? { retryable: record.retryable } : {}),
-    ...(Array.isArray(record.cleanupMessages)
-      ? { cleanupMessages: parseCleanupMessages(record.cleanupMessages) }
-      : {}),
-    ...(typeof record.target === "string" && record.target.trim().length > 0
-      ? { target: record.target.trim() }
-      : {}),
   };
 }
 
@@ -208,16 +187,6 @@ function parseTelegramFile(value: unknown): HostedRuntimeTelegramFile {
   };
 }
 
-function parseCleanupMessages(value: readonly unknown[]): HostedRuntimeTelegramCleanupMessage[] {
-  return value.map((entry) => {
-    const record = requireRecord(entry, "Hosted Telegram cleanup message");
-    return {
-      messageId: readRequiredString(record.messageId, "cleanup messageId"),
-      target: readRequiredString(record.target, "cleanup target"),
-    };
-  });
-}
-
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object.`);
@@ -242,42 +211,6 @@ function readOptionalString(value: unknown, label: string): string | null {
     return null;
   }
   return readRequiredString(value, label);
-}
-
-function readRequiredStringArray(value: unknown, label: string): string[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError(`Hosted runner provider effect ${label} must be a string array.`);
-  }
-  const strings = value.map((entry) => readRequiredString(entry, label));
-  return [...new Set(strings)];
-}
-
-function readRequiredStringRecord(
-  value: unknown,
-  label: string,
-): Record<string, string> {
-  const record = requireRecord(
-    value,
-    `Hosted runner provider effect ${label}`,
-  );
-  const result: Record<string, string> = {};
-  for (const [key, entry] of Object.entries(record)) {
-    const normalizedKey = key.trim();
-    if (!normalizedKey) {
-      throw new TypeError(
-        `Hosted runner provider effect ${label} keys must not be blank.`,
-      );
-    }
-    result[normalizedKey] = readRequiredString(entry, `${label}.${normalizedKey}`);
-  }
-  return result;
-}
-
-function readOptionalStringArray(value: unknown, label: string): string[] | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  return readRequiredStringArray(value, label);
 }
 
 function readNonNegativeInteger(value: unknown, label: string): number {

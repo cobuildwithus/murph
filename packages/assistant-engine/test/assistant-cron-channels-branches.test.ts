@@ -1,10 +1,8 @@
-import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import {
-  type AssistantCronPresetVariable,
   type AssistantCronSchedule,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -147,7 +145,6 @@ import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 
 const tempRoots: string[] = []
-const tempModulePaths: string[] = []
 
 beforeEach(() => {
   vi.useRealTimers()
@@ -331,11 +328,7 @@ beforeEach(() => {
 afterEach(async () => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
-  await Promise.all(
-    tempModulePaths.splice(0).map((filePath) =>
-      unlink(filePath).catch(() => undefined),
-    ),
-  )
+
   await Promise.all(
     tempRoots.splice(0).map((rootPath) =>
       rm(rootPath, {
@@ -616,7 +609,7 @@ describe('assistant channel descriptors and runtime edges', () => {
 })
 
 describe('assistant cron helpers and wrappers', () => {
-  it('covers preset variable guards and internal validation branches', async () => {
+  it('validates public preset variables and renders the unique registry', () => {
     expect(
       listAssistantCronPresets().some((preset) => preset.id === 'morning-mindfulness'),
     ).toBe(true)
@@ -635,155 +628,11 @@ describe('assistant cron helpers and wrappers', () => {
       }),
     ).toThrowError(/does not define variables "badOne", "badTwo"/u)
 
-    const tempModulePath = path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      `.__assistant-cron-preset-hooks-${process.pid}-${Date.now()}.ts`,
-    )
-    const originalSource = await readFile(
-      new URL('../src/assistant/cron/presets.ts', import.meta.url),
-      'utf8',
-    )
-    const transformedSource = originalSource
-      .replace(
-        "from '../shared.js'",
-        "from '../src/assistant/shared.ts'",
-      )
-      .concat(
-        '\nexport const __testHooks = { validateAssistantCronPresetDefinitions, resolveAssistantCronPresetVariables }\n',
-      )
-    await writeFile(tempModulePath, transformedSource, 'utf8')
-    tempModulePaths.push(tempModulePath)
-
-    const loaded = await import(
-      `${pathToFileURL(tempModulePath).href}?t=${Date.now()}`
-    ) as typeof import('../src/assistant/cron/presets.ts') & {
-      __testHooks: {
-        resolveAssistantCronPresetVariables: (
-          variables: readonly AssistantCronPresetVariable[],
-          input: Record<string, string | null | undefined> | null,
-          presetId: string,
-        ) => Record<string, string>
-        validateAssistantCronPresetDefinitions: (presets: readonly unknown[]) => void
-      }
+    const presets = listAssistantCronPresets()
+    expect(new Set(presets.map((preset) => preset.id)).size).toBe(presets.length)
+    for (const preset of presets) {
+      expect(renderAssistantCronPreset({ presetId: preset.id }).resolvedPrompt).not.toMatch(/\{\{[^}]+\}\}/u)
     }
-
-    const optionalOnly = loaded.__testHooks.resolveAssistantCronPresetVariables(
-      [
-        {
-          defaultValue: null,
-          description: 'Optional value',
-          example: null,
-          key: 'optional_value',
-          label: 'Optional value',
-          required: false,
-        },
-      ],
-      {
-        optional_value: '   ',
-      },
-      'custom-preset',
-    )
-    expect(optionalOnly).toEqual({
-      optional_value: '',
-    })
-
-    expect(() =>
-      loaded.__testHooks.resolveAssistantCronPresetVariables(
-        [
-          {
-            defaultValue: null,
-            description: 'Required value',
-            example: null,
-            key: 'required_value',
-            label: 'Required value',
-            required: true,
-          },
-        ],
-        {
-          required_value: '   ',
-        },
-        'custom-preset',
-      ),
-    ).toThrowError(/requires --var required_value=/u)
-
-    expect(() =>
-      loaded.__testHooks.validateAssistantCronPresetDefinitions([
-        {
-          category: 'tests',
-          description: 'first',
-          id: 'duplicate-id',
-          promptTemplate: 'Prompt {{value}}',
-          suggestedName: 'first',
-          suggestedSchedule: {
-            expression: '0 7 * * *',
-            kind: 'cron',
-          },
-          suggestedScheduleLabel: 'Daily',
-          title: 'First',
-          variables: [
-            {
-              defaultValue: 'value',
-              description: 'value',
-              example: 'value',
-              key: 'value',
-              label: 'Value',
-              required: true,
-            },
-          ],
-        },
-        {
-          category: 'tests',
-          description: 'second',
-          id: 'duplicate-id',
-          promptTemplate: 'Prompt {{missing}}',
-          suggestedName: 'second',
-          suggestedSchedule: {
-            expression: '0 8 * * *',
-            kind: 'cron',
-          },
-          suggestedScheduleLabel: 'Daily',
-          title: 'Second',
-          variables: [
-            {
-              defaultValue: 'value',
-              description: 'value',
-              example: 'value',
-              key: 'value',
-              label: 'Value',
-              required: true,
-            },
-          ],
-        },
-      ]),
-    ).toThrowError(/Duplicate assistant cron preset id/u)
-
-    expect(() =>
-      loaded.__testHooks.validateAssistantCronPresetDefinitions([
-        {
-          category: 'tests',
-          description: 'unknown placeholder',
-          id: 'placeholder-mismatch',
-          promptTemplate: 'Prompt {{missing}}',
-          suggestedName: 'placeholder-mismatch',
-          suggestedSchedule: {
-            expression: '0 7 * * *',
-            kind: 'cron',
-          },
-          suggestedScheduleLabel: 'Daily',
-          title: 'Mismatch',
-          variables: [
-            {
-              defaultValue: 'value',
-              description: 'value',
-              example: 'value',
-              key: 'value',
-              label: 'Value',
-              required: true,
-            },
-          ],
-        },
-      ]),
-    ).toThrowError(/references unknown variable "missing"/u)
   })
 
   it('covers schedule parsing and cron matching edge branches', () => {

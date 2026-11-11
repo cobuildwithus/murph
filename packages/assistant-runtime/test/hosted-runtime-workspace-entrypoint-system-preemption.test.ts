@@ -1,4 +1,5 @@
 import {
+  createWorkspaceRunRequest,
   TEST_NOW,
   TEST_USER_ID,
   createBrowserVaultReplicaRef,
@@ -22,82 +23,47 @@ import {
   requireEventIndex,
   runHostedWorkspaceRuntimeJobInProcess,
   stagePendingLinqAssistantInputForMailboxItem,
-  waitUntil,
   withRealTimeout,
   writeMailboxImportStateFile,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import assert from "node:assert/strict";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  addCaptureWithLookup,
   CURRENT_VAULT_FORMAT_VERSION,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  buildIntegrationEvidencePart,
-  buildIntegrationIngestRecord,
-  findCaptureByLookup,
   initializeVault,
   patchAutomation,
-  readJsonlRecords,
-  repairVault,
   runCanonicalWrite,
   showAutomation,
   upsertAutomation,
-  validateVault,
 } from "@murphai/core";
 import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
-import { readHostedExecutionSnapshotBaseRef } from "@murphai/hosted-execution/parsers";
+
 import {
-  appendAssistantTranscriptEntries,
   createAssistantOutboxIntent,
-  ensureAutomaticMealCloseoutAutomation,
   getAssistantCronStatus,
-  listAssistantTranscriptEntries,
-  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentSentById,
-  readAssistantContextSnapshotState,
-  refreshAssistantContextSnapshotBestEffort,
-  recordHostedMailboxAssistantInputItem,
-  saveAssistantOutboxIntent,
-  saveAssistantSession,
-  type AssistantHostedImageGenerationLauncher,
-  type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  readHostedRuntimeFailurePhaseCode,
   type HostedMailboxFetchRequest,
   type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
-  type HostedMailboxPayloadFetchResponse,
-  type HostedRuntimeRedactedJson,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
-  type HostedWorkspaceCheckpointResponse,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, test, vi } from "vitest";
 import {
   createCoalescingRuntimeWakeSignal,
-  HostedRuntimeCheckpointInterruptedByWakeError,
-  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
-  HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  parseHostedAssistantWorkspaceRuntimeJobInput,
-  type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD,
@@ -107,12 +73,6 @@ import type {
 } from "../src/hosted-runtime/runtime-wake.ts";
 import {
   createEmptyHostedMailboxImportState,
-  HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
-  HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
-  HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH,
-  readHostedMailboxImportState,
-  writeHostedMailboxImportState,
-  type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   readHostedSystemMailboxState,
@@ -120,12 +80,8 @@ import {
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
-  HostedRuntimeArtifactReadError,
   type HostedRuntimeDeviceSyncPort,
   type HostedRuntimeMailboxPort,
-  type HostedRuntimePlatform,
-  type HostedRuntimeWorkspacePort,
-  type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
 
 describe("hosted workspace runtime entrypoint", () => {
@@ -998,9 +954,6 @@ describe("hosted workspace runtime entrypoint", () => {
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const conversationItem = createMailboxItem({
       id: "mailbox_item_entrypoint_system_bootstrap_conversation_001",
-      kind: "conversation.message",
-      lane: "conversation",
-      laneSeq: "1",
     });
     const systemItem = createMailboxItem({
       id: "mailbox_item_entrypoint_system_bootstrap_member_activated_001",
@@ -1020,8 +973,6 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             leaseGeneration: "7",
             processingMode: "system_mailbox",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2373,7 +2324,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       await acknowledgementStarted.promise;
       conversationItems.push(createMailboxItem({
-        id: "mailbox_item_recording_foreground", lane: "conversation", laneSeq: "1",
+        id: "mailbox_item_recording_foreground",
       }));
       runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
       await withRealTimeout(
@@ -2610,7 +2561,7 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
       conversationItems.push(createMailboxItem({
-        id: "mailbox_item_recording_foreground", lane: "conversation", laneSeq: "1",
+        id: "mailbox_item_recording_foreground",
       }));
       runtimeWakeSignal.notify({ requestedProcessingMode: "default" });
       await withRealTimeout(foregroundStarted.promise, 2_000,
@@ -3225,8 +3176,6 @@ describe("hosted workspace runtime entrypoint", () => {
               checkpointRequests,
               events,
               workspace: createWorkspaceState({
-                nextWakeAt: null,
-                nextWakeReason: null,
                 snapshotRef: terminalWorkspace.snapshotRef,
                 version: "3",
               }),
@@ -3693,9 +3642,6 @@ describe("hosted workspace runtime entrypoint", () => {
 
     const conversationItem = createMailboxItem({
       id: "mailbox_item_entrypoint_deferred_image_only_001",
-      kind: "conversation.message",
-      lane: "conversation",
-      laneSeq: "1",
     });
     const systemItem = createMailboxItem({
       id: "mailbox_item_entrypoint_deferred_member_activated_001",
@@ -3713,8 +3659,6 @@ describe("hosted workspace runtime entrypoint", () => {
               maxMailboxItems: 10,
             },
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -3800,8 +3744,6 @@ describe("hosted workspace runtime entrypoint", () => {
               maxMailboxItems: 10,
             },
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -3873,9 +3815,6 @@ describe("hosted workspace runtime entrypoint", () => {
     const imported: string[] = [];
     const conversationItem = createMailboxItem({
       id: "mailbox_item_entrypoint_unbootstrapped_image_only_001",
-      kind: "conversation.message",
-      lane: "conversation",
-      laneSeq: "1",
       payloadInlineCiphertext: null,
       payloadRef: "payload_ref_synthetic_conversation",
     });
@@ -3901,8 +3840,6 @@ describe("hosted workspace runtime entrypoint", () => {
               maxMailboxItems: 10,
             },
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -3973,9 +3910,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -4057,9 +3992,7 @@ describe("hosted workspace runtime entrypoint", () => {
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_foreground_stale_assistant_wake",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
@@ -4135,10 +4068,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const idleWakeImportContextMilestones: unknown[] = [];
     const mailboxItems = [
-      createMailboxItem({
-        id: "mailbox_item_entrypoint_001",
-        laneSeq: "1",
-      }),
+      createMailboxItem({}),
     ];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     let wakeQueued = false;

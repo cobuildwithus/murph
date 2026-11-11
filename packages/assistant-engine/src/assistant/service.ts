@@ -1,27 +1,16 @@
 // Local-only assistant orchestration surface for headless consumers.
 
-import type {
-  AssistantMessageInput,
-} from './service-contracts.js'
-import {
-  sendAssistantMessageLocal,
-} from './local-service.js'
-import {
-  sendAssistantNotificationLocal as sendAssistantNotificationTurnLocal,
-  type AssistantNotificationInput,
-  type AssistantNotificationResult,
-} from './notification-turn.js'
-import { sendAssistantAskContinuationLocal as sendAssistantAskContinuationTurnLocal } from './ask-continuation.js'
-
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 export {
   sendAssistantMessageLocal,
+  sendAssistantMessageLocal as sendAssistantMessage,
 } from './local-service.js'
 export {
   ASSISTANT_ASK_CONTINUATION_TURN_PROFILE,
   buildAssistantAskContinuationMessageInput,
   readAssistantAskOriginSession,
   sendAssistantAskContinuationLocal,
+  sendAssistantAskContinuationLocal as sendAssistantAskContinuation,
 } from './ask-continuation.js'
 export type {
   AssistantBeforeProviderAcceptedInputsHook,
@@ -51,26 +40,7 @@ export type {
   AssistantAskContinuationResult,
 } from './ask-continuation.js'
 
-export async function sendAssistantMessage(
-  input: AssistantMessageInput,
-) {
-  return sendAssistantMessageLocal(input)
-}
-
-export async function sendAssistantNotificationLocal(
-  input: AssistantNotificationInput,
-): Promise<AssistantNotificationResult> {
-  return sendAssistantNotificationTurnLocal(input)
-}
-
-export async function sendAssistantNotification(
-  input: AssistantNotificationInput,
-): Promise<AssistantNotificationResult> {
-  return sendAssistantNotificationLocal(input)
-}
-
-export async function sendAssistantAskContinuation(
-  input: import('./ask-continuation.js').AssistantAskContinuationInput,
-) {
-  return sendAssistantAskContinuationTurnLocal(input)
-}
+export {
+  sendAssistantNotificationLocal,
+  sendAssistantNotificationLocal as sendAssistantNotification,
+} from './notification-turn.js'

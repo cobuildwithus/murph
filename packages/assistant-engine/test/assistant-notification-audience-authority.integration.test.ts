@@ -190,7 +190,6 @@ beforeEach(() => {
       route: input.route,
       session: input.resolvedSession,
       stderr: '',
-      stdout: '',
       transcriptResponse: JSON.stringify({
         kind: 'send_message',
         privateSummary: 'Scheduled update prepared.',
@@ -813,7 +812,6 @@ describe('notification audience authority integration', () => {
             route: input.route,
             session: input.resolvedSession,
             stderr: '',
-            stdout: '',
             transcriptResponse: consumer === 'scheduled'
               ? JSON.stringify({
                   kind: 'send_message',

@@ -159,8 +159,7 @@ describe('assistant auto-reply event-first path', () => {
   it('buffers outcome persistence timing without turning a trace failure into a delivery failure', async () => {
     const vault = await createTempVault()
     const onTraceEvent = vi.fn(() => { throw new Error('synthetic trace failure') })
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context: createReplyContext(createLinqGroupCandidate({
         inputId: 'ain_12121212121212121212121212121212',
         messageId: 'synthetic-timing-message',
@@ -169,10 +168,7 @@ describe('assistant auto-reply event-first path', () => {
       })),
       enabledChannels: ['linq'],
       executionContext: { hosted: { memberId: 'member-synthetic', userEnvKeys: [] } },
-      inboxServices: createInboxServices(),
       onTraceEvent,
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
     expect(result).toMatchObject({ failed: 0, currentTurnDeliveryIntentIds: [] })
@@ -198,13 +194,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Drink a pint.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -235,13 +227,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Drink a pint.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContextFromCandidates([target, reply]),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -272,13 +260,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'This target arrived later.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContextFromCandidates([reply, laterTarget]),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -314,17 +298,13 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Reply to the ambiguous target.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContextFromCandidates([
         firstTarget,
         secondTarget,
         reply,
       ]),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -365,17 +345,13 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Replying to the edited message.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContextFromCandidates([
         original,
         correction,
         reply,
       ]),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -409,13 +385,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Replying to the prior-turn edited message.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContextFromCandidates([correction, reply]),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -472,13 +444,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Yes.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(reply),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -543,13 +511,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Replying to the second message.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContextFromCandidates([firstReply, secondReply]),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -599,13 +563,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Replying to the ambiguous Murph target.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(reply),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -658,13 +618,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -704,13 +660,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Do another one.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(reply),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -890,13 +842,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Use this as the group photo.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(reply),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -943,13 +891,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'That makes sense.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(reply),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -1064,8 +1008,7 @@ describe('assistant auto-reply event-first path', () => {
     })
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([persisted])
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createLinqGroupCandidate({
         inputId: 'ain_19191919191919191919191919191919',
         messageId: 'linq-msg-reply-to-split-voice-text',
@@ -1074,9 +1017,6 @@ describe('assistant auto-reply event-first path', () => {
         text: 'What is this?',
       })),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -1090,8 +1030,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(textPrompt).not.toContain('reply-target.m4a')
 
     replyEventPathMocks.sendAssistantMessage.mockClear()
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createLinqGroupCandidate({
         inputId: 'ain_20202020202020202020202020202020',
         messageId: 'linq-msg-reply-to-split-voice-media',
@@ -1100,9 +1039,6 @@ describe('assistant auto-reply event-first path', () => {
         text: 'Do another one.',
       })),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -1177,13 +1113,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Got it.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(reply),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -1341,8 +1273,7 @@ describe('assistant auto-reply event-first path', () => {
     })
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([persisted])
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createLinqGroupCandidate({
         inputId: 'ain_16161616161616161616161616161616',
         messageId: 'linq-msg-reply-to-generated-image-primary',
@@ -1351,9 +1282,6 @@ describe('assistant auto-reply event-first path', () => {
         text: 'Use this as the group photo.',
       })),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -1368,8 +1296,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(primaryPrompt).not.toContain('https://example.test/source')
 
     replyEventPathMocks.sendAssistantMessage.mockClear()
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createLinqGroupCandidate({
         inputId: 'ain_18181818181818181818181818181818',
         messageId: 'linq-msg-reply-to-generated-image-link',
@@ -1378,9 +1305,6 @@ describe('assistant auto-reply event-first path', () => {
         text: 'Use this link as the group photo.',
       })),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -1646,8 +1570,7 @@ describe('assistant auto-reply event-first path', () => {
       otherDelivery,
     ])
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createLinqGroupCandidate({
         inputId: 'ain_19191919191919191919191919191919',
         messageId: 'linq-msg-reply-before-link-retry',
@@ -1656,9 +1579,6 @@ describe('assistant auto-reply event-first path', () => {
         text: 'Use this as the group photo.',
       })),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -1803,8 +1723,7 @@ describe('assistant auto-reply event-first path', () => {
       })
 
       replyEventPathMocks.sendAssistantMessage.mockClear()
-      await processAssistantAutoReplyGroup({
-        allowSelfAuthored: false,
+      await processReply({
         context: createReplyContext(createLinqGroupCandidate({
           inputId: 'ain_21212121212121212121212121212121',
           messageId: 'linq-msg-unanchored-after-link-retry',
@@ -1814,9 +1733,6 @@ describe('assistant auto-reply event-first path', () => {
           text: 'A later unanchored follow-up.',
         })),
         enabledChannels: ['linq'],
-        inboxServices: createInboxServices(),
-        requestId: null,
-        sessionMaxAgeMs: null,
         vault,
       })
       const unanchoredRetryInput = readSentInput()
@@ -1842,8 +1758,7 @@ describe('assistant auto-reply event-first path', () => {
         newDelivery,
       ])
       replyEventPathMocks.sendAssistantMessage.mockClear()
-      await processAssistantAutoReplyGroup({
-        allowSelfAuthored: false,
+      await processReply({
         context: createReplyContext(createLinqGroupCandidate({
           inputId: 'ain_22222222222222222222222222222223',
           messageId: 'linq-msg-unanchored-after-new-delivery',
@@ -1853,9 +1768,6 @@ describe('assistant auto-reply event-first path', () => {
           text: 'What about the new update?',
         })),
         enabledChannels: ['linq'],
-        inboxServices: createInboxServices(),
-        requestId: null,
-        sessionMaxAgeMs: null,
         vault,
       })
       expect(readSentInput().turnContext).toContain(
@@ -1960,8 +1872,7 @@ describe('assistant auto-reply event-first path', () => {
         status,
       }])
 
-      await processAssistantAutoReplyGroup({
-        allowSelfAuthored: false,
+      await processReply({
         context: createReplyContext(createLinqGroupCandidate({
           inputId: 'ain_20202020202020202020202020202020',
           messageId: 'linq-msg-reply-to-unattested-retryable-avatar',
@@ -1970,9 +1881,6 @@ describe('assistant auto-reply event-first path', () => {
           text: 'Use this as the group photo.',
         })),
         enabledChannels: ['linq'],
-        inboxServices: createInboxServices(),
-        requestId: null,
-        sessionMaxAgeMs: null,
         vault,
       })
 
@@ -2012,13 +1920,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'A reply with a private target placeholder.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(reply),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -2042,13 +1946,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Malformed provider edge.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(reply),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -2088,14 +1988,10 @@ describe('assistant auto-reply event-first path', () => {
       })),
     }
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(initial),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
       inputSource,
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -2146,14 +2042,10 @@ describe('assistant auto-reply event-first path', () => {
       listNewConversationInputs: vi.fn(async () => ({ inputs: [], nextCursor: null })),
       refresh: vi.fn(async () => ({ progressed: false, reason: 'no_new_input' as const })),
     }
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(initial),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
       inputSource,
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
     const admit = readSentInput().activeTurnInput
@@ -2218,14 +2110,10 @@ describe('assistant auto-reply event-first path', () => {
       listNewConversationInputs: vi.fn(async () => ({ inputs: [], nextCursor: null })),
       refresh: vi.fn(async () => ({ progressed: false, reason: 'no_new_input' as const })),
     }
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(initial),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
       inputSource,
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
     const admit = readSentInput().activeTurnInput
@@ -2308,14 +2196,10 @@ describe('assistant auto-reply event-first path', () => {
       })),
     }
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(initial),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
       inputSource,
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -2430,14 +2314,10 @@ describe('assistant auto-reply event-first path', () => {
       })),
     }
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(initial),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
       inputSource,
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -2532,14 +2412,10 @@ describe('assistant auto-reply event-first path', () => {
       })),
     }
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(current),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
       inputSource,
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -2562,14 +2438,10 @@ describe('assistant auto-reply event-first path', () => {
     expect(inputSource.checkpointAcceptedInput).not.toHaveBeenCalled()
     expect(currentSendInput?.deliveryReplyToMessageId).toBe('message-current')
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(olderCorrection),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
       inputSource,
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -2614,13 +2486,9 @@ describe('assistant auto-reply event-first path', () => {
       ...(usageRunningLow ? { usageRunningLow: true as const } : {}),
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: [source],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -2664,13 +2532,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(forgedCandidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault: await createTempVault(),
     })
 
@@ -2705,13 +2569,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(trustedCandidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault: await createTempVault(),
     })
 
@@ -2780,13 +2640,9 @@ describe('assistant auto-reply event-first path', () => {
       text: completionText,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(trustedCandidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault: await createTempVault(),
     })
 
@@ -2809,13 +2665,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'An unscoped hosted mailbox input.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(unscopedCandidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault: await createTempVault(),
     })
 
@@ -2874,13 +2726,9 @@ describe('assistant auto-reply event-first path', () => {
       text: 'Use that as the group picture.',
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContextFromCandidates([completion, laterGroupInput]),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault: await createTempVault(),
     })
 
@@ -2951,13 +2799,9 @@ describe('assistant auto-reply event-first path', () => {
         text: completionText,
       })
 
-      await processAssistantAutoReplyGroup({
-        allowSelfAuthored: false,
+      await processReply({
         context: createReplyContext(trustedCandidate),
         enabledChannels: ['linq'],
-        inboxServices: createInboxServices(),
-        requestId: null,
-        sessionMaxAgeMs: null,
         vault: await createTempVault(),
       })
 
@@ -3007,13 +2851,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(trustedCandidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault: await createTempVault(),
     })
 
@@ -3066,13 +2906,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(trustedCandidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault: await createTempVault(),
     })
 
@@ -3109,13 +2945,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(trustedCandidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault: await createTempVault(),
     })
 
@@ -3162,13 +2994,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(trustedCandidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault: await createTempVault(),
     })
 
@@ -3199,14 +3027,11 @@ describe('assistant auto-reply event-first path', () => {
       }),
     )
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context,
       enabledChannels: ['email'],
       inboxServices: createInboxServices({ show }),
       onEvent,
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -3243,39 +3068,6 @@ describe('assistant auto-reply event-first path', () => {
     )
   })
 
-  it('does not let prompt-time inbox service failures abort event-owned replies', async () => {
-    const vault = await createTempVault()
-    const candidate = createAssistantInputCandidate({
-      optionalInboxCaptureId: 'capture_abort_projection',
-      source: 'email',
-      text: 'Received an email message.',
-      threadIsDirect: true,
-    })
-    const context = createReplyContext(candidate)
-    const abortError = new Error('aborted')
-    abortError.name = 'AbortError'
-    const show = vi.fn().mockRejectedValue(abortError)
-
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
-      context,
-      enabledChannels: ['email'],
-      inboxServices: createInboxServices({ show }),
-      requestId: null,
-      sessionMaxAgeMs: null,
-      vault,
-    })
-
-    expect(result).toMatchObject({
-      advanceCursor: true,
-      failed: 0,
-      replied: 1,
-      skipped: 0,
-    })
-    expect(show).not.toHaveBeenCalled()
-    expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
-  })
-
   it('sends degraded email body-unavailable prompts to Codex', async () => {
     const vault = await createTempVault()
     const candidate = createAssistantInputCandidate({
@@ -3296,13 +3088,9 @@ describe('assistant auto-reply event-first path', () => {
     })
     const context = createReplyContext(candidate)
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context,
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -3374,15 +3162,13 @@ describe('assistant auto-reply event-first path', () => {
     const runReply = async (occurredAt: string, replyToMessageId?: string) => {
       replyNumber += 1
       replyEventPathMocks.sendAssistantMessage.mockClear()
-      const result = await processAssistantAutoReplyGroup({
-        allowSelfAuthored: false,
+      const result = await processReply({
         context: createReplyContext(createLinqGroupCandidate({
           inputId: `ain_${String(replyNumber).padStart(32, '0')}`, messageId: `synthetic-followup-${replyNumber}`,
           occurredAt, text: 'Did my archive send?', replyToMessageId,
           threadIsDirect: replyToMessageId === undefined,
         })),
-        enabledChannels: ['linq'], inboxServices: createInboxServices(),
-        requestId: null, sessionMaxAgeMs: null, vault,
+        enabledChannels: ['linq'], inboxServices: createInboxServices(), sessionMaxAgeMs: null, vault,
       })
       expect(result.failed).toBe(0)
       return readSentInput().turnContext ?? ''
@@ -3444,14 +3230,12 @@ describe('assistant auto-reply event-first path', () => {
       ])
     }
     await completeAutoReplyRouteMigration(vault)
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createAssistantInputCandidate({
         occurredAt: '2026-01-01T14:00:00.000Z', optionalInboxCaptureId: null,
         source: 'linq', text: 'Did the files send?', threadIsDirect: true,
       })),
-      enabledChannels: ['linq'], inboxServices: createInboxServices(),
-      requestId: null, sessionMaxAgeMs: null, vault,
+      enabledChannels: ['linq'], inboxServices: createInboxServices(), sessionMaxAgeMs: null, vault,
     })
     const context: string = readSentInput().turnContext
     const attachments = context.split('\n').filter(line => line.startsWith('- attachment:'))
@@ -3546,13 +3330,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -3640,8 +3420,7 @@ describe('assistant auto-reply event-first path', () => {
     ])
     await completeAutoReplyRouteMigration(vault)
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createLinqGroupCandidate({
         inputId: 'ain_22222222222222222222222222222222',
         messageId: 'linq-msg-current-completion',
@@ -3650,9 +3429,6 @@ describe('assistant auto-reply event-first path', () => {
         threadIsDirect: true,
       })),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -3716,8 +3492,7 @@ describe('assistant auto-reply event-first path', () => {
     ])
     await completeAutoReplyRouteMigration(vault)
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createLinqGroupCandidate({
         inputId: 'ain_33333333333333333333333333333333',
         messageId: 'linq-msg-after-context-clear',
@@ -3726,9 +3501,6 @@ describe('assistant auto-reply event-first path', () => {
         threadIsDirect: true,
       })),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -3806,13 +3578,9 @@ describe('assistant auto-reply event-first path', () => {
         threadIsDirect: true,
       })
 
-      await processAssistantAutoReplyGroup({
-        allowSelfAuthored: false,
+      await processReply({
         context: createReplyContext(candidate),
         enabledChannels: ['linq'],
-        inboxServices: createInboxServices(),
-        requestId: null,
-        sessionMaxAgeMs: null,
         vault,
       })
 
@@ -3885,8 +3653,7 @@ describe('assistant auto-reply event-first path', () => {
     ])
     await completeAutoReplyRouteMigration(vault)
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createAssistantInputCandidate({
         occurredAt: '2026-04-08T00:10:00.000Z',
         optionalInboxCaptureId: null,
@@ -3895,9 +3662,6 @@ describe('assistant auto-reply event-first path', () => {
         threadIsDirect: true,
       })),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -3957,8 +3721,7 @@ describe('assistant auto-reply event-first path', () => {
       }),
     ])
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createAssistantInputCandidate({
         inputId: 'ain_44444444444444444444444444444444',
         occurredAt: '2026-04-08T00:11:00.000Z',
@@ -3968,9 +3731,6 @@ describe('assistant auto-reply event-first path', () => {
         threadIsDirect: true,
       })),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4021,8 +3781,7 @@ describe('assistant auto-reply event-first path', () => {
     ])
     await completeAutoReplyRouteMigration(vault)
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createAssistantInputCandidate({
         occurredAt: '2026-04-08T00:10:00.000Z',
         optionalInboxCaptureId: null,
@@ -4031,9 +3790,6 @@ describe('assistant auto-reply event-first path', () => {
         threadIsDirect: true,
       })),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4066,8 +3822,7 @@ describe('assistant auto-reply event-first path', () => {
     ])
     await completeAutoReplyRouteMigration(vault)
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createAssistantInputCandidate({
         occurredAt: '2026-04-08T00:10:00.000Z',
         optionalInboxCaptureId: null,
@@ -4076,9 +3831,6 @@ describe('assistant auto-reply event-first path', () => {
         threadIsDirect: true,
       })),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4088,49 +3840,6 @@ describe('assistant auto-reply event-first path', () => {
     expect(turnContext).toContain(
       '- plannedOccurrenceAt: unavailable; treat this reminder as context only and use ordinary session resolution',
     )
-  })
-
-  it('records the selected cross-session intent in receipt metadata so subsequent turns can suppress it', async () => {
-    const vault = await createTempVault()
-    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
-      created: false,
-      session: {
-        lastTurnAt: '2026-04-08T00:02:00.000Z',
-        sessionId: 'session-chat',
-      },
-    })
-    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
-      createOutboxMessage({
-        intentId: 'intent-persisted',
-        message: 'persisted cross-session reminder',
-        sentAt: '2026-04-08T00:05:00.000Z',
-        sessionId: 'session_automation',
-      }),
-    ])
-    await completeAutoReplyRouteMigration(vault)
-    const candidate = createAssistantInputCandidate({
-      occurredAt: '2026-04-08T00:10:00.000Z',
-      optionalInboxCaptureId: null,
-      source: 'email',
-      text: 'What was that?',
-      threadIsDirect: true,
-    })
-
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
-      context: createReplyContext(candidate),
-      enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
-      vault,
-    })
-
-    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
-    expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
-      [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
-        'intent-persisted',
-    }))
   })
 
   it('injects prior delivery context for an actor-less direct Telegram route', async () => {
@@ -4163,13 +3872,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['telegram'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4207,13 +3912,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4224,47 +3925,6 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.receiptMetadata).not.toHaveProperty(
       AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY,
     )
-  })
-
-  it('injects cross-session context across provider and local clock skew', async () => {
-    const vault = await createTempVault()
-    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({
-      created: false,
-      session: {
-        lastTurnAt: '2026-04-08T00:02:00.000Z',
-        sessionId: 'session-chat',
-      },
-    })
-    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
-      createOutboxMessage({
-        intentId: 'intent-skewed-context',
-        message: 'skewed local send context',
-        sentAt: '2026-04-08T00:10:01.000Z',
-        sessionId: 'session-automation',
-      }),
-    ])
-    await completeAutoReplyRouteMigration(vault)
-    const candidate = createAssistantInputCandidate({
-      occurredAt: '2026-04-08T00:10:00.000Z',
-      optionalInboxCaptureId: null,
-      receivedAt: '2026-04-08T00:10:02.000Z',
-      source: 'email',
-      text: 'What was that reminder?',
-      threadIsDirect: true,
-    })
-
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
-      context: createReplyContext(candidate),
-      enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
-      vault,
-    })
-
-    const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
-    expect(sendInput.turnContext).toContain('skewed local send context')
   })
 
   it('does not inject outbox context sent after the input was durably received', async () => {
@@ -4300,13 +3960,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4335,13 +3991,10 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    const result = await processAssistantAutoReplyGroup({
+    const result = await processReply({
       allowSelfAuthored: true,
       context: createReplyContext(candidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4378,13 +4031,10 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    const result = await processAssistantAutoReplyGroup({
+    const result = await processReply({
       allowSelfAuthored: true,
       context: createReplyContext(candidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4427,13 +4077,10 @@ describe('assistant auto-reply event-first path', () => {
       }),
     ])
 
-    await expect(processAssistantAutoReplyGroup({
+    await expect(processReply({
       allowSelfAuthored: true,
       context: createReplyContext(futureOnlyCandidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })).resolves.toMatchObject({
       replied: 1,
@@ -4473,13 +4120,10 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await expect(processAssistantAutoReplyGroup({
+    await expect(processReply({
       allowSelfAuthored: true,
       context: createReplyContext(causalCandidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })).resolves.toMatchObject({
       replied: 0,
@@ -4503,13 +4147,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4543,13 +4183,9 @@ describe('assistant auto-reply event-first path', () => {
       throw new Error('provider connection dropped after final action')
     })
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4587,13 +4223,9 @@ describe('assistant auto-reply event-first path', () => {
       session: { sessionId: 'session-frozen-reaction' },
     })
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context: createReplyContextFromCandidates([accepted, uncovered]),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4622,13 +4254,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4673,13 +4301,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4721,13 +4345,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['telegram'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4782,13 +4402,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['telegram'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4833,13 +4449,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['telegram'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4891,13 +4503,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -4967,13 +4575,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -5006,13 +4610,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(nextCandidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault: consumedVault,
     })
 
@@ -5058,8 +4658,7 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       deliveryDispatchMode: 'queue-only',
       enabledChannels: ['email'],
@@ -5069,9 +4668,6 @@ describe('assistant auto-reply event-first path', () => {
           userEnvKeys: [],
         },
       },
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -5171,13 +4767,9 @@ describe('assistant auto-reply event-first path', () => {
         }
       })
       const processCandidate = (candidate: AssistantInputCandidate) =>
-        processAssistantAutoReplyGroup({
-          allowSelfAuthored: false,
+        processReply({
           context: createReplyContext(candidate),
           enabledChannels: ['email'],
-          inboxServices: createInboxServices(),
-          requestId: null,
-          sessionMaxAgeMs: null,
           vault,
         })
       await processCandidate(unrelatedInput)
@@ -5309,8 +4901,7 @@ describe('assistant auto-reply event-first path', () => {
       }),
     ])
     await completeAutoReplyRouteMigration(vault)
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createAssistantInputCandidate({
         occurredAt: '2026-04-08T00:10:00.000Z',
         optionalInboxCaptureId: null,
@@ -5319,9 +4910,6 @@ describe('assistant auto-reply event-first path', () => {
         threadIsDirect: true,
       })),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
     const reply = readSentInput()
@@ -5359,8 +4947,7 @@ describe('assistant auto-reply event-first path', () => {
       }),
     ])
     await completeAutoReplyRouteMigration(vault)
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createAssistantInputCandidate({
         occurredAt: '2026-04-08T00:10:00.000Z',
         optionalInboxCaptureId: null,
@@ -5377,9 +4964,6 @@ describe('assistant auto-reply event-first path', () => {
         threadIsDirect: direct,
       })),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
     const reply = readSentInput()
@@ -5439,13 +5023,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -5507,8 +5087,7 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context: createReplyContext(candidate),
       deliveryDispatchMode: 'queue-only',
       enabledChannels: ['linq'],
@@ -5518,9 +5097,6 @@ describe('assistant auto-reply event-first path', () => {
           userEnvKeys: [],
         },
       },
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -5581,13 +5157,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -5658,13 +5230,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -5728,13 +5296,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -5816,13 +5380,9 @@ describe('assistant auto-reply event-first path', () => {
       throw new Error('expected auto-reply group context')
     }
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context,
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -5872,13 +5432,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -5932,13 +5488,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -6026,13 +5578,9 @@ describe('assistant auto-reply event-first path', () => {
       throw new Error('expected auto-reply group context')
     }
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context,
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -6083,8 +5631,7 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       deliveryDispatchMode: 'queue-only',
       enabledChannels: ['email'],
@@ -6094,9 +5641,6 @@ describe('assistant auto-reply event-first path', () => {
           userEnvKeys: [],
         },
       },
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -6134,8 +5678,7 @@ describe('assistant auto-reply event-first path', () => {
       await writeFile(migrationPath, '{invalid migration')
     }
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context: createReplyContext(createAssistantInputCandidate({
         occurredAt: '2026-04-08T00:10:00.000Z',
         optionalInboxCaptureId: null,
@@ -6151,9 +5694,6 @@ describe('assistant auto-reply event-first path', () => {
         threadIsDirect: true,
       })),
       enabledChannels: ['linq'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -6182,8 +5722,7 @@ describe('assistant auto-reply event-first path', () => {
       new Error('Synthetic outbox history unavailable'),
     )
 
-    const result = await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    const result = await processReply({
       context: createReplyContext(createAssistantInputCandidate({
         optionalInboxCaptureId: null,
         source: 'email',
@@ -6191,9 +5730,6 @@ describe('assistant auto-reply event-first path', () => {
         threadIsDirect: true,
       })),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -6227,8 +5763,7 @@ describe('assistant auto-reply event-first path', () => {
       },
     }
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(createAssistantInputCandidate({
         inputId: 'ain_11111111111111111111111111111111',
         occurredAt: '2026-04-08T00:10:00.000Z',
@@ -6240,9 +5775,6 @@ describe('assistant auto-reply event-first path', () => {
       deliveryDispatchMode: 'queue-only',
       enabledChannels: ['email'],
       executionContext,
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -6262,8 +5794,7 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       deliveryDispatchMode: 'queue-only',
       enabledChannels: ['email'],
@@ -6273,9 +5804,6 @@ describe('assistant auto-reply event-first path', () => {
           userEnvKeys: [],
         },
       },
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -6296,7 +5824,7 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
+    await processReply({
       allowSelfAuthored: true,
       context: createReplyContext(candidate),
       deliveryDispatchMode: 'queue-only',
@@ -6307,9 +5835,6 @@ describe('assistant auto-reply event-first path', () => {
           userEnvKeys: [],
         },
       },
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -6434,8 +5959,7 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       deliveryDispatchMode: 'queue-only',
       enabledChannels: ['email'],
@@ -6445,9 +5969,6 @@ describe('assistant auto-reply event-first path', () => {
           userEnvKeys: [],
         },
       },
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -6501,13 +6022,9 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    await processAssistantAutoReplyGroup({
-      allowSelfAuthored: false,
+    await processReply({
       context: createReplyContext(candidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -6546,13 +6063,10 @@ describe('assistant auto-reply event-first path', () => {
       threadIsDirect: true,
     })
 
-    const result = await processAssistantAutoReplyGroup({
+    const result = await processReply({
       allowSelfAuthored: true,
       context: createReplyContext(candidate),
       enabledChannels: ['email'],
-      inboxServices: createInboxServices(),
-      requestId: null,
-      sessionMaxAgeMs: null,
       vault,
     })
 
@@ -6564,6 +6078,20 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 })
+
+type ReplyInput = Parameters<typeof processAssistantAutoReplyGroup>[0]
+
+function processReply(
+  input: Pick<ReplyInput, 'context' | 'enabledChannels' | 'vault'> & Partial<ReplyInput>,
+) {
+  return processAssistantAutoReplyGroup({
+    allowSelfAuthored: false,
+    inboxServices: createInboxServices(),
+    requestId: null,
+    sessionMaxAgeMs: null,
+    ...input,
+  })
+}
 
 async function createTempVault(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'murph-reply-event-path-'))

@@ -1512,7 +1512,7 @@ describeRealCodex('real clinical document extraction journeys', () => {
         reactions: [], precedingAgentMessageSegments: [], responseDeliveryContextOrdinal: 0, targetInputId: null,
         additionalUsages: [], responseMedia: [], followUpRequest: null, responseCard: null, jsonEvents: [],
         providerActionCount: 0, runtimeIssueInputs: [], rolloutRelativePath: null, sessionId: null,
-        stderr: '', stdout: '', threadId: null, turnId: null,
+        stderr: '',  threadId: null, turnId: null,
       })
       .mockImplementation(nativeExecute)
     let providerEntries = 0
@@ -6770,7 +6770,7 @@ describe('real Codex live fixture contracts', () => {
           ? 'first'
           : 'second',
       })
-      if (request?.kind !== 'invalid-response-card-arguments') {
+      if (request?.kind !== 'invalid-tool-arguments') {
         throw new Error('Expected the test-only probe field to remain invalid.')
       }
       expect(request.validationDigest.issueCodes).toContain('unrecognized_key')
@@ -9861,6 +9861,19 @@ describeRealCodex('real Codex X post reading e2e', () => {
         /could(?:n['’]t| not)|unable|was(?:n['’]t| not) able|(?:deleted|private)/iu,
       forbiddenReplyPattern: /HEYYY|squat|(?:^|[.!?]\s+)(?:the )?screenshot (?:says|shows)/iu,
     },
+    {
+      scenarioLabel: 'an earlier request in this assistant turn used the X search budget',
+      testName: 'x post reading reports the exhausted assistant-turn search budget',
+      scope: 'direct',
+      spentSearchBudget: 3,
+      memberText: `What does the screenshot in this post say? ${coachPost}`,
+      answerText: 'This result must never be fetched.',
+      annotationUrls: [],
+      citations: [],
+      expectedPostIds: [],
+      expectedReplyPattern: /could(?:n['’]t| not)|can(?:n['’]t|not)|unable|limit|try again/iu,
+      forbiddenReplyPattern: /HEYYY|squat|(?:^|[.!?]\s+)(?:the )?screenshot (?:says|shows)/iu,
+    },
   ] as const)(
     '$testName',
     async (scenario) => {
@@ -9933,6 +9946,9 @@ describeRealCodex('real Codex X post reading e2e', () => {
           })
         const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
+          askGrokTurnState: {
+            providerCallCount: ('spentSearchBudget' in scenario ? scenario.spentSearchBudget : 0) ?? 0,
+          },
           askGrokRuntime: {
             apiKey: 'synthetic-xai-key',
             fetchImpl: async (_request, init) => {
@@ -9989,9 +10005,10 @@ describeRealCodex('real Codex X post reading e2e', () => {
             toolCallCount: grokCalls.length,
           })}\n`,
         )
+        const budgetExhausted = 'spentSearchBudget' in scenario
         expect(grokCalls).toHaveLength(1)
-        expect(providerBodies).toHaveLength(1)
-        expect(grokCalls[0]).toMatchObject({ kind: 'dynamic', success: true })
+        expect(providerBodies).toHaveLength(budgetExhausted ? 0 : 1)
+        expect(grokCalls[0]).toMatchObject({ kind: 'dynamic', success: !budgetExhausted })
         expect(reply).toMatch(scenario.expectedReplyPattern)
         expect(reply).not.toMatch(scenario.forbiddenReplyPattern)
         expect([...replyPostIds].sort()).toEqual([...scenario.expectedPostIds])

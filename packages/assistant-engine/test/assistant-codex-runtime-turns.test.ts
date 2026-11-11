@@ -1,4 +1,9 @@
 import {
+  writeCompletedTurn,
+  writeTokenUsage,
+  mockWarmCodexProcess,
+  mockCodexProcess,
+  initializeWarmTurn,
   cliTimingLaunchArgs,
   codexSteeringLaunchArgs,
   CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
@@ -81,72 +86,40 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const workingDirectory = await createTempDir('assistant-codex-local-turn-id-shapes-work-')
     const codexHome = await createTempDir('assistant-codex-local-turn-id-shapes-home-')
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    mockWarmCodexProcess(spawnedChildren, 25_800, async (child) => {
+      await initializeWarmTurn(child, 'thread-local-turn-id-shape-1', 'turn-local-turn-id-shape-1')
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-local-turn-id-shape-1',
+            status: 'completed',
+          },
+        },
+      }))
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 25_800 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-local-turn-id-shape-1',
-            turnId: 'turn-local-turn-id-shape-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-local-turn-id-shape-1',
-                status: 'completed',
-              },
-            },
-          }))
-
-          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-local-turn-id-shape-2',
-              },
-            },
-          }))
-          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-local-turn-id-shape-2',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/agentMessage/delta',
-            data: {
-              turn_id: 'turn-local-turn-id-shape-2',
-            },
-            params: { itemId: 'assistant-local-turn-id-shape-2', delta: 'Second answer' },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            data: {
-              turn_id: 'turn-local-turn-id-shape-2',
-            },
-            params: {
-              status: 'completed',
-            },
-          }))
-        })()
+      await writeWarmTurnStarted({
+        child,
+        requestCount: 2,
+        threadId: 'thread-local-turn-id-shape-2',
+        turnId: 'turn-local-turn-id-shape-2',
       })
-
-      return child
+      child.stdout.write(jsonLine({
+        method: 'item/agentMessage/delta',
+        data: {
+          turn_id: 'turn-local-turn-id-shape-2',
+        },
+        params: { itemId: 'assistant-local-turn-id-shape-2', delta: 'Second answer' },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        data: {
+          turn_id: 'turn-local-turn-id-shape-2',
+        },
+        params: {
+          status: 'completed',
+        },
+      }))
     })
 
     const stableInput = {
@@ -208,61 +181,46 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         headers: { 'content-type': 'application/json' },
         status: 200,
       }))
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-warm-write-1',
-            turnId: 'turn-warm-write-1',
-          })
-          writeCodexV2AssistantEventTurn({
-            child,
-            finalMessage: 'First warm turn complete',
-            threadId: 'thread-warm-write-1',
-            turnId: 'turn-warm-write-1',
-          })
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 2,
-            threadId: 'thread-warm-write-2',
-            turnId: 'turn-warm-write-2',
-          })
-          child.stdout.write(jsonLine({
-            id: 91,
-            method: 'item/tool/call',
-            params: {
-              namespace: 'murph',
-              tool: 'generate_image',
-              arguments: {
-                prompt: 'Render the current turn.',
-              },
-              threadId: 'thread-warm-write-2',
-              turnId: 'turn-warm-write-2',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
-            id: 91,
-            result: {
-              success: true,
-            },
-          })
-          writeCodexV2AssistantEventTurn({
-            child,
-            finalMessage: 'Second warm turn complete',
-            threadId: 'thread-warm-write-2',
-            turnId: 'turn-warm-write-2',
-          })
-        })()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-warm-write-1', 'turn-warm-write-1')
+      writeCodexV2AssistantEventTurn({
+        child,
+        finalMessage: 'First warm turn complete',
+        threadId: 'thread-warm-write-1',
+        turnId: 'turn-warm-write-1',
       })
 
-      return child
+      await writeWarmTurnStarted({
+        child,
+        requestCount: 2,
+        threadId: 'thread-warm-write-2',
+        turnId: 'turn-warm-write-2',
+      })
+      child.stdout.write(jsonLine({
+        id: 91,
+        method: 'item/tool/call',
+        params: {
+          namespace: 'murph',
+          tool: 'generate_image',
+          arguments: {
+            prompt: 'Render the current turn.',
+          },
+          threadId: 'thread-warm-write-2',
+          turnId: 'turn-warm-write-2',
+        },
+      }))
+      await expect(waitForRpcResponse(child, 91)).resolves.toMatchObject({
+        id: 91,
+        result: {
+          success: true,
+        },
+      })
+      writeCodexV2AssistantEventTurn({
+        child,
+        finalMessage: 'Second warm turn complete',
+        threadId: 'thread-warm-write-2',
+        turnId: 'turn-warm-write-2',
+      })
     })
 
     await expect(withHostedCanonicalWritePort(
@@ -326,100 +284,80 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const onProviderRequestStarted = vi.fn()
     const onTraceEvent = vi.fn()
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    mockWarmCodexProcess(spawnedChildren, 25_900, async (child) => {
+      await initializeWarmTurn(child, 'thread-local-prestart-tagged-1', 'turn-local-prestart-tagged-1')
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-local-prestart-tagged-1',
+            status: 'completed',
+          },
+        },
+      }))
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 25_900 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-local-prestart-tagged-1',
-            turnId: 'turn-local-prestart-tagged-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-local-prestart-tagged-1',
-                status: 'completed',
-              },
-            },
-          }))
-
-          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-local-prestart-tagged-2',
-              },
-            },
-          }))
-          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-          const secondProviderStartedAtMs = Date.parse(
-            onProviderRequestStarted.mock.calls.at(-1)?.[0]?.startedAt ?? '',
-          )
-          expect(Number.isFinite(secondProviderStartedAtMs)).toBe(true)
-          controlledNowMs = secondProviderStartedAtMs + 10
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: 'turn-local-prestart-tagged-2',
-              },
-            },
-          }))
-          controlledNowMs = secondProviderStartedAtMs + 20
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: 'turn-local-prestart-tagged-2',
-              },
-            },
-          }))
-          controlledNowMs = secondProviderStartedAtMs + 30
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {},
-          }))
-          controlledNowMs = secondProviderStartedAtMs + 40
-          child.stdout.write(jsonLine({
-            method: 'item/agentMessage/delta',
-            params: { itemId: 'assistant-local-prestart-tagged-2', delta: 'Tagged event succeeded', turnId: 'turn-local-prestart-tagged-2' },
-          }))
-          controlledNowMs = secondProviderStartedAtMs + 50
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-local-prestart-tagged-2',
-                status: 'completed',
-              },
-            },
-          }))
-          controlledNowMs = secondProviderStartedAtMs + 60
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-local-prestart-tagged-2',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
+      const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+      child.stdout.write(jsonLine({
+        id: secondThread.id,
+        result: {
+          thread: {
+            id: 'thread-local-prestart-tagged-2',
+          },
+        },
+      }))
+      const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+      const secondProviderStartedAtMs = Date.parse(
+        onProviderRequestStarted.mock.calls.at(-1)?.[0]?.startedAt ?? '',
+      )
+      expect(Number.isFinite(secondProviderStartedAtMs)).toBe(true)
+      controlledNowMs = secondProviderStartedAtMs + 10
+      child.stdout.write(jsonLine({
+        method: 'turn/started',
+        params: {
+          turn: {
+            id: 'turn-local-prestart-tagged-2',
+          },
+        },
+      }))
+      controlledNowMs = secondProviderStartedAtMs + 20
+      child.stdout.write(jsonLine({
+        method: 'turn/started',
+        params: {
+          turn: {
+            id: 'turn-local-prestart-tagged-2',
+          },
+        },
+      }))
+      controlledNowMs = secondProviderStartedAtMs + 30
+      child.stdout.write(jsonLine({
+        id: secondTurn.id,
+        result: {},
+      }))
+      controlledNowMs = secondProviderStartedAtMs + 40
+      child.stdout.write(jsonLine({
+        method: 'item/agentMessage/delta',
+        params: { itemId: 'assistant-local-prestart-tagged-2', delta: 'Tagged event succeeded', turnId: 'turn-local-prestart-tagged-2' },
+      }))
+      controlledNowMs = secondProviderStartedAtMs + 50
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-local-prestart-tagged-2',
+            status: 'completed',
+          },
+        },
+      }))
+      controlledNowMs = secondProviderStartedAtMs + 60
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-local-prestart-tagged-2',
+            status: 'completed',
+          },
+        },
+      }))
     })
 
     const stableInput = {
@@ -478,100 +416,80 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const codexHome = await createTempDir('assistant-codex-local-prestart-request-home-')
     const progressUpdates: string[] = []
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    mockWarmCodexProcess(spawnedChildren, 25_925, async (child) => {
+      await initializeWarmTurn(child, 'thread-local-prestart-request-1', 'turn-local-prestart-request-1')
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-local-prestart-request-1',
+            status: 'completed',
+          },
+        },
+      }))
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 25_925 + spawnedChildren.length
-      spawnedChildren.push(child)
+      const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+      child.stdout.write(jsonLine({
+        id: secondThread.id,
+        result: {
+          thread: {
+            id: 'thread-local-prestart-request-2',
+          },
+        },
+      }))
+      const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+      child.stdout.write(jsonLine({
+        method: 'turn/started',
+        params: {
+          turn: {
+            id: 'turn-local-prestart-request-2',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        id: 99,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            text: 'Starting early work',
+          },
+          callId: 'call-local-prestart-request-2',
+          namespace: 'murph',
+          threadId: 'thread-local-prestart-request-2',
+          tool: 'send_progress_update',
+          turnId: 'turn-local-prestart-request-2',
+        },
+      }))
+      child.stdout.write(jsonLine({
+        id: secondTurn.id,
+        result: {
+          turn: {
+            id: 'turn-local-prestart-request-2',
+          },
+        },
+      }))
 
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-local-prestart-request-1',
-            turnId: 'turn-local-prestart-request-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-local-prestart-request-1',
-                status: 'completed',
-              },
-            },
-          }))
-
-          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-local-prestart-request-2',
-              },
-            },
-          }))
-          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: 'turn-local-prestart-request-2',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            id: 99,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                text: 'Starting early work',
-              },
-              callId: 'call-local-prestart-request-2',
-              namespace: 'murph',
-              threadId: 'thread-local-prestart-request-2',
-              tool: 'send_progress_update',
-              turnId: 'turn-local-prestart-request-2',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-local-prestart-request-2',
-              },
-            },
-          }))
-
-          const response = await waitForRpcResponse(child, 99)
-          expect(response).toMatchObject({
-            id: 99,
-            result: {
-              success: true,
-            },
-          })
-
-          child.stdout.write(jsonLine({
-            method: 'item/agentMessage/delta',
-            params: { itemId: 'assistant-local-prestart-request-2', delta: 'Pre-start request completed', turnId: 'turn-local-prestart-request-2' },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-local-prestart-request-2',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
+      const response = await waitForRpcResponse(child, 99)
+      expect(response).toMatchObject({
+        id: 99,
+        result: {
+          success: true,
+        },
       })
 
-      return child
+      child.stdout.write(jsonLine({
+        method: 'item/agentMessage/delta',
+        params: { itemId: 'assistant-local-prestart-request-2', delta: 'Pre-start request completed', turnId: 'turn-local-prestart-request-2' },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-local-prestart-request-2',
+            status: 'completed',
+          },
+        },
+      }))
     })
 
     const stableInput = {
@@ -618,92 +536,64 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const codexHome = await createTempDir('assistant-codex-warm-reroute-home-')
     const onTraceEvent = vi.fn()
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-warm-reroute',
-            turnId: 'turn-warm-reroute-1',
-          })
-          writeCodexV2AssistantEventTurn({
-            child,
-            finalMessage: 'First warm turn complete',
-            threadId: 'thread-warm-reroute',
-            turnId: 'turn-warm-reroute-1',
-          })
-
-          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: { id: 'thread-warm-reroute' },
-            },
-          }))
-          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: { id: 'turn-warm-reroute-2' },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'model/rerouted',
-            params: { toModel: 'gpt-6-sol' },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              threadId: 'thread-warm-reroute',
-              turn: { id: 'turn-warm-reroute-2' },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'model/rerouted',
-            params: { toModel: 'gpt-6.1-sol' },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'thread/tokenUsage/updated',
-            params: {
-              threadId: 'thread-warm-reroute',
-              tokenUsage: {
-                last: {
-                  cacheWriteInputTokens: 0,
-                  cachedInputTokens: 12,
-                  inputTokens: 120,
-                  outputTokens: 45,
-                  reasoningOutputTokens: 8,
-                  totalTokens: 165,
-                },
-                modelContextWindow: 258_400,
-                total: {
-                  cacheWriteInputTokens: 0,
-                  cachedInputTokens: 12,
-                  inputTokens: 120,
-                  outputTokens: 45,
-                  reasoningOutputTokens: 8,
-                  totalTokens: 165,
-                },
-              },
-              turnId: 'turn-warm-reroute-2',
-            },
-          }))
-          writeCodexV2AssistantEventTurn({
-            child,
-            finalMessage: 'Current turn used the rerouted model',
-            threadId: 'thread-warm-reroute',
-            turnId: 'turn-warm-reroute-2',
-          })
-        })()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-warm-reroute', 'turn-warm-reroute-1')
+      writeCodexV2AssistantEventTurn({
+        child,
+        finalMessage: 'First warm turn complete',
+        threadId: 'thread-warm-reroute',
+        turnId: 'turn-warm-reroute-1',
       })
 
-      return child
+      await writeWarmTurnStarted({
+        child,
+        requestCount: 2,
+        threadId: 'thread-warm-reroute',
+        turnId: 'turn-warm-reroute-2',
+      })
+      child.stdout.write(jsonLine({
+        method: 'model/rerouted',
+        params: { toModel: 'gpt-6-sol' },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'turn/started',
+        params: {
+          threadId: 'thread-warm-reroute',
+          turn: { id: 'turn-warm-reroute-2' },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'model/rerouted',
+        params: { toModel: 'gpt-6.1-sol' },
+      }))
+      writeTokenUsage({
+        child,
+        threadId: 'thread-warm-reroute',
+        turnId: 'turn-warm-reroute-2',
+        last: {
+          cacheWriteInputTokens: 0,
+          cachedInputTokens: 12,
+          inputTokens: 120,
+          outputTokens: 45,
+          reasoningOutputTokens: 8,
+          totalTokens: 165,
+        },
+        total: {
+          cacheWriteInputTokens: 0,
+          cachedInputTokens: 12,
+          inputTokens: 120,
+          outputTokens: 45,
+          reasoningOutputTokens: 8,
+          totalTokens: 165,
+        },
+        modelContextWindow: 258_400,
+      })
+      writeCodexV2AssistantEventTurn({
+        child,
+        finalMessage: 'Current turn used the rerouted model',
+        threadId: 'thread-warm-reroute',
+        turnId: 'turn-warm-reroute-2',
+      })
     })
 
     const stableInput = {
@@ -767,129 +657,82 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const progressDelivery = createProgressDeliveryMock()
     const receiptTraces: Record<string, unknown>[] = []
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    mockWarmCodexProcess(spawnedChildren, 25_940, async (child) => {
+      await initializeWarmTurn(child, 'thread-local-stale-turn-id', 'turn-local-stale-turn-id-1')
+      writeCompletedTurn(child, 'thread-local-stale-turn-id', 'turn-local-stale-turn-id-1', 'completed')
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 25_940 + spawnedChildren.length
-      spawnedChildren.push(child)
+      const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+      child.stdout.write(jsonLine({
+        id: secondThread.id,
+        result: {
+          thread: {
+            id: 'thread-local-stale-turn-id',
+          },
+        },
+      }))
+      const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+      child.stdout.write(jsonLine({
+        id: 98,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            text: 'This pre-start stale progress must not send',
+          },
+          namespace: 'murph',
+          threadId: 'thread-local-stale-turn-id',
+          tool: 'send_progress_update',
+          turnId: 'turn-local-stale-turn-id-1',
+        },
+      }))
 
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-local-stale-turn-id',
-            turnId: 'turn-local-stale-turn-id-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              threadId: 'thread-local-stale-turn-id',
-              turn: {
-                id: 'turn-local-stale-turn-id-1',
-                status: 'completed',
-              },
-            },
-          }))
-
-          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-local-stale-turn-id',
-              },
-            },
-          }))
-          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-          child.stdout.write(jsonLine({
-            id: 98,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                text: 'This pre-start stale progress must not send',
-              },
-              namespace: 'murph',
-              threadId: 'thread-local-stale-turn-id',
-              tool: 'send_progress_update',
-              turnId: 'turn-local-stale-turn-id-1',
-            },
-          }))
-
-          await expect(waitForRpcResponse(child, 98)).resolves.toMatchObject({
-            error: {
-              code: -32000,
-              message: 'Codex parent-thread request arrived before the active turn id was known.',
-            },
-          })
-
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-local-stale-turn-id-2',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              threadId: 'thread-local-stale-turn-id',
-              turn: {
-                id: 'turn-local-stale-turn-id-1',
-                status: 'completed',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            id: 99,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                text: 'This stale progress must not send',
-              },
-              namespace: 'murph',
-              threadId: 'thread-local-stale-turn-id',
-              tool: 'send_progress_update',
-              turnId: 'turn-local-stale-turn-id-1',
-            },
-          }))
-
-          await expect(waitForRpcResponse(child, 99)).resolves.toMatchObject({
-            error: {
-              code: -32000,
-              message: 'Codex message turn id does not match the active turn.',
-            },
-          })
-
-          for (const staleTurnId of ['turn-local-stale-turn-id-1', undefined]) {
-            child.stdout.write(jsonLine({
-              method: 'item/agentMessage/delta',
-              params: { itemId: 'stale-item', delta: 'Stale output', threadId: 'thread-local-stale-turn-id', turnId: staleTurnId },
-            }))
-          }
-          child.stdout.write(jsonLine({
-            method: 'item/agentMessage/delta',
-            params: { itemId: 'assistant-local-stale-turn-id-2', delta: 'Current turn survived stale output', threadId: 'thread-local-stale-turn-id', turnId: 'turn-local-stale-turn-id-2' },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              threadId: 'thread-local-stale-turn-id',
-              turn: {
-                id: 'turn-local-stale-turn-id-2',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
+      await expect(waitForRpcResponse(child, 98)).resolves.toMatchObject({
+        error: {
+          code: -32000,
+          message: 'Codex parent-thread request arrived before the active turn id was known.',
+        },
       })
 
-      return child
+      child.stdout.write(jsonLine({
+        id: secondTurn.id,
+        result: {
+          turn: {
+            id: 'turn-local-stale-turn-id-2',
+          },
+        },
+      }))
+      writeCompletedTurn(child, 'thread-local-stale-turn-id', 'turn-local-stale-turn-id-1', 'completed')
+      child.stdout.write(jsonLine({
+        id: 99,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            text: 'This stale progress must not send',
+          },
+          namespace: 'murph',
+          threadId: 'thread-local-stale-turn-id',
+          tool: 'send_progress_update',
+          turnId: 'turn-local-stale-turn-id-1',
+        },
+      }))
+
+      await expect(waitForRpcResponse(child, 99)).resolves.toMatchObject({
+        error: {
+          code: -32000,
+          message: 'Codex message turn id does not match the active turn.',
+        },
+      })
+
+      for (const staleTurnId of ['turn-local-stale-turn-id-1', undefined]) {
+        child.stdout.write(jsonLine({
+          method: 'item/agentMessage/delta',
+          params: { itemId: 'stale-item', delta: 'Stale output', threadId: 'thread-local-stale-turn-id', turnId: staleTurnId },
+        }))
+      }
+      child.stdout.write(jsonLine({
+        method: 'item/agentMessage/delta',
+        params: { itemId: 'assistant-local-stale-turn-id-2', delta: 'Current turn survived stale output', threadId: 'thread-local-stale-turn-id', turnId: 'turn-local-stale-turn-id-2' },
+      }))
+      writeCompletedTurn(child, 'thread-local-stale-turn-id', 'turn-local-stale-turn-id-2', 'completed')
     })
 
     const stableInput = {
@@ -940,91 +783,53 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const codexHome = await createTempDir('assistant-codex-local-untagged-request-home-')
     const progressDelivery = createProgressDeliveryMock()
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    mockWarmCodexProcess(spawnedChildren, 25_955, async (child) => {
+      await initializeWarmTurn(child, 'thread-local-untagged-request', 'turn-local-untagged-request-1')
+      writeCompletedTurn(child, 'thread-local-untagged-request', 'turn-local-untagged-request-1', 'completed')
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 25_955 + spawnedChildren.length
-      spawnedChildren.push(child)
+      const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+      child.stdout.write(jsonLine({
+        id: secondThread.id,
+        result: {
+          thread: {
+            id: 'thread-local-untagged-request',
+          },
+        },
+      }))
+      const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+      child.stdout.write(jsonLine({
+        id: 99,
+        method: 'item/tool/call',
+        params: {
+          __testPreserveMissingIdentity: true,
+          arguments: {
+            text: 'This unscoped progress must not send',
+          },
+          namespace: 'murph',
+          tool: 'send_progress_update',
+        },
+      }))
 
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-local-untagged-request',
-            turnId: 'turn-local-untagged-request-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              threadId: 'thread-local-untagged-request',
-              turn: {
-                id: 'turn-local-untagged-request-1',
-                status: 'completed',
-              },
-            },
-          }))
-
-          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-local-untagged-request',
-              },
-            },
-          }))
-          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-          child.stdout.write(jsonLine({
-            id: 99,
-            method: 'item/tool/call',
-            params: {
-              __testPreserveMissingIdentity: true,
-              arguments: {
-                text: 'This unscoped progress must not send',
-              },
-              namespace: 'murph',
-              tool: 'send_progress_update',
-            },
-          }))
-
-          await expect(waitForRpcResponse(child, 99)).resolves.toMatchObject({
-            error: {
-              code: -32000,
-              message: 'Codex parent-thread request did not include the active turn id.',
-            },
-          })
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-local-untagged-request-2',
-              },
-            },
-          }))
-
-          child.stdout.write(jsonLine({
-            method: 'item/agentMessage/delta',
-            params: { itemId: 'assistant-local-untagged-request-2', delta: 'Current turn rejected untagged request', threadId: 'thread-local-untagged-request', turnId: 'turn-local-untagged-request-2' },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              threadId: 'thread-local-untagged-request',
-              turn: {
-                id: 'turn-local-untagged-request-2',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
+      await expect(waitForRpcResponse(child, 99)).resolves.toMatchObject({
+        error: {
+          code: -32000,
+          message: 'Codex parent-thread request did not include the active turn id.',
+        },
       })
+      child.stdout.write(jsonLine({
+        id: secondTurn.id,
+        result: {
+          turn: {
+            id: 'turn-local-untagged-request-2',
+          },
+        },
+      }))
 
-      return child
+      child.stdout.write(jsonLine({
+        method: 'item/agentMessage/delta',
+        params: { itemId: 'assistant-local-untagged-request-2', delta: 'Current turn rejected untagged request', threadId: 'thread-local-untagged-request', turnId: 'turn-local-untagged-request-2' },
+      }))
+      writeCompletedTurn(child, 'thread-local-untagged-request', 'turn-local-untagged-request-2', 'completed')
     })
 
     const stableInput = {
@@ -1066,75 +871,37 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const workingDirectory = await createTempDir('assistant-codex-local-untagged-output-work-')
     const codexHome = await createTempDir('assistant-codex-local-untagged-output-home-')
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    mockWarmCodexProcess(spawnedChildren, 25_970, async (child) => {
+      await initializeWarmTurn(child, 'thread-local-untagged-output', 'turn-local-untagged-output-1')
+      writeCompletedTurn(child, 'thread-local-untagged-output', 'turn-local-untagged-output-1', 'completed')
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 25_970 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-local-untagged-output',
-            turnId: 'turn-local-untagged-output-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              threadId: 'thread-local-untagged-output',
-              turn: {
-                id: 'turn-local-untagged-output-1',
-                status: 'completed',
-              },
-            },
-          }))
-
-          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-local-untagged-output',
-              },
-            },
-          }))
-          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-          child.stdout.write(jsonLine({
-            method: 'item/agentMessage/delta',
-            params: { itemId: 'assistant-local-untagged-output-2', delta: 'This unscoped output must not be accepted' },
-          }))
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-local-untagged-output-2',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/agentMessage/delta',
-            params: { itemId: 'assistant-local-untagged-output-current', delta: 'Current turn ignored untagged output', threadId: 'thread-local-untagged-output', turnId: 'turn-local-untagged-output-2' },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              threadId: 'thread-local-untagged-output',
-              turn: {
-                id: 'turn-local-untagged-output-2',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
+      const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+      child.stdout.write(jsonLine({
+        id: secondThread.id,
+        result: {
+          thread: {
+            id: 'thread-local-untagged-output',
+          },
+        },
+      }))
+      const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+      child.stdout.write(jsonLine({
+        method: 'item/agentMessage/delta',
+        params: { itemId: 'assistant-local-untagged-output-2', delta: 'This unscoped output must not be accepted' },
+      }))
+      child.stdout.write(jsonLine({
+        id: secondTurn.id,
+        result: {
+          turn: {
+            id: 'turn-local-untagged-output-2',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'item/agentMessage/delta',
+        params: { itemId: 'assistant-local-untagged-output-current', delta: 'Current turn ignored untagged output', threadId: 'thread-local-untagged-output', turnId: 'turn-local-untagged-output-2' },
+      }))
+      writeCompletedTurn(child, 'thread-local-untagged-output', 'turn-local-untagged-output-2', 'completed')
     })
 
     const stableInput = {
@@ -1209,15 +976,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
       queueMicrotask(() => {
         void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-prestart-pause-live-turn-1',
-            turnId: 'turn-prestart-pause-live-turn-1',
-          })
+          await initializeWarmTurn(child, 'thread-prestart-pause-live-turn-1', 'turn-prestart-pause-live-turn-1')
           child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
@@ -1228,24 +987,12 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
             },
           }))
 
-          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-prestart-pause-live-turn-2',
-              },
-            },
-          }))
-          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-prestart-pause-live-turn-2',
-              },
-            },
-          }))
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 2,
+            threadId: 'thread-prestart-pause-live-turn-2',
+            turnId: 'turn-prestart-pause-live-turn-2',
+          })
           child.stdout.write(jsonLine({
             id: 103,
             method: 'item/tool/call',
@@ -1342,55 +1089,35 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const workingDirectory = await createTempDir('assistant-codex-local-turn-start-error-work-')
     const codexHome = await createTempDir('assistant-codex-local-turn-start-error-home-')
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    mockWarmCodexProcess(spawnedChildren, 25_935, async (child) => {
+      await initializeWarmTurn(child, 'thread-local-turn-start-error-1', 'turn-local-turn-start-error-1')
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-local-turn-start-error-1',
+            status: 'completed',
+          },
+        },
+      }))
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 25_935 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-local-turn-start-error-1',
-            turnId: 'turn-local-turn-start-error-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-local-turn-start-error-1',
-                status: 'completed',
-              },
-            },
-          }))
-
-          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-local-turn-start-error-2',
-              },
-            },
-          }))
-          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            error: {
-              code: -32000,
-              message: 'turn/start failed before a turn id was allocated',
-            },
-          }))
-        })()
-      })
-
-      return child
+      const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+      child.stdout.write(jsonLine({
+        id: secondThread.id,
+        result: {
+          thread: {
+            id: 'thread-local-turn-start-error-2',
+          },
+        },
+      }))
+      const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+      child.stdout.write(jsonLine({
+        id: secondTurn.id,
+        error: {
+          code: -32000,
+          message: 'turn/start failed before a turn id was allocated',
+        },
+      }))
     })
 
     const stableInput = {
@@ -1434,76 +1161,44 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const workingDirectory = await createTempDir('assistant-codex-local-dotted-events-work-')
     const codexHome = await createTempDir('assistant-codex-local-dotted-events-home-')
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    mockWarmCodexProcess(spawnedChildren, 25_940, async (child) => {
+      await initializeWarmTurn(child, 'thread-local-dotted-events-1', 'turn-local-dotted-events-1')
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-local-dotted-events-1',
+            status: 'completed',
+          },
+        },
+      }))
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 25_940 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-local-dotted-events-1',
-            turnId: 'turn-local-dotted-events-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-local-dotted-events-1',
-                status: 'completed',
-              },
-            },
-          }))
-
-          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-local-dotted-events-2',
-              },
-            },
-          }))
-          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-local-dotted-events-2',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            data: {
-              turn_id: 'turn-local-dotted-events-2',
-            },
-            params: {
-              item: {
-                id: 'assistant-local-dotted-events-2',
-                type: 'agentMessage',
-              },
-              delta: 'Dotted lifecycle completed',
-            },
-            type: 'assistant.message.delta',
-          }))
-          child.stdout.write(jsonLine({
-            data: {
-              status: 'completed',
-              turn_id: 'turn-local-dotted-events-2',
-            },
-            type: 'turn.completed',
-          }))
-        })()
+      await writeWarmTurnStarted({
+        child,
+        requestCount: 2,
+        threadId: 'thread-local-dotted-events-2',
+        turnId: 'turn-local-dotted-events-2',
       })
-
-      return child
+      child.stdout.write(jsonLine({
+        data: {
+          turn_id: 'turn-local-dotted-events-2',
+        },
+        params: {
+          item: {
+            id: 'assistant-local-dotted-events-2',
+            type: 'agentMessage',
+          },
+          delta: 'Dotted lifecycle completed',
+        },
+        type: 'assistant.message.delta',
+      }))
+      child.stdout.write(jsonLine({
+        data: {
+          status: 'completed',
+          turn_id: 'turn-local-dotted-events-2',
+        },
+        type: 'turn.completed',
+      }))
     })
 
     const stableInput = {
@@ -1550,15 +1245,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
       queueMicrotask(() => {
         void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-data-failed',
-            turnId: 'turn-data-failed',
-          })
+          await initializeWarmTurn(child, 'thread-data-failed', 'turn-data-failed')
           child.stdout.write(jsonLine({
             data: {
               error: {
@@ -1608,15 +1295,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
       queueMicrotask(() => {
         void (async () => {
-          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: `thread-local-malformed-${processNumber}`,
-            turnId: `turn-local-malformed-${processNumber}`,
-          })
+          await initializeWarmTurn(spawnedChild, `thread-local-malformed-${processNumber}`, `turn-local-malformed-${processNumber}`)
 
           if (processNumber === 1) {
             spawnedChild.stdout.write('not-json\n')
@@ -1702,14 +1381,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
       queueMicrotask(() => {
         void (async () => {
-          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: `thread-teardown-retry-${processNumber}`,
-            turnId: `turn-teardown-retry-${processNumber}`,
-          })
+          await initializeWarmTurn(spawnedChild, `thread-teardown-retry-${processNumber}`, `turn-teardown-retry-${processNumber}`)
           if (processNumber === 1) {
             firstTurnReady.resolve()
             return
@@ -1815,14 +1487,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
       queueMicrotask(() => {
         void (async () => {
-          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: `thread-teardown-race-${processNumber}`,
-            turnId: `turn-teardown-race-${processNumber}`,
-          })
+          await initializeWarmTurn(spawnedChild, `thread-teardown-race-${processNumber}`, `turn-teardown-race-${processNumber}`)
           if (processNumber === 1) {
             firstTurnReady.resolve()
             return
@@ -1902,178 +1567,147 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const workingDirectory = await createTempDir('assistant-codex-action-diagnostics-')
     const onTraceEvent = vi.fn()
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-diagnostics', 'turn-diagnostics')
+      child.stdout.write(
+        jsonLine({
+          method: 'item/started',
+          params: {
+            startedAtMs: 100,
+            item: {
+              id: 'cmd-1',
+              type: 'commandExecution',
+              command: 'cat /tmp/raw-private-file',
+              cwd: '/tmp/raw-private-cwd',
+              status: 'running',
+            },
+            threadId: 'thread-diagnostics',
+            turnId: 'turn-diagnostics',
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            completedAtMs: 160,
+            item: {
+              id: 'cmd-1',
+              type: 'commandExecution',
+              command: 'cat /tmp/raw-private-file',
+              cwd: '/tmp/raw-private-cwd',
+              status: 'completed',
+              exitCode: 0,
+              aggregatedOutput: 'command raw output must not appear',
+            },
+            threadId: 'thread-diagnostics',
+            turnId: 'turn-diagnostics',
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            completedAtMs: 300,
+            item: {
+              id: 'dyn-1',
+              type: 'dynamicToolCall',
+              namespace: 'murph',
+              tool: 'send_progress_update',
+              status: 'completed',
+              success: true,
+              durationMs: 123,
+              arguments: {
+                secretPath: '/tmp/raw-argument',
+              },
+              contentItems: [
+                {
+                  type: 'inputText',
+                  text: 'dynamic raw output must not appear',
+                },
+                {
+                  type: 'inputImage',
+                  imageUrl: 'data:image/png;base64,AAA',
+                },
+              ],
+            },
+            threadId: 'thread-diagnostics',
+            turnId: 'turn-diagnostics',
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            completedAtMs: 340,
+            item: {
+              id: 'mcp-1',
+              type: 'mcpToolCall',
+              server: 'web',
+              tool: 'search_query',
+              status: 'completed',
+              durationMs: 80,
+              arguments: {
+                secretPath: '/tmp/raw-mcp-argument',
+              },
               result: {
-                thread: {
-                  id: 'thread-diagnostics',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-diagnostics',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/started',
-              params: {
-                startedAtMs: 100,
-                item: {
-                  id: 'cmd-1',
-                  type: 'commandExecution',
-                  command: 'cat /tmp/raw-private-file',
-                  cwd: '/tmp/raw-private-cwd',
-                  status: 'running',
-                },
-                threadId: 'thread-diagnostics',
-                turnId: 'turn-diagnostics',
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                completedAtMs: 160,
-                item: {
-                  id: 'cmd-1',
-                  type: 'commandExecution',
-                  command: 'cat /tmp/raw-private-file',
-                  cwd: '/tmp/raw-private-cwd',
-                  status: 'completed',
-                  exitCode: 0,
-                  aggregatedOutput: 'command raw output must not appear',
-                },
-                threadId: 'thread-diagnostics',
-                turnId: 'turn-diagnostics',
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                completedAtMs: 300,
-                item: {
-                  id: 'dyn-1',
-                  type: 'dynamicToolCall',
-                  namespace: 'murph',
-                  tool: 'send_progress_update',
-                  status: 'completed',
-                  success: true,
-                  durationMs: 123,
-                  arguments: {
-                    secretPath: '/tmp/raw-argument',
+                content: [
+                  {
+                    type: 'text',
+                    text: 'mcp raw output must not appear',
                   },
-                  contentItems: [
-                    {
-                      type: 'inputText',
-                      text: 'dynamic raw output must not appear',
-                    },
-                    {
-                      type: 'inputImage',
-                      imageUrl: 'data:image/png;base64,AAA',
-                    },
-                  ],
+                ],
+                structuredContent: {
+                  ok: true,
                 },
-                threadId: 'thread-diagnostics',
-                turnId: 'turn-diagnostics',
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                completedAtMs: 340,
-                item: {
-                  id: 'mcp-1',
-                  type: 'mcpToolCall',
-                  server: 'web',
-                  tool: 'search_query',
-                  status: 'completed',
-                  durationMs: 80,
-                  arguments: {
-                    secretPath: '/tmp/raw-mcp-argument',
-                  },
-                  result: {
-                    content: [
-                      {
-                        type: 'text',
-                        text: 'mcp raw output must not appear',
-                      },
-                    ],
-                    structuredContent: {
-                      ok: true,
-                    },
-                    _meta: {
-                      more: 'meta',
-                    },
-                  },
-                },
-                threadId: 'thread-diagnostics',
-                turnId: 'turn-diagnostics',
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'thread/tokenUsage/updated',
-              params: {
-                threadId: 'thread-diagnostics',
-                turnId: 'turn-diagnostics',
-                tokenUsage: {
-                  last: { cacheWriteInputTokens: 0,
-                    cachedInputTokens: 1000,
-                    inputTokens: 81000,
-                    outputTokens: 1200,
-                    reasoningOutputTokens: 300,
-                    totalTokens: 82500,
-                  },
-                  total: { cacheWriteInputTokens: 0,
-                    cachedInputTokens: 1000,
-                    inputTokens: 81000,
-                    outputTokens: 1200,
-                    reasoningOutputTokens: 300,
-                    totalTokens: 82500,
-                  },
+                _meta: {
+                  more: 'meta',
                 },
               },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-diagnostics',
-                  status: 'completed',
-                },
+            },
+            threadId: 'thread-diagnostics',
+            turnId: 'turn-diagnostics',
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-diagnostics',
+            turnId: 'turn-diagnostics',
+            tokenUsage: {
+              last: { cacheWriteInputTokens: 0,
+                cachedInputTokens: 1000,
+                inputTokens: 81000,
+                outputTokens: 1200,
+                reasoningOutputTokens: 300,
+                totalTokens: 82500,
               },
-            }),
-          )
-        })()
-      })
-
-      return child
+              total: { cacheWriteInputTokens: 0,
+                cachedInputTokens: 1000,
+                inputTokens: 81000,
+                outputTokens: 1200,
+                reasoningOutputTokens: 300,
+                totalTokens: 82500,
+              },
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-diagnostics',
+              status: 'completed',
+            },
+          },
+        }),
+      )
     })
 
     await expect(
@@ -2217,10 +1851,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
               method: 'item/agentMessage/delta',
               params: { threadId, turnId: `turn-warm-${ordinal}`, itemId: `reply-${ordinal}`, delta: 'Scoped reply' },
             }))
-            child.stdout.write(jsonLine({
-              method: 'turn/completed',
-              params: { threadId, turn: { id: `turn-warm-${ordinal}`, status: 'completed' } },
-            }))
+            writeCompletedTurn(child, threadId, `turn-warm-${ordinal}`, 'completed')
           }
         })()
       })
@@ -2261,102 +1892,71 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const workingDirectory = await createTempDir('assistant-codex-transport-diagnostics-')
     const onTraceEvent = vi.fn()
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-transport',
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-transport', 'turn-transport')
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-transport',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'error',
+          params: {
+            error: {
+              message: 'Reconnecting... 2/5',
+              codexErrorInfo: {
+                responseStreamDisconnected: {
+                  httpStatusCode: null,
                 },
               },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-transport',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/started',
-              params: {
-                turn: {
-                  id: 'turn-transport',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'error',
-              params: {
-                error: {
-                  message: 'Reconnecting... 2/5',
-                  codexErrorInfo: {
-                    responseStreamDisconnected: {
-                      httpStatusCode: null,
-                    },
-                  },
-                  additionalDetails:
-                    `stream disconnected before completion: ${timeoutMessage} at https://api.openai.com/v1/responses`,
-                },
-                threadId: 'thread-transport',
-                turnId: 'turn-transport',
-                willRetry: true,
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'warning',
-              params: {
-                threadId: 'thread-transport',
-                message:
-                  'Falling back from WebSockets to HTTPS transport. raw endpoint https://api.openai.com/v1/responses',
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-transport',
-                  type: 'agentMessage',
-                  text: 'Recovered.',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-transport',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
-      })
-
-      return child
+              additionalDetails:
+                `stream disconnected before completion: ${timeoutMessage} at https://api.openai.com/v1/responses`,
+            },
+            threadId: 'thread-transport',
+            turnId: 'turn-transport',
+            willRetry: true,
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'warning',
+          params: {
+            threadId: 'thread-transport',
+            message:
+              'Falling back from WebSockets to HTTPS transport. raw endpoint https://api.openai.com/v1/responses',
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-transport',
+              type: 'agentMessage',
+              text: 'Recovered.',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-transport',
+              status: 'completed',
+            },
+          },
+        }),
+      )
     })
 
     await expect(
@@ -2434,139 +2034,112 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       throw new Error('Expected product feedback collection to be available.')
     }
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-product-feedback-retry', 'turn-product-feedback-retry')
+      child.stdout.write(jsonLine({
+        method: 'turn/started',
+        params: {
+          turn: {
+            id: 'turn-product-feedback-retry',
+          },
+        },
+      }))
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: 2,
-            result: {
-              thread: {
-                id: 'thread-product-feedback-retry',
-              },
-            },
-          }))
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: 3,
-            result: {
-              turn: {
-                id: 'turn-product-feedback-retry',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/started',
-            params: {
-              turn: {
-                id: 'turn-product-feedback-retry',
-              },
-            },
-          }))
-
-          child.stdout.write(jsonLine({
-            id: 81,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                kind: 'feature_request',
-                summary: 'Speculative: first disconnected candidate.',
-              },
-              namespace: 'murph',
-              tool: 'submit_product_feedback',
-              turnId: 'turn-product-feedback-retry',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 81)).resolves.toMatchObject({
-            result: {
-              success: true,
-            },
-          })
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'feedback-disconnected',
-                namespace: 'murph',
-                status: 'completed',
-                success: true,
-                tool: 'submit_product_feedback',
-                type: 'dynamicToolCall',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'error',
-            params: {
-              error: {
-                message: 'Reconnecting... 1/5',
-                additionalDetails:
-                  'stream disconnected before completion',
-              },
-              threadId: 'thread-product-feedback-retry',
-              turnId: 'turn-product-feedback-retry',
-              willRetry: true,
-            },
-          }))
-
-          child.stdout.write(jsonLine({
-            id: 82,
-            method: 'item/tool/call',
-            params: {
-              arguments: {
-                kind: 'feature_request',
-                summary: 'Speculative: recovered candidate.',
-              },
-              namespace: 'murph',
-              tool: 'submit_product_feedback',
-              turnId: 'turn-product-feedback-retry',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 82)).resolves.toMatchObject({
-            result: {
-              success: true,
-            },
-          })
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'feedback-recovered',
-                namespace: 'murph',
-                status: 'completed',
-                success: true,
-                tool: 'submit_product_feedback',
-                type: 'dynamicToolCall',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-product-feedback-retry',
-                text: 'Recovered response.',
-                type: 'agentMessage',
-              },
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-product-feedback-retry',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
+      child.stdout.write(jsonLine({
+        id: 81,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            kind: 'feature_request',
+            summary: 'Speculative: first disconnected candidate.',
+          },
+          namespace: 'murph',
+          tool: 'submit_product_feedback',
+          turnId: 'turn-product-feedback-retry',
+        },
+      }))
+      await expect(waitForRpcResponse(child, 81)).resolves.toMatchObject({
+        result: {
+          success: true,
+        },
       })
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'feedback-disconnected',
+            namespace: 'murph',
+            status: 'completed',
+            success: true,
+            tool: 'submit_product_feedback',
+            type: 'dynamicToolCall',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'error',
+        params: {
+          error: {
+            message: 'Reconnecting... 1/5',
+            additionalDetails:
+              'stream disconnected before completion',
+          },
+          threadId: 'thread-product-feedback-retry',
+          turnId: 'turn-product-feedback-retry',
+          willRetry: true,
+        },
+      }))
 
-      return child
+      child.stdout.write(jsonLine({
+        id: 82,
+        method: 'item/tool/call',
+        params: {
+          arguments: {
+            kind: 'feature_request',
+            summary: 'Speculative: recovered candidate.',
+          },
+          namespace: 'murph',
+          tool: 'submit_product_feedback',
+          turnId: 'turn-product-feedback-retry',
+        },
+      }))
+      await expect(waitForRpcResponse(child, 82)).resolves.toMatchObject({
+        result: {
+          success: true,
+        },
+      })
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'feedback-recovered',
+            namespace: 'murph',
+            status: 'completed',
+            success: true,
+            tool: 'submit_product_feedback',
+            type: 'dynamicToolCall',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'assistant-product-feedback-retry',
+            text: 'Recovered response.',
+            type: 'agentMessage',
+          },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-product-feedback-retry',
+            status: 'completed',
+          },
+        },
+      }))
     })
 
     await expect(
@@ -2590,94 +2163,63 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const workingDirectory = await createTempDir('assistant-codex-transport-terminal-')
     const onTraceEvent = vi.fn()
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-transport-terminal',
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-transport-terminal', 'turn-transport-terminal')
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-transport-terminal',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'cmd-transport-terminal',
+              type: 'commandExecution',
+              status: 'completed',
+              exitCode: 0,
+              aggregatedOutput: 'command raw output must not appear',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'error',
+          params: {
+            error: {
+              message: 'stream disconnected before completion',
+              codexErrorInfo: {
+                responseStreamDisconnected: {
+                  httpStatusCode: null,
                 },
               },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-transport-terminal',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/started',
-              params: {
-                turn: {
-                  id: 'turn-transport-terminal',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'cmd-transport-terminal',
-                  type: 'commandExecution',
-                  status: 'completed',
-                  exitCode: 0,
-                  aggregatedOutput: 'command raw output must not appear',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'error',
-              params: {
-                error: {
-                  message: 'stream disconnected before completion',
-                  codexErrorInfo: {
-                    responseStreamDisconnected: {
-                      httpStatusCode: null,
-                    },
-                  },
-                  additionalDetails:
-                    'stream disconnected before completion at https://api.openai.com/v1/responses',
-                },
-                threadId: 'thread-transport-terminal',
-                turnId: 'turn-transport-terminal',
-                willRetry: false,
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-transport-terminal',
-                  status: 'failed',
-                },
-              },
-            }),
-          )
-        })()
-      })
-
-      return child
+              additionalDetails:
+                'stream disconnected before completion at https://api.openai.com/v1/responses',
+            },
+            threadId: 'thread-transport-terminal',
+            turnId: 'turn-transport-terminal',
+            willRetry: false,
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-transport-terminal',
+              status: 'failed',
+            },
+          },
+        }),
+      )
     })
 
     await expect(
@@ -3482,101 +3024,78 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       'assistant-codex-command-failure-recovery-',
     )
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-command-failure-recovery', 'turn-command-failure-recovery')
 
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: 2,
-            result: {
-              thread: { id: 'thread-command-failure-recovery' },
-            },
-          }))
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: 3,
-            result: {
-              turn: { id: 'turn-command-failure-recovery' },
-            },
-          }))
-
-          child.stdout.write(jsonLine({
-            method: 'item/started',
-            params: {
-              item: {
-                command: 'rg private-query /tmp/private-record',
-                id: 'command-private-failure',
-                type: 'commandExecution',
-              },
-              turnId: 'turn-command-failure-recovery',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                aggregatedOutput: 'private command failure output',
-                exitCode: 2,
-                id: 'command-private-failure',
-                status: 'failed',
-                type: 'commandExecution',
-              },
-              turnId: 'turn-command-failure-recovery',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/started',
-            params: {
-              item: {
-                command: 'rg narrower-query /tmp/private-record',
-                id: 'command-private-recovery',
-                type: 'commandExecution',
-              },
-              turnId: 'turn-command-failure-recovery',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                aggregatedOutput: 'private command recovery output',
-                exitCode: 0,
-                id: 'command-private-recovery',
-                status: 'completed',
-                type: 'commandExecution',
-              },
-              turnId: 'turn-command-failure-recovery',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              item: {
-                id: 'assistant-command-failure-recovery',
-                phase: 'final_answer',
-                text: 'Recovered safely.',
-                type: 'agentMessage',
-              },
-              turnId: 'turn-command-failure-recovery',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-command-failure-recovery',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
+      child.stdout.write(jsonLine({
+        method: 'item/started',
+        params: {
+          item: {
+            command: 'rg private-query /tmp/private-record',
+            id: 'command-private-failure',
+            type: 'commandExecution',
+          },
+          turnId: 'turn-command-failure-recovery',
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: 'private command failure output',
+            exitCode: 2,
+            id: 'command-private-failure',
+            status: 'failed',
+            type: 'commandExecution',
+          },
+          turnId: 'turn-command-failure-recovery',
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'item/started',
+        params: {
+          item: {
+            command: 'rg narrower-query /tmp/private-record',
+            id: 'command-private-recovery',
+            type: 'commandExecution',
+          },
+          turnId: 'turn-command-failure-recovery',
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: 'private command recovery output',
+            exitCode: 0,
+            id: 'command-private-recovery',
+            status: 'completed',
+            type: 'commandExecution',
+          },
+          turnId: 'turn-command-failure-recovery',
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          item: {
+            id: 'assistant-command-failure-recovery',
+            phase: 'final_answer',
+            text: 'Recovered safely.',
+            type: 'agentMessage',
+          },
+          turnId: 'turn-command-failure-recovery',
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-command-failure-recovery',
+            status: 'completed',
+          },
+        },
+      }))
     })
 
     const result = await executeCodexAppServerTurn({
@@ -3625,67 +3144,36 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const workingDirectory = await createTempDir('assistant-codex-failed-diagnostics-')
     const onTraceEvent = vi.fn()
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-failed-diagnostics',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-failed-diagnostics',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'cmd-failed-diagnostics',
-                  type: 'commandExecution',
-                  status: 'failed',
-                  exitCode: 1,
-                  durationMs: 42,
-                  aggregatedOutput: 'failed raw output must not appear',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-failed-diagnostics',
-                  status: 'failed',
-                },
-              },
-            }),
-          )
-          child.emit('exit', 0, null)
-          child.emit('close', 0, null)
-        })()
-      })
-
-      return child
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-failed-diagnostics', 'turn-failed-diagnostics')
+      child.stdout.write(
+        jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'cmd-failed-diagnostics',
+              type: 'commandExecution',
+              status: 'failed',
+              exitCode: 1,
+              durationMs: 42,
+              aggregatedOutput: 'failed raw output must not appear',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-failed-diagnostics',
+              status: 'failed',
+            },
+          },
+        }),
+      )
+      child.emit('exit', 0, null)
+      child.emit('close', 0, null)
     })
 
     await expect(
@@ -3724,19 +3212,11 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     const workingDirectory = await createTempDir('assistant-codex-explicit-command-')
     const codexCommand = '/tmp/caller-controlled-codex'
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          const error = new Error(`spawn ${codexCommand} ENOENT`) as NodeJS.ErrnoException
-          error.code = 'ENOENT'
-          emitProcessErrorAndExit(child, error)
-        })()
-      })
-
-      return child
+    mockCodexProcess(async (child) => {
+      await waitForRpcMethod(child, 'initialize')
+      const error = new Error(`spawn ${codexCommand} ENOENT`) as NodeJS.ErrnoException
+      error.code = 'ENOENT'
+      emitProcessErrorAndExit(child, error)
     })
 
     await expect(
@@ -3790,28 +3270,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
       queueMicrotask(() => {
         void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: 2,
-            result: {
-              thread: {
-                id: 'thread-hosted-home',
-              },
-            },
-          }))
-
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({
-            id: 3,
-            result: {
-              turn: {
-                id: 'turn-hosted-home',
-              },
-            },
-          }))
+          await initializeWarmTurn(child, 'thread-hosted-home', 'turn-hosted-home')
           child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
@@ -4354,51 +3813,39 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
         : firstCodexHome
       const workingDirectory = await createTempDir('assistant-codex-warm-identity-work-')
       const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
+      mockWarmCodexProcess(spawnedChildren, 32_000, async (spawnedChild) => {
+        const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
+        spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-      codexMocks.spawn.mockImplementation(() => {
-        const spawnedChild = new MockChildProcess()
-        spawnedChild.pid = 32_000 + spawnedChildren.length
-        spawnedChildren.push(spawnedChild)
+        const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
+        const processNumber = spawnedChildren.length
+        spawnedChild.stdout.write(jsonLine({
+          id: thread.id,
+          result: {
+            thread: {
+              id: `thread-warm-identity-${processNumber}`,
+            },
+          },
+        }))
 
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
-            spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-            const thread = await waitForRpcMethod(spawnedChild, 'thread/start')
-            const processNumber = spawnedChildren.length
-            spawnedChild.stdout.write(jsonLine({
-              id: thread.id,
-              result: {
-                thread: {
-                  id: `thread-warm-identity-${processNumber}`,
-                },
-              },
-            }))
-
-            const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
-            spawnedChild.stdout.write(jsonLine({
-              id: turn.id,
-              result: {
-                turn: {
-                  id: `turn-warm-identity-${processNumber}`,
-                },
-              },
-            }))
-            spawnedChild.stdout.write(jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: `turn-warm-identity-${processNumber}`,
-                  status: 'completed',
-                },
-              },
-            }))
-          })()
-        })
-
-        return spawnedChild
+        const turn = await waitForRpcMethod(spawnedChild, 'turn/start')
+        spawnedChild.stdout.write(jsonLine({
+          id: turn.id,
+          result: {
+            turn: {
+              id: `turn-warm-identity-${processNumber}`,
+            },
+          },
+        }))
+        spawnedChild.stdout.write(jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: `turn-warm-identity-${processNumber}`,
+              status: 'completed',
+            },
+          },
+        }))
       })
 
       const baseEnv = {

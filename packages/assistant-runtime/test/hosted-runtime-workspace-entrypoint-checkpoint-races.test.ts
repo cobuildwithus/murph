@@ -1,4 +1,5 @@
 import {
+  createWorkspaceRunRequest,
   TEST_NOW,
   TEST_USER_ID,
   createSnapshotFixtureRef,
@@ -23,66 +24,38 @@ import {
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import assert from "node:assert/strict";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  addCaptureWithLookup,
-  CURRENT_VAULT_FORMAT_VERSION,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  buildIntegrationEvidencePart,
-  buildIntegrationIngestRecord,
-  findCaptureByLookup,
   initializeVault,
-  patchAutomation,
-  readJsonlRecords,
-  repairVault,
-  runCanonicalWrite,
-  showAutomation,
-  upsertAutomation,
-  validateVault,
 } from "@murphai/core";
 import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  readHostedRuntimeFailurePhaseCode,
   type HostedMailboxFetchRequest,
-  type HostedMailboxFetchResponse,
   type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
-  type HostedMailboxPayloadFetchResponse,
-  type HostedRuntimeRedactedJson,
-  type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedWorkspaceSnapshotV2Aad,
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
-  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
-  HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
-  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
-  type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
-import { describe, expect, test, vi } from "vitest";
+import {
+  describe,
+  test,
+  vi,
+} from "vitest";
 import {
   createCoalescingRuntimeWakeSignal,
   HostedRuntimeCheckpointInterruptedByWakeError,
-  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
-  HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  parseHostedAssistantWorkspaceRuntimeJobInput,
-  type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
   createHostedWorkspaceRuntimeBridgeJobOptions,
@@ -95,12 +68,7 @@ import type {
   RuntimeWakeSignal,
 } from "../src/hosted-runtime/runtime-wake.ts";
 import {
-  HostedRuntimeArtifactReadError,
-  type HostedRuntimeDeviceSyncPort,
-  type HostedRuntimeMailboxPort,
   type HostedRuntimePlatform,
-  type HostedRuntimeWorkspacePort,
-  type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
 
 describe("hosted workspace runtime entrypoint", () => {test("retained post-checkpoint consumed conversation replay checkpoints dirty import before returning", async () => {
@@ -154,10 +122,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_post_checkpoint_consumed_replay",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -240,9 +205,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_foreground_pending",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -356,10 +319,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_forced_checkpoint_foreground_pending",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -635,9 +595,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_snapshot_wake",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -859,9 +817,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
       const runtimeJobInput = createWorkspaceRuntimeJobInput({
         request: {
           attemptId: "attempt_synthetic_snapshot_failure_log_wake",
-          runnerIdleTtlMs: 1,
           leaseGeneration: "9",
-          userId: TEST_USER_ID,
           workspaceVersion: "4",
         },
       });
@@ -1117,9 +1073,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_checkpoint_conversation_hint",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -1252,9 +1206,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_snapshot_wake_shutdown",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -1358,9 +1310,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
           createWorkspaceRuntimeJobInput({
             request: {
               attemptId: "attempt_synthetic_shutdown_foreground_pending_mailbox",
-              runnerIdleTtlMs: 1,
               leaseGeneration: "9",
-              userId: TEST_USER_ID,
               workspaceVersion: "4",
             },
           }),
@@ -1764,9 +1714,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_checkpoint_publication_non_assistant",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -1859,9 +1807,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_post_checkpoint_mailbox_system_failure",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -1984,9 +1930,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_stale_workspace",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -2091,9 +2035,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_pending_wake_timer",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -2388,9 +2330,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_checkpoint_wake_no_progress_hint",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),
@@ -2488,9 +2428,7 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_runtime_idle_checkpoint_clear_projection",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "9",
-            userId: TEST_USER_ID,
             workspaceVersion: "4",
           },
         }),

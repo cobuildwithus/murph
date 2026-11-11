@@ -59,7 +59,7 @@ describe('murph.ask_grok arguments', () => {
       { question: 'ok', unknown: true },
     ]) {
       const request = readAskGrokCall(argumentsValue)
-      expect(request).toMatchObject({ kind: 'invalid-ask-grok-arguments' })
+      expect(request).toMatchObject({ kind: 'invalid-tool-arguments', errorCode: 'invalid_ask_grok_arguments' })
     }
   })
 

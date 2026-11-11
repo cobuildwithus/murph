@@ -10,7 +10,7 @@ import type { WorkerEnvironmentSource } from "./worker-routes/shared.ts";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "./runtime-owner-completion.ts";
 import { RuntimeInvocationPreparation } from "./runtime-invocation-preparation.ts";
-import { RunnerStoreCache } from "./user-runner/runner-store-cache.ts";
+import { loadRunnerStores } from "./user-runner/runner-stores.ts";
 import type { HostedRuntimeEnsureProcessingRequest } from "@murphai/hosted-execution/orchestration-control";
 import type { HostedRuntimeLatencyPhaseBreakdown } from "@murphai/hosted-execution/runtime-control";
 
@@ -350,7 +350,7 @@ function createInvocationPreparation(ctx: ProcessingContext) {
   const { env, namespace, source } = ctx;
   return new RuntimeInvocationPreparation({
     env, runnerContainerNamespace: namespace, runnerRuntimeEnvSource: source,
-    runnerStoreCache: new RunnerStoreCache({ bucket: source.BUNDLES, env, runnerRuntimeEnvSource: source }),
+    loadRunnerStores: (userId, options) => loadRunnerStores({ bucket: source.BUNDLES, env, userId, ...options }),
     assertWorkspaceBelongsToRunnerUser(workspace, userId) {
       if (workspace && workspace.userId !== userId) throw new Error("Hosted workspace member mismatch.");
     },

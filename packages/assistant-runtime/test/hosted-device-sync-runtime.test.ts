@@ -703,7 +703,8 @@ function createNoDirtyStateDeviceSyncPortMethods(): Pick<
 }
 
 function createSnapshotOnlyDeviceSyncPort(
-  snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+  snapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse
+    | (() => HostedExecutionDeviceSyncRuntimeSnapshotResponse),
 ): HostedRuntimeDeviceSyncPort {
   return {
     ...createNoDirtyStateDeviceSyncPortMethods(),
@@ -714,7 +715,7 @@ function createSnapshotOnlyDeviceSyncPort(
       throw new Error("createConnectLink should not be called during sync");
     },
     async fetchSnapshot() {
-      return snapshot;
+      return typeof snapshot === "function" ? snapshot() : snapshot;
     },
   };
 }
@@ -1367,18 +1368,7 @@ describe("hosted device-sync runtime", () => {
           ],
         });
       let snapshot = buildSnapshotWith("2026-04-05T09:00:00.000Z", "2026-04-05T09:00:00.000Z");
-      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
-        ...createNoDirtyStateDeviceSyncPortMethods(),
-        async applyUpdates() {
-          throw new Error("applyUpdates should not be called during sync");
-        },
-        async createConnectLink() {
-          throw new Error("createConnectLink should not be called during sync");
-        },
-        async fetchSnapshot() {
-          return snapshot;
-        },
-      };
+      const deviceSyncPort = createSnapshotOnlyDeviceSyncPort(() => snapshot);
       const readArrival = () =>
         getStore(service).listConnectionSources({
           connectionId: connected.account.id,
@@ -1590,18 +1580,7 @@ describe("hosted device-sync runtime", () => {
           },
         ],
       });
-      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
-        ...createNoDirtyStateDeviceSyncPortMethods(),
-        async applyUpdates() {
-          throw new Error("applyUpdates should not be called during sync");
-        },
-        async createConnectLink() {
-          throw new Error("createConnectLink should not be called during sync");
-        },
-        async fetchSnapshot() {
-          return snapshot;
-        },
-      };
+      const deviceSyncPort = createSnapshotOnlyDeviceSyncPort(() => snapshot);
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
@@ -11186,18 +11165,7 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
-          },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
-          },
-          async fetchSnapshot() {
-            return snapshot;
-          },
-        },
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => snapshot),
         wake: buildCronWake("2026-04-06T09:10:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -11322,30 +11290,19 @@ describe("hosted device-sync runtime", () => {
       );
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => buildRuntimeSnapshot({
+          connectionId: "hosted_conn_clear_local_error",
+          externalAccountId: connected.account.externalAccountId,
+          localState: {
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: "2026-04-06T09:10:00.000Z",
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: "2026-04-06T09:07:00.000Z",
+            lastWebhookAt: "2026-04-06T09:06:00.000Z",
+            nextReconcileAt: "2026-04-06T10:00:00.000Z",
           },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
-          },
-          async fetchSnapshot() {
-            return buildRuntimeSnapshot({
-              connectionId: "hosted_conn_clear_local_error",
-              externalAccountId: connected.account.externalAccountId,
-              localState: {
-                lastErrorCode: null,
-                lastErrorMessage: null,
-                lastSyncCompletedAt: "2026-04-06T09:10:00.000Z",
-                lastSyncErrorAt: null,
-                lastSyncStartedAt: "2026-04-06T09:07:00.000Z",
-                lastWebhookAt: "2026-04-06T09:06:00.000Z",
-                nextReconcileAt: "2026-04-06T10:00:00.000Z",
-              },
-            });
-          },
-        },
+        })),
         wake: buildCronWake("2026-04-06T09:11:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -11386,18 +11343,7 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
-          },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
-          },
-          async fetchSnapshot() {
-            return snapshot;
-          },
-        },
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => snapshot),
         wake: buildCronWake("2026-04-06T09:06:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -11408,25 +11354,14 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => buildRuntimeSnapshot({
+          connectionId: "hosted_conn_stale_state",
+          externalAccountId: connected.account.externalAccountId,
+          hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
+          localState: {
+            nextReconcileAt: "2026-04-06T11:00:00.000Z",
           },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
-          },
-          async fetchSnapshot() {
-            return buildRuntimeSnapshot({
-              connectionId: "hosted_conn_stale_state",
-              externalAccountId: connected.account.externalAccountId,
-              hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
-              localState: {
-                nextReconcileAt: "2026-04-06T11:00:00.000Z",
-              },
-            });
-          },
-        },
+        })),
         wake: buildCronWake("2026-04-06T09:07:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -11457,35 +11392,24 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => buildRuntimeSnapshot({
+          connectionId: "hosted_conn_stale_disconnect",
+          displayName: "Hosted Fresh",
+          externalAccountId: connected.account.externalAccountId,
+          hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
+          localState: {
+            nextReconcileAt: "2026-04-06T10:00:00.000Z",
           },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
+          metadata: {
+            hosted: true,
           },
-          async fetchSnapshot() {
-            return buildRuntimeSnapshot({
-              connectionId: "hosted_conn_stale_disconnect",
-              displayName: "Hosted Fresh",
-              externalAccountId: connected.account.externalAccountId,
-              hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
-              localState: {
-                nextReconcileAt: "2026-04-06T10:00:00.000Z",
-              },
-              metadata: {
-                hosted: true,
-              },
-              tokenBundle: {
-                accessToken: "hosted-access-v5",
-                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-                refreshToken: "hosted-refresh-v5",
-                tokenVersion: 5,
-              },
-            });
+          tokenBundle: {
+            accessToken: "hosted-access-v5",
+            accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+            refreshToken: "hosted-refresh-v5",
+            tokenVersion: 5,
           },
-        },
+        })),
         wake: buildCronWake("2026-04-06T09:11:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -11534,31 +11458,20 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => buildRuntimeSnapshot({
+          connectionId: "hosted_conn_stale_disconnect",
+          displayName: "Hosted Stale Disconnect",
+          externalAccountId: connected.account.externalAccountId,
+          hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
+          localState: {
+            nextReconcileAt: "2026-04-06T11:00:00.000Z",
           },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
+          metadata: {
+            stale: true,
           },
-          async fetchSnapshot() {
-            return buildRuntimeSnapshot({
-              connectionId: "hosted_conn_stale_disconnect",
-              displayName: "Hosted Stale Disconnect",
-              externalAccountId: connected.account.externalAccountId,
-              hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
-              localState: {
-                nextReconcileAt: "2026-04-06T11:00:00.000Z",
-              },
-              metadata: {
-                stale: true,
-              },
-              status: "disconnected",
-              tokenBundle: null,
-            });
-          },
-        },
+          status: "disconnected",
+          tokenBundle: null,
+        })),
         wake: buildCronWake("2026-04-06T09:12:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -11622,35 +11535,24 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => buildRuntimeSnapshot({
+          connectionId: "hosted_conn_same_snapshot_disconnect",
+          displayName: "Hosted Fresh",
+          externalAccountId: connected.account.externalAccountId,
+          hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
+          localState: {
+            nextReconcileAt: "2026-04-06T10:00:00.000Z",
           },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
+          metadata: {
+            hosted: true,
           },
-          async fetchSnapshot() {
-            return buildRuntimeSnapshot({
-              connectionId: "hosted_conn_same_snapshot_disconnect",
-              displayName: "Hosted Fresh",
-              externalAccountId: connected.account.externalAccountId,
-              hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
-              localState: {
-                nextReconcileAt: "2026-04-06T10:00:00.000Z",
-              },
-              metadata: {
-                hosted: true,
-              },
-              tokenBundle: {
-                accessToken: "hosted-access-v5",
-                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-                refreshToken: "hosted-refresh-v5",
-                tokenVersion: 5,
-              },
-            });
+          tokenBundle: {
+            accessToken: "hosted-access-v5",
+            accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+            refreshToken: "hosted-refresh-v5",
+            tokenVersion: 5,
           },
-        },
+        })),
         wake: buildCronWake("2026-04-06T09:11:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -11701,37 +11603,26 @@ describe("hosted device-sync runtime", () => {
       setAccountUpdatedAtForTesting(service, connected.account.id, "2026-04-06T08:00:00.000Z");
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => buildRuntimeSnapshot({
+          connectionId: "hosted_conn_same_snapshot_disconnect",
+          displayName: "Hosted Replayed Disconnect",
+          externalAccountId: connected.account.externalAccountId,
+          hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
+          localState: {
+            lastErrorCode: "REPLAY_IGNORED",
+            lastErrorMessage: "same hosted snapshot",
+            lastSyncCompletedAt: "2026-04-06T09:45:00.000Z",
+            lastSyncErrorAt: "2026-04-06T09:40:00.000Z",
+            lastSyncStartedAt: "2026-04-06T09:35:00.000Z",
+            lastWebhookAt: "2026-04-06T09:30:00.000Z",
+            nextReconcileAt: "2026-04-06T11:00:00.000Z",
           },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
+          metadata: {
+            replay: true,
           },
-          async fetchSnapshot() {
-            return buildRuntimeSnapshot({
-              connectionId: "hosted_conn_same_snapshot_disconnect",
-              displayName: "Hosted Replayed Disconnect",
-              externalAccountId: connected.account.externalAccountId,
-              hostedUpdatedAt: "2026-04-06T09:10:00.000Z",
-              localState: {
-                lastErrorCode: "REPLAY_IGNORED",
-                lastErrorMessage: "same hosted snapshot",
-                lastSyncCompletedAt: "2026-04-06T09:45:00.000Z",
-                lastSyncErrorAt: "2026-04-06T09:40:00.000Z",
-                lastSyncStartedAt: "2026-04-06T09:35:00.000Z",
-                lastWebhookAt: "2026-04-06T09:30:00.000Z",
-                nextReconcileAt: "2026-04-06T11:00:00.000Z",
-              },
-              metadata: {
-                replay: true,
-              },
-              status: "disconnected",
-              tokenBundle: null,
-            });
-          },
-        },
+          status: "disconnected",
+          tokenBundle: null,
+        })),
         wake: buildCronWake("2026-04-06T09:12:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -11944,25 +11835,14 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => buildRuntimeSnapshot({
+          connectionId: "hosted_conn_keep_local_next",
+          externalAccountId: connected.account.externalAccountId,
+          hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
+          localState: {
+            nextReconcileAt: "2026-04-06T10:00:00.000Z",
           },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
-          },
-          async fetchSnapshot() {
-            return buildRuntimeSnapshot({
-              connectionId: "hosted_conn_keep_local_next",
-              externalAccountId: connected.account.externalAccountId,
-              hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
-              localState: {
-                nextReconcileAt: "2026-04-06T10:00:00.000Z",
-              },
-            });
-          },
-        },
+        })),
         wake: buildCronWake("2026-04-06T09:06:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -11973,25 +11853,14 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => buildRuntimeSnapshot({
+          connectionId: "hosted_conn_keep_local_next",
+          externalAccountId: connected.account.externalAccountId,
+          hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
+          localState: {
+            nextReconcileAt: null,
           },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
-          },
-          async fetchSnapshot() {
-            return buildRuntimeSnapshot({
-              connectionId: "hosted_conn_keep_local_next",
-              externalAccountId: connected.account.externalAccountId,
-              hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
-              localState: {
-                nextReconcileAt: null,
-              },
-            });
-          },
-        },
+        })),
         wake: buildCronWake("2026-04-06T09:07:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -12021,25 +11890,14 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => buildRuntimeSnapshot({
+          connectionId: "hosted_conn_invalid_local_next",
+          externalAccountId: connected.account.externalAccountId,
+          hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
+          localState: {
+            nextReconcileAt: "2026-04-06T10:00:00.000Z",
           },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
-          },
-          async fetchSnapshot() {
-            return buildRuntimeSnapshot({
-              connectionId: "hosted_conn_invalid_local_next",
-              externalAccountId: connected.account.externalAccountId,
-              hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
-              localState: {
-                nextReconcileAt: "2026-04-06T10:00:00.000Z",
-              },
-            });
-          },
-        },
+        })),
         wake: buildCronWake("2026-04-06T09:06:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -12050,25 +11908,14 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => buildRuntimeSnapshot({
+          connectionId: "hosted_conn_invalid_local_next",
+          externalAccountId: connected.account.externalAccountId,
+          hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
+          localState: {
+            nextReconcileAt: "2026-04-06T11:00:00.000Z",
           },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
-          },
-          async fetchSnapshot() {
-            return buildRuntimeSnapshot({
-              connectionId: "hosted_conn_invalid_local_next",
-              externalAccountId: connected.account.externalAccountId,
-              hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
-              localState: {
-                nextReconcileAt: "2026-04-06T11:00:00.000Z",
-              },
-            });
-          },
-        },
+        })),
         wake: buildCronWake("2026-04-06T09:07:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -12098,25 +11945,14 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => buildRuntimeSnapshot({
+          connectionId: "hosted_conn_invalid_hosted_next",
+          externalAccountId: connected.account.externalAccountId,
+          hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
+          localState: {
+            nextReconcileAt: "2026-04-06T10:00:00.000Z",
           },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
-          },
-          async fetchSnapshot() {
-            return buildRuntimeSnapshot({
-              connectionId: "hosted_conn_invalid_hosted_next",
-              externalAccountId: connected.account.externalAccountId,
-              hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
-              localState: {
-                nextReconcileAt: "2026-04-06T10:00:00.000Z",
-              },
-            });
-          },
-        },
+        })),
         wake: buildCronWake("2026-04-06T09:06:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,
@@ -12127,25 +11963,14 @@ describe("hosted device-sync runtime", () => {
       });
 
       await syncHostedDeviceSyncControlPlaneState({
-        deviceSyncPort: {
-          ...createNoDirtyStateDeviceSyncPortMethods(),
-          async applyUpdates() {
-            throw new Error("applyUpdates should not be called during sync");
+        deviceSyncPort: createSnapshotOnlyDeviceSyncPort(() => buildRuntimeSnapshot({
+          connectionId: "hosted_conn_invalid_hosted_next",
+          externalAccountId: connected.account.externalAccountId,
+          hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
+          localState: {
+            nextReconcileAt: "still-not-a-timestamp",
           },
-          async createConnectLink() {
-            throw new Error("createConnectLink should not be called during sync");
-          },
-          async fetchSnapshot() {
-            return buildRuntimeSnapshot({
-              connectionId: "hosted_conn_invalid_hosted_next",
-              externalAccountId: connected.account.externalAccountId,
-              hostedUpdatedAt: "2026-04-06T09:05:00.000Z",
-              localState: {
-                nextReconcileAt: "still-not-a-timestamp",
-              },
-            });
-          },
-        },
+        })),
         wake: buildCronWake("2026-04-06T09:07:00.000Z"),
         secret: DEVICE_SYNC_SECRET,
         service,

@@ -98,6 +98,7 @@ import type {
 import {
   createAskGrokTurnState,
   type AskGrokToolRuntime,
+  type AskGrokTurnState,
 } from './assistant-codex/ask-grok-tool.js'
 import {
   createAnalyzeVideoTurnState,
@@ -340,7 +341,6 @@ type CodexAppServerActiveTurnBinding = {
   onStderrLine(line: string): void
   onStderrText(text: string): void
   onStdinError(error: unknown): VaultCliError | null
-  onStdoutText(text: string): void
 }
 
 // Last thread/tokenUsage/updated observed on the warm process. `last` is the
@@ -515,6 +515,7 @@ async function waitForCodexProgressDrain(
 
 export interface CodexAppServerTurnInput {
   allowFinishWithoutReply?: boolean | null
+  askGrokTurnState?: AskGrokTurnState | null
   analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
@@ -681,7 +682,6 @@ export interface CodexAppServerTurnResult {
   rolloutRelativePath: string | null
   sessionId: string | null
   stderr: string
-  stdout: string
   threadId: string | null
   turnId: string | null
 }
@@ -2065,10 +2065,6 @@ class CodexAppServerProcess {
 
   private handleStdoutLine(line: string): void {
     const parsed = tryParseJsonLine(line)
-    if (!parsed.ok || (parsed.value.method !== 'rawResponseItem/completed'
-      && parsed.value.method !== 'rawResponse/completed')) {
-      this.activeTurn?.onStdoutText(`${line}\n`)
-    }
     if (parsed.ok) {
       this.observeDetachedChildLifecycle(parsed.value)
       this.observeThreadTokenUsage(parsed.value)
@@ -2856,7 +2852,6 @@ export async function compactWarmCodexThread(input: {
       settleCompaction('rpc_error')
       return null
     },
-    onStdoutText: () => {},
   }
 
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
@@ -3193,7 +3188,6 @@ async function runCodexAppServerTurnOnProcess(
     'codexAppServerProcessTurnStartedAtMonotonicMs',
   )
   const hostedCanonicalWritePort = readHostedCanonicalWritePort()
-  let stdout = ''
   let stderr = ''
   let settled = false
   let normalShutdown = false
@@ -3201,7 +3195,7 @@ async function runCodexAppServerTurnOnProcess(
   let lifecycleStage = 'spawn_start'
   let terminationSignalSent: NodeJS.Signals | null = null
   const requestedResumeThreadId =
-    normalizeNullableString(input.resumeSessionId) ?? null
+    normalizeNullableString(input.resumeSessionId)
   const offeredDynamicToolKeys = new Set(
     input.dynamicTools.map((tool) => `${tool.namespace}.${tool.name}`),
   )
@@ -3262,7 +3256,7 @@ async function runCodexAppServerTurnOnProcess(
   // turn. Standalone App Server calls retain a request-local fallback.
   const analyzeVideoTurnState =
     input.analyzeVideoTurnState ?? createAnalyzeVideoTurnState()
-  const askGrokTurnState = createAskGrokTurnState()
+  const askGrokTurnState = input.askGrokTurnState ?? createAskGrokTurnState()
   const groupSharedReadTurnState = {
     currentSenderDecisionByMessageRef: new Map(),
     invalid: false,
@@ -3390,9 +3384,9 @@ async function runCodexAppServerTurnOnProcess(
     input.onAdditionalUsage
       ? []
       : extractCodexSubagentUsageDrafts({
-          modelProvider: normalizeNullableString(input.modelProvider) ?? null,
+          modelProvider: normalizeNullableString(input.modelProvider),
           ordinalStart: nextDynamicToolUsageOrdinal,
-          parentModel: normalizeNullableString(input.model) ?? null,
+          parentModel: normalizeNullableString(input.model),
           serviceTier: input.serviceTier ?? null,
           subagentTokenUsageByTurn,
         })
@@ -5810,9 +5804,6 @@ async function runCodexAppServerTurnOnProcess(
       stderr += text
     },
     onStdinError: handleCodexStdinError,
-    onStdoutText(text) {
-      stdout += text
-    },
   }
 
   try {
@@ -6139,7 +6130,6 @@ async function runCodexAppServerTurnOnProcess(
     rolloutRelativePath,
     sessionId: codexThreadId,
     stderr: stderr.trim(),
-    stdout: stdout.trim(),
     threadId: codexThreadId,
     turnId,
   }

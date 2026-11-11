@@ -32,7 +32,7 @@ describe('assistant personalization tool', () => {
           namespace: 'murph', tool: 'personalization',
           arguments: { action: 'update', [field.name]: value },
         } })
-        expect(parsed?.kind, `${field.name} runtime value`).toBe(accepted ? 'personalization' : 'invalid-personalization-arguments')
+        expect(parsed?.kind, `${field.name} runtime value`).toBe(accepted ? 'personalization' : 'invalid-tool-arguments')
       }
     }
   })
@@ -48,7 +48,7 @@ describe('assistant personalization tool', () => {
       expect(advertisedInput(args)).toBe(false)
       expect(readTestMurphDynamicToolRequest({ method: 'item/tool/call', params: {
         arguments: args, namespace: 'murph', tool: 'personalization',
-      } })?.kind).toBe('invalid-personalization-arguments')
+      } })?.kind).toBe('invalid-tool-arguments')
     }
     expect(advertisedInput({ action: 'update', tone: 'formal' })).toBe(true)
     expect(advertisedInput({ action: 'update', voice: 'warm' })).toBe(true)
@@ -110,7 +110,7 @@ describe('assistant personalization tool', () => {
       expect(readTestMurphDynamicToolRequest({
         method: 'item/tool/call',
         params: { arguments: args, namespace: 'murph', tool: 'personalization' },
-      })?.kind).toBe('invalid-personalization-arguments')
+      })?.kind).toBe('invalid-tool-arguments')
     }
   })
 
@@ -275,7 +275,7 @@ describe('assistant personalization tool', () => {
         namespace: 'murph',
         tool: 'personalization',
       },
-    })?.kind).toBe('invalid-personalization-arguments')
+    })?.kind).toBe('invalid-tool-arguments')
 
     expect(readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
@@ -287,7 +287,7 @@ describe('assistant personalization tool', () => {
         namespace: 'murph',
         tool: 'personalization',
       },
-    })?.kind).toBe('invalid-personalization-arguments')
+    })?.kind).toBe('invalid-tool-arguments')
 
     expect(readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
@@ -300,7 +300,7 @@ describe('assistant personalization tool', () => {
         namespace: 'murph',
         tool: 'personalization',
       },
-    })?.kind).toBe('invalid-personalization-arguments')
+    })?.kind).toBe('invalid-tool-arguments')
 
     expect(readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
@@ -309,7 +309,7 @@ describe('assistant personalization tool', () => {
         namespace: 'murph',
         tool: 'personalization',
       },
-    })?.kind).toBe('invalid-personalization-arguments')
+    })?.kind).toBe('invalid-tool-arguments')
 
     expect(readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
@@ -321,7 +321,7 @@ describe('assistant personalization tool', () => {
         namespace: 'murph',
         tool: 'personalization',
       },
-    })?.kind).toBe('invalid-personalization-arguments')
+    })?.kind).toBe('invalid-tool-arguments')
 
     for (const selector of [
       { memberId: 'member_other' },
@@ -338,7 +338,7 @@ describe('assistant personalization tool', () => {
           namespace: 'murph',
           tool: 'personalization',
         },
-      })?.kind).toBe('invalid-personalization-arguments')
+      })?.kind).toBe('invalid-tool-arguments')
     }
   })
 })

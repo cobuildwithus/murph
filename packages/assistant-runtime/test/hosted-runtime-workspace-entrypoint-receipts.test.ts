@@ -31,126 +31,70 @@ import {
 import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
 
 import assert from "node:assert/strict";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   HostedCanonicalWriteOutcomeUnknownError,
-  addCaptureWithLookup,
-  CURRENT_VAULT_FORMAT_VERSION,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  buildIntegrationEvidencePart,
-  buildIntegrationIngestRecord,
-  findCaptureByLookup,
   initializeVault,
-  patchAutomation,
   readJsonlRecords,
-  repairVault,
   runCanonicalWrite,
   showAutomation,
   upsertAutomation,
   createAutomationForInputs,
   listAutomations,
-  validateVault,
 } from "@murphai/core";
 import {
-  openInboxRuntime,
   persistCanonicalInboxCapture,
-  rebuildRuntimeFromVault,
 } from "@murphai/inboxd";
 import {
   AssistantWorkspaceArtifactMaterializationError,
-  appendAssistantTranscriptEntries,
-  createAssistantOutboxIntent,
-  ensureAutomaticMealCloseoutAutomation,
-  getAssistantCronStatus,
-  listAssistantTranscriptEntries,
-  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
-  listAssistantOutboxIntents,
-  markAssistantOutboxIntentSentById,
   readAssistantContextSnapshotState,
-  refreshAssistantContextSnapshotBestEffort,
-  recordHostedMailboxAssistantInputItem,
-  saveAssistantOutboxIntent,
-  saveAssistantSession,
-  type AssistantHostedImageGenerationLauncher,
-  type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import {
   resolveAssistantStatePaths,
   sha256HostedBundleHex,
-  createHostedPortableWorkspaceManifestFromBundle,
-  listPendingAssistantRuntimeIssueRecords,
-  restoreHostedBundleRoots,
-  restoreHostedExecutionContext,
-  snapshotHostedPortableWorkspaceDelta,
   snapshotHostedBundleRoots,
-  writePendingAssistantRuntimeIssueRecord,
-  writeHostedBundleTextFile,
 } from "@murphai/runtime-state/node";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-  HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  readHostedRuntimeFailurePhaseCode,
-  type HostedMailboxFetchRequest,
-  type HostedMailboxFetchResponse,
   type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
-  type HostedMailboxPayloadFetchResponse,
-  type HostedRuntimeRedactedJson,
-  type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
-  type HostedWorkspaceCheckpointResponse,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
-import {
-  buildHostedExecutionLayeredSnapshotRef,
-  buildHostedExecutionWorkingSnapshotRef,
-  isHostedWorkspaceSnapshotV2Ref,
-  readHostedExecutionSnapshotBaseRef,
-} from "@murphai/hosted-execution/parsers";
+
 import { describe, expect, test, vi } from "vitest";
 import {
   createCoalescingRuntimeWakeSignal,
-  HostedRuntimeCheckpointInterruptedByWakeError,
-  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
-  HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
   type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD,
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
 } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import {
-  createEmptyHostedMailboxImportState,
-  HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
-  HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
-  HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH,
   readHostedMailboxImportState,
-  writeHostedMailboxImportState,
-  type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   HostedRuntimeArtifactReadError,
-  type HostedRuntimeDeviceSyncPort,
-  type HostedRuntimeMailboxPort,
   type HostedRuntimePlatform,
   type HostedRuntimeWorkspacePort,
-  type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
 
 describe("hosted workspace runtime entrypoint", () => {test("runs assistant outbox phase after restored mailbox checkpoint with restored vault root", async () => {

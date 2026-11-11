@@ -9,6 +9,47 @@ afterEach(() => {
 });
 
 describe("hosted workspace snapshot enumeration races", () => {
+  it("admits durable vault state while excluding credentials and process residue", async () => {
+    const durableRoot = await mkdtemp(path.join(tmpdir(), "workspace-plan-policy-"));
+    const vaultRoot = path.join(durableRoot, "vault");
+    const operatorHomeRoot = path.join(durableRoot, "home");
+    const included = [
+      "journal/entry.md",
+      ".runtime/operations/assistant/state/new-continuity.json",
+      ".runtime/operations/assistant/diagnostics/snapshot.json",
+      ".runtime/projections/query-entities.sqlite",
+      ".runtime/projections/query-metrics.sqlite",
+      ".runtime/projections/query-wearables.sqlite",
+    ];
+    const excluded = [
+      ".env", "journal/.env.local", ".git/config", "exports/packs/private.zip",
+      ".runtime/cache/secret.json", ".runtime/tmp/scratch.json",
+      ".runtime/projections/query.sqlite", ".runtime/projections/query-entities.sqlite.tmp",
+      ".runtime/operations/assistant/secrets/token.json",
+      ".runtime/operations/assistant/outbox/.quarantine/rejected.json",
+      ".runtime/operations/assistant/diagnostics/events.jsonl",
+      ".runtime/operations/assistant/journals/runtime-events.jsonl.1",
+      ".runtime/operations/assistant/state/worker.pid",
+      ".runtime/operations/assistant/.runtime-write.lock/metadata.json",
+      ".runtime/operations/assistant/state/.runtime-write.lock.pending.fixture/metadata.json",
+      ".runtime/operations/assistant/status.json",
+    ];
+    try {
+      for (const relativePath of [...included, ...excluded]) {
+        await mkdir(path.dirname(path.join(vaultRoot, relativePath)), { recursive: true });
+        await writeFile(path.join(vaultRoot, relativePath), "synthetic fixture");
+      }
+      await mkdir(operatorHomeRoot);
+      await writeFile(path.join(operatorHomeRoot, "config.json"), "synthetic operator config");
+      const { collectHostedWorkspaceSnapshotArchivePlan } = await import("../src/hosted-bundles.ts");
+      const plan = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot, vaultRoot, operatorHomeRoot });
+      expect(plan.entries.filter(entry => entry.kind === "file").map(entry => entry.relativePath).sort())
+        .toEqual([...included].sort());
+    } finally {
+      await rm(durableRoot, { recursive: true, force: true });
+    }
+  });
+
   it("keeps empty inbox roots and unrelated empty directories", async () => {
     const durableRoot = await mkdtemp(path.join(tmpdir(), "empty-inbox-roots-"));
     const vaultRoot = path.join(durableRoot, "vault");

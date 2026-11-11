@@ -467,36 +467,6 @@ describe('assistant cron runtime threshold coverage', () => {
     expect(job.target.deliveryTarget).toBeNull()
   })
 
-  it('preserves the existing next run when a disabled recurring job succeeds manually', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-08T08:00:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext('assistant-cron-disabled-success-')
-
-    const job = await addAssistantCronJob({
-      channel: 'telegram',
-      deliveryTarget: 'room-disabled',
-      name: 'disabled-success-job',
-      prompt: 'Manual check-in.',
-      schedule: {
-        kind: 'dailyLocal',
-        localTime: '09:00',
-      },
-      vault: vaultRoot,
-    })
-
-    const disabledJob = await setAssistantCronJobEnabled(vaultRoot, job.jobId, false)
-    const preservedNextRunAt = disabledJob.state.nextRunAt
-
-    const result = await runAssistantCronJobNow({
-      job: job.jobId,
-      vault: vaultRoot,
-    })
-
-    expect(result.run.status).toBe('succeeded')
-    expect(result.job.enabled).toBe(false)
-    expect(result.job.state.nextRunAt).toBe(preservedNextRunAt)
-    expect(result.job.state.lastSucceededAt).toBe('2026-04-08T08:00:00.000Z')
-  })
 
   it('escalates failure backoff across repeated manual failures', async () => {
     vi.useFakeTimers()

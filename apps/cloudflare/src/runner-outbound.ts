@@ -6,7 +6,7 @@ import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, HostedRuntimeR
 import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
 import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
 import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
-import { HostedBundleGarbageCollector } from "./bundle-gc.ts";
+import { deleteLegacyHostedBundle } from "./bundle-gc.ts";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionSnapshotRef,
@@ -2893,20 +2893,14 @@ async function deleteReplacedLegacyWorkspaceSnapshotBundles(input: {
     environment: input.environment,
     userId: input.userId,
   });
-  const garbageCollector = new HostedBundleGarbageCollector(
-    input.env.BUNDLES,
-    cryptoContext.rootKey,
-    cryptoContext.rootKeyId,
-    cryptoContext.keysById,
-  );
-
-  await Promise.all(bundleRefs.map(async (previousBundleRef) => {
-    await garbageCollector.cleanupBundleTransition({
-      nextBundleRef: null,
-      previousBundleRef,
-      userId: input.userId,
-    });
-  }));
+  await Promise.all(bundleRefs.map((ref) => deleteLegacyHostedBundle({
+    bucket: input.env.BUNDLES,
+    key: cryptoContext.rootKey,
+    keyId: cryptoContext.rootKeyId,
+    keysById: cryptoContext.keysById,
+    ref,
+    userId: input.userId,
+  })));
 }
 
 async function recordWorkspaceSnapshotOrphanCandidate(

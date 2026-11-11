@@ -46,7 +46,6 @@ it.each([false, true])('attributes transcript and session writes without changin
     },
     session,
     stderr: '',
-    stdout: '',
     transcriptResponse: 'synthetic persisted answer',
     workingDirectory: vaultRoot,
   }

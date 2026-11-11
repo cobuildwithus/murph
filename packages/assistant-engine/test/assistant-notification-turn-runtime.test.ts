@@ -6508,7 +6508,6 @@ function createProviderResult(input?: {
     route: input?.route ?? createRoute(),
     session,
     stderr: '',
-    stdout: '',
     transcriptResponse:
       input?.transcriptResponse === undefined
         ? input?.response ?? 'provider response'

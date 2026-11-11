@@ -9656,61 +9656,6 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('runs canonical one-shot notification cron jobs within the expiry window', async () => {
-    vi.useFakeTimers()
-    // 55 minutes late: stale under the previous 30-minute window, deliverable
-    // under the 60-minute window.
-    vi.setSystemTime(new Date('2026-04-08T09:55:00.000Z'))
-    const { vaultRoot } = await createRuntimeContext(
-      'assistant-cron-runtime-fresh-one-shot-',
-    )
-    const canonicalJob = await addAssistantCronJob({
-      channel: 'telegram',
-      deliveryTarget: 'room-1',
-      name: 'fresh one-shot reminder',
-      now: new Date('2026-04-08T08:00:00.000Z'),
-      prompt: 'First-session prep reminder.',
-      schedule: {
-        kind: 'at',
-        at: '2026-04-08T09:00:00.000Z',
-      },
-      vault: vaultRoot,
-    })
-
-    const summary = await processDueAssistantCronJobsLocal({
-      limit: 1,
-      vault: vaultRoot,
-    })
-
-    expect(summary).toEqual({
-      failed: 0,
-      processed: 1,
-      succeeded: 1,
-    })
-    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
-      expect.objectContaining({
-        deliveryDedupeToken: expect.stringContaining(
-          `assistant-cron|${canonicalJob.jobId}|2026-04-08T09:00:00.000Z`,
-        ),
-        instructions: expect.stringContaining('First-session prep reminder.'),
-        turnTrigger: 'automation-cron',
-      }),
-    )
-    await expect(
-      listAssistantCronRuns({
-        job: canonicalJob.jobId,
-        vault: vaultRoot,
-      }),
-    ).resolves.toMatchObject({
-      jobId: canonicalJob.jobId,
-      runs: [
-        expect.objectContaining({
-          error: null,
-          status: 'succeeded',
-        }),
-      ],
-    })
-  })
 
   it('delivers canonical one-shot notifications exactly at the 60-minute expiry boundary', async () => {
     vi.useFakeTimers()

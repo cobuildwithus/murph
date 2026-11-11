@@ -10,9 +10,6 @@ import {
   type HostedRuntimeSignal,
 } from "../src/orchestration-control.ts";
 import {
-  HOSTED_AI_USAGE_ALLOW_DECISION_SCHEMA,
-  HOSTED_AI_USAGE_ALLOW_DECISION_SIGNATURE_ALG,
-  type HostedAiUsageAllowDecision,
   type HostedMailboxLaneLag,
 } from "../src/runtime-control.ts";
 import {
@@ -699,15 +696,15 @@ function createWorkspaceProjection(): HostedRuntimeReconciliationFactsWorkspace 
   };
 }
 
-function createAiUsageAllowDecision(): HostedAiUsageAllowDecision {
+function createAiUsageAllowDecision() {
   return {
     allowed: true,
     expiresAt: "2026-05-20T12:05:00.000Z",
     issuedAt: "2026-05-20T12:00:00.000Z",
     nonce: "nonce_test",
-    schema: HOSTED_AI_USAGE_ALLOW_DECISION_SCHEMA,
+    schema: "murph.hosted-ai-usage-allow-decision.v1",
     signature: {
-      alg: HOSTED_AI_USAGE_ALLOW_DECISION_SIGNATURE_ALG,
+      alg: "HMAC-SHA256",
       keyId: "key_test",
       signature: "signature_test",
     },
