@@ -19,7 +19,7 @@ test("removes a stale post-join marker for an existing accessible member", () =>
   expect(buildGroupJoinPostAuthReturnPath({
     currentPath: "/groups/join/JOIN123?postJoin=setup&source=text",
     payload: {
-      stage: "activating",
+      stage: "active",
     },
   })).toBe("/groups/join/JOIN123?source=text");
 });

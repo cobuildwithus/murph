@@ -38,8 +38,8 @@ function runVeil(location: { hash?: string; pathname: string; search?: string })
 
 test.each([
   ["a wearable link", { hash: `#deviceConnectIntent=${CLAIM}&connectSource=oura`, pathname: "/connect" }],
-  ["a wearable result", { pathname: "/home", search: "?deviceSyncCompletion=1&connectSource=oura" }],
-  ["an app result", { pathname: "/home", search: "?connectedAppCompletion=1&toolkit=gmail" }],
+  ["a wearable result", { pathname: "/settings", search: "?deviceSyncCompletion=1&connectSource=oura" }],
+  ["an app result", { pathname: "/settings", search: "?connectedAppCompletion=1&toolkit=gmail" }],
 ])("hides the dashboard frame for %s, and lifts on its own", (_label, location) => {
   const { appended, timers } = runVeil(location);
 

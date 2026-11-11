@@ -56,7 +56,6 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       return <JoinInviteBlockedScreen status={status} />;
     case "checkout":
       return <JoinInviteCheckoutStage model={model} />;
-    case "activating":
     case "active":
       return (
         <JoinInviteActiveScreen
@@ -360,11 +359,10 @@ function JoinInviteActiveScreen({
           telegramStartLink={telegramStartLink}
         />
       ) : undefined}
-      announceDetail={status.stage === "activating"}
+      announceDetail={false}
       detail={resolveJoinInviteSubtitle(status)}
       title={resolveJoinInviteTitle(status)}
     >
-      {status.stage === "activating" ? <LinkPageDots /> : null}
       {status.stage === "active" && canContactMurph ? <JoinInviteFirstMessage /> : null}
     </LinkPageScreen>
   );

@@ -45,7 +45,7 @@ test("navigation cancels a continuation retained by the app shell", async () => 
   try {
     const button = [...view.container.querySelectorAll("button")].find((entry) => entry.textContent === "Approve")!;
     await act(async () => { button.dispatchEvent(new view.window.Event("click", { bubbles: true })); });
-    mocks.pathname = "/home";
+    mocks.pathname = "/settings";
     await view.rerender(element());
     expect(view.container.querySelector("[data-result]")?.textContent).toBe("canceled");
     expect(view.container.querySelector("[data-reauthenticate]")).toBeNull();

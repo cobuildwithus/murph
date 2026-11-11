@@ -1,13 +1,13 @@
 import {
-  buildConnectedAppCompletionHomeRedirectHref,
+  buildConnectedAppCompletionSettingsRedirectHref,
 } from "@/src/lib/connected-apps/connect-completion";
 import {
   completeHostedConnectedAppConnection,
 } from "@/src/lib/connected-apps/service";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
-// Composio callback target. On any outcome we redirect to /home with a
-// completion marker so the existing home dialog (shared with device-sync)
+// Composio callback target. On any outcome we redirect to /settings with a
+// completion marker so the existing account dialog (shared with device-sync)
 // shows "<Account> is connected" or the matching failure state.
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -16,7 +16,7 @@ export async function GET(request: Request): Promise<Response> {
   const connectedAccountId = url.searchParams.get("connected_account_id") ?? "";
 
   if (status !== "success" || !claim || !connectedAccountId) {
-    return redirectToHome({ status: "error" });
+    return redirectToSettings({ status: "error" });
   }
 
   try {
@@ -24,7 +24,7 @@ export async function GET(request: Request): Promise<Response> {
       claim,
       connectedAccountId,
     });
-    return redirectToHome({
+    return redirectToSettings({
       alias: completed.intent.alias ?? null,
       status: "success",
       toolkit: completed.intent.toolkit,
@@ -35,11 +35,11 @@ export async function GET(request: Request): Promise<Response> {
         errorType: error instanceof Error ? error.name : typeof error,
       });
     }
-    return redirectToHome({ status: "error" });
+    return redirectToSettings({ status: "error" });
   }
 }
 
-function redirectToHome(input: {
+function redirectToSettings(input: {
   alias?: string | null;
   status: "success" | "error";
   toolkit?: string | null;
@@ -47,7 +47,7 @@ function redirectToHome(input: {
   return new Response(null, {
     headers: {
       "Cache-Control": "no-store",
-      Location: buildConnectedAppCompletionHomeRedirectHref(input),
+      Location: buildConnectedAppCompletionSettingsRedirectHref(input),
       "Referrer-Policy": "no-referrer",
     },
     status: 303,

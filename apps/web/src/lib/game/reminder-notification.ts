@@ -9,7 +9,7 @@ import { openGameTexts } from "./crypto";
 import { deliverGamePush, readGamePushRoutes } from "./push-delivery";
 import { gameReminderWindow, reminderOpenDay } from "./reminders";
 import { effectiveTermWords, eligibleFromDay, liveEntry, parseTermWords, termsForDay } from "./rules";
-import { toRuleState } from "./service";
+import { toRuleState } from "./row";
 
 /** Each member is visited every five minutes, so a reminder is at most that late and a missed sweep costs one visit of six. */
 const SHARDS = 5;

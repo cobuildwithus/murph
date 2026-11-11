@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import type {
   HostedActionApprovalRequest,
@@ -663,9 +663,9 @@ describe("hosted action approvals", () => {
     })).resolves.toEqual(secondApproved);
   });
 
-  it("consumes approved legacy null-channel requests that used the old action hash", async () => {
+  it("consumes current approvals whose request omits a return channel", async () => {
     const { deps, memberId } = await setup();
-    const legacyRequest = {
+    const requestWithoutChannel = {
       actionFingerprint: REQUEST.actionFingerprint,
       actionId: REQUEST.actionId,
       actionKind: REQUEST.actionKind,
@@ -675,18 +675,12 @@ describe("hosted action approvals", () => {
       memberId,
       now: new Date("2026-06-25T16:00:00.000Z"),
       prisma: deps.prisma,
-      request: legacyRequest,
-    });
-    const legacyActionHash = hashLegacyNullReturnContactKindRequest({
-      memberId,
-      request: legacyRequest,
+      request: requestWithoutChannel,
     });
 
     await deps.prisma.hostedSensitiveActionChallenge.update({
       data: {
-        actionHash: legacyActionHash,
         approvalStatus: "approved",
-        bindingHash: legacyActionHash,
         consumedAt: null,
         consumedBy: null,
         decidedAt: new Date("2026-06-25T16:01:00.000Z"),
@@ -701,10 +695,10 @@ describe("hosted action approvals", () => {
       memberId,
       now: new Date("2026-06-25T16:02:00.000Z"),
       prisma: deps.prisma,
-      request: legacyRequest,
+      request: requestWithoutChannel,
     });
     if (approved.status !== "approved") {
-      throw new Error("Expected legacy hosted action approval to be approved.");
+      throw new Error("Expected null-channel hosted action approval to be approved.");
     }
 
     await expect(consumeHostedActionApproval({
@@ -713,14 +707,14 @@ describe("hosted action approvals", () => {
       prisma: deps.prisma,
       request: {
         approvalGeneration: approved.approvalGeneration,
-        consumerId: "legacy_delivery",
-        request: legacyRequest,
+        consumerId: "null_channel_delivery",
+        request: requestWithoutChannel,
       },
     })).resolves.toEqual(approved);
 
     const consumed = await requireApprovalRow(deps, requested.approvalId);
     expect(consumed.consumedAt?.toISOString()).toBe("2026-06-25T16:03:00.000Z");
-    expect(consumed.consumedBy).toBe("legacy_delivery");
+    expect(consumed.consumedBy).toBe("null_channel_delivery");
   });
 });
 
@@ -793,34 +787,6 @@ function consumeRequest(
     consumerId,
     request: REQUEST,
   };
-}
-
-function hashLegacyNullReturnContactKindRequest(input: {
-  memberId: string;
-  request: {
-    actionFingerprint: string;
-    actionId: string;
-    actionKind: string;
-    presentation: {
-      body: string;
-      title: string;
-    };
-  };
-}): string {
-  return createHash("sha256")
-    .update([
-      "murph-action-approval-request-hash-v1",
-      input.memberId,
-      JSON.stringify([
-        "murph.hosted-action-approval-request.v1",
-        input.request.actionId,
-        input.request.actionKind,
-        input.request.actionFingerprint,
-        input.request.presentation.title,
-        input.request.presentation.body,
-      ]),
-    ].join("\n"))
-    .digest("hex");
 }
 
 async function requireApprovalRow(

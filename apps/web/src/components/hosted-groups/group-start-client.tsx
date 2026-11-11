@@ -94,6 +94,14 @@ export function HostedGroupStartClient({
   }, [activeAccess, authenticated]);
 
   async function handleCompleted(payload: HostedAuthenticationCompletionPayload) {
+    const accessible = isHostedOnboardingAccessibleStage(payload.stage);
+    // Authentication succeeded independently of linking the Messages address.
+    // A transient linking failure must not discard access before an explicit retry.
+    setSignedIn(true);
+    setReadyAccess(accessible);
+    if (accessible) {
+      clearHostedGroupStartHandoff();
+    }
     const recoveryToken = recoveryTokenRef.current;
     if (recoveryToken) {
       setRecoveryStatus("linking");
@@ -107,15 +115,11 @@ export function HostedGroupStartClient({
       }
     }
 
-    if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    if (!accessible) {
       armHostedGroupStartHandoff();
       navigateHostedAuthRedirect(payload.joinUrl);
       return;
     }
-
-    clearHostedGroupStartHandoff();
-    setSignedIn(true);
-    setReadyAccess(true);
   }
 
   if (

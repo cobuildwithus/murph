@@ -1,7 +1,6 @@
 import {
   buildHostedStorageAad,
   decryptHostedStoragePayload,
-  generateHostedUserRecipientKeyPair,
   parseHostedBrowserSessionKeyEnvelope,
   parseHostedCipherEnvelope,
   unwrapHostedBrowserSessionKey,
@@ -32,6 +31,8 @@ import {
 import {
   getHostedBrowserVaultReplicaStorageKeyId,
   HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES,
+  HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS as BROWSER_VAULT_REPLICA_SHARDS,
+  type HostedBrowserVaultReplicaShardKind as BrowserVaultReplicaShard,
   HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
   HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
   HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
@@ -40,239 +41,30 @@ import {
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/browser-vault";
 
-import type { SensitiveActionAuthorization } from "@/src/lib/sensitive-actions/shared";
-
 import {
-  browserVaultReplicaLegacyFieldsMatch,
   browserVaultReplicaRefsMatch,
 } from "./ref";
-import {
-  BROWSER_VAULT_REPLICA_SHARDS,
-  type BrowserVaultReplicaShard,
-} from "./route-shards";
 
 export type BrowserVaultFreshness = "fresh" | "stale";
 
-export interface BrowserVaultSessionMetadata {
+interface DecodedBrowserVaultSession {
   deviceSyncImportPending: boolean;
   freshness: BrowserVaultFreshness;
   refreshPending: boolean;
   workspaceVersion: string | null;
-}
-
-export type BrowserVaultAnyQueryClient = BrowserVaultCoreCapableQueryClient;
-
-export type BrowserVaultSessionLoadResult =
-  | (BrowserVaultSessionMetadata & { memberId: string | null; state: "empty" })
-  | (BrowserVaultSessionMetadata & {
-      memberId: string;
-      replicaRef: HostedBrowserVaultReplicaRef;
-      state: "not_modified";
-    })
-  | (BrowserVaultSessionMetadata & {
-      client: BrowserVaultAnyQueryClient;
-      loadedMetricBuckets: readonly BrowserVaultMetricBucketId[];
-      loadedShards: readonly BrowserVaultReplicaShard[];
-      memberId: string;
-      replicaRef: HostedBrowserVaultReplicaRef;
-      shards: BrowserVaultReplicaShardSelection;
-      state: "ready";
-    })
-  | { state: "identity_changed" };
-
-export interface LoadBrowserVaultReplicaInput {
-  authorization?: SensitiveActionAuthorization;
-  emptyOnUnauthorized?: boolean;
-  endpoint?: string;
-  expectedMemberId?: string | null;
-  fetchImpl?: typeof fetch;
-  knownReplicaShards?: BrowserVaultReplicaShardSelection | null;
-  knownMetricBuckets?: readonly BrowserVaultMetricBucketId[];
-  knownShards?: readonly BrowserVaultReplicaShard[];
-  knownReplicaRef: HostedBrowserVaultReplicaRef | null;
-  preferLegacyTransport?: boolean;
-  refreshObservationOnly?: boolean;
-  requestedShards?: readonly BrowserVaultReplicaShard[];
-  requestedMetricBuckets?: readonly BrowserVaultMetricBucketId[];
-  requestRefresh?: boolean;
-  signal?: AbortSignal;
-}
-
-export class BrowserVaultUnauthorizedError extends Error {
-  readonly status: 401 | 403;
-
-  constructor(status: 401 | 403, message: string) {
-    super(`Browser vault session failed with HTTP ${status}: ${message}`);
-    this.name = "BrowserVaultUnauthorizedError";
-    this.status = status;
-  }
+  client: BrowserVaultCoreCapableQueryClient;
+  loadedMetricBuckets: readonly BrowserVaultMetricBucketId[];
+  loadedShards: readonly BrowserVaultReplicaShard[];
+  memberId: string;
+  replicaRef: HostedBrowserVaultReplicaRef;
+  shards: BrowserVaultReplicaShardSelection;
+  state: "ready";
 }
 
 const textDecoder = new TextDecoder();
 const BROWSER_VAULT_INTERACTIVE_DECODE_CONCURRENCY = 4;
 
-export async function loadBrowserVaultReplica({
-  authorization,
-  emptyOnUnauthorized = true,
-  endpoint = "/api/browser-vault/session",
-  expectedMemberId,
-  fetchImpl = fetch,
-  knownReplicaShards = null,
-  knownMetricBuckets = [],
-  knownShards = [],
-  knownReplicaRef,
-  preferLegacyTransport = false,
-  refreshObservationOnly = false,
-  requestedShards = BROWSER_VAULT_REPLICA_SHARDS,
-  requestedMetricBuckets = [],
-  requestRefresh = false,
-  signal,
-}: LoadBrowserVaultReplicaInput): Promise<BrowserVaultSessionLoadResult> {
-  assertNotAborted(signal);
-  assertValidBrowserVaultMetricBucketDemand(requestedMetricBuckets);
-  if (
-    requestedMetricBuckets.length > 0
-    && !requestedShards.includes("metricsIndex")
-  ) {
-    throw new Error(
-      "Browser vault metric bucket demand requires the metrics index shard.",
-    );
-  }
-
-  const { privateKeyJwk, publicKeyJwk } = await generateHostedUserRecipientKeyPair();
-  assertNotAborted(signal);
-  const acceptsCompressedShards = !preferLegacyTransport
-    && typeof DecompressionStream === "function";
-
-  const response = await fetchImpl(endpoint, {
-    body: JSON.stringify({
-      acceptStaleReplica: true,
-      ...(authorization ? { authorization } : {}),
-      browserPublicKeyJwk: publicKeyJwk,
-      knownReplicaRef,
-      ...(acceptsCompressedShards ? { knownShards, requestedShards } : {}),
-      ...(acceptsCompressedShards && requestedMetricBuckets.length > 0
-        ? { knownMetricBuckets, requestedMetricBuckets }
-        : {}),
-      ...(refreshObservationOnly ? { refreshObservationOnly: true } : {}),
-      ...(requestRefresh ? { requestRefresh: true } : {}),
-    }),
-    credentials: "same-origin",
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-    },
-    method: "POST",
-    signal,
-  });
-
-  if (response.status === 401 || response.status === 403) {
-    if (emptyOnUnauthorized) {
-      return createEmptyLoadResult();
-    }
-
-    const status = response.status === 401 ? 401 : 403;
-    throw new BrowserVaultUnauthorizedError(
-      status,
-      await readJsonErrorMessage(response),
-    );
-  }
-
-  if (!response.ok) {
-    throw new Error(await readJsonErrorMessage(response));
-  }
-
-  assertNotAborted(signal);
-  const sessionValue: unknown = await response.json();
-  assertNotAborted(signal);
-  const session = parseBrowserVaultSessionResponse(sessionValue);
-  const responseMemberId = session.state === "ready"
-    ? getReadySessionMemberId(session)
-    : session.memberId;
-
-  if (
-    expectedMemberId !== undefined
-    && responseMemberId !== expectedMemberId
-  ) {
-    return { state: "identity_changed" };
-  }
-
-  if (session.state === "empty") {
-    return {
-      deviceSyncImportPending: session.deviceSyncImportPending,
-      freshness: session.freshness,
-      memberId: session.memberId,
-      refreshPending: session.refreshPending,
-      state: "empty",
-      workspaceVersion: session.workspaceVersion,
-    };
-  }
-
-  if (session.state === "not_modified") {
-    if (!knownReplicaRef) {
-      throw new Error("Browser vault unchanged session response did not have a known replica ref.");
-    }
-
-    const responseReplicaRef = session.replicaRef.generation === undefined
-      && knownReplicaRef.generation !== undefined
-      ? { ...session.replicaRef, generation: knownReplicaRef.generation }
-      : session.replicaRef;
-    const oldServerOmittedChildRefs = responseReplicaRef.shards === undefined
-      && responseReplicaRef.metricBuckets === undefined
-      && (
-        knownReplicaRef.shards !== undefined
-        || knownReplicaRef.metricBuckets !== undefined
-      )
-      && browserVaultReplicaLegacyFieldsMatch(responseReplicaRef, knownReplicaRef);
-    if (
-      !oldServerOmittedChildRefs
-      && !browserVaultReplicaRefsMatch(responseReplicaRef, knownReplicaRef)
-    ) {
-      throw new Error("Browser vault unchanged session ref did not match the known ref.");
-    }
-
-    if (
-      oldServerOmittedChildRefs
-      && (
-        !requestedShards.every((shard) => knownShards.includes(shard))
-        || !requestedMetricBuckets.every((bucketId) =>
-          knownMetricBuckets.includes(bucketId)
-        )
-      )
-    ) {
-      return loadBrowserVaultReplica({
-        authorization,
-        emptyOnUnauthorized,
-        endpoint,
-        expectedMemberId,
-        fetchImpl,
-        knownReplicaRef: null,
-        preferLegacyTransport: true,
-        requestedMetricBuckets,
-        requestedShards,
-        refreshObservationOnly,
-        requestRefresh,
-        signal,
-      });
-    }
-
-    return {
-      deviceSyncImportPending: session.deviceSyncImportPending,
-      freshness: session.freshness,
-      memberId: session.memberId,
-      replicaRef: knownReplicaRef,
-      refreshPending: session.refreshPending,
-      state: "not_modified",
-      workspaceVersion: session.workspaceVersion,
-    };
-  }
-
-  return decodeReadyBrowserVaultSession({
-    session, privateKeyJwk, expectedMemberId: responseMemberId,
-    knownReplicaRef, knownReplicaShards, requestedMetricBuckets, requestedShards, signal,
-  });
-}
-
-/** Shared authenticated replica decoding for browser and companion readers. */
+/** Shared authenticated replica decoding for native and companion readers. */
 export async function decodeReadyBrowserVaultSession({
   session,
   privateKeyJwk,
@@ -291,7 +83,12 @@ export async function decodeReadyBrowserVaultSession({
   requestedMetricBuckets?: readonly BrowserVaultMetricBucketId[];
   requestedShards?: readonly BrowserVaultReplicaShard[];
   signal?: AbortSignal;
-}): Promise<Extract<BrowserVaultSessionLoadResult, { state: "ready" }>> {
+}): Promise<DecodedBrowserVaultSession> {
+  assertNotAborted(signal);
+  assertValidBrowserVaultMetricBucketDemand(requestedMetricBuckets);
+  if (requestedMetricBuckets.length > 0 && !requestedShards.includes("metricsIndex")) {
+    throw new Error("Browser vault metric bucket demand requires the metrics index shard.");
+  }
   const responseMemberId = getReadySessionMemberId(session);
   if (responseMemberId !== expectedMemberId) {
     throw new Error("Browser vault session member did not match the authorized member.");
@@ -649,7 +446,7 @@ export function createBrowserVaultRouteQueryClient(
   shards: BrowserVaultReplicaShardSelection,
   requestedShards: readonly BrowserVaultReplicaShard[],
   requestedMetricBuckets: readonly BrowserVaultMetricBucketId[] = [],
-): BrowserVaultAnyQueryClient {
+): BrowserVaultCoreCapableQueryClient {
   if (requestedShards.includes("metricsIndex")) {
     if (!shards.metrics) {
       throw new Error("Browser vault session did not provide the requested metrics index shard.");
@@ -834,38 +631,6 @@ async function decodeBrowserVaultChild(input: {
     offset += chunk.byteLength;
   }
   return decoded;
-}
-
-export function normalizeBrowserVaultError(error: unknown): string {
-  if (isBrowserVaultAbortError(error)) {
-    return "Your dashboard data is not available right now.";
-  }
-
-  const message = error instanceof Error ? error.message : "";
-
-  if (/HTTP 401|HTTP 403/u.test(message)) {
-    return "Your dashboard session expired. Refresh and try again.";
-  }
-
-  if (/HTTP 404/u.test(message)) {
-    return "Your dashboard data is not available yet.";
-  }
-
-  return "Your dashboard data is not available right now.";
-}
-
-export function isBrowserVaultAbortError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-
-  return Reflect.get(error, "name") === "AbortError";
-}
-
-export function isBrowserVaultUnauthorizedError(
-  error: unknown,
-): error is BrowserVaultUnauthorizedError {
-  return error instanceof BrowserVaultUnauthorizedError;
 }
 
 export type BrowserVaultSessionResponse =
@@ -1419,25 +1184,6 @@ function parseRequiredReplicaRef(value: unknown, label: string): HostedBrowserVa
   return ref;
 }
 
-async function readJsonErrorMessage(response: Response): Promise<string> {
-  try {
-    const value = await response.json();
-    const record = requireRecord(value, "Browser vault error response");
-    const message = record.error;
-    const nestedMessage = message && typeof message === "object" && !Array.isArray(message)
-      ? (message as Record<string, unknown>).message
-      : null;
-
-    return typeof message === "string" && message.trim().length > 0
-      ? message
-      : typeof nestedMessage === "string" && nestedMessage.trim().length > 0
-        ? nestedMessage
-      : `Browser vault session failed with HTTP ${response.status}.`;
-  } catch {
-    return `Browser vault session failed with HTTP ${response.status}.`;
-  }
-}
-
 function assertNotAborted(signal: AbortSignal | undefined): void {
   if (!signal?.aborted) {
     return;
@@ -1532,17 +1278,6 @@ function getBrowserVaultShardSchema(shard: BrowserVaultReplicaShard): string {
   if (shard === "core") return BROWSER_VAULT_CORE_SHARD_SCHEMA;
   if (shard === "metricsIndex") return BROWSER_VAULT_METRICS_SHARD_SCHEMA;
   return BROWSER_VAULT_LABS_SHARD_SCHEMA;
-}
-
-function createEmptyLoadResult(): Extract<BrowserVaultSessionLoadResult, { state: "empty" }> {
-  return {
-    deviceSyncImportPending: false,
-    freshness: "stale",
-    memberId: null,
-    refreshPending: false,
-    state: "empty",
-    workspaceVersion: null,
-  };
 }
 
 function parseBrowserVaultFreshness(

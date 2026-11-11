@@ -43,8 +43,8 @@ vi.mock("@/src/components/ui/badge", () => ({
   },
 }));
 
-vi.mock("@/src/components/settings/hosted-plan-upgrade-button", () => ({
-  UpgradeToEdgeButton({ children }: { children?: ReactNode }) {
+vi.mock("@/src/components/settings/hosted-plan-change-button", () => ({
+  HostedPlanChangeButton({ children }: { children?: ReactNode }) {
     return createElement("button", { type: "button" }, children ?? "Upgrade to Edge");
   },
 }));

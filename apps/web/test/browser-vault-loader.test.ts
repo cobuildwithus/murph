@@ -30,9 +30,6 @@ vi.mock("@murphai/runtime-state", async () => {
 import {
   createBrowserVaultRouteQueryClient,
   decodeReadyBrowserVaultSession,
-  isBrowserVaultAbortError,
-  isBrowserVaultUnauthorizedError,
-  loadBrowserVaultReplica,
   parseBrowserVaultSessionResponse,
 } from "@/src/lib/browser-vault/loader";
 import { browserVaultReplicaRefsMatch } from "@/src/lib/browser-vault/ref";
@@ -60,13 +57,25 @@ test("companion decode rejects another member before private key unwrap", async 
   assert.equal(runtimeMocks.unwrapHostedBrowserSessionKey.mock.calls.length, 0);
 });
 
+test("replica decode rejects canceled work and invalid metric demand before key unwrap", async () => {
+  const fixture = createShardedReadyFixture(["core"]);
+  const session = parseBrowserVaultSessionResponse(await fixture.response.json());
+  assert.equal(session.state, "ready");
+  if (session.state !== "ready") return;
+  const keys = await import("@murphai/runtime-state").then((runtime) => runtime.generateHostedUserRecipientKeyPair());
+  const input = { session, privateKeyJwk: keys.privateKeyJwk, expectedMemberId: "member_123" };
+  await assert.rejects(decodeReadyBrowserVaultSession({ ...input, signal: AbortSignal.abort() }), { name: "AbortError" });
+  await assert.rejects(decodeReadyBrowserVaultSession({ ...input, requestedMetricBuckets: ["00"] }), /requires the metrics index/u);
+  assert.equal(runtimeMocks.unwrapHostedBrowserSessionKey.mock.calls.length, 0);
+});
+
 test("route query construction ignores loaded capabilities outside the route demand", async () => {
   const fixture = createShardedReadyFixture(["core", "metricsIndex"]);
   runtimeMocks.decryptHostedStoragePayload.mockImplementation(async ({ envelope }) =>
     readFixtureEncodedPayload(fixture, envelope.ciphertext),
   );
-  const result = await loadBrowserVaultReplica({
-    fetchImpl: async () => fixture.response,
+  const result = await decodeFixture({
+    response: fixture.response,
     knownReplicaRef: null,
     requestedShards: ["core", "metricsIndex"],
   });
@@ -233,183 +242,15 @@ test("browser vault session parser accepts freshness metadata and defaults optio
   });
 });
 
-test("browser vault abort detection accepts DOM-style abort errors", () => {
-  const abortError = new Error("Browser vault load was aborted.");
-  abortError.name = "AbortError";
-
-  assert.equal(isBrowserVaultAbortError(abortError), true);
-  assert.equal(isBrowserVaultAbortError({ name: "AbortError" }), true);
-  assert.equal(isBrowserVaultAbortError(new Error("not aborted")), false);
-  assert.equal(isBrowserVaultAbortError(null), false);
-});
-
-test("browser vault loader treats unauthorized responses as empty by default", async () => {
-  const result = await loadBrowserVaultReplica({
-    fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-      error: {
-        message: "Sign in to continue.",
-      },
-    }), {
-      headers: { "content-type": "application/json; charset=utf-8" },
-      status: 401,
-    })),
-    knownReplicaRef: null,
-  });
-
-  assert.deepEqual(result, {
-    deviceSyncImportPending: false,
-    freshness: "stale",
-    memberId: null,
-    refreshPending: false,
-    state: "empty",
-    workspaceVersion: null,
-  });
-});
-
-test("browser vault loader opts in to stale replicas explicitly", async () => {
-  const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-    deviceSyncImportPending: true,
-    encryptedReplica: null,
-    freshness: "stale",
-    memberId: "member_123",
-    replicaAad: null,
-    replicaKeyEnvelope: null,
-    replicaRef: null,
-    refreshPending: true,
-    state: "empty",
-    workspaceVersion: "7",
-  }), {
-    headers: { "content-type": "application/json; charset=utf-8" },
-    status: 200,
-  }));
-
-  const result = await loadBrowserVaultReplica({
-    fetchImpl,
-    knownReplicaRef: createReplicaRef(),
-  });
-
-  assert.deepEqual(result, {
-    deviceSyncImportPending: true,
-    freshness: "stale",
-    memberId: "member_123",
-    refreshPending: true,
-    state: "empty",
-    workspaceVersion: "7",
-  });
-  assert.equal(fetchImpl.mock.calls.length, 1);
-  const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
-  assert.equal(body.acceptStaleReplica, true);
-  assert.deepEqual(body.knownReplicaRef, createReplicaRef());
-  assert.deepEqual(body.knownShards, []);
-  assert.deepEqual(body.requestedShards, ["core", "labs", "metricsIndex"]);
-});
-
-test("browser vault loader sends one complete route shard demand", async () => {
-  const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-    encryptedReplica: null,
-    memberId: "member_123",
-    replicaAad: null,
-    replicaKeyEnvelope: null,
-    replicaRef: createReplicaRef(),
-    state: "not_modified",
-  }), {
-    headers: { "content-type": "application/json; charset=utf-8" },
-    status: 200,
-  }));
-
-  await loadBrowserVaultReplica({
-    fetchImpl,
-    knownReplicaRef: createReplicaRef(),
-    knownShards: ["core"],
-    requestedShards: ["core", "metricsIndex"],
-  });
-
-  const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
-  assert.deepEqual(body.knownShards, ["core"]);
-  assert.deepEqual(body.requestedShards, ["core", "metricsIndex"]);
-});
-
-test("browser vault loader retries legacy when old Web omitted a missing requested shard", async () => {
-  const knownReplicaRef = createShardedReplicaRef();
-  const fetchImpl = vi.fn<typeof fetch>()
-    .mockResolvedValueOnce(new Response(JSON.stringify({
-      encryptedReplica: null,
-      memberId: "member_123",
-      replicaAad: null,
-      replicaKeyEnvelope: null,
-      replicaRef: createReplicaRef(),
-      state: "not_modified",
-    }), {
-      headers: { "content-type": "application/json; charset=utf-8" },
-      status: 200,
-    }))
-    .mockResolvedValueOnce(new Response(JSON.stringify({
-      encryptedReplica: null,
-      memberId: "member_123",
-      replicaAad: null,
-      replicaKeyEnvelope: null,
-      replicaRef: null,
-      state: "empty",
-    }), {
-      headers: { "content-type": "application/json; charset=utf-8" },
-      status: 200,
-    }));
-
-  const result = await loadBrowserVaultReplica({
-    fetchImpl,
-    knownReplicaRef,
-    knownShards: ["core"],
-    requestedShards: ["core", "metricsIndex"],
-  });
-
-  assert.equal(result.state, "empty");
-  assert.equal(fetchImpl.mock.calls.length, 2);
-  const retryBody = JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body));
-  assert.equal(retryBody.knownReplicaRef, null);
-  assert.equal(retryBody.knownShards, undefined);
-  assert.equal(retryBody.requestedShards, undefined);
-});
-
-test("browser vault loader falls back to the legacy transport without gzip support", async () => {
-  const originalDecompressionStream = globalThis.DecompressionStream;
-  vi.stubGlobal("DecompressionStream", undefined);
-  try {
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-      encryptedReplica: null,
-      memberId: "member_123",
-      replicaAad: null,
-      replicaKeyEnvelope: null,
-      replicaRef: createReplicaRef(),
-      state: "not_modified",
-    }), {
-      headers: { "content-type": "application/json; charset=utf-8" },
-      status: 200,
-    }));
-
-    await loadBrowserVaultReplica({
-      fetchImpl,
-      knownReplicaRef: createReplicaRef(),
-      knownShards: ["core"],
-      requestedShards: ["core", "metricsIndex"],
-    });
-
-    const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
-    assert.equal(body.knownShards, undefined);
-    assert.equal(body.requestedShards, undefined);
-  } finally {
-    vi.stubGlobal("DecompressionStream", originalDecompressionStream);
-  }
-});
-
-test("browser vault loader rejects a decrypted shard whose generatedAt differs from its replica ref", async () => {
+test("replica decoder rejects a decrypted shard whose generatedAt differs from its replica ref", async () => {
   const fixture = createShardedReadyFixture(["core"], {
     coreGeneratedAt: "2026-04-20T07:59:59.000Z",
   });
   runtimeMocks.decryptHostedStoragePayload.mockResolvedValue(fixture.encoded.core);
 
   await assert.rejects(
-    loadBrowserVaultReplica({
-      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(fixture.response),
+    decodeFixture({
+      response: fixture.response,
       knownReplicaRef: null,
       requestedShards: ["core"],
     }),
@@ -417,7 +258,7 @@ test("browser vault loader rejects a decrypted shard whose generatedAt differs f
   );
 });
 
-test("browser vault loader decrypts selected shards concurrently", async () => {
+test("replica decoder decrypts selected shards concurrently", async () => {
   const fixture = createShardedReadyFixture(["core", "metricsIndex"]);
   const core = createDeferred<Uint8Array>();
   const metricsIndex = createDeferred<Uint8Array>();
@@ -433,8 +274,8 @@ test("browser vault loader decrypts selected shards concurrently", async () => {
     },
   );
 
-  const load = loadBrowserVaultReplica({
-    fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(fixture.response),
+  const load = decodeFixture({
+    response: fixture.response,
     knownReplicaRef: null,
     requestedShards: ["core", "metricsIndex"],
   });
@@ -450,7 +291,7 @@ test("browser vault loader decrypts selected shards concurrently", async () => {
   }
 });
 
-test("browser vault loader bounds concurrent fixed and metric-bucket decrypts at four", async () => {
+test("replica decoder bounds concurrent fixed and metric-bucket decrypts at four", async () => {
   const bucketIds = ["00", "01", "02", "03"] as const;
   const fixture = createShardedReadyFixture(["core", "metricsIndex"], {
     selectedMetricBuckets: bucketIds,
@@ -472,8 +313,8 @@ test("browser vault loader bounds concurrent fixed and metric-bucket decrypts at
     },
   );
 
-  const load = loadBrowserVaultReplica({
-    fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(fixture.response),
+  const load = decodeFixture({
+    response: fixture.response,
     knownReplicaRef: null,
     requestedMetricBuckets: bucketIds,
     requestedShards: ["core", "metricsIndex"],
@@ -488,13 +329,13 @@ test("browser vault loader bounds concurrent fixed and metric-bucket decrypts at
   assert.equal(maxActive, 4);
 });
 
-test("browser vault loader rejects an aggregate route demand above the replica byte cap", async () => {
+test("replica decoder rejects an aggregate route demand above the replica byte cap", async () => {
   const fixture = createShardedReadyFixture(["core", "metricsIndex"], {
     inflateAggregateBudget: true,
   });
   await assert.rejects(
-    loadBrowserVaultReplica({
-      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(fixture.response),
+    decodeFixture({
+      response: fixture.response,
       knownReplicaRef: null,
       requestedShards: ["core", "metricsIndex"],
     }),
@@ -503,13 +344,13 @@ test("browser vault loader rejects an aggregate route demand above the replica b
   assert.equal(runtimeMocks.decryptHostedStoragePayload.mock.calls.length, 0);
 });
 
-test("browser vault loader binds child identity to the key envelope before decrypt", async () => {
+test("replica decoder binds child identity to the key envelope before decrypt", async () => {
   const fixture = createShardedReadyFixture(["core"], {
     envelopeMemberId: "different_member",
   });
   await assert.rejects(
-    loadBrowserVaultReplica({
-      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(fixture.response),
+    decodeFixture({
+      response: fixture.response,
       knownReplicaRef: null,
       requestedShards: ["core"],
     }),
@@ -519,7 +360,7 @@ test("browser vault loader binds child identity to the key envelope before decry
   assert.equal(runtimeMocks.decryptHostedStoragePayload.mock.calls.length, 0);
 });
 
-test("browser vault loader rejects a legacy plaintext length mismatch before parsing", async () => {
+test("replica decoder rejects a legacy plaintext length mismatch before parsing", async () => {
   const ref = createReplicaRef();
   runtimeMocks.decryptHostedStoragePayload.mockResolvedValue(new Uint8Array([123]));
   const response = new Response(JSON.stringify({
@@ -540,8 +381,8 @@ test("browser vault loader rejects a legacy plaintext length mismatch before par
     state: "ready",
   }), { status: 200 });
   await assert.rejects(
-    loadBrowserVaultReplica({
-      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(response),
+    decodeFixture({
+      response: response,
       knownReplicaRef: null,
       requestedShards: ["core"],
     }),
@@ -549,7 +390,7 @@ test("browser vault loader rejects a legacy plaintext length mismatch before par
   );
 });
 
-test("browser vault loader ignores run cards persisted in legacy replicas by older producers", async () => {
+test("replica decoder ignores run cards persisted in legacy replicas by older producers", async () => {
   const legacyReplica = {
     assistantSummary: { highlights: [], latestDate: null },
     entities: [],
@@ -606,8 +447,8 @@ test("browser vault loader ignores run cards persisted in legacy replicas by old
     state: "ready",
   }), { status: 200 });
 
-  const result = await loadBrowserVaultReplica({
-    fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(response),
+  const result = await decodeFixture({
+    response: response,
     knownReplicaRef: null,
     requestedMetricBuckets: ["00"],
     requestedShards: ["core", "metricsIndex"],
@@ -621,7 +462,7 @@ test("browser vault loader ignores run cards persisted in legacy replicas by old
   assert.equal("experimentRunCards" in result.client.replica, false);
 });
 
-test("browser vault loader reuses only the active same-ref bucket intersection and resets on a new ref", async () => {
+test("replica decoder reuses only the active same-ref bucket intersection and resets on a new ref", async () => {
   const firstFixture = createShardedReadyFixture(["core", "metricsIndex"], {
     selectedMetricBuckets: ["00"],
   });
@@ -636,8 +477,8 @@ test("browser vault loader reuses only the active same-ref bucket intersection a
       ),
     ),
   );
-  const first = await loadBrowserVaultReplica({
-    fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(firstFixture.response),
+  const first = await decodeFixture({
+    response: firstFixture.response,
     knownReplicaRef: null,
     requestedMetricBuckets: ["00"],
     requestedShards: ["core", "metricsIndex"],
@@ -645,12 +486,10 @@ test("browser vault loader reuses only the active same-ref bucket intersection a
   assert.equal(first.state, "ready");
   if (first.state !== "ready") return;
 
-  const accumulated = await loadBrowserVaultReplica({
-    fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(secondFixture.response),
-    knownMetricBuckets: first.loadedMetricBuckets,
+  const accumulated = await decodeFixture({
+    response: secondFixture.response,
     knownReplicaRef: first.replicaRef,
     knownReplicaShards: first.shards,
-    knownShards: first.loadedShards,
     requestedMetricBuckets: ["00", "01"],
     requestedShards: ["core", "metricsIndex"],
   });
@@ -666,12 +505,10 @@ test("browser vault loader reuses only the active same-ref bucket intersection a
       readFixtureEncodedPayload(activeOnlyFixture, envelope.ciphertext),
     ),
   );
-  const activeOnly = await loadBrowserVaultReplica({
-    fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(activeOnlyFixture.response),
-    knownMetricBuckets: accumulated.loadedMetricBuckets,
+  const activeOnly = await decodeFixture({
+    response: activeOnlyFixture.response,
     knownReplicaRef: accumulated.replicaRef,
     knownReplicaShards: accumulated.shards,
-    knownShards: accumulated.loadedShards,
     requestedMetricBuckets: ["01"],
     requestedShards: ["core", "metricsIndex"],
   });
@@ -689,12 +526,10 @@ test("browser vault loader reuses only the active same-ref bucket intersection a
       readFixtureEncodedPayload(replacementFixture, envelope.ciphertext),
     ),
   );
-  const replacement = await loadBrowserVaultReplica({
-    fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(replacementFixture.response),
-    knownMetricBuckets: activeOnly.loadedMetricBuckets,
+  const replacement = await decodeFixture({
+    response: replacementFixture.response,
     knownReplicaRef: activeOnly.replicaRef,
     knownReplicaShards: activeOnly.shards,
-    knownShards: activeOnly.loadedShards,
     requestedMetricBuckets: ["01"],
     requestedShards: ["core", "metricsIndex"],
   });
@@ -705,54 +540,17 @@ test("browser vault loader reuses only the active same-ref bucket intersection a
   }
 });
 
-test("browser vault loader can request runtime-owned projection refresh", async () => {
-  const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-    encryptedReplica: null,
-    memberId: "member_123",
-    replicaAad: null,
-    replicaKeyEnvelope: null,
-    replicaRef: createReplicaRef(),
-    refreshPending: true,
-    state: "not_modified",
-  }), {
-    headers: { "content-type": "application/json; charset=utf-8" },
-    status: 200,
-  }));
-
-  await loadBrowserVaultReplica({
-    fetchImpl,
-    knownReplicaRef: createReplicaRef(),
-    requestRefresh: true,
+async function decodeFixture({ response, ...input }: {
+  response: Response;
+} & Omit<Parameters<typeof decodeReadyBrowserVaultSession>[0], "session" | "privateKeyJwk" | "expectedMemberId">) {
+  const session = parseBrowserVaultSessionResponse(await response.json());
+  assert.equal(session.state, "ready");
+  if (session.state !== "ready") throw new Error("Expected a ready fixture.");
+  const keys = await import("@murphai/runtime-state").then((runtime) => runtime.generateHostedUserRecipientKeyPair());
+  return decodeReadyBrowserVaultSession({
+    ...input, session, privateKeyJwk: keys.privateKeyJwk, expectedMemberId: "member_123",
   });
-
-  const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
-  assert.equal(body.requestRefresh, true);
-});
-
-test("browser vault loader can surface unauthorized responses for privacy export", async () => {
-  await assert.rejects(
-    loadBrowserVaultReplica({
-      emptyOnUnauthorized: false,
-      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
-        error: {
-          message: "Accept the current Murph legal consent before continuing.",
-        },
-      }), {
-        headers: { "content-type": "application/json; charset=utf-8" },
-        status: 403,
-      })),
-      knownReplicaRef: null,
-    }),
-    (error: unknown) => {
-      assert.equal(isBrowserVaultUnauthorizedError(error), true);
-      assert.match(
-        error instanceof Error ? error.message : "",
-        /HTTP 403: Accept the current Murph legal consent before continuing\./u,
-      );
-      return true;
-    },
-  );
-});
+}
 
 function createReplicaRef() {
   return {

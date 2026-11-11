@@ -6272,7 +6272,7 @@ test("ConnectPage shows fallback callback errors with the original source label"
   assert.match(markup, /We could not finish connecting Garmin\./);
 });
 
-test("ConnectPage offers support and home recovery on callback failures", async () => {
+test("ConnectPage offers support and Settings recovery on callback failures", async () => {
   const { default: ConnectPage } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
@@ -6288,8 +6288,8 @@ test("ConnectPage offers support and home recovery on callback failures", async 
   );
 
   assert.match(markup, /Email support/);
-  assert.match(markup, /Go to home/);
-  assert.match(markup, /href="\/home"/u);
+  assert.match(markup, /Go to Settings/);
+  assert.match(markup, /href="\/settings"/u);
 
   // Parse the real anchor: matching anywhere in the markup would still pass if
   // the support draft stopped carrying the source or the reference.
@@ -6375,7 +6375,7 @@ test.each([
   } else {
     assert.match(markup, /aria-label="Connect Oura"/);
   }
-  assert.doesNotMatch(markup, /Unable to finish connection|nothing was connected|Email support|Go to home/);
+  assert.doesNotMatch(markup, /Unable to finish connection|nothing was connected|Email support|Go to Settings/);
 });
 
 test("ConnectPage offers sign-in recovery when the callback arrived signed out", async () => {
@@ -6442,7 +6442,7 @@ test("ConnectPage keeps successful callbacks free of failure recovery actions", 
   );
 
   assert.doesNotMatch(markup, /Email support/);
-  assert.doesNotMatch(markup, /Go to home/);
+  assert.doesNotMatch(markup, /Go to Settings/);
 });
 
 test("resolveConfiguredConnectSources keeps Fitbit on its dedicated Junction disclosure", async () => {

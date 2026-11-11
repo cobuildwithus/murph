@@ -28,6 +28,7 @@ import {
 import {
   PrismaComputerUseStore,
   type ComputerHandoffRecord,
+  type ComputerHandoffCreateInput,
   type ComputerManagedLoginBrowser,
   type ComputerRunCheckpointContext,
   type ComputerRunRecord,
@@ -658,39 +659,24 @@ export class ComputerUseService {
     }
 
     const handoff = input.handoffPurpose
-      ? await this.createHandoff({
+      ? await this.prepareHandoff({
           purpose: input.handoffPurpose,
           returnContactKind: input.pauseDeliveryContext?.returnContactKind ?? null,
           run,
           suggestedReply: input.suggestedReply,
-        }, store)
+        })
       : null;
-    let paused: ComputerRunRecord;
-    try {
-      paused = await store.markRunAwaitingUser({
-        awaitingMessage: null,
-        awaitingReason: input.reason,
-        checkpointContext: normalizeComputerCheckpointContext(
-          input.pauseDeliveryContext ?? null,
-        ),
-        now,
-        pendingHandoffId: handoff?.record.id ?? null,
-        runId: run.id,
-        suggestedReply: input.suggestedReply,
-      });
-    } catch (error) {
-      if (handoff) {
-        await store.markHandoffExpired({
-          expectedStatus: "open",
-          expectedUpdatedAt: handoff.record.updatedAt,
-          handoffId: handoff.record.id,
-          now,
-        }).catch(() => {
-          // Preserve the transition failure; the handoff cleanup is compensating.
-        });
-      }
-      throw error;
-    }
+    const paused = await store.markRunAwaitingUser({
+      memberId: input.memberId,
+      awaitingReason: input.reason,
+      checkpointContext: normalizeComputerCheckpointContext(
+        input.pauseDeliveryContext ?? null,
+      ),
+      now,
+      handoff: handoff?.data ?? null,
+      runId: run.id,
+      suggestedReply: input.suggestedReply,
+    });
 
     return {
       awaitingReason: paused.awaitingReason ?? input.reason,
@@ -1741,14 +1727,14 @@ export class ComputerUseService {
     };
   }
 
-  private async createHandoff(input: {
+  private async prepareHandoff(input: {
     purpose: HostedComputerHandoffPurpose;
     returnContactKind: HostedComputerReturnContactKind | null;
     run: ComputerRunRecord;
     suggestedReply: string | null;
-  }, store: ComputerUseStore = this.store): Promise<{
+  }): Promise<{
     handoffUrl: string;
-    record: ComputerHandoffRecord;
+    data: ComputerHandoffCreateInput;
   }> {
     if (input.purpose !== "managed_login") {
       await this.requireAllowedLiveViewUrl(input.run);
@@ -1758,19 +1744,16 @@ export class ComputerUseService {
       this.now().getTime() + COMPUTER_HANDOFF_TTL_MS,
       input.run.expiresAt.getTime(),
     ));
-    const record = await store.createHandoff({
-      expiresAt,
-      memberId: input.run.memberId,
-      purpose: input.purpose,
-      returnContactKind: input.returnContactKind,
-      runId: input.run.id,
-      suggestedReply: input.suggestedReply,
-      tokenHash: sha256Hex(token),
-    });
-
     return {
       handoffUrl: buildComputerHandoffUrl({ env: this.env, token }),
-      record,
+      data: {
+        id: createComputerId("hch"),
+        expiresAt,
+        purpose: input.purpose,
+        returnContactKind: input.returnContactKind,
+        suggestedReply: input.suggestedReply,
+        tokenHash: sha256Hex(token),
+      },
     };
   }
 
@@ -1897,50 +1880,28 @@ export class ComputerUseService {
       });
     }
 
-    const handoff = await this.createHandoff({
+    const handoff = await this.prepareHandoff({
       // Interactive handoff links stay interactive once issued.
       purpose: existing.purpose,
       returnContactKind: existing.returnContactKind,
       run,
       suggestedReply: existing.suggestedReply,
-    }, input.store);
-    try {
-      const refreshed = await input.store.replaceAwaitingRunHandoff({
-        expectedHandoffUpdatedAt: existing.updatedAt,
-        expectedPendingHandoffId: existing.id,
-        newPendingHandoffId: handoff.record.id,
-        now: input.now,
-        runId: run.id,
-      });
-      if (existing.status === "open") {
-        await input.store.markHandoffExpired({
-          expectedStatus: "open",
-          expectedUpdatedAt: existing.updatedAt,
-          handoffId: existing.id,
-          now: input.now,
-        }).catch(() => {
-          // The refreshed handoff is now the run authority; the old link expires on use.
-        });
-      }
-
-      return {
-        awaitingReason: refreshed.awaitingReason ?? awaitingReason,
-        handoffUrl: handoff.handoffUrl,
-        runId: run.id,
-        status: "awaiting_user",
-        suggestedReply: refreshed.suggestedReply ?? existing.suggestedReply,
-      };
-    } catch (error) {
-      await input.store.markHandoffExpired({
-        expectedStatus: "open",
-        expectedUpdatedAt: handoff.record.updatedAt,
-        handoffId: handoff.record.id,
-        now: input.now,
-      }).catch(() => {
-        // Preserve the transition failure; the new handoff cleanup is compensating.
-      });
-      throw error;
-    }
+    });
+    const refreshed = await input.store.replaceAwaitingRunHandoff({
+      memberId: input.memberId,
+      expectedHandoffUpdatedAt: existing.updatedAt,
+      expectedPendingHandoffId: existing.id,
+      handoff: handoff.data,
+      now: input.now,
+      runId: run.id,
+    });
+    return {
+      awaitingReason: refreshed.awaitingReason ?? awaitingReason,
+      handoffUrl: handoff.handoffUrl,
+      runId: run.id,
+      status: "awaiting_user",
+      suggestedReply: refreshed.suggestedReply ?? existing.suggestedReply,
+    };
   }
 
   private async attachFirstAwaitingRunHandoff(input: {
@@ -1955,39 +1916,27 @@ export class ComputerUseService {
       return null;
     }
 
-    const handoff = await this.createHandoff({
+    const handoff = await this.prepareHandoff({
       purpose: input.handoffPurpose,
       returnContactKind: input.pauseDeliveryContext?.returnContactKind ?? null,
       run: input.run,
       suggestedReply: input.run.suggestedReply,
-    }, input.store);
-    try {
-      const attached = await input.store.attachAwaitingRunHandoff({
-        awaitingReason: input.run.awaitingReason,
-        expectedPausedAt: input.run.pausedAt,
-        newPendingHandoffId: handoff.record.id,
-        now: input.now,
-        runId: input.run.id,
-      });
-
-      return {
-        awaitingReason: attached.awaitingReason ?? input.run.awaitingReason,
-        handoffUrl: handoff.handoffUrl,
-        runId: input.run.id,
-        status: "awaiting_user",
-        suggestedReply: attached.suggestedReply ?? input.run.suggestedReply,
-      };
-    } catch (error) {
-      await input.store.markHandoffExpired({
-        expectedStatus: "open",
-        expectedUpdatedAt: handoff.record.updatedAt,
-        handoffId: handoff.record.id,
-        now: input.now,
-      }).catch(() => {
-        // Preserve the transition failure; the handoff cleanup is compensating.
-      });
-      throw error;
-    }
+    });
+    const attached = await input.store.attachAwaitingRunHandoff({
+      memberId: input.memberId,
+      awaitingReason: input.run.awaitingReason,
+      expectedPausedAt: input.run.pausedAt,
+      handoff: handoff.data,
+      now: input.now,
+      runId: input.run.id,
+    });
+    return {
+      awaitingReason: attached.awaitingReason ?? input.run.awaitingReason,
+      handoffUrl: handoff.handoffUrl,
+      runId: input.run.id,
+      status: "awaiting_user",
+      suggestedReply: attached.suggestedReply ?? input.run.suggestedReply,
+    };
   }
 
   private async requireRunnableRun(input: {
