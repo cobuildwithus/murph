@@ -64,7 +64,7 @@ describe('notification accepted-message history', () => {
     expect(prompt).toContain('bounded accepted-message evidence')
     expect(prompt).toContain('Do not call tools')
     expect(prompt).not.toContain('Do not read conversation history')
-    expect(task).toContain('Omit only a task/question')
+    expect(task).toContain('Omit a task only')
     expect(task).not.toContain('omit that person')
     expect(REMINDER_AWARENESS_GUIDANCE).toContain('explicitly requested repeats')
     expect(REMINDER_AWARENESS_GUIDANCE).toContain('treatment or safety')

@@ -48412,7 +48412,13 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
     { name: 'game evening check-in one open player', count: 1, covered: false },
     { name: 'game evening check-in two open players', count: 2, covered: false },
     { name: 'game evening check-in already covered stays quiet', count: 1, covered: true },
-  ])('$name', async ({ name, count, covered }) => {
+    { name: 'game evening multigame repro empty conversation', count: 2, covered: false, multi: true, history: 'empty' },
+    { name: 'game evening multigame repro previous date correction', count: 2, covered: false, multi: true, history: 'past' },
+    { name: 'game evening multigame repro other task commitment', count: 2, covered: false, multi: true, history: 'other-task' },
+    { name: 'game evening multigame one covered task leaves the other open', count: 2, covered: false, multi: true, history: 'partial' },
+    { name: 'game evening completed today stays quiet', count: 1, covered: true, history: 'done' },
+    { name: 'game evening declined today stays quiet', count: 1, covered: true, history: 'declined' },
+  ])('$name', async ({ name, count, covered, multi, history }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-evening-e2e-'))
     const permissionHome = await materializeRealCodexHostedPermissionHome(config)
@@ -48422,10 +48428,29 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       { memberId: 'player_ava', playerName: 'Ava', tasks: [{ gameId: 'game_pushups', task: '20 pushups' }] },
       { memberId: 'player_bea', playerName: 'Bea', tasks: [{ gameId: 'game_walk', task: 'a 20 minute walk' }] },
     ].slice(0, count)
+    if (multi) {
+      players[0]!.tasks = [{ gameId: 'game_cycle', task: 'a 15 minute bike ride' }]
+      players[1]!.tasks = [{ gameId: 'game_cycle', task: 'a 15 minute bike ride' }, { gameId: 'game_read', task: 'read a chapter' }]
+    }
+    const transcript = covered ? [{ memberId: 'player_ava', playerName: 'Ava', text: history === 'done'
+      ? 'My pushups are finished today.' : history === 'declined' ? 'I am skipping my pushups today.' : "I'll do my pushups today." }]
+      : history === 'past' ? [
+        { memberId: 'player_ava', playerName: 'Ava', text: 'Yes, that ride was finished.' },
+        { memberId: 'player_ava', playerName: 'Ava', text: 'Please correct the cycling entry for March 3.' },
+        { memberId: 'player_ava', playerName: 'Ava', text: 'Use River route as the label.' },
+        { memberId: 'player_bea', playerName: 'Bea', text: 'The library has new opening hours.' },
+      ] : history === 'other-task' ? [
+        { memberId: 'player_ava', playerName: 'Ava', text: "I'll read a chapter before bed today." },
+      ] : history === 'partial' ? [
+        { memberId: 'player_bea', playerName: 'Bea', text: "I'll take my bike ride today." },
+      ] : []
+    const batch = multi ? [
+      { gameId: 'game_cycle', termsVersion: 1, memberIds: ['player_ava', 'player_bea'], dayIndex: 3 },
+      { gameId: 'game_read', termsVersion: 1, memberIds: ['player_bea'], dayIndex: 1 },
+    ] : players.map((player) => ({ gameId: player.tasks[0]!.gameId, termsVersion: 1, memberIds: [player.memberId], dayIndex: 0 }))
     const policy = gameEveningCheckInPolicySchema.parse({ kind: 'game_evening_check_in', roomId: 'synthetic-group',
       eventId: 'game-evening:synthetic-group:2030-03-04', date: '2030-03-04', expiresAt: '2030-03-05T02:30:00.000Z',
-      conversationLaneSeq: '9', batch: players.map((player) => ({ gameId: player.tasks[0]!.gameId, termsVersion: 1,
-        memberIds: [player.memberId], dayIndex: 0 })) })
+      conversationLaneSeq: '9', batch })
     try {
       await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
       const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never',
@@ -48438,7 +48463,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
         deliveryDedupeToken: policy.eventId,
         executionContext: { hosted: { defaultTarget: modelTarget, memberId: policy.roomId, userEnvKeys: [] } },
         instructions: buildGameEveningCheckInInstructions({ date: policy.date,
-          transcript: covered ? [{ memberId: 'player_ava', playerName: 'Ava', text: "I'll do my pushups today." }] : [], players }),
+          transcript, players }),
         responsePolicy: policy, threadId: 'synthetic-group-thread', threadIsDirect: false,
         turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env }, turnTrigger: 'manual-deliver',
         vault: workingDirectory, workingDirectory,
@@ -48446,18 +48471,22 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       const intents = await listAssistantOutboxIntents(workingDirectory)
       const actions = readCapabilityRoutingActions(events)
       expect(actions.filter(action => action.kind === 'dynamic' && /(?:^|[.])(?:game_lore|read_game|update_game)$/u.test(action.tool))).toEqual([])
+      process.stdout.write(`[game-evening-check-in] ${JSON.stringify({ scenario: name, reply: result.response, decision: result.decision.kind, intents: intents.length })}\n`)
       if (covered) {
         expect(result.decision.kind).toBe('skip'); expect(intents).toHaveLength(0); expect(result.response).toBeNull()
       } else {
         expect(result.decision.kind).toBe('send_message'); expect(intents).toHaveLength(1)
         expect(intents[0]?.message).toBe(result.response)
-        for (const player of players) { expect(result.response).toContain(player.playerName); expect(result.response).toMatch(new RegExp(player.tasks[0]!.task.includes('pushups') ? 'pushups' : 'walk', 'iu')) }
+        for (const player of players) {
+          expect(result.response).toContain(player.playerName)
+          for (const task of player.tasks.filter(task => !(history === 'partial' && player.memberId === 'player_bea' && task.gameId === 'game_cycle'))) expect(result.response).toMatch(new RegExp(task.task.includes('bike') ? 'bike|cycl' : task.task.includes('chapter') ? 'chapter|read' : task.task.includes('pushups') ? 'pushups' : 'walk', 'iu'))
+        }
+        if (history === 'partial') expect(result.response?.match(/bike|cycl/giu)).toHaveLength(1)
         expect(result.response).toMatch(/\?/u)
         expect((result.response?.match(/\?/gu) ?? [])).toHaveLength(1)
         expect(result.response).not.toMatch(/vs\.|—| - |player_|game_|time zones?|reminder was scheduled|score|weight|body|lazy/iu)
         expect((result.response ?? '').length).toBeLessThan(300)
       }
-      process.stdout.write(`[game-evening-check-in] ${JSON.stringify({ scenario: name, reply: result.response, decision: result.decision.kind, intents: intents.length })}\n`)
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths]) }
   }, 360_000)
 
