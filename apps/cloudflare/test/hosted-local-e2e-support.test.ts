@@ -1353,6 +1353,8 @@ function buildResponsesRequest(
         && name !== "murph.usage_diagnostics"
         && name !== "murph.family_plan"
         && name !== "murph.create_phone_call"
+        && name !== "murph.get_phone_call_status"
+        && name !== "murph.pending_vault_files"
         && name !== "murph.get_sender_contact"
         && name !== "murph.send_physical_note"
         && name !== "murph.resolve_physical_note"
