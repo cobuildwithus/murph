@@ -23,6 +23,12 @@ normalization for games. [Architecture](../ARCHITECTURE.md#linq-group-line-moves
 and [Security](SECURITY.md#weekly-game-chat-authority) own the contracts;
 silent producer release, bounded source fallback and provider proof remain in the
 [active plan](exec-plans/active/2026-11-10-linq-group-line-move.md).
+Historical dispatch fences require the snapshot-bound outbox settlement witness
+owned by the [runtime protocol](references/hosted-runtime-protocol.md), with
+reservation and rollback rules in Architecture.
+The [verification workflow](operations/verification-and-runtime.md) and
+[CI map](references/testing-ci-map.md) cover Chromium's installed-library
+preflight during dependency mirror outages; real browser checks remain required.
 
 The [synthetic game self-play QA map](references/game-selfplay-qa.md) records reachable game states, local native gameplay, real-model chat edits and explicit coverage gaps, with a [machine-readable native scenario inventory](references/game-selfplay-scenarios.json).
 
