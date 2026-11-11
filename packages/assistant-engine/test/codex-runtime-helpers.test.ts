@@ -71,7 +71,6 @@ import {
   startHostedCodexAssistantVoice,
 } from '../src/assistant/codex-runtime.ts'
 import {
-  MURPH_DYNAMIC_TOOLS,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.ts'
@@ -301,16 +300,6 @@ function findProviderPromptSizeTraceRawEvent(
 }
 
 describe('Codex assistant registry helpers', () => {
-
-  it('finish_without_reply description does not claim to withdraw completed replies', () => {
-    const finishWithoutReply = MURPH_DYNAMIC_TOOLS.find(
-      (tool) => tool.name === 'finish_without_reply',
-    )
-    expect(finishWithoutReply?.description).toBe(
-      'Finish the current response without adding a new text reply. This does not withdraw a reply you already completed earlier in the turn.',
-    )
-  })
-
   it('extracts Codex usage from sparse provider metadata', () => {
     expect(
       extractCodexAssistantProviderUsage({

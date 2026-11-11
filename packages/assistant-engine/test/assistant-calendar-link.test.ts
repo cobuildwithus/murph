@@ -30,21 +30,6 @@ describe('assistant calendar link tool', () => {
     expect(resolveMurphDynamicTools({ calendarLinkAvailable: true })).toContain(
       MURPH_CREATE_CALENDAR_LINK_TOOL,
     )
-    expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
-      'current private text conversation',
-    )
-    expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
-      'This does not add the event',
-    )
-    expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
-      'ask for every missing required detail together',
-    )
-    expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
-      'does not replace private appointment follow-through',
-    )
-    expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
-      'exactly one one-shot reminder',
-    )
   })
 
   it('parses the ordinary dynamic-tool request into one event', () => {

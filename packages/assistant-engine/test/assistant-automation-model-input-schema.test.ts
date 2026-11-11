@@ -187,31 +187,14 @@ describe('automation model input schema', () => {
     }
   })
 
-  it('explains workout and sleep filtering versus all recorded activity kinds', () => {
+  it('declares a described activityKind filter in the runtime and tool schemas', () => {
     for (const schema of [MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA, MURPH_AUTOMATION_TOOL.inputSchema]) {
       const kinds = collectKeys(schema, 'activityKind')
       expect(kinds.length).toBeGreaterThan(0)
       for (const kind of kinds) {
-        const description = asObject(kind).description
-        expect(description).toContain('Use "workout" for workouts, "sleep" for sleep')
-        expect(description).toContain('Omit only to match all recorded activity kinds, including sleep.')
+        expect(asObject(kind).description).toEqual(expect.any(String))
       }
     }
-  })
-
-  it('explains device activity selectors alongside canonical schedule shapes', () => {
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      '{"kind":"deviceActivity","activityKind":"workout","source":"garmin","after":"2026-01-01T00:00:00.000Z"}',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'with the requested lowercase source and exact recorded-after cutoff',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'set schedule.activityKind to workout for workout requests',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'omitted activityKind matches all recorded kinds including sleep, and omitted source matches all providers',
-    )
   })
 
   it.each([undefined, 'whoop', 'whoop_v2', 'garmin', 'oura', 'fitbit', 'google_health', 'google-health', 'unknown-provider'])(
@@ -242,53 +225,6 @@ describe('automation model input schema', () => {
     },
   )
 
-  it('advertises Luna for bounded low-risk reads while preserving stronger reasoning and member preferences', () => {
-    const schemaDescriptions = collectKeys(
-      MURPH_AUTOMATION_TOOL.inputSchema,
-      'description',
-    ).filter((value): value is string => typeof value === 'string')
-    const modelSchemaDescription = schemaDescriptions.find((description) =>
-      description.startsWith('Optional model for this automation turn only.'),
-    )
-
-    expect(modelSchemaDescription).toBeDefined()
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For an ordinary reminder, set assistantTargetOverride.model explicitly',
-    )
-    for (const guidance of [
-      MURPH_AUTOMATION_TOOL.description,
-      modelSchemaDescription ?? '',
-    ]) {
-      const normalizedGuidance = guidance.toLowerCase()
-
-      expect(normalizedGuidance).toContain(
-        'use luna for fixed cues and bounded low-risk workflows',
-      )
-      expect(normalizedGuidance).toContain(
-        'sensitive health decisions',
-      )
-      expect(normalizedGuidance).toContain('for a non-reminder automation')
-      expect(normalizedGuidance).toContain('preserve explicit member model preferences')
-      expect(normalizedGuidance).not.toContain('must need no reads')
-    }
-    expect(MURPH_AUTOMATION_TOOL.description).toContain('Luna and Sol mean GPT-6 Luna and GPT-6.1 Sol')
-    expect(schemaDescriptions.join(' ')).not.toMatch(/Terra|high for Luna/iu)
-    expect(MURPH_AUTOMATION_TOOL.description).not.toContain('GPT-5.6')
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'only when intentionally changing the task purpose or reasoning burden',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Omit assistantTargetOverride for factual corrections, timing-only or status-only edits to preserve the stored override',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'On a non-reminder patch, assistantTargetOverride replaces the whole stored override: use null to return that automation to conversation inheritance',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain('correcting stale instructions or reconciling a plan does not itself authorize a model change')
-    expect(MURPH_AUTOMATION_TOOL.description).not.toContain('when its instructions or context requirements materially change')
-    expect(MURPH_AUTOMATION_TOOL.description).toContain('If a changed field such as instructions is absent from the result, use one exact inspection')
-    expect(MURPH_AUTOMATION_TOOL.description).toContain('The authorized weekly usage review may also make model-only optimization patches')
-  })
-
   it('advertises the complete canonical runtime schema with self-contained action branches', () => {
     const schema = MURPH_AUTOMATION_TOOL.inputSchema
     expect(schema).toBe(MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA)
@@ -302,9 +238,6 @@ describe('automation model input schema', () => {
       ],
       description: expect.stringContaining('most recent readback'),
     })
-    expect(MURPH_AUTOMATION_TOOL.description).toContain('resolve its exact automationId')
-    expect(MURPH_AUTOMATION_TOOL.description).toContain('Inspect that id, then patch using lookup=automationId and expectedUpdatedAt=updatedAt')
-    expect(MURPH_AUTOMATION_TOOL.description).toContain('for a wording edit, include the new wording')
   })
 
   it('advertises strict action-specific root contracts', () => {

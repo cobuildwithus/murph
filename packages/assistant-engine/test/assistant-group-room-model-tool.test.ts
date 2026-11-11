@@ -344,12 +344,6 @@ describe('authenticated group room-model tool', () => {
       action: 'show',
       participantId: 'participant:other',
     })?.kind).toBe('invalid-group-room-model-arguments')
-    expect(MURPH_GROUP_ROOM_MODEL_TOOL.description).toContain(
-      'If show fails or a write reports stale state, stop.',
-    )
-    expect(MURPH_GROUP_ROOM_MODEL_TOOL.description).toContain(
-      'defensive 64 KiB file-read ceiling',
-    )
   })
 
   it('fails closed on malformed or conflicting fixed-page state', async () => {

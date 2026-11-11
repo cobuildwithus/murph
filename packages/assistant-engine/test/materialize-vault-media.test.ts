@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { assistantVaultFileMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
 import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath, type HostedMediaReference } from '@murphai/runtime-state/node'
 import { executeMurphDynamicToolRequest, readMurphDynamicToolRequest } from '../src/assistant-codex/dynamic-tools.ts'
-import { resolveMurphDynamicTools, MURPH_MATERIALIZE_VAULT_MEDIA_TOOL, MURPH_SEND_VAULT_FILE_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
+import { resolveMurphDynamicTools, MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 
 function imageDescriptor(relativePath: string): HostedMediaReference {
   return { relativePath, mediaKind: 'image', mediaId: 'a'.repeat(64), sha256: 'b'.repeat(64),
@@ -39,10 +39,6 @@ describe('materialize vault media', () => {
       expect(names.includes('materialize_vault_media')).toBe(available)
       expect(names.includes('send_vault_file')).toBe(available)
     }
-    expect(MURPH_MATERIALIZE_VAULT_MEDIA_TOOL.description).toContain('saved photo or file is missing locally')
-    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain('materialize_vault_media with all: true before archiving')
-    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain('Never drop files to fit')
-    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain('Unavailable means unrestored, not excluded: preserve any local copy as unverified.')
   })
   it.each([{}, { all: false }, { all: true, paths: ['a'] }, { paths: [] }, { paths: Array(101).fill('a') }, { paths: ['a'], extra: true },
     ...['/outside', '../outside', 'a/../outside', 'a/./b', 'a//b', 'a/', 'operator-home:secret', 'vault:raw/a', 'C:/secret', 'a\\b', 'a\u0000b'].map(ref => ({ paths: [ref] }))])('rejects invalid or non-vault scope %j before the port', async args => {

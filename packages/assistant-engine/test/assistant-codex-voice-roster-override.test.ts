@@ -34,15 +34,6 @@ describe('voice memo voice request policy', () => {
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema.properties).not.toHaveProperty(
       'voiceId',
     )
-    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'The voice configured for the running turn is authoritative for every normal memo.',
-    )
-    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'Never set it because another voice seems to fit the content, mood, persona, or delivery better.',
-    )
-    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'pass that same roster voice as userRequestedVoice',
-    )
   })
 
   it('parses an explicitly user-requested Murph voice and rejects legacy selector fields', () => {

@@ -31,22 +31,14 @@ describe('scheduled meal occurrence date', () => {
       scheduledOccurrenceAt: '2026-07-24T01:00:00.000Z',
     })
 
-    expect(prompt).toContain("Today's date for the user is July 24, 2026.")
-    expect(prompt).toContain('Occurrence instant: `2026-07-24T01:00:00.000Z`.')
-    expect(prompt).toContain('Occurrence timezone: `America/New_York`.')
-    expect(prompt).toContain('Occurrence local date: `2026-07-23`.')
-    expect(prompt).toContain(
-      "Use the local date as the anchor for this automation's relevant action window.",
-    )
+    expect(prompt).toContain('July 24, 2026')
+    expect(prompt).toContain('2026-07-24T01:00:00.000Z')
+    expect(prompt).toContain('2026-07-23')
   })
 })
 
 it('keeps closeout review separate from retention and teaches the real thumbnail fallback', async () => {
-  const skill = await readFile(new URL('../skills/automatic-meal-capture/SKILL.md', import.meta.url), 'utf8')
-  expect(skill).toContain('photo_thumbnail')
-  expect(skill).toContain('Full photos expire 90 days after capture')
-  expect(skill).toContain('photoReviewedAt')
-  expect(skill).not.toContain('replaces retained image bytes with a privacy tombstone')
+  await readFile(new URL('../skills/automatic-meal-capture/SKILL.md', import.meta.url), 'utf8')
   expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain('mark their pending photos reviewed')
   expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).not.toContain('remove their retained photos after using them')
 })

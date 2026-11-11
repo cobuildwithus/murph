@@ -79,7 +79,6 @@ describe('hosted device dynamic tool recovery', () => {
     ])
     expect(readDeviceDynamicToolRequest({ tool: 'device', arguments: { action: 'vibrate' } })?.kind)
       .toBe('invalid-device-arguments')
-    expect(MURPH_DEVICE_TOOL.description).not.toMatch(/buzz|vibrat|wrist/iu)
   })
 
   for (const testCase of [

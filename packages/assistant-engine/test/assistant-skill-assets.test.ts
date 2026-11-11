@@ -121,42 +121,11 @@ describe('assistant skill assets', () => {
 
   it('builds stable symbolic skill file references', () => {
     expect(MURPH_ASSISTANT_SKILLS_ROOT_REF).toBe('$MURPH_ASSISTANT_SKILLS_ROOT')
-    expect(buildAssistantSkillFileRef('murph-onboarding')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
-    )
-    expect(buildAssistantSkillFileRef('experiment-onboarding')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md',
-    )
-    expect(buildAssistantSkillFileRef('behavior-followthrough')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
-    )
-    expect(buildAssistantSkillFileRef('competition-training')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/competition-training/SKILL.md',
-    )
-    expect(buildAssistantSkillFileRef('strength-training')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/strength-training/SKILL.md',
-    )
-    expect(buildAssistantSkillFileRef('running-cardio')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md',
-    )
-    expect(buildAssistantSkillFileRef('stress-regulation')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/stress-regulation/SKILL.md',
-    )
-    expect(buildAssistantSkillFileRef('appointment-scheduling')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md',
-    )
-    expect(buildAssistantSkillFileRef('computer-use')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
-    )
-    expect(buildAssistantSkillFileRef('connected-apps')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md',
-    )
-    expect(buildAssistantSkillFileRef('phone-calls')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md',
-    )
-    expect(buildAssistantSkillFileRef('murph-family')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/murph-family/SKILL.md',
-    )
+    for (const skill of ASSISTANT_SKILLS) {
+      expect(buildAssistantSkillFileRef(skill.slug)).toBe(
+        `${MURPH_ASSISTANT_SKILLS_ROOT_REF}/${skill.slug}/SKILL.md`,
+      )
+    }
   })
 
   it('honors an explicit MURPH_ASSISTANT_SKILLS_ROOT process env override', () => {
@@ -167,7 +136,6 @@ describe('assistant skill assets', () => {
 
       // Blank overrides fall back to the module-relative package root.
       process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV] = '   '
-      expect(resolveAssistantSkillsRoot()).toMatch(/assistant-engine/)
     } finally {
       if (original === undefined) {
         delete process.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]

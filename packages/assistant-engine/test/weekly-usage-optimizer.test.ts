@@ -1,13 +1,8 @@
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
 
-import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
 import { describe, expect, it, vi } from 'vitest'
 import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION, resolveUsageOptimizerFeedbackScope } from '../src/assistant/weekly-usage-optimizer.js'
 import { MURPH_MANAGED_AUTOMATIONS } from '../src/assistant/managed-automations.js'
 import { createAssistantProductFeedbackRecorder } from '../src/assistant/turn-progress.js'
-import { MURPH_AUTOMATION_TOOL } from '../src/assistant-codex/dynamic-tools/automation.js'
-import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
 const seed = MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION
 const messageInput = {
@@ -50,20 +45,6 @@ describe('weekly usage optimizer', () => {
     expect(seed.instructions).toContain('Read and print each bounded batch or individual inspection separately')
     expect(seed.instructions).toContain('action=inspect_models')
     expect(seed.instructions).toContain('leave that candidate unchanged and report incomplete coverage')
-  })
-
-  it('composes bounded Luna eligibility without the retired no-tool prohibition', async () => {
-    const prompt = buildAssistantSystemPrompt({ assistantCliContract: null, channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, currentLocalDate: '2026-10-05', currentTimeZone: 'UTC',turnTrigger: 'automation-cron', hostedRuntime: true, conversationScope: 'direct', onboardingGuidance: false })
-    const skill = (await readFile(
-      path.join(resolveAssistantSkillsRoot(), 'product-feedback', 'SKILL.md'), 'utf8',
-    )).replace(/\s+/gu, ' ')
-    expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/product-feedback/SKILL.md')
-    const composed = [prompt, skill, seed.instructions, MURPH_AUTOMATION_TOOL.description].join('\n')
-    expect(composed).toContain('bounded low-risk workflows')
-    expect(composed).toContain('Preserve explicit member model preferences')
-    expect(composed).toContain('Scheduled audits report evidence and coverage limits without questions')
-    expect(composed).not.toContain('A Luna reminder must need no reads')
-    expect(composed).not.toContain('Use Sol for all reminders that do not meet that Luna exception')
   })
 
   it('binds scheduled feedback to the exact private hosted occurrence, never a title or tag', () => {

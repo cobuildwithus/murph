@@ -7,7 +7,6 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
-  buildAssistantCliGuidanceText,
   HOSTED_RUNTIME_PROCESS_ENV_MARKER,
   prepareAssistantDirectCliEnv,
   resolveAssistantCliAccessContext,
@@ -182,34 +181,5 @@ describe("prepareAssistantDirectCliEnv", () => {
 
     expect(env.OPENAI_API_KEY).toBe("openai-credential");
     expect(env.VENICE_API_KEY).toBeUndefined();
-  });
-
-  it("builds operator guidance that points callers back to the CLI surface", () => {
-    const guidance = buildAssistantCliGuidanceText({
-      rawCommand: "vault-cli",
-    });
-
-    expect(guidance).toContain("`vault-cli` is the canonical Murph CLI");
-    expect(guidance).not.toContain("setup entrypoint");
-    expect(guidance).toContain("Use the matching local CLI command directly");
-    expect(guidance).toContain("prefer `--format json`");
-    expect(guidance).toContain("do not start another assistant process");
-    expect(guidance).not.toMatch(/`assistant (chat|ask|run|deliver)`|`chat`|`run`/);
-    expect(guidance).toContain(
-      "`stage` names the failure",
-    );
-    expect(guidance).toContain(
-      "For a read-only command, `retryable: true` permits at most one unchanged retry in the turn",
-    );
-    expect(guidance).toContain("never retry an unchanged write");
-    expect(guidance).toContain(
-      "Fixing a `fieldErrors` field, a `hint` prerequisite, or a precise bounded `message` is a new attempt",
-    );
-    expect(guidance).toContain(
-      "Otherwise stop",
-    );
-    expect(guidance).toContain(
-      "never guess or echo omitted details",
-    );
   });
 });

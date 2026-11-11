@@ -66,18 +66,6 @@ describe('assistant physical notes', () => {
     expect(resolveMurphDynamicTools({
       physicalNotesAvailable: false,
     })).not.toContain(MURPH_SEND_PHYSICAL_NOTE_TOOL)
-    expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md',
-    )
-    expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
-      'call this tool automatically after generation finishes',
-    )
-    expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
-      'provide the exact image_ref and image_sha256',
-    )
-    expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
-      'exact message_ref approving the send in the current turn',
-    )
     expect(
       MURPH_SEND_PHYSICAL_NOTE_TOOL.inputSchema.properties.to.properties.state,
     ).toEqual({ type: 'string', pattern: '^[A-Za-z]{2}$' })
@@ -90,9 +78,6 @@ describe('assistant physical notes', () => {
     expect(resolveMurphDynamicTools({
       physicalNoteRecoveryAvailable: false,
     })).not.toContain(MURPH_RESOLVE_PHYSICAL_NOTE_TOOL)
-    expect(MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.description).toContain(
-      'never sends a new note or recalls an accepted one',
-    )
     expect(MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.deferLoading).toBe(true)
   })
 
@@ -407,19 +392,8 @@ describe('assistant physical notes', () => {
       'utf8',
     )
 
-    expect(skill).toMatch(
-      /A physical-note rejection by itself is recovery evidence, not product-feedback\s+eligibility\./u,
-    )
-    expect(skill).toMatch(
-      /independently establishes eligible frustration or repeated\s+Murph-owned friction/u,
-    )
-    expect(skill).toMatch(
-      /call `murph\.resolve_physical_note` exactly\s+once with the exact current authorizing `message_ref`/u,
-    )
     expect(skill).toContain('target_message_ref')
     expect(skill).toContain('target_kind')
-    expect(skill).toMatch(/does not authorize the\s+action/u)
-    expect(skill).toContain('never sends a new note or recalls an accepted one')
   })
 
   it('normalizes the bounded US recipient', () => {

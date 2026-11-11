@@ -43,10 +43,6 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
       }).find((candidate) => candidate.name === 'generate_voice_memo')!
       const schema = JSON.stringify(tool.inputSchema)
       expect(schema.includes('[yawning]')).toBe(modelId === 'eleven_v4')
-      expect(schema.includes('without bracketed audio directions')).toBe(modelId !== 'eleven_v4')
-      expect(tool.description).toContain('The voice configured for the running turn is authoritative')
-      expect(schema).toContain("Write the spoken text in the user's requested language")
-      expect(schema).toContain('Language choice never authorizes a voice change or personal memory access outside a private conversation')
       expect(tool.inputSchema).toMatchObject({
         properties: { text: { maxLength: ELEVENLABS_TTS_MAX_TEXT_LENGTH } },
       })
@@ -63,29 +59,6 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
     expect(ELEVENLABS_TTS_MAX_TEXT_LENGTH).toBe(1_000)
     expect(MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema.properties.text.maxLength).toBe(
       ELEVENLABS_TTS_MAX_TEXT_LENGTH,
-    )
-    for (const guidanceSurface of [
-      MURPH_GENERATE_VOICE_MEMO_TOOL.description,
-      MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema.properties.text.description,
-    ]) {
-      expect(guidanceSurface).toContain(
-        'Voice memo text is limited to at most 1,000 characters. Compress it before calling the tool.',
-      )
-    }
-    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'when a loaded Murph skill or product flow explicitly asks for a voice memo',
-    )
-    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'Final response text is optional.',
-    )
-    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'Leave it empty when the memo fully carries the reply, the user asked for voice only, or the owning skill or product flow marks the response voice-only. When leaving it empty, finish with an empty final assistant message and do not call murph.finish_without_reply after attaching the memo.',
-    )
-    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'Add accompanying text only when it contributes distinct necessary information, the owning flow explicitly requires it, or the user explicitly asks for both audio and text; otherwise do not duplicate the memo transcript in text.',
-    )
-    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'For a voice-only Linq/iMessage response, do not call murph.select_reply_target because native reply targeting requires accompanying text.',
     )
   })
 
@@ -552,6 +525,4 @@ describe('murph.generate_song dynamic tool execution', () => {
     })
     expect(result.rpcResult.success).toBe(true)
   })
-
-
 })

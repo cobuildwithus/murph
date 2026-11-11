@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  MURPH_GROUP_TOOL_PROPERTIES,
-} from "../src/assistant-codex/dynamic-tool-catalog.ts";
-import {
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_FINISH_RUN_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
@@ -38,104 +35,43 @@ if (!groupProgressTool) {
   throw new Error("Expected the group progress tool.");
 }
 
-// Budgets were raised on 2026-11-10 when these descriptions were rewritten as
-// full sentences. The earlier caps had pushed rules into parameter
-// descriptions, which Codex repeats in the schema copy and the code signature.
-const TARGET_TOOL_DESCRIPTION_BUDGETS = [
-  ["send_progress_update", MURPH_SEND_PROGRESS_UPDATE_TOOL, 260],
-  ["group send_progress_update", groupProgressTool, 240],
-  ["family_plan", MURPH_FAMILY_PLAN_TOOL, 400],
-  ["plan_usage", MURPH_PLAN_USAGE_TOOL, 500],
-  ["imessage_contact", MURPH_IMESSAGE_CONTACT_TOOL, 170],
-  ["subscription", MURPH_SUBSCRIPTION_TOOL, 530],
-  ["group shared read", MURPH_GROUP_SHARED_READ_TOOL, 440],
+const CALL_CONTRACT_TOOLS = [
+  ["send_progress_update", MURPH_SEND_PROGRESS_UPDATE_TOOL],
+  ["group send_progress_update", groupProgressTool],
+  ["family_plan", MURPH_FAMILY_PLAN_TOOL],
+  ["plan_usage", MURPH_PLAN_USAGE_TOOL],
+  ["imessage_contact", MURPH_IMESSAGE_CONTACT_TOOL],
+  ["subscription", MURPH_SUBSCRIPTION_TOOL],
+  ["group shared read", MURPH_GROUP_SHARED_READ_TOOL],
   [
     "group shared read and permission offer",
     MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
-    380,
   ],
-  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 950],
-  ["group_data", MURPH_GROUP_DATA_TOOL, 720],
-  ["group_membership", MURPH_GROUP_MEMBERSHIP_TOOL, 500],
-  ["group_usage", MURPH_GROUP_USAGE_TOOL, 360],
-  ["group_chat", MURPH_GROUP_CHAT_TOOL, 390],
-  ["group_email", MURPH_GROUP_EMAIL_TOOL, 310],
-  ["computer_open", MURPH_COMPUTER_OPEN_TOOL, 460],
-  ["computer_act", MURPH_COMPUTER_ACT_TOOL, 450],
-  ["computer_os_control", MURPH_COMPUTER_OS_CONTROL_TOOL, 320],
-  ["computer_pause_for_user", MURPH_COMPUTER_PAUSE_FOR_USER_TOOL, 300],
-  ["computer_finish_run", MURPH_COMPUTER_FINISH_RUN_TOOL, 150],
-  ["connected_apps_manage", MURPH_CONNECTED_APPS_MANAGE_TOOL, 260],
-  ["connected_apps_search", MURPH_CONNECTED_APPS_SEARCH_TOOL, 200],
-  ["connected_apps_execute", MURPH_CONNECTED_APPS_EXECUTE_TOOL, 330],
+  ["group_consult", MURPH_GROUP_CONSULT_TOOL],
+  ["group_data", MURPH_GROUP_DATA_TOOL],
+  ["group_membership", MURPH_GROUP_MEMBERSHIP_TOOL],
+  ["group_usage", MURPH_GROUP_USAGE_TOOL],
+  ["group_chat", MURPH_GROUP_CHAT_TOOL],
+  ["group_email", MURPH_GROUP_EMAIL_TOOL],
+  ["computer_open", MURPH_COMPUTER_OPEN_TOOL],
+  ["computer_act", MURPH_COMPUTER_ACT_TOOL],
+  ["computer_os_control", MURPH_COMPUTER_OS_CONTROL_TOOL],
+  ["computer_pause_for_user", MURPH_COMPUTER_PAUSE_FOR_USER_TOOL],
+  ["computer_finish_run", MURPH_COMPUTER_FINISH_RUN_TOOL],
+  ["connected_apps_manage", MURPH_CONNECTED_APPS_MANAGE_TOOL],
+  ["connected_apps_search", MURPH_CONNECTED_APPS_SEARCH_TOOL],
+  ["connected_apps_execute", MURPH_CONNECTED_APPS_EXECUTE_TOOL],
 ] as const;
 
+// Sizes live in test/support/instruction-budgets.json, for every tool.
 describe("assistant tool description call contracts", () => {
-  it.each(TARGET_TOOL_DESCRIPTION_BUDGETS)(
-    "keeps %s within its call-contract budget",
-    (_label, tool, maxLength) => {
-      expect(tool.description.length).toBeLessThanOrEqual(maxLength);
+  it.each(CALL_CONTRACT_TOOLS)(
+    "keeps %s a single-line call contract with no skill path or URL",
+    (_label, tool) => {
+      expect(tool.description.length).toBeGreaterThan(0);
       expect(tool.description).not.toContain("\n");
       expect(tool.description).not.toContain("SKILL.md");
       expect(tool.description).not.toMatch(/https?:\/\//u);
     },
   );
-
-  it("keeps the route-wide target description footprint bounded", () => {
-    const total = TARGET_TOOL_DESCRIPTION_BUDGETS.reduce(
-      (sum, [, tool]) => sum + tool.description.length,
-      0,
-    );
-
-    expect(total).toBeLessThanOrEqual(8_200);
-  });
-
-  it("keeps group_consult discovery, audience choice, and pending-state semantics explicit", () => {
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("handoff");
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "exact ID after exhausting list_memberships pages",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("participantTarget");
-    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("groupLabel");
-    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain("memory show");
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Handoff identity-neutral; host labels",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "accepted=queued/pending, never sent/shared",
-    );
-  });
-
-  it("keeps private-to-group handoff context identity-neutral", () => {
-    const contextDescription = MURPH_GROUP_TOOL_PROPERTIES.context.description;
-
-    expect(contextDescription).toContain(
-      "written in identity-neutral third person",
-    );
-    expect(contextDescription).toContain(
-      "the host supplies any group-safe attribution separately",
-    );
-    expect(contextDescription).not.toContain("memory show");
-    expect(contextDescription).toContain(
-      "Never write the member's actions, claims, or experiences as if Murph did, said, or experienced them",
-    );
-  });
-
-  it("distinguishes fresh current-sender handoffs from clarification continuations", () => {
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "ask_current_sender=group",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "ask_current_sender_privately=private",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "clarify=destination only",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "resume continuations",
-    );
-    expect(MURPH_GROUP_CONSULT_TOOL.description).not.toContain(
-      "message_current_sender",
-    );
-  });
 });

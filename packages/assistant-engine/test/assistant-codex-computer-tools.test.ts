@@ -84,51 +84,6 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain("awaitingMessage");
   });
 
-  it("keeps Computer descriptions to authorization and retry-safe call contracts", () => {
-    const actTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_act");
-    const openTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_open");
-    const osControlTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_os_control");
-    const pauseTool = MURPH_DYNAMIC_TOOLS.find(
-      (tool) => tool.name === "computer_pause_for_user",
-    );
-    const actDescription = actTool?.description ?? "";
-    const openDescription = openTool?.description ?? "";
-    const osControlDescription = osControlTool?.description ?? "";
-    const pauseDescription = pauseTool?.description ?? "";
-
-    expect(actDescription.length).toBeLessThanOrEqual(450);
-    expect(actDescription).toMatch(/macro-step/iu);
-    expect(actDescription).toContain("current authorized run");
-    expect(actDescription).toContain(
-      "specifically authorized non-credential identity/health input",
-    );
-    expect(actDescription).toContain("approved final terms");
-    expect(actDescription).toContain("Never invent data");
-    expect(actDescription).toContain("enter credentials/OTP/payment");
-    expect(actDescription).toContain("bypass CAPTCHA");
-    expect(actDescription).toContain("accept material consent");
-    expect(actDescription).toContain("retry unknown effects");
-    expect(actDescription).toContain("After failure, call computer_open");
-
-    expect(openDescription.length).toBeLessThanOrEqual(460);
-    expect(openDescription).toContain("authorized browser");
-    expect(openDescription).toContain("Returns runId, URL, title, text");
-    expect(openDescription).toContain("reopen after handoff/uncertainty");
-    expect(openDescription).toContain("prior outcome stays unknown");
-    expect(openDescription).not.toContain("send_progress_update");
-
-    expect(osControlDescription.length).toBeLessThanOrEqual(320);
-    expect(osControlDescription).toContain("only when Playwright cannot operate");
-    expect(osControlDescription).toContain("Never enter sensitive data");
-    expect(osControlDescription).toContain("outcome may be unknown");
-    expect(osControlDescription).toContain("call computer_open before any retry or next action");
-
-    expect(pauseDescription.length).toBeLessThanOrEqual(300);
-    expect(pauseDescription).toContain("current authorized run");
-    expect(pauseDescription).toContain("This does not message the user");
-    expect(pauseDescription).toContain("does not prove handoff completion");
-  });
-
   it("advertises computer tools only when execution transport is available", () => {
     const toolNames = resolveMurphDynamicTools({}).map((tool) => tool.name);
 

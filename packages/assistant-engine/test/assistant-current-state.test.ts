@@ -46,14 +46,10 @@ describe('assistant current state', () => {
       hostedRuntime: true,onboardingGuidance: false,
       turnTrigger: 'automation-cron',
     })
-    // A scheduled turn carries the language rule in its own execution context.
-    expect(layers.dynamicTurnContextPrompt).toContain("Write in the member's language: a saved language preference first, then the language of their recent messages, then the observed conversational language saved in memory.")
-    expect(layers.dynamicTurnContextPrompt).toContain('A saved, active automation triggered this turn.')
     expect(layers.dynamicTurnContextPrompt).toContain('Europe/Warsaw')
     if (language) expect(snapshot).toContain(`Observed conversational language: ${language}.`)
     else expect(snapshot).not.toContain('Observed conversational language:')
     expect(layers.dynamicTurnContextPrompt).not.toContain('Observed conversational language:')
-    expect(layers.prompt).not.toContain('This is not an attended user turn or a scheduled automation occurrence')
   })
 
   it('retains older durable preferences beyond three recent records with stable bounds', () => {

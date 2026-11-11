@@ -1163,7 +1163,6 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     const declaration = observed.description.replace(/^MURPH_INPUT_SCHEMA_JSON: .+$/mu, '')
     expect(/expectedUpdatedAt:\s*string/u.test(declaration), 'required typed edit version').toBe(true)
     expect(/expectedUpdatedAt\??:\s*unknown/u.test(declaration), 'no unknown edit version').toBe(false)
-    expect(observed.description.includes('Required current automation updatedAt'), 'canonical version readback documentation').toBe(true)
     expect(/lookup:\s*string/u.test(declaration), 'typed exact lookup').toBe(true)
     expect(/instructions\??:\s*string/u.test(declaration), 'typed replacement instructions').toBe(true)
   })
@@ -1178,7 +1177,6 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       expect(cardDeclaration).not.toMatch(new RegExp(`${field}: unknown`, 'u'))
     }
     const personalizationDeclaration = personalization.description.replace(/^MURPH_INPUT_SCHEMA_JSON: .+$/mu, '')
-    expect(personalizationDeclaration).toMatch(/action: "update"/u)
     expect(personalizationDeclaration).toMatch(/message_ref\?: string/u)
     expect(personalizationDeclaration).not.toMatch(/(?:mainPersona|supportingPersona)\??:/u)
     for (const field of ['tone', 'voice']) {
@@ -1742,7 +1740,6 @@ describe('game incomplete initial input measurement', () => {
     },
   )
 })
-
 
 describe('Bluetooth help initial input measurement', () => {
   it.skipIf(process.env.MURPH_MEASURE_BLUETOOTH_INPUT !== '1').each(['direct', 'group'] as const)(

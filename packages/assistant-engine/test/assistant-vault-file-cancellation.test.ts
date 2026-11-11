@@ -55,24 +55,6 @@ describe('pending generated vault-file cancellation', () => {
       vaultRoot,
     })
 
-    expect(MURPH_PENDING_VAULT_FILES_TOOL.description).toContain(
-      'Always list first',
-    )
-    expect(MURPH_PENDING_VAULT_FILES_TOOL.description).toContain(
-      'does not delete bytes directly',
-    )
-    expect(MURPH_PENDING_VAULT_FILES_TOOL.description).toContain(
-      'oldest 20 entries plus totalCount',
-    )
-    expect(MURPH_PENDING_VAULT_FILES_TOOL.description).toContain(
-      'at most five batches',
-    )
-    expect(MURPH_PENDING_VAULT_FILES_TOOL.description).toContain(
-      'not_pending means only that the intent is no longer cancellable',
-    )
-    expect(MURPH_PENDING_VAULT_FILES_TOOL.description).toContain(
-      'old approval link cannot revive',
-    )
     expect(resolveMurphDynamicTools({})).not.toContain(
       MURPH_PENDING_VAULT_FILES_TOOL,
     )

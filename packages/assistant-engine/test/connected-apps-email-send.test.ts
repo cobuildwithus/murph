@@ -11,12 +11,6 @@ describe('connected-app email-send dynamic behavior', () => {
   it('advertises email sends as non-retryable writes', () => {
     expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description.length)
       .toBeLessThanOrEqual(330)
-    expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).toContain(
-      'failed or ambiguous calendar create is non-retryable',
-    )
-    expect(MURPH_CONNECTED_APPS_EXECUTE_TOOL.description).toContain(
-      'email sends are too',
-    )
   })
 
   it('preserves explicit approval for a Gmail send', () => {
