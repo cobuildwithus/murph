@@ -19,6 +19,9 @@ export type GroupHumorScenario = {
   mustNotMatch?: RegExp
   // Longest acceptable text reply. Defaults to 240 characters.
   maxChars?: number
+  // The last message asks Murph to record something, so a plain
+  // confirmation may restate it ("50 done.").
+  allowEcho?: boolean
 }
 
 // Frames Murph wore out in real rooms. No reply in any scenario may use them,
@@ -297,6 +300,7 @@ export const GROUP_HUMOR_SCENARIOS: readonly GroupHumorScenario[] = [
     ],
     expect: 'either',
     maxChars: 90,
+    allowEcho: true,
   },
   {
     id: 'after-a-line',

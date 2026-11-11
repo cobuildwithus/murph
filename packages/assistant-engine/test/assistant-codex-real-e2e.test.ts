@@ -11718,7 +11718,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           expect(opensByAddressing(reply, lastSpeaker)).toBe(false)
         }
         // They know what they posted: no opening by repeating it back.
-        if (reply) expect(opensWithEcho(reply, scenario.transcript)).toBe(false)
+        if (reply && !scenario.allowEcho) {
+          expect(opensWithEcho(reply, scenario.transcript)).toBe(false)
+        }
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
