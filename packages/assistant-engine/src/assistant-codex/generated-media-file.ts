@@ -3,6 +3,8 @@ import type { ResolvedGenerateImageReference } from './image-reference-resolver.
 
 /** Supplied by the owning flow, never by model arguments or an editable manifest. */
 export interface GeneratedMediaFileRuntime {
+  /** Host-only credential; never include it in the Codex shell environment. */
+  elevenLabsApiKey?: string
   signal?: AbortSignal
   finish?(): Promise<void>
   fetchImpl: typeof fetch

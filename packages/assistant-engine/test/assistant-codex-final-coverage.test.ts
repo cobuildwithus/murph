@@ -425,7 +425,7 @@ describe('Codex provider routing', () => {
     const { recapTaskDirectory } = await import('../src/assistant/recap-workspace.js')
     const root = path.relative(input.vault, recapTaskDirectory(input.vault, scope.eventId))
     expect(provider.codexThreadConfig['permissions.murph-recap.filesystem.:workspace_roots']).toEqual({
-      '.': 'deny', [root]: 'read', [`${root}/drafts`]: 'write', [`${root}/media`]: 'write', [`${root}/previews`]: 'write',
+      '.': 'deny', [`${root}/inputs`]: 'read', [`${root}/drafts`]: 'write', [`${root}/media`]: 'write', [`${root}/previews`]: 'write',
     })
   })
 

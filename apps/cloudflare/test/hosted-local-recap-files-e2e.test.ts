@@ -60,6 +60,7 @@ it('accepts a recap show through the production hosted Linux sandbox', async () 
     `if cat .runtime/tmp/recap/sibling/inputs/private.json; then exit 22; fi`,
     `if printf forbidden >> ${relativeRoot}/inputs/game.json; then exit 23; fi`,
     ...['drafts', 'media', 'previews'].map(area => `printf allowed > ${relativeRoot}/${area}/permission-probe.txt || exit 24`),
+    'test -z "${ELEVENLABS_API_KEY+x}" || exit 26',
     'printf RECAP_CONFINEMENT_OK',
   ].join('\n');
   const responses: HostedLocalAssistantProviderScriptedResponse[] = [

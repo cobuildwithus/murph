@@ -35,17 +35,19 @@ test('file image uses normal provider accounting and creates no capture or respo
   expect(result.rpcText).not.toContain(root)
 })
 
-test('file song works without a voice-memo channel and never uploads a chat attachment', async () => {
+test.each(['environment', 'host-only runtime'] as const)('file song uses %s credentials without a voice-memo channel or chat attachment', async credentialSource => {
   const bytes = await readFile(new URL('../../../fixtures/generated-audio/music.mp3', import.meta.url))
   const fetchImpl = vi.fn<typeof fetch>(async () => new Response(bytes))
   const save = vi.fn(async () => ({ operationId: 'theme', path: `${relativeRoot}/media/theme.mp3`, hash: 'a'.repeat(64), byteLength: bytes.length, mediaType: 'audio/mpeg' as const, durationMs: 20_000 }))
-  const result = await executeGenerateSongTool({ env: { ELEVENLABS_API_KEY: 'synthetic-key' },
+  const result = await executeGenerateSongTool({ env: credentialSource === 'environment' ? { ELEVENLABS_API_KEY: 'synthetic-key' } : {},
     args: { output: 'file', operationId: 'theme', durationSeconds: 20, instrumental: false, prompt: 'An original playful song for Player A and Player B.' },
-    fileRuntime: { fetchImpl, resolveReferences: async () => [], save } })
+    fileRuntime: { elevenLabsApiKey: credentialSource === 'host-only runtime' ? 'synthetic-key' : undefined, fetchImpl, resolveReferences: async () => [], save } })
   expect(result.rpcSuccess).toBe(true)
   expect(result.responseMedia).toBeUndefined()
   expect(fetchImpl).toHaveBeenCalledTimes(1)
   expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('/v1/music')
+  expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get('xi-api-key')).toBe('synthetic-key')
+  expect(result.rpcText).not.toContain('synthetic-key')
   expect(save).toHaveBeenCalledWith(new Uint8Array(bytes), 'audio/mpeg')
 })
 

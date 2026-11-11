@@ -761,7 +761,7 @@ function resolveCodexAttemptThreadConfig(
       'features.shell_tool': true,
       'features.image_generation': false,
       [`permissions.${MURPH_RECAP_PERMISSION_PROFILE}.filesystem.:workspace_roots`]: {
-        '.': 'deny', [root]: 'read', [`${root}/drafts`]: 'write', [`${root}/media`]: 'write', [`${root}/previews`]: 'write',
+        '.': 'deny', [`${root}/inputs`]: 'read', [`${root}/drafts`]: 'write', [`${root}/media`]: 'write', [`${root}/previews`]: 'write',
       },
     }
   }
