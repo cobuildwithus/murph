@@ -117,7 +117,7 @@ When a short clip would help, ask for the smallest view that answers the questio
 
 ## Saving the problem and the plan
 
-Save the complaint as a condition so the next conversation starts from it:
+When the member accepts a plan for the problem, save the complaint as a condition so the next conversation starts from it:
 
 ```
 vault-cli condition save "<the complaint in the member's words>" --clinical-status active --verification-status unconfirmed --body-site "<site>" --asserted-on <YYYY-MM-DD> --note "<onset, what aggravates it, the repeatable measure, and anything still unknown>"
