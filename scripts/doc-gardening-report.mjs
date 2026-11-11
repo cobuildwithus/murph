@@ -6,41 +6,6 @@ import { fileURLToPath } from "node:url";
 const reportPath = "agent-docs/generated/doc-gardening-report.md";
 const inventoryPath = "agent-docs/generated/doc-inventory.md";
 
-function isBulletPath(line) {
-  const match = line.match(/^- `([^`]+)`$/u);
-  return match ? match[1] : null;
-}
-
-export function parseDocGardeningReport(text, { exclude, trackedPaths }) {
-  const unindexed = [];
-  const broken = [];
-  let section = "";
-
-  for (const line of text.split("\n")) {
-    if (line === "## Unindexed Tracked Artifacts") {
-      section = "unindexed";
-      continue;
-    }
-    if (line === "## Broken Index Targets") {
-      section = "broken";
-      continue;
-    }
-
-    const artifactPath = isBulletPath(line);
-    if (!artifactPath || artifactPath === "None") continue;
-
-    if (section === "unindexed") {
-      if (trackedPaths.has(artifactPath) && !exclude.test(artifactPath)) {
-        unindexed.push(artifactPath);
-      }
-    } else if (section === "broken") {
-      broken.push(artifactPath);
-    }
-  }
-
-  return { unindexed, broken };
-}
-
 export function formatDocGardeningReport({ unindexed, broken }) {
   const lines = [
     "# Agent Doc Gardening Report",
@@ -65,18 +30,6 @@ export function formatDocGardeningReport({ unindexed, broken }) {
 
   lines.push("");
   return lines.join("\n");
-}
-
-export function filterDocGardeningInventory(text, { exclude, trackedPaths }) {
-  return text
-    .split("\n")
-    .filter((line) => {
-      const artifactPath = isBulletPath(line);
-      return artifactPath
-        ? trackedPaths.has(artifactPath) && !exclude.test(artifactPath)
-        : true;
-    })
-    .join("\n");
 }
 
 function readTrackedPaths() {
@@ -110,7 +63,7 @@ function matchesIndexTarget(entry) {
   }
 }
 
-function generateDocGardeningArtifacts(index) {
+function generateDocGardeningArtifacts(index, { exclude, trackedPaths }) {
   const markdown = execFileSync("find", [
     "agent-docs", "-type", "f", "-name", "*.md",
     "!", "-path", "agent-docs/index.md",
@@ -122,7 +75,8 @@ function generateDocGardeningArtifacts(index) {
   ], { encoding: "utf8" }).stdout ?? "";
   const extras = process.env.COBUILD_DOC_GARDENING_EXTRA_TRACKED_PATHS ?? "";
   const docs = sortedLines(`${markdown}${references}${extras}\n`
-    .split("\n").filter((line) => line.trim()).join("\n") + "\n");
+    .split("\n").filter((line) => line.trim()).join("\n") + "\n")
+    .filter((doc) => trackedPaths.has(doc) && !exclude.test(doc));
   const indexed = sortedLines(index.split("\n")
     .filter((line) => line.startsWith("|"))
     .map((line) => line.split("`")[1] ?? "")
@@ -138,7 +92,7 @@ function generateDocGardeningArtifacts(index) {
     "## Tracked Artifacts (.md + references/*-llms.txt + configured extras)",
     ...(docs.length ? docs.map((doc) => `- \`${doc}\``) : ["- None"]), "",
   ].join("\n");
-  return { report: formatDocGardeningReport({ unindexed, broken }), inventory };
+  return { report: { unindexed, broken }, inventory };
 }
 
 function run() {
@@ -148,21 +102,17 @@ function run() {
     return;
   }
   fs.mkdirSync("agent-docs/generated", { recursive: true });
-  const generated = generateDocGardeningArtifacts(fs.readFileSync("agent-docs/index.md", "utf8"));
   const excludePattern = process.env.COBUILD_DOC_GARDENING_EXCLUDE_PATTERN
     ?? "^agent-docs/exec-plans/completed/";
   const exclude = new RegExp(excludePattern);
   const trackedPaths = readTrackedPaths();
-  const report = parseDocGardeningReport(
-    generated.report,
+  const { report, inventory } = generateDocGardeningArtifacts(
+    fs.readFileSync("agent-docs/index.md", "utf8"),
     { exclude, trackedPaths },
   );
 
   fs.writeFileSync(reportPath, formatDocGardeningReport(report));
-  fs.writeFileSync(
-    inventoryPath,
-    filterDocGardeningInventory(generated.inventory, { exclude, trackedPaths }),
-  );
+  fs.writeFileSync(inventoryPath, inventory);
 
   const issueCount = report.unindexed.length + report.broken.length;
   console.log(`Doc gardening completed. Issues found: ${issueCount}`);

@@ -5,11 +5,60 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
-import {
-  filterDocGardeningInventory,
-  formatDocGardeningReport,
-  parseDocGardeningReport,
-} from "./doc-gardening-report.mjs";
+import { formatDocGardeningReport } from "./doc-gardening-report.mjs";
+
+// Parse the independent upstream fixture output only; production keeps structured findings.
+function isBulletPath(line: string) {
+  const match = line.match(/^- `([^`]+)`$/u);
+  return match ? match[1] : null;
+}
+
+function parseDocGardeningReport(text: string, { exclude, trackedPaths }: FilterOptions) {
+  const unindexed = [];
+  const broken = [];
+  let section = "";
+
+  for (const line of text.split("\n")) {
+    if (line === "## Unindexed Tracked Artifacts") {
+      section = "unindexed";
+      continue;
+    }
+    if (line === "## Broken Index Targets") {
+      section = "broken";
+      continue;
+    }
+
+    const artifactPath = isBulletPath(line);
+    if (!artifactPath || artifactPath === "None") continue;
+
+    if (section === "unindexed") {
+      if (trackedPaths.has(artifactPath) && !exclude.test(artifactPath)) {
+        unindexed.push(artifactPath);
+      }
+    } else if (section === "broken") {
+      broken.push(artifactPath);
+    }
+  }
+
+  return { unindexed, broken };
+}
+
+function filterDocGardeningInventory(text: string, { exclude, trackedPaths }: FilterOptions) {
+  return text
+    .split("\n")
+    .filter((line) => {
+      const artifactPath = isBulletPath(line);
+      return artifactPath
+        ? trackedPaths.has(artifactPath) && !exclude.test(artifactPath)
+        : true;
+    })
+    .join("\n");
+}
+
+interface FilterOptions {
+  exclude: RegExp;
+  trackedPaths: ReadonlySet<string>;
+}
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const upstream = path.join(repoRoot, "node_modules/@cobuild/repo-tools/src/doc-gardening.sh");

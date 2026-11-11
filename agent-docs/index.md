@@ -1,5 +1,10 @@
 Bound pair and group games tolerate bystanders while retaining current-player,
 route and restriction checks. [Architecture](../ARCHITECTURE.md),
+Repository tooling uses installed registry dependencies, one prepared-runtime
+build owner, author-controlled PR readiness, and structural documentation checks.
+The [verification owner](operations/verification-and-runtime.md) and
+[plan lifecycle](PLANS.md) describe these contracts.
+
 [Weekly Game](product-specs/weekly-game.md), and
 [the completed implementation plan](exec-plans/completed/2026-11-10-game-chat-open-room.md)
 record the contract and local evidence. The [review corrections](exec-plans/completed/2026-11-10-game-chat-review-shipping.md)

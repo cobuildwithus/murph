@@ -25,7 +25,7 @@ owner document prevails and the completed snapshot remains unchanged.
 
 ## When To Create A Plan
 
-Create a plan when work is multi-file, high-risk, cross-cutting, or likely to span more than one turn.
+Create a plan when work needs durable coordination, is high-risk or cross-cutting, or is likely to span more than one turn. File count alone does not require a plan.
 
 Narrow user-supplied patch landings may skip a dedicated plan when all of the following are true:
 
@@ -35,11 +35,13 @@ Narrow user-supplied patch landings may skip a dedicated plan when all of the fo
 
 If the patch starts drifting into broader design, refactor, or multi-turn work, open a plan before continuing.
 
-## Local Working Tree Note
+## Documentation checks
 
-The repo's large-change-set plan guard remains strict for staged comparisons and CI-style commit ranges.
-
-Plain local working-tree verification is intentionally looser: if other agents have left many unrelated dirty files in the tree, `scripts/check-agent-docs-drift.sh` will not fail solely because the total local changed-file count exceeds the large-change threshold. The guard still enforces the usual code-versus-doc drift checks, and operators can re-enable a local threshold by setting `MURPH_WORKTREE_DRIFT_LARGE_CHANGE_THRESHOLD`.
+The drift guard requires the repository's owner documents and an index update
+when owner documents change. Gardening checks index targets and tracked-document
+coverage. Code changes do not require token documentation edits or a plan solely
+because they exceed a file-count threshold. Update the durable owner whenever its
+contract changes; use the lifecycle above when the work needs a plan.
 
 ## Completion Rule
 

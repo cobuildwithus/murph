@@ -22,7 +22,7 @@ Use `agent-docs/references/repo-scope.md` when repository ownership is unclear.
 | Code, tests, config | Focused tests and relevant typecheck; direct evidence for changed behavior. Use the verification and completion owners below. | Isolated worktree for non-trivial work. |
 | Sensitive or cross-owner behavior | Trace authority, state, failure, and deploy boundaries; focused proof plus the risk-routed final review. | Isolated worktree and execution plan. |
 
-Use `agent-docs/PLANS.md` for durable plans when work is multi-file, high-risk,
+Use `agent-docs/PLANS.md` for durable plans when work needs durable coordination, is high-risk,
 cross-cutting, or likely to span turns. Keep the plan proportional; one plan
 can hold implementation, Product UX, and verification decisions.
 

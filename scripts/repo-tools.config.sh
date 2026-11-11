@@ -3,19 +3,9 @@ set -euo pipefail
 
 COBUILD_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-consumer_shell_path=""
-for candidate in \
-  "$COBUILD_REPO_ROOT/node_modules/@cobuild/repo-tools/src/consumer-shell.sh" \
-  "$COBUILD_REPO_ROOT/../repo-tools/src/consumer-shell.sh"
-do
-  if [ -f "$candidate" ]; then
-    consumer_shell_path="$candidate"
-    break
-  fi
-done
-
-if [ -z "$consumer_shell_path" ]; then
-  echo "Error: missing repo-tools consumer shell helper. Install dependencies first." >&2
+consumer_shell_path="$COBUILD_REPO_ROOT/node_modules/@cobuild/repo-tools/src/consumer-shell.sh"
+if [[ ! -f "$consumer_shell_path" ]]; then
+  echo "Error: missing installed repo-tools consumer shell helper. Install dependencies first." >&2
   exit 1
 fi
 
@@ -48,11 +38,6 @@ required_files=(
   "agent-docs/exec-plans/tech-debt-tracker.md"
 )
 repo_tools_join_lines COBUILD_DRIFT_REQUIRED_FILES "${required_files[@]}"
-export COBUILD_DRIFT_CODE_CHANGE_PATTERN='^(src/|app/|apps/|contracts/|scripts/|\.github/workflows/|package\.json$|README\.md$|ARCHITECTURE\.md$|AGENTS\.md$)'
-export COBUILD_DRIFT_CODE_CHANGE_LABEL='Code/process covered by the documentation guard'
-export COBUILD_DRIFT_LARGE_CHANGE_THRESHOLD="${COBUILD_DRIFT_LARGE_CHANGE_THRESHOLD:-10}"
-export COBUILD_DRIFT_CHANGED_COUNT_EXCLUDE_PATTERN='^agent-docs/generated/|^agent-docs/exec-plans/(active|completed)/|^pnpm-lock\.yaml$'
-export COBUILD_DRIFT_ALLOW_RELEASE_ARTIFACTS_ONLY='0'
 export COBUILD_DOC_GARDENING_EXCLUDE_PATTERN='^agent-docs/exec-plans/completed/'
 # Murph accepts ordinary descriptive commit messages in helper flows; do not require
 # Conventional Commit syntax unless the caller opts back into it manually.
