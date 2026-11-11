@@ -1,3 +1,5 @@
+import { buildRecapFallback } from './recap-fallback';
+import { storedRecapAdmissionSchema } from './recap-admission';
 import { prepareRecapSubmission, stageRecapSubmissionFile } from "./recap-submission";
 import { handleRecapAdmission } from "./recap-admission";
 import { readPendingRecapUsages } from "./recap-lore";
@@ -228,6 +230,38 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
   };
+  const context = { gameId, eventId, players, material, authorizeMutation, unavailable, audience };
+  return input.request.action === "read_game" ? handleAuthorizedRecapRead({ ...input, request: input.request }, context)
+    : handleAuthorizedRecapWrite({ ...input, request: input.request }, context);
+}
+
+type RecapToolInput = Parameters<typeof handleGameRecapTool>[0];
+type RecapToolContext = {
+  gameId: string; eventId: string; players: string[];
+  material: NonNullable<Awaited<ReturnType<typeof readGameRecapMaterial>>>;
+  authorizeMutation: (tx: Prisma.TransactionClient) => Promise<void>;
+  unavailable: () => Promise<HostedGameToolResponse>;
+  audience: Awaited<ReturnType<typeof readGameChatAudience>> | undefined;
+};
+async function recoverGameRecap(input: RecapToolInput, context: RecapToolContext): Promise<HostedGameToolResponse> {
+  const { gameId, eventId, players, material, authorizeMutation, unavailable } = context;
+  const prisma = getPrisma();
+    if (!material.validation.show) return unavailable();
+    const scope = { beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players };
+    let saved = await sealGameRecap({ ...scope, recap: null });
+    if (!saved) {
+      const row = await prisma.gameEvent.findUnique({ where: { commandKey: `${eventId}:admission` }, select: { payload: true } });
+      const admission = row ? storedRecapAdmissionSchema.parse(row.payload) : null;
+      if (!admission || admission.runs.length < 2 && Date.now() < Date.parse(admission.deadline)) return { action: 'read_game', result: { status: 'ok', recapGame: { recovered: false } } };
+      const recap = buildRecapFallback(material);
+      await prepareRecapSubmission({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity, gameId, eventId, draft: { story: recap, files: [] }, trustedFallback: true });
+      saved = await sealGameRecap({ ...scope, recap, files: [] });
+    }
+    return saved ? { action: 'read_game', result: { status: 'ok', recap: saved, chatLine: await acceptedGameRecapMessage(gameId, saved.chatLine) } } : unavailable();
+}
+async function handleAuthorizedRecapRead(input: RecapToolInput & { request: Extract<RecapToolInput['request'], { action: 'read_game' }> }, context: RecapToolContext): Promise<HostedGameToolResponse> {
+  const { gameId, eventId, players, material, authorizeMutation, unavailable } = context;
+  if (input.request.recapRead?.kind === "recover") return recoverGameRecap(input, context);
   if (input.request.action === "read_game" && input.request.recapRead?.kind === "stage") {
     if (!material.validation.show) return unavailable();
     return { action: "read_game", result: { status: "ok", recapGame: await stageRecapSubmissionFile({ memberId: input.memberId,
@@ -238,12 +272,17 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
     return { action: "read_game", result: { status: "ok", recapGame: await handleRecapAdmission({ memberId: input.memberId,
       runtimeIdentity: input.runtimeIdentity, gameId, eventId, command: input.request.recapRead, material }) } };
   }
-  if (input.request.action === "read_game") return readRecapForWriter({ material, request: input.request, containerMemberId: input.memberId, playerMemberIds: players, beforeMutationTx: authorizeMutation });
+  return readRecapForWriter({ material, request: input.request, containerMemberId: input.memberId, playerMemberIds: players, beforeMutationTx: authorizeMutation });
+}
+async function handleAuthorizedRecapWrite(input: RecapToolInput & { request: Extract<RecapToolInput['request'], { action: 'write_recap' }> }, context: RecapToolContext): Promise<HostedGameToolResponse> {
+  const { gameId, eventId, players, material, authorizeMutation, unavailable, audience } = context;
+  const prisma = getPrisma();
+
   const replay = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId,
     eventId, gameId, playerMemberIds: players, recap: null });
   if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(replay, input.request.recap), chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, replay.chatLine) : gameRecapMessage(gameId, replay.chatLine) } };
   if (await isGameRecapGenerationRetired(prisma, eventId, input.memberId)) return { action: "write_recap", result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
-  const chatMessages = await readGameRecapChatMessages({ containerMemberId: input.memberId, material, eventId });
+  const chatMessages = await readGameRecapChatMessages({ containerMemberId: input.memberId, material, eventId, beforeMutationTx: authorizeMutation });
   const errors = validateGameRecap({ recap: input.request.recap, players: material.players, entries: material.entries,
     chatMessages, priorChatLines: input.request.priorChatLines, result: material.validation.result, group: material.validation.group, show: material.validation.show, usedTreatments: input.request.usedTreatments });
   if (errors.length > 0) return { action: "write_recap", result: { status: "rejected", recapOutcome: gameRecapToolResult(errors) } };
@@ -272,9 +311,11 @@ export async function readGameRecapChatMessages(input: {
   containerMemberId: string;
   material: NonNullable<Awaited<ReturnType<typeof readGameRecapMaterial>>>;
   eventId?: string;
+  beforeMutationTx?: (tx: Prisma.TransactionClient) => Promise<void>;
 }): Promise<GameRecapChatMessage[]> {
   if (input.material.validation.show && input.eventId && input.material.validation.settledAt) {
-    return readRecapTranscriptForValidation({ containerMemberId: input.containerMemberId, eventId: input.eventId,
+    if (!input.beforeMutationTx) throw new Error('Transcript authorization is required.');
+    return readRecapTranscriptForValidation({ beforeMutationTx: input.beforeMutationTx, containerMemberId: input.containerMemberId, eventId: input.eventId,
       gameId: String(input.material.game.id), players: input.material.validation.playerNamesByMemberId,
       since: input.material.validation.startedAt, until: input.material.validation.settledAt });
   }
@@ -372,7 +413,7 @@ async function readRecapForWriter(input: {
   const { eventId, gameId } = input.request.origin;
   const read = input.request.recapRead;
   if (read?.kind === "transcript") return { action: "read_game", result: { status: "ok", recapGame: await readRecapTranscriptPage({
-    containerMemberId: input.containerMemberId, gameId, eventId,
+    containerMemberId: input.containerMemberId, gameId, eventId, beforeMutationTx: input.beforeMutationTx,
     players: input.material.validation.playerNamesByMemberId, since: input.material.validation.startedAt,
     until: input.material.validation.settledAt, after: read.after,
   }) } };

@@ -73,7 +73,7 @@ export function createRecapMediaRuntime(input: {
       const reservation = z.object({ token: z.string().regex(/^[a-f0-9]{64}$/u), deadline: z.string() }).strict().parse(response.result.recapGame)
       token = reservation.token
       request.headers.set('x-murph-recap-reservation', token)
-      return input.fetchImpl(request, { signal: AbortSignal.any([request.signal, signal]) })
+      return input.fetchImpl(request.url, { method: request.method, headers: request.headers, body: await request.arrayBuffer(), signal: AbortSignal.any([request.signal, signal]) })
     },
     save: async (bytes, mediaType) => {
       if (!token) throw new Error('No recap reservation.')

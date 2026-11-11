@@ -1,4 +1,4 @@
-import { gameRecapDraftSchema } from '@murphai/contracts/recap-show'
+import { type GameRecapDraft, gameRecapDraftSchema } from '@murphai/contracts/recap-show'
 import { readRecapUsages, recapUsageSchema } from '../../assistant/game-recap-lore.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse } from '@murphai/hosted-execution/runtime-control'
@@ -187,15 +187,9 @@ async function executeTrustedGameRecapRead(input: {
   }
   const result = await input.tool.request({ action: 'read_game', origin: input.origin })
   if (input.context?.currentGameRecapScope?.()?.show && result.result.status === 'ok') {
-    const game = 'recapGame' in result.result ? result.result.recapGame : null
-    const pending = typeof game === 'object' && game !== null && 'pendingRecapUsages' in game ? z.array(recapUsageSchema).max(20).parse(game.pendingRecapUsages) : []
-    for (const usage of pending) {
-      if (!input.context.appendGameRecapUsage) throw new Error('Trusted recap lore is unavailable.')
-      await input.context.appendGameRecapUsage(usage)
-    }
-    if (typeof game === 'object' && game !== null && 'material' in game && input.context.prepareGameRecapInputs) {
-      return toolTextResult(true, JSON.stringify(await input.context.prepareGameRecapInputs(game.material)))
-    }
+    const prepared = await prepareRecapReadResult(input.context, result)
+    if (prepared) return prepared
+
   }
   return toolTextResult(true, JSON.stringify('recapGame' in result.result ? result.result.recapGame : result))
 }
@@ -227,7 +221,7 @@ async function executeTrustedGameRecapWrite(input: {
   return toolTextResult(true, output)
 }
 
-async function recordAcceptedRecap(input: { context: AssistantHostedToolContext | null; origin: { gameId: string; eventId: string } }, payload: HostedGameToolResponse['result'], show: boolean): Promise<void> {
+export async function recordAcceptedRecap(input: { context: AssistantHostedToolContext | null; origin: { gameId: string; eventId: string } }, payload: HostedGameToolResponse['result'], show: boolean): Promise<void> {
   if (payload.status === 'ok' && 'chatLine' in payload && typeof payload.chatLine === 'string') input.context?.recordSavedGameRecapChatLine?.(payload.chatLine)
   if (payload.status === 'ok' && 'recap' in payload && payload.recap) {
     try {
@@ -293,11 +287,7 @@ function gameReadGuidance(result: Awaited<ReturnType<NonNullable<AssistantHosted
 
 export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null }) {
   if (input.request.action === 'write_recap_file') return executeRecapFileWrite({ context: input.context, draftPath: input.request.draftPath })
-  if (input.request.action === 'preview_recap') {
-    if (!input.context?.currentGameRecapScope?.()?.show || !input.context.previewGameRecap) return toolTextResult(false, 'Preview requires a bound pair show.', 'authority_rejected')
-    try { return toolTextResult(true, JSON.stringify(await input.context.previewGameRecap(input.request.draftPath))) }
-    catch (error) { return toolTextResult(false, 'Preview failed. Check the draft JSON and selected file hashes.', 'invalid_result', error) }
-  }
+  if (input.request.action === 'preview_recap') return executeRecapPreview(input.context, input.request.draftPath)
   if (input.request.action === 'my_game_reminders') {
     const scope = input.context?.currentUserActionScope?.()
     const tool = input.context?.myGameRemindersTool
@@ -351,19 +341,48 @@ async function executeRecapFileWrite(input: { context: AssistantHostedToolContex
     // Read and hash every selected file once before freezing anything remotely.
     const selected = await Promise.all(draft.files.map(async file => ({ ...file, bytes: await context.readGameRecapMedia!(file.receipt) })))
     const prepared = await tool.request({ ...request, phase: 'prepare' })
+    if (prepared.action !== 'write_recap') throw new Error('Wrong recap preparation response.')
     if (prepared.result.recap) {
       await recordAcceptedRecap({ context, origin }, prepared.result, true)
       return toolTextResult(true, prepared.result.recapOutcome ?? 'ok')
     }
     if (prepared.result.status !== 'ok') return toolTextResult(true, prepared.result.recapOutcome ?? JSON.stringify(prepared.result))
-    for (const file of selected) {
-      const staged = await tool.request({ action: 'read_game', origin, recapRead: { kind: 'stage', receipt: file.receipt, bytes: file.bytes } })
-      if (staged.result.status !== 'ok') throw new Error('Selected media upload was not confirmed.')
-    }
+    await stageSelectedRecapFiles(tool, origin, selected)
     const accepted = await tool.request({ ...request, phase: 'accept' })
+    if (accepted.action !== 'write_recap') throw new Error('Wrong recap acceptance response.')
     await recordAcceptedRecap({ context, origin }, accepted.result, true)
     return toolTextResult(true, accepted.result.recapOutcome ?? JSON.stringify(accepted.result))
   } catch (error) {
     return toolTextResult(false, 'Submission was not confirmed. Retry the same local draft; do not regenerate media.', 'handler_exception', error)
   }
+}
+
+async function prepareRecapReadResult(context: AssistantHostedToolContext, result: Awaited<ReturnType<NonNullable<AssistantHostedToolContext['groupTool']>['request']>>) {
+    const game = 'recapGame' in result.result ? result.result.recapGame : null
+    const pending = typeof game === 'object' && game !== null && 'pendingRecapUsages' in game ? z.array(recapUsageSchema).max(20).parse(game.pendingRecapUsages) : []
+    for (const usage of pending) {
+      if (!context.appendGameRecapUsage) throw new Error('Trusted recap lore is unavailable.')
+      await context.appendGameRecapUsage(usage)
+    }
+    if (typeof game === 'object' && game !== null && 'material' in game && context.prepareGameRecapInputs) {
+      return toolTextResult(true, JSON.stringify(await context.prepareGameRecapInputs(game.material)))
+    }  return null
+}
+
+async function executeRecapPreview(context: AssistantHostedToolContext | null, draftPath: string) {
+    if (!context?.currentGameRecapScope?.()?.show || !context.previewGameRecap) return toolTextResult(false, 'Preview requires a bound pair show.', 'authority_rejected')
+    try { return toolTextResult(true, JSON.stringify(await context.previewGameRecap(draftPath))) }
+    catch (error) {
+      const { RecapDraftValidationError } = await import('../../assistant/recap-preview.js')
+      return toolTextResult(false, error instanceof RecapDraftValidationError ? error.message
+        : 'Preview failed. Check the selected file paths, hashes and image formats.', 'invalid_result', error)
+    }
+}
+
+async function stageSelectedRecapFiles(tool: NonNullable<AssistantHostedToolContext['groupTool']>,
+  origin: { kind: 'game_recap'; gameId: string; eventId: string }, selected: { receipt: GameRecapDraft['files'][number]['receipt']; bytes: string }[]) {
+    for (const file of selected) {
+      const staged = await tool.request({ action: 'read_game', origin, recapRead: { kind: 'stage', receipt: file.receipt, bytes: file.bytes } })
+      if (staged.result.status !== 'ok') throw new Error('Selected media upload was not confirmed.')
+    }
 }

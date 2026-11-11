@@ -10,8 +10,18 @@ import { renderRecapPageSvg } from '@murphai/contracts/recap-renderer'
 import { readRecapUsages } from './game-recap-lore.js'
 import { readRecapFile, recapDirectory } from './recap-files.js'
 
+/** Safe draft feedback contains schema paths and constraints, never file contents. */
+export class RecapDraftValidationError extends Error {}
+
 export async function readRecapDraftFile(input: { vault: string; relativeRoot: string; draftPath: string }): Promise<GameRecapDraft> {
-  return gameRecapDraftSchema.parse(JSON.parse((await readRecapFile({ ...input, file: input.draftPath, maxBytes: 128 * 1024 })).toString('utf8')))
+  const bytes = await readRecapFile({ ...input, file: input.draftPath, maxBytes: 128 * 1024 })
+  let value: unknown
+  try { value = JSON.parse(bytes.toString('utf8')) }
+  catch { throw new RecapDraftValidationError('Draft must contain valid JSON.') }
+  const parsed = gameRecapDraftSchema.safeParse(value)
+  if (!parsed.success) throw new RecapDraftValidationError(`Invalid recap draft: ${parsed.error.issues.slice(0, 8)
+    .map(issue => `${issue.path.join('.') || 'draft'}: ${issue.message}`).join('; ')}`)
+  return parsed.data
 }
 
 export async function previewRecap(input: {

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { mockRecapMediaAdmission } from "./helpers/recap-media-admission.ts";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer, type IncomingMessage } from "node:http";
@@ -11,6 +12,8 @@ import type { RunnerOutboundEnvironmentSource } from "../src/runner-outbound.ts"
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import { createPostgresTestOwner, mockPostgresOwnerCommand, nativeProviderTestNamespace } from "./postgres-owner-fixtures.ts";
 import { nativeLiveRequest } from "./fixtures/native-live-request.ts";
+
+beforeEach(() => { mockRecapMediaAdmission(); });
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 

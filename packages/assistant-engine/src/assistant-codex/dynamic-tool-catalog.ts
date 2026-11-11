@@ -1,6 +1,6 @@
 import { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL, VAULT_MEDIA_EXPORT_GUIDANCE } from './dynamic-tools/materialize-vault-media.js'
 export { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from './dynamic-tools/materialize-vault-media.js'
-import { MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, MURPH_MY_GAME_REMINDERS_TOOL } from './dynamic-tools/games.js'
+import { MURPH_PREVIEW_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, MURPH_MY_GAME_REMINDERS_TOOL } from './dynamic-tools/games.js'
 import { MURPH_GET_SENDER_CONTACT_TOOL } from './dynamic-tools/sender-contact.js'
 import { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 export { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
@@ -1845,6 +1845,11 @@ export const MURPH_DYNAMIC_TOOLS = [
   ...MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
 ] as const
 
+export const MURPH_RECAP_IMAGE_TOOL = { ...MURPH_GENERATE_IMAGE_TOOL,
+  description: 'Generate a recap scene into a local file. Follow the task writing guide. Set output=file, a unique stable operationId, JPEG, low or medium quality and manifest reference IDs. Returns a verified file receipt; sends nothing to chat.' } as const
+export const MURPH_RECAP_SONG_TOOL = { ...MURPH_GENERATE_SONG_TOOL,
+  description: 'Generate the recap theme song into a local file. Follow the task writing guide. Set output=file, a unique stable operationId, durationSeconds=20, instrumental=false and a prompt with style and lyrics. Returns a verified file receipt; sends nothing to chat.' } as const
+
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
   | typeof MURPH_EXPRESSIVE_VOICE_MEMO_TOOL
@@ -1853,6 +1858,10 @@ export type MurphDynamicTool =
   | typeof MURPH_MEMBER_MEMORY_TOOL
   | typeof MURPH_READ_GAME_RECAP_TOOL
   | typeof MURPH_WRITE_RECAP_TOOL
+  | typeof MURPH_RECAP_IMAGE_TOOL
+  | typeof MURPH_RECAP_SONG_TOOL
+  | typeof MURPH_PREVIEW_RECAP_TOOL
+  | typeof MURPH_WRITE_RECAP_FILE_TOOL
   | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
   | typeof MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL
   | typeof MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL

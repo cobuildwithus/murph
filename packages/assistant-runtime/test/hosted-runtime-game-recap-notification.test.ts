@@ -45,6 +45,19 @@ beforeEach(() => {
 });
 
 describe("hosted game recap notification", () => {
+  it.each([false, true])("checkpoints only stamps actually written and resumes repair-only work: %s", async resume => {
+    const wake = recapWake();
+    if (wake.notification.responsePolicy?.kind !== "require_game_recap") throw new Error("Expected recap policy");
+    wake.notification.responsePolicy.show = true;
+    const generationIds = ["game-recap:game_prior", EVENT_ID];
+    mocks.sendAssistantNotification.mockResolvedValue({ decision: { kind: "skip", privateSummary: "Synthetic repair." },
+      deliveryOutcome: null, response: null, session: { sessionId: "synthetic" }, recapLoreCheckpointed: generationIds,
+      ...(resume ? { recapLoreRepairOnly: true } : {}) });
+    const result = await executeHostedAssistantNotificationWake({ executionContext: { hosted: { memberId: wake.userId, userEnvKeys: [] } },
+      groupToolPort: { request: vi.fn() }, vaultRoot: "/synthetic-vault", wake });
+    expect(result.postCheckpointRecord).toEqual({ kind: "game.recap-lore-checkpointed", gameId: GAME_ID, eventId: EVENT_ID, generationIds, resume });
+    expect(result.deliveryIntentIds).toEqual([]);
+  });
   it("uses Sol only for the trusted pair-show capability", async () => {
     for (const show of [false, true]) {
       const wake = recapWake();

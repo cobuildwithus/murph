@@ -23,6 +23,7 @@ Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the own
 14. **Plain fallback page ownership:** store two authored text pages and derive the third from the canonical result, so the native show has three pages without duplicating score ownership. Validate the complete three-page plain content through the shared validator. The fallback has no treatment, song, quotes or cards; its locally rendered title cover uses the same private storage and preview capability.
 15. **Lore repair checkpoint:** when an older accepted usage stamp is pending, repair it without a model call or chat send, checkpoint the workspace, acknowledge the exact repaired generations, then resume the same existing mailbox item. This avoids accepting another treatment before its predecessor is durably recorded, without a second queue or scheduler.
 16. **Native execution configuration:** the pinned Codex RPC uses raw dotted override keys, not quoted TOML key segments. An empty environment list disables execution. The parent recap selects the default local environment and applies the exact task permission profile; other game-host turns keep their existing empty environment list. The live journey exposed both differences from the assumed configuration.
+17. **Authorized checkout handoff:** the owner moved the complete working tree and commit snapshots into a checkout created by `scripts/create-worktree`, on `fable/recap-show-pr-a`. Create the seven commits there, prove the committed tree matches the transferred files, then rebase onto fetched `origin/main` and repeat focused verification. Leave the original checkout untouched and do not push.
 
 ## PR A execution
 
@@ -71,14 +72,14 @@ Before release, collect representative control-path latency and complete
 base/head provider-input token measurements; local mocked correctness tests do
 not provide those measurements.
 
-Completion remains blocked at commit creation: the supplied checkout is rejected
-by `scripts/committer` because it bypassed `scripts/create-worktree`; routing
-forbids editing local authorization state. No guard bypass, push, PR, deployment,
-production access or other-worktree mutation is authorized by this execution.
-The owner must resolve checkout authorization before the seven ordered commits
-can be created. Required remote CI and final ReviewGPT await a separately
-authorized pushed candidate. Product rollout status: Hold pending native consumer,
-verified provider input ceiling and those completion gates.
+The checkout authorization blocker is resolved through the owner's handoff.
+Seven ordered commits were created with `scripts/committer`; before rebasing,
+their final tree matched all 133 transferred task files with no extra changed
+paths. Rebase conflicts were confined to the documentation index, preserving
+both the upstream reminder entry and recap presentation entry. The original
+checkout remains untouched. Required remote CI and final ReviewGPT await a
+separately authorized pushed candidate. Product rollout status: Hold pending
+native consumer, verified provider input ceiling and those completion gates.
 
 ## Plan
 
@@ -686,4 +687,3 @@ Full-chat retention: May the existing conversation owners retain the game window
 Provider privacy approval: Are the actual OpenAI image and ElevenLabs account arrangements approved for permitted player photos and bounded game-derived song content, including applicable retention and processing terms? Keep real-user generation disabled until that evidence exists.
 
 The implementation otherwise has enough direction: use the existing notification, existing media primitives, local files, one canonical submission, and the existing storage and delivery owners.
-

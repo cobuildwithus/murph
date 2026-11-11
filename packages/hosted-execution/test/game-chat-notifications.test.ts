@@ -1,3 +1,4 @@
+import { RECAP_SHOW_CRAFT } from "../src/recap-show-craft.ts";
 import { describe, expect, it } from "vitest";
 import { hostedGameChatStateSchema } from "../src/game-tools.ts";
 import { GAME_LIVE_LORE_GUIDANCE, GAME_PRIZE_WORDS, buildGameTalkInstructions, buildGameChangeResolvedInstructions, buildGameChangeExpiredInstructions, buildGameChangeCancelledInstructions, buildGameInviteCancelledInstructions, buildGameCalledOffInstructions, buildGameKickoffInstructions, gameZoneSpreadHours, buildGameMissedDayInstructions, buildGameProposalInstructions, buildGameRecapInstructions, buildGameRematchInstructions } from "../src/game-chat-notifications.ts";
@@ -348,8 +349,9 @@ describe("group Talk notice", () => {
 });
 
 
-it("activates show policy only for an explicitly capable pair", () => {
-  const show = buildGameRecapInstructions([], undefined, false, true);
+it("activates show policy only for an explicitly selected pair", () => {
+  expect(buildGameRecapInstructions([], undefined, false, true)).toContain("craft guide");
+  const show = RECAP_SHOW_CRAFT;
   expect(show).toContain("scene.murph");
   expect(show).toContain("fewer than 3 distinct permitted real-photo entries");
   expect(show).toContain("whole image visible");

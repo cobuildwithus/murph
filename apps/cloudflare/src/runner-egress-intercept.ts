@@ -1220,8 +1220,7 @@ async function maybeHandleOpenAiRequest(input: {
   const { boundedBody, imageGenerationRequested } = bodyRead;
 
   const recapDenied = await checkRecapProviderRequest({ authorization, env: input.env,
-    request: new Request(input.request.url, { method: input.request.method, headers: input.request.headers,
-      ...(boundedBody !== undefined ? { body: boundedBody } : {}) }),
+    request: new Request(input.request.url, { method: input.request.method, headers: input.request.headers, body: boundedBody }),
     media: pathnameSuffix === "/v1/images/generations" || pathnameSuffix === "/v1/images/edits",
     opaque: input.request.method === "GET", nativeImage: imageGenerationRequested });
   if (recapDenied) return recapDenied;
@@ -1303,6 +1302,8 @@ async function handleHostedLiveCreation(input: {
   const startedAt = Date.now();
   const authorization = await authorizeHostedProviderEgress({ ...input, providerKind: "openai" });
   if (!authorization.authorized || !authorization.writeFence) return disallowedProviderEgress();
+  const recapDenied = await checkRecapProviderRequest({ authorization, env: input.env, request: input.request, media: false, opaque: true, nativeImage: false });
+  if (recapDenied) return recapDenied;
   const body = await readBoundedRequestBody(input.request, HOSTED_OPENAI_LIVE_BODY_LIMIT);
   if (body === null) return new Response("Payload Too Large", { status: 413 });
   if (!isHostedLiveCreationBody(body)) return new Response("Invalid Live request.", { status: 400 });
@@ -1327,6 +1328,10 @@ async function handleHostedLiveAttachment(input: {
   const startedAt = Date.now();
   const resource = await authorizeHostedLiveAttachment({ caller: input.ctx, reference: input.reference, source: input.env });
   if (!resource) return disallowedProviderEgress();
+  const recapDenied = await checkRecapProviderRequest({ authorization: { authorized: true, mode: "native_container", durationMs: Date.now() - startedAt,
+    userId: resource.owner.userId, writeFence: { ...resource.owner, workspaceVersion: null } },
+    env: input.env, request: input.request, media: false, opaque: true, nativeImage: false });
+  if (recapDenied) return recapDenied;
   const url = new URL(createProviderUpstreamUrl(input.url, input.pathMatch));
   url.pathname = url.pathname.replace(`/${input.reference}/attach`, `/${encodeURIComponent(resource.sessionId)}/attach`);
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
@@ -3094,6 +3099,8 @@ async function checkRecapProviderRequest(input: {
   authorization: HostedProviderEgressAuthorization; env: RunnerOutboundEnvironmentSource;
   request: Request; media: boolean; opaque: boolean; nativeImage: boolean;
 }): Promise<Response | null> {
+  // This separate bounded smoke owner has no member runtime or recap scope.
+  if (input.authorization.authorized && input.authorization.mode === 'deploy_smoke_live_model_turn') return null;
   try {
     const fence = requireHostedDirectUsageWriteFence(input.authorization);
     let providerRequest: RecapProviderRequest | null = null;

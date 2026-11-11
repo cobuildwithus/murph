@@ -164,7 +164,7 @@ export function presentGameRecap(input: {
     const sceneIndex = page.blocks.findIndex(block => block.kind === "scene");
     const scene = page.blocks[sceneIndex];
     const ids = (scene?.entryIds ?? []).filter(id => input.permittedPhotoIds.has(id)).slice(0, 1);
-    return { id: `page-${index}`, kind: scene ? index === 0 ? "cover" : "scene" : page.blocks.some(block => ["photo", "photoPair", "contactSheet"].includes(block.kind)) ? "print" : "text",
+    return { id: `page-${index}`, kind: index === 0 ? "cover" : scene ? "scene" : page.blocks.some(block => ["photo", "photoPair", "contactSheet"].includes(block.kind)) ? "print" : "text",
       background: page.background,
       blocks: page.blocks.flatMap(block => {
         if (block.kind === "scene") return [];

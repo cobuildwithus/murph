@@ -1,7 +1,9 @@
+import { RECAP_SHOW_CRAFT } from '@murphai/hosted-execution/runtime-control'
+import { constants } from 'node:fs'
 import { recapDirectory } from './recap-files.js'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { access, writeFile } from 'node:fs/promises'
+import { access, open } from 'node:fs/promises'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -57,17 +59,18 @@ export async function materializeRecapWorkspace(input: {
   const referenceFiles = []
   for (const reference of initialReferences) referenceFiles.push(await materializeRecapReference({ ...input, root, material, id: reference.id }))
   const manifest = { version: 1, directory: relativeRoot,
-    game: `${relativeRoot}/inputs/game.json`, chat: `${relativeRoot}/inputs/chat.jsonl`, lore: `${relativeRoot}/inputs/lore.txt`,
+    instructions: `${relativeRoot}/inputs/writing-guide.md`, game: `${relativeRoot}/inputs/game.json`, chat: `${relativeRoot}/inputs/chat.jsonl`, lore: `${relativeRoot}/inputs/lore.txt`,
     references: material.references, referenceFiles, coverage: { since: material.startedAt, until: material.settledAt, retainedSince,
       throughConversationLaneSeq: through, incomplete: incomplete || replies.incomplete,
       gaps: [...(incomplete ? ['Some player history is unavailable or exceeds the export bound.'] : []),
         ...(replies.incomplete ? ['Earlier committed Murph replies may have been trimmed.'] : [])] } }
   await Promise.all([
-    writeFile(path.join(root, 'inputs/material.json'), JSON.stringify(material) + '\n'),
-    writeFile(path.join(root, 'inputs/game.json'), JSON.stringify(material.game, null, 2) + '\n'),
-    writeFile(path.join(root, 'inputs/chat.jsonl'), chat.map(message => JSON.stringify(message)).join('\n') + '\n'),
-    writeFile(path.join(root, 'inputs/lore.txt'), input.lore),
-    writeFile(path.join(root, 'inputs/manifest.json'), JSON.stringify(manifest, null, 2) + '\n'),
+    writeInput(path.join(root, 'inputs/writing-guide.md'), RECAP_SHOW_CRAFT),
+    writeInput(path.join(root, 'inputs/material.json'), JSON.stringify(material) + '\n'),
+    writeInput(path.join(root, 'inputs/game.json'), JSON.stringify(material.game, null, 2) + '\n'),
+    writeInput(path.join(root, 'inputs/chat.jsonl'), chat.map(message => JSON.stringify(message)).join('\n') + '\n'),
+    writeInput(path.join(root, 'inputs/lore.txt'), input.lore),
+    writeInput(path.join(root, 'inputs/manifest.json'), JSON.stringify(manifest, null, 2) + '\n'),
   ])
   return { root, material, chat, manifest }
 }
@@ -94,7 +97,7 @@ export async function fetchRecapReference(input: {
 export async function materializeRecapReference(input: Parameters<typeof fetchRecapReference>[0] & { root: string; vault: string }) {
   const reference = await fetchRecapReference(input)
   const file = path.join(input.root, 'inputs', `${reference.id}.jpg`)
-  await writeFile(file, reference.bytes, { mode: 0o600 })
+  await writeInput(file, reference.bytes)
   return { id: reference.id, path: path.relative(input.vault, file), hash: reference.hash }
 }
 
@@ -122,4 +125,9 @@ export async function readCommittedRecapReplies(vault: string, sessionId: string
     if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error
   }
   return { messages, incomplete: first === undefined || Date.parse(first) > Date.parse(since) }
+}
+
+async function writeInput(file: string, data: string | Uint8Array) {
+  const handle = await open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600)
+  try { await handle.writeFile(data) } finally { await handle.close() }
 }

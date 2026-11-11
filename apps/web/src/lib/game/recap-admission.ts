@@ -33,8 +33,9 @@ export async function requireRecapAdmissionAuthorityTx(tx: Prisma.TransactionCli
   const owner = await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
   await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
   await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
+  const witness = await tx.gameEvent.findUnique({ where: { commandKey: `${input.eventId}:witness` }, select: { id: true } });
   const game = await tx.game.findUnique({ where: { id: input.gameId }, include: { players: { take: 3 }, invitees: true } });
-  if (!game || !isPairRecapShowEnabled(game.maxPlayers) || game.status !== 'settled' || game.players.length !== 2
+  if (!witness || !game || !isPairRecapShowEnabled(game.maxPlayers) || game.status !== 'settled' || game.players.length !== 2
     || game.players.some(player => !player.memberId || player.leftAt) || !await readGameChatAuthority(game, input.memberId, audience, tx)
     || await readLatestGameRecapEventIdTx(tx, game.id) !== input.eventId
     || await isGameRecapGenerationRetired(tx, input.eventId, input.memberId)
@@ -51,21 +52,21 @@ export async function handleRecapAdmission(input: Identity & { command: Control;
     ? await readRecapSourceReferences(input.material, input.eventId) : [];
   const selected: RecapSourceReference[] = [];
   if (command.kind === 'reserve' && command.providerRequest.kind === 'image') {
-    const wanted = new Set(command.providerRequest.referenceHashes);
+    const wanted = command.providerRequest.referenceHashes;
     // At most the three reference IDs requested by the host; the manifest itself
     // does not grant authority. Avoid normalizing every photo in a long game.
     const ids = command.referenceIds ?? [];
-    for (const id of ids) {
+    if (ids.length !== wanted.length) throw new Error('Unapproved recap reference bytes.');
+    for (const [index, id] of ids.entries()) {
       const ref = references.find(reference => reference.id === id);
       if (!ref) throw new Error('Recap reference was revoked.');
       const bytes = await readRecapReferenceBytes(ref);
-      if (!bytes || !wanted.has(bytes.hash)) throw new Error('Recap reference bytes changed.');
-      wanted.delete(bytes.hash); selected.push(ref);
+      if (!bytes || wanted[index] !== bytes.hash) throw new Error('Recap reference bytes changed.');
+      selected.push(ref);
     }
-    if (wanted.size) throw new Error('Unapproved recap reference bytes.');
   }
   return getPrisma().$transaction(async tx => {
-    const { owner } = await requireRecapAdmissionAuthorityTx(tx, input, audience);
+    const { owner, game } = await requireRecapAdmissionAuthorityTx(tx, input, audience);
     const prior = await tx.gameEvent.findUnique({ where: { commandKey: commandKey(input.eventId) }, select: { payload: true } });
     let state: StoredRecapAdmission = prior ? storedRecapAdmissionSchema.parse(prior.payload)
       : { v: 1, deadline: new Date(Date.now() + RECAP_DEADLINE_MS).toISOString(), runs: [], operations: [] };
@@ -84,7 +85,10 @@ export async function handleRecapAdmission(input: Identity & { command: Control;
       }
       return { ended: true };
     } else if (command.kind === 'lore_checkpointed') {
-      await tx.gameEvent.updateMany({ where: { gameId: input.gameId, commandKey: `${input.eventId}:lore`, type: 'recap_lore_pending' }, data: { type: 'recap_lore_stamped' } });
+      await tx.gameEvent.updateMany({ where: { commandKey: { in: command.generationIds.map(id => `${id}:lore`) }, type: 'recap_lore_pending',
+        game: { maxPlayers: 2, chatContainerMemberId: input.memberId,
+          players: { every: { memberId: { in: game.players.flatMap(player => player.memberId ? [player.memberId] : []) }, leftAt: null } },
+          AND: game.players.map(player => ({ players: { some: { memberId: player.memberId, leftAt: null } } })) } }, data: { type: 'recap_lore_stamped' } });
       return { checkpointed: true };
     } else if (command.kind === 'reserve') {
       const scope = scopeSchema.parse(owner.recapMediaScope);
@@ -98,12 +102,7 @@ export async function handleRecapAdmission(input: Identity & { command: Control;
         pricing: RECAP_MEDIA_PRICING_VERSION, referenceIds: selected.map(reference => reference.id), references: selected.map(({ id: _id, ...reference }) => reference) }] };
       result = { token, deadline: state.deadline };
     } else if (command.kind === 'finished') {
-      const operation = state.operations.find(operation => operation.id === command.operationId && operation.tokenHash === hash(command.token));
-      if (!operation || !operation.consumed) throw new Error('Media reservation was not consumed.');
-      if (command.receipt && (command.receipt.operationId !== operation.id || command.receipt.mediaType !== (operation.kind === 'image' ? 'image/jpeg' : 'audio/mpeg'))) throw new Error('Media receipt does not match its reservation.');
-      if (operation.receipt && JSON.stringify(operation.receipt) !== JSON.stringify(command.receipt)) throw new Error('Media receipt is immutable.');
-      operation.active = false;
-      if (command.receipt) operation.receipt = command.receipt;
+      finishRecapOperation(state, command);
       result = { finished: true };
     } else throw new Error('Unsupported recap control.');
     await tx.gameEvent.upsert({ where: { commandKey: commandKey(input.eventId) },
@@ -148,4 +147,13 @@ export async function consumeRecapProviderReservation(input: {
     await tx.gameEvent.update({ where: { commandKey: commandKey(scope.data.eventId) }, data: { payload: state } });
     return { scoped: true, allowed: true };
   });
+}
+
+function finishRecapOperation(state: StoredRecapAdmission, command: Extract<Control, { kind: 'finished' }>) {
+      const operation = state.operations.find(operation => operation.id === command.operationId && operation.tokenHash === hash(command.token));
+      if (!operation || !operation.consumed) throw new Error('Media reservation was not consumed.');
+      if (command.receipt && (command.receipt.operationId !== operation.id || command.receipt.mediaType !== (operation.kind === 'image' ? 'image/jpeg' : 'audio/mpeg'))) throw new Error('Media receipt does not match its reservation.');
+      if (operation.receipt && JSON.stringify(operation.receipt) !== JSON.stringify(command.receipt)) throw new Error('Media receipt is immutable.');
+      operation.active = false;
+      if (command.receipt) operation.receipt = command.receipt;
 }

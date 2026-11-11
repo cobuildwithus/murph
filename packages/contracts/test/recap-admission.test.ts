@@ -5,7 +5,7 @@ const image: RecapProviderRequest = { kind: 'image', model: 'gpt-image-2.6-flare
   size: '1024x1024', quality: 'medium', outputFormat: 'jpeg', referenceHashes: [] }
 const now = new Date('2026-11-11T00:00:00Z')
 const initial = (): RecapAdmissionState => ({ v: 1, deadline: '2026-11-11T00:10:00Z', runs: ['run'], operations: [] })
-const reserve = (state: RecapAdmissionState, id: string, reserved = 300_000, request = image) => reserveRecapOperation(state, { id, runId: 'run', request, reserved, now })
+const reserve = (state: RecapAdmissionState, id: string, reserved = 300_000, request: RecapProviderRequest = image) => reserveRecapOperation(state, { id, runId: 'run', request, reserved, now })
 
 test('prospective reservations enforce total cost, count, concurrency, retries and deadline', () => {
   let state = reserve(initial(), 'one')

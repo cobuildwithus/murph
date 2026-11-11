@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+import { readGameRecapEntryIdsTx, readLatestGameRecapEventIdTx } from "./recap-witness";
 import "server-only";
 import type { RecapTranscriptPage } from "@murphai/contracts/recap-material";
 import { isHostedLinqConversationMessageWake, isHostedTelegramConversationMessageWake } from "@murphai/hosted-execution";
@@ -12,13 +14,19 @@ export async function readRecapTranscriptPage(input: {
   containerMemberId: string; gameId: string; eventId: string;
   players: readonly { memberId: string; name: string }[];
   since: Date; until: Date; after?: string;
+  beforeMutationTx: (tx: Prisma.TransactionClient) => Promise<void>;
 }): Promise<RecapTranscriptPage> {
   const db = getPrisma();
   const now = new Date();
   const retainedSince = new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
   // One structural GameEvent owns the settlement watermark across pages/retries.
   const through = await db.$transaction(async tx => {
+    await input.beforeMutationTx(tx);
     await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.gameId} FOR UPDATE`;
+    const game = await tx.game.findUnique({ where: { id: input.gameId }, include: { players: { take: 3 } } });
+    if (!game || game.chatContainerMemberId !== input.containerMemberId || game.status !== 'settled'
+      || game.players.some(player => !input.players.some(allowed => allowed.memberId === player.memberId) || player.leftAt)
+      || await readLatestGameRecapEventIdTx(tx, game.id) !== input.eventId || !await readGameRecapEntryIdsTx(tx, game, input.eventId)) throw new Error('Transcript authority changed.');
     const key = `${input.eventId}:transcript`;
     const prior = await tx.gameEvent.findUnique({ where: { commandKey: key }, select: { payload: true } });
     if (prior) {
@@ -55,22 +63,11 @@ export async function readRecapTranscriptPage(input: {
   let incomplete = input.since < retainedSince;
   for (const [index, payload] of decoded.entries()) {
     if (!payload) { incomplete = true; continue; }
-    const wake = parseHostedExecutionWake(payload);
-    if (wake.kind !== "conversation.message") continue;
-    if (!isHostedLinqConversationMessageWake(wake) && !isHostedTelegramConversationMessageWake(wake)) continue;
-    const route = wake.message.routeAuthority;
-    if (!route || route.containerMemberId !== input.containerMemberId) continue;
-    let sender: string;
-    let text: string;
-    if (isHostedLinqConversationMessageWake(wake)) {
-      if (wake.message.linqMessage.isFromMe || wake.message.linqMessage.threadIsDirect || route.channel !== "linq" || route.threadId !== wake.message.linqMessage.chatId) continue;
-      sender = `linq:${wake.message.linqMessage.from}`;
-      text = wake.message.linqMessage.parts.flatMap(part => part.type === "text" ? [part.value] : []).join("\n");
-    } else if (isHostedTelegramConversationMessageWake(wake)) {
-      if (wake.message.telegramMessage.threadIsDirect || route.channel !== "telegram" || route.threadId !== wake.message.telegramMessage.threadId) continue;
-      sender = `telegram:${wake.message.telegramMessage.from ?? ""}`;
-      text = wake.message.telegramMessage.text?.trim() ?? "";
-    } else continue;
+    let evidence: ReturnType<typeof readRecapMessageEvidence>;
+    try { evidence = readRecapMessageEvidence(payload, input.containerMemberId); }
+    catch { incomplete = true; continue; }
+    if (!evidence) continue;
+    const { wake, route, sender, text } = evidence;
     // Bounded by the authorized room's senders; resolve sequentially, never one transaction per message.
     if (!senders.has(sender)) senders.set(sender, await resolveHostedGroupMessageSenderMemberId({ prisma: db, routeAuthority: route, wake }));
     const member = senders.get(sender);
@@ -93,4 +90,24 @@ export async function readRecapTranscriptForValidation(input: Omit<Parameters<ty
     after = result.next;
   }
   throw new RangeError("Recap transcript exceeds the bounded export; use canonical posts without chat quotes.");
+}
+
+function readRecapMessageEvidence(payload: unknown, containerMemberId: string) {
+    const wake = parseHostedExecutionWake(payload);
+    if (wake.kind !== "conversation.message") return null;
+    if (!isHostedLinqConversationMessageWake(wake) && !isHostedTelegramConversationMessageWake(wake)) return null;
+    const route = wake.message.routeAuthority;
+    if (!route || route.containerMemberId !== containerMemberId) return null;
+    let sender: string;
+    let text: string;
+    if (isHostedLinqConversationMessageWake(wake)) {
+      if (wake.message.linqMessage.isFromMe || wake.message.linqMessage.threadIsDirect || route.channel !== "linq" || route.threadId !== wake.message.linqMessage.chatId) return null;
+      sender = `linq:${wake.message.linqMessage.from}`;
+      text = wake.message.linqMessage.parts.flatMap(part => part.type === "text" ? [part.value] : []).join("\n");
+    } else if (isHostedTelegramConversationMessageWake(wake)) {
+      if (wake.message.telegramMessage.threadIsDirect || route.channel !== "telegram" || route.threadId !== wake.message.telegramMessage.threadId) return null;
+      sender = `telegram:${wake.message.telegramMessage.from ?? ""}`;
+      text = wake.message.telegramMessage.text?.trim() ?? "";
+    } else return null;
+  return { wake, route, sender, text };
 }

@@ -585,70 +585,136 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await sealGameRecap({ ...scope, recap: { ...recap, treatment: "Rejected candidate" } })).toEqual(recap);
     expect(await readPendingRecapUsages(scope)).toEqual([{ generationId: eventId, treatment: recap.treatment, chatLine: recap.chatLine }]);
   });
-  it("atomically accepts a show envelope, cleanup identities and one durable asset wake", async () => {
-    const a = await member("PlayerA", "UTC", true), b = await member("PlayerB", "UTC");
-    const room = await member("Room", "UTC", true);
-    const db = getPrisma();
+  it("finishes exhausted attempts with a canonical fallback and a complete cover", async () => {
+    const a = await member("PlayerA", "UTC", true), b = await member("PlayerB", "UTC", true);
+    const room = await member("Room", "UTC", true), db = getPrisma();
     const { gameId } = await startGame(a, b);
     await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
     await devStartNow(gameId, a); await devSettleNow(gameId, a);
     const eventId = gameChatLifecycleEventId(gameId, "recap");
     await markGameChatGenerationQueuedTx(eventId, db, room);
-    await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: `game/${a}/${"a".repeat(64)}.jpg` } });
-    await db.gameProfile.update({ where: { memberId: b }, data: { photoKey: `game/${b}/${"b".repeat(64)}.jpg` } });
+    const { recordGameRecapWitnessTx } = await import("@/src/lib/game/recap-witness");
+    await db.$transaction(tx => recordGameRecapWitnessTx(tx, gameId, eventId));
+    vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
+    vi.stubEnv("MURPH_GAME_RECAP_MEDIA_DIR", path.join(mediaDir, "recap"));
+    const ownerModule = await import("@/src/lib/hosted-execution/runtime-owner");
+    const accessModule = await import("@/src/lib/hosted-mailbox/runtime-access");
+    await db.hostedRuntimeOwner.upsert({ where: { userId: room }, create: { userId: room }, update: {} });
+    const fence = vi.spyOn(ownerModule, "requireHostedRuntimeCallbackTx").mockImplementation(async tx => tx.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: room } }));
+    const active = vi.spyOn(accessModule, "requireHostedRuntimeActiveAccessForUpdateTx").mockResolvedValue();
+    try {
+      const { handleRecapAdmission } = await import("@/src/lib/game/recap-admission");
+      const { prepareRecapSubmission } = await import("@/src/lib/game/recap-submission");
+      const { buildRecapFallback } = await import("@/src/lib/game/recap-fallback");
+      const identity = { memberId: room, runtimeIdentity: null, gameId, eventId };
+      const material = (await readGameRecapMaterial(gameId, room, [a, b], eventId))!;
+      const story = buildRecapFallback(material), draft = { story, files: [] };
+      await handleRecapAdmission({ ...identity, material, command: { kind: "admit", runId: randomUUID() } });
+      await expect(prepareRecapSubmission({ ...identity, draft, trustedFallback: true })).rejects.toThrow("attempts remain");
+      await handleRecapAdmission({ ...identity, material, command: { kind: "admit", runId: randomUUID() } });
+      expect(await handleRecapAdmission({ ...identity, material, command: { kind: "admit", runId: randomUUID() } })).toMatchObject({ admitted: false });
+      await prepareRecapSubmission({ ...identity, draft, trustedFallback: true });
+      const scope = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [a, b] };
+      expect(await sealGameRecap({ ...scope, recap: story, files: [] })).toEqual(story);
+      expect(await sealGameRecap({ ...scope, recap: null })).toEqual(story);
+      const presented = (await readGame(gameId, a))?.recap;
+      expect(presented?.show?.pages.map(page => page.kind)).toEqual(["cover", "text", "result"]);
+      expect(presented?.show?.pages.some(page => page.kind === "song" || page.kind === "superlative")).toBe(false);
+      const { readRecapEnvelope } = await import("@/src/lib/game/recap-asset-access");
+      expect((await readRecapEnvelope(gameId))?.envelope.assets).toEqual([expect.objectContaining({ recipeId: "fallback-cover", status: "ready" })]);
+      expect(await db.hostedMailboxItem.count({ where: { userId: room } })).toBe(0);
+    } finally {
+      fence.mockRestore(); active.mockRestore(); vi.unstubAllEnvs();
+      await db.hostedRuntimeOwner.deleteMany({ where: { userId: room } });
+      await db.hostedRuntimeOrphan.deleteMany({ where: { kind: "game_recap", resourceId: { startsWith: `${gameId}|` } } });
+    }
+  });
+  it("reserves once, freezes selected files, uploads before acceptance and creates no generator wake", async () => {
+    const a = await member("PlayerA", "UTC", true), b = await member("PlayerB", "UTC", true);
+    const room = await member("Room", "UTC", true), db = getPrisma();
+    const { gameId } = await startGame(a, b);
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await devStartNow(gameId, a); await devSettleNow(gameId, a);
+    const eventId = gameChatLifecycleEventId(gameId, "recap");
+    await markGameChatGenerationQueuedTx(eventId, db, room);
+    const { recordGameRecapWitnessTx } = await import("@/src/lib/game/recap-witness");
+    await db.$transaction(tx => recordGameRecapWitnessTx(tx, gameId, eventId));
     const recap = { treatment: "Courtroom drama", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
-      scene: { cast: ["PlayerA", "PlayerB"], murph: true as const, prompt: "A synthetic courtroom with both players and the approved robot inspecting a mat on the witness stand." } }] }], chatLine: "The mat entered evidence." };
+      scene: { cast: ["PlayerA", "PlayerB"], prompt: "A synthetic paper courtroom stage with a rolled mat on a witness stand, with warm lighting and simple wooden benches." } }] }], chatLine: "The mat entered evidence." };
     const scope = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [a, b] };
     vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
     vi.stubEnv("MURPH_GAME_RECAP_MEDIA_DIR", path.join(mediaDir, "recap"));
     const ownerModule = await import("@/src/lib/hosted-execution/runtime-owner");
     const accessModule = await import("@/src/lib/hosted-mailbox/runtime-access");
-    const runtimeOwner = await db.hostedRuntimeOwner.upsert({ where: { userId: room }, create: { userId: room }, update: {} });
-    const fence = vi.spyOn(ownerModule, "requireHostedRuntimeCallbackTx").mockResolvedValue(runtimeOwner);
+    await db.hostedRuntimeOwner.upsert({ where: { userId: room }, create: { userId: room }, update: {} });
+    const fence = vi.spyOn(ownerModule, "requireHostedRuntimeCallbackTx").mockImplementation(async tx => tx.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: room } }));
     const active = vi.spyOn(accessModule, "requireHostedRuntimeActiveAccessForUpdateTx").mockResolvedValue();
     try {
-      expect(await sealGameRecap({ ...scope, recap })).toEqual(recap);
-      expect(await sealGameRecap({ ...scope, recap: null })).toEqual(recap);
-      const { readRecapEnvelope, recapReferencesCurrent } = await import("@/src/lib/game/recap-asset-access");
-      const accepted = (await readRecapEnvelope(gameId))!;
-      expect(accepted.envelope.assets).toHaveLength(1);
-      expect(accepted.envelope.assets[0]).toMatchObject({ status: "pending", references: [{ kind: "profile", memberId: a }, { kind: "profile", memberId: b }, { kind: "murph" }] });
-      expect(await db.hostedRuntimeOrphan.count({ where: { kind: "game_recap", resourceId: { startsWith: `${gameId}|` } } })).toBe(1);
-      expect(await db.hostedMailboxItem.count({ where: { userId: room, kind: "game.recap-assets-requested" } })).toBe(1);
-      expect((await readGame(gameId, a, false))?.recap?.show?.pages[0]?.media?.status).toBe("pending");
-      expect((await readGame(gameId, a))?.recap?.show).toBeUndefined();
-      expect(await recapReferencesCurrent(db, gameId, accepted.envelope.assets)).toBe(true);
-      const { handleRecapAssets } = await import("@/src/lib/game/recap-asset-task");
-      const control = (command: import("@murphai/hosted-execution/runtime-control").RecapAssetsRequest["command"]) => handleRecapAssets({ memberId: room, runtimeIdentity: null,
-        request: { action: "recap_assets", gameId, eventId, generationId: accepted.envelope.generationId, command } });
-      const claims = await Promise.all([control({ operation: "claim", slot: "scene-0" }), control({ operation: "claim", slot: "scene-0" })]);
-      expect(claims.filter(result => result.result.claimed)).toHaveLength(1);
+      const { handleRecapAdmission, consumeRecapProviderReservation } = await import("@/src/lib/game/recap-admission");
+      const { prepareRecapSubmission, stageRecapSubmissionFile } = await import("@/src/lib/game/recap-submission");
       const sharp = (await import("sharp")).default;
-      const bytes = await sharp({ create: { width: 2, height: 2, channels: 3, background: { r: 0, g: 0, b: 0 } } }).jpeg().toBuffer();
-      await control({ operation: "stage", slot: "scene-0", recipeId: accepted.envelope.assets[0]!.recipeId, bytes: bytes.toString("base64") });
-      expect((await readRecapEnvelope(gameId))!.envelope.assets[0]!.status).toBe("ready");
-      expect(fence).toHaveBeenCalled();
-      const { readAuthorizedRecapAsset } = await import("@/src/lib/game/recap-asset-access");
+      const bytes = await sharp({ create: { width: 2, height: 2, channels: 3, background: "#abcdef" } }).jpeg().toBuffer();
+      for (const player of [a, b]) {
+        const key = await putGameMedia({ bytes, contentType: "image/jpeg", prefix: mediaKeyPrefixFor(player) });
+        await db.gameProfile.update({ where: { memberId: player }, data: { photoKey: key } });
+      }
+      const material = (await readGameRecapMaterial(gameId, room, [a, b], eventId))!;
+      const { readRecapSourceReferences, readRecapReferenceBytes } = await import("@/src/lib/game/recap-inputs");
+      const references = (await readRecapSourceReferences(material, eventId)).filter(ref => ref.kind === 'profile');
+      const referenceHashes = await Promise.all(references.map(async ref => (await readRecapReferenceBytes(ref))!.hash));
+      vi.stubEnv('MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING', '20000');
+      const identity = { memberId: room, runtimeIdentity: null, gameId, eventId }, runId = randomUUID();
+      await handleRecapAdmission({ ...identity, material, command: { kind: "admit", runId } });
+      const providerRequest = { kind: "image" as const, model: "gpt-image-2.6-flare" as const, requestHash: "a".repeat(64),
+        promptBytes: 300, size: "1024x1024" as const, quality: "low" as const, outputFormat: "jpeg" as const, referenceHashes };
+      const command = { kind: "reserve" as const, runId, operationId: "synthetic-cover", providerRequest, referenceIds: references.map(ref => ref.id) };
+      const concurrent = await Promise.allSettled([handleRecapAdmission({ ...identity, material, command }), handleRecapAdmission({ ...identity, material, command })]);
+      expect(concurrent.filter(item => item.status === "fulfilled")).toHaveLength(1);
+      const reserved = concurrent.find(item => item.status === "fulfilled");
+      if (reserved?.status !== "fulfilled" || !reserved.value || typeof reserved.value !== "object" || !("token" in reserved.value) || typeof reserved.value.token !== "string") throw new Error("Missing reservation.");
+      const token = reserved.value.token;
+      const runtimeIdentity = { userId: room, attemptId: "synthetic-attempt", generation: "1" };
+      expect(await consumeRecapProviderReservation({ memberId: room, runtimeIdentity, providerRequest })).toEqual({ scoped: true, allowed: false });
+      expect(await consumeRecapProviderReservation({ memberId: room, runtimeIdentity, nativeImage: true })).toEqual({ scoped: true, allowed: false });
+      expect(await consumeRecapProviderReservation({ memberId: room, runtimeIdentity, token,
+        providerRequest: { ...providerRequest, requestHash: "b".repeat(64) } })).toEqual({ scoped: true, allowed: false });
+      const profile = await db.gameProfile.findUniqueOrThrow({ where: { memberId: a } });
+      await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: null } });
+      expect(await consumeRecapProviderReservation({ memberId: room, runtimeIdentity, token, providerRequest })).toEqual({ scoped: true, allowed: false });
+      await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: profile.photoKey } });
+      const consumes = await Promise.all([0, 1].map(() => consumeRecapProviderReservation({ memberId: room, runtimeIdentity, token, providerRequest })));
+      expect(consumes.filter(result => result.allowed)).toHaveLength(1);
+      expect(await consumeRecapProviderReservation({ memberId: room, runtimeIdentity, token, providerRequest })).toEqual({ scoped: true, allowed: false });
+
+      const { createHash } = await import("node:crypto");
+      const receipt = { operationId: command.operationId, path: ".runtime/tmp/recap/synthetic/media/cover.jpg", hash: createHash("sha256").update(bytes).digest("hex"), mediaType: "image/jpeg" as const, byteLength: bytes.length, width: 2, height: 2 };
+      await handleRecapAdmission({ ...identity, material, command: { kind: "finished", operationId: command.operationId, token, receipt } });
+      const files = [{ slot: "scene-0", receipt }];
+      await prepareRecapSubmission({ ...identity, draft: { story: recap, files } });
+      await expect(prepareRecapSubmission({ ...identity, draft: { story: { ...recap, chatLine: "Changed" }, files } })).rejects.toThrow("frozen");
+      await expect(sealGameRecap({ ...scope, recap, files })).rejects.toThrow("not been uploaded");
+      await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: null } });
+      await expect(stageRecapSubmissionFile({ ...identity, receipt, bytes: bytes.toString("base64") })).rejects.toThrow("revoked");
+      await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: profile.photoKey } });
+      await stageRecapSubmissionFile({ ...identity, receipt, bytes: bytes.toString("base64") });
+      expect(await sealGameRecap({ ...scope, recap, files })).toEqual(recap);
+      expect(await sealGameRecap({ ...scope, recap: null })).toEqual(recap);
+      const { readRecapEnvelope, readAuthorizedRecapAsset } = await import("@/src/lib/game/recap-asset-access");
+      const accepted = (await readRecapEnvelope(gameId))!;
+      expect(accepted.envelope.assets[0]).toMatchObject({ status: "ready", hash: receipt.hash });
+      expect(await db.hostedMailboxItem.count({ where: { userId: room } })).toBe(0);
+      expect((await readGame(gameId, a))?.recap?.show?.pages[0]?.media?.status).toBe("ready");
       const assetInput = { gameId, generationId: accepted.envelope.generationId, slot: "scene-0", memberId: a };
       expect((await readAuthorizedRecapAsset(assetInput))?.bytes.length).toBe(bytes.length);
       expect(await readAuthorizedRecapAsset({ ...assetInput, memberId: room })).toBeNull();
-      expect(await readAuthorizedRecapAsset({ ...assetInput, generationId: "f".repeat(32) })).toBeNull();
       const { readRecapCoverPreview } = await import("@/src/lib/game/recap-preview");
       expect((await readRecapCoverPreview(gameId, accepted.envelope.preview.token))?.length).toBe(bytes.length);
-      expect((await control({ operation: "delivery_gate" })).result.deferUntil).toBeUndefined();
       expect(await readPendingRecapUsages(scope)).toHaveLength(1);
-      await control({ operation: "lore_checkpointed" });
-      await control({ operation: "lore_checkpointed" });
+      await handleRecapAdmission({ ...identity, material, command: { kind: "lore_checkpointed", generationIds: [eventId] } });
       expect(await readPendingRecapUsages(scope)).toEqual([]);
-      await db.gameProfile.update({ where: { memberId: b }, data: { photoKey: null } });
-      expect(await recapReferencesCurrent(db, gameId, accepted.envelope.assets)).toBe(false);
-      expect(await readAuthorizedRecapAsset(assetInput)).toBeNull();
-      expect(await readRecapCoverPreview(gameId, accepted.envelope.preview.token)).toBeNull();
-      expect((await control({ operation: "stage", slot: "scene-0", recipeId: accepted.envelope.assets[0]!.recipeId, bytes: bytes.toString("base64") })).result.status).toBe("unavailable");
     } finally {
-      fence.mockRestore(); active.mockRestore();
+      fence.mockRestore(); active.mockRestore(); vi.unstubAllEnvs();
       await db.hostedRuntimeOwner.deleteMany({ where: { userId: room } });
-      vi.unstubAllEnvs();
       await db.hostedRuntimeOrphan.deleteMany({ where: { kind: "game_recap", resourceId: { startsWith: `${gameId}|` } } });
     }
   });

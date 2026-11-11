@@ -19,7 +19,7 @@ export async function prepareRecapGeneration(input: {
   row: Game; story: GameRecapStory; eventId: string; playerMemberIds: readonly string[];
   files?: GameRecapDraft['files']; beforeMutationTx: (tx: Prisma.TransactionClient) => Promise<void>;
 }) {
-  if (!isPairRecapShowEnabled(input.row.maxPlayers) || !input.story.treatment || !input.row.chatContainerMemberId) return null;
+  if (!isPairRecapShowEnabled(input.row.maxPlayers) || (!input.story.treatment && input.files === undefined) || !input.row.chatContainerMemberId) return null;
   if (!input.files) throw new Error('Pair shows require a selected-file submission.');
   const db = getPrisma();
   const material = await readGameRecapMaterial(input.row.id, input.row.chatContainerMemberId, input.playerMemberIds, input.eventId);
@@ -42,11 +42,11 @@ export async function prepareRecapGeneration(input: {
   const now = new Date();
   // A cover is always complete at acceptance. Failed image generation gets a
   // deterministic title card; capability previews never reveal a raw player photo.
-  if (!assets.some(asset => asset.slot === 'scene-0') && input.story.pages[0]?.blocks.some(block => block.kind === 'scene')) {
+  if (!assets.some(asset => asset.slot === 'scene-0') && input.story.pages[0]) {
     const first = input.story.pages[0];
     const rendered = renderRecapPageSvg({ page: { id: 'cover', kind: 'cover', background: first.background,
-      blocks: first.blocks.filter(block => block.kind !== 'scene').map(({ scene: _scene, ...block }) => ({ ...block, kind: block.kind as Exclude<typeof block.kind, 'scene'> })) },
-      treatment: input.story.treatment, photos: new Map(), result: material.validation.result });
+      blocks: first.blocks.flatMap(({ scene: _scene, ...block }) => block.kind === 'scene' ? [] : [{ ...block, kind: block.kind }]) },
+      treatment: input.story.treatment ?? '', photos: new Map(), result: material.validation.result });
     const bytes = await sharp(Buffer.from(rendered.svg)).jpeg({ quality: 85 }).toBuffer();
     const hash = createHash('sha256').update(bytes).digest('hex');
     const storageKey = `recap/${generationId}/${hash}.jpg`;

@@ -304,6 +304,16 @@ describe('game recap dynamic contract', () => {
     if (parsed?.kind !== 'game' || parsed.request.action !== 'write_recap') throw new Error('Expected recap request')
     expect(parsed.request.recap).toEqual(candidate)
   })
+  it('gives a pair show only file media, preview, submission, read and lore tools', async () => {
+    const tools = resolveAssistantGameHostDynamicTools({ currentGameRecapScope: () => ({ gameId: 'game', eventId: 'game-recap:game', pairFingerprint: 'a'.repeat(32), show: true }) })
+    expect(tools.map(tool => tool.name)).toEqual(['read_game', 'preview_recap', 'write_recap', 'game_lore', 'generate_image', 'generate_song'])
+    expect(tools.filter(tool => tool.name.startsWith('generate_')).every(tool => tool.description.includes('sends nothing to chat'))).toBe(true)
+    const { buildGameRecapInstructions, RECAP_SHOW_CRAFT } = await import('@murphai/hosted-execution/runtime-control')
+    const instructions = buildGameRecapInstructions([], undefined, false, true)
+    expect(instructions).toContain('parent')
+    expect(instructions).not.toContain('bounded current-room transcript')
+    for (const rule of ['Jokes may exaggerate, facts may not', 'setup above', 'whole prints', 'Most likely to', 'theme song', 'Do not call providers from shell']) expect(RECAP_SHOW_CRAFT).toContain(rule)
+  })
   it('gives isolated recap and check-in turns only their host-owned tools', () => {
     expect(resolveAssistantGameHostDynamicTools({ currentGameRecapScope: () => ({ gameId: 'game', eventId: 'game-recap:game', pairFingerprint: 'a'.repeat(32) }) }))
       .toEqual([MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL])

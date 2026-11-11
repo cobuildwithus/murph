@@ -271,6 +271,7 @@ export function createAssistantHostedToolContext(input: {
   ) => void
   recordGroupEmailPendingDeliveryIntentId?: (intentId: string) => void
   recordSavedGameRecapChatLine?: (chatLine: string) => void
+  recordGameRecapUsageStamped?: (generationId: string) => void
   verifyGeneratedImageDelivery?: (input: {
     contentType: AssistantVaultImageResponseMedia['contentType']
     imageRef: string
@@ -703,6 +704,7 @@ export function createAssistantHostedToolContext(input: {
     appendGameRecapUsage: async usage => {
       if (!executionContext?.gameRecapScope?.show) return
       await writeGameLore(appendRecapUsage(await readGameLore(), usage))
+      input.recordGameRecapUsageStamped?.(usage.generationId)
     },
     appendGameRecapChatLine: async (chatLine) => {
       if (executionContext?.gameRecapScope?.loreAccess !== 'read') return

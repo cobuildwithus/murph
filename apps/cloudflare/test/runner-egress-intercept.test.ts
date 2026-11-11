@@ -1,3 +1,4 @@
+import { mockRecapMediaAdmission } from "./helpers/recap-media-admission.ts";
 import { createCloudflareHostedProviderFetch } from "../src/runtime-platform/provider-fetch.ts";
 import type { TestProviderContext } from "./postgres-owner-fixtures.ts";
 import { createPostgresTestOwner } from "./postgres-owner-fixtures.ts";
@@ -371,6 +372,7 @@ const interceptControl = new WeakMap<Readonly<Record<string, unknown>>, {
   input: Parameters<typeof createInterceptEnv>[0]; owner: HostedRuntimeOwnerSnapshot | null; revoked: boolean;
 }>();
 beforeEach(() => {
+  mockRecapMediaAdmission();
   vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner").mockImplementation(async ({ source, userId, command }) => {
     const state = interceptControl.get(source);
     if (!state) throw new Error("Missing synthetic canonical owner.");
@@ -1475,6 +1477,25 @@ describe("hostedRunnerIntercept", () => {
     const upstream = findFetchCall(fetchMock, "api.openai.com");
     expect(Boolean(upstream)).toBe(status === 200);
     expect(fetchMock.mock.calls.filter(([target]) => new URL(readFetchTargetUrl(target)).pathname !== "/api/internal/hosted-runtime/log")).toHaveLength(Number(image) + Number(status === 200));
+  });
+
+  it.each([
+    { path: '/v1/images/generations', method: 'POST', body: { model: 'gpt-image-2.6-flare', prompt: 'Synthetic stage', size: '1024x1024', quality: 'low', output_format: 'jpeg' }, status: 403 },
+    { path: '/v1/responses', method: 'POST', body: { model: 'gpt-6.1-sol', input: 'Draw a stage', tools: [{ type: 'image_generation' }] }, status: 403 },
+    { path: '/v1/responses', method: 'GET', body: undefined, status: 426 },
+  ])('checks the native recap scope for $method $path even without a reservation header', async ({ path, method, body, status }) => {
+    const admission = mockRecapMediaAdmission({ scoped: true, allowed: false });
+    const upstream = vi.fn<typeof fetch>(async () => new Response('must not call provider'));
+    vi.stubGlobal('fetch', upstream);
+    const response = await hostedRunnerIntercept(new Request(`https://api.openai.com${path}`, {
+      method, headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        'content-type': 'application/json', ...(method === 'GET' ? OPENAI_WEBSOCKET_HANDSHAKE_HEADERS : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    }), createInterceptEnv({ OPENAI_API_KEY: 'synthetic-key', validateRuntimeWriteFence: async () => true }),
+    { className: 'RunnerContainer', containerId: 'member_123--v-version_1' });
+    expect(response.status).toBe(status);
+    expect(admission).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ token: null }), boundUserId: 'member_123' }));
+    expect(findFetchCall(upstream, 'api.openai.com')).toBeUndefined();
   });
 
   it.each(["generations", "edits"])("denies image %s before OpenAI when the subscription gate rejects", async (operation) => {

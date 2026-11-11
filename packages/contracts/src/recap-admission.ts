@@ -55,9 +55,33 @@ const digest = async (bytes: Uint8Array) => Array.from(new Uint8Array(await cryp
 /** Both the tool host and outbound Worker inspect the actual final request.
  * Unknown fields are denied rather than silently excluding billable options.
  */
-export async function inspectRecapProviderRequest(request: Request): Promise<RecapProviderRequest> {
+export async function inspectRecapProviderRequest(request: Pick<Request, 'url' | 'method' | 'headers' | 'formData' | 'json'>): Promise<RecapProviderRequest> {
   const url = new URL(request.url)
+  const endpoint = url.pathname.slice(url.pathname.lastIndexOf('/v1/'))
   if (request.method !== 'POST') throw new TypeError('Recap media requires POST.')
+  const { fields, references } = await readRecapRequestFields(request)
+  const prompt = fields.prompt
+  if (typeof prompt !== 'string') throw new TypeError('Missing recap prompt.')
+  const promptBytes = new TextEncoder().encode(prompt).length
+  if (endpoint === '/v1/images/generations' || endpoint === '/v1/images/edits') {
+    const allowed = ['model', 'prompt', 'size', 'quality', 'output_format']
+    if (Object.keys(fields).some(key => !allowed.includes(key)) || url.search) throw new TypeError('Unsupported recap image settings.')
+    const canonical = [fields.model, prompt, fields.size, fields.quality, fields.output_format, references]
+    return recapProviderRequestSchema.parse({ kind: 'image', model: fields.model, promptBytes,
+      size: fields.size, quality: fields.quality, outputFormat: fields.output_format, referenceHashes: references,
+      requestHash: await digest(new TextEncoder().encode(JSON.stringify(canonical))) })
+  }
+  if (endpoint === '/v1/music') {
+    const allowed = ['model_id', 'prompt', 'music_length_ms', 'force_instrumental']
+    if (Object.keys(fields).some(key => !allowed.includes(key)) || url.search !== '?output_format=mp3_48000_192'
+      || typeof fields.force_instrumental !== 'boolean') throw new TypeError('Unsupported recap song settings.')
+    return recapProviderRequestSchema.parse({ kind: 'song', model: fields.model_id, promptBytes, durationMs: fields.music_length_ms,
+      requestHash: await digest(new TextEncoder().encode(JSON.stringify([fields.model_id, prompt, fields.music_length_ms, fields.force_instrumental, url.search]))) })
+  }
+  throw new TypeError('Unsupported recap provider endpoint.')
+}
+
+async function readRecapRequestFields(request: Pick<Request, 'headers' | 'formData' | 'json'>) {
   let fields: Record<string, unknown>
   const references: string[] = []
   if ((request.headers.get('content-type') ?? '').startsWith('multipart/form-data')) {
@@ -77,23 +101,5 @@ export async function inspectRecapProviderRequest(request: Request): Promise<Rec
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new TypeError('Invalid recap media request.')
     fields = raw as Record<string, unknown>
   }
-  const prompt = fields.prompt
-  if (typeof prompt !== 'string') throw new TypeError('Missing recap prompt.')
-  const promptBytes = new TextEncoder().encode(prompt).length
-  if (url.pathname === '/v1/images/generations' || url.pathname === '/v1/images/edits') {
-    const allowed = ['model', 'prompt', 'size', 'quality', 'output_format']
-    if (Object.keys(fields).some(key => !allowed.includes(key)) || url.search) throw new TypeError('Unsupported recap image settings.')
-    const canonical = [fields.model, prompt, fields.size, fields.quality, fields.output_format, references]
-    return recapProviderRequestSchema.parse({ kind: 'image', model: fields.model, promptBytes,
-      size: fields.size, quality: fields.quality, outputFormat: fields.output_format, referenceHashes: references,
-      requestHash: await digest(new TextEncoder().encode(JSON.stringify(canonical))) })
-  }
-  if (url.pathname === '/v1/music') {
-    const allowed = ['model_id', 'prompt', 'music_length_ms', 'force_instrumental']
-    if (Object.keys(fields).some(key => !allowed.includes(key)) || url.search !== '?output_format=mp3_48000_192'
-      || typeof fields.force_instrumental !== 'boolean') throw new TypeError('Unsupported recap song settings.')
-    return recapProviderRequestSchema.parse({ kind: 'song', model: fields.model_id, promptBytes, durationMs: fields.music_length_ms,
-      requestHash: await digest(new TextEncoder().encode(JSON.stringify([fields.model_id, prompt, fields.music_length_ms, fields.force_instrumental, url.search]))) })
-  }
-  throw new TypeError('Unsupported recap provider endpoint.')
+  return { fields, references }
 }

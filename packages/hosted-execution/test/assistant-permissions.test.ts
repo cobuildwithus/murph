@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGameHostPermissionProfileTomlLines,
+  buildMurphRecapPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
   buildMurphHostedPermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
@@ -101,6 +102,7 @@ describe("hosted Codex permissions", () => {
   it("composes every hosted permission profile from the canonical builders", () => {
     expect(buildMurphHostedPermissionProfileTomlLines()).toEqual([
       ...buildMurphGameHostPermissionProfileTomlLines(),
+      ...buildMurphRecapPermissionProfileTomlLines(),
       ...buildMurphGroupReadPermissionProfileTomlLines(),
       ...buildMurphOperatorDiagnosticReadPermissionProfileTomlLines(),
       ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),

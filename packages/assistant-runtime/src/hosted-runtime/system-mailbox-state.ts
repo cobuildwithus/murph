@@ -1471,9 +1471,11 @@ function parseHostedSystemMailboxRecordRequest(value: unknown): HostedSystemMail
   if (typeof value !== "object" || value === null) return parseHostedSystemMailboxRecordRequestLegacy(value);
   const record = value as Record<string, unknown>;
   if (record.kind === "game.recap-lore-checkpointed") {
-    assertHostedSystemMailboxRecordKeys(record, ["kind", "gameId", "eventId"], "Recap lore checkpoint");
+    assertHostedSystemMailboxRecordKeys(record, ["kind", "gameId", "eventId", "generationIds", "resume"], "Recap lore checkpoint");
     if (typeof record.gameId !== "string" || typeof record.eventId !== "string" || parseGameRecapEventId(record.eventId)?.gameId !== record.gameId) throw new TypeError("Invalid recap checkpoint identity.");
-    return { kind: "game.recap-lore-checkpointed", gameId: record.gameId, eventId: record.eventId };
+    if (typeof record.resume !== "boolean" || !Array.isArray(record.generationIds) || record.generationIds.length < 1 || record.generationIds.length > 20
+      || record.generationIds.some(id => typeof id !== "string" || !parseGameRecapEventId(id))) throw new TypeError("Invalid recap checkpoint generations.");
+    return { kind: "game.recap-lore-checkpointed", gameId: record.gameId, eventId: record.eventId, generationIds: record.generationIds, resume: record.resume };
   }
   return parseHostedSystemMailboxRecordRequestLegacy(value);
 }

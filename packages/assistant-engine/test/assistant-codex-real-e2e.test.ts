@@ -48115,7 +48115,8 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     { name: 'pair recap show production validation with weekends off', weekendsOff: true, regeneration: false, superlatives: false },
     { name: 'pair recap show production validation regeneration', weekendsOff: true, regeneration: true, superlatives: false },
     { name: 'pair recap show production validation optional grounded cards', weekendsOff: true, regeneration: false, superlatives: true },
-  ])('$name', async ({ weekendsOff, regeneration }) => {
+    { name: 'pair recap show parent files preview revision and selected media', weekendsOff: false, regeneration: false, superlatives: false, mediaJourney: true },
+  ])('$name', async ({ weekendsOff, regeneration, mediaJourney = false }) => {
     const eventId = `game-recap:game_recap_synthetic${regeneration ? ':synthetic_request' : ''}`
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-recap-e2e-'))
@@ -48144,6 +48145,9 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     const entries = material.days.flatMap(day => Object.entries(day.posts).flatMap(([playerName, post]) =>
       typeof post === 'object' && post ? [{ entryId: post.entryId, kind: post.kind, text: post.text, playerName, visibleToBoth: true }] : []))
     const scores = material.score.map((score, index) => ({ ...score, memberId: material.players[index]!.memberId }))
+    const { createRecapShowLiveProviders } = await import('./support/recap-show-live.js')
+    const providers = await createRecapShowLiveProviders({ game: material, players: material.players, entries, result: scores, chat: chatMessages })
+    const events: unknown[] = []
     let rejectedWrites = 0
     let conflictingTreatment: string | undefined
     try {
@@ -48162,11 +48166,11 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
         deliveryIdempotencyKey: eventId,
         deliveryDedupeToken: eventId,
         executionContext: { hosted: {
-          defaultTarget: modelTarget,
+          defaultTarget: modelTarget, providerFetch: providers.providerFetch,
           gameRecapScope: { gameId: 'game_recap_synthetic', eventId, pairFingerprint: '0123456789abcdef0123456789abcdef', show: true },
           groupTool: { request: async (request): Promise<import('@murphai/hosted-execution/runtime-control').HostedGameToolResponse> => {
             calls.push(request)
-            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', recapGame: material } }
+            if (request.action === 'read_game') return providers.control(request)
             if (request.action === 'write_recap') {
               // Simulate a concurrent lore repair discovering the first genre.
               if (regeneration && conflictingTreatment === undefined) conflictingTreatment = request.recap.treatment
@@ -48177,6 +48181,8 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
                 return { action: 'write_recap', result: { status: 'rejected', recapOutcome: gameRecapToolResult(corrections) } }
               }
               if (saved[0]) return { action: 'write_recap', result: { status: 'ok', recapOutcome: gameRecapToolResult([]), recap: saved[0], chatLine: `${saved[0].chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic` } }
+              if (request.phase === 'prepare') return { action: 'write_recap', result: { status: 'ok', recapGame: providers.prepare({ story: request.recap, files: request.files }) } }
+              providers.accept()
               saved.push(withValidGameSuperlatives(request.recap, material.players.map(player => player.memberId)))
               return { action: 'write_recap', result: { status: 'ok', recapOutcome: gameRecapToolResult([]), recap: request.recap, chatLine: `${request.recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic` } }
             }
@@ -48184,9 +48190,9 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
           } },
           memberId: 'synthetic-group', userEnvKeys: [],
         } },
-        identityId: null, instructions: buildGameRecapInstructions(chatMessages, undefined, false, true), responsePolicy: { kind: 'require_game_recap', gameId: 'game_recap_synthetic', eventId, pairFingerprint: '0123456789abcdef0123456789abcdef', show: true },
+        identityId: null, onTraceEvent: event => events.push(event.rawEvent), instructions: buildGameRecapInstructions(chatMessages, undefined, false, true) + (mediaJourney ? '\nExercise the complete file flow: generate at least one image and the song, preview, inspect the PNGs, deliberately improve one detail in the draft, preview the revision and submit once. All photos and provider responses in this test are synthetic.' : ''), responsePolicy: { kind: 'require_game_recap', gameId: 'game_recap_synthetic', eventId, pairFingerprint: '0123456789abcdef0123456789abcdef', show: true },
         threadId: 'synthetic-game-thread', threadIsDirect: false,
-        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: { ...config.env, OPENAI_API_KEY: 'synthetic-file-provider', ELEVENLABS_API_KEY: 'synthetic-file-provider' } },
         turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
       })
       const intents = await listAssistantOutboxIntents(workingDirectory)
@@ -48194,7 +48200,8 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       expect(calls[0]?.action).toBe('read_game')
       expect(calls.every((call) => 'origin' in call && call.origin.kind === 'game_recap' && call.origin.eventId === eventId)).toBe(true)
       // Corrections may take separate attempts; exactly one write may succeed.
-      expect(calls.filter((call) => call.action === 'write_recap')).toHaveLength(rejectedWrites + 1)
+      expect(calls.filter((call) => call.action === 'write_recap' && call.phase === 'accept')).toHaveLength(1)
+      expect(calls.filter((call) => call.action === 'write_recap' && call.phase === 'prepare')).toHaveLength(rejectedWrites + 1)
       expect(saved).toHaveLength(1)
       if (regeneration) { expect(rejectedWrites).toBeGreaterThanOrEqual(1); expect(saved[0]?.treatment).not.toBe(conflictingTreatment) }
       expect(saved[0]).not.toHaveProperty('scoreLine')
@@ -48226,6 +48233,32 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       expect(intents).toHaveLength(1)
       expect(result.response).toBe(`${saved[0]?.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic`)
       expect(intents[0]?.message).toBe(result.response)
+      expect(intents[0]?.media ?? []).toEqual([])
+      if (mediaJourney) {
+        expect(providers.providerCalls.some(call => call.kind === 'image')).toBe(true)
+        expect(providers.providerCalls.filter(call => call.kind === 'song')).toHaveLength(1)
+        const actions = readCapabilityRoutingActions(events)
+        const previews = actions.filter(action => action.kind === 'dynamic' && /(?:^|[.])preview_recap$/u.test(action.tool) && action.success)
+        expect(previews.length).toBeGreaterThanOrEqual(2)
+        const hashes = previews.flatMap(action => action.kind === 'dynamic' ? [JSON.parse(action.output).draftHash] : [])
+        expect(new Set(hashes).size).toBeGreaterThanOrEqual(2)
+        expect(actions.some(action => action.kind === 'command' && /chat[.]jsonl|writing-guide[.]md/u.test(action.command ?? ''))).toBe(true)
+        const { recapTaskDirectory } = await import('../src/assistant/recap-workspace.js')
+        const artifactRoot = fileURLToPath(new URL('../../../audit-packages/recap-show-live/', import.meta.url))
+        await mkdir(artifactRoot, { recursive: true })
+        await cp(path.join(recapTaskDirectory(workingDirectory, eventId), 'previews'), path.join(artifactRoot, 'previews'), { recursive: true })
+        const { presentGameRecap } = await import('@murphai/contracts/recap-show')
+        const accepted = providers.accept(), now = new Date().toISOString()
+        const presentation = presentGameRecap({ stored: { version: 1, generationId: 'synthetic-accepted', story: accepted.story,
+          acceptedAt: now, coverDeadline: now, mediaDeadline: now, preview: { token: 'synthetic-capability'.repeat(3), expiresAt: now },
+          assets: accepted.files.map(({ slot, receipt }) => ({ slot, recipeId: receipt.operationId, storageKey: slot, status: 'ready', references: [],
+            kind: receipt.mediaType === 'image/jpeg' ? 'image' : 'song', hash: receipt.hash, mediaType: receipt.mediaType, byteLength: receipt.byteLength,
+            width: receipt.width, height: receipt.height, durationMs: receipt.durationMs })) }, now: new Date(),
+          permittedPhotoIds: new Set(entries.map(entry => entry.entryId)), mediaUrl: slot => `/api/game/v1/games/synthetic-game/recap-assets/${slot}?generation=synthetic-accepted` })
+        await writeFile(path.join(artifactRoot, 'accepted-presentation.json'), JSON.stringify(presentation, null, 2) + '\n')
+        await writeFile(path.join(artifactRoot, 'verification.json'), JSON.stringify({ model: config.model, mediaProviders: 'synthetic in-process fixtures',
+          accepted: saved.length, chatMessages: intents.length, chatMedia: 0, previewDrafts: [...new Set(hashes)], providerCalls: providers.providerCalls.map(call => call.kind) }, null, 2) + '\n')
+      }
       expect(saved[0]?.chatLine).not.toMatch(/https?:\/\//iu)
       expect(saved[0]?.chatLine.length).toBeLessThan(160)
       const chatLine = saved[0]?.chatLine ?? ''
@@ -48240,6 +48273,15 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       expect(lore).not.toContain('https://recaps.murph.test')
     } catch (error) {
       process.stdout.write(`[game-recap failure] ${JSON.stringify({ weekendsOff, regeneration, actions: calls.map((call) => call.action), seals: saved.length })}\n`)
+      const diagnostics = events.flatMap(event => {
+        const row = readRecord(event), params = readRecord(row?.params), item = readRecord(params?.item), turn = readRecord(params?.turn)
+        if (row?.method === 'item/completed' && item?.type === 'agentMessage') return [{ kind: 'reply', text: String(item.text).replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>').slice(-3000) }]
+        if (row?.method === 'turn/completed') return [{ kind: 'turn', text: String(turn?.status) }]
+        if (row?.method === 'item/completed' || /error|warn/iu.test(String(row?.method))) return [{ kind: String(row?.method), text: JSON.stringify(params).replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>').slice(-1200) }]
+        return []
+      })
+      process.stdout.write(`[game-recap diagnostics] ${JSON.stringify({ diagnostics, actions: readCapabilityRoutingActions(events).map(action => action.kind === 'command' ? { kind: action.kind, command: action.command.slice(0, 300), ok: action.ok, output: action.output.slice(-600) } : { kind: action.kind, tool: action.tool, success: action.success, output: action.output.slice(-600) }) })}\n`)
+
       throw error
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])

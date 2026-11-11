@@ -640,7 +640,7 @@ export function createCloudflareHostedControlClient(
       const userId = requireCloudflareHostedControlUserId(input.userId);
       await requestHostedExecutionAuthorizedJson({ baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
         label: "recap media staging", path: buildCloudflareHostedControlGameMediaPath("recapMediaStage", userId),
-        parse: value => requireBoolean(requireRecord(value, "Recap storage").stored, "Recap stored"),
+        parse: value => { if (requireRecord(value, "Recap storage").stored !== true) throw new TypeError("Recap storage was not confirmed."); },
         request: { method: "POST", headers: { "content-type": "application/json", "x-murph-recap-media-id": input.mediaId, "x-murph-recap-hash": input.hash }, body: input.envelope }, timeoutMs: options.timeoutMs });
     },
     async readRecapMedia(input) {

@@ -2798,35 +2798,26 @@ export async function sealGameRecap(input: {
 
 async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: Parameters<typeof sealGameRecap>[0], current: Game, recapEncrypted: string | null, regenerationId?: string, generation?: Awaited<ReturnType<typeof prepareRecapGeneration>>): Promise<string | null> {
   const show = input.recap?.treatment !== undefined;
-    if (regenerationId) {
-      const requested = await tx.gameEvent.findUnique({ where: { commandKey: input.eventId }, select: { gameId: true, type: true } });
-      if (requested?.gameId !== input.gameId || requested.type !== "recap_regeneration_requested") return null;
-      const acceptedKey = `${input.eventId}:accepted`;
-      const accepted = await tx.gameEvent.findUnique({ where: { commandKey: acceptedKey }, select: { id: true } });
-      if (accepted) return current.recapEncrypted;
-      if (!recapEncrypted) return null;
-      if (show && !await canAcceptRecapUsageTx(tx, input)) return null;
-      // Keep the old story until validation accepts this replacement. The row
-      // lock makes replacement and its once-only acceptance one atomic change.
-      await retireGameRecapAssetsTx(tx, input.gameId, current.wordsOwnerMemberId, new Date(), generation?.envelope.generationId);
-      await tx.game.update({ where: { id: input.gameId }, data: { recapEncrypted } });
-      await tx.gameEvent.create({ data: { gameId: input.gameId, actor: "system", type: "recap_regeneration_accepted", commandKey: acceptedKey, payload: {} } });
-      if (show) await reserveRecapUsageTx(tx, input.gameId, input.eventId);
-      await generation?.publish(tx);
-      return recapEncrypted;
-    }
-    // A rematch cannot invalidate a finished game's first recap. The pair lock
-    // still serializes joins/blocks; this row lock and null-only write preserve
-    // the settled game's first seal, even if a newer game committed first.
-    if (current.recapEncrypted) return current.recapEncrypted;
-    if (!recapEncrypted) return null;
-    if (show && !await canAcceptRecapUsageTx(tx, input)) return null;
+  const acceptedKey = `${input.eventId}:accepted`;
+  if (regenerationId) {
+    const requested = await tx.gameEvent.findUnique({ where: { commandKey: input.eventId }, select: { gameId: true, type: true } });
+    if (requested?.gameId !== input.gameId || requested.type !== "recap_regeneration_requested") return null;
+    if (await tx.gameEvent.findUnique({ where: { commandKey: acceptedKey }, select: { id: true } })) return current.recapEncrypted;
+  } else if (current.recapEncrypted) return current.recapEncrypted;
+  if (!recapEncrypted || show && !await canAcceptRecapUsageTx(tx, input)) return null;
+  if (regenerationId) {
+    // Keep the old story until its replacement and cleanup ownership commit.
+    await retireGameRecapAssetsTx(tx, input.gameId, current.wordsOwnerMemberId, new Date(), generation?.envelope.generationId);
+    await tx.game.update({ where: { id: input.gameId }, data: { recapEncrypted } });
+    await tx.gameEvent.create({ data: { gameId: input.gameId, actor: "system", type: "recap_regeneration_accepted", commandKey: acceptedKey, payload: {} } });
+  } else {
+    // The null-only write preserves the first seal even after a rematch starts.
     const changed = await tx.game.updateMany({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled", recapEncrypted: null }, data: { recapEncrypted } });
-    if (changed.count === 1) {
-      if (show) await reserveRecapUsageTx(tx, input.gameId, input.eventId);
-      await generation?.publish(tx);
-    }
-    return changed.count === 1 ? recapEncrypted : null;
+    if (changed.count !== 1) return null;
+  }
+  if (show) await reserveRecapUsageTx(tx, input.gameId, input.eventId);
+  await generation?.publish(tx);
+  return recapEncrypted;
 }
 
 /** The caller already holds member/runtime authority; locks follow member before game. */
