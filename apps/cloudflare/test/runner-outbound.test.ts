@@ -1,4 +1,5 @@
 import { expectedManagedSnapshotEtag } from "../src/managed-snapshot-upload.ts";
+import { createHostedRuntimeGroupToolPort } from "../src/runtime-platform/group-tool-port.ts";
 import { createOutboundMultipartTestBucket } from "./multipart-bucket-fixtures.ts";
 import { createLegacyHostedBundleFixtureStore } from "./legacy-bundle-fixtures.js";
 import assert from "node:assert/strict";
@@ -46,6 +47,7 @@ import {
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  HOSTED_RUNTIME_RECAP_UPLOAD_REQUEST_MAX_BYTES,
   isHostedRuntimePrivateImageDeliveryUrl,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceReadResponse,
@@ -2205,12 +2207,52 @@ describe("handleRunnerOutboundRequest", () => {
     }));
   });
 
-  it("rejects oversized allowlisted hosted web-control bodies before proxying", async () => {
+  it("forwards a maximum-size recap image upload through the signed groups/tool proxy", async () => {
+    const payload = { action: "read_game" as const,
+      origin: { kind: "game_recap" as const, gameId: "synthetic-game", eventId: "game-recap:synthetic-game" },
+      recapRead: { kind: "upload" as const, slot: "scene-0", mediaType: "image/jpeg" as const,
+        referenceIds: Array.from({ length: 16 }, (_, i) => i.toString(16).repeat(64)),
+        bytes: Buffer.alloc(2 * 1024 * 1024).toString("base64") },
+    };
+    const body = JSON.stringify(payload);
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ action: "read_game", result: { status: "ok", recapGame: {} } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const port = createHostedRuntimeGroupToolPort({ boundUserId: "member_123", timeoutMs: 10_000, transport: { mode: "proxy" },
+      fetchImpl: async (url, init) => handleRunnerOutboundRequest(
+        new Request(url, { ...init, headers: createRunnerWriteFenceProxyHeaders(Object.fromEntries(new Headers(init?.headers))) }),
+        createRunnerOutboundEnv({ HOSTED_WEB_BASE_URL: "https://web.example.test" }), "member_123",
+      ),
+    });
+    expect(await port.request(payload)).toEqual({ action: "read_game", result: { status: "ok", recapGame: {} } });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(new URL(String(url)).searchParams.get("recapMedia")).toBe("1");
+    expect(init?.body).toBe(body);
+    expect(new Headers(init?.headers).get("x-hosted-execution-signature")).toBeTruthy();
+  });
+
+  it("rejects groups/tool bodies above the recap allowance before proxying", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_GROUP_TOOL_PATH}?recapMedia=1`, {
+        method: "POST",
+        headers: createRunnerWriteFenceProxyHeaders({ "content-type": "application/json" }),
+        body: "x".repeat(HOSTED_RUNTIME_RECAP_UPLOAD_REQUEST_MAX_BYTES + 1),
+      }),
+      createRunnerOutboundEnv({ HOSTED_WEB_BASE_URL: "https://web.example.test" }),
+      "member_123",
+    );
+    expect(response.status).toBe(413);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "?recapMedia=1"])("rejects oversized non-group web-control bodies before proxying (%s)", async query => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request(`http://web-control.worker${HOSTED_RUNTIME_USAGE_RECORD_PATH}`, {
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_USAGE_RECORD_PATH}${query}`, {
         body: JSON.stringify({
           usage: {
             payload: "x".repeat((256 * 1024) + 1),

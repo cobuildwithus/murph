@@ -11,6 +11,7 @@ import {
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
+  HOSTED_RUNTIME_RECAP_UPLOAD_REQUEST_MAX_BYTES,
   isHostedRuntimeAssistantAskDiagnosticCode,
   type HostedRuntimeGroupCurrentSenderDirectResult,
   type HostedRuntimeGroupToolResponse,
@@ -49,7 +50,7 @@ export const POST = withJsonError(async (request: Request) => {
   // charged to the operation that has to finish inside it.
   const requestStartedAtMs = Date.now();
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
-    maxBodyBytes: new URL(request.url).searchParams.get("recapMedia") === "1" ? 3 * 1024 * 1024 : HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
+    maxBodyBytes: new URL(request.url).searchParams.get("recapMedia") === "1" ? HOSTED_RUNTIME_RECAP_UPLOAD_REQUEST_MAX_BYTES : HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   });
   const runtimeAuthority = readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers);
   const currentSenderWire = readHostedCurrentSenderWire(payload);
