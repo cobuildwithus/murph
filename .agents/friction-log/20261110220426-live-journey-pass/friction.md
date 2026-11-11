@@ -1,6 +1,7 @@
 ---
 title: 'Live journey pass rates swing by batch, so separate base and head runs mislead'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4844'
 ---
 
 ## Expected Behavior

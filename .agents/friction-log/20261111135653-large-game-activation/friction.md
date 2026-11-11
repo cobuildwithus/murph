@@ -1,6 +1,7 @@
 ---
 title: 'Large game activation fixture can exceed its transaction budget in CI'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4842'
 ---
 
 ## Expected Behavior
