@@ -13,10 +13,14 @@ vi.mock("@/src/lib/game/chat-membership", async original => ({ ...await original
     const { getPrisma } = await import("@/src/lib/prisma");
     const players = await getPrisma().gamePlayer.findMany({ where: { game: { chatContainerMemberId: room } }, select: { memberId: true } });
     const memberIds = [...new Set(players.flatMap(player => player.memberId ? [player.memberId] : []))];
-    return { memberIds, contacts: [], resolvedContacts: [], keys: { current: null, candidates: [] }, threadId: room };
+    return { memberIds, contacts: [], resolvedContacts: [], keys: { current: null, candidates: [] }, threadId: room, route: { channel: "linq", containerMemberId: room, threadId: room } };
   } }));
 vi.mock("@/src/lib/hosted-routing/thread-route-store", async original => ({ ...await original<object>(),
-  readHostedThreadRouteByThreadIdentity: async ({ threadId }: { threadId: string }) => ({ containerMemberId: threadId }) }));
+  readHostedThreadRouteByThreadIdentity: async ({ threadId }: { threadId: string }) => ({ containerMemberId: threadId }),
+  assertHostedThreadRouteEgressAuthority: async ({ authority }: { authority: { containerMemberId: string; threadId: string } }) => {
+    expect(authority.containerMemberId).toBe(authority.threadId);
+    return { containerMemberId: authority.containerMemberId };
+  } }));
 
 // Real roots and sealing for the crypto case; only KMS is the local provider.
 vi.mock("@/src/lib/hosted-crypto/env", async () => {
