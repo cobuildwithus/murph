@@ -103,6 +103,12 @@ test.each([
             assert.deepEqual(await readFile(seedPath), seedBytes);
             events.push("import.yielded");
             importYielded.resolve();
+            if (closeAt === "provider") {
+              // Resume immediately when provider admission closes, before the
+              // service can enter an idle-yield polling interval.
+              await withRealTimeout(waitUntil(() => assert.equal(shouldYieldImport?.(), false)),
+                5_000, () => "Provider admission did not close");
+            }
             throw error;
           }
         },
@@ -311,7 +317,13 @@ test.each([
     assert.ok(Number(passStages.deviceSyncStageArtifactUploadCount) >= 2);
     assert.ok(Number(passStages.deviceSyncStageRuntimeSnapshotCount) >= 1);
     assert.ok(Number(passStages.deviceSyncStageLocalProgressCommitCount) >= 1);
-    assert.ok(Number(passStages.deviceSyncStageIdleYieldWaitTotalMs) > 0);
+    const idleYieldWaitMs = Number(passStages.deviceSyncStageIdleYieldWaitTotalMs);
+    assert.ok(Number.isFinite(idleYieldWaitMs) && idleYieldWaitMs >= 0);
+    assert.equal(idleYieldWaitMs, Math.round(diagnostics.reduce(
+      (total, diagnostic) => total + (diagnostic.snapshotImportDeferralElapsedMs ?? 0), 0,
+    )));
+    if (closeAt === "provider") assert.equal(idleYieldWaitMs, 0);
+    if (closeAt === "sustained-foreground") assert.ok(idleYieldWaitMs > 0);
     const loggedTimings = passLogs[0]?.redactedJson?.deviceSyncJobTimingSummaries;
     assert.ok(Array.isArray(loggedTimings));
     const loggedDeferrals = loggedTimings.map((item) => {
