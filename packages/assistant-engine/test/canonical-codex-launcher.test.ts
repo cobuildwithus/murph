@@ -16,7 +16,7 @@ it.each(['direct', 'adapter'] as const)('executes the launcher with shared hoste
   try {
     const capture = path.join(root, 'capture')
     const launcher = path.join(root, 'launcher')
-    await writeFile(capture, `#!${process.execPath}\nprocess.stdout.write(process.argv.includes('--help') ? '--ignore-user-config' : JSON.stringify(process.argv.slice(2)))\n`, { mode: 0o700 })
+    await writeFile(capture, `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(process.argv.slice(2)))\n`, { mode: 0o700 })
     const syntheticRoot = "/fixture/install with 'quote'/$literal"
     await writeFile(launcher, canonicalCodexLauncher({ PATH: '/fixture/bin', HOME: '/fixture/home' }, [syntheticRoot]), { mode: 0o700 })
     const inputArgs = shape === 'adapter' ? canonicalAdapterArgs() : ['app-server']
@@ -24,9 +24,8 @@ it.each(['direct', 'adapter'] as const)('executes the launcher with shared hoste
       env: { MURPH_CANONICAL_JOURNEY_CODEX: capture }, timeout: 10_000,
     })
     const args: string[] = JSON.parse(stdout)
-    expect(args.slice(-2)).toEqual(['app-server', '--ignore-user-config'])
-    expect(args.slice(-(inputArgs.length + 1))).toEqual([...inputArgs, '--ignore-user-config'])
-    const overrides = args.slice(0, -(inputArgs.length + 1)).filter((_, index) => index % 2 === 1)
+    expect(args.slice(-inputArgs.length)).toEqual(inputArgs)
+    const overrides = args.slice(0, -inputArgs.length).filter((_, index) => index % 2 === 1)
     const features = overrides.find((value) => value.startsWith('features='))!
     expect(features).toContain('plugins = false')
     expect(features).toContain('memories = false')
@@ -108,24 +107,7 @@ it.skipIf(process.platform !== 'darwin')('executes local install reads while den
 })
 
 
-it.each(['direct', 'adapter'] as const)('rejects an unpatched app-server before starting a journey (%s)', async (shape) => {
-  const root = await mkdtemp(path.join(tmpdir(), 'murph-codex-capability-'))
-  try {
-    const launcher = path.join(root, 'launcher')
-    const codex = path.join(root, 'codex')
-    await writeFile(codex, '#!/bin/sh\nif [ "$2" = "--help" ]; then exit 0; fi\nprintf "unexpected-start"\n', { mode: 0o700 })
-    await writeFile(launcher, canonicalCodexLauncher({}, []), { mode: 0o700 })
-    await expect(execFileAsync(launcher, shape === 'adapter' ? canonicalAdapterArgs() : ['app-server'], {
-      env: { MURPH_CANONICAL_JOURNEY_CODEX: codex }, timeout: 10_000,
-    })).rejects.toMatchObject({
-      code: 64,
-      stdout: '',
-      stderr: 'Canonical journeys require the Murph native patch; select its binary with --codex-command.\n',
-    })
-  } finally { await rm(root, { recursive: true, force: true }) }
-})
-
-it.skipIf(!process.env.MURPH_TEST_CODEX_COMMAND)('isolates synthetic personal inputs through the adapter launch shape with the selected native artifact', { timeout: 60_000 }, async () => {
+it.each(['subscription', 'provider'] as const)('preserves selected %s home inputs with stock app-server', { timeout: 60_000 }, async (authMode) => {
   const root = await mkdtemp(path.join(tmpdir(), 'murph-codex-isolation-'))
   const workspace = path.join(root, 'workspace')
   const global = path.join(root, 'AGENTS.override.md')
@@ -133,10 +115,10 @@ it.skipIf(!process.env.MURPH_TEST_CODEX_COMMAND)('isolates synthetic personal in
   const auth = '{"OPENAI_API_KEY":"synthetic-test-key"}'
   try {
     await mkdir(workspace)
-    await writeFile(global, 'SYNTHETIC_GLOBAL_INSTRUCTIONS')
+    if (authMode === 'subscription') await writeFile(global, 'SYNTHETIC_GLOBAL_INSTRUCTIONS')
     await writeFile(project, 'SYNTHETIC_PROJECT_INSTRUCTIONS')
     await writeFile(path.join(root, 'auth.json'), auth)
-    await writeFile(path.join(root, 'config.toml'), [
+    if (authMode === 'subscription') await writeFile(path.join(root, 'config.toml'), [
       'default_permissions = "murph-member-workspace"',
       'developer_instructions = "SYNTHETIC_PERSONAL_DEVELOPER"',
       '[permissions.murph-member-workspace.filesystem]',
@@ -147,17 +129,19 @@ it.skipIf(!process.env.MURPH_TEST_CODEX_COMMAND)('isolates synthetic personal in
     await writeFile(launcher, canonicalCodexLauncher(env, []), { mode: 0o700 })
     const inspected = await inspectCanonicalCodex({
       command: launcher, cwd: workspace,
-      env: { ...env, MURPH_CANONICAL_JOURNEY_CODEX: process.env.MURPH_TEST_CODEX_COMMAND },
-      threadParams: { modelProvider: 'synthetic', config: {
+      env: { ...env, MURPH_CANONICAL_JOURNEY_CODEX: path.resolve(import.meta.dirname, '../node_modules/.bin/codex') },
+      // This synthetic inspection submits no turns or commands; sandbox boundaries
+      // are exercised separately without requiring Linux namespaces here.
+      threadParams: { sandbox: 'danger-full-access', modelProvider: 'synthetic', config: {
         'model_providers.synthetic': { name: 'Synthetic', base_url: 'http://127.0.0.1:1/v1', wire_api: 'responses' },
       } },
     })
-    expect(JSON.stringify(inspected.config)).not.toContain('SYNTHETIC_PERSONAL_DEVELOPER')
-    expect(JSON.stringify(inspected.config)).not.toContain('/synthetic-extra-read')
+    expect(JSON.stringify(inspected.config).includes('SYNTHETIC_PERSONAL_DEVELOPER')).toBe(authMode === 'subscription')
+    expect(JSON.stringify(inspected.config).includes('/synthetic-extra-read')).toBe(authMode === 'subscription')
     expect(inspected.account).toMatchObject({ account: { type: 'apiKey' } })
     expect(await readFile(path.join(root, 'auth.json'), 'utf8')).toBe(auth)
     const canonicalSources = await Promise.all(inspected.instructionSources.map((source) => realpath(source)))
     expect(canonicalSources).toContain(await realpath(project))
-    expect(canonicalSources).not.toContain(await realpath(global))
+    expect(canonicalSources.some((source) => path.basename(source) === 'AGENTS.override.md')).toBe(authMode === 'subscription')
   } finally { await rm(root, { recursive: true, force: true }) }
 })

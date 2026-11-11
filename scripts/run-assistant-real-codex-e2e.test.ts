@@ -89,7 +89,6 @@ describe('assistant real Codex local runner', () => {
     const status = executeAssistantRealCodexRun(options, {
       runCommand: (request) => {
         requests.push(request)
-        if (request.args[0] === 'app-server') return { status: 0, stdout: '--ignore-user-config' }
         return request.stdio === 'capture'
           ? { status: 0, stdout: JSON.stringify([{ name: 'synthetic journey' }]) }
           : { status: 0 }
@@ -226,7 +225,6 @@ describe('assistant real Codex local runner', () => {
       {
         runCommand: (request) => {
           requests.push(request)
-          if (request.args[0] === 'app-server') return { status: 0, stdout: '--ignore-user-config' }
           return {
             status: 0,
             stdout: JSON.stringify(listed),
@@ -257,7 +255,6 @@ describe('assistant real Codex local runner', () => {
       {
         runCommand: (request) => {
           requests.push(request)
-          if (request.args[0] === 'app-server') return { status: 0, stdout: '--ignore-user-config' }
           return {
             status: 0,
             stdout: JSON.stringify(Array.from({ length: 25 }, (_, index) => ({
@@ -289,7 +286,6 @@ describe('assistant real Codex local runner', () => {
       {
         runCommand: (request) => {
           requests.push(request)
-          if (request.args[0] === 'app-server') return { status: 0, stdout: '--ignore-user-config' }
           return request.stdio === 'capture'
             ? {
                 status: 0,
@@ -313,7 +309,6 @@ describe('assistant real Codex local runner', () => {
     expect(status).toBe(0)
     expect(requests.map(({ command, stdio }) => ({ command, stdio }))).toEqual([
       { command: 'pnpm', stdio: 'capture' },
-      { command: ASSISTANT_REAL_CODEX_COMMAND, stdio: 'capture' },
       { command: ASSISTANT_REAL_CODEX_COMMAND, stdio: 'ignore' },
       { command: 'pnpm', stdio: 'inherit' },
     ])
@@ -327,17 +322,17 @@ describe('assistant real Codex local runner', () => {
       HOME: '/normal-home',
     })
     expect(requests[1]?.env.MURPH_REAL_CODEX_HOME).toBeUndefined()
-    expect(requests[3]?.env).toMatchObject({
+    expect(requests[2]?.env).toMatchObject({
       HOME: '/normal-home',
       MURPH_REAL_CODEX_COMMAND: ASSISTANT_REAL_CODEX_COMMAND,
       MURPH_REAL_CODEX_HOME: '/selected-codex-home',
     })
-    expect(requests[3]?.env.CODEX_HOME).toBeUndefined()
-    expect(requests[3]?.args).toContain(
+    expect(requests[2]?.env.CODEX_HOME).toBeUndefined()
+    expect(requests[2]?.args).toContain(
       '^real Codex adaptive wearable journey$',
     )
     expect(output.join('')).toContain(
-      'use a dedicated home for production-like evidence',
+      'developer-local evidence',
     )
   })
 
@@ -352,7 +347,6 @@ describe('assistant real Codex local runner', () => {
       {
         runCommand: (request) => {
           requests.push(request)
-          if (request.args[0] === 'app-server') return { status: 0, stdout: '--ignore-user-config' }
           return request.stdio === 'capture'
             ? {
                 status: 0,
@@ -371,24 +365,8 @@ describe('assistant real Codex local runner', () => {
     )
 
     expect(status).toBe(0)
-    expect(requests).toHaveLength(3)
+    expect(requests).toHaveLength(2)
     expect(requests.some(({ args }) => args[0] === 'login')).toBe(false)
-    expect(requests[2]?.env.CODEX_HOME).toBe('/ambient-provider-home')
+    expect(requests[1]?.env.CODEX_HOME).toBe('/ambient-provider-home')
   })
-})
-
-
-it.each([{ status: 0, stdout: 'ordinary app-server help' }, { status: 1 }])('rejects an incompatible native runner before login or provider work', (help) => {
-  const requests: AssistantRealCodexCommandRequest[] = []
-  const errors: string[] = []
-  const status = executeAssistantRealCodexRun(parseAssistantRealCodexRunArgs(['synthetic']), {
-    runCommand(request) {
-      requests.push(request)
-      return request.args[0] === 'app-server' ? help : { status: 0, stdout: JSON.stringify([{ name: 'synthetic journey' }]) }
-    },
-    sourceEnv: {}, writeStderr: message => errors.push(message), writeStdout: () => undefined,
-  })
-  expect(status).toBe(1)
-  expect(requests).toHaveLength(2)
-  expect(errors.join('')).toContain('--codex-command')
 })

@@ -4,6 +4,68 @@ Status: active
 Created: 2026-11-10
 Updated: 2026-11-11
 
+## Historical delivery settlement follow-up
+
+Outcome: existing groups can move past historical delivery metadata while every
+unsettled outbox obligation retains its original route and retry opportunity.
+Reaches: confirmed legacy sends, idle runtimes with deferred retries, and empty
+outboxes whose old Web dispatch fences have no terminal receipt.
+Proof: real PostgreSQL producer/consumer cases plus canonical outbox and snapshot
+publication tests; keep missing, stale, incomplete and active evidence fail-closed.
+
+Review of candidate 06521196bafab6c80a9a853b5e8f0347fa1fd426 found one accepted
+High: an empty Web dispatch fence can still represent a checkpointed runtime
+outbox retry. Its timestamp does not advance on replay, and mailbox acknowledgement
+plus runtime idleness does not prove settlement. The 15-minute age-only exemption
+is removed. The regression reproduces the unsafe move through the production
+fence writer after a 31-minute idle interval, then proves rejection until the
+normal delivery outcome writer settles it. Confirmed historical sends retain
+the narrow age/source/payload exemption.
+
+For unresolved historical fences, derive a snapshot-bound settlement witness from
+the existing complete outbox inventory in generated-delivery cleanup. It is true
+only for a trusted scan with no active or confirmation-pending intent. Snapshot
+completion writes the current snapshot ID or null in the existing checkpoint
+status; it never carries a prior witness into a replacement snapshot. No new
+scan, table, queue, provider call or model decision is needed. Old writers omit
+the witness or retain a mismatched old ID and cannot authorize the exception.
+
+Operator start locks runtime ownership, requires idle, and checks the witness
+against the current validated member-bound snapshot. Only empty historical
+runtime dispatch fences older than that snapshot and the conservative drain can
+then cease to veto. Saved payloads, recent fences, partial outcomes and unknown
+sources still block. The ledger itself is never rewritten. One bounded workspace
+metadata read is added only to operator start; snapshot inventory work is reused.
+
+The current runtime and Web readers/writers must converge before the canary, then
+a fresh idle snapshot supplies the proof. Reverting either side loses the
+exception safely. This settlement extension changes a protocol/authority boundary
+after round 1 and therefore requires a fresh full final review on the stable head.
+The active plan stays open through the provider canary and duplicate repair.
+
+Focused settlement proof passes: 116 Web producer, consumer and route tests;
+43 engine residue tests; and all 158 snapshot bridge tests. The real-writer retry
+regression first reproduced the unsafe reservation on the age-only candidate.
+The corrected cases preserve its veto, then allow canonical acceptance or a
+current trusted snapshot to settle historical evidence. Web lint passes with
+existing warnings; workspace typecheck and documentation drift pass, and
+complexity debt is unchanged. The new full review, exact-head CI and deployment
+remain gates.
+
+Round 2 full-snapshot ReviewGPT passes on candidate
+ca510a5905b085b0b4e099931e862331d71fe050 with no qualifying findings. CI exposed
+the already-recorded workspace wake timing flake; its isolated test passes.
+An upstream Ubuntu DNS outage repeatedly prevented the browser lanes from
+installing dependencies. The first tooling fallback still waited behind APT and a billing runner
+reached its timeout before that fallback could execute. The corrected order
+downloads pinned Chromium independently and verifies real headed and headless
+launches under Xvfb first. Only an unusable runtime invokes dependency repair,
+followed by the same mandatory probe. Download, dependency-repair and final
+launch failures remain fatal; the 14-minute ceiling and browser tests are
+unchanged. Focused installer and billing workflow tests pass (46 tests), as does
+workspace typecheck. The runtime design reviewed in round 2 is unchanged;
+this CI correction does not require another runtime review.
+
 ## Legacy route projection follow-up
 
 Outcome: an authorized silent move can start for a legacy route whose nullable

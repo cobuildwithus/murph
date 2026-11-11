@@ -1,11 +1,25 @@
 #!/usr/bin/env bash
 # Installs the Chromium build used by browser-driving CI lanes.
 #
-# Playwright's `--with-deps` path owns `apt-get update` and `apt-get install`
-# behind `sudo`. Configure retry and inactivity bounds at that native owner so
-# one transient mirror stall can recover without restarting or supervising the
-# privileged process tree. GitHub's step timeout remains the overall ceiling.
+# Download independently of APT and prove the existing runtime first. Missing
+# native libraries still use Playwright's dependency installer, with retry and
+# inactivity bounds at APT's own boundary and the existing CI step ceiling.
 set -euo pipefail
+
+probe_browser_runtime() {
+  xvfb-run --auto-servernum pnpm --dir apps/web exec node --input-type=module -e '
+    import { chromium } from "@playwright/test";
+    for (const headless of [true, false]) {
+      const browser = await chromium.launch({ headless });
+      await browser.close();
+    }
+  '
+}
+
+pnpm --dir apps/web exec playwright install chromium
+if probe_browser_runtime; then
+  exit 0
+fi
 
 # Playwright downloads its own Chromium. Remove the runner's unused Chrome apt
 # source before installing the required Ubuntu libraries and fonts.
@@ -22,4 +36,5 @@ Acquire::http::Timeout "$APT_TIMEOUT_SECONDS";
 Acquire::https::Timeout "$APT_TIMEOUT_SECONDS";
 EOF
 
-exec pnpm --dir apps/web exec playwright install --with-deps chromium
+pnpm --dir apps/web exec playwright install-deps chromium
+probe_browser_runtime

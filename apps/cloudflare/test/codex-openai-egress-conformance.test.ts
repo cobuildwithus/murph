@@ -17,8 +17,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   hostedRunnerIntercept,
 } from "../src/runner-egress-intercept.ts";
-import { createHostedLiveSessionReference } from "../src/runner-egress-openai-live.ts";
-import { nativeLiveRequest } from "./fixtures/native-live-request.ts";
 import type {
   RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
@@ -239,7 +237,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
     const requiredBinaryCorroboration = new Set(
       PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes
         .filter((route) =>
-          route.owner === "codex" && route.disposition !== "blocked" && route.proof !== "reviewed_source"
+          route.owner === "codex" && route.disposition !== "blocked"
         )
         .map((route) => route.pathname),
     );
@@ -291,12 +289,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
     const env = createOpenAiInterceptEnv({
       readProviderContext,
     });
-    const upstreamFetch = vi.fn<typeof fetch>(async (input) => {
-      const url = new URL(input instanceof Request ? input.url : String(input));
-      return url.pathname === "/v1/live/sessions" ? Response.json({
-        session: { id: "synthetic-session" }, transport: { type: "webrtc", sdp: "v=0\r\nanswer" },
-      }, { status: 201 }) : new Response("ok");
-    });
+    const upstreamFetch = vi.fn<typeof fetch>(async () => new Response("ok"));
     const imageAccessFetch = vi.fn<typeof fetch>(async () =>
       Response.json({ allowed: true, reason: "allowed" })
     );
@@ -327,7 +320,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
         continue;
       }
 
-      expect(response.status, `${route.method} ${route.pathname}`).toBe(route.pathname === "/v1/live/sessions" ? 201 : 200);
+      expect(response.status, `${route.method} ${route.pathname}`).toBe(200);
       expect(imageAccessFetch.mock.calls.length, route.feature).toBe(
         imageAccessCallsBefore + (route.pathname.startsWith("/v1/images/") || (route.pathname === "/v1/responses" && route.transport === "websocket") ? 1 : 0),
       );
@@ -614,11 +607,7 @@ async function createInventoryRequest(
     headers.set("upgrade", "websocket");
   }
   const body = buildInventoryRequestBody(route, headers);
-  const pathname = route.disposition === "allowed_scoped_websocket_only"
-    ? `/v1/live/sessions/${await createHostedLiveSessionReference("synthetic-session", {
-        userId: TEST_USER_ID, attemptId: "attempt_codex_route_conformance", leaseGeneration: "7",
-      }, { HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET })}/attach`
-    : route.pathname;
+  const pathname = route.pathname;
   return new Request(`https://api.openai.com${pathname}`, {
     ...(body === undefined ? {} : { body }),
     headers,
@@ -643,7 +632,6 @@ function buildInventoryRequestBody(
     return form;
   }
   headers.set("content-type", "application/json");
-  if (route.pathname === "/v1/live/sessions") return JSON.stringify(nativeLiveRequest());
   return JSON.stringify({
     input: "synthetic route contract",
     model: SCRIPTED_MODEL,
