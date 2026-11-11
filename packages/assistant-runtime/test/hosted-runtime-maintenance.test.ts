@@ -1601,7 +1601,6 @@ describe("runHostedAssistantAutomation", () => {
     const list = vi.fn<InboxServices["list"]>(async (input) => ({
       vault: input.vault,
       filters: {
-        sourceId: null,
         limit: input.limit ?? 50,
         afterCreatedAt: input.afterCreatedAt ?? null,
         afterOccurredAt: input.afterOccurredAt ?? null,
@@ -1650,7 +1649,6 @@ describe("runHostedAssistantAutomation", () => {
         await passInboxServices.list({
           limit: 1,
           requestId: "req_projection_show",
-          sourceId: null,
           vault: maintenanceVaultRoot,
         });
         await passInboxServices.show({
