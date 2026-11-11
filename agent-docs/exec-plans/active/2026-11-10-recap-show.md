@@ -1,6 +1,6 @@
 # Pair game recap as a show (agentic)
 
-Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the owner's direction that Murph (or a subagent Murph drives) makes the recap with its existing composable tools and files. It replaces an earlier pipeline plan the owner rejected. The parent agent's amendments below override the plan text.
+Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the owner's direction that Murph makes the recap with its existing composable tools and files. It replaces an earlier pipeline plan the owner rejected. The parent agent's amendments below override the plan text.
 
 ## Amendments (override the plan)
 
@@ -8,7 +8,7 @@ Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the own
 2. **The partial asset pipeline was never deployed.** Delete the asset mailbox task, recipe executor, recap-only provider exports and post-save cover polling now; no drain step. Fold PR 11's deletion into this work.
 3. **Chat retention is 30 days by default** (owner decision). Raise the existing inbound transcript and mailbox retention from 14 to 30 days in the existing conversation owners; the recap transcript export covers what is retained and reports gaps. No separate recap archive.
 4. **Provider use is approved** (owner): permitted player profile and game photos may go to the existing OpenAI image account and bounded lyrics with player names to the existing ElevenLabs account, for all pair games.
-5. **Fewer PRs, same order.** murph PR A = plan PRs 01-07 plus the deletions (one branch, one logical commit per plan PR). murph PR B = plan PR 08 (child tool forwarding, the subagent path). murph-ios PR = plan PRs 09 + 10. The parent path must fully work without PR B.
+5. **Fewer PRs, same order.** murph PR A = plan PRs 01-07 plus the deletions (one branch, one logical commit per plan PR). Plan PR 08 is canceled by amendment 21; there is no murph PR B. murph-ios PR = plan PRs 09 + 10.
 6. **Model:** the recap task runs on GPT-6.1 Sol.
 7. **Murph cameo:** the approved character sheet exists at `agent-docs/assets/murph-character-sheet-v1.png` (the plan's ZIP omitted images).
 8. **Craft carries over:** the writing guidance proven in the prototype prompt (genre treatment, scene staging rules, setup above and payoff below, whole real photos, zero to two Most likely to cards, song rules, "jokes may exaggerate, facts may not") must reach the agent as clear, well-organized instructions it reads for this task, not as scattered strings.
@@ -30,13 +30,15 @@ Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the own
 19. **Reference input estimate without a required env (parent review):** the existing authorized reference exporter already rotates and resizes every player photo and the Murph sheet to fit 1024×1024, without enlargement, before hashing/upload. Share that bound with admission. With at most three references and a 16,384-byte prompt, use a default total input estimate of `16,384 + 3 × (65 + 129 × ceil(1024/512)^2 + 6,240) = 36,847` tokens, all charged at $8/million for reference requests. The optional `MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING` overrides that estimate. Missing configuration no longer rejects photos. **Evidence limit:** the current official [vision guide](https://developers.openai.com/api/docs/guides/images-vision#gpt-image-model-inputs) labels this high-fidelity accounting as legacy GPT Image 1; it publishes no equivalent Flare input formula. Deliberately omit the legacy shortest-side downscale and use the larger fidelity surcharge. This is a conservative estimate, not a provider-guaranteed Flare worst-case ceiling; the requested Flare-specific derivation remains unverified. The default is chosen to fulfill the owner's zero-new-env direction while exposing that limitation, instead of silently treating legacy documentation as a modern guarantee.
 20. **Quality and time budget (parent review):** file images default to high quality at 1024×1536, including cover and scenes; ordinary chat images keep medium/square defaults. Allow six image attempts, two concurrent images, one twenty-second song and $3.00 prospective reservations. Expand the stored operation bound to seven. The official [GPT-Image-2.6 output calculator](https://developers.openai.com/api/docs/guides/image-generation#calculating-costs) uses a high-quality long axis of 48 and multiplier 1 (1,372 output tokens at portrait size). Raise the generation deadline from ten to twenty minutes, retaining thirty seconds for finalization. The prior synthetic live run took 79.59 seconds with mocked media; it does not measure real high-quality rendering. Conservative timing is three two-image waves at the existing 240-second image timeout, plus the existing 300-second song timeout, plus 80 seconds of authoring and 30 seconds of finalization: 1,130 seconds, below 1,200. The hosted notification uses the default service tier (the separate ten-minute Flex deadline does not apply); Codex waits for turn completion, and hosted workspace runtime rejects configured maxRuntimeMs budgets rather than imposing a shorter one. No hosted deadline/configuration is extended. Preserve cancellation from the owning runtime.
 
+21. **Parent authoring is the final design (owner review):** cancel plan PR 08 and the proposed child-forwarding PR B. The parent reads material, writes files, generates, previews, revises and submits the show. Keep native multi-agent features disabled for recap turns. Remove child/subagent instructions from the craft guide; it simply tells Murph to finish with the task files and tools. The separate native iOS work remains.
+
 ## PR A execution
 
-Outcome: pair players receive one accepted themed recap through one text line and link. Full, sparse, failed-media and retired generations use the existing game authority; groups retain their current path. Proof includes contract fixtures, focused unit/Postgres checks and synthetic live parent journeys. Native visual implementation and child forwarding remain separate work.
+Outcome: pair players receive one accepted themed recap through one text line and link. Full, sparse, failed-media and retired generations use the existing game authority; groups retain their current path. Proof includes contract fixtures, focused unit/Postgres checks and synthetic live parent journeys. Native visual implementation remains separate work; child forwarding is canceled.
 
 Implementation covers plan PRs 01–07 and removes the undeployed recipe executor,
 asset mailbox and cover polling. The iOS contract and synthetic decoder fixtures
-are frozen for commit 01. PR 08 and native UI are intentionally excluded.
+are frozen for commit 01. PR 08 is canceled. Native UI remains separate.
 
 Local synthetic acceptance passed on GPT-6.1 Sol through the sanctioned
 `test:assistant:live` runner: the existing production-validator recap journey and
@@ -92,7 +94,7 @@ Decision
 
 Murph should make the recap inside its existing hosted Codex runtime, using ordinary files and the existing image and song tools. The existing recap notification owns the work; write_recap remains the canonical submission boundary.
 
-Murph can drive one native subagent to read the material, compose the show, generate media, preview it, and revise it. That requires a small, explicitly scoped change to child tool dispatch: the snapshot supports native child lifecycles and usage accounting, but currently rejects children’s dynamic-tool requests. Until that bridge passes a live conformance test, the parent performs those same tool calls. Both paths use the same tools, files, budget, submission, and recovery behavior.
+The parent reads material, composes the show, generates media, previews, revises and submits. This is the final design, with no child-tool forwarding work planned.
 
 Remove the separate post-save media-generation pipeline. Generate and inspect the chosen media before accepting the final recap, then let the existing notification/outbox deliver the accepted chat line.
 
@@ -146,7 +148,7 @@ Migration risk. Historical recaps must remain readable, including pending or mal
 
 Focused validation. Add four-block-page fixtures proving that old clients receive setup/picture/payoff and no authoring prompts, storage keys, or provider metadata.
 
-2. Runtime owner, subagent support, and context
+2. Runtime owner and context
 
 The existing recap notification owns the task
 
@@ -165,34 +167,6 @@ These owners already exist in   chat-lifecycle.ts and   recap-witness.ts. Do not
 For trusted pair-show scope, reuse the existing isolated provider-turn execution path. Compose its applicable room capabilities with the bound recap tools. Simply switching profiles is insufficient: today’s recap tool list replaces the normal catalog, and normal gameplay discovery depends on accepted user-input authority that a notification does not have. Do not fabricate such an input.
 
 Groups and other game notifications keep their current restricted profile. The relevant owners are   notification-turn.ts,   planning.ts, and   codex-turn-runner.ts.
-
-What subagents can do today
-
-Native children are supported, including lifecycle tracking, usage attribution, and waiting for them before a workspace checkpoint. However:
-
-The current game-host-turn disables shell and multi-agent capabilities.
-
-handleSubagentThreadMessage rejects all child server requests, including dynamic tools and approvals.
-
-Existing tests intentionally enforce that rejection.
-
-These are implemented restrictions, not prompt configuration gaps. See   assistant-codex.ts, handleSubagentThreadMessage, and   assistant-codex-runtime-events.test.ts.
-
-The smallest tool-capable child change is to reuse the existing dispatcher with inherited authority:
-
-Prove that the child belongs to the active root invocation using the existing child-registration relationship.
-
-Inherit the exact game/event scope, deadline, cancellation signal, and budget.
-
-Forward only tools authorized for that parent task.
-
-Keep unrelated delivery effects and approval handling root-scoped.
-
-Reject foreign, stale, detached, or unregistered children.
-
-Designate one submitter. The parent must not independently submit while its child is submitting.
-
-A real run against the pinned Codex build must prove tool declaration/inheritance and dispatch. If that fails, the parent completes the task using the same tools; do not build a substitute subagent framework.
 
 Filesystem and canonical writes
 
@@ -230,7 +204,7 @@ Admit	Existing notification handler checks event, room, witness, deadline, and p
 
 Read	Bound read_game, conversation export, and game_lore	Game data, transcript files, lore, permitted photo manifest
 
-Compose	Murph parent or its scoped child writes draft JSON	Editable local draft
+Compose	Murph writes draft JSON	Editable local draft
 
 Generate	Existing generate_image and generate_song in file mode	Local media receipts
 
@@ -388,7 +362,7 @@ Durable admission belongs to the tools and existing provider boundary
 
 Use the existing game/event authority for a small, bounded admission receipt: deadline, attempt identity, image/song counts, reserved cost, and source-reference identities or hashes. GameEvent already holds generation witnesses and pointer receipts; keep its payload structural and keep private words out of it.
 
-Under the existing game lock, reserve the next operation’s conservative maximum cost before provider egress. Parent, child, and resumed attempts share the same budget.
+Under the existing game lock, reserve the next operation’s conservative maximum cost before provider egress. All attempts for the same recap share the same budget.
 
 The current withinRecapBudget only checks whether prior spending is below $1.25; it does not check whether prior spending plus the next reservation fits. Replace that logic rather than copying it into the tools.
 
@@ -404,7 +378,7 @@ Validate it before upstream dispatch.
 
 Reject unreserved direct/native media calls within recap scope.
 
-Use the inspectable HTTP Responses path for this scope and reject native image-generation requests that bypass the ordinary tool.
+Disable Codex native image generation for recap turns. Keep ordinary model transports; reject Responses image-generation requests that bypass the ordinary file tool.
 
 Treat missing or omitted scope headers as insufficient; the agent cannot opt out of the host-bound scope.
 
@@ -416,7 +390,7 @@ These are proposed rollout defaults.
 
 Limit	Policy
 
-Paid images	At most four attempts, including cover and revisions
+Paid images	At most six attempts, including cover and revisions
 
 Published scenes	Preserve two to three; allow four when fewer than three real photos are available
 
@@ -424,13 +398,11 @@ Paid songs	One 20-second attempt
 
 Image concurrency	At most two
 
-Native children	One active recap child; no recursive delegation
-
-Media spending	Hard cap of $1.25 per recap generation, enforced prospectively
+Media spending	Cap of $3.00 in prospective media reservations per recap generation
 
 Agent attempts	At most two admitted runs for the same event
 
-Generation deadline	Ten minutes from first admission; preserve time for finalization
+Generation deadline	Twenty minutes from first admission; preserve time for finalization
 
 Provider timeouts	Existing image 240 seconds and music 300 seconds, each shortened by remaining task time
 
@@ -456,11 +428,11 @@ Four images and one song	$0.45–$1.05
 
 The image range is an explicit planning assumption. Replace it with measured reference-heavy synthetic runs before rollout.
 
-The $1.25 cap covers media, not total Codex reasoning cost. Meter parent and child usage through existing accounting and report it separately. Attempts, elapsed time, and child concurrency bound operational work; they do not establish a hard dollar ceiling for in-flight model tokens. A combined hard dollar cap would require additional token-cost admission and proven provider output bounds, which the snapshot does not provide.
+The $3.00 prospective cap covers media, not total Codex reasoning cost. Meter parent usage through existing accounting and report it separately. Attempts and elapsed time bound operational work; they do not establish a hard dollar ceiling for in-flight model tokens. A combined hard dollar cap would require additional token-cost admission and proven provider output bounds, which the snapshot does not provide.
 
 7. Reliability and fallback
 
-The existing system mailbox already persists failed work for retry and successful work for checkpoint recording. Native children are awaited at checkpoint boundaries; they are not durable background processes. See   system-mailbox.ts and   snapshot-bridge.ts.
+The existing system mailbox already persists failed work for retry and successful work for checkpoint recording. See   system-mailbox.ts and   snapshot-bridge.ts.
 
 On every admission or retry:
 
@@ -476,11 +448,11 @@ Run only while the existing generation still has time and budget.
 
 Otherwise finish through the plain-fallback path.
 
-Do not reset the clock or budget when a container restarts, a child fails, or Codex produces a new tool-call ID.
+Do not reset the clock or budget when a container restarts or Codex produces a new tool-call ID.
 
 Local-file durability
 
-A generated local file is not durable until a workspace checkpoint or upload completes. The existing canonical-write wrapper does not independently snapshot arbitrary files, and snapshotting waits for child quiescence.
+A generated local file is not durable until a workspace checkpoint or upload completes. The existing canonical-write wrapper does not independently snapshot arbitrary files.
 
 For the first implementation, keep candidates local and upload final choices only. If a container loses a paid result before checkpoint/upload, its attempt remains consumed. Another generation is possible only within the remaining cap; otherwise produce the plain fallback.
 
@@ -574,13 +546,12 @@ PR	Owner label	Scope and dependencies	Acceptance checks
 
 07	Codex backend	Existing notification uses the agentic parent path; durable deadline/attempt handling and trusted plain fallback. Depends on 02–06.	Same-event recovery, save-before-send, deterministic failure completion, no generation after acceptance, no send after retirement.
 
-08	Codex backend	Narrow current-child dynamic-tool forwarding. Depends on 07. Parent remains capable of completing the task.	Proven ancestry; inherited scope/budget; stale/foreign child denial; native child can generate, preview, and submit in a live synthetic run.
 
 09	Codex iOS plumbing	Inspect separate repo; capability header, decoders, private media fetch, fallback and audio lifecycle. Depends on stable 01 fixtures.	Legacy/full-show/failure fixtures; auth failures; unknown optional media; song stops on exit; no crash or infinite refresh.
 
 10	Opus UI	Implement themed reel in GameRecapReel.swift, using 05 and 09 contracts.	Whole photos, setup/payoff, one card per page, cover composition, accessibility, long names, small screens, native screenshots against preview fixtures.
 
-11	Codex backend	Cutover verification and deletion of obsolete generator/routing/polling code after any drain. Depends on 07 and completed client gates; 08 gates child mode.	No new asset wakes; no live caller of recap-only provider exports; both synthetic journeys pass; kill switches and rollback floor demonstrated.
+11	Codex backend	Cutover verification and deletion of obsolete generator/routing/polling code after any drain. Depends on 07 and completed client gates.	No new asset wakes; no live caller of recap-only provider exports; both synthetic journeys pass; kill switches and rollback floor demonstrated.
 
 These PRs add no new package, scheduler, recap worker service, or public web player.
 
@@ -588,7 +559,7 @@ These PRs add no new package, scheduler, recap worker service, or public web pla
 
 Unit and contract tests
 
-Extend the existing contract, show-policy, game-tool, image-tool, voice/song, notification, and subagent suites.
+Extend the existing contract, show-policy, game-tool, image-tool, voice/song and notification suites.
 
 Cover:
 
@@ -604,7 +575,7 @@ File output without delivery effects.
 
 Forged references, changed profiles, withdrawn entries, symlink/path substitution, and missing character sheet.
 
-Parent/child scope inheritance and rejection.
+Trusted recap configuration and native-image suppression.
 
 Preview layout and audio metadata.
 
@@ -648,7 +619,7 @@ Require observed evidence that:
 
 Murph reads early and late transcript material.
 
-The parent or registered child invokes the ordinary media tools in file mode.
+The parent invokes the ordinary media tools in file mode.
 
 The agent renders and opens preview images.
 
@@ -664,7 +635,7 @@ The song remains private to the recap.
 
 Usage and reservations reconcile without duplicate billing records.
 
-Add fault variants for a lost local output, provider timeout, song failure, expired deadline, and revoked reference. Use queue-only or test transport for chat effects. Record measured latency and parent/child/media cost. Inspect native screenshots and listen to the synthetic song before rollout.
+Add fault variants for a lost local output, provider timeout, song failure, expired deadline, and revoked reference. Use queue-only or test transport for chat effects. Record measured latency and model/media cost. Inspect native screenshots and listen to the synthetic song before rollout.
 
 12. Rollout, kill switches, and owner decisions
 
@@ -680,7 +651,7 @@ Turning generation off must stop new paid admissions and allow pending work to f
 
 If old asset wakes were deployed, disable their producer and drain them before deleting their consumers. Retain compatible readers and cleanup machinery through rollback. Never activate two generation owners for the same event.
 
-Track save latency, fallback rate, provider attempts, duplicate admissions, media cost, parent/child cost, accepted-but-undelivered recaps, pending lore acknowledgments, and abandoned-media cleanup. Logs contain structural diagnostics, not recap content.
+Track save latency, fallback rate, provider attempts, duplicate admissions, media cost, model cost, accepted-but-undelivered recaps, pending lore acknowledgments, and abandoned-media cleanup. Logs contain structural diagnostics, not recap content.
 
 Only owner decisions still required
 
