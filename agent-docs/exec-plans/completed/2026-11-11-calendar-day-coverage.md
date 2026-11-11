@@ -1,6 +1,6 @@
 # Complete sparse source-local calendar refresh coverage
 
-Status: active
+Status: completed
 Created: 2026-11-11
 Updated: 2026-11-11
 
@@ -21,10 +21,13 @@ Change only strict sparse calendar refresh collection and importer-owned day sel
 
 ## Product UX
 
-Effort: Patch. Source-local daily totals recover without changing their dates or fabricating partial totals. Interrupted refreshes retain prior data and retry. No new member action or UI. Readiness pending proof. Complete collection waits until its bounded UTC envelope has closed; this preserves all accepted offsets, including the normalizer's 24-hour boundary.
+Effort: Patch. Source-local daily totals recover without changing their dates or fabricating partial totals. Interrupted refreshes retain prior data and retry. No new member action or UI. Parent review: Ready. Complete collection waits until its bounded UTC envelope has closed; this preserves all accepted offsets, including the normalizer's 24-hour boundary.
 
 ## Verification
 
 - Before change: both composed offset tests fail with JunctionSparseCalendarRepairNormalizationError.
-- Planned: focused calendar, provider history/diagnostics, importer tests; importer and device-sync typechecks; complexity diff; parent review and required CI.
+- Passed: 12 new composed calendar cases, 111 existing provider history/diagnostic cases, 274 importer cases, importer and device-sync typechecks, four rendered changelog cases, and complexity diff with zero added debt.
+- Parent review: retained source lifecycle, canonical identity, empty-day authority, offset bounds, malformed-row rejection, bounded pagination, foreground yield, and existing retry owner. No new persisted state or secret access.
+- PR4867 is the implementation candidate. Required exact-head CI, merge, protected deployment and four-hour natural-traffic observation continue in the original automation memory; they are not claimed complete by this implementation record.
 - ReviewGPT skipped by explicit user instruction; parent review retained.
+Completed: 2026-11-11
