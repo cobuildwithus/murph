@@ -103,7 +103,7 @@ export async function executeAskGrokTool(input: {
 }): Promise<AskGrokToolResult> {
   const runtime = input.runtime ?? null
   if (!runtime) {
-    return failure('X search is not configured (XAI_API_KEY is missing); no search ran', 'unavailable')
+    return failure('X search is not set up on this deployment, so no search ran', 'unavailable')
   }
 
   const turnState = input.turnState ?? createAskGrokTurnState()

@@ -132,7 +132,7 @@ export async function executeGenerateImageTool(input: {
     return {
       failureDiagnostic: toolFailureDiagnostic('unavailable'),
       rpcSuccess: false,
-      rpcText: 'OPENAI_API_KEY is required for image generation',
+      rpcText: 'image generation is not set up on this deployment, so no image was made',
     }
   }
 

@@ -28,15 +28,23 @@ import {
 const voiceRosterDescription = assistantVoiceOptions
   .map((option) => `${option.label}=${option.id}`)
   .join(', ')
-const voiceMemoTextLengthGuidance =
-  `Voice memo text is limited to at most ${ELEVENLABS_TTS_MAX_TEXT_LENGTH.toLocaleString('en-US')} characters. Compress it before calling the tool. Write the spoken text in the user's requested language, otherwise their explicit saved language preference, clear conversational language, or remembered default when ambiguous. Language choice never authorizes a voice change or personal memory access outside a private conversation.`
+const voiceMemoTextLimitGuidance =
+  `Keep it to at most ${ELEVENLABS_TTS_MAX_TEXT_LENGTH.toLocaleString('en-US')} characters, shortening it before you call. Write it in the language the reply would use.`
 
 export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
   namespace: 'murph',
   name: 'generate_voice_memo',
   deferLoading: true,
-  description:
-    `Generate one short voice memo using ElevenLabs and attach it to the final assistant response. Use it only when the user requests voice, a known preference supports voice, or when a loaded Murph skill or product flow explicitly asks for a voice memo and marks voice welcome and privacy-safe. Otherwise prefer text. ${voiceMemoTextLengthGuidance} The voice configured for the running turn is authoritative for every normal memo. Set userRequestedVoice only when the current user explicitly asks to test that exact named Murph voice or explicitly asks for this memo in that exact named voice. Never set it because another voice seems to fit the content, mood, persona, or delivery better. userRequestedVoice is a roster id, never an ElevenLabs voice id. Do not persist a one-off voice request. A murph.personalization voice update starts on a later turn, so when the user asks to save a named voice and hear or test it immediately, save it and pass that same roster voice as userRequestedVoice. Final response text is optional. Leave it empty when the memo fully carries the reply, the user asked for voice only, or the owning skill or product flow marks the response voice-only. When leaving it empty, finish with an empty final assistant message and do not call murph.finish_without_reply after attaching the memo. Add accompanying text only when it contributes distinct necessary information, the owning flow explicitly requires it, or the user explicitly asks for both audio and text; otherwise do not duplicate the memo transcript in text. For a voice-only Linq/iMessage response, do not call murph.select_reply_target because native reply targeting requires accompanying text. This does not send directly.`,
+  description: [
+    'Generate one short voice memo and attach it to your final response. It is delivered with the reply.',
+    'Use it when the user asks for voice, a saved preference supports voice, or a loaded skill or product flow asks for a voice memo. Otherwise reply in text.',
+    'The memo uses the voice configured for this turn.',
+    'Set userRequestedVoice only when the current user names a Murph voice for this memo or asks to test it. A voice named for one memo is not a saved preference.',
+    'A murph.personalization voice change starts on a later turn, so when the user asks to save a voice and hear it now, save it and also pass it here.',
+    'Final text is optional. Leave it empty when the memo carries the whole reply, and add text only for information the memo lacks or when the user asked for both.',
+    'For a voice-only reply, end with an empty final message and do not call murph.finish_without_reply.',
+    'On iMessage, also skip murph.select_reply_target for a voice-only reply, because reply targeting needs text.',
+  ].join(' '),
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -45,7 +53,7 @@ export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
         type: 'string',
         minLength: 1,
         maxLength: ELEVENLABS_TTS_MAX_TEXT_LENGTH,
-        description: `The exact text to speak in the voice memo. ${voiceMemoTextLengthGuidance} Use plain spoken words, without bracketed audio directions or SSML.`,
+        description: `Exact words to speak. ${voiceMemoTextLimitGuidance} Use plain spoken words with no bracketed audio directions or SSML.`,
       },
       userRequestedVoice: {
         anyOf: [
@@ -54,7 +62,7 @@ export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
         ],
         default: null,
         description:
-          `Exact Murph voice roster id explicitly named by the current user for this one memo or test. Omit it for every normal memo, including when a different voice seems better suited to the content; omission uses the voice configured for the running turn. Available voices: ${voiceRosterDescription}.`,
+          `Roster id of the voice the current user named for this one memo or test. Omit it otherwise, and the memo uses the voice configured for this turn. Voices: ${voiceRosterDescription}.`,
       },
     },
     required: ['text'],
@@ -69,7 +77,7 @@ export const MURPH_EXPRESSIVE_VOICE_MEMO_TOOL = {
       ...MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema.properties,
       text: {
         ...MURPH_GENERATE_VOICE_MEMO_TOOL.inputSchema.properties.text,
-        description: `The exact text to speak in the voice memo. ${voiceMemoTextLengthGuidance} This turn uses Eleven v4. Add occasional inline audio directions such as [yawning], [sighs], [whispering], or [excited] when requested or when they naturally serve the moment. Put each cue beside the words it affects; cues count toward the character limit. Keep ordinary memos natural and restrained, without gratuitous sounds or laughing at your own jokes. Keep serious health guidance clear and literal. Use square-bracket natural-language cues, not SSML, and keep them out of accompanying text. Delivery cues never authorize changing the configured voice.`,
+        description: `Exact words to speak. ${voiceMemoTextLimitGuidance} This turn uses Eleven v4, so you may add occasional square-bracket cues such as [yawning], [sighs], [whispering], or [excited] beside the words they affect, when the user asks for them or they fit the moment. Cues count toward the character limit. Keep ordinary memos natural and restrained, with no gratuitous sounds or laughing at your own jokes, and keep serious health guidance clear and literal. Do not use SSML, and keep cues out of any accompanying text.`,
       },
     },
   },

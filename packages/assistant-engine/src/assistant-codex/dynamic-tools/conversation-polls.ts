@@ -10,7 +10,19 @@ export const MURPH_POLL_TOOL = {
   namespace: 'murph',
   name: 'poll',
   deferLoading: true,
-  description: 'Create, list, read, vote in or close native polls in this conversation. Create takes a question and 2–12 distinct options (100 characters each); it sends immediately. iMessage sends the question followed by a poll; votes are public and multiple choices are allowed. Telegram uses one choice: anonymous defaults to true; set anonymous=false for named voting, or true when anonymity is requested. iMessage cannot be anonymous. Read uses pollRef from create/list and returns counts plus up to 50 voters with their optionIndexes. Pass nextVoterCursor as voterCursor to read more. iMessage exposes voter handles; named Telegram exposes received user or chat identities. Telegram tallies and voter updates may lag independently, even after close: never claim the received voter list is exhaustive or infer people behind chat voters or missing identities. Anonymous polls expose counts only. Vote is iMessage-only and adds or removes your own line’s vote: use pollRef, zero-based optionIndex from read, and operation=add or remove. Multiple choices are independent; adding another does not remove a previous choice. vote_submitted means the provider accepted the request, not confirmed device delivery; read to verify the tally. After an uncertain vote, read to inspect; do not automatically repeat it. Telegram bots cannot vote: state your pick in text when useful, without claiming a ballot or adding to its count. Only Telegram supports close; close stops voting and returns final results. Do not recreate after an unknown send outcome. After creation, avoid repeating the question and options in a second message.',
+  description: [
+    'Create, list, read, vote in, or close native polls in this conversation.',
+    'create needs a question and 2 to 12 distinct options of up to 100 characters each, and it sends at once. Do not repeat the question and options in a message afterward.',
+    'On iMessage, votes are public, several choices are allowed, and a poll cannot be anonymous.',
+    'On Telegram, each voter picks one choice. anonymous defaults to true, and anonymous=false makes votes named. Only Telegram supports close, which ends voting and returns final results.',
+    'read takes pollRef from create or list and returns counts plus up to 50 voters with their optionIndexes. Pass nextVoterCursor as voterCursor to read more.',
+    'Anonymous polls return counts only. iMessage shows voter handles, and named Telegram polls show the user or chat identities received.',
+    'Telegram tallies and voter lists can lag, even after close, so never call a voter list complete or guess who is behind a chat-level vote or a missing identity.',
+    "vote works on iMessage only and changes Murph's own vote: pass pollRef, a zero-based optionIndex from read, and operation add or remove. Each choice is independent, so adding one does not remove another.",
+    'vote_submitted means the provider accepted the request. Read the poll to confirm the tally.',
+    'On Telegram, Murph cannot vote, so state a pick in text when useful without claiming a ballot or adding to the count.',
+    'After an uncertain create or vote, read or list to check, and never repeat it automatically.',
+  ].join(' '),
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -60,8 +72,20 @@ export async function executeConversationPollTool(input: {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'HOSTED_POLL_UNSUPPORTED_SERVICE') {
       return toolTextResult(false, 'Native polls require a confirmed iMessage conversation. This conversation’s service is unknown or unsupported; no poll action was sent.', 'authority_rejected', error)
     }
-    return toolTextResult(false, input.request.action === 'vote'
-      ? 'The vote could not be confirmed and may have applied. Read the poll to inspect; do not automatically resubmit or claim success.'
-      : 'Poll action could not be confirmed. Do not invent results or claim it succeeded; an interrupted create may have sent, so do not recreate automatically.', 'handler_exception', error)
+    return toolTextResult(false, pollFailureText(input.request.action), 'handler_exception', error)
+  }
+}
+
+function pollFailureText(action: ConversationPollAction['action']): string {
+  switch (action) {
+    case 'vote':
+      return 'The vote could not be confirmed and may have applied. Read the poll to check before voting again.'
+    case 'create':
+      return 'Creating the poll could not be confirmed, and it may have been sent. List polls to check before creating another one.'
+    case 'close':
+      return 'Closing the poll could not be confirmed, so it may still be open. Read the poll to check.'
+    case 'list':
+    case 'read':
+      return 'The poll could not be read, so its results are unknown.'
   }
 }

@@ -16,8 +16,14 @@ export const MURPH_CREATE_CALENDAR_LINK_TOOL = {
   namespace: 'murph',
   name: 'create_calendar_link',
   deferLoading: true,
-  description:
-    'Prepare one self-contained Add to Calendar link from appointment details the member explicitly provided or confirmed in the current private text conversation. This does not add the event. Require an explicit title, start, end, and UTC offset; never guess a missing date, time, duration, or offset. When any required detail is missing, ask for every missing required detail together. Pass startsAt and endsAt as RFC 3339 date-times with offsets. Creating this link does not replace private appointment follow-through: when scheduled automation changes are available, also ensure exactly one one-shot reminder under the appointment reminder policy in this same turn, using tool search for `murph automation` to load and call `murph.automation` when needed, and preserve its verified or pending result in the semantic reply. After success, do not copy, compose, alter, or repeat a URL: write the rest of the truthful semantic reply, and the runtime appends one exact calendar link. Never claim the event was added.',
+  description: [
+    'Make one Add to Calendar link for an appointment the member gave or confirmed in this private conversation.',
+    'The link does not add the event, so never say the event was added.',
+    "Pass title, startsAt, and endsAt. Use the member's time zone for the UTC offset.",
+    'When they gave no end time, use one hour after the start and say so in the reply.',
+    'Ask only when the date or the start time is missing.',
+    'After success the runtime appends the link to your reply, so write the reply without any URL.',
+  ].join(' '),
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -26,31 +32,31 @@ export const MURPH_CREATE_CALENDAR_LINK_TOOL = {
         type: 'string',
         minLength: 1,
         maxLength: calendarEventV1Bounds.title,
-        description: 'Explicit event title.',
+        description: 'Event title.',
       },
       startsAt: {
         type: 'string',
         maxLength: 35,
         description:
-          'Explicit start as an RFC 3339 date-time with UTC offset, for example 2026-10-14T14:30:00-04:00.',
+          'Start as an RFC 3339 date-time with UTC offset, for example 2026-10-14T14:30:00-04:00.',
       },
       endsAt: {
         type: 'string',
         maxLength: 35,
         description:
-          'Explicit end as an RFC 3339 date-time with UTC offset. It must be after startsAt.',
+          'End in the same format. It must be after startsAt.',
       },
       location: {
         type: 'string',
         minLength: 1,
         maxLength: calendarEventV1Bounds.location,
-        description: 'Optional explicit location.',
+        description: 'Optional location.',
       },
       notes: {
         type: 'string',
         minLength: 1,
         maxLength: calendarEventV1Bounds.notes,
-        description: 'Optional concise notes. Keep them short enough for a calendar link.',
+        description: 'Optional short notes.',
       },
     },
     required: ['title', 'startsAt', 'endsAt'],
@@ -91,7 +97,7 @@ export function executeCreateCalendarLinkDynamicTool(
         success: false,
         contentItems: [{
           type: 'inputText',
-          text: 'The event details are too long for a reliable calendar link. Ask the member to shorten the notes or location.',
+          text: 'The event details are too long for a calendar link, so no link was made. Shorten the notes or location and call again.',
         }],
       },
       usageDraft: null,
@@ -107,7 +113,7 @@ export function executeCreateCalendarLinkDynamicTool(
         type: 'inputText',
         text: JSON.stringify({
           instruction:
-            'Before ending, complete private appointment follow-through: use tool search for `murph automation` to load and call `murph.automation`, then ensure exactly one one-shot reminder unless the member declined it. Then write the rest of the truthful semantic reply without copying or repeating a URL. The runtime appends the exact calendar link.',
+            'The link is ready, and the runtime appends it to your reply, so write the reply without any URL. The link does not set a reminder. When the Private appointment follow-through policy covers this turn, it still needs its reminder.',
           status: 'ready',
         }),
       }],

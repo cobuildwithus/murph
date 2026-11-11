@@ -2838,7 +2838,7 @@ async function executeSendPhysicalNoteDynamicTool(
             complimentary: result.complimentary,
             costUsdMicros: result.costUsdMicros,
             note:
-              'Lob accepted the exact generated artwork for printing. Do not attach the image unless it adds conversational value. Say it is headed to print, not delivered.',
+              'The printer accepted the exact generated artwork. The note is headed to print, and delivery is not confirmed. Attach the image only when it adds to the conversation.',
             physicalNoteId: result.physicalNoteId,
             status: result.status,
           }),
@@ -2954,7 +2954,7 @@ async function executeCreatePhoneCallDynamicTool(
   if (!phoneCallAuthority) {
     return toolTextResult(
       false,
-      'phone calling requires user-sourced input or direct scheduled automation authority for this turn',
+      'no phone call was placed. A call needs a request in the current message or a scheduled occurrence whose saved instructions ask for it.',
       'authority_rejected',
     )
   }
@@ -3047,7 +3047,7 @@ async function executeCreatePhoneCallDynamicTool(
       if (isHostedAssistantNotificationRouteRequiredError(error)) {
         return toolTextResult(
           false,
-          'no phone call was started for this scheduled occurrence because its direct result route was unavailable. Restore that messaging route and ask the requester to reschedule the call; do not retry automatically.',
+          'no phone call was started for this scheduled occurrence because the conversation route for reporting its result was unavailable. Nothing retries on its own. Tell the requester the call did not happen and ask them to reschedule it.',
           'unavailable',
         )
       }

@@ -189,7 +189,7 @@ describe("scheduled assistant tool authority", () => {
     expect(result.rpcResult).toEqual({
       success: false,
       contentItems: [{
-        text: "OPENAI_API_KEY is required for image generation",
+        text: "image generation is not set up on this deployment, so no image was made",
         type: "inputText",
       }],
     });

@@ -34,11 +34,28 @@ const groupRoomModelArgumentsSchema = z.discriminatedUnion('action', [
   }).strict(),
 ])
 
+/**
+ * Upkeep rules for the optional `Photo references` subsection. They apply only
+ * during silent room-model consolidation, so the consolidation prompt owns
+ * them. Keeping them out of the tool description means ordinary group turns do
+ * not pay for them.
+ */
+export const GROUP_ROOM_MODEL_PHOTO_REFERENCES_MAINTENANCE_GUIDANCE = [
+  'The page may keep an optional `Photo references` subsection under `People` when supplied evidence explicitly associates a familiar conversational name with an exact `raw/captures/**` or `raw/inbox/**` image ref.',
+  'Keep the exact ref and only the minimum multi-person disambiguator needed, such as "far left".',
+  'Prefer `raw/captures/**`; for transient `raw/inbox/**` refs, also keep the evidence date and retire the entry after 14 days.',
+  'Keep at most three useful non-duplicate refs per person, and prune contradicted or superseded entries.',
+  'Never invent a ref or infer identity from facial similarity; use only explicit captions, positions, labels, and corrections.',
+].join(' ')
+
 const GROUP_ROOM_MODEL_TOOL_DESCRIPTION = [
-  'Read, fully replace, or delete the one advisory room-model page owned by the current authenticated group chat. Ordinary group turns may use it only for an explicit current-room request to remember, correct, retire, or forget social context; silent consolidation receives separate immutable automation authority.',
-  'During engine-authorized silent consolidation, the page may keep an optional `Photo references` subsection under `People` when supplied evidence explicitly associates a familiar conversational name with an exact `raw/captures/**` or `raw/inbox/**` image ref. Keep the exact ref and only the minimum multi-person disambiguator needed, such as "far left". Prefer `raw/captures/**`; for transient `raw/inbox/**` refs, also keep the evidence date and retire the entry after 14 days. Keep at most three useful non-duplicate refs per person, and prune contradicted or superseded entries. Never invent a ref or infer identity from facial similarity; use only explicit captions, positions, labels, and corrections.',
-  'For an ordinary image-generation or image-edit request involving a named person, check current attachments, recent visible conversation, and injected `Photo references` before asking for another upload. The current page or its runtime status is already injected into ordinary group turns, so do not call show merely to reread it. Use an exact usable ref when available. If a multi-person mapping is incomplete, ask only for the missing photo or position; ask for a new photo only when no usable ref exists. Current participant corrections override the page.',
-  'Show first, then pass the returned expectedDigest to upsert or delete. Upsert must contain the complete compact Markdown page, must keep the serialized fixed page within its defensive 64 KiB file-read ceiling, and must not contain raw participant handles. If show fails or a write reports stale state, stop. This tool is unavailable in group email and never changes participant identity, permissions, health sharing, or personal memory.',
+  "Read, replace, or delete this group chat's room-model page, which holds Murph's rough notes about the room.",
+  'On an ordinary turn, use it only when someone in the room asks Murph to remember, correct, or forget something about the room.',
+  'That turn already has the current page, or a note that there is none, in context, so call show only to get the digest before a write.',
+  'Pass that digest as expectedDigest to upsert or delete.',
+  'upsert replaces the whole page: send the complete Markdown page, under 64 KiB, with no raw participant handles.',
+  'If show fails or a write reports stale state, stop.',
+  "This page never changes anyone's identity, permissions, health sharing, or personal memory.",
 ].join(' ')
 
 export const MURPH_GROUP_ROOM_MODEL_TOOL = {

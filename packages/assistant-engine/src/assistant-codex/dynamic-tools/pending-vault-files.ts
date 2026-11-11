@@ -55,8 +55,18 @@ const pendingVaultFilesArgumentsSchema = z.discriminatedUnion('action', [
 export const MURPH_PENDING_VAULT_FILES_TOOL = {
   namespace: 'murph',
   name: 'pending_vault_files',
-  description:
-    'List or cancel runtime-generated files still awaiting secure delivery approval in this direct conversation. Use only for an explicit request from the current user. Always list first, then cancel only exact intentIds from that list. List returns the oldest 20 entries plus totalCount; totalCount greater than pending.length means more remain. Cancel returns one status per requested id: failed may be retried once, while not_pending means only that the intent is no longer cancellable and never proves delivery. For an explicit cancel-all request, list and cancel at most five batches, stopping early when the list is empty or a batch makes no progress, then report any remaining count or failed ids. Cancellation may win only while the outbox intent remains awaiting_approval; once delivery preparation or dispatch owns it, cancellation refuses. Cancellation terminalizes the delivery but does not delete bytes directly: quiescent runtime-residue cleanup remains the sole deletion owner. A later approval observation or old approval link cannot revive a delivery that cancellation already terminalized; state this when reporting a successful cancellation. Canonical and user-owned vault files are outside this tool.',
+  description: [
+    "List or cancel files Murph generated that are still waiting for the member's delivery approval in this private conversation.",
+    'Use it only when the member asks.',
+    'list returns the oldest 20 pending files plus totalCount.',
+    'cancel takes intentIds from that list and returns one status per id: cancelled, already_cancelled, not_found, not_pending, or failed.',
+    'not_pending means delivery already started or finished, and it does not show that the file arrived.',
+    'A failed id may be retried once.',
+    'For a request to cancel everything, repeat list then cancel up to five times, stop when the list is empty or nothing changes, and report what remains.',
+    'Cancelling stops the delivery, and an old approval link cannot revive it. Say so when you confirm a cancellation.',
+    'The file itself is removed later by cleanup.',
+    'Files the member saved to their vault are not affected.',
+  ].join(' '),
   inputSchema: z.toJSONSchema(pendingVaultFilesArgumentsSchema, { io: 'input' }),
 } as const
 

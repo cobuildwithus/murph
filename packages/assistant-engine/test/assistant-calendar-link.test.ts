@@ -61,7 +61,7 @@ describe('assistant calendar link tool', () => {
     expect(url?.startsWith(CALENDAR_LINK_URL_PREFIX)).toBe(true)
     expect(JSON.parse(result.rpcResult.contentItems[0]?.text ?? '')).toEqual({
       instruction:
-        'Before ending, complete private appointment follow-through: use tool search for `murph automation` to load and call `murph.automation`, then ensure exactly one one-shot reminder unless the member declined it. Then write the rest of the truthful semantic reply without copying or repeating a URL. The runtime appends the exact calendar link.',
+        'The link is ready, and the runtime appends it to your reply, so write the reply without any URL. The link does not set a reminder. When the Private appointment follow-through policy covers this turn, it still needs its reminder.',
       status: 'ready',
     })
     const payload = url?.slice(CALENDAR_LINK_URL_PREFIX.length) ?? ''

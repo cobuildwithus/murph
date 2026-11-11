@@ -463,7 +463,7 @@ describe("assistant phone calls", () => {
       success: false,
     });
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "user-sourced input or direct scheduled automation authority",
+      "A call needs a request in the current message or a scheduled occurrence",
     );
   });
 
@@ -965,13 +965,13 @@ describe("assistant phone calls", () => {
       "no phone call was started",
     );
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "Restore that messaging route",
+      "Nothing retries on its own",
     );
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "ask the requester to reschedule",
+      "ask them to reschedule it",
     );
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "do not retry automatically",
+      "did not happen",
     );
     expect(result.rpcResult.contentItems[0]?.text).not.toContain(
       "a later result",

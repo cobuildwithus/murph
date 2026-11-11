@@ -455,7 +455,7 @@ describe('executeAskGrokTool', () => {
       runtime: null,
     })
     expect(result.rpcSuccess).toBe(false)
-    expect(result.rpcText).toContain('not configured')
+    expect(result.rpcText).toContain('not set up on this deployment, so no search ran')
   })
 
   it('enforces the per-turn provider-call ceiling in trusted turn state', async () => {

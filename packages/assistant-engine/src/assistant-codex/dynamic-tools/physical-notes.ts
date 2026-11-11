@@ -87,12 +87,11 @@ export const MURPH_RESOLVE_PHYSICAL_NOTE_TOOL = {
   name: 'resolve_physical_note',
   deferLoading: true,
   description: [
-    'Read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md before using this tool.',
-    'Call exactly once only when a person explicitly asks to check, clear, resolve, or cancel an earlier unresolved physical-note submission.',
-    'Supply the exact current Message ref that authorizes the check.',
-    'When the earlier unresolved send or prior recovery is known from conversation or tool results, also supply its exact earlier Message ref as target_message_ref and identify it with target_kind send or recovery.',
-    'This checks provider records and may safely clear a blocker; it never sends a new note or recalls an accepted one.',
-    'Report the checked accepted, clear, pending, permission_denied, or unavailable status and the independent remainingUnresolved fact literally. Never retry automatically.',
+    'Check one earlier physical-note submission whose outcome is unknown, when the person asks to check, clear, or cancel it.',
+    'Read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md first.',
+    "Pass the current request's Message ref as message_ref. When you know which earlier send or recovery it concerns, also pass target_message_ref and target_kind.",
+    'This reads printer records and may clear a blocker. It never sends a new note and never recalls an accepted one.',
+    'Call it once per request, and report the returned status and remainingUnresolved as given.',
   ].join(' '),
   inputSchema: {
     type: 'object',
@@ -102,19 +101,19 @@ export const MURPH_RESOLVE_PHYSICAL_NOTE_TOOL = {
         type: 'string',
         pattern: '^ain_[0-9a-f]{32}$',
         description:
-          'Exact current Message ref explicitly authorizing this recovery check.',
+          'Message ref of the current request asking for this check.',
       },
       target_message_ref: {
         type: 'string',
         pattern: '^ain_[0-9a-f]{32}$',
         description:
-          'Optional exact earlier Message ref for the unresolved send or prior recovery result being checked. It identifies the target only; it does not authorize the action.',
+          'Message ref of the earlier send or recovery result being checked. It only identifies the target.',
       },
       target_kind: {
         type: 'string',
         enum: ['send', 'recovery'],
         description:
-          'Required with target_message_ref. Use send for an original physical-note send; use recovery for a prior murph.resolve_physical_note result.',
+          'Required with target_message_ref. Use send for an original physical-note send and recovery for an earlier resolve_physical_note result.',
       },
     },
     required: ['message_ref'],
@@ -126,14 +125,12 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
   name: 'send_physical_note',
   deferLoading: true,
   description: [
-    'Before creating or mailing a physical note, read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md.',
-    'On a trusted hosted image-completion turn whose generation was launched with the exact authorizing message_ref, omit image_ref, image_sha256, and message_ref so runtime code binds the exact generated image and request automatically.',
-    'When a generated note was intentionally shown first and a person later says to send it, provide the exact image_ref and image_sha256 from that trusted completion plus the exact message_ref approving the send in the current turn. Runtime code re-reads and verifies the private vault bytes and exact accepted input.',
-    'Before treating omitted city, state, or ZIP fields as an incomplete address, follow the skill\'s narrow temporary address-resolution step. Lookup results complete a destination only; they never identify a recipient or authorize a send.',
-    'When the originating user already explicitly asked Murph to mail the note and supplied a complete or reliably resolved US address, call this tool automatically after generation finishes; showing or attaching the image first is optional, not required.',
-    "The server supplies Murph's fixed return address. Never ask the person for a return address, invent one, or include one in the tool arguments or artwork.",
-    'Do not call for a draft-only request, an unresolved or ambiguous address, bulk mail, an international address, impersonation, threats, harassment, fraud, or illegal content.',
-    'The server decides whether the note is complimentary and computes any Murph-time cost. Never claim acceptance until this tool reports accepted.',
+    'Mail one printed note to one US address, using artwork from murph.generate_image.',
+    'Read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md first. It owns address lookup, artwork, and how to report results.',
+    'When the user already asked to mail the note and the address is complete or resolved, call this on the image-completion turn with only `to`. The runtime binds the generated image and the request.',
+    "To send artwork that was shown first and approved in a later message, also pass image_ref and image_sha256 from that image completion and the approving message's Message ref as message_ref.",
+    "The server adds Murph's return address, so never ask for one or pass one.",
+    'Say the note is headed to print only after this tool returns accepted.',
   ].join(' '),
   inputSchema: {
     type: 'object',
@@ -144,25 +141,25 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
         minLength: 1,
         maxLength: 1024,
         description:
-          'Optional exact private vault image ref from an earlier trusted hosted image completion. Omit on the completion turn. Supply only together with image_sha256 after a later explicit send request.',
+          'Vault image ref from an earlier image completion. Omit it on the image-completion turn. Pass it with image_sha256 and message_ref when sending artwork approved in a later message.',
       },
       image_sha256: {
         type: 'string',
         pattern: '^[0-9a-f]{64}$',
         description:
-          'Optional exact SHA-256 paired with image_ref from an earlier trusted hosted image completion.',
+          'SHA-256 returned with image_ref by that image completion.',
       },
       message_ref: {
         type: 'string',
         pattern: '^ain_[0-9a-f]{32}$',
         description:
-          'Exact current Message ref approving a later send of previously previewed artwork. Required whenever image_ref and image_sha256 are supplied; omit on the automatic image-completion turn.',
+          'Message ref of the current message approving the send of artwork shown earlier. Required with image_ref and image_sha256. Omit it on the image-completion turn.',
       },
       to: {
         type: 'object',
         additionalProperties: false,
         description:
-          "One recipient address only. Trusted server code supplies Murph's fixed return address.",
+          'The one recipient address.',
         properties: {
           name: { type: 'string', minLength: 1, maxLength: 40 },
           address_line1: { type: 'string', minLength: 1, maxLength: 64 },
@@ -322,20 +319,20 @@ export function buildPhysicalNoteFailureInstruction(
 ): string {
   switch (reason) {
     case 'recipient_address':
-      return 'The printer could not verify or accept the recipient address. Nothing was sent. Ask the person to check the street and unit, city, state, and ZIP before making a new explicit send request. Do not retry automatically.'
+      return 'The printer could not verify or accept the recipient address, so nothing was sent. Ask the person to check the street and unit, city, state, and ZIP. Sending again needs a new request from them, and nothing retries on its own.'
     case 'artwork':
-      return 'The printer could not render the generated artwork. Nothing was sent. Explain that Murph needs to regenerate the image, and require a new explicit send request before trying again. Do not retry automatically.'
+      return 'The printer could not render the generated artwork, so nothing was sent. Tell the person Murph needs to regenerate the image. Sending again needs a new request from them, and nothing retries on its own.'
     case 'service_unavailable':
-      return 'Murph\'s printing service or account setup was unavailable. Nothing was sent. Explain that the problem is on Murph\'s side, not the recipient address. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
+      return "Murph's printing service or account setup was unavailable, so nothing was sent. Tell the person the problem is on Murph's side and the recipient address was not the cause. Nothing retries or follows up on its own, and another attempt needs a new request from them later."
     case 'request_invalid':
-      return 'The printer rejected Murph\'s print request. Nothing was sent. Explain that Murph needs to correct the printing request. Do not ask the person to change a confirmed address. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
+      return "The printer rejected Murph's print request, so nothing was sent. Tell the person Murph needs to correct the printing request, and do not ask them to change a confirmed address. Nothing retries or follows up on its own, and another attempt needs a new request from them later."
     case 'prior_note_unresolved':
-      return 'An earlier physical-note submission is still unresolved, so the current physical-note request was not sent. Tell the person both facts without claiming the earlier and current requests share a recipient. No automatic investigation, retry, notification, or follow-up is running. A later explicit physical-note request may recheck the earlier outcome, but do not send while it remains unresolved. Do not retry automatically.'
+      return 'An earlier physical-note submission is still unresolved, so the current physical-note request was not sent. Tell the person both facts without claiming the earlier and current requests share a recipient. Nothing investigates, retries, notifies, or follows up on its own. A later explicit physical-note request may recheck the earlier outcome, and no note can be sent while it stays unresolved.'
     case 'prior_note_accepted':
-      return 'An earlier physical note was accepted for printing, so the current physical-note request was not sent. Tell the person both facts without claiming the earlier and current requests share a recipient. No automatic retry, notification, or follow-up is running. Do not retry automatically; that applies only to this request. A separately authorized future request is distinct.'
+      return 'An earlier physical note was accepted for printing, so the current physical-note request was not sent. Tell the person both facts without claiming the earlier and current requests share a recipient. Nothing retries, notifies, or follows up on its own. This request is finished. A future request from the person is a separate note.'
     case 'unknown':
     case null:
     case undefined:
-      return 'Murph could not complete the physical-note request with a recognized safe correction. Nothing was sent for this request. Do not guess that the address or artwork was wrong. Explain that Murph needs to investigate. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
+      return 'Murph could not complete the physical-note request and has no known safe correction. Nothing was sent for this request. Do not guess that the address or artwork was wrong. Tell the person Murph needs to investigate. Nothing retries or follows up on its own, and another attempt needs a new request from them later.'
   }
 }

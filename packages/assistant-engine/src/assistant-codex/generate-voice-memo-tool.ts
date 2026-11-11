@@ -194,7 +194,7 @@ export async function executeGenerateVoiceMemoTool(input: {
     return {
       failureDiagnostic: toolFailureDiagnostic('unavailable'),
       rpcSuccess: false,
-      rpcText: 'MURPH_ELEVENLABS_VOICE_ID is required for voice memo generation',
+      rpcText: 'No voice is configured for voice memos on this deployment, so no voice memo was made. Reply in text.',
     }
   }
 
@@ -203,7 +203,7 @@ export async function executeGenerateVoiceMemoTool(input: {
     return {
       failureDiagnostic: toolFailureDiagnostic('unavailable'),
       rpcSuccess: false,
-      rpcText: 'MURPH_ELEVENLABS_MODEL_ID must be a priced ElevenLabs TTS model',
+      rpcText: 'No supported speech model is configured for voice memos on this deployment, so no voice memo was made. Reply in text.',
     }
   }
 
@@ -388,8 +388,8 @@ function describeVoiceMemoRuntimeFailure(
       )
     case 'missing_configuration':
       return failure.variable === 'LINQ_API_TOKEN'
-        ? `${failure.variable} is required for ${label} attachment upload`
-        : `${failure.variable} is required for ${label} generation`
+        ? `${label} generated but attachment upload is not set up on this deployment, so nothing was attached`
+        : `${label} generation is not set up on this deployment, so nothing was generated`
   }
 }
 
@@ -415,7 +415,7 @@ function validateElevenLabsApiKeyPrecondition(
     return {
       failureDiagnostic: toolFailureDiagnostic('unavailable'),
       rpcSuccess: false,
-      rpcText: `ELEVENLABS_API_KEY is required for ${label} generation`,
+      rpcText: `${label} generation is not set up on this deployment, so nothing was generated`,
     }
   }
   return null

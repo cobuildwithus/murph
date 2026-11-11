@@ -171,7 +171,7 @@ describe('executeGenerateVoiceMemoTool', () => {
     ).resolves.toEqual({
       failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
-      rpcText: 'ELEVENLABS_API_KEY is required for voice memo generation',
+      rpcText: 'voice memo generation is not set up on this deployment, so nothing was generated',
     })
 
     await expect(
@@ -185,7 +185,7 @@ describe('executeGenerateVoiceMemoTool', () => {
       failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText:
-        'MURPH_ELEVENLABS_MODEL_ID must be a priced ElevenLabs TTS model',
+        'No supported speech model is configured for voice memos on this deployment, so no voice memo was made. Reply in text.',
     })
 
     await expect(
@@ -199,7 +199,7 @@ describe('executeGenerateVoiceMemoTool', () => {
       failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText:
-        'MURPH_ELEVENLABS_VOICE_ID is required for voice memo generation',
+        'No voice is configured for voice memos on this deployment, so no voice memo was made. Reply in text.',
     })
   })
 
@@ -476,7 +476,7 @@ describe('executeGenerateVoiceMemoTool', () => {
       failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText:
-        'LINQ_API_TOKEN is required for voice memo attachment upload',
+        'voice memo generated but attachment upload is not set up on this deployment, so nothing was attached',
     })
     await expect(
       executeGenerateVoiceMemoTool({

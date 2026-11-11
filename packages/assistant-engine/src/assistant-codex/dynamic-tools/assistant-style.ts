@@ -45,8 +45,14 @@ export const MURPH_ASSISTANT_STYLE_TOOL = {
   namespace: 'murph',
   name: 'assistant_style',
   deferLoading: true,
-  description:
-    'Read or update the current conversation runtime\'s Humor, Push, Detail, and Unhinged settings. In a private chat these belong to the member; in a group chat they belong to the synthetic room Murph and never to a participant. Use show to read scores and sources; set only for an explicit ongoing preference; reset one setting or all settings to product defaults. For a bare directional request ("more"/"less") show first, then set a bounded step from the reported score; otherwise set only the exact score the member stated or agreed to. Never silently clamp an out-of-range value. For set or reset in a conversation, pass message_ref from the accepted message requesting that change; never borrow a later message\'s ref. Omit it for local or scheduled actions.',
+  description: [
+    'Read or change the Humor, Push, Detail, and Unhinged dials, each from 0 to 10, for this conversation.',
+    "In a private chat the dials are the member's. In a group chat they belong to the room's Murph and never to a participant.",
+    'show returns each score and its source. set saves one dial for an ongoing preference. reset returns one dial, or all of them, to the product default.',
+    'For a request for more or less with no number, show first and then set a step from the reported score.',
+    'Otherwise set the exact number the member stated or agreed to. When they name a number outside 0 to 10, tell them the range and do not save a different number.',
+    "For a set or reset that a message asked for, pass that message's Message ref as message_ref, and never use a later message's ref. Omit message_ref on local or scheduled runs.",
+  ].join(' '),
   inputSchema: z.toJSONSchema(assistantStyleArgumentsSchema, { io: 'input' }),
 } as const
 

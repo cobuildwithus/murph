@@ -12,10 +12,9 @@ export const MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL = {
   name: 'create_clinical_records_connect_link',
   description: [
     'Create a Murph link for the current user to connect Epic or MyChart clinical records.',
-    'Use only in a private conversation after the current user asks to connect or import their provider records, or on an exact scheduled occurrence whose saved instructions request that link.',
-    'This tool accepts no provider, member, recipient, portal credential, or account fields.',
-    'Use the returned first-party connectUrl in the reply without changing it. Current-message links carry a short-lived single-use browser claim; scheduled links create that claim only after the member opens the authenticated launcher.',
-    'Never fabricate or reuse a Clinical Records connection URL.',
+    'Use it in a private conversation when the user asks to connect or import their provider records, or on a scheduled occurrence whose saved instructions ask for the link.',
+    'Put the returned connectUrl in the reply unchanged.',
+    'Each link is single-use and expires quickly, so create a new one each time and never reuse an earlier link.',
   ].join(' '),
   inputSchema: {
     type: 'object',

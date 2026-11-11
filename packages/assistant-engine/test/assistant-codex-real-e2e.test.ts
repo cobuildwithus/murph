@@ -29349,7 +29349,7 @@ describeRealCodex('real Codex stateless calendar link e2e', () => {
         }
         expect(JSON.parse(action.output)).toEqual({
           instruction:
-            'Before ending, complete private appointment follow-through: use tool search for `murph automation` to load and call `murph.automation`, then ensure exactly one one-shot reminder unless the member declined it. Then write the rest of the truthful semantic reply without copying or repeating a URL. The runtime appends the exact calendar link.',
+            'The link is ready, and the runtime appends it to your reply, so write the reply without any URL. The link does not set a reminder. When the Private appointment follow-through policy covers this turn, it still needs its reminder.',
           status: 'ready',
         })
       }
