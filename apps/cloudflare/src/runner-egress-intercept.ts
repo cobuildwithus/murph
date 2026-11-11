@@ -3063,7 +3063,7 @@ async function checkHostedImageGenerationAccess(input: {
       if (result.allowed === false && result.reason === "subscription_required") {
         return Response.json({ error: {
           code: "MURPH_IMAGE_SUBSCRIPTION_REQUIRED",
-          message: "Image generation requires a subscription. Start Pulse or, if eligible, Group at https://www.withmurph.ai/settings#subscription, then ask for the image again.",
+          message: "Image generation requires a subscription. Start Pulse or, if eligible, Core at https://www.withmurph.ai/settings#subscription, then ask for the image again.",
         } }, { status: 403 });
       }
     }

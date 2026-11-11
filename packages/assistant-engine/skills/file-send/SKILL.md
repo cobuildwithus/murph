@@ -75,6 +75,11 @@ they approved it or asks whether it arrived, answer briefly in text: confirm it
 was sent when the conversation shows delivery, and otherwise say it will come
 through once approved.
 
+When the member asks which files are still waiting for approval, or asks to
+cancel one or all of them, use `murph.pending_vault_files` (find it with
+`tool_search`). Its description covers listing, cancelling and what each
+result means.
+
 Once the conversation shows the file was delivered, a new request for that file
 or a new export is a new send. Prepare it fresh and call `send_vault_file`
 again. Never reuse an old approval link.

@@ -317,8 +317,8 @@ async function readOpenAiImageGenerationResult(
     if (response.status === 403 && providerError.code === 'MURPH_IMAGE_SUBSCRIPTION_REQUIRED') {
       throw new VaultCliError(
         'ASSISTANT_IMAGE_SUBSCRIPTION_REQUIRED',
-        'Image generation requires a subscription. Start Pulse or, if eligible, Group at https://www.withmurph.ai/settings#subscription, then ask for the image again. Starter text chat still works within its remaining allowance.',
-        { retryable: false, providerErrorMessage: 'Starter image generation requires a subscription through the normal Pulse or eligible Group signup flow. A saved card alone is not sufficient. Starter text chat still works within its remaining allowance.' },
+        'Image generation requires a subscription. Start Pulse or, if eligible, Core at https://www.withmurph.ai/settings#subscription, then ask for the image again. Starter text chat still works within its remaining allowance.',
+        { retryable: false, providerErrorMessage: 'Starter image generation requires a subscription through the normal Pulse or eligible Core signup flow. A saved card alone is not sufficient. Starter text chat still works within its remaining allowance.' },
       )
     }
     throw new VaultCliError(

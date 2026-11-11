@@ -55,6 +55,7 @@ const pendingVaultFilesArgumentsSchema = z.discriminatedUnion('action', [
 export const MURPH_PENDING_VAULT_FILES_TOOL = {
   namespace: 'murph',
   name: 'pending_vault_files',
+  deferLoading: true,
   description: [
     "List or cancel files Murph generated that are still waiting for the member's delivery approval in this private conversation.",
     'Use it only when the member asks.',

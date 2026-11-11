@@ -193,7 +193,7 @@ task and tell them it was not saved.
 ## After it is booked
 
 Make sure one reminder exists for a confirmed future appointment, as the
-private appointment follow-through rule in your standing instructions says. The
+Appointment reminder rule in your standing instructions says. The
 `reminders` skill has the timing. Update the reminder when a reschedule is
 confirmed and archive it when a cancellation is confirmed. A proposed slot, a
 list of options, a waitlist place or an unconfirmed booking gets no reminder.

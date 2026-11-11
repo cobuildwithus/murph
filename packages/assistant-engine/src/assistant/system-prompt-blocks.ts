@@ -159,6 +159,8 @@ export const ASSISTANT_SCHEDULED_TURN_PROMPT_BLOCK_IDS: ReadonlySet<AssistantPro
   // each have their own block.
   "core.how-you-help.direct",
   "core.product-principles",
+  // The skill router sends some topics to the Health Commons search.
+  "core.health-commons",
   // The group-email health block refers to these rules by name.
   "core.understand-before-recommending.group",
   "core.chronic-support",

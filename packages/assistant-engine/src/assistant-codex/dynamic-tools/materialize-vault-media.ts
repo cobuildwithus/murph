@@ -15,7 +15,7 @@ const argumentsSchema = z.object({
   all: z.literal(true).optional(),
 }).strict().refine(value => (value.paths !== undefined) !== (value.all === true), 'Supply paths or all: true, not both.')
 
-export const VAULT_MEDIA_EXPORT_GUIDANCE = 'call materialize_vault_media with all: true before archiving; disclose unavailable paths and reasons without claiming completeness. Unavailable means unrestored, not excluded: preserve any local copy as unverified. Never drop files to fit the 100 MiB send cap; if the finished ZIP exceeds it, report that it cannot be sent. Archive'
+export const VAULT_MEDIA_EXPORT_GUIDANCE = 'call materialize_vault_media with all: true before archiving, and tell the member about any path it reports as unavailable.'
 
 export const MURPH_MATERIALIZE_VAULT_MEDIA_TOOL = {
   namespace: 'murph',

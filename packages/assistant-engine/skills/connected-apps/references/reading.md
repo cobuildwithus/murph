@@ -91,9 +91,9 @@ take a city or region, and never ask for an exact address. If the member
 declines, save the reminder unchanged and do not raise it again. Write the
 stored instructions so that each run works out the location before reading the
 weather. Do not store today's city as permanent. In a private chat, save a
-location the member gives with its date and how long it holds. A group's
-location stays in the room's instructions and never goes into a personal
-record.
+location the member gives once with `vault-cli memory upsert`, with its date
+and how long it holds. A group's location stays in the room's instructions and
+never goes into a personal record.
 
 **When a private reminder runs.** Work out the location before any weather
 call, including for older instructions that name a city.

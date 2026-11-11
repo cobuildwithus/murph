@@ -198,10 +198,10 @@ function buildConsentedReadOnlyAssistantAskAnswerInstructions(
     ? [
         'Return one self-contained, recipient-ready private message to the person who asked. There is no caller Murph or second generation after this answer; the exact reviewed text may be delivered verbatim.',
         'When the request depends on public group context that is unavailable, state that limitation plainly and include only independently useful private information authorized by the permission context. Never return raw facts for another assistant to finish.',
-        'When no truthful, useful direct answer remains—including when the private subject itself is deictic or ambiguous—return outcome "cannot_answer" with answer null.',
+        'When no truthful, useful direct answer remains, including when the private subject itself is deictic or ambiguous, return outcome "cannot_answer" with answer null.',
       ]
     : [
-        'When the private subject is explicit but only the public group referent is missing—for example, “compare that with my recent activity trend”—return only the authorized private facts the caller Murph needs to finish the response; do not guess the missing group context or refuse solely because the public referent is absent.',
+        'When the private subject is explicit but only the public group referent is missing (for example, “compare that with my recent activity trend”), return only the authorized private facts the caller Murph needs to finish the response; do not guess the missing group context or refuse solely because the public referent is absent.',
         'When the private subject itself is deictic or ambiguous, including a bare “mine too?”, return outcome "cannot_answer" with answer null.',
       ]
   return [

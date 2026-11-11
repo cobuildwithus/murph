@@ -88,10 +88,9 @@ export const MURPH_RESOLVE_PHYSICAL_NOTE_TOOL = {
   deferLoading: true,
   description: [
     'Check one earlier physical-note submission whose outcome is unknown, when the person asks to check, clear, or cancel it.',
-    'Read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md first.',
+    'Read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md first. It says what each result means.',
     "Pass the current request's Message ref as message_ref. When you know which earlier send or recovery it concerns, also pass target_message_ref and target_kind.",
     'This reads printer records and may clear a blocker. It never sends a new note and never recalls an accepted one.',
-    'Call it once per request, and report the returned status and remainingUnresolved as given.',
   ].join(' '),
   inputSchema: {
     type: 'object',
@@ -126,11 +125,10 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
   deferLoading: true,
   description: [
     'Mail one printed note to one US address, using artwork from murph.generate_image.',
-    'Read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md first. It owns address lookup, artwork, and how to report results.',
-    'When the user already asked to mail the note and the address is complete or resolved, call this on the image-completion turn with only `to`. The runtime binds the generated image and the request.',
+    'Read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md first. It owns the address lookup, the artwork, when to send, and what each result means.',
+    'On the image-completion turn pass only `to`. The runtime binds the generated image and the request.',
     "To send artwork that was shown first and approved in a later message, also pass image_ref and image_sha256 from that image completion and the approving message's Message ref as message_ref.",
-    "The server adds Murph's return address, so never ask for one or pass one.",
-    'Say the note is headed to print only after this tool returns accepted.',
+    "The server adds Murph's return address, so never pass one.",
   ].join(' '),
   inputSchema: {
     type: 'object',

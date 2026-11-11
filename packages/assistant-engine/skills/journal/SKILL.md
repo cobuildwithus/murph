@@ -131,3 +131,8 @@ a sync failure without evidence.
 Plans that come from a connected calendar or email, corrections to that
 upcoming context, and opting out of it are covered by
 `journal-connected-context`.
+
+When the member says yes to the private question about saving facts they
+shared in a group, first call `murph.group_membership` with
+`action: "set_journal_capture"` and `enabled: true` (find it with
+`tool_search`), then save every fact they named.

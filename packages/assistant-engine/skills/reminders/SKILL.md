@@ -124,9 +124,7 @@ caveats out of them.
 ## Outdoor and weather reminders
 
 Before writing or running one, read
-`$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/references/reading.md`. Store
-instructions that look up the member's location at each run before reading the
-weather. Do not write the city they happen to be in today into a recurring
-reminder. Keep a destination or time the member fixed. When the member gives a
-city or region for this purpose, also save it once with `vault-cli memory
-upsert`, with its date and how long it applies. It is context and may change.
+`$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/references/reading.md` and follow
+its "Outdoor reminder location" section. It covers where the location comes
+from, what the stored instructions say, and the weather read. Keep a
+destination or time the member fixed.
