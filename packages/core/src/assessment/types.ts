@@ -110,7 +110,7 @@ export interface GeneticVariantProposal {
   raw: UnknownRecord;
 }
 
-export interface AssessmentResponseProposal {
+export type AssessmentResponseProposal = {
   assessmentId?: string;
   sourcePath?: string;
   auditPath?: string;
@@ -121,4 +121,4 @@ export interface AssessmentResponseProposal {
   historyEvents: HistoryEventProposal[];
   familyMembers: FamilyMemberProposal[];
   geneticVariants: GeneticVariantProposal[];
-}
+};

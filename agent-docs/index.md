@@ -2060,3 +2060,6 @@ are recorded in [the simplification plan](exec-plans/completed/2026-11-10-simpli
 Current compatibility gates remain in `../packages/core/README.md` and
 `../packages/inbox-services/README.md`; loader boundaries remain in
 `../packages/vault-usecases/README.md`.
+
+Downstream canonical type composition and existing group-room audit value support
+are recorded in [the correction proof](exec-plans/completed/2026-11-10-canonical-type-composition.md).
