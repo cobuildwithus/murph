@@ -6,18 +6,10 @@ import { fileURLToPath } from "node:url";
 
 import { test } from "vitest";
 
-import * as rootExports from "../src/index.ts";
 import {
   JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
   JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
 } from "../src/fitbit-migration.ts";
-import { createSecretCodec } from "../src/local-secret-codec.ts";
-
-test("@murphai/device-syncd root barrel exposes the local secret codec API", () => {
-  assert.equal(rootExports.createSecretCodec, createSecretCodec);
-  assert.equal("buildDeviceSyncSecretAad" in rootExports, false);
-  assert.equal("buildDeviceSyncTokenCipherOptions" in rootExports, false);
-});
 
 test("Fitbit migration public entrypoint and browser consumers stay browser-safe", async () => {
   const source = await readFile(

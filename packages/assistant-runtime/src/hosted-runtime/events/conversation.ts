@@ -672,6 +672,7 @@ async function normalizeHostedConversationMessageWake(input: {
       accountAddress: input.wake.message.identityId,
       accountId: input.wake.message.identityId,
       rawMessage: bytes,
+      receivedAt: input.wake.occurredAt,
       selfAddresses: resolveHostedEmailSelfAddresses({
         extra: [input.wake.message.selfAddress],
         senderIdentity: input.wake.message.identityId,

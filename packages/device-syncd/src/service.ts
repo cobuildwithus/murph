@@ -2098,9 +2098,7 @@ function normalizeExecutionError(error: unknown): {
 
 function summarizeDeviceSyncErrorMessage(error: DeviceSyncError): string {
   const baseMessage = sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]";
-  const providerReason =
-    readSafeDiagnosticText(error.details?.responseErrorDescription)
-    ?? readSafeDiagnosticText(error.details?.oauthErrorDescription);
+  const providerReason = readSafeDiagnosticText(error.details?.responseErrorDescription);
   if (!providerReason) {
     return baseMessage;
   }
@@ -2146,39 +2144,6 @@ function buildDeviceSyncErrorFailureDiagnostics(
     ),
     providerResponseErrorFieldPresent: readSafeDiagnosticBoolean(error.details?.responseErrorFieldPresent),
     providerResponseShapeKind: readSafeDiagnosticToken(error.details?.responseShapeKind),
-    providerOAuthErrorCode: readSafeDiagnosticToken(error.details?.oauthErrorCode),
-    providerOAuthErrorDescription: readSafeDiagnosticText(error.details?.oauthErrorDescription),
-    providerOAuthGrantType: readSafeDiagnosticToken(error.details?.oauthGrantType),
-    providerOAuthRequestBodyBuilderKind: readSafeDiagnosticToken(error.details?.oauthRequestBodyBuilderKind),
-    providerOAuthRequestClientAuthPlacement: readSafeDiagnosticToken(error.details?.oauthRequestClientAuthPlacement),
-    providerOAuthRequestClientCredentialPresent: readSafeDiagnosticBoolean(
-      error.details?.oauthRequestClientCredentialPresent,
-    ),
-    providerOAuthRequestClientIdPresent: readSafeDiagnosticBoolean(error.details?.oauthRequestClientIdPresent),
-    providerOAuthRequestContentType: readSafeDiagnosticToken(error.details?.oauthRequestContentType),
-    providerOAuthRequestDuplicateParameterCount: readSafeDiagnosticNumber(
-      error.details?.oauthRequestDuplicateParameterCount,
-    ),
-    providerOAuthRequestEncodingKind: readSafeDiagnosticToken(error.details?.oauthRequestEncodingKind),
-    providerOAuthRequestHasDuplicateParameters: readSafeDiagnosticBoolean(
-      error.details?.oauthRequestHasDuplicateParameters,
-    ),
-    providerOAuthRequestMethod: readSafeDiagnosticToken(error.details?.oauthRequestMethod),
-    providerOAuthRequestOfflineScopePresent: readSafeDiagnosticBoolean(error.details?.oauthRequestOfflineScopePresent),
-    providerOAuthRequestParameterCount: readSafeDiagnosticNumber(error.details?.oauthRequestParameterCount),
-    providerOAuthRequestParameterNames: readSafeDiagnosticToken(error.details?.oauthRequestParameterNames),
-    providerOAuthRequestRefreshCredentialPresent: readSafeDiagnosticBoolean(
-      error.details?.oauthRequestRefreshCredentialPresent,
-    ),
-    providerOAuthRequestScopeCount: readSafeDiagnosticNumber(error.details?.oauthRequestScopeCount),
-    providerOAuthRequestScopePresent: readSafeDiagnosticBoolean(error.details?.oauthRequestScopePresent),
-    providerOAuthRequestScopeValue: readSafeDiagnosticToken(error.details?.oauthRequestScopeValue),
-    providerOAuthRequestTokenEndpointKind: readSafeDiagnosticToken(error.details?.oauthRequestTokenEndpointKind),
-    providerOAuthResponseErrorDescriptionFieldPresent: readSafeDiagnosticBoolean(
-      error.details?.oauthResponseErrorDescriptionFieldPresent,
-    ),
-    providerOAuthResponseErrorFieldPresent: readSafeDiagnosticBoolean(error.details?.oauthResponseErrorFieldPresent),
-    providerOAuthResponseShapeKind: readSafeDiagnosticToken(error.details?.oauthResponseShapeKind),
   });
 }
 

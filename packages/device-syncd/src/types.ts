@@ -153,29 +153,6 @@ export interface DeviceSyncJobFailureDiagnosticDetails extends JunctionRequestTi
   providerResponseErrorDescriptionFieldPresent?: boolean;
   providerResponseErrorFieldPresent?: boolean;
   providerResponseShapeKind?: string;
-  providerOAuthErrorCode?: string;
-  providerOAuthErrorDescription?: string;
-  providerOAuthGrantType?: string;
-  providerOAuthRequestBodyBuilderKind?: string;
-  providerOAuthRequestClientAuthPlacement?: string;
-  providerOAuthRequestClientCredentialPresent?: boolean;
-  providerOAuthRequestClientIdPresent?: boolean;
-  providerOAuthRequestContentType?: string;
-  providerOAuthRequestDuplicateParameterCount?: number;
-  providerOAuthRequestEncodingKind?: string;
-  providerOAuthRequestHasDuplicateParameters?: boolean;
-  providerOAuthRequestMethod?: string;
-  providerOAuthRequestOfflineScopePresent?: boolean;
-  providerOAuthRequestParameterCount?: number;
-  providerOAuthRequestParameterNames?: string;
-  providerOAuthRequestRefreshCredentialPresent?: boolean;
-  providerOAuthRequestScopeCount?: number;
-  providerOAuthRequestScopePresent?: boolean;
-  providerOAuthRequestScopeValue?: string;
-  providerOAuthRequestTokenEndpointKind?: string;
-  providerOAuthResponseErrorDescriptionFieldPresent?: boolean;
-  providerOAuthResponseErrorFieldPresent?: boolean;
-  providerOAuthResponseShapeKind?: string;
 }
 
 /**

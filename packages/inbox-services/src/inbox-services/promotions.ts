@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto'
-import { readdir, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   acquireCanonicalWriteLock as acquireDefaultCanonicalWriteLock,
   normalizeOpaquePathSegment,
   normalizeRelativeVaultPath,
+  walkVaultFiles,
   withCanonicalWriteLockScope as withDefaultCanonicalWriteLockScope,
 } from '@murphai/core'
 import {
@@ -44,7 +45,6 @@ import type {
 import { isStoredDocumentAttachment } from './query.js'
 import { ensureInitialized } from './state.js'
 import {
-  fileExists,
   normalizeNullableString,
   relativeToVault,
 } from './shared.js'
@@ -1003,70 +1003,57 @@ async function findCanonicalPromotionMatch<
   metadata: CanonicalPromotionMetadata
   spec: CanonicalPromotionLookupSpec<TManifest, TContext>
 }): Promise<CanonicalPromotionMatch | null> {
-  const matches = (
-    await Promise.all(
-      (
-        await listCanonicalManifestPaths(
-          input.absoluteVaultRoot,
-          input.spec.manifestDirectory,
-        )
-      ).map(async (manifestPath) => {
-        const manifest = await readCanonicalManifest(
-          input.absoluteVaultRoot,
-          manifestPath,
-          input.spec.manifestSchema,
-        )
-        if (!manifest) {
-          return null
-        }
-
-        if (!input.spec.matchesManifest(manifest, input.context)) {
-          return null
-        }
-        if (
-          input.liveRelatedIds &&
-          !input.liveRelatedIds.has(manifest.importId)
-        ) {
-          return null
-        }
-        if (normalizeNullableString(manifest.source) !== input.metadata.source) {
-          return null
-        }
-
-        const occurredAt = extractCanonicalString(
-          manifest.provenance,
-          'occurredAt',
-        )
-        if (occurredAt !== input.metadata.occurredAt) {
-          return null
-        }
-
-        if (
-          normalizeNullableString(extractCanonicalString(manifest.provenance, 'note')) !==
-          input.metadata.note
-        ) {
-          return null
-        }
-
-        const lookupId =
-          normalizeNullableString(
-            extractCanonicalString(manifest.provenance, 'lookupId'),
-          ) ??
-          normalizeNullableString(
-            extractCanonicalString(manifest.provenance, 'eventId'),
-          )
-        if (!lookupId) {
-          return null
-        }
-
-        return {
-          lookupId,
-          promotedAt: manifest.importedAt,
-          relatedId: manifest.importId,
-        }
-      }),
+  const matches: CanonicalPromotionMatch[] = []
+  const manifestPaths = await listCanonicalManifestPaths(input.absoluteVaultRoot, input.spec.manifestDirectory)
+  // Do not turn an unreadable authoritative record into permission to import again.
+  // Sequential reads bound open files while the canonical mutation lock is held.
+  for (const manifestPath of manifestPaths) {
+    const manifest = await readCanonicalManifest(
+      input.absoluteVaultRoot,
+      manifestPath,
+      input.spec.manifestSchema,
     )
-  ).filter((match): match is CanonicalPromotionMatch => match !== null)
+    if (!input.spec.matchesManifest(manifest, input.context)) {
+      continue
+    }
+    if (
+      input.liveRelatedIds &&
+      !input.liveRelatedIds.has(manifest.importId)
+    ) {
+      continue
+    }
+    if (normalizeNullableString(manifest.source) !== input.metadata.source) {
+      continue
+    }
+
+    const occurredAt = extractCanonicalString(
+      manifest.provenance,
+      'occurredAt',
+    )
+    if (occurredAt !== input.metadata.occurredAt) {
+      continue
+    }
+
+    if (
+      normalizeNullableString(extractCanonicalString(manifest.provenance, 'note')) !==
+      input.metadata.note
+    ) {
+      continue
+    }
+
+    const lookupId =
+      normalizeNullableString(
+        extractCanonicalString(manifest.provenance, 'lookupId'),
+      ) ??
+      normalizeNullableString(
+        extractCanonicalString(manifest.provenance, 'eventId'),
+      )
+    if (!lookupId) {
+      continue
+    }
+
+    matches.push({ lookupId, promotedAt: manifest.importedAt, relatedId: manifest.importId })
+  }
 
   if (matches.length === 0) {
     return null
@@ -1315,60 +1302,20 @@ async function listCanonicalManifestPaths(
   absoluteVaultRoot: string,
   manifestDirectory: string,
 ): Promise<string[]> {
-  return walkRelativeFiles(
-    absoluteVaultRoot,
-    manifestDirectory,
-    (fileName) =>
-      fileName === 'manifest.json' ||
-      (fileName.startsWith('manifest.') && fileName.endsWith('.json')),
-  )
-}
-
-async function walkRelativeFiles(
-  absoluteVaultRoot: string,
-  relativeDirectory: string,
-  matchesFileName: (fileName: string) => boolean,
-): Promise<string[]> {
-  const absoluteDirectory = path.join(absoluteVaultRoot, relativeDirectory)
-  if (!(await fileExists(absoluteDirectory))) {
-    return []
-  }
-
-  const matches: string[] = []
-  const stack = [absoluteDirectory]
-
-  while (stack.length > 0) {
-    const current = stack.pop()
-    if (!current) {
-      continue
-    }
-
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      const absoluteEntry = path.join(current, entry.name)
-      if (entry.isDirectory()) {
-        stack.push(absoluteEntry)
-        continue
-      }
-      if (entry.isFile() && matchesFileName(entry.name)) {
-        matches.push(relativeToVault(absoluteVaultRoot, absoluteEntry))
-      }
-    }
-  }
-
-  return matches.sort((left, right) => left.localeCompare(right))
+  return (await walkVaultFiles(absoluteVaultRoot, manifestDirectory, { extension: '.json' }))
+    .filter((relativePath) => {
+      const name = path.posix.basename(relativePath)
+      return name === 'manifest.json' || name.startsWith('manifest.')
+    })
 }
 
 async function readCanonicalManifest<TManifest>(
   absoluteVaultRoot: string,
   relativePath: string,
   schema: z.ZodType<TManifest>,
-): Promise<TManifest | null> {
-  try {
-    const raw = await readFile(path.join(absoluteVaultRoot, relativePath), 'utf8')
-    return schema.parse(JSON.parse(raw))
-  } catch {
-    return null
-  }
+): Promise<TManifest> {
+  const raw = await readFile(path.join(absoluteVaultRoot, relativePath), 'utf8')
+  return schema.parse(JSON.parse(raw))
 }
 
 function extractCanonicalString(

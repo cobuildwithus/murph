@@ -671,11 +671,6 @@ test('direct promotion helpers cover canonical matching and stale-state reconcil
     'raw/inbox/email/capture-created/attachments/new.pdf',
     'new document',
   )
-  await writeTextFile(
-    createdPaths.absoluteVaultRoot,
-    'raw/documents/broken/manifest.json',
-    '{not-valid-json',
-  )
   let createClosed = 0
   let createMetadata: {
     note: string | null
@@ -2227,3 +2222,37 @@ test('app promotion ops fail closed for unsupported or invalid journal and exper
       error.code === 'experiment_failed',
   )
 })
+
+test.each(['{invalid-json', JSON.stringify({ importKind: 'document' })])(
+  'unreadable canonical promotion evidence blocks recreation: %s',
+  async (manifest) => {
+    const paths = await createTempVault()
+    const capture = createCapture('capture-interrupted', {
+      attachments: [createAttachment({
+        kind: 'document', ordinal: 1, storedPath: 'raw/inbox/email/capture-interrupted/attachments/report.pdf',
+      })],
+    })
+    await writeTextFile(paths.absoluteVaultRoot, 'raw/documents/committed/manifest.json', manifest)
+    let created = false
+    await assert.rejects(() => promoteCanonicalAttachmentImport({
+      input: { vault: paths.absoluteVaultRoot, captureId: capture.captureId, requestId: null },
+      target: 'document',
+      clock: () => new Date('2026-11-11T12:00:00.000Z'),
+      loadInbox: async () => createInboxRuntimeModule(createRuntimeStore([capture])),
+      prepare: async () => ({}),
+      findRequiredAttachment: (current) => current.attachments.find(
+        (attachment): attachment is RuntimeAttachmentRecord & { storedPath: string } =>
+          typeof attachment.storedPath === 'string',
+      ),
+      missingAttachmentError: () => new VaultCliError('MISSING', 'Missing attachment'),
+      canonicalPromotionSpec: documentCanonicalPromotionSpec,
+      buildCanonicalMatchContext: () => ({ documentSha256: sha256('synthetic document'), title: null }),
+      createPromotion: async () => {
+        created = true
+        return { lookupId: 'duplicate', relatedId: 'duplicate' }
+      },
+    }))
+    assert.equal(created, false)
+    assert.equal((await readPromotionsByCapture(paths)).size, 0)
+  },
+)

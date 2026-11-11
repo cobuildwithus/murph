@@ -920,6 +920,171 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("preserves lifecycle timing and deadline-first recovery across terminal replays", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `member_latency_lifecycle_${suffix}`;
+      const mailboxItemId = `mailbox_latency_lifecycle_${suffix}`;
+      const assistantInputId = `input_latency_lifecycle_${suffix}`;
+      const acceptedAt = new Date("2026-08-09T15:00:00.000Z");
+      const at = (seconds: number) =>
+        new Date(acceptedAt.getTime() + seconds * 1_000);
+      const input = {
+        assistantInputIds: [assistantInputId],
+        authenticatedUserId: memberId,
+        prisma,
+        runtimeAttemptId: `attempt_lifecycle_${suffix}`,
+        runtimeLeaseGeneration: "1",
+        source: "linq",
+      } as const;
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.hostedMailboxItem.create({
+          data: {
+            dedupeKey: `latency-lifecycle:${suffix}`,
+            id: mailboxItemId,
+            kind: "conversation.message",
+            lane: "conversation",
+            laneSeq: 1n,
+            occurredAt: acceptedAt,
+            payloadSchema: "murph.hosted-execution.conversation-message.v1",
+            userId: memberId,
+          },
+        });
+        await prisma.hostedIngressLatencyTrace.create({
+          data: {
+            acceptedAt,
+            assistantInputId,
+            id: `trace_latency_lifecycle_${suffix}`,
+            mailboxItemId,
+            mailboxLane: "conversation",
+            mailboxLaneSeq: 1n,
+            runtimeAttemptId: input.runtimeAttemptId,
+            source: "linq",
+            userId: memberId,
+          },
+        });
+
+        for (const milestone of [
+          "pending_reply_admitted",
+          "assistant_input_accepted_for_execution",
+        ] as const) {
+          for (const seconds of [3, 2, 4]) {
+            await recordHostedIngressAssistantMilestone({
+              ...input,
+              at: at(seconds),
+              milestone,
+            });
+          }
+        }
+        const first = await prisma.hostedIngressLatencyTrace.findUniqueOrThrow({
+          where: { mailboxItemId },
+        });
+        expect(requireJsonRecord(requireJsonRecord(first.phaseBreakdownJson).assistant)).toMatchObject({
+          pendingReplyAdmittedAtEpochMs: at(2).getTime(),
+          assistantInputAcceptedForExecutionAtEpochMs: at(2).getTime(),
+          runtimeLeaseGeneration: "1",
+        });
+        const recovered = {
+          ...input,
+          runtimeAttemptId: `attempt_recovered_${suffix}`,
+          runtimeLeaseGeneration: "2",
+        };
+        await expect(recordHostedIngressAssistantMilestone({
+          ...recovered,
+          at: at(5),
+          milestone: "assistant_input_accepted_for_execution",
+        })).resolves.toEqual({ matchedCount: 1, recorded: true, unmatchedCount: 0 });
+        await expect(recordHostedIngressAssistantMilestone({
+          ...input,
+          at: at(1),
+          milestone: "assistant_input_accepted_for_execution",
+        })).resolves.toEqual({ matchedCount: 0, recorded: false, unmatchedCount: 1 });
+        await recordHostedIngressProviderStarted({
+          ...recovered,
+          at: at(6),
+          providerRequestOrdinal: 0,
+        });
+        const next = {
+          ...input,
+          runtimeAttemptId: `attempt_next_${suffix}`,
+          runtimeLeaseGeneration: "3",
+        };
+        await expect(recordHostedIngressAssistantMilestone({
+          ...next,
+          at: at(7),
+          milestone: "assistant_input_accepted_for_execution",
+        })).resolves.toEqual({ matchedCount: 0, recorded: false, unmatchedCount: 1 });
+
+        // A different attempt cannot claim a nonterminal checkpoint; the current
+        // attempt's deadline must survive a terminal projection arriving later.
+        await expect(recordHostedIngressRuntimeMilestone({
+          ...next,
+          at: at(30),
+          milestone: "checkpoint_publication_expected_by",
+        })).resolves.toEqual({ matchedCount: 0, recorded: false, unmatchedCount: 0 });
+        await recordHostedIngressRuntimeMilestone({
+          ...recovered,
+          at: at(30),
+          milestone: "checkpoint_publication_expected_by",
+        });
+        await recordHostedIngressAssistantMilestone({
+          ...recovered,
+          at: at(8),
+          checkpointPublicationExpectedBy: at(20),
+          milestone: "terminal_non_reply_committed",
+        });
+        const terminal = await prisma.hostedIngressLatencyTrace.findUniqueOrThrow({
+          where: { mailboxItemId },
+        });
+        expect(requireJsonRecord(requireJsonRecord(terminal.phaseBreakdownJson).assistant)).toMatchObject({
+          checkpointPublicationExpectedByEpochMs: at(30).getTime(),
+          runtimeLeaseGeneration: "2",
+          terminalNonReplyCommittedAtEpochMs: at(8).getTime(),
+        });
+
+        // Recovery may publish its deadline before its terminal replay. The later
+        // replay cannot shorten it, and same-lease or stale owners cannot replace it.
+        await recordHostedIngressRuntimeMilestone({
+          ...next,
+          at: at(40),
+          milestone: "checkpoint_publication_expected_by",
+        });
+        for (const seconds of [10, 12, 11]) {
+          await recordHostedIngressAssistantMilestone({
+            ...next,
+            at: at(seconds),
+            checkpointPublicationExpectedBy: at(35),
+            milestone: "terminal_non_reply_committed",
+          });
+        }
+        for (const stale of [
+          recovered,
+          { ...next, runtimeAttemptId: `attempt_competing_${suffix}` },
+        ]) {
+          await recordHostedIngressAssistantMilestone({
+            ...stale,
+            at: at(50),
+            checkpointPublicationExpectedBy: at(60),
+            milestone: "terminal_non_reply_committed",
+          });
+        }
+        const final = await prisma.hostedIngressLatencyTrace.findUniqueOrThrow({
+          where: { mailboxItemId },
+        });
+        expect(final.runtimeAttemptId).toBe(next.runtimeAttemptId);
+        expect(requireJsonRecord(requireJsonRecord(final.phaseBreakdownJson).assistant)).toMatchObject({
+          checkpointPublicationExpectedByEpochMs: at(40).getTime(),
+          runtimeLeaseGeneration: "3",
+          terminalNonReplyCommittedAtEpochMs: at(12).getTime(),
+        });
+      } finally {
+        await prisma.hostedMember.deleteMany({ where: { id: memberId } });
+        await prisma.$disconnect();
+      }
+    });
+
     it("updates only the newest 250 checkpoint traces and keeps replay a no-op", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const suffix = randomUUID().replaceAll("-", "");

@@ -12,6 +12,8 @@ import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { HostedMailboxItemRecord } from "../src/lib/hosted-mailbox/store";
+
 import { readRawBodyBuffer } from "../src/lib/http";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES } from "@murphai/hosted-execution/runtime-control";
@@ -26,7 +28,6 @@ const mocks = vi.hoisted(() => ({
   reportHostedRuntimeTypingAlerts: vi.fn(),
   after: vi.fn<(task: () => Promise<void> | void) => void>(),
   checkpointHostedWorkspace: vi.fn(),
-  fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
   fetchHostedMailboxPayload: vi.fn(),
   fetchHostedRuntimeMailboxProjection: vi.fn(),
   hostedRuntimeMailboxMemberFindUnique: vi.fn(),
@@ -82,7 +83,6 @@ vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({
 
 vi.mock("@/src/lib/hosted-mailbox/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/hosted-mailbox/store")>()),
-  fetchHostedMailboxItemsAfterLaneCursors: mocks.fetchHostedMailboxItemsAfterLaneCursors,
   fetchHostedMailboxPayload: mocks.fetchHostedMailboxPayload,
   readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxItemByDedupeKey: mocks.readHostedMailboxItemByDedupeKey,
@@ -310,49 +310,10 @@ describe("hosted runtime internal web routes", () => {
       consumedSeq: "999",
       lane,
     }))));
-    mocks.fetchHostedRuntimeMailboxProjection.mockImplementation(async (input: {
-      cursorMode?: "imported_seq" | null;
-      lanes: readonly { importedSeq: string; lane: "conversation" | "system" }[];
-      limitPerLane: number;
-      now: Date;
-      userId: string;
-    }) => {
-      const requestedLanes = input.lanes.map((entry) => entry.lane);
-      const consumedSeqByLane = await mocks.readHostedMailboxConsumedSeqByLane({
-        lanes: requestedLanes,
-        userId: input.userId,
-      });
-      const consumedEntries: Array<[string, bigint]> = consumedSeqByLane.map(
-        (entry: { consumedSeq: string; lane: string }) => [
-          entry.lane,
-          BigInt(entry.consumedSeq),
-        ],
-      );
-      const consumedByLane = new Map<string, bigint>(consumedEntries);
-      const itemsResult = await mocks.fetchHostedMailboxItemsAfterLaneCursors({
-        lanes: input.lanes.map((entry) => {
-          const importedSeq = BigInt(entry.importedSeq);
-          const consumedSeq = consumedByLane.get(entry.lane) ?? 0n;
-          return {
-            afterSeq: input.cursorMode === "imported_seq" || entry.lane !== "conversation"
-              ? entry.importedSeq
-              : (consumedSeq < importedSeq ? consumedSeq : importedSeq).toString(),
-            lane: entry.lane,
-          };
-        }),
-        limitPerLane: input.limitPerLane,
-        now: input.now,
-        userId: input.userId,
-      });
-      const maxSeqByLane = await mocks.readHostedMailboxMaxSeqByLane({
-        lanes: requestedLanes,
-        userId: input.userId,
-      });
-      return {
-        consumedSeqByLane,
-        items: itemsResult.items,
-        maxSeqByLane,
-      };
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValue({
+      consumedSeqByLane: [],
+      items: [],
+      maxSeqByLane: [],
     });
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
@@ -635,66 +596,48 @@ describe("hosted runtime internal web routes", () => {
     },
   );
 
-  it("fetches mailbox DTOs by lane cursor without hydrating sidecar payload bodies", async () => {
+  it("forwards mailbox lane cursors and returns DTOs without hydrating sidecar payload bodies", async () => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
       buildRuntimeMailboxAccessRecord(),
     );
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "11",
-        lane: "conversation",
-      },
-      {
-        consumedSeq: "0",
-        lane: "system",
-      },
-    ]);
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [
         {
-          createdAt: FIXED_NOW,
-          dedupeKey: "conversation-dedupe-1",
-          expiresAt: null,
-          id: "mailbox_item_1",
-          kind: "conversation.message",
+          consumedSeq: "11",
           lane: "conversation",
-          laneSeq: "12",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
-          payloadInlineCiphertext: "cipher_inline_1",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
         },
         {
-          createdAt: FIXED_NOW,
+          consumedSeq: "0",
+          lane: "system",
+        },
+      ],
+      items: [
+        buildMailboxItem({
+          dedupeKey: "conversation-dedupe-1",
+          id: "mailbox_item_1",
+        }),
+        buildMailboxItem({
           dedupeKey: "system-dedupe-1",
-          expiresAt: null,
           id: "mailbox_item_2",
           kind: "assistant.notification.requested",
           lane: "system",
           laneSeq: "3",
-          occurredAt: FIXED_NOW,
           payloadBytes: 128000,
           payloadInlineCiphertext: null,
           payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
+        }),
+      ],
+      maxSeqByLane: [
+        {
+          lane: "conversation",
+          maxSeq: "12",
+        },
+        {
+          lane: "system",
+          maxSeq: "3",
         },
       ],
     });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "12",
-      },
-      {
-        lane: "system",
-        maxSeq: "3",
-      },
-    ]);
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
@@ -731,21 +674,6 @@ describe("hosted runtime internal web routes", () => {
         },
         {
           importedSeq: "2",
-          lane: "system",
-        },
-      ],
-      limitPerLane: 10,
-      now: expect.any(Date),
-      userId: "member_routes_1",
-    });
-    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
-      lanes: [
-        {
-          afterSeq: "11",
-          lane: "conversation",
-        },
-        {
-          afterSeq: "2",
           lane: "system",
         },
       ],
@@ -817,71 +745,6 @@ describe("hosted runtime internal web routes", () => {
     expect(payload.items).toHaveLength(items.length);
   });
 
-  it("returns group mailbox work without a sponsorship moment store", async () => {
-    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
-      buildRuntimeMailboxAccessRecord({
-        threadContainer: { owner: buildRuntimeMailboxAccessRecord() },
-      }),
-    );
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "11",
-        lane: "conversation",
-      },
-    ]);
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [
-        {
-          createdAt: FIXED_NOW,
-          dedupeKey: "conversation-dedupe-1",
-          expiresAt: null,
-          id: "mailbox_item_1",
-          kind: "conversation.message",
-          lane: "conversation",
-          laneSeq: "12",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
-          payloadInlineCiphertext: "cipher_inline_1",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
-        },
-      ],
-    });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "12",
-      },
-    ]);
-
-    const response = await mailboxFetchRoute.POST(jsonRequest(
-      "/api/internal/hosted-mailbox/fetch",
-      {
-        cursorMode: "imported_seq",
-        lanes: [
-          {
-            importedSeq: "11",
-            lane: "conversation",
-          },
-        ],
-        limitPerLane: 10,
-        requestId: "request_mailbox_fetch_without_bit",
-      },
-    ));
-    const payload = parseHostedMailboxFetchResponse(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(payload).not.toHaveProperty("groupRunningBit");
-    expect(payload.items).toHaveLength(1);
-    expect(payload.items[0]).toMatchObject({
-      id: "mailbox_item_1",
-      lane: "conversation",
-      laneSeq: "12",
-    });
-  });
-
   it("keeps participant-backed group access", async () => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
       buildRuntimeMailboxAccessRecord({
@@ -914,200 +777,42 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.readHostedMemberAssistantModelPreference).not.toHaveBeenCalled();
   });
 
-  it("fetches after the local imported watermark while returning the consumed floor", async () => {
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "13",
-        lane: "conversation",
-      },
-      {
-        consumedSeq: "1",
-        lane: "system",
-      },
-    ]);
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [],
-    });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "14",
-      },
-      {
-        lane: "system",
-        maxSeq: "8",
-      },
-    ]);
-
-    const response = await mailboxFetchRoute.POST(jsonRequest(
-      "/api/internal/hosted-mailbox/fetch",
-      {
-        cursorMode: "imported_seq",
-        lanes: [
-          {
-            importedSeq: "14",
-            lane: "conversation",
-          },
-          {
-            importedSeq: "8",
-            lane: "system",
-          },
-        ],
-        limitPerLane: 10,
-        requestId: "request_mailbox_fetch_replay",
-      },
-    ));
-    const payload = parseHostedMailboxFetchResponse(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(mocks.readHostedMailboxConsumedSeqByLane).toHaveBeenCalledWith({
-      lanes: ["conversation", "system"],
-      userId: "member_routes_1",
-    });
-    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
-      lanes: [
-        {
-          afterSeq: "14",
-          lane: "conversation",
-        },
-        {
-          afterSeq: "8",
-          lane: "system",
-        },
-      ],
-      limitPerLane: 10,
-      now: expect.any(Date),
-      userId: "member_routes_1",
-    });
-    expect(payload.consumedSeqByLane).toEqual([
-      {
-        consumedSeq: "13",
-        lane: "conversation",
-      },
-      {
-        consumedSeq: "1",
-        lane: "system",
-      },
-    ]);
-    expect(payload.items).toHaveLength(0);
-  });
-
-  it("anchors legacy conversation fetches at the consumed floor without rewinding system", async () => {
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "13",
-        lane: "conversation",
-      },
-      {
-        consumedSeq: "1",
-        lane: "system",
-      },
-    ]);
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [],
-    });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "14",
-      },
-      {
-        lane: "system",
-        maxSeq: "8",
-      },
-    ]);
-
-    const response = await mailboxFetchRoute.POST(jsonRequest(
-      "/api/internal/hosted-mailbox/fetch",
-      {
-        lanes: [
-          {
-            importedSeq: "14",
-            lane: "conversation",
-          },
-          {
-            importedSeq: "8",
-            lane: "system",
-          },
-        ],
-        limitPerLane: 10,
-        requestId: "request_mailbox_fetch_legacy_replay",
-      },
-    ));
-    const payload = parseHostedMailboxFetchResponse(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
-      lanes: [
-        {
-          afterSeq: "13",
-          lane: "conversation",
-        },
-        {
-          afterSeq: "8",
-          lane: "system",
-        },
-      ],
-      limitPerLane: 10,
-      now: expect.any(Date),
-      userId: "member_routes_1",
-    });
-    expect(payload.consumedSeqByLane).toEqual([
-      {
-        consumedSeq: "13",
-        lane: "conversation",
-      },
-      {
-        consumedSeq: "1",
-        lane: "system",
-      },
-    ]);
-  });
-
   it("does not strand ungated system work behind consumed conversation metadata when access is denied", async () => {
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "denied",
     });
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "13",
-        lane: "conversation",
-      },
-      {
-        consumedSeq: "1",
-        lane: "system",
-      },
-    ]);
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [
         {
-          createdAt: FIXED_NOW,
+          consumedSeq: "13",
+          lane: "conversation",
+        },
+        {
+          consumedSeq: "1",
+          lane: "system",
+        },
+      ],
+      items: [
+        buildMailboxItem({
           dedupeKey: "browser-vault-dedupe-denied-replay",
-          expiresAt: null,
           id: "mailbox_browser_vault_denied_replay",
           kind: "runtime.browser-vault-refresh-requested",
           lane: "system",
           laneSeq: "2",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
           payloadInlineCiphertext: "cipher_inline_browser_vault_denied_replay",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
+        }),
+      ],
+      maxSeqByLane: [
+        {
+          lane: "conversation",
+          maxSeq: "14",
+        },
+        {
+          lane: "system",
+          maxSeq: "2",
         },
       ],
     });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "14",
-      },
-      {
-        lane: "system",
-        maxSeq: "2",
-      },
-    ]);
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
@@ -1130,145 +835,38 @@ describe("hosted runtime internal web routes", () => {
     const payload = parseHostedMailboxFetchResponse(await response.json());
 
     expect(response.status).toBe(200);
-    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
-      lanes: [
-        {
-          afterSeq: "14",
-          lane: "conversation",
-        },
-        {
-          afterSeq: "1",
-          lane: "system",
-        },
-      ],
-      limitPerLane: 10,
-      now: expect.any(Date),
-      userId: "member_routes_1",
-    });
     expect(payload.items.map((item) => item.id)).toEqual([
       "mailbox_browser_vault_denied_replay",
     ]);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
-  it("fetches the fresh tail when local import is ahead of consume", async () => {
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "0",
-        lane: "conversation",
-      },
-      {
-        consumedSeq: "0",
-        lane: "system",
-      },
-    ]);
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [
-        {
-          createdAt: FIXED_NOW,
-          dedupeKey: "conversation-dedupe-fresh-251",
-          expiresAt: null,
-          id: "mailbox_item_fresh_251",
-          kind: "conversation.message",
-          lane: "conversation",
-          laneSeq: "251",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
-          payloadInlineCiphertext: "cipher_inline_fresh_251",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
-        },
-      ],
-    });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "251",
-      },
-      {
-        lane: "system",
-        maxSeq: "0",
-      },
-    ]);
-
-    const response = await mailboxFetchRoute.POST(jsonRequest(
-      "/api/internal/hosted-mailbox/fetch",
-      {
-        cursorMode: "imported_seq",
-        lanes: [
-          {
-            importedSeq: "250",
-            lane: "conversation",
-          },
-          {
-            importedSeq: "0",
-            lane: "system",
-          },
-        ],
-        limitPerLane: 10,
-        requestId: "request_mailbox_fetch_recovery",
-      },
-    ));
-    const payload = parseHostedMailboxFetchResponse(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
-      lanes: [
-        {
-          afterSeq: "250",
-          lane: "conversation",
-        },
-        {
-          afterSeq: "0",
-          lane: "system",
-        },
-      ],
-      limitPerLane: 10,
-      now: expect.any(Date),
-      userId: "member_routes_1",
-    });
-    expect(payload.items).toHaveLength(1);
-    expect(payload.items[0]?.laneSeq).toBe("251");
-  });
-
   it("does not AI-gate consumed-ahead restored context when access is denied", async () => {
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "denied",
     });
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "250",
-        lane: "conversation",
-      },
-    ]);
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [
         {
-          createdAt: FIXED_NOW,
-          dedupeKey: "conversation-dedupe-consumed-context-001",
-          expiresAt: null,
-          id: "mailbox_item_consumed_context_001",
-          kind: "conversation.message",
+          consumedSeq: "250",
           lane: "conversation",
+        },
+      ],
+      items: [
+        buildMailboxItem({
+          dedupeKey: "conversation-dedupe-consumed-context-001",
+          id: "mailbox_item_consumed_context_001",
           laneSeq: "1",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
           payloadInlineCiphertext: "cipher_inline_consumed_context_001",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
+        }),
+      ],
+      maxSeqByLane: [
+        {
+          lane: "conversation",
+          maxSeq: "251",
         },
       ],
     });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "251",
-      },
-    ]);
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
@@ -1286,17 +884,6 @@ describe("hosted runtime internal web routes", () => {
     const payload = parseHostedMailboxFetchResponse(await response.json());
 
     expect(response.status).toBe(200);
-    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).toHaveBeenCalledWith({
-      lanes: [
-        {
-          afterSeq: "0",
-          lane: "conversation",
-        },
-      ],
-      limitPerLane: 2,
-      now: expect.any(Date),
-      userId: "member_routes_1",
-    });
     expect(payload.items.map((item) => item.id)).toEqual([
       "mailbox_item_consumed_context_001",
     ]);
@@ -1307,62 +894,45 @@ describe("hosted runtime internal web routes", () => {
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "denied",
     });
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "13",
-        lane: "conversation",
-      },
-      {
-        consumedSeq: "1",
-        lane: "system",
-      },
-    ]);
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [
         {
-          createdAt: FIXED_NOW,
+          consumedSeq: "13",
+          lane: "conversation",
+        },
+        {
+          consumedSeq: "1",
+          lane: "system",
+        },
+      ],
+      items: [
+        buildMailboxItem({
           dedupeKey: "conversation-dedupe-tombstone-denied",
           expiresAt: FIXED_NOW,
           id: "mailbox_item_tombstone_denied",
-          kind: "conversation.message",
-          lane: "conversation",
           laneSeq: "14",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
           payloadInlineCiphertext: null,
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
-        },
-        {
-          createdAt: FIXED_NOW,
+        }),
+        buildMailboxItem({
           dedupeKey: "browser-vault-dedupe-tombstone-denied",
-          expiresAt: null,
           id: "mailbox_browser_vault_tombstone_denied",
           kind: "runtime.browser-vault-refresh-requested",
           lane: "system",
           laneSeq: "2",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
           payloadInlineCiphertext: "cipher_inline_browser_vault_tombstone_denied",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
+        }),
+      ],
+      maxSeqByLane: [
+        {
+          lane: "conversation",
+          maxSeq: "14",
+        },
+        {
+          lane: "system",
+          maxSeq: "2",
         },
       ],
     });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "14",
-      },
-      {
-        lane: "system",
-        maxSeq: "2",
-      },
-    ]);
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
@@ -1410,7 +980,6 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.fetchHostedRuntimeMailboxProjection).not.toHaveBeenCalled();
-    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
   });
 
@@ -1441,43 +1010,31 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.fetchHostedRuntimeMailboxProjection).not.toHaveBeenCalled();
-    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
   });
 
   it("projects low usage only with an allowed conversation mailbox batch", async () => {
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "11",
-        lane: "conversation",
-      },
-    ]);
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [
         {
-          createdAt: FIXED_NOW,
-          dedupeKey: "conversation-dedupe-low",
-          expiresAt: null,
-          id: "mailbox_item_low",
-          kind: "conversation.message",
+          consumedSeq: "11",
           lane: "conversation",
-          laneSeq: "12",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
+        },
+      ],
+      items: [
+        buildMailboxItem({
+          dedupeKey: "conversation-dedupe-low",
+          id: "mailbox_item_low",
           payloadInlineCiphertext: "cipher_inline_low",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
+        }),
+      ],
+      maxSeqByLane: [
+        {
+          lane: "conversation",
+          maxSeq: "12",
         },
       ],
     });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "12",
-      },
-    ]);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
       status: "allowed",
       usageRunningLow: true,
@@ -1516,38 +1073,28 @@ describe("hosted runtime internal web routes", () => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
       buildRuntimeMailboxAccessRecord(),
     );
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "11",
-        lane: "conversation",
-      },
-    ]);
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [
         {
-          createdAt: FIXED_NOW,
-          dedupeKey: "conversation-dedupe-denied",
-          expiresAt: null,
-          id: "mailbox_item_denied",
-          kind: "conversation.message",
+          consumedSeq: "11",
           lane: "conversation",
+        },
+      ],
+      items: [
+        buildMailboxItem({
+          dedupeKey: "conversation-dedupe-denied",
+          id: "mailbox_item_denied",
           laneSeq: "13",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
           payloadInlineCiphertext: "cipher_inline_denied",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
+        }),
+      ],
+      maxSeqByLane: [
+        {
+          lane: "conversation",
+          maxSeq: "13",
         },
       ],
     });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "conversation",
-        maxSeq: "13",
-      },
-    ]);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
       status: "denied",
     });
@@ -1590,154 +1137,75 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("does not AI-gate manual runtime-control mailbox imports", async () => {
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [
-        {
-          createdAt: FIXED_NOW,
-          dedupeKey: "manual-dedupe-denied",
-          expiresAt: null,
-          id: "mailbox_manual_denied",
-          kind: "runtime.manual-requested",
-          lane: "system",
-          laneSeq: "12",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
-          payloadInlineCiphertext: "cipher_inline_denied",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
-        },
-      ],
-    });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
+  it.each([
+    "runtime.manual-requested",
+    "runtime.browser-vault-refresh-requested",
+  ] as const)("imports system work without an AI gate: %s", async (kind) => {
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "denied" });
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [{ lane: "system", consumedSeq: "11" }],
+      items: [buildMailboxItem({
+        dedupeKey: "system-dedupe",
+        id: "mailbox_system",
+        kind,
         lane: "system",
-        maxSeq: "12",
-      },
-    ]);
-    const response = await mailboxFetchRoute.POST(jsonRequest(
-      "/api/internal/hosted-mailbox/fetch",
-      {
-        lanes: [
-          {
-            importedSeq: "11",
-            lane: "system",
-          },
-        ],
-        limitPerLane: 10,
-        requestId: "request_mailbox_fetch_manual_denied",
-      },
-    ));
-
-    expect(response.status).toBe(200);
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-  });
-
-  it("does not AI-gate non-manual system mailbox consumption", async () => {
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [
-        {
-          createdAt: FIXED_NOW,
-          dedupeKey: "browser-vault-dedupe",
-          expiresAt: null,
-          id: "mailbox_browser_vault",
-          kind: "runtime.browser-vault-refresh-requested",
-          lane: "system",
-          laneSeq: "12",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
-          payloadInlineCiphertext: "cipher_inline_browser_vault",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
-        },
-      ],
+      })],
+      maxSeqByLane: [{ lane: "system", maxSeq: "12" }],
     });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "system",
-        maxSeq: "12",
-      },
-    ]);
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
       {
-        lanes: [
-          {
-            importedSeq: "11",
-            lane: "system",
-          },
-        ],
+        lanes: [{ importedSeq: "11", lane: "system" }],
         limitPerLane: 10,
-        requestId: "request_mailbox_fetch_browser_vault",
+        requestId: "request_system_fetch",
       },
     ));
 
     expect(response.status).toBe(200);
+    expect(parseHostedMailboxFetchResponse(await response.json()).items).toMatchObject([
+      { id: "mailbox_system", kind, laneSeq: "12" },
+    ]);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("gates the whole mixed mailbox fetch batch when any item needs the AI usage gate", async () => {
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "11",
-        lane: "system",
-      },
-      {
-        consumedSeq: "11",
-        lane: "conversation",
-      },
-    ]);
-    mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
-      items: [
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [
         {
-          createdAt: FIXED_NOW,
+          consumedSeq: "11",
+          lane: "system",
+        },
+        {
+          consumedSeq: "11",
+          lane: "conversation",
+        },
+      ],
+      items: [
+        buildMailboxItem({
           dedupeKey: "browser-vault-dedupe-mixed",
-          expiresAt: null,
           id: "mailbox_browser_vault_mixed",
           kind: "runtime.browser-vault-refresh-requested",
           lane: "system",
-          laneSeq: "12",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
           payloadInlineCiphertext: "cipher_inline_browser_vault_mixed",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
+        }),
+        buildMailboxItem({
+          dedupeKey: "conversation-dedupe-mixed",
+          id: "mailbox_item_mixed",
+          payloadInlineCiphertext: "cipher_inline_mixed",
+        }),
+      ],
+      maxSeqByLane: [
+        {
+          lane: "system",
+          maxSeq: "12",
         },
         {
-          createdAt: FIXED_NOW,
-          dedupeKey: "conversation-dedupe-mixed",
-          expiresAt: null,
-          id: "mailbox_item_mixed",
-          kind: "conversation.message",
           lane: "conversation",
-          laneSeq: "12",
-          occurredAt: FIXED_NOW,
-          payloadBytes: 64,
-          payloadInlineCiphertext: "cipher_inline_mixed",
-          payloadRef: null,
-          payloadSchema: "murph.hosted-mailbox-item.v1",
-          updatedAt: FIXED_NOW,
-          userId: "member_routes_1",
+          maxSeq: "12",
         },
       ],
     });
-    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
-      {
-        lane: "system",
-        maxSeq: "12",
-      },
-      {
-        lane: "conversation",
-        maxSeq: "12",
-      },
-    ]);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
       status: "denied",
     });
@@ -1783,6 +1251,9 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("fetches a mailbox payload sidecar through the separate signed route", async () => {
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      { lane: "conversation", consumedSeq: "11" },
+    ]);
     const item = {
       id: "mailbox_item_2",
       kind: "conversation.message",
@@ -1831,128 +1302,95 @@ describe("hosted runtime internal web routes", () => {
     expect(JSON.stringify(payload)).not.toContain(UNSAFE_SENTINEL);
   });
 
-  it("rejects mailbox payload fetches for inactive members", async () => {
-    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(buildRuntimeMailboxAccessRecord({
-      suspendedAt: new Date("2026-04-26T00:00:00.000Z"),
-    }));
-
-    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
-      "/api/internal/hosted-mailbox/payload/fetch",
-      {
-        dedupeKey: "dedupe_item_2",
-        mailboxItemId: "mailbox_item_2",
-        payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-        requestId: "request_payload_fetch_inactive",
-      },
-    ));
-
-    expect(response.status).toBe(403);
-    expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
-  });
-
-  it("rejects conversation mailbox payload fetches when the AI usage gate denies runtime consumption", async () => {
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "11",
-        lane: "conversation",
-      },
-    ]);
-    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+  it.each([
+    {
+      scenario: "inactive member",
+      item: {},
+      consumedSeq: "11",
+      inactive: true,
+      status: 403,
+      usageReads: 0,
+      cursorReads: 0,
+      matches: true,
+    },
+    {
+      scenario: "fresh denied conversation",
+      item: {},
+      consumedSeq: "11",
+      inactive: false,
+      status: 403,
+      usageReads: 1,
+      cursorReads: 1,
+      matches: true,
+    },
+    {
+      scenario: "manual runtime control",
+      item: { kind: "runtime.manual-requested", lane: "system" },
+      consumedSeq: "11",
+      inactive: false,
+      status: 200,
+      usageReads: 0,
+      cursorReads: 0,
+      matches: true,
+    },
+    {
+      scenario: "consumed conversation replay",
+      item: { laneSeq: "14" },
+      consumedSeq: "14",
+      inactive: false,
+      status: 200,
+      usageReads: 0,
+      cursorReads: 1,
+      matches: true,
+    },
+    {
+      scenario: "mismatched mailbox identity",
+      item: { id: "mailbox_item_other" },
+      consumedSeq: "11",
+      inactive: false,
+      status: 200,
+      usageReads: 0,
+      cursorReads: 0,
+      matches: false,
+    },
+    {
+      scenario: "browser vault refresh",
+      item: { kind: "runtime.browser-vault-refresh-requested", lane: "system" },
+      consumedSeq: "11",
+      inactive: false,
+      status: 200,
+      usageReads: 0,
+      cursorReads: 0,
+      matches: true,
+    },
+  ] as const)("authorizes sidecar payloads independently: $scenario", async ({ item: overrides, consumedSeq, inactive, status, usageReads, cursorReads, matches }) => {
+    if (inactive) {
+      mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(buildRuntimeMailboxAccessRecord({
+        suspendedAt: new Date(FIXED_NOW),
+      }));
+    }
+    const item = buildMailboxItem({
+      dedupeKey: "dedupe_item_2",
       id: "mailbox_item_2",
-      kind: "conversation.message",
-      lane: "conversation",
-      laneSeq: "12",
       payloadInlineCiphertext: null,
       payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-      userId: "member_routes_1",
+      ...overrides,
     });
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
-      status: "denied",
-    });
-
-    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
-      "/api/internal/hosted-mailbox/payload/fetch",
-      {
-        dedupeKey: "dedupe_item_2",
-        mailboxItemId: "mailbox_item_2",
-        payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-        requestId: "request_payload_fetch_usage_denied",
-      },
-    ));
-
-    expect(response.status).toBe(403);
-    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "read_first",
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      userId: "member_routes_1",
-    });
-    expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
-  });
-
-  it("does not AI-gate manual runtime-control mailbox payload imports", async () => {
-    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
-      id: "mailbox_manual_2",
-      kind: "runtime.manual-requested",
-      lane: "system",
-      laneSeq: "12",
-      userId: "member_routes_1",
-    });
-    mocks.fetchHostedMailboxPayload.mockResolvedValue({
-      fetchedAt: FIXED_NOW,
-      payload: {
-        createdAt: FIXED_NOW,
-        mailboxItemId: "mailbox_manual_2",
-        payloadCiphertext: "cipher_ref_manual",
-        payloadSchema: "murph.hosted-mailbox-payload.v1",
-        userId: "member_routes_1",
-      },
-      unavailable: null,
-    });
-
-    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
-      "/api/internal/hosted-mailbox/payload/fetch",
-      {
-        dedupeKey: "manual-dedupe-2",
-        mailboxItemId: "mailbox_manual_2",
-        payloadRef: "hosted-mailbox-payload:mailbox_manual_2",
-        requestId: "request_payload_fetch_manual_denied",
-      },
-    ));
-
-    expect(response.status).toBe(200);
-    expect(mocks.readHostedMailboxConsumedSeqByLane).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalled();
-  });
-
-  it("does not AI-gate consumed conversation mailbox payload replay", async () => {
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
-      status: "denied",
-    });
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "14",
-        lane: "conversation",
-      },
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(item);
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValue([
+      { lane: "conversation", consumedSeq },
     ]);
-    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
-      id: "mailbox_item_2",
-      kind: "conversation.message",
-      lane: "conversation",
-      laneSeq: "14",
-      payloadInlineCiphertext: null,
-      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-      userId: "member_routes_1",
-    });
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "denied" });
     mocks.fetchHostedMailboxPayload.mockResolvedValue({
       fetchedAt: FIXED_NOW,
-      payload: {
+      payload: matches ? {
         createdAt: FIXED_NOW,
         mailboxItemId: "mailbox_item_2",
-        payloadCiphertext: "payload_cipher_2",
+        payloadCiphertext: "cipher_ref_2",
         payloadSchema: "murph.hosted-mailbox-payload.v1",
         userId: "member_routes_1",
-      },
+      } : null,
+      unavailable: matches ? null : { code: "not_found", retryable: false },
     });
 
     const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
@@ -1961,100 +1399,31 @@ describe("hosted runtime internal web routes", () => {
         dedupeKey: "dedupe_item_2",
         mailboxItemId: "mailbox_item_2",
         payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-        requestId: "request_payload_fetch_replay_denied",
+        requestId: "request_payload_authorization",
       },
     ));
 
-    expect(response.status).toBe(200);
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      item: expect.objectContaining({
-        id: "mailbox_item_2",
-        laneSeq: "14",
+    expect(response.status).toBe(status);
+    expect(mocks.readHostedMailboxConsumedSeqByLane).toHaveBeenCalledTimes(cursorReads);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledTimes(usageReads);
+    if (usageReads) {
+      expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+        mode: "read_first",
+        prisma: expect.objectContaining({ kind: "prisma" }),
         userId: "member_routes_1",
-      }),
-      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-    });
-  });
-
-  it("does not AI-gate mismatched mailbox payload metadata", async () => {
-    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
-      id: "mailbox_item_other",
-      kind: "conversation.message",
-      lane: "conversation",
-      laneSeq: "12",
-      userId: "member_routes_1",
-    });
-    mocks.fetchHostedMailboxPayload.mockResolvedValue({
-      fetchedAt: FIXED_NOW,
-      payload: null,
-      unavailable: {
-        code: "not_found",
-        retryable: false,
-      },
-    });
-
-    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
-      "/api/internal/hosted-mailbox/payload/fetch",
-      {
-        dedupeKey: "dedupe_item_2",
-        mailboxItemId: "mailbox_item_2",
+      });
+    }
+    if (status === 403) {
+      expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
+    } else {
+      expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledExactlyOnceWith({
+        prisma: expect.objectContaining({ kind: "prisma" }),
+        item: matches ? item : null,
         payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-        requestId: "request_payload_fetch_mismatched_metadata",
-      },
-    ));
-
-    expect(response.status).toBe(200);
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      item: null,
-      payloadRef: MAILBOX_ITEM_2_PAYLOAD_REF,
-    });
-  });
-
-  it("does not AI-gate non-manual system mailbox payload fetches", async () => {
-    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
-      id: "mailbox_browser_vault",
-      kind: "runtime.browser-vault-refresh-requested",
-      lane: "system",
-      laneSeq: "12",
-      userId: "member_routes_1",
-    });
-    mocks.fetchHostedMailboxPayload.mockResolvedValue({
-      fetchedAt: FIXED_NOW,
-      payload: {
-        createdAt: FIXED_NOW,
-        mailboxItemId: "mailbox_browser_vault",
-        payloadCiphertext: "cipher_ref_browser_vault",
-        payloadSchema: "murph.hosted-mailbox-payload.v1",
-        userId: "member_routes_1",
-      },
-      unavailable: null,
-    });
-
-    const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
-      "/api/internal/hosted-mailbox/payload/fetch",
-      {
-        dedupeKey: "dedupe_browser_vault",
-        mailboxItemId: "mailbox_browser_vault",
-        payloadRef: "hosted-mailbox-payload:mailbox_browser_vault",
-        requestId: "request_payload_fetch_browser_vault",
-      },
-    ));
-
-    expect(response.status).toBe(200);
-    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
-    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalledWith({
-      prisma: expect.objectContaining({ kind: "prisma" }),
-      item: expect.objectContaining({
-        id: "mailbox_browser_vault",
-        lane: "system",
-        userId: "member_routes_1",
-      }),
-      payloadRef: "hosted-mailbox-payload:mailbox_browser_vault",
-    });
+      });
+      const payload = parseHostedMailboxPayloadFetchResponse(await response.json());
+      expect(payload.payload?.payloadCiphertext ?? null).toBe(matches ? "cipher_ref_2" : null);
+    }
   });
 
   it("starts the usage read while workspace and preference reads are still pending", async () => {
@@ -4219,5 +3588,25 @@ function createBrowserVaultReplicaRef(sourceBundleHash: string) {
     runtimeRootKeyId: "udrk:runtime:internal-route",
     schema: "murph.hosted-browser-vault-replica-ref.v1",
     sourceBundleHash,
+  };
+}
+
+function buildMailboxItem(
+  overrides: Partial<HostedMailboxItemRecord> & Pick<HostedMailboxItemRecord, "id" | "dedupeKey">,
+): HostedMailboxItemRecord {
+  return {
+    createdAt: FIXED_NOW,
+    expiresAt: null,
+    kind: "conversation.message",
+    lane: "conversation",
+    laneSeq: "12",
+    occurredAt: FIXED_NOW,
+    payloadBytes: 64,
+    payloadInlineCiphertext: "cipher_inline_1",
+    payloadRef: null,
+    payloadSchema: "murph.hosted-mailbox-item.v1",
+    updatedAt: FIXED_NOW,
+    userId: "member_routes_1",
+    ...overrides,
   };
 }

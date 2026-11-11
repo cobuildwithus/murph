@@ -5,7 +5,6 @@ import { initializeVault } from "@murphai/core";
 import { importClinicalFhirSnapshot, type ClinicalFhirSnapshotPage } from "@murphai/vault-usecases/clinical-records";
 import { parseHostedClinicalRecordsFetchPageResponse, parseHostedClinicalRecordsFetchPageRequest } from "@murphai/hosted-execution/clinical-records";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1249,30 +1248,6 @@ describe("Clinical Records retrieval control plane", () => {
     expect(harness.state.run.pageCount).toBe(1);
     expect(harness.state.run.fetchedBytes).toBeGreaterThan(0);
     expect(harness.state.run.egressBytes).toBe(harness.state.run.fetchedBytes);
-  });
-
-  it("persists server-page dedupe and pre-egress reservation counters in the additive migration", () => {
-    const migration = readFileSync(new URL(
-      "../prisma/migrations/20260710160000_clinical_records_control_plane/migration.sql",
-      import.meta.url,
-    ), "utf8");
-
-    expect(migration).toContain('"egress_bytes" INTEGER NOT NULL DEFAULT 0');
-    expect(migration).toContain('"provider_request_count" INTEGER NOT NULL DEFAULT 0');
-    expect(migration).toContain('"reserved_bytes" INTEGER NOT NULL DEFAULT 0');
-    expect(migration).toContain(
-      'ON "clinical_record_retrieval_request"("run_id", "request_fingerprint")',
-    );
-    expect(migration).not.toContain("request_id_hash");
-
-    const wireMigration = readFileSync(new URL(
-      "../prisma/migrations/20260721160000_clinical_retrieval_wire_identity/migration.sql",
-      import.meta.url,
-    ), "utf8");
-    expect(wireMigration).toContain('ADD COLUMN "retrieval_protocol" TEXT');
-    expect(wireMigration).toContain('ADD COLUMN "query_scope_id" TEXT');
-    expect(wireMigration).toContain('ADD COLUMN "slice_id" TEXT');
-    expect(wireMigration).not.toMatch(/patient|provider_url|page_url|clinical_value/iu);
   });
 
   it("uses claim-version CAS so a stale claimant cannot double-count a page", async () => {

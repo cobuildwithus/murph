@@ -541,6 +541,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       accountAddress: "assistant@mail.example.test",
       accountId: "assistant@mail.example.test",
       rawMessage: rawEmailMessage,
+      receivedAt: emailWake.occurredAt,
       selfAddresses,
       source: "email",
       threadTarget: null,

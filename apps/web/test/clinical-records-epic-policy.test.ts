@@ -11,6 +11,7 @@ import {
   EPIC_BETA_RESOURCE_TYPES,
   buildEpicBetaInitialFhirPageUrl,
   buildEpicBetaRetrievalPlan,
+  buildEpicDailyRetrievalPlan,
   buildEpicBetaRetrievalQueryFingerprintInput,
   buildEpicBetaSmartResourceScope,
   buildEpicBinarySmartResourceScope,
@@ -448,8 +449,7 @@ function requireSlice(
 }
 
 
-it("uses overlapping daily windows and restores lifetime acquisition every seventh generation", async () => {
-  const { buildEpicDailyRetrievalPlan } = await import("@/src/lib/clinical-records/epic-policy");
+it("uses overlapping daily windows and restores lifetime acquisition every seventh generation", () => {
   const now = new Date("2026-09-17T12:00:00.000Z");
   const previous = buildEpicBetaRetrievalPlan({ frozenAt: now, pageCount: "100", resourceTypes: ["Patient", "Observation", "DocumentReference"] });
   const daily = buildEpicDailyRetrievalPlan({ previous, now, generation: 2 });
@@ -470,4 +470,38 @@ it("includes Epic's required longitudinal care-plan category", () => {
 it("preserves the request identity of care-plan runs frozen before the category fix", () => {
   const original = baseline.find((row) => row.slice.queryScopeId === "care-plans")!;
   expect(buildEpicBetaInitialFhirPageUrl({ fhirBaseUrl: "https://fhir.example.test/FHIR/R4", pageCount: "100", patientId: "patient-1", retrievalSlice: clinicalFhirRetrievalSliceSchema.parse(original.slice) }).href).toBe(original.url);
+});
+
+it("upgrades legacy care-plan queries for new daily runs without rewriting the frozen run", () => {
+  const legacy = clinicalFhirRetrievalSliceSchema.parse(
+    baseline.find((row) => row.slice.queryScopeId === "care-plans")!.slice,
+  );
+  let previous = {
+    schemaVersion: "murph.clinical-retrieval-plan.v1" as const,
+    slices: [legacy],
+  };
+  for (const generation of [2, 7, 100]) {
+    previous = buildEpicDailyRetrievalPlan({
+      previous,
+      now: new Date("2026-11-11T12:00:00.000Z"),
+      generation,
+    });
+    expect(previous.slices).toHaveLength(1);
+    expect(previous.slices[0]?.queryScopeId).toBe(legacy.queryScopeId);
+    const request = buildEpicBetaInitialFhirPageUrl({
+      fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
+      pageCount: "100",
+      patientId: "synthetic-patient",
+      retrievalSlice: previous.slices[0]!,
+    });
+    expect(request.searchParams.get("category")).toBe("38717003");
+    expect(previous.slices[0]?.queryFingerprint).not.toBe(legacy.queryFingerprint);
+  }
+  const frozenRequest = buildEpicBetaInitialFhirPageUrl({
+    fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
+    pageCount: "100",
+    patientId: "synthetic-patient",
+    retrievalSlice: legacy,
+  });
+  expect(frozenRequest.searchParams.has("category")).toBe(false);
 });

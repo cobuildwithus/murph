@@ -11,3 +11,5 @@ Older runner bundles require the retired config marker. A vault initialized by
 this version needs this reader version as its rollback floor unless the older
 bundle's inbox initialization runs before its inbox reads. Existing snapshots
 remain readable; this change neither rewrites nor removes their retired files.
+
+Canonical promotion lookup reads manifests sequentially through the core vault walker. Unreadable or invalid canonical evidence blocks promotion instead of being treated as absence; a retry may create a record only after the canonical lookup completes successfully.

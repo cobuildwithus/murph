@@ -123,7 +123,7 @@ import {
   buildJunctionDeviceSyncRuntimeDescriptor,
   normalizeJunctionClientUserIdNamespace,
   normalizeJunctionDeviceSyncRuntimeConfig,
-} from "../configured-provider-runtime-descriptors.ts";
+} from "../config/provider-manifests.ts";
 import {
   addMilliseconds,
   normalizeString,
