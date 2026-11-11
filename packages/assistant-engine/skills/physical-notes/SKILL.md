@@ -5,163 +5,126 @@ description: Generate and mail one expressive full-page Murph note through the e
 
 # Physical notes
 
-Use this flow only when a person explicitly wants Murph to send a real note in
-the mail. The product is one US-only, one-artwork-page, color First Class note.
+Murph can mail a real note: one page of full-colour artwork, sent First Class
+to a US address. Use this only when a person asks Murph to send something in
+the mail.
 
-## Resolve an earlier uncertain submission
+One mail request covers one note. In a group, any current activated participant
+may ask, and the free note and any later cost belong to the group.
 
-When a person explicitly asks to cancel, clear, check, or resolve an earlier
-unresolved physical-note submission, call `murph.resolve_physical_note` exactly
-once with the exact current authorizing `message_ref`. When the earlier
-unresolved send or prior recovery result is known from the conversation or a
-tool result, also pass that earlier accepted Message ref as `target_message_ref`;
-pair it with `target_kind: "send"` for an original physical-note send or
-`target_kind: "recovery"` for a prior `murph.resolve_physical_note` result. The
-target pair identifies the checked effect only and does not authorize the
-action. This is a foreground reconciliation, not a send request: do not generate
-artwork, collect an address, or call `murph.send_physical_note` as part of
-recovery.
+## Send a note
 
-Treat its result literally:
+When the request says to mail it and the address can be completed, go all the
+way to sending without asking for approval of a draft. Show the artwork first
+only when the person asked for a draft, the intended content is unclear, or you
+need them to choose between options.
 
-- `accepted` means provider records prove the checked submission was accepted
-  for printing. It cannot be treated as canceled or recalled. Say accepted for
-  printing, not delivered, and say this recovery sent nothing new.
-- `clear` means the checked submission no longer blocks. When
-  `remainingUnresolved` is false, say no unresolved submission remains. When it
-  is true, say the checked submission cleared but a different unresolved
-  submission remains and needs another explicit recovery request. This recovery
-  sent nothing; a future note still needs a separate explicit send request.
-- `pending` means the outcome still cannot be safely resolved. If
-  `retryAfter` is present, state that Murph can check again after that time only
-  if the person explicitly asks. If the result includes `targetMessageRef` and
-  `targetKind`, preserve both for any later explicit recovery request about the
-  same submission. Never promise or schedule an automatic check.
-- `permission_denied` means the action was not authorized and nothing changed.
-  State the bounded reason and do not retry automatically.
-- For `unavailable`, follow the result's bounded explanation. A returned
-  provider/configuration unavailability can establish that no clear occurred,
-  while a lost or invalid response leaves the final state unconfirmed. Never
-  infer a state change or no-change from the status alone. Say nothing new was
-  sent, say no automatic retry is running, preserve any returned
-  `targetMessageRef` and `targetKind` for a later explicit recovery request
-  about the same submission, and do not retry automatically.
+1. **Address.** You need one recipient name and the US street address the
+   person gave. When the city, state or ZIP is missing, run
+   `vault-cli route resolve-address "<address>" --country US --format json`
+   before asking. Use `recommendedCandidate` when it is non-null: it means one
+   strong match kept the house number and street and filled in every mailing
+   field. Otherwise ask one short question about the missing detail. The lookup
+   only completes an address the person supplied. Never use it to find where
+   someone lives or to choose between different people or places.
+2. **Wording.** A request to send a thank-you, congratulations, apology or
+   similar note is also a request to write short fitting words, so write them
+   without asking. Sign it with a name the requester gave, or one already
+   established in their private chat, and otherwise leave the signature off
+   unless the note needs one. In a group, a display name or another
+   participant's identity does not show who the note is from. Ask about content
+   only when the sender, the relationship, the signature or the meaning is
+   unclear.
+3. **Artwork.** Call `murph.generate_image` with size `1024x1536`, JPEG output,
+   high quality, and the requesting message as `message_ref`. Follow the print
+   rules below.
+4. **Acknowledge once.** After generation starts, send one short true line,
+   such as "I'm making it now; I'll confirm here if the printer accepts it."
+   The finished image wakes this conversation by itself. Do not poll, wait or
+   schedule anything.
+5. **Mail it.** On that image-completion turn, call `murph.send_physical_note`
+   with only the recipient in `to`. Murph's server attaches the saved image and
+   the original request.
 
-For `accepted` or `clear`, `remainingUnresolved: true` is an independent
-member-wide blocker fact. Report it even though the checked submission reached
-a terminal outcome, and require another explicit recovery request before one
-more check. Never call the tool twice from one authorization.
+If you showed the artwork first, keep the `ref` and `sha256` from the image
+completion exactly. When the person then says to send it, call
+`murph.send_physical_note` with those values as `image_ref` and `image_sha256`
+and the approving message as `message_ref`. Use the message from the person who
+approved, even if another message arrived later.
 
-The recovery tool never sends a new note or recalls an accepted one. Never say
-“canceled” unless a future provider contract explicitly adds that outcome.
+Murph's return address is added by the server. Never ask for one, make one up,
+or put one in the tool arguments or the artwork.
 
-## Resolve before asking
+## Print rules for the image
 
-Identify one recipient name, the US street address the person supplied, and
-enough intent to make the note. Do not treat an address as incomplete merely
-because city, state, or ZIP were omitted.
+You choose the design: handwriting, doodles, an illustration, a collage, a fake
+award, a comic, or anything else that fits on one page. Make it personal and
+specific to the conversation. Put these constraints in the image prompt:
 
-Before asking for an objective missing address component, run
-`vault-cli route resolve-address "<address>" --country US --format json`. This
-is a narrow temporary Mapbox lookup for completing the destination the person
-already supplied. Use `recommendedCandidate` only when it is non-null; it means
-one strong candidate preserved the supplied house number and street and supplied
-all US mailing fields. Otherwise ask one concise question about the unresolved
-delivery-critical detail. Never use address lookup to discover where a person
-lives, choose among genuinely ambiguous people or destinations, or infer send
-authority.
+- portrait full-page artwork on white 8.5 by 11 inch paper
+- all important text, faces and marks inside the central 86 percent of the
+  page height, because the image is cropped at the top and bottom to fit US
+  Letter
+- a small, understated `murph ai` mark somewhere unobtrusive
+- no mailing address, postage, envelope, QR code, tracking code or print
+  provider branding
+- lettering large and dark enough to read in print
 
-A clear request to send a thank-you, congratulations, apology, or similar note
-already asks Murph to draft fitting short copy. Use a signature the requester
-explicitly supplied or that is already established in their private direct
-context; otherwise omit it unless the note genuinely needs one. In a group,
-never use a room display label or another participant's identity as authorship
-proof. Do not ask whether Murph should draft the note. Ask about content only
-when the intended sender, relationship, signature, or message meaning is
-materially ambiguous.
+The recipient's address goes only in `murph.send_physical_note`, never in the
+image prompt.
 
-## Compose with the existing primitives
+## What the send result means
 
-1. Confirm the recipient address is complete as supplied or safely resolved and
-   the request contains enough intent to make the note.
-   Murph's fixed return address is platform configuration. Never ask the person
-   for a return address, invent one, or place one in tool arguments or artwork.
-2. Call `murph.generate_image` with portrait size `1024x1536`, JPEG output,
-   high quality, and the exact current authorizing message as `message_ref`.
-   The generated image is the complete expressive page.
-3. After generation starts, send one short truthful acknowledgement, such as
-   “I’m making it now; I’ll confirm here if the printer accepts it.” The
-   existing hosted image completion will wake this conversation when the saved
-   image is ready; do not poll, sleep, schedule, or create an automation.
-4. On that trusted completion turn, call `murph.send_physical_note` with only
-   the recipient address. Trusted runtime code automatically binds the exact
-   saved image and originating user message.
-5. When Murph intentionally shows the generated note first, keep the exact
-   trusted `ref` and `sha256` from the completion. After a later explicit send
-   request, call `murph.send_physical_note` with those exact values as
-   `image_ref` and `image_sha256`; runtime code re-reads and verifies the vault
-   bytes before mailing. Also pass the exact current approving message as
-   `message_ref`; do not infer approval from another participant or from
-   whichever message happened to arrive last. Never invent or alter any of
-   these values.
+- `accepted`: accepted for printing. Do not say it was delivered. When the
+  result is paid, state the returned Murph-time cost. When it carries
+  `prior_note_accepted`, an earlier submission was the one accepted and this
+  call sent nothing more, so say that and state no cost and no free-note claim.
+- `pending`: the outcome is not known yet. Do not retry and do not say it was
+  mailed.
+- `insufficient_usage`: the free note has been used and more Murph time is
+  needed.
+- `failed`: the printer did not accept it. Give the returned reason and next
+  step exactly as returned. Do not guess that the address was wrong, and do not
+  retry without a new request.
+- `permission_denied` or `unavailable`: nothing was mailed. Give the returned
+  reason and do not retry.
 
-Do not attach or preview the image merely because it exists. When the
-originating request already said to mail it and the address is complete or
-safely resolved, send it automatically. Show the image first only when the
-person requested a draft, the intended content is ambiguous, or Murph genuinely
-needs their choice.
+A rejected note alone is no reason to call `murph.submit_product_feedback`. The
+usual feedback rules still apply when the person's own messages show
+frustration or repeated trouble.
 
-## Image prompt
+## What Murph will not mail
 
-The model owns the visual expression. It may create handwriting, doodles,
-illustration, collage, a fake award, a comic, or another fitting single-page
-design. Keep it personal and specific to the conversation.
+Bulk or repeated mail, international mail, threats, harassment, fraud,
+impersonation, someone's private details, illegal content, or a note that
+claims to come from a real person who is not involved.
 
-Include these print constraints in the prompt:
+## Check or clear an earlier uncertain note
 
-- portrait full-page artwork on white 8.5-by-11-inch paper;
-- all important text, faces, and marks within the central 86 percent of the
-  page because the 1024x1536 image is cover-cropped to US Letter;
-- a small understated `murph ai` mark somewhere unobtrusive;
-- no mailing address, postage, envelope, QR code, tracking code, or provider
-  branding inside the artwork;
-- large enough lettering and contrast to remain legible in print.
+An earlier send can end without a clear answer, and that blocks new notes. When
+a person asks to check, clear, resolve or cancel it, call
+`murph.resolve_physical_note` once with the asking message as `message_ref`.
+When you know which earlier send or earlier check is meant, also pass that
+earlier message as `target_message_ref`, with `target_kind: "send"` for the
+original send or `target_kind: "recovery"` for an earlier check. This call only
+checks records. It never mails anything and cannot recall an accepted note, so
+do not generate artwork, collect an address or call `murph.send_physical_note`
+here.
 
-The recipient address belongs only in `murph.send_physical_note`; never place
-it in the image prompt. Trusted server code supplies the platform return
-address.
+- `accepted`: the earlier note was accepted for printing and cannot be
+  cancelled. Say accepted for printing, and that this check sent nothing new.
+- `clear`: the earlier note no longer blocks. A new note still needs its own
+  request.
+- `pending`: still unknown. If `retryAfter` is present, say you can check again
+  after that time when they ask.
+- `permission_denied`: nothing changed. Give the returned reason.
+- `unavailable`: follow the returned explanation. It may show that nothing was
+  cleared, or it may leave the outcome unconfirmed, so do not assume either.
+  Say nothing new was sent.
 
-## Authority and safety
-
-One explicit mail request authorizes one note. A group request may originate
-from any current activated participant; the group itself owns the free claim
-and any later Murph-time cost.
-
-Do not send bulk or repeated mail, international mail, anonymous threats,
-harassment, fraud, impersonation, doxxing, illegal content, or a note that
-claims to come from an uninvolved real person. Ask one concise question only
-after the permitted lookup cannot uniquely resolve a delivery-critical address
-field, or when send intent or note authorship is genuinely incomplete. Do not
-ask the person to repeat retrievable city, state, or ZIP details or whether
-Murph should draft a clear note request. Never ask for a return address.
-
-Treat tool results literally:
-
-- `accepted` means accepted for printing, not delivered. When it carries
-  `prior_note_accepted`, say the earlier submission was accepted and this replay
-  sent nothing else; do not call it paid or complimentary or state a cost
-  because historical billing evidence is unavailable. Otherwise, when the
-  result is paid rather than complimentary, state the returned Murph-time cost;
-- `pending` means do not retry or claim mailing success;
-- `insufficient_usage` means explain that the free note was used and more
-  Murph time is needed;
-- `failed` means it was not accepted for printing. Follow the returned safe
-  failure reason and next-step note exactly. Never substitute Lob text, guess
-  that a confirmed address was wrong, or retry without a new explicit request.
-
-A physical-note rejection by itself is recovery evidence, not product-feedback
-eligibility. Do not call `murph.submit_product_feedback` solely because the
-printer result says the problem is on Murph's side, needs correction, or needs
-investigation. The existing feedback policy still applies when the person's own
-current input independently establishes eligible frustration or repeated
-Murph-owned friction.
+`remainingUnresolved: true` means a different earlier note is still unresolved.
+Say so even when this one was accepted or cleared. One request allows one
+check: make another check, including a check after `retryAfter`, only when the
+person asks again, and never promise or schedule one. When a result includes
+`targetMessageRef` and `targetKind`, keep both for the next request about the
+same note. Never say a note was cancelled.
