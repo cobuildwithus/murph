@@ -1,7 +1,7 @@
 # Architecture, bug and test audit
 
 Date: 2026-11-11
-Status: verified local checkpoint; remote completion gates remain
+Status: verified checkpoint split into six PRs; review and release in progress
 Audit base: main `d519978569e3443aabe4dfb17690d3cc30883649`
 Integrated main: `978a415b771cff9810d2e1b7d5fd2adce0126d24`
 Task: `codex/radical-simplicity`
@@ -48,7 +48,7 @@ increased gated complexity debt. This metric supports the diff review; it does
 not prove correctness or maintainability by itself.
 
 All implementation workers and final searches have finished. The cleanup and
-main reconciliation are committed locally. This checkpoint includes focused
+main reconciliation were committed locally, then split into six published PRs. This checkpoint includes focused
 behavioral proof and the full workspace typecheck, but is not a claim that the
 entire repository is bug-free or the branch is ready to deploy.
 
@@ -242,8 +242,9 @@ wake. New receipts use receipt-owned completion; resetting historical completed
 receipts globally would be an unsafe substitute for that drain.
 
 A scoped local commit is distinct from deployment or merging. Final remote CI
-and required ReviewGPT have not run; the branch has not been pushed or merged
-to main. The full Docker smoke and interactive browser/provider verification
+and required ReviewGPT were not run at the original local checkpoint. The
+subsequent release is tracked in PRs #4861–#4866 and the active PR/release plan;
+its review and merge status must be checked separately. The full Docker smoke and interactive browser/provider verification
 also remain unrun. Rendered component tests and native local-Codex journeys
 prove their respective boundaries, not those external checks. Product/release
 readiness remains **Hold** until applicable missing evidence is supplied.

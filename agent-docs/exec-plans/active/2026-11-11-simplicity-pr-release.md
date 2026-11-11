@@ -69,7 +69,22 @@ skip gates, use local production secrets or perform an unapproved rollback.
 
 ## Progress
 
-- Partition and branch preparation: in progress.
-- Per-PR focused verification, ReviewGPT and CI: pending.
+- Partition and branch preparation: complete. All six initial component trees compose exactly to the reconciled checkpoint; later changelog provenance is scoped to each owning PR.
+- Per-PR focused verification: fresh builds/typechecks and focused owner proof passed; the games PostgreSQL invocation was corrected to match canonical serial CI execution. ReviewGPT and exact-head CI are in progress.
 - Merges: pending.
 - Single Cloudflare deployment and post-deploy evidence: pending.
+
+## Pull requests
+
+| Component | PR | Initial reviewed source |
+| --- | --- | --- |
+| data | [#4861](https://github.com/cobuildwithus/murph/pull/4861) | `84d7c098a05371c64eacd01d90586d910e86bede` |
+| devices | [#4862](https://github.com/cobuildwithus/murph/pull/4862) | `97c8e2633ddb4c289f15884b910db41fbdab1136` |
+| runtime | [#4863](https://github.com/cobuildwithus/murph/pull/4863) | `078947d6a225657a758946ab67f37287b66d83fe` |
+| authority | [#4864](https://github.com/cobuildwithus/murph/pull/4864) | `d29b5722dc392cb60489eeeb8450a18d36b990c1` |
+| experience | [#4865](https://github.com/cobuildwithus/murph/pull/4865) | `5f4a89a8fe11c60699737497f15ab412519cb5d0` |
+| tooling | [#4866](https://github.com/cobuildwithus/murph/pull/4866) | `4cc2bd01c5d825cc4cfceb968ce289fc05416865` |
+
+These heads identify the prepared candidates; accepted review fixes and final
+merge/deployment evidence are recorded below as they occur. Reviews run on the
+actual pushed heads, including changelog provenance.
