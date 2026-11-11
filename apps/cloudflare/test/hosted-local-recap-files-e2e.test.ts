@@ -24,11 +24,12 @@ it('accepts a recap show through the production hosted Linux sandbox', async () 
     const image = `murph-recap-files-proof:${createHash('sha256').update(root).digest('hex').slice(0, 12)}`;
     try {
       await exec('docker', ['build', '--platform', 'linux/amd64', '-f', path.join(root, 'Dockerfile.cloudflare-hosted-runner'), '-t', image, path.join(root, 'apps/cloudflare')], { maxBuffer: 16 * 1024 * 1024 });
-      const result = await exec('docker', ['run', '--rm', '--platform', 'linux/amd64', '--network', 'none', '--security-opt', 'seccomp=unconfined', '--security-opt', 'apparmor=unconfined',
+      const running = exec('docker', ['run', '--rm', '--platform', 'linux/amd64', '--network', 'none', '--security-opt', 'seccomp=unconfined', '--security-opt', 'apparmor=unconfined',
         '--user', `${process.getuid!()}:${process.getgid!()}`, '--mount', `type=bind,source=${root},target=/workspace`, '--workdir', '/workspace', '-e', `${containerFlag}=1`, '--entrypoint', 'node', image,
         '/workspace/node_modules/vitest/vitest.mjs', 'run', '--pool=forks', '--config', 'apps/cloudflare/vitest.e2e.config.ts', 'apps/cloudflare/test/hosted-local-recap-files-e2e.test.ts'], { maxBuffer: 16 * 1024 * 1024 });
-      process.stdout.write(result.stdout);
-      process.stderr.write(result.stderr);
+      running.child.stdout?.pipe(process.stdout);
+      running.child.stderr?.pipe(process.stderr);
+      await running;
     } catch (error) {
       if (error && typeof error === 'object' && 'stdout' in error && 'stderr' in error) {
         process.stdout.write(String(error.stdout)); process.stderr.write(String(error.stderr));
@@ -49,7 +50,6 @@ it('accepts a recap show through the production hosted Linux sandbox', async () 
   const draftPath = `${relativeRoot}/drafts/show.json`;
   const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
   const draftCommand = (revised: boolean) => {
-    expect(fixture.receipts).toHaveLength(2);
     const story = structuredClone(fixture.story);
     if (revised) story.pages[3]!.blocks[0]!.text = 'Mission control found the missing sock';
     const draft = { story, files: fixture.receipts.map(receipt => ({ slot: receipt.mediaType === 'image/jpeg' ? 'scene-0' : 'song', receipt })) };
@@ -79,7 +79,13 @@ it('accepts a recap show through the production hosted Linux sandbox', async () 
   ];
   const observed = new Set<string>();
   const server = await startAssistantProviderStubServer({ responseState: { queuedResponses: responses }, maxResponsesApiRequestBodies: 20,
-    onRequest: request => { for (const output of readHostedLocalAssistantProviderToolOutputs(request)) observed.add(output); } });
+    onRequest: request => {
+      for (const output of readHostedLocalAssistantProviderToolOutputs(request)) {
+        if (observed.has(output)) continue;
+        observed.add(output);
+        process.stdout.write(`Synthetic tool output: ${output}\n`);
+      }
+    } });
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Expected loopback provider.');
   const originalCwd = process.cwd();
@@ -114,6 +120,7 @@ it('accepts a recap show through the production hosted Linux sandbox', async () 
     expect([...observed].some(output => output.includes('Process exited with code 0') && output.includes(gameId))).toBe(true);
     expect([...observed].some(output => output.includes('RECAP_CONFINEMENT_OK') && output.includes('Process exited with code 0'))).toBe(true);
     expect([...observed].some(output => output.includes('RECAP_PREVIEW_READ_OK') && output.includes('Process exited with code 0'))).toBe(true);
+    expect(fixture.receipts).toHaveLength(2);
     expect(fixture.providerCalls.map(call => call.kind)).toEqual(['image', 'song']);
     expect(fixture.phases).toEqual(['prepare', 'accept']);
     expect(fixture.saved).toHaveLength(1);
