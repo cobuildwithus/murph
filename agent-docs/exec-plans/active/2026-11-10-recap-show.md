@@ -25,6 +25,8 @@ Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the own
 16. **Native execution configuration:** the pinned Codex RPC uses raw dotted override keys, not quoted TOML key segments. An empty environment list disables execution. The parent recap selects the default local environment and applies the exact task permission profile; other game-host turns keep their existing empty environment list. The live journey exposed both differences from the assumed configuration.
 17. **Authorized checkout handoff:** the owner moved the complete working tree and commit snapshots into a checkout created by `scripts/create-worktree`, on `fable/recap-show-pr-a`. Create the seven commits there, prove the committed tree matches the transferred files, then rebase onto fetched `origin/main` and repeat focused verification. Leave the original checkout untouched and do not push.
 
+18. **Media-only provider admission (parent review):** remove the recap admission round trip from ordinary Responses POSTs, websocket GET upgrades and Live creation/attachment. Only image endpoint POSTs, Responses POSTs requesting native image generation and ElevenLabs requests consult admission. Disable `features.image_generation` in the trusted recap turn configuration; keep ordinary native transport selection. Existing provider authorization and image subscription checks retain their owners. Deterministic tests simulate admission failure and require zero admission calls for ordinary model and Live traffic.
+
 ## PR A execution
 
 Outcome: pair players receive one accepted themed recap through one text line and link. Full, sparse, failed-media and retired generations use the existing game authority; groups retain their current path. Proof includes contract fixtures, focused unit/Postgres checks and synthetic live parent journeys. Native visual implementation and child forwarding remain separate work.
@@ -62,15 +64,13 @@ and cover previews without deleting readable stories. `MURPH_GAME_RECAP_MEDIA_DI
 is a local test storage override. The separate authorized rollout regenerates
 the three settled pair games after verification; this task performs none of it.
 
-The Worker adds one signed, serial Web admission request before each OpenAI or
-ElevenLabs egress request, including an unscoped request. It uses the existing
-Web-control timeout (30 seconds by default), has no admission retry and fails
-closed. This is required to distinguish a trusted active recap scope from a
-missing model-supplied token. Preserve the Web endpoint and nullable runtime-owner
-column while any new Worker is deployed, even with show production disabled.
-Before release, collect representative control-path latency and complete
-base/head provider-input token measurements; local mocked correctness tests do
-not provide those measurements.
+The Worker adds a signed Web admission request only before paid media egress:
+image endpoint POSTs, Responses POSTs with native image generation, and
+ElevenLabs requests. Ordinary Responses, websocket upgrades and Live have no
+recap admission dependency. Recap turns disable Codex native image generation;
+the bounded file tool owns their image calls. Media admission retains the Web
+control timeout, no retry and fail-closed semantics. Preserve the Web endpoint
+and nullable runtime-owner column while the new Worker is deployed.
 
 The checkout authorization blocker is resolved through the owner's handoff.
 Seven ordered commits were created with `scripts/committer`; before rebasing,

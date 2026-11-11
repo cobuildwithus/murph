@@ -1219,11 +1219,15 @@ async function maybeHandleOpenAiRequest(input: {
   if (bodyRead instanceof Response) return bodyRead;
   const { boundedBody, imageGenerationRequested } = bodyRead;
 
-  const recapDenied = await checkRecapProviderRequest({ authorization, env: input.env,
-    request: new Request(input.request.url, { method: input.request.method, headers: input.request.headers, body: boundedBody }),
-    media: pathnameSuffix === "/v1/images/generations" || pathnameSuffix === "/v1/images/edits",
-    opaque: input.request.method === "GET", nativeImage: imageGenerationRequested });
-  if (recapDenied) return recapDenied;
+  const imageEndpoint = pathnameSuffix === "/v1/images/generations" || pathnameSuffix === "/v1/images/edits";
+  // Text model traffic and opaque transports must not acquire a Web dependency.
+  // Recap turns disable Codex's native image tool in their trusted configuration.
+  if (input.request.method === "POST" && (imageEndpoint || imageGenerationRequested)) {
+    const recapDenied = await checkRecapProviderRequest({ authorization, env: input.env,
+      request: new Request(input.request.url, { method: input.request.method, headers: input.request.headers, body: boundedBody }),
+      media: imageEndpoint, nativeImage: imageGenerationRequested });
+    if (recapDenied) return recapDenied;
+  }
   const imageDenied = await checkHostedOpenAiImageRequestAccess({
     request: input.request, env: input.env, authorization, pathnameSuffix, imageGenerationRequested,
   });
@@ -1302,8 +1306,6 @@ async function handleHostedLiveCreation(input: {
   const startedAt = Date.now();
   const authorization = await authorizeHostedProviderEgress({ ...input, providerKind: "openai" });
   if (!authorization.authorized || !authorization.writeFence) return disallowedProviderEgress();
-  const recapDenied = await checkRecapProviderRequest({ authorization, env: input.env, request: input.request, media: false, opaque: true, nativeImage: false });
-  if (recapDenied) return recapDenied;
   const body = await readBoundedRequestBody(input.request, HOSTED_OPENAI_LIVE_BODY_LIMIT);
   if (body === null) return new Response("Payload Too Large", { status: 413 });
   if (!isHostedLiveCreationBody(body)) return new Response("Invalid Live request.", { status: 400 });
@@ -1328,10 +1330,6 @@ async function handleHostedLiveAttachment(input: {
   const startedAt = Date.now();
   const resource = await authorizeHostedLiveAttachment({ caller: input.ctx, reference: input.reference, source: input.env });
   if (!resource) return disallowedProviderEgress();
-  const recapDenied = await checkRecapProviderRequest({ authorization: { authorized: true, mode: "native_container", durationMs: Date.now() - startedAt,
-    userId: resource.owner.userId, writeFence: { ...resource.owner, workspaceVersion: null } },
-    env: input.env, request: input.request, media: false, opaque: true, nativeImage: false });
-  if (recapDenied) return recapDenied;
   const url = new URL(createProviderUpstreamUrl(input.url, input.pathMatch));
   url.pathname = url.pathname.replace(`/${input.reference}/attach`, `/${encodeURIComponent(resource.sessionId)}/attach`);
   const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
@@ -1433,7 +1431,7 @@ async function maybeHandleElevenLabsRequest(input: {
 
   const recapDenied = await checkRecapProviderRequest({ authorization, env: input.env,
     request: new Request(input.request.url, { method: 'POST', headers: input.request.headers, body: requestBody }),
-    media: pathnameSuffix === '/v1/music', opaque: false, nativeImage: pathnameSuffix !== '/v1/music' });
+    media: pathnameSuffix === '/v1/music', nativeImage: pathnameSuffix !== '/v1/music' });
   if (recapDenied) return recapDenied;
 
   const token = readRequiredInterceptSecret(
@@ -3097,7 +3095,7 @@ async function checkHostedImageGenerationAccess(input: {
 /** Scope comes from the current runtime owner, including requests with no header. */
 async function checkRecapProviderRequest(input: {
   authorization: HostedProviderEgressAuthorization; env: RunnerOutboundEnvironmentSource;
-  request: Request; media: boolean; opaque: boolean; nativeImage: boolean;
+  request: Request; media: boolean; nativeImage: boolean;
 }): Promise<Response | null> {
   // This separate bounded smoke owner has no member runtime or recap scope.
   if (input.authorization.authorized && input.authorization.mode === 'deploy_smoke_live_model_turn') return null;
@@ -3113,13 +3111,13 @@ async function checkRecapProviderRequest(input: {
     const result = await fetchHostedWebControlPlaneJson({
       body: { attemptId: fence.attemptId, generation: fence.leaseGeneration,
         token: input.request.headers.get('x-murph-recap-reservation'), providerRequest,
-        opaque: input.opaque, nativeImage: input.nativeImage || invalidMedia },
+        nativeImage: input.nativeImage || invalidMedia },
       boundUserId: fence.userId, description: 'Recap provider admission', fetchImpl: fetch,
       route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.recapMediaAccess, timeoutMs: environment.webControlTimeoutMs,
       transport: { callbackSigning: environment.webCallbackSigning, mode: 'direct', webControlBaseUrl: environment.hostedWebBaseUrl, workspaceCheckpointBridge: null },
     });
     if (result && typeof result === 'object' && 'allowed' in result && result.allowed === true) return null;
-    return new Response('Recap provider admission rejected this request.', { status: input.opaque ? 426 : 403 });
+    return new Response('Recap provider admission rejected this request.', { status: 403 });
   } catch {
     return new Response('Recap provider admission is unavailable.', { status: 503 });
   }

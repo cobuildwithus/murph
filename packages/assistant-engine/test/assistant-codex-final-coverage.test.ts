@@ -420,7 +420,7 @@ describe('Codex provider routing', () => {
     const provider = providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(provider.environments).toBeUndefined()
     expect(provider.permissions).toBe('murph-recap')
-    expect(provider.codexThreadConfig).toMatchObject({ 'features.shell_tool': true, 'features.multi_agent': false })
+    expect(provider.codexThreadConfig).toMatchObject({ 'features.shell_tool': true, 'features.multi_agent': false, 'features.image_generation': false })
     // RPC override keys use raw dot segments; TOML quotes would become literal key bytes.
     const { recapTaskDirectory } = await import('../src/assistant/recap-workspace.js')
     const root = path.relative(input.vault, recapTaskDirectory(input.vault, scope.eventId))

@@ -1481,8 +1481,8 @@ describe("hostedRunnerIntercept", () => {
 
   it.each([
     { path: '/v1/images/generations', method: 'POST', body: { model: 'gpt-image-2.6-flare', prompt: 'Synthetic stage', size: '1024x1024', quality: 'low', output_format: 'jpeg' }, status: 403 },
+    { path: '/v1/images/edits', method: 'POST', body: { model: 'gpt-image-2.6-flare', prompt: 'Synthetic stage', size: '1024x1024', quality: 'low', output_format: 'jpeg' }, status: 403 },
     { path: '/v1/responses', method: 'POST', body: { model: 'gpt-6.1-sol', input: 'Draw a stage', tools: [{ type: 'image_generation' }] }, status: 403 },
-    { path: '/v1/responses', method: 'GET', body: undefined, status: 426 },
   ])('checks the native recap scope for $method $path even without a reservation header', async ({ path, method, body, status }) => {
     const admission = mockRecapMediaAdmission({ scoped: true, allowed: false });
     const upstream = vi.fn<typeof fetch>(async () => new Response('must not call provider'));
@@ -1496,6 +1496,22 @@ describe("hostedRunnerIntercept", () => {
     expect(response.status).toBe(status);
     expect(admission).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ token: null }), boundUserId: 'member_123' }));
     expect(findFetchCall(upstream, 'api.openai.com')).toBeUndefined();
+  });
+
+  it.each(['POST', 'GET'])('forwards ordinary Responses %s with zero recap admission calls even when admission is unavailable', async method => {
+    const admission = mockRecapMediaAdmission(new Error('Synthetic admission outage'));
+    const upstream = vi.fn<typeof fetch>(async request => new URL(readFetchTargetUrl(request)).hostname === 'api.openai.com'
+      ? new Response('synthetic model response') : Response.json({ allowed: true, reason: 'allowed' }));
+    vi.stubGlobal('fetch', upstream);
+    const response = await hostedRunnerIntercept(new Request('https://api.openai.com/v1/responses', {
+      method, headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        'content-type': 'application/json', ...(method === 'GET' ? OPENAI_WEBSOCKET_HANDSHAKE_HEADERS : {}) },
+      ...(method === 'POST' ? { body: JSON.stringify({ model: 'gpt-6.1-sol', input: 'Synthetic ordinary reply', tools: [] }) } : {}),
+    }), createInterceptEnv({ OPENAI_API_KEY: 'synthetic-key', validateRuntimeWriteFence: async () => true }),
+    { className: 'RunnerContainer', containerId: 'member_123--v-version_1' });
+    expect(response.status).toBe(200);
+    expect(findFetchCall(upstream, 'api.openai.com')).toBeDefined();
+    expect(admission.mock.calls.filter(([input]) => input.route.path === '/api/internal/hosted-execution/recap-media/access')).toHaveLength(0);
   });
 
   it.each(["generations", "edits"])("denies image %s before OpenAI when the subscription gate rejects", async (operation) => {

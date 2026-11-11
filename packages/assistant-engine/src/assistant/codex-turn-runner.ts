@@ -753,15 +753,13 @@ function resolveCodexAttemptEnvironments(capabilities: CodexAttemptCapabilities,
 function resolveCodexAttemptThreadConfig(
   capabilities: CodexAttemptCapabilities,
   executionPlan: AssistantCodexTurnExecutionPlan,
-  attemptPlan: AssistantCodexAttemptPlan,
 ): AssistantProviderTurnInput['turn']['codexThreadConfig'] {
   if (capabilities.recapShowTurn) {
     const scope = recapScopeForExecution(executionPlan)!
     const root = relative(executionPlan.input.vault, recapTaskDirectory(executionPlan.input.vault, scope.eventId))
-    const provider = attemptPlan.route.providerOptions.modelProvider ?? 'openai'
     return { ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG, ...ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
       'features.shell_tool': true,
-      [`model_providers.${provider}.supports_websockets`]: false,
+      'features.image_generation': false,
       [`permissions.${MURPH_RECAP_PERMISSION_PROFILE}.filesystem.:workspace_roots`]: {
         '.': 'deny', [root]: 'read', [`${root}/drafts`]: 'write', [`${root}/media`]: 'write', [`${root}/previews`]: 'write',
       },
@@ -862,7 +860,7 @@ function buildCodexAttemptProviderInput(
         ),
       authorizeAcceptedMessageTarget:
         executionPlan.authorizeAcceptedMessageTarget ?? null,
-      codexThreadConfig: resolveCodexAttemptThreadConfig(capabilities, executionPlan, attemptPlan),
+      codexThreadConfig: resolveCodexAttemptThreadConfig(capabilities, executionPlan),
       conversationHistoryMessages:
         attemptPlan.routePlan.conversationHistoryMessages,
       developerInstructions: attemptPlan.routePlan.developerInstructions,
