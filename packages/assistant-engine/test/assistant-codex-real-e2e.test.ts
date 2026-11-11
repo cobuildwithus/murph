@@ -15680,7 +15680,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       )
       expect(journey.finalMessage).not.toMatch(/\b(?:Avery|Jordan)\b/u)
       expect(journey.finalMessage).toMatch(
-        /(?:cannot (?:reliably )?(?:tell|say) who|can.t tell who|(?:duplicate|same)[^.!?\n]{0,100}(?:label|name)|(?:label|name|mapping|attribute)[^.!?\n]{0,100}(?:ambiguous|duplicate|same|cannot|can't|unable)|(?:cannot|can't|unable)[^.!?\n]{0,100}(?:label|name|mapping|attribute))/iu,
+        /(?:cannot (?:reliably )?(?:tell|say) who|can.t tell (?:you )?(?:who|which)|both[^.!?\n]{0,60}(?:labell?ed|named|called)|(?:duplicate|same)[^.!?\n]{0,100}(?:label|name)|(?:label|name|mapping|attribute)[^.!?\n]{0,100}(?:ambiguous|duplicate|same|cannot|can't|unable)|(?:cannot|can't|unable)[^.!?\n]{0,100}(?:label|name|mapping|attribute))/iu,
       )
     },
     360_000,
@@ -16599,7 +16599,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         }])
         expect(
           actions.filter((action) => action.kind === 'command'
-            && !/^\/bin\/zsh -c 'cat "\$MURPH_ASSISTANT_SKILLS_ROOT\/group-chat\/SKILL\.md"\s*'$/u.test(action.command)),
+            && !/^\/bin\/zsh -c 'cat "\$MURPH_ASSISTANT_SKILLS_ROOT\/group-chat\/(?:SKILL|references\/[a-z-]+)\.md"\s*'$/u.test(action.command)),
           'no current-sender group-turn private command calls or writes',
         ).toEqual([])
         expect(assistantReply).toBe(expectedProgressText)
@@ -16751,7 +16751,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(progressUpdates).toEqual([])
         expect(
           actions.filter((action) => action.kind === 'command'
-            && !/^\/bin\/zsh -c 'cat "\$MURPH_ASSISTANT_SKILLS_ROOT\/group-chat\/SKILL\.md"\s*'$/u.test(action.command)),
+            && !/^\/bin\/zsh -c 'cat "\$MURPH_ASSISTANT_SKILLS_ROOT\/group-chat\/(?:SKILL|references\/[a-z-]+)\.md"\s*'$/u.test(action.command)),
           'no current-sender private-turn private command calls or writes',
         ).toEqual([])
         expect(result.finalAction).toEqual({ kind: 'none' })
