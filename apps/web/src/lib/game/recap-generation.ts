@@ -49,7 +49,10 @@ export async function prepareRecapGeneration(input: {
       treatment: input.story.treatment ?? '', photos: new Map(), result: material.validation.result });
     const bytes = await sharp(Buffer.from(rendered.svg)).jpeg({ quality: 85 }).toBuffer();
     const hash = createHash('sha256').update(bytes).digest('hex');
-    const storageKey = `recap/${generationId}/${hash}.jpg`;
+    // A refreshed fallback selection must not revive an expired upload receipt
+    // or overwrite its tombstone. Retries of the same selection keep one key.
+    const coverId = createHash('sha256').update(`recap-cover:${selection.deadline}:${hash}`).digest('hex');
+    const storageKey = `recap/${generationId}/${coverId}.jpg`;
     await db.$transaction(async tx => {
       await input.beforeMutationTx(tx);
       await tx.$queryRaw`SELECT id FROM game WHERE id = ${input.row.id} FOR UPDATE`;
@@ -68,7 +71,8 @@ export async function prepareRecapGeneration(input: {
     preview: { token: randomBytes(32).toString('base64url'), expiresAt: new Date(now.getTime() + 30 * 86400_000).toISOString() } });
   return { envelope, async publish(tx: Prisma.TransactionClient) {
     const current = await tx.gameEvent.findUnique({ where: { commandKey: recapSelectionKey(input.eventId) }, select: { payload: true } });
-    if (recapSelectionSchema.parse(current?.payload).hash !== selection.hash || Date.now() >= Date.parse(selection.deadline)
+    const currentSelection = recapSelectionSchema.parse(current?.payload);
+    if (currentSelection.hash !== selection.hash || currentSelection.deadline !== selection.deadline || Date.now() >= Date.parse(selection.deadline)
       || !await recapReferencesCurrent(tx, input.row.id, assets)) throw new Error('Recap submission authority changed.');
     for (const asset of assets) if (!await retainRecapAssetTx(tx, { gameId: input.row.id, generationId,
       ownerMemberId: input.row.wordsOwnerMemberId, storageKey: asset.storageKey, now: new Date() })) throw new Error('Selected recap media was retired.');

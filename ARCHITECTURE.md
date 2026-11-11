@@ -5910,6 +5910,9 @@ registers cleanup ownership before each upload, and accepts only complete verifi
 bytes. Fresh runtime, room, roster, witness and reference checks guard each
 boundary. The FK-free recap receipts let the existing retention worker retire abandoned/replaced media;
 permanent retirement tombstones prevent late uploads from restoring access.
+A refreshed fallback selection derives a fresh cover key from its frozen deadline
+and content, retaining the current cover atomically with acceptance; expired
+receipts and tombstones remain terminal across mailbox retries.
 Accepted media uses private generation URLs; a thirty-day opaque cover capability
 exposes only a composed cover. Failed scenes retain their text, failed songs are
 omitted, and exhausted generation uses a validated three-page plain fallback.

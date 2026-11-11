@@ -629,6 +629,99 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       await db.gameRecapAsset.deleteMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
     }
   });
+  it.each([
+    { purge: false, revoke: false }, { purge: true, revoke: false },
+    { purge: false, revoke: true }, { purge: true, revoke: true },
+  ])("retries a registered fallback cover after the mailbox delay (purge=$purge revoke=$revoke)", async ({ purge, revoke }) => {
+    const a = await member("PlayerA", "UTC", true), b = await member("PlayerB", "UTC", true);
+    const room = await member("Room", "UTC", true), db = getPrisma();
+    const { gameId } = await startGame(a, b);
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await devStartNow(gameId, a);
+    const post = await photo(a, gameId, "synthetic-fallback-source", "A synthetic morning walk.");
+    await ok(a, post);
+    await devSettleNow(gameId, a);
+    const eventId = gameChatLifecycleEventId(gameId, "recap");
+    await markGameChatGenerationQueuedTx(eventId, db, room);
+    const { recordGameRecapWitnessTx } = await import("@/src/lib/game/recap-witness");
+    await db.$transaction(tx => recordGameRecapWitnessTx(tx, gameId, eventId));
+    vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://recaps.murph.test");
+    vi.stubEnv("MURPH_GAME_RECAP_MEDIA_DIR", path.join(mediaDir, "recap"));
+    const ownerModule = await import("@/src/lib/hosted-execution/runtime-owner");
+    const accessModule = await import("@/src/lib/hosted-mailbox/runtime-access");
+    const media = await import("@/src/lib/game/recap-media");
+    const originalPut = media.putRecapMedia;
+    const upload = vi.spyOn(media, "putRecapMedia").mockRejectedValueOnce(new Error("Synthetic transient cover upload failure"));
+    await db.hostedRuntimeOwner.upsert({ where: { userId: room }, create: { userId: room }, update: {} });
+    const fence = vi.spyOn(ownerModule, "requireHostedRuntimeCallbackTx").mockImplementation(async tx => tx.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: room } }));
+    const active = vi.spyOn(accessModule, "requireHostedRuntimeActiveAccessForUpdateTx").mockResolvedValue();
+    try {
+      const { handleRecapAdmission } = await import("@/src/lib/game/recap-admission");
+      const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
+      const { readRecapEnvelope } = await import("@/src/lib/game/recap-asset-access");
+      const { readRecapCoverPreview } = await import("@/src/lib/game/recap-preview");
+      const { recapGenerationId } = await import("@/src/lib/game/recap-submission");
+      const { retainRecapAssetTx } = await import("@/src/lib/game/recap-retirement");
+      const { claimHostedRuntimeResourceCleanup, acknowledgeHostedRuntimeOrphanPurge } = await import("@/src/lib/hosted-execution/runtime-resource-cleanup");
+      const identity = { memberId: room, runtimeIdentity: null, gameId, eventId };
+      const material = (await readGameRecapMaterial(gameId, room, [a, b], eventId))!;
+      for (let attempt = 0; attempt < 2; attempt++) await handleRecapAdmission({ ...identity, material, command: { kind: "admit", runId: randomUUID() } });
+      const recover = () => handleGameChatTool({ memberId: room, runtimeIdentity: null, multiplayer: true,
+        request: { action: "read_game", origin: { kind: "game_recap", gameId, eventId }, recapRead: { kind: "recover" } } });
+      const startedAt = Date.now();
+      vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(startedAt);
+      await expect(recover()).rejects.toThrow("Synthetic transient cover upload failure");
+      const firstUpload = upload.mock.calls[0]![0];
+      const oldReceipt = await db.gameRecapAsset.findFirstOrThrow({ where: { resourceId: { startsWith: `${gameId}|` } } });
+      expect(oldReceipt.recoveryUntil?.getTime()).toBe(startedAt + 30_000);
+      expect(await readRecapEnvelope(gameId)).toBeNull();
+      vi.setSystemTime(startedAt + 61_000);
+      if (purge) {
+        const claimed = (await claimHostedRuntimeResourceCleanup({ prisma: db, now: new Date() })).orphans.find(row => row.resourceId === oldReceipt.resourceId)!;
+        expect(claimed).toMatchObject({ kind: "game_recap", objectKey: oldReceipt.objectKey });
+        await media.retireRecapMedia({ storageKey: firstUpload.storageKey, ownerMemberId: firstUpload.ownerMemberId });
+        expect(await acknowledgeHostedRuntimeOrphanPurge({ prisma: db, orphan: claimed, now: new Date() })).toBe(true);
+        await expect(originalPut(firstUpload)).rejects.toThrow(/retired/iu);
+      }
+      upload.mockImplementationOnce(async input => {
+        const metadata = await originalPut(input);
+        if (revoke) await db.gameEntry.update({ where: { id: post.entryId }, data: { withdrawnAt: new Date(), withdrawnReason: "removed" } });
+        return metadata;
+      });
+      const response = await recover();
+      if (revoke) {
+        expect(response.result.status).toBe("unavailable");
+        expect(response.result.chatLine).toBeUndefined();
+        expect(await readRecapEnvelope(gameId)).toBeNull();
+        expect(await db.gameRecapAsset.count({ where: { resourceId: { startsWith: `${gameId}|` }, recoveryUntil: null } })).toBe(0);
+      } else {
+        expect(response.result.status).toBe("ok");
+        const accepted = (await readRecapEnvelope(gameId))!;
+        expect(accepted.envelope.generationId).toBe(recapGenerationId(eventId));
+        expect(accepted.envelope.assets).toHaveLength(1);
+        const cover = accepted.envelope.assets[0]!;
+        expect(cover.storageKey).not.toBe(firstUpload.storageKey);
+        expect((await readRecapCoverPreview(gameId, accepted.envelope.preview.token))?.length).toBeGreaterThan(0);
+        expect(response.result.chatLine?.split("\n")).toEqual([accepted.envelope.story.chatLine, expect.stringContaining(`/recap/${gameId}`)]);
+        expect(await recover()).toEqual(response);
+        expect(upload).toHaveBeenCalledTimes(2);
+        expect(await db.game.count({ where: { id: gameId, recapEncrypted: { not: null } } })).toBe(1);
+        expect(await db.gameRecapAsset.count({ where: { resourceId: { startsWith: `${gameId}|` }, recoveryUntil: null, retiredAt: null } })).toBe(1);
+      }
+      expect(await db.hostedMailboxItem.count({ where: { userId: room } })).toBe(0);
+      expect(await db.gameRecapAsset.findUniqueOrThrow({ where: { userId_resourceId: { userId: oldReceipt.userId, resourceId: oldReceipt.resourceId } } })).toMatchObject({
+        recoveryUntil: oldReceipt.recoveryUntil, ...(purge ? { purgedAt: new Date() } : { retiredAt: null }),
+      });
+      expect(await db.$transaction(tx => retainRecapAssetTx(tx, { gameId, generationId: recapGenerationId(eventId),
+        ownerMemberId: firstUpload.ownerMemberId, storageKey: firstUpload.storageKey, now: new Date() }))).toBe(false);
+    } finally {
+      vi.useRealTimers(); upload.mockRestore(); fence.mockRestore(); active.mockRestore(); vi.unstubAllEnvs();
+      await db.hostedRuntimeOwner.deleteMany({ where: { userId: room } });
+      await db.gameRecapAsset.deleteMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
+    }
+  });
+
   it.each([0, 1, 2])("reserves once, freezes selected files and accepts %i cards with same-draft retries", async cardCount => {
     const a = await member("PlayerA", "UTC", true), b = await member("PlayerB", "UTC", true);
     const room = await member("Room", "UTC", true), db = getPrisma();
