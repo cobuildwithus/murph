@@ -1,85 +1,185 @@
-## First-session prep reminders
+# Experiment reminders, check-ins, and summaries
 
-- First-session support is not just a time reminder. Before onboarding is complete, resolve how the user will know what to do the first time:
-  - If the user is starting now or today and seems ready, give a brief first-session walkthrough in the current reply after creating the run.
-  - If the first session is later and the user accepts a prep reminder, the one-shot prep automation must instruct the scheduled assistant to give that brief walkthrough at reminder time. If they decline reminders, give the walkthrough in the current reply and do not create an automation.
-- The first-session walkthrough should use the saved experiment, its private plan or protocol snapshot, and the user's setup answers. Summarize only what the user needs for session one: first-session guidance, the starting branch, the pain ceiling or stop rule, the key steps for today, what Murph can capture automatically, what subjective details Murph may ask about later if needed, and that they can answer in their own words.
-- Do not make the reminder merely say "you have a session" or "I can walk you through it." Include the compact walkthrough by default, then offer to go deeper if needed.
-- Say the walkthrough once. If the current reply already gave it, the prep automation instructions must say so, so the scheduled reminder stays a short nudge.
-- During experiment onboarding, actively resolve the user's first planned intervention session date and time. Prefer a context-backed suggestion the user can accept or edit. Ask a direct, lightweight reminder setup question only when reminders are viable, the user has not declined them, and neither user-provided nor context-backed timing gives you a usable time. Do not ask for another time when the user already gave a usable time, declined reminders, or reminder delivery is not possible in the current route.
-- Do not bury the support choice in a summary. Once safety, protocol fit, and basic schedule are clear, resolve the first session time and explicitly offer a one-shot prep reminder at a concrete time the user can accept or edit. Do not schedule it until they accept.
-- Before asking for the first session time, try to propose a default from context when the protocol and schedule allow it. Use recent sleep/wake timing for bedtime or morning protocols, usual workout or walk windows for activity protocols, usual meal windows for meal-linked protocols, and saved preferences or journal patterns when they are fresher than generic defaults. Ask the user to confirm or adjust the suggestion before scheduling from inferred context.
-- Use the user's canonical timezone and current local date from the prompt context to resolve phrases like "tomorrow around 5."
-- "Tomorrow around 5" and "tomorrow at 5" both count as usable times; "tomorrow between 5 and 6" uses the lower bound as the likely start.
-- If the user explicitly asks for or accepts a first-session prep reminder and gives a usable exact time or narrow time range, create the run first, then schedule one first-session prep reminder. A session time or consent to the run alone is not reminder consent. When consent is still missing, offer one specific time the user can accept or edit; do not create the reminder yet.
-- Default lead time is 15 minutes before the planned first session unless the saved plan or member specifies otherwise. Persist that relationship as `plannedOccurrenceOffsetMs: 900000`; use the exact nonnegative lead when the protocol or user chooses another reminder time.
-- Save traceability in onboarding setup answers when possible: `first_session_start_at`, `first_session_prep_reminder_at`, and `first_session_prep_automation_slug`. Pass known setup answers on `vault-cli experiment start`; use `vault-cli experiment edit <id> --setup-answer ...` only for later repairs or details learned after creation.
-- If the user gives only a broad day or window such as "after work" or "this weekend," ask one lightweight follow-up for a rough time. Do not schedule from vague language alone.
-- If no deliverable route is available, ask one concise channel question when the current conversation can collect it. If the route still cannot be resolved, create the run without the prep reminder and tell the user what exact time/channel detail they can give later.
-- If the user says they do not know the time yet, create the run without a prep reminder and tell them they can give a time later.
-- If the selected plan expects a baseline window before the first intervention, do not silently treat a user-provided time as session one. Resolve whether they want to start baseline then or skip baseline and treat that time as the first intervention.
-- Keep first-session prep separate from missed-log follow-up and weekly digest. First-session prep is before the first session; missed-log follow-up is after a planned session if nothing was logged.
-- After scheduling, tell the user the reminder time and that they can cancel or move it.
+Read this with `setup.md` when setting up a run, and on its own when the member
+asks to add, move, pause, repair, or stop support for a run that already
+exists. Repairing support does not mean redoing the experiment setup.
 
-## Planned-session support reminders
+The member should never have to remember to report back. Murph either reminds
+them before a session, records the session itself, or asks once afterwards.
 
-- First-session prep and planned-session support are separate. First-session prep teaches the user how to do the protocol the first time. Planned-session support helps the user remember and repeat every planned intervention session in the confirmed run plan. Logging applies to experiments whose sessions Murph cannot currently sense; for device-observable experiments with activity coverage, sensing handles the record after the session. If `progress.adherence.evidence.eventKind` is `activity_session` but `progress.dataCoverage.activityProviders` is empty, keep the standard planned-session support and logging behavior until workouts start syncing.
-- For non-sensable cadence experiments with `progress.adherence.evidence.eventKind` `intervention_session` and a calendar target, onboarding should say one short setup line: "I'll assume each session happens on schedule. Just tell me if you skip one." This applies to examples like sauna, tretinoin, red-light, and supplement cadence experiments. Do not create per-session "did you do it?" asks for this assumed lane; pre-session reminders remain available when useful.
-- During onboarding, after safety, protocol fit, schedule, first-session timing, and route delivery are clear, offer one concrete finite planned-session support pattern. Schedule it only after the user explicitly accepts that support; otherwise record that support was declined or name the concrete missing cadence, timing, or route detail. Agreement to the experiment is not agreement to reminders or check-ins.
-- Separately offer Murph-managed lifecycle summaries when the run is eligible: one day-four progress moment and one final results review. Agreement to the experiment, first-session prep, planned-session reminders, check-ins, or a weekly digest is not consent to these lifecycle summaries. Map an explicit acceptance to `--notification-style send_scheduled_summary` on `vault-cli experiment start` or `vault-cli experiment edit`; map a decline or unresolved choice to `--notification-style skip_by_default`. Do not create manual progress/final automations for this choice.
-- Ask a planned-session support setup question only when cadence, timing, route, or user preference is genuinely unclear. Do not ask when the user already gave a clear preference, explicitly declined reminders, or reminder delivery is not possible in the current route.
-- When the user accepts planned-session support, schedule the finite pattern they accepted around the planned intervention sessions. For daily or near-daily protocols, the offer may cover each planned session through the intervention window; for non-daily protocols, it may cover each planned intervention. Use the experiment schedule plus saved context: shortly after the user's usual wake window for morning logs, before the usual activity window for exercise protocols, near the relevant meal window for meal-linked protocols, or far enough before the usual sleep window for pre-bed protocols. For behavior-dependent protocols, include the compact follow-through loop in setup answers or automation instructions when available: target behavior, user reason, anchor/action window, standard/tiny/fallback versions, support style, privacy boundary, repair-after policy, and review point.
-- Behavior-followthrough may satisfy consented planned-session support with quiet or review-only support when the user prefers that or when per-session reminders are likely to become noise. Schedule only the consented review/check-in automation; do not create per-session cue messages merely because the run exists.
-- Do not create open-ended recurring reminders for planned-session support.
-- Prefer bounded one-shot reminders with `schedule: { "kind": "at", "at": "<ISO timestamp>" }`, `plannedOccurrenceOffsetMs: 0` when the reminder fires at session time (or the exact nonnegative lead when it fires earlier), and stable `slug` values such as `experiment-session-support-<experiment-slug>-<YYYY-MM-DD>-<HHmm>` or `experiment-session-support-<experiment-slug>-session-<n>`. Include enough session identity to avoid collisions when a plan has multiple sessions on the same local date. Use `dailyLocal`, `cron`, or `every` only when the user explicitly consented to recurring support, and always set `activeUntil: "<ISO timestamp>"` no later than the accepted support window's end.
-- Save traceability in onboarding setup answers when possible: `session_support_status` (`scheduled`, `declined`, or `blocked`), `session_support_cadence`, `session_support_window`, `session_support_automation_slugs`, and `session_support_blocked_reason` when blocked. Pass known setup answers on `vault-cli experiment start`; use repeated `vault-cli experiment edit <id> --setup-answer ...` flags only for later repairs or details learned after creation.
-- If the experiment includes a baseline or run-in window before intervention, make reminder content match the phase. Baseline reminders should prompt baseline logging or context capture, not intervention instructions.
-- Baked automation instructions should carry the reminder's purpose and when to skip, not a fixed list of surfaces to read. The scheduled assistant has Murph's full vault access at fire time; trust it to check current state — including what the user already logged for the relevant session or action window — before sending.
-- For behavior-support automations, the scheduled instructions must include enough compact support context and the exact accepted purpose to choose `skip` or `send_message` without rereading this skill. When sending, follow the persisted occurrence role: a `reminder` is a normal cue only; a separately consented `check_in` may ask the explicitly authorized accountability/current-state or repair question; a separately consented `review` may ask its bounded repair or decision question. Do not embed fixed reminder copy; embed the support policy.
-- Skip sending if the experiment is inactive, the user declined or cancelled reminders, the scheduled session or log is already complete, the saved plan changed, or the planned support window has ended.
-- Keep planned-session reminder copy short and non-pressuring, written for someone who already knows the plan and stop conditions: the planned action or baseline log for that day, and what Murph can capture automatically or may ask about later if needed. Bring up the stop rule only when new context makes it newly relevant.
-- When separately consented `check_in` support needs the user to report, end with one direct question they can answer in their own words; Murph derives values like grams or totals from the answer. Do not add that question to a reminder-only automation.
-- Do not turn planned-session support into a user-facing setup chore. One concise offer may bundle the proposed cadence, channel, and finite window, and one affirmative answer can authorize that described pattern; do not require approval for every individual cue.
+## What to offer with a run
 
-## Device-observable experiments
+Name each piece that fits the run in the setup offer, with its time. One yes
+covers every piece the offer named (`setup.md`). Later additions need their own
+yes. Do not make the member choose times from nothing: read the protocol's
+timing limits, the run's schedule, recent sleep and wake times, usual workout
+or meal windows, and saved preferences, then propose one time with a short
+reason ("around 7:45 pm, before your usual wind-down"). When that context is
+missing or contradictory, pick a sensible time for the window they gave and let
+them edit it. "Tomorrow around 5" is usable as given, and "between 5 and 6"
+means 5.
 
-- After creating the run, read `vault-cli experiment progress <id> --format json` and check both `progress.adherence.evidence` and `progress.dataCoverage.activityProviders`. The device lane applies only when `progress.adherence.evidence.eventKind` is `activity_session` and `progress.dataCoverage.activityProviders` is non-empty. In that state, sessions are sensed automatically from the user's connected wearable. Do not ask the user to log sessions, do not create per-session "log it" reminders, and do not save the workout through any other logging surface either; the wearable record is the log.
-- Keep the user's preferred setup separate from what qualifies. When `progress.adherence.evidence.activityKinds` is present, every listed kind may count; `minimumDurationMinutes` is the minimum known sensed duration. Do not silently narrow a multi-modality plan to the machine or activity the user expects to use most often.
-- In the setup summary, say plainly what qualifies, including the duration threshold when present. For example: "Cycling can be your usual setup, but walks, rowing, and elliptical sessions of at least 35 minutes count too."
-- If `progress.adherence.evidence.eventKind` is `activity_session` but `progress.dataCoverage.activityProviders` is empty, treat the experiment like a manual experiment for planned-session support and logging. Keep bounded planned-session support, ask for or log sessions when the normal manual lane would, and do not create the activity nudge automation. In the setup summary, add one short setup line such as: "Once your workouts start syncing, qualifying sessions will count automatically."
-- In the setup summary for the covered device lane, include one short line that makes this effortless, for example: "Qualifying sessions count automatically from your WHOOP. No need to tell me when you do one." Name the provider only when current evidence shows it; `progress.dataCoverage.activityProviders` is that evidence.
-- Pre-session support reminders remain available exactly as before if the user wants them. Device sensing changes what happens after a session, not before it.
-- Offer one activity nudge automation for a covered device-lane experiment and create it only when the user explicitly accepts. Use `slug: "experiment-activity-nudge-<experiment-slug>"`, a self-contained `instructions` value, `schedule: { "kind": "deviceActivity", "after": "<current ISO timestamp>", "activityKind": "<activity-kind>" }`, and finite `activeUntil: "<ISO timestamp>"` at the accepted support window's end. Use `progress.adherence.evidence.activityKind` only for a singular target; for `activityKinds` or a generic any-activity target use `activity`, then let `vault-cli experiment progress` decide whether the sensed workout advanced the run. Omit `source`; the trigger is provider-agnostic. Save traceability in setup answers with `activity_nudge_automation_slug`; if declined or blocked, record that result in setup answers too.
-- Activity nudge automation instructions must be self-contained because a future notification turn may not read this skill. Tell that turn to run `vault-cli experiment progress <experiment-slug> --format json`; send a short celebratory progress line only when it earns a send, such as the first sensed session, halfway, target met, or recovery after a behind stretch; otherwise skip silently. Nudge copy is one short sentence with the progress count, for example: "Nice run, that's 8 of 24 for your base block." Never ask a question and never ask the user to log.
+1. **First-session reminder.** For a first session later than today, offer one
+   reminder that fires 15 minutes before it (or another lead the member or the
+   plan chooses) and walks them through the session. If they start today, or
+   decline reminders, give the walkthrough in your reply after creating the
+   run. If they do not know the time yet, or there is no route to deliver a
+   reminder, create the run without it and tell them what detail to send later.
+2. **Session reminders.** One finite reminder per planned intervention session
+   through the intervention window. When per-session reminders would be noise,
+   or the member prefers quiet, a single review can replace them.
+3. **After-session check-in.** Only for sessions Murph cannot sense and cannot
+   assume (see the two lanes below), when a missing log would lose information
+   the experiment needs.
+4. **Day-four and final summaries.** For a run with at least four intervention
+   days: one progress note on day four and one results review the morning after
+   it ends. Murph schedules these itself once the run records
+   `--notification-style send_scheduled_summary`; never create automations for
+   them. Record `skip_by_default` when the member declines or the offer left
+   them out.
 
-## Session support loop
+When a run has a baseline or run-in period before the intervention, do not
+treat the time the member gives as session one without settling whether that is
+when the baseline starts. Baseline reminders prompt baseline logging, never the
+intervention.
 
-Outcome: the user should not need to remember to report later. For each supported planned session in the planned support window, Murph should either:
-- give timely pre-session guidance when useful,
-- skip outreach because the session/log is already captured, the run is inactive, support was declined, or no deliverable route exists,
-- or send one neutral after-session question to recover the missing subjective log fields.
+After saving, tell the member when the first reminder comes and that they can
+move or cancel it.
 
-Pre-session guidance tells the user what to do now. It should not assign the user a future reporting chore. When later subjective logging matters, say that Murph will check in if needed.
+## The first-session walkthrough
 
-For pre-bed protocols, default the after-session check to shortly after the user's usual wake window on the next local day, and evaluate the prior night's session date.
+The first session needs instruction, wherever it is delivered. Build it from the
+saved experiment, its plan or protocol snapshot, and the setup answers, and
+keep it to what session one needs: the starting version, the key steps, the
+pain ceiling or stop rule, what Murph records automatically, what Murph may ask
+about afterwards, and that they can answer in their own words. Offer more detail
+if they want it.
 
-Use existing bounded one-shot automations. A pre-session cue uses `supportKind: "reminder"`; an after-session recovery question requires separate check-in consent, a non-`none` saved `checkInCadence`, and `supportKind: "check_in"`. Prefer stable slugs such as `experiment-session-support-<experiment-slug>-<YYYY-MM-DD>-<HHmm>` or `experiment-session-support-<experiment-slug>-session-<n>`. Include enough session identity to avoid collisions when a plan has multiple sessions on the same local date. When deterministic missed-log due logic applies, the automation should call `vault-cli experiment followup due <id> --kind missed-log --date <sessionDate> --format json`; skip when `decision.action` is `skip`, and send only when `decision.action` is `notify`.
+Give the walkthrough once. If your reply already gave it, say so in the
+first-session reminder's instructions so that reminder stays a short nudge.
 
-For assumed-mode experiments, missed-log due returns a skip such as `session_assumed`; do not convert that into a per-session check-in. The confirm-or-correct line belongs in existing progress, weekly digest, or reminder-tail moments.
+## Two lanes that need no logging from the member
 
-If sending, ask whether the planned session happened and collect only the missing subjective fields needed to log it. Keep it neutral and easy to answer.
+**Assumed sessions.** For a simple scheduled routine that Murph cannot sense,
+such as sauna, tretinoin, red light, or a supplement
+(`progress.adherence.evidence.eventKind` is `intervention_session` with a
+calendar target of one session per day), tell the member once: "I'll assume
+each session happens on schedule. Just tell me if you skip one." Do not create
+per-session "did you do it?" messages. Reminders before a session are still
+available.
 
-## Experiment automation mechanics
+**Wearable-sensed sessions.** After creating the run, read
+`vault-cli experiment progress <id> --format json`. When
+`progress.adherence.evidence.eventKind` is `activity_session` and
+`progress.dataCoverage.activityProviders` is not empty, the wearable record is
+the log. Do not ask the member to log, do not create "log it" reminders, and do
+not save the workout through any other command.
 
-- Follow the developer prompt's shared automation action rules for creation, changes, and status updates. This skill owns only the experiment-specific fields below. Missed-log checks are neutral, at most once per planned session, easy to decline.
-- Automation instructions carry purpose and skip conditions, not the message: do not embed routine content, walkthrough text, or report-back fields that live in the experiment or protocol records — the scheduled assistant composes the message fresh from current state. Embed exact wording only when the user dictated it.
-- Keep an alternating rotation's anchor and rule in the canonical experiment setup answers, with any date-scoped target exceptions. Reminder titles and instructions must not maintain their own exercise assignments or copied anchors; refer to the exact experiment and derive each cue from its current plan and the occurrence's local calendar date. A one-day repeat or correction is not a permanent rotation reset. When an explicitly authorized repair changes the rotation, update and re-read the canonical experiment first, then inventory the entire exact support series (following every `nextCursor`), remove copied target rules from its intended reminders, and read back the patched records before claiming repair. Preserve accepted one-day pause/skip conditions and unrelated support. Reconciliation controls series membership; it does not rewrite surviving reminders.
-- Every experiment-owned first-session prep, planned-session support, review/check-in, weekly digest, or activity-nudge automation must set `supportSeriesId: "experiment:<experimentId>"`, set `contextReferences: [{ "entityKind": "experiment", "entityId": "<experimentId>" }]`, and persist the exact accepted purpose as `supportKind: "reminder"`, `"check_in"`, `"review"`, or `"weekly_digest"` when it is saved or patched after the run exists. Copy that exact canonical experiment id only from the successful current run-creation result or canonical experiment read; if current evidence does not identify exactly one run, save no reference. The host preserves the stored id as routing context for the scheduled turn and later ordinary direct-chat reply. This does not prove the record exists, does not require native iMessage Reply, and does not grant mutation authority. Save the matching `assistantSupport` consent on the experiment first: reminders require `remindersEnabled=true`, check-ins and bounded reviews require a non-`none` `checkInCadence`, and weekly digests require `weeklyDigestEnabled=true`. A bounded review uses `review`, never `weekly_digest`; a weekly digest is a summary, not a decision review. Never pass a raw `system:support-series:*` tag and never assign the engine-managed `experiment-lifecycle:<experimentId>` series id. Use `tags` only for ordinary descriptive tags. In a hosted turn, repair the plan-owned series with `murph.automation` action `reconcile`, its `supportSeriesId`, and the exact `desiredAutomationIds`; use the equivalent `vault-cli automation reconcile-support-series` command only in a privileged local route. An empty desired-id list archives the series on pause, stop, or completion so stale support cannot survive the run.
-- First-session prep reminders: after the run exists and reminder consent is saved, create one with `slug: "experiment-first-prep-<experiment-slug>-<YYYY-MM-DD>"`, `supportSeriesId: "experiment:<experimentId>"`, `supportKind: "reminder"`, `plannedOccurrenceOffsetMs: 900000` for the default lead (or the exact chosen lead), self-contained `instructions`, `schedule: { "kind": "at", "at": "<ISO timestamp>" }`, and ordinary `tags: ["assistant", "scheduled", "experiment", "first-session-prep"]`. Add protocol-specific ordinary tags only when they are necessary and non-sensitive.
-- Planned-session support automations: after reminder consent is saved, create bounded one-shot records with `slug` values such as `experiment-session-support-<experiment-slug>-<YYYY-MM-DD>-<HHmm>` or `experiment-session-support-<experiment-slug>-session-<n>`, `supportSeriesId: "experiment:<experimentId>"`, `supportKind: "reminder"`, `plannedOccurrenceOffsetMs: 0` at session time (or the exact nonnegative lead), `schedule: { "kind": "at", "at": "<ISO timestamp>" }`, and ordinary `tags: ["assistant", "scheduled", "experiment", "session-support"]`. Each slug must identify one planned session rather than only one date. Add protocol-specific ordinary tags only when they are necessary and non-sensitive.
-- For rescheduling, follow the developer prompt's shared automation action rules and update only the requested schedule fields on the existing stable slug.
-- When an authorized check-in or review shows the support loop is stale, do not leave related future session-support automations blindly active. Read the exact owner with `vault-cli automation list --support-series-id experiment:<experimentId> --compact` and reconcile that series with the intended canonical automation ids through the current shared automation action surface. Use `vault-cli automation show <automationId>` only when a fact needed for the reconciliation decision is absent from that compact inventory; never infer ownership from an experiment slug, generic tag, title, or text prefix. Do not silently archive clinical or safety-relevant support; ask or switch to safer review-only support.
-- Do not create a scheduled first-session prep reminder with only a bare channel when no deliverable target or binding route is available. Set up the experiment without the prep reminder, and tell the user they can give a channel and time later.
-- First-session prep automation instructions should state the reminder's purpose and when to skip (the experiment is inactive, completed intervention sessions are already present, the reminder was cancelled or moved, or the saved plan no longer matches the scheduled first session). Do not bake in a fixed read list — the scheduled assistant has full vault access to verify current state before sending.
-- First-session prep automation instructions must also include this outcome: "This is the user's first time doing this experiment. If sending, give a brief first-session walkthrough, not just a reminder." Tell the scheduled assistant to derive the walkthrough from the saved plan, protocol snapshot when present, stop conditions, declared session fields, and saved setup answers. Keep it short and do not dump the full protocol.
-- Planned-session support automation instructions should state that this is bounded experiment-session support, not a missed-log follow-up or weekly digest, with skip conditions, the compact support loop when available, and a `skip`/`send_message` outcome constrained by the persisted support kind. For a `reminder`, `send_message` is a normal cue only; reminder-only acceptance does not authorize a repair or accountability question. If the user separately accepted check-in or review questions, persist that exact purpose as `supportKind: "check_in"` or `supportKind: "review"` and describe the authorized question shape in its own automation instructions. The scheduled assistant verifies current state with full vault access; do not enumerate the surfaces it must read.
+- Tell the member what counts. Every kind in
+  `progress.adherence.evidence.activityKinds` counts, and
+  `minimumDurationMinutes` is the minimum length: "Cycling can be your usual
+  setup, but walks, rowing, and elliptical sessions of at least 35 minutes count
+  too." Add one line such as "Qualifying sessions count automatically from your
+  WHOOP. No need to tell me when you do one." Name the provider only when
+  `activityProviders` shows it.
+- You may offer one progress nudge that reacts to a sensed workout. Save it with
+  `slug: "experiment-activity-nudge-<experiment-slug>"`,
+  `schedule: {"kind":"deviceActivity","after":"<current ISO timestamp>","activityKind":"<kind>"}`,
+  and an `activeUntil` at the end of the support window. Use
+  `progress.adherence.evidence.activityKind` when the run has a single target
+  kind, and `activity` otherwise. Leave out `source`. Its instructions must
+  stand alone: run `vault-cli experiment progress <experiment-slug> --format json`
+  and send one short celebratory line with the count ("Nice run, that's 8 of 24
+  for your base block") only at a moment that earns it, such as the first
+  sensed session, halfway, target met, or a recovery after falling behind.
+  Otherwise skip. It never asks a question and never asks the member to log.
+  Record `activity_nudge_automation_slug` as a setup answer.
+- When `eventKind` is `activity_session` but `activityProviders` is empty, treat
+  the run as manual for now: keep session reminders and logging, create no
+  nudge, and tell the member "Once your workouts start syncing, qualifying
+  sessions will count automatically."
+
+## Saving the automations
+
+Use `murph.automation` and follow its schema. This section adds only what is
+specific to experiments.
+
+Save the run first, with the consent the member gave (`setup.md`): reminders
+need `--reminders-enabled`, check-ins and reviews need a `--check-in-cadence`
+other than `none`. Then every automation for the run sets:
+
+- `supportSeriesId: "experiment:<experimentId>"`, with the id copied from the
+  run-creation result or a read of the experiment. If you cannot identify
+  exactly one run, save nothing. The series `experiment-lifecycle:<experimentId>`
+  belongs to Murph's own summaries; never use it.
+- `contextReferences: [{"entityKind":"experiment","entityId":"<experimentId>"}]`.
+- `supportKind`: `reminder` for a cue before a session, `check_in` for an
+  after-session question, `review` for a decision review, `weekly_digest` for a
+  weekly summary (which also needs `--weekly-digest-enabled`). A review is a
+  decision point and a digest is a summary; do not swap them.
+- A one-shot schedule:
+  `{"kind":"at","localAt":{"date":"<YYYY-MM-DD>","time":"<HH:MM>","timeZone":"<IANA zone>"}}`.
+  The tool does not accept an ISO timestamp in `schedule.at`. Use a recurring
+  schedule only when the member asked for one, with `activeUntil` no later than
+  the end of the support window.
+- `plannedOccurrenceOffsetMs`: the gap between the reminder and the session it
+  is for. `900000` for the 15-minute first-session lead, `0` when the reminder
+  fires at session time.
+- `slug`: `experiment-first-prep-<experiment-slug>-<YYYY-MM-DD>` for the
+  first-session reminder, and
+  `experiment-session-support-<experiment-slug>-<YYYY-MM-DD>-<HHmm>` for each
+  session reminder, so two sessions on one day do not collide.
+
+Record the choice on the run with `--setup-answer`: `first_session_start_at`,
+and `session_support_status` set to `scheduled`, `declined`, or `blocked` (with
+`session_support_blocked_reason` when blocked).
+
+**Instructions.** The scheduled turn can read the whole vault, so write the
+purpose and when to skip, and leave out fixed message text, read lists, and
+anything copied from the plan. Embed exact wording only when the member dictated
+it.
+
+- Every reminder skips when the run is inactive, the member cancelled or
+  declined reminders, the session is already logged, the saved plan changed, or
+  the support window has ended.
+- The first-session reminder also says: "This is the user's first time doing
+  this experiment. If sending, give a brief first-session walkthrough, not just
+  a reminder."
+- A session reminder is short and written for someone who knows the plan: the
+  action for that day (or the baseline log, during baseline), and what Murph
+  records or may ask later. It raises the stop rule only when new context makes
+  it relevant, and it does not ask whether they did it.
+- A check-in runs
+  `vault-cli experiment followup due <id> --kind missed-log --date <sessionDate> --format json`,
+  skips when `decision.action` is `skip` (an assumed session returns a skip such
+  as `session_assumed`), and sends only on `notify`. It asks once, neutrally,
+  whether the session happened and for the missing subjective details; Murph
+  works out totals from the answer. For a pre-bed protocol it fires shortly
+  after the member's usual wake time and asks about the night before.
+- When follow-through depends on the member's own effort, include the short
+  version of what keeps it going: the behavior, their reason, the time or cue,
+  the tiny and fallback versions, and what to change after misses.
+
+**Rotations.** When exercises or targets alternate, keep the rotation's start
+and rule in the experiment's setup answers, along with any one-day exception.
+Reminders refer to the experiment and work out that day's target from its plan
+and the local date; they never carry their own copy of the rotation. A one-day
+repeat or correction does not reset the rotation.
+
+## Changing or repairing support for a run
+
+- To move a reminder, patch the schedule of the existing automation and nothing
+  else.
+- When support has gone stale, or the member changes the rotation, list the
+  whole series with
+  `vault-cli automation list --support-series-id experiment:<experimentId> --compact`
+  (follow every `nextCursor`), update the experiment first and re-read it, patch
+  the reminders that should stay, and then call `murph.automation` `reconcile`
+  with the series id and the `desiredAutomationIds` that should remain. An
+  empty list archives the series, which is right for a pause, a stop, or the end
+  of the run. Reconcile changes which reminders exist; it does not rewrite the
+  ones that stay.
+- Decide which automations belong to the run from the series id, never from a
+  slug, tag, title, or text.
+- Keep one-day pauses and unrelated reminders the member asked for. Do not
+  silently archive a clinical or safety reminder; ask, or switch it to a review.

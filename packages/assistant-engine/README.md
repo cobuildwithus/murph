@@ -641,12 +641,13 @@ and the tool never exposes a general billing or Stripe client.
 
 ## Experiment support policy
 
-The experiment-onboarding entrypoint retains safety, protocol resolution, run
-creation, and active-session logging rules. First-session guidance and support
-mechanics live in the co-packaged `references/session-support.md`, which must be
-read before support questions or effects. Normal recursive skill packaging and
-filesystem reads remain the owners. Keep that reference in focused real-Codex
-fixtures when changing support policy.
+The experiment-onboarding entrypoint retains active-session logging, progress,
+and results rules. Design, safety review, the single setup offer, and run
+creation live in the co-packaged `references/setup.md`; first-session guidance
+and support mechanics live in `references/session-support.md`. Both must be read
+before a run is proposed, and `session-support.md` before any support change.
+Normal recursive skill packaging and filesystem reads remain the owners. Keep
+both references in focused real-Codex fixtures when changing support policy.
 
 ## Focused tests
 
