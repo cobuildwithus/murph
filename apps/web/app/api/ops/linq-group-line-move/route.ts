@@ -11,7 +11,7 @@ export const revalidate = 0;
 const opaque = z.string().min(1).max(256);
 const operation = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("start"), containerRef: opaque, targetLineLookupKey: opaque }).strict(),
-  z.object({ operation: z.enum(["resume", "cancel", "retry_leave"]), moveId: z.string().uuid() }).strict(),
+  z.object({ operation: z.enum(["resume", "cancel", "retry_leave", "adopt"]), moveId: z.string().uuid() }).strict(),
 ]);
 const overview = z.object({ status: z.enum(["reserved", "adopted", "left", "cancelled"]).optional(),
   sourceLineLookupKey: opaque.optional(), afterMoveId: z.string().uuid().optional(), afterContainerRef: opaque.optional() }).strict();

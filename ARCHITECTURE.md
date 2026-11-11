@@ -3891,6 +3891,23 @@ failures retain their cleanup behavior. Source fallback and expiry still disarm
 adoption permanently. No polling loop, new state column, or ingress change is
 required. See the [provider add contract](https://docs.linqapp.com/channel/imessage/api/resources/chats/subresources/participants/methods/add/).
 
+Ops can explicitly `adopt` a confirmed add without waiting for a message. One
+bounded Linq chat-list request filters by destination line and source participant
+(maximum 100 records, 512 KiB, three seconds); an incomplete page fails closed.
+Only a unique iMessage group created at or after this add claim, no later than
+now, containing both service numbers and the exact human audience can qualify.
+The list only selects a candidate: fresh destination and source GETs use the
+same roster verifier as ingress, then the existing locked replacement writer
+revalidates the reservation, deadline, route and destination ownership. Pending,
+ambiguous, stale, mismatched and occupied candidates preserve the source route.
+No message is fabricated or sent. Linq may not expose the destination before its
+first message; that case remains pending and ordinary ingress can still adopt.
+The operation adds at most four sequential bounded provider reads outside the
+transaction and no foreground-path work. Source departure uses existing cleanup.
+Candidate overview also resolves legacy null account projections from sealed
+routes, at most 50 sequential opens per page; cursor advancement uses the raw
+page, even when legacy routes belong to another line. It does not rewrite routes.
+
 Cancellation claims `remove_started_at` once under the source-chat lock before
 dispatch and records `remove_accepted_at` only after a successful provider
 return. Replays reconcile roster absence; they never repeat removal. Until

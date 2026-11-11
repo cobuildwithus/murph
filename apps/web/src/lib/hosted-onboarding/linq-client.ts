@@ -740,6 +740,10 @@ export async function getHostedLinqChatSummary(input: {
     timeoutMs: input.timeoutMs,
   });
 
+  return summarizeHostedLinqChat(payload, observedAt);
+}
+
+function summarizeHostedLinqChat(payload: unknown, observedAt: Date): HostedLinqChatSummary {
   const canonical = readHostedLinqCanonicalChat(payload);
   const displayName = normalizeNullableString(canonical?.display_name);
   const handles: Chat["handles"] = canonical?.handles ?? [];
@@ -757,6 +761,17 @@ export async function getHostedLinqChatSummary(input: {
     observedAt,
     isGroup,
   };
+}
+
+/** One bounded inventory page; callers must reject truncation before selecting a chat. */
+export async function listHostedLinqGroupMoveChats(input: { from: string; to: string }) {
+  const observedAt = new Date();
+  const page = await requestHostedLinqSdkOrThrow({
+    operation: "group move chat discovery", maxResponseBytes: 512 * 1024,
+    request: async client => await client.chats.listChats({ from: input.from, to: input.to, limit: 100 }),
+    timeoutMessage: "Linq group discovery timed out.", timeoutMs: 3_000,
+  });
+  return { chats: page.chats.map(chat => ({ id: chat.id, createdAt: chat.created_at, roster: summarizeHostedLinqChat(chat, observedAt) })), complete: !page.next_cursor && page.chats.length <= 100 };
 }
 
 /** Mutations have one attempt; the caller settles their effect with a complete roster. */

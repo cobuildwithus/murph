@@ -1220,3 +1220,27 @@ all 133 producer, consumer, audience and Ops route tests pass after the fix.
 Web typecheck, docs drift and diff whitespace checks pass. Source complexity
 remains zero debt with maximum 18. Final review, exact-head CI and production
 canary are pending.
+
+
+### Explicit provider discovery without a handoff message
+
+Outcome: migrate a quiet group without requiring a person or operator to post.
+The existing reservation, sealed cleanup context and locked route replacement
+remain the only state owners. Add one explicit Ops `adopt` action: discover a
+unique destination through the provider's documented from/to chat inventory,
+require creation after the add claim and exact audience, re-read both rosters,
+then reuse canonical adoption and verified departure. Missing or ambiguous
+inventory cannot change routing. The provider may not materialize a target chat
+before the first message; live proof must distinguish that limit from local proof.
+
+No schema, scheduler, provider mutation primitive or foreground reply work is
+added. Existing ingress remains the fallback for a naturally arriving message.
+Legacy account-null routes must be visible in the paginated operator inventory;
+resolve sealed identity without rewriting state, and advance the raw cursor.
+
+Product UX proof: no-message adoption through the real database, unchanged
+container, target route and verified leave; missing/old/future/ambiguous inventory,
+truncation, wrong audience/self, changed roster and concurrent cancellation all
+retain source authority. Existing message adoption and cancellation paths remain
+covered. The original canary is complete; remaining production migration and
+retirement verification remain open. Public artifacts contain synthetic proof only.
