@@ -124,6 +124,9 @@ export interface DeviceSyncJobFailureDiagnosticDetails extends JunctionRequestTi
   normalizationSourceProvider?: string;
   normalizationTimestampKind?: string;
   normalizationTimestampSemantics?: string;
+  normalizationDayBasis?: string;
+  normalizationUtcDayRelation?: string;
+  normalizationResolvedDayRelation?: string;
   normalizationValueKind?: string;
   normalizationValueRange?: string;
   normalizationUnitKind?: string;

@@ -42,6 +42,7 @@ import {
   DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_LIMIT,
   resolveDeviceSyncStoreNextJobWakeAt,
   resolveDeviceSyncStoreNextWakeAt,
+  readSafeJunctionNormalizationDiagnostics,
 } from "../src/service.ts";
 import {
   createJunctionDeviceSyncProvider,
@@ -11658,6 +11659,9 @@ test.each([
             valueKind: "numeric_string",
             valueRange,
             unitKind,
+            dayBasis: "source_offset",
+            utcDayRelation: "equal",
+            resolvedDayRelation: "before",
           });
         },
       }),
@@ -11685,6 +11689,9 @@ test.each([
       normalizationValueKind: "numeric_string",
       normalizationValueRange: valueRange,
       normalizationUnitKind: unitKind,
+      normalizationDayBasis: "source_offset",
+      normalizationUtcDayRelation: "equal",
+      normalizationResolvedDayRelation: "before",
     });
   } finally {
     close();
@@ -14004,4 +14011,21 @@ test.each([false, true])("retained snapshot gets an uninterrupted retry after 30
     close();
     await rm(vaultRoot, { recursive: true, force: true });
   }
+});
+
+
+test("Junction calendar diagnostics allow only finite day categories", () => {
+  for (const basis of ["explicit_calendar", "timestamp_calendar", "source_offset", "vault_timezone", "utc", "missing"]) {
+    assert.deepEqual(readSafeJunctionNormalizationDiagnostics({ normalizationDayBasis: basis }), { normalizationDayBasis: basis });
+  }
+  for (const relation of ["before", "equal", "after", "missing"]) {
+    const details = { normalizationUtcDayRelation: relation, normalizationResolvedDayRelation: relation };
+    assert.deepEqual(readSafeJunctionNormalizationDiagnostics(details), details);
+  }
+  for (const value of ["2026-04-21", "synthetic-private-timezone", -14400, null, {}, []]) {
+    assert.deepEqual(readSafeJunctionNormalizationDiagnostics({
+      normalizationDayBasis: value, normalizationUtcDayRelation: value, normalizationResolvedDayRelation: value,
+    }), {});
+  }
+  assert.deepEqual(readSafeJunctionNormalizationDiagnostics({}), {});
 });

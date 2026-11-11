@@ -1989,7 +1989,8 @@ function resolveDeviceSyncFailureRetryPolicy(input: {
 export function readSafeJunctionNormalizationDiagnostics(
   input: Record<string, unknown>,
 ): Pick<DeviceSyncJobFailureDiagnostic["details"],
-  "normalizationValueKind" | "normalizationValueRange" | "normalizationUnitKind"> {
+  "normalizationValueKind" | "normalizationValueRange" | "normalizationUnitKind"
+  | "normalizationDayBasis" | "normalizationUtcDayRelation" | "normalizationResolvedDayRelation"> {
   const allowed = (value: unknown, values: readonly string[]): string | null =>
     typeof value === "string" && values.includes(value) ? value : null;
   return compactFailureDiagnostics({
@@ -2000,6 +2001,12 @@ export function readSafeJunctionNormalizationDiagnostics(
         "below_range", "above_range_up_to_10x", "above_range_10x_to_1000x", "above_range_over_1000x"]),
     normalizationUnitKind: allowed(input.normalizationUnitKind,
       ["missing", "percent", "ratio", "other", "g", "mg", "ml", "l", "min", "s"]),
+    normalizationDayBasis: allowed(input.normalizationDayBasis,
+      ["explicit_calendar", "timestamp_calendar", "source_offset", "vault_timezone", "utc", "missing"]),
+    normalizationUtcDayRelation: allowed(input.normalizationUtcDayRelation,
+      ["before", "equal", "after", "missing"]),
+    normalizationResolvedDayRelation: allowed(input.normalizationResolvedDayRelation,
+      ["before", "equal", "after", "missing"]),
   });
 }
 
@@ -2043,6 +2050,9 @@ function normalizeExecutionError(error: unknown): {
           normalizationValueKind: error.diagnostic.valueKind,
           normalizationValueRange: error.diagnostic.valueRange,
           normalizationUnitKind: error.diagnostic.unitKind,
+          normalizationDayBasis: error.diagnostic.dayBasis,
+          normalizationUtcDayRelation: error.diagnostic.utcDayRelation,
+          normalizationResolvedDayRelation: error.diagnostic.resolvedDayRelation,
         }),
       }),
       message: error.message,

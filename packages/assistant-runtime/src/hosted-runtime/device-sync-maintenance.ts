@@ -2518,6 +2518,9 @@ function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
       normalizationValueKind: diagnostic.details.normalizationValueKind,
       normalizationValueRange: diagnostic.details.normalizationValueRange,
       normalizationUnitKind: diagnostic.details.normalizationUnitKind,
+      normalizationDayBasis: diagnostic.details.normalizationDayBasis,
+      normalizationUtcDayRelation: diagnostic.details.normalizationUtcDayRelation,
+      normalizationResolvedDayRelation: diagnostic.details.normalizationResolvedDayRelation,
     }));
   }
   if (diagnostic.provider === "junction"

@@ -1951,6 +1951,17 @@ Current product admission, delivery and native runtime safety rules remain.
   `sparse_interval.*` reason: source context, value, start/end presence or
   validity, interval ordering, day, provider, source type, or source instance.
   Historical producers may still report `sparse_interval.row_incomplete`.
+  Day mismatches additionally report the selected `normalizationDayBasis`
+  (explicit calendar, timestamp calendar, source offset, vault timezone, UTC,
+  or missing) and UTC/resolved-day relations (before, equal, after, or missing)
+  to the requested day. These are finite categories derived by the existing
+  day resolver, never dates, timezone names, offsets, or health values. Both
+  service and hosted boundaries allowlist them on the existing failure event;
+  event frequency and retention stay unchanged. Missing old fields mean unknown.
+  Compare these categories over 24–72 hours of natural retries after convergence
+  to distinguish window errors from calendar interpretation. Retain them only
+  if they resolve that diagnostic question; otherwise remove them in a later
+  reviewed change. The signal does not change acceptance or authorize replay.
   Value failures reuse the same fields: `below_range`,
   `above_range_up_to_10x`, `above_range_10x_to_1000x`, and
   `above_range_over_1000x` compare finite rejected values against the existing
