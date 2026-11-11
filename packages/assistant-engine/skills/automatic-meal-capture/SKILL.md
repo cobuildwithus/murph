@@ -1,449 +1,136 @@
 ---
 name: automatic-meal-capture
-description: Use in a private direct conversation when someone asks how to start recurring meal tracking or how Murph can track meals, and whenever someone explicitly asks about Murph iPhone automatic meal capture setup, Photos permissions, background behavior, the on-device Meals review page, missing or delayed imports, the automatic 9pm closeout, retained-photo cleanup, or calorie-aware enrichment of automatically captured meal photos.
+description: Meals the Murph iPhone app imports from new food photos. Covers enriching them, merging or deleting duplicates, setup and missing-photo questions, and the nightly closeout.
 ---
 
 # Automatic meal capture
 
-## Own the automatic-capture boundary
+The Murph iPhone app notices new food photos and saves each one as a meal: one
+meal per photo, with the photo attached, `source: device`, the time the photo
+was taken, and no foods, calories or macros yet. That meal is the log. Add
+detail to it with `vault-cli meal edit`. Never run `meal add` for a photo that
+already has a meal, because that creates a duplicate.
 
-In a private direct conversation, load this skill when a member asks how to
-start recurring meal tracking or how Murph can track meals, even when they do
-not say "automatic." In any conversation, also use it when a member explicitly
-asks how automatic meal capture works, needs the iPhone app for that feature,
-is setting it up, says a photo did not arrive, asks what Murph can see, or wants
-device-captured meal photos included in calorie or macro tracking. Do not treat
-a generic group request, a request to continue an established manual workflow,
-or already-completed setup as a fresh app-install request.
+Two other files hold the rest:
 
-Automatic capture already creates a canonical photo-only meal. This skill owns
-the iPhone setup and arrival-verification workflow; it does not create a second
-meal store or a duplicate meal record. Read
-`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md` before estimating nutrition
-or interpreting meal patterns. A successful automatic import ensures one
-private 9pm managed closeout for that member; there is no separate automation
-opt-in. Load this skill alongside `food-journal` on eligible interactive
-automatic-capture turns and check recent unresolved device meals. Use
-`nutrition-strategy` for forward-looking decisions about what to eat.
+- For "how do I track meals", app setup, what the app can see, or a photo that
+  did not arrive, read
+  `$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/references/setup.md`.
+  You do not need the rest of this file for those questions.
+- For the scheduled 9pm closeout, see the last section.
 
-## Answer a general recurring meal-tracking request
+Lookups, estimating and the nutrition card are in
+`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md`. Read it before
+estimating. Members who should not see numbers, as that file defines them, get
+no estimates and no questions asked only to make an estimate possible.
 
-For a private direct request about starting recurring meal tracking, use known
-context before choosing the first option:
+## When to enrich an imported meal
 
-- When device compatibility is unknown or a compatible iPhone is established,
-  no manual-only preference is established, and setup is not already complete,
-  lead with automatic capture as the lowest-friction supported option. Briefly
-  explain that the member can download or open the Murph iPhone app, enable Meal
-  capture, and have eligible new food photos picked up without messaging each
-  meal. Include the canonical App Store listing and the shortest relevant setup
-  steps below in the first answer.
-- When known context establishes Android or another incompatible device, or the
-  member prefers manual capture, lead with the food-journal skill's manual text,
-  voice-note, and user-sent-photo options. Do not push the iPhone app or repeat
-  automatic setup unless the member asks about it.
-- When automatic meal capture is already enabled, explain the current capture,
-  review, or recovery path that answers the question. Do not tell the member to
-  download the app again or repeat completed setup steps.
+Enrich imported meals in three situations:
 
-When automatic capture leads, keep manual text, voice-note, and user-sent-photo
-logging available as an alternative in the same answer. Do not assume the
-member has a compatible iPhone, make the app a prerequisite for all meal
-tracking, or promise that iOS background work will capture every meal. If
-device compatibility is unknown, state the compatible-iPhone condition rather
-than delaying the useful handoff with a question.
+1. A meal save or a `meal totals` read shows a meal without nutrition for that
+   date (a metric `mealCount` below the day's `mealCount`).
+2. The member asks about a photo or a captured meal, or sends one from the app
+   with Send to Murph. Send to Murph asks for an estimate now, so do not leave
+   it for the closeout.
+3. The nightly closeout.
 
-In a group, do not introduce the app or personalized automatic-capture setup for
-a generic meal-tracking request. Share the canonical public App Store listing
-only when someone explicitly asks how to get, download, or install the app, and
-keep sign-in, permissions, and personalized health setup in the person's
-private Murph conversation or in the app.
+Do not list meals before an ordinary meal log to look for imported ones. An
+import by itself starts no turn and needs no reply, and nothing is enriched at
+import time.
 
-## Set up the iPhone app
+## Enrich one imported meal
 
-Use the shortest relevant setup path:
-
-1. Automatic meal capture requires an iPhone on iOS 26.1 or later.
-2. Download or open Murph from
-   `https://apps.apple.com/us/app/murph-ai/id6786145859` and sign in to the same
-   Murph account used in the conversation. The automatic closeout needs an
-   existing private iMessage or Telegram conversation, or a verified email
-   address; this is a delivery prerequisite, not a second automation opt-in.
-   Follow the developer prompt's URL placement rule when sending the link.
-3. In Murph, open the menu, open Settings, choose Meal capture, and choose Set
-   up. If Meal capture is absent after updating, the installed build does not
-   support it; do not send the member through a setup retry loop.
-4. Continue through Murph's explanation and grant **Full Photos** access in
-   Apple's system prompt. Limited Photos access is not enough.
-5. Confirm the Settings row says On. Only photos inserted after successful
-   enablement are eligible; existing photos are never scanned.
-
-Do not claim Android support, ask the member to choose historical photos, or
-invent a second background permission. The app enables its PhotoKit background
-adapter during setup.
-
-## Explain what happens
-
-- Murph considers only new image insertions after opt-in.
-- The iPhone renders a bounded, metadata-sanitized JPEG and runs Apple's Vision
-  classifier on device.
-- Likely meals upload automatically. Uncertain candidates stay in the iPhone's
-  bounded recent Meals list unless the member chooses Approve & send. They may
-  age out after 14 days or as newer items fill the 24-item limit. Clear
-  non-meals stay private and contribute only to an aggregate on-device count.
-- Murph does not receive the original filename, location, camera metadata,
-  Vision labels, or classifier confidence.
-- A successful upload lands asynchronously as one canonical meal with the
-  sanitized photo, `source: device`, and the photo's original capture time. It
-  starts without identified foods, calories, or macros.
-- The canonical import also ensures one managed daily closeout at 9:00pm in the
-  vault timezone. Replayed and later captures reuse that automation.
-- The original capture instant—not upload or import time—owns meal timing.
-  Infer breakfast, lunch, dinner, and day context in the member's vault
-  timezone. If travel or a timezone change could materially alter the answer,
-  state the ambiguity or ask instead of asserting a category.
-
-Background work is best effort. PhotoKit can wake the app's background task,
-the app schedules another background opportunity, and opening Murph runs the
-same catch-up processor immediately. iOS may delay or skip any background
-opportunity. Do not promise immediate logging, guaranteed capture, or that the
-member never needs to open the app. After a long idle period, the scoped upload
-credential may require renewal by opening Murph.
-
-Automatic background capture does not itself require a chat reply and its import
-does not start a model turn. Explicit manual submissions through Send to Murph
-request immediate estimation of the existing meal in the private conversation;
-inspect the photo, estimate from supported evidence, or ask one focused
-follow-up for essential missing identity or amount. Do not wait for closeout. If the member asks whether a photo arrived, verify
-the meal record instead of using conversation silence as evidence of failure. Inspect and
-enrich unresolved device meals on the next eligible meal-related interactive turn,
-including ordinary meal logging without a separate request for a daily card. The 9pm
-closeout handles the same unresolved work independently. Do not claim enrichment
-happened at import time.
-
-## Verify an import
-
-Use the canonical meal surface:
-
-1. Query the local date covering the original photo time:
-
+1. **Find it.** Run
    `vault-cli meal list --from <YYYY-MM-DD> --to <YYYY-MM-DD> --limit 20 --format json`
+   for the local date of the photo and pick out the meals that have a photo and
+   no nutrition. `meal list` shortens fields, so read the full record with
+   `vault-cli meal show <meal-id> --format json`. The photo's capture time sets
+   the meal's time and day in the member's vault timezone. If travel or a
+   timezone change could change which meal or day it was, say so.
+2. **Check for a duplicate.** Compare the other meals near that time for a
+   typed meal, a meal from a connected app, or a second photo of the same
+   eating occasion. Count each occasion once. When you cannot tell whether two
+   records are the same occasion, enrich one, leave the other, and ask only if
+   the answer materially changes tracking.
+3. **Look at the photo.** Open the attachment itself. The phone's classifier
+   accepting an image tells you nothing about what is in it.
+4. **Do exactly one of these.**
+   - **Food you can estimate.** Edit the meal with ingredients and nutrition
+     (step 5). Do not ask for confirmation. A visible food or drink with a
+     defensible portion range is enough, even when the exact recipe is unknown.
+   - **Food you cannot estimate.** If the note is empty, save a short `--note`
+     describing what is visible and what is uncertain, and add `--ingredient`
+     only for what the photo shows. Ask one narrow identity or portion question
+     only when no meaningful estimate is possible and the answer would help.
+   - **A non-food image, or food the member did not eat.** Run
+     `vault-cli meal delete <meal-id>`, then confirm it is gone with a fresh
+     `meal list` for that date. Write no note and run no `remove-photo`.
+   - **A repeat of a meal already saved.** If the saved meal was typed, merge
+     the two as described under "Merge a capture into a typed meal". Otherwise,
+     while the capture's attachment role is still `photo`, delete the capture
+     as above.
+   - **The capture has a note the member wrote.** Never delete it. Keep the
+     record and the note, add no invented dish, ingredients or nutrition, and
+     read it back.
 
-   Include the adjacent date near midnight or when the member gives a capture
-   time in another timezone.
-
-2. Identify recent photo-backed device meals. Use
-   `vault-cli meal show <meal-id> --format json` when the list result is not
-   detailed enough or the attachment must be inspected.
-3. Confirm arrival from a real returned meal id, photo attachment, and captured
-   time. Report those facts plainly.
-
-An iPhone Sent state means the upload was accepted; canonical import may still
-be finishing. If a just-sent photo is absent on the first read, say it may still
-be landing and perform one fresh canonical re-check. If it is still absent,
-report the import as pending; do not request a resend solely from back-to-back
-reads. Suggest resending only after later evidence shows the upload failed. Also
-distinguish a pending import from a candidate that is still local in Review and
-cannot yet be visible to Murph.
-
-## Enrich calorie and macro tracking by default
-
-Estimate calories and macros by default when enriching a captured meal. Skip
-estimation only for intuitive-eating contexts, eating-disorder risk, or
-number-sensitive members.
-
-When enriching a captured meal:
-
-1. List recent meals and find photo-backed device meals with missing nutrition.
-2. Before editing, compare nearby canonical meals for a likely manual,
-   conversation, provider, or second-photo record of the same eating occasion.
-   Count each occasion once. When inspection shows a capture repeats a meal
-   already saved, apply the deletion or merge rule below. When you cannot tell,
-   do not enrich both or sum both; ask only when resolving it materially affects
-   tracking.
-3. Show each candidate and inspect its actual photo attachment. Do not infer
-   foods from the fact that the on-device classifier accepted it.
-4. Resolve exact visible package or menu labels with the food-journal label
-   workflow when identity changes the estimate. Otherwise estimate visible
-   ingredients and portions conservatively.
-5. Enrich the existing meal with `vault-cli meal edit <meal-id>`, repeated
-   `--ingredient` flags, relevant nutrition flags, evidence-dependent
-   provenance, an honest confidence, and a short `--nutrition-source-detail`.
-   Use `--nutrition-source label` for verified label facts,
-   `--nutrition-source database` for matched database facts, and
-   `--nutrition-source estimated` only for visual ingredient or portion
-   estimates. For mixed evidence, describe both and set confidence from the
-   weakest material assumption. Preserve the meal's occurred-at time. An edit
+   Delete only after looking at the photo. An image that is hard to estimate
+   stays a meal.
+5. **Edit.**
+   `vault-cli meal edit <meal-id> --name "<dish name>" --ingredient "<food>" --ingredient "<food>" --nutrition-calories <kcal> --nutrition-protein-grams <g> --nutrition-carbs-grams <g> --nutrition-fat-grams <g> --nutrition-fiber-grams <g> --nutrition-source <label|database|estimated> --nutrition-confidence <low|medium|high> --nutrition-source-detail "<evidence and assumptions>" --format json`.
+   Use `label` for verified label facts, `database` for matched database rows,
+   and `estimated` for ingredients or portions judged from the photo. With
+   mixed evidence, describe both in the source detail and set confidence from
+   the weakest material assumption. Look up a visible package or menu item when
+   its identity changes the estimate. Leave the meal's time as it is.
+6. **Read it back** with `meal show` before saying it was logged. An edit
    makes the meal member-owned, so `source` reads `manual` afterward; its
    `externalRef` still identifies the capture.
-   `--with-daily-totals` belongs to add/import, not edit; after editing, read
-   the meal back. Read daily totals only when the existing presentation and
-   numeric-suitability rules authorize them. Keep the photo until saved
-   structure has been read back.
-6. If the edit fails or the read-back does not prove the intended structure,
-   run one fresh bounded meal list for the capture date, re-identify the exact
-   photo-backed capture from its returned id, occurred-at time, and attachment,
-   inspect it, and retry `meal edit` once with corrected arguments.
-   Never switch to `meal add`, guess a nearby record, or retry past that one
-   correction. If the retry or its read-back fails, keep the photo and report or
-   fail the unresolved work instead of claiming enrichment.
-7. Read the edited meal back before claiming it was logged.
+7. **If the edit fails, or the read-back does not show what you saved,** run
+   one fresh `meal list` for the capture date, find the same capture again by
+   its id, time and attachment, and retry `meal edit` once with corrected
+   arguments. If that also fails, leave the photo in place and say the meal is
+   still unresolved. Do not switch to `meal add` or edit a nearby record.
+8. **Totals and card.** `meal edit` has no `--with-daily-totals` flag. Follow
+   "Changing a meal that already exists" in `food-journal/SKILL.md` for fresh
+   totals and the card.
 
-Do not run `meal add` for a captured photo that already has a meal id. The
-automatic import is the meal log; `meal edit` adds the useful structure. By
-default, save a bounded photo estimate without asking for confirmation on every
-meal. Retain provenance, uncertainty, and assumptions; a visible food or drink
-category with a defensible portion range is enough even when the exact recipe,
-ingredients, or serving is uncertain. If the photo cannot support a meaningful
-numeric estimate, do not leave a model-reviewed capture blank. When its note is
-empty, save a concise `--note` describing only the visible meal or food form and
-material uncertainty; never replace a member-written note. Add `--ingredient`
-values only for identities the photo supports. An imported photo stub is not
-evidence of consumption. After actually inspecting an imported device stub,
-if it shows a non-food image, food/drink the member did not consume, or, while
-its attachment role is still `photo`, a meal already saved that the merge rule
-below does not cover, and has no member-written note, run
-`vault-cli meal delete <meal-id>` and confirm it is
-absent with a fresh bounded `meal list` for its capture date. Write no note and
-run no `remove-photo` for that meal. This applies to interactive enrichment and
-scheduled closeout. Never delete from classifier acceptance, a guess, or
-difficulty estimating food; unclear images follow the food workflow above.
-Never delete a stub with a member-written note: preserve the record and note,
-add no invented dish, ingredients, or nutrition, and read it back before
-scheduled photo review completion. Clarification is a last resort,
-not a confidence check: ask
-one narrow identity or portion question only when actual attachment inspection
-leaves identity or amount too indeterminate for any meaningful bounded estimate
-and the answer would materially help.
+## Merge a capture into a typed meal
 
-A pending capture that repeats a typed meal merges instead, so the one entry
-keeps the photo. This applies when the saved meal has no attachment and no
-`externalRef` and shares the capture's local date, and the capture has no
-member-written note. Read the saved meal with `meal show`, because `meal list`
-shortens fields. Copy its name, note, ingredients, tags and nutrition onto the
-capture with `meal edit`, read the capture back against that record, run
-`vault-cli meal delete <saved-meal-id>`, confirm it is absent,
-then continue the capture's normal review. If that delete fails, run no
-`remove-photo`, so the capture stays pending; a later run that finds those
-details already on the capture resumes at the delete. When the saved meal holds
-anything `meal edit` cannot set, such as micronutrients, keep it and delete the
-capture instead.
+When a capture still waiting for review repeats a meal the member typed, keep
+one entry and keep the photo on it. This applies when the typed meal has no
+attachment and no `externalRef`, has the same local date as the capture, and
+the capture has no note the member wrote.
 
-A recent captured meal remains unresolved after its attachment becomes a privacy
-tombstone when its saved identity, amount or ingredients, and nutrition cannot
-support the member's current request. When the member answers a capture question
-or asks for totals or a card that meal blocks, match the existing meal from the
-current conversation, `externalRef`, capture date, and capture time with bounded
-`meal list` and `meal show` reads; never add a replacement or restore the photo.
-Apply the estimation-eligibility rule above before recovery. When estimation is
-skipped, do not ask for identity or amount merely to enable nutrition estimates.
-Otherwise, ask instead of refusing or inventing totals only when the saved facts
-still fail that last-resort threshold. With enough facts, edit and read back the
-existing meal, then use fresh food-journal totals and any eligible card. Never
-calculate around it or reuse pre-edit totals.
+1. Read the typed meal with `meal show`.
+2. Copy its name, note, ingredients, tags and nutrition onto the capture with
+   `vault-cli meal edit <capture-meal-id>`, then read the capture back and
+   compare.
+3. Run `vault-cli meal delete <typed-meal-id>` and confirm it is gone.
 
-Do not surface calorie numbers for intuitive-eating contexts, eating-disorder
-risk, or number-sensitive members.
+If the delete fails, run no `remove-photo`, so the capture stays pending. A
+later run that finds those details already on the capture starts again at step
+3. If the typed meal holds something `meal edit` cannot set, such as
+micronutrients, keep the typed meal and delete the capture.
+
+## When the photo is no longer available
+
+Full photos expire 90 days after capture. A smaller copy, the `photo_thumbnail`
+attachment, stays as long as the meal exists. Use the thumbnail through the
+normal media tools when the full photo is gone. It is the same photo and does
+not mean a new meal. Deleting a meal removes its thumbnail and any remaining
+full photo.
+
+If a captured meal still lacks the identity, amount or nutrition that the
+member's request needs, and no usable photo is left, complete it from what the
+member tells you. Find the meal with `meal list` and `meal show` by its capture
+date, capture time and `externalRef`, edit it, read it back, and then use fresh
+totals. Never add a replacement meal, restore the photo, or work out totals
+that leave the meal aside. Ask the member only when no meaningful estimate is
+possible.
 
 ## Run the automatic 9pm closeout
 
-On a scheduled run:
-
-1. Use the engine-supplied `Occurrence local date` from the `Scheduled
-   occurrence context` as the action and latest-capture boundary, even when the
-   wall-clock `Today's date` differs. Run `vault-cli meal closeout-work
-   --occurrence-at <scheduled-occurrence-instant> --to
-   <occurrence-local-date> --limit 20 --format json`. It returns
-   same-occurrence retry evidence first, then the oldest bounded batch of
-   automatic captures with attachments whose role is `photo` (pending review). Reviewed full photos and thumbnails remain available but are not pending work. Pending photos are the queue,
-   with no separate cursor or state.
-2. Treat each `photo` attachment as pending closeout work. Also include the
-   same-occurrence review evidence returned by the queue: `photoReviewedAt`
-   proves an earlier attempt already reviewed it. Legacy removal revisions
-   remain supported. Thumbnail maintenance is not review evidence. `closeout-work` includes
-   that evidence without carrying it into a later occurrence. Group captures
-   by local capture date. A capture is eligible for member-visible presentation
-   only when its local capture date equals the engine-supplied `Occurrence local
-   date`. A late import from an earlier date remains full cleanup work, but it
-   never authorizes a dated catch-up, card, question, or closeout text. When
-   current and historical captures are selected together, exclude every
-   historical capture from current-date presentation inputs.
-3. Compare nearby meals before counting so a manual record or second photo of
-   the same eating occasion is not silently double counted.
-4. Run `vault-cli meal show <meal-id> --format json` for each selected meal and
-   inspect the actual attachment for a photo-backed selection. For
-   same-occurrence retry evidence, use only the already-saved structured fields
-   and uncertainty. Enrich the existing meal when supported, apply the bounded
-   re-identification and single-retry rule above after a failed edit, and read
-   the result back. Apply the inspected-stub deletion rule above before the food
-   observation fallback. A confirmed deletion completes
-   that stub's work. On retry, refresh the queue and skip meals already absent;
-   never recreate or delete them again. For food without supported nutrition,
-   save and read back the observation fallback above.
-5. For surviving meals only, after read-back proves saved nutrition, the food
-   observation fallback, or a preserved member-written note, and any merge
-   delete has succeeded, run `vault-cli meal remove-photo <meal-id>` and read the meal back again.
-   This compatibility-named command marks pending attachments `reviewed_photo`
-   and records `photoReviewedAt`; it preserves the structured meal and media.
-   Full photos expire 90 days after capture. A private thumbnail remains while
-   the meal exists. Verify no attachment with role `photo` remains. Any command
-   failure, including a failed delete, fails the run. On retry, combine pending photos with same-occurrence
-   review evidence so a provider or partial-closeout failure loses no meal.
-
-After all selected cleanup, exclude deleted stubs and any preserved non-food or
-unconsumed-food records from closeout text, questions, and cards. Stop before any presentation work when
-no remaining selected capture has the occurrence local date. Return
-`{"kind":"skip","privateSummary":"Historical meal cleanup completed."}` and
-run no Goal, totals, card, or clarification work. When current and historical
-captures were selected together, continue with current-date food captures only.
-
-Before step 6, apply the estimation-eligibility rule above to those current-date
-captures. When estimation is skipped, complete photo cleanup and stop with the
-established non-numeric closeout: ask no estimate-enabling question and run no
-Goal, totals, or card work. Otherwise, after cleaning each current-date capture
-that still fails the last-resort threshold, send one compact question for only
-those meals and stop before Goal, totals, or card work. Use local time for the
-occurrence date. Ask only for missing identity and amount, expose no meal ids,
-and do not substitute ordinary closeout or a dashboard refusal. This is the sole
-scheduled-question exception; its answer uses the existing-meal recovery above.
-
-6. After inspection, enrichment, read-back, and photo cleanup, run
-   `vault-cli meal totals --from <occurrence-local-date> --to <occurrence-local-date> --resolve-goals --format json`.
-   This query owns the complete active target scan and deterministic rules below;
-   do not repeat goal list/show to re-resolve active authority.
-   Use fresh canonical totals and `goalContext` points. `conflict`, `incompatible`,
-   or `capacity` means ordinary compact closeout, no Goal or measurement
-   mutation, no question, and no card. `ready` still requires the suitability,
-   intent, and meal-completeness gates. `missing` permits totals-only with all
-   five goals null, never a proposal. Historical compatibility is read-only
-   display authority. A scheduled closeout never creates, changes, repeats,
-   accepts or activates goals, including on its first run. Do not perform an
-   all-status proposal lookup; leave paused/abandoned Goals alone. Read the
-   shared `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
-   for compatibility rules, not permission to enter its explicit target-setting
-   workflow. Target conflicts, incompatible authority and capacity stay text-only;
-   never relabel them missing or acceptance. Apply the concise known-context
-   numeric-suitability rule in the `murph.attach_response_card` prompt. Do not run
-   a universal medical-history or measurement checklist. Number-sensitive context
-   or unresolved suitability retains ordinary nonnumeric closeout, no card,
-   Goal/measurement mutation, or target-setup question. A constraint affecting
-   target advice does not alone suppress benign logged totals. Keep the occurrence
-   local date from step 1 as both the work boundary and the only scheduled card
-   `localDate`. Historical captures are cleanup-only and never card inputs. A target
-   qualifies only when that card date is on or after the containing Goal's
-   `window.startAt`, on or before its optional `window.targetAt`, and inside the
-   target's optional inclusive `startAt`/`targetAt` interval. Ignore an
-   out-of-window target for current authority and conflict resolution; never
-   copy, expose, derive from, or mutate a Goal because of it. If fewer than five
-   compatible applicable targets remain and the query reports `missing`, use
-   all-null goals subject to complete totals and suitability, without questions
-   or target mutations.
-   New authoring uses `dietary-calories`. Resolve that canonical owner first;
-   when it exists, use it and ignore every globally ambiguous `calories`
-   target. Only without a canonical owner may an applicable exact-point
-   `calories` target in `kcal` fill the card's calorie slot when its
-   `targetId` is `daily-calories`. Its same containing Goal must own exactly one
-   applicable compatible point for every historical id, metric, and unit pair:
-   `daily-protein` / `protein-grams` / `g`, `daily-carbohydrates` /
-   `carbs-grams` / `g`, `daily-fat` / `fat-grams` / `g`, and `daily-fiber` /
-   `fiber-grams` / `g`. Require one complete historical set. Any other
-   `calories` target is not dietary authority even when the four nutrition
-   metrics share its Goal; never combine the historical set with another Goal
-   or managed proposal. Never infer ownership from a title, slug, domain, or
-   description, and never rename or mutate a Goal just to repair this key.
-   A target in another unit remains authoritative, but never compare, convert,
-   or copy its raw value into this fixed-unit card; on a scheduled occurrence,
-   ask no question and use ordinary closeout text. Never infer a target from
-   this day's meal total or one wearable day. A card-qualifying target must also
-   be an exact point with comparator `between` and identical numeric `value` and
-   `highValue`. Accept `selected-value` evaluation normally. The complete
-   same-Goal historical `daily-*` set above may instead use the read-only
-   rolling-mean plus daily-aggregate-mean display compatibility in the shared
-   daily-card reference; preserve the Goal and do not extend that exception. A
-   mixed evaluation bundle or another rolling-window or daily-aggregate
-   statistic is incompatible. A one-sided `<`, `<=`, `>`, or `>=` threshold,
-   non-identical range, or other shape remains authoritative but is incompatible
-   with this point-target card.
-   Never expose, compare, copy, or derive from its bound, and never create,
-   replace, or remove a managed target around it. On a scheduled occurrence,
-   ask no question, perform no Goal or measurement mutation, and use ordinary
-   closeout text without a card.
-7. When step 6 reports `ready` or `missing`, use its fresh canonical totals
-   immediately before any response-card attachment. If a meal or Goal changed
-   after that read, rerun `vault-cli meal totals --from <occurrence-local-date>
-   --to <occurrence-local-date> --resolve-goals --format json` first; otherwise
-   do not repeat the read. Never calculate nutrition independently or reuse
-   totals from an earlier turn. On an interactive card
-   request, apply food-journal's selected-date incomplete-meal recovery to
-   every saved meal whose nutrition coverage blocks the card, including a
-   manual, conversation, provider, or device meal not selected by this
-   closeout. Do not widen the scheduled-question exception above: a scheduled
-   run follows its existing compact closeout when an unselected meal remains
-   incomplete. Totals-only scheduled cards require non-null totals and metric
-   `mealCount` equal to the top-level `mealCount` for all five nutrients. Equal
-   counts describe stored records, not every meal eaten that day. Preserve
-   food-journal's informed explicit partial-request behavior and the existing
-   goal-aware partial behavior. Missing nutrition is unknown, never zero.
-   When the canonical read includes a calorie total and
-   the card-time safety gate from step 6 still passes, call
-   `murph.attach_response_card` with this exact mapping:
-   `card: { kind: "daily_nutrition", version: 2, localDate:
-   <occurrence-local-date>, mealCount: <top-level mealCount>, totals: { calories,
-   proteinGrams, carbsGrams, fatGrams, fiberGrams }, goals: { calories,
-   proteinGrams, carbsGrams, fatGrams, fiberGrams } }`. Copy every metric's
-   complete `{ total, mealCount }` pair unchanged from the canonical read,
-   including `fiberGrams`. For `missing`, every goal entry is null; never mix
-   snapshots and nulls or derive targets. For `ready`, each goal entry is
-   `{ target: <exact canonical daily target>, status: <any valid status> }`;
-   the host replaces each status with its deterministic assessment of the
-   copied total and target. Never translate a threshold or range comparator
-   into this point-target payload. After the tool succeeds, return a `send_message`
-   decision without repeating nutrition values in its text; the runtime
-   replaces that text with the deterministic closeout derived from the card.
-   Do not author a second nutrition summary. The runtime labels partial totals
-   as partial and identifies missing or under-supported nutrition honestly. For
-   missing calories, incomplete totals-only coverage, conflicting or incompatible
-   active authority, capacity, or numerical suppression, retain the current compact text, one-question, or
-   non-numeric behavior and do not attach a card. Never attach the photos.
-   Historical-only work already returned the required skip before this step;
-   historical captures never become presentation inputs for current-date work.
-   Scheduled closeouts do not add goal invitations or questions. An ordinary
-   interactive reply to a scheduled check-in uses food-journal's meal-log path,
-   not this scheduled authority; a meal reply never accepts goals.
-
-## Handle edge cases
-
-- **Uncertain photo:** it exists only in the iPhone's bounded recent Meals list
-  unless approved, and can age out after 14 days or once newer items fill the
-  24-item limit. Murph cannot inspect or log it remotely before approval.
-- **Old photo:** photos from before successful enablement are intentionally
-  ignored, even if edited or re-opened later.
-- **Limited or revoked Photos access:** capture pauses or stays off; direct the
-  member to iOS Settings and require Full Photos access.
-- **iCloud-backed photo:** iOS may download it locally before classification,
-  causing delay or failure. Murph does not connect directly to iCloud.
-- **Screenshot or non-image:** it is rejected before upload.
-- **Deleted or unavailable asset:** a local review item may lose its thumbnail
-  or become unsendable; do not claim the server has a recoverable copy.
-- **Low light, mixed plates, packaging, or food-like objects:** classification
-  and portion estimates can be wrong. Use the actual photo and retain
-  uncertainty.
-- **Several photos of one meal:** they can become separate meal records. Count
-  the meal once under the inspected-stub deletion rule; when you cannot tell,
-  ask only if it would materially change tracking.
-- **App says Sent but the assistant did not mention it:** automatic background
-  imports may stay quiet. A manual Send to Murph submission requests estimation;
-  query meals by captured time and complete the existing meal or clarify missing
-  information instead of treating silence as completion.
-- **Setup loops or errors:** confirm supported iOS, the current App Store app,
-  the same Murph account, network access, and Full Photos permission. Avoid
-  repeated blind retries; if one fresh setup attempt still fails, state the
-  unresolved step rather than claiming capture is on.
-
-## Reading an older meal photo
-
-Use the canonical `photo_thumbnail` attachment when the full photo has expired
-or is unavailable. It is a smaller JPEG of the same photo, not evidence of a new
-meal. Inspect it through the normal media tools and update the existing meal;
-do not recreate a meal or infer details the thumbnail cannot support. Removing
-a meal removes its thumbnail and any remaining canonical full photo.
+On a scheduled closeout run, read
+`$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/references/closeout.md`
+and follow it exactly. It is the single owner of that workflow.

@@ -1,66 +1,51 @@
-# Complete an interactive day before attaching its card
+# Completing a day that has a meal without nutrition
 
-Use this selected-date recovery during private meal logging and estimation,
-including explicit app submissions, as well as daily nutrition card or summary
-requests. A separate request to estimate an already-saved meal is unnecessary.
-When totals expose incomplete meals, inspect and complete those existing records
-from available evidence, or ask one focused follow-up for essential missing
-identity or amount. Do not end with a missing-estimate refusal before trying
-this recovery. Keep reads bounded to the selected date; unrelated conversation
-does not trigger meal recovery.
+Read this when a meal save or a `meal totals` read shows a metric `mealCount`
+below the day's top-level `mealCount`. One or more meals saved for that date
+have no nutrition, so the day's card would be partial. Complete those meals
+first, then attach the card. This applies in a private conversation during meal
+logging, an app submission, and a card or daily-summary request. Keep every
+read to the one date in question.
 
-After the fresh selected-date totals read (standalone or combined save), compare every
-metric's `mealCount` with the top-level `mealCount`. When any metric has lower
-coverage, do not treat the normal interactive card workflow as finished with a
-partial card. List only that selected date, show the exact meals that lack
-nutrition, and try to complete those existing records from accepted current
-conversation context, their saved identity, ingredients, and amount, and a
-bounded matching prior meal when useful. A member's current statement that the
-meal is equivalent to a specific prior meal is usable evidence. A similar
-informal name alone is not: require matching saved ingredients and portion
-evidence or ask instead of copying nutrition.
+For members who should not see numbers (see `food-journal/SKILL.md`), skip
+this recovery and do not ask a question whose only purpose is to make an
+estimate possible.
 
-For imported device stubs, load `automatic-meal-capture` and inspect the photo.
-Delete confirmed non-food or unconsumed-food stubs and resolve pending repeats
-without member-written notes under that skill's rules, confirm absence, then
-refresh same-date totals. Write no note or `remove-photo` for a deleted stub. Preserve member-written notes;
-unclear food stays on the estimation or clarification path.
+1. **Find the meals.** Run
+   `vault-cli meal list --from <date> --to <date> --limit 200 --format json`,
+   then `vault-cli meal show <meal-id> --format json` for each meal that lacks
+   nutrition.
+2. **For a meal the iPhone app imported** (a photo with no nutrition yet), read
+   `$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/SKILL.md` and follow
+   it. It covers looking at the photo, enriching, merging a duplicate and
+   deleting a non-food capture.
+3. **For any other meal, estimate from what you have.** Use this conversation,
+   the meal's saved name, ingredients and amount, and the lookup and estimating
+   rules in `food-journal/SKILL.md`. You may copy totals from an earlier meal
+   when the member says it was the same meal, or when the two share saved
+   ingredients and portion. A similar name alone is not enough. Read the earlier
+   meal with `meal show` before copying, save with
+   `--nutrition-source inherited`, and name the earlier meal's source in
+   `--nutrition-source-detail`.
+4. **Edit the existing meal.**
+   `vault-cli meal edit <meal-id> --nutrition-calories <kcal> --nutrition-protein-grams <g> --nutrition-carbs-grams <g> --nutrition-fat-grams <g> --nutrition-fiber-grams <g> --nutrition-source <source> --nutrition-confidence <confidence> --nutrition-source-detail "<evidence>" --format json`.
+   Never add a replacement meal, and never work out totals that leave the
+   incomplete meal aside.
+5. **Read back and refresh.** Run `meal show` for the edited meal, then
+   `vault-cli meal totals --from <date> --to <date> --resolve-goals --format json`,
+   and attach the card as `food-journal/SKILL.md` describes.
 
-Use only the canonical meal surface for this recovery: `vault-cli meal list
---from <date> --to <date> --limit 200 --format json`, `vault-cli meal show
-<meal-id> --format json`, and `vault-cli meal edit <meal-id>` with the typed
-`--nutrition-calories`, `--nutrition-protein-grams`,
-`--nutrition-carbs-grams`, `--nutrition-fat-grams`,
-`--nutrition-fiber-grams`, `--nutrition-source`,
-`--nutrition-confidence`, and `--nutrition-source-detail` flags. Never inspect
-or modify raw vault files. After the date lists identify the records, show the
-selected prior meal before copying its saved totals. After the edit succeeds,
-run the exact edited-meal `meal show` readback and fresh same-date `meal totals`
-command before attaching the card. Use `--nutrition-source inherited` for
-copied prior-meal totals and preserve the prior source in
-`--nutrition-source-detail`.
+Ask only when no meaningful estimate is possible. If a meal's identity or
+amount is still too unclear after step 3, ask one short question for that
+missing detail and end the turn without a card. When the member answers, resume
+at step 4.
 
-Apply the estimation-eligibility and label/database grounding rules below. If
-the available evidence supports a meaningful bounded estimate, edit and read
-back the exact existing meal, then rerun fresh same-date totals before any card.
-Never add a replacement meal or calculate around the incomplete record. If
-identity or amount remains too indeterminate, ask one compact question for only
-that missing detail and stop without a card. The answer resumes the exact-meal
-edit, read-back, fresh-totals, and eligible-card workflow. Do not ask merely to
-enable numeric output for an intuitive-eating, eating-disorder-risk, or
-number-sensitive member.
+Attach a partial card only when the member, knowing some meals are missing
+nutrition, asks to see what is there so far.
 
-This generic recovery question is interactive-only. Scheduled automatic
-closeout keeps the narrower question authority in `automatic-meal-capture`.
-Attach a partial card only when the member explicitly asks to see the currently
-available partial data after the limitation is clear; partial-card schema and
-rendering remain compatibility surfaces, not the normal interactive closeout.
+A complete day means every saved meal has nutrition. The member may have eaten
+meals they never logged, so describe the card as nutrition logged so far.
 
-An explicit target-setting response still explains a paused canonical proposal
-in ordinary text, not a card. Only unambiguous acceptance of that explained
-proposal may activate it. When an explicit combined target-setting and card
-request remains pending, the acceptance response may complete it after suitability,
-activation/readback, and fresh same-date totals. Ordinary summary requests use
-all-null goals when accepted authority is missing; they do not repeat a paused
-proposal or change its status. Complete stored records do not prove every meal
-eaten was logged; the card reports estimated nutrition logged so far.
+The nightly closeout is a scheduled run and follows
+`automatic-meal-capture/references/closeout.md`, which allows a narrower
+question than this file does.

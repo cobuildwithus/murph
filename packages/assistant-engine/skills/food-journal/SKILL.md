@@ -1,357 +1,264 @@
 ---
 name: food-journal
-description: Use for low-friction meal capture, connected meal and nutrient questions, and bounded pattern finding between food and digestion, symptoms, energy, appetite, or performance, providing calorie and macro estimates by default except in eating-disorder-risk, intuitive-eating, or number-sensitive contexts.
+description: Meal capture, corrections, calorie and macro estimates, daily nutrition cards, and looking back at how food relates to symptoms, energy or performance.
 ---
 
 # Food journal
 
-## Goal
+A photo, a voice note or a rough phrase is a complete meal log. Save it with
+calorie and macro estimates and answer with the day's nutrition card. Ask a
+question only when the answer would materially change the record. Otherwise
+take the likelier reading and put the assumption in `--note`.
 
-Make meal capture easy, preserve the context that matters, and turn enough observations into an honest, low-pressure pattern readback.
+Meal records are private, and the nutrition card is for the member's private
+conversation. In a group, reply in text, and write a recap of someone's meals
+only when they ask for one, leaving out incidental sensitive details.
 
-This skill is a policy layer over existing Murph surfaces. Do not create a new food-journal store, observation entity, scoring model, streak, or CLI family.
+## Members who should not see numbers
 
-Use `nutrition-strategy` for forward-looking decisions about what to eat or change; keep this skill focused on capture and retrospective observation. Use `behavior-followthrough` only when repeated support or missed logs become central. Use `experiment-onboarding` only after the user chooses a change to test.
+Check this first. When known context shows eating-disorder risk, an
+intuitive-eating approach, or a member who has asked not to see numbers, save
+the meal with its name, note and ingredients only. Skip lookups, nutrition
+flags, `--with-daily-totals` and the card, and reply with one short line. Do
+not ask a question whose only purpose is to make an estimate possible. Suggest
+professional support when risk or symptoms warrant it.
 
-In a private direct conversation, when the member asks how to start recurring
-meal tracking or how Murph can track meals, read
-`$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/SKILL.md` even when they do
-not say "automatic." That skill owns whether the compatible-iPhone path or this
-skill's manual text, voice-note, and user-sent-photo path should lead based on
-known device, preference, and setup context. For a generic group request, keep
-the response on group-safe manual capture unless someone explicitly asks for
-the public app listing; keep personalized app setup private.
+Preferences normally arrive in the saved context at the top of the
+conversation. If they are missing, add
+`vault-cli memory show --compact --format json` to step 1 and reuse that one
+read for the rest of the turn.
 
-## Choose the user's focus
+## Routine meal log
 
-Infer the focus from the conversation:
+A meal log takes three tool steps. Batch the independent calls of each step
+together, in one code-mode `exec` script when available.
 
-- simple record
-- digestion or symptoms
-- energy or appetite
-- performance
-- clinician handoff
-- explicit calorie or macro tracking
+1. **Look up.** Run the label lookups (see Lookups) for every material
+   component whose label or USDA facts are not already in this conversation.
+   For a named restaurant, menu or packaged item, run its database search and
+   one official-source web search in this same step. Skip lookups when the
+   member gave the totals or sent a fully readable label. If you ran the
+   lookups in the same step that read this file, go to step 2.
+2. **Save and attach.** In one script: scale each component to the amount
+   eaten, sum them, round to whole calories and one-decimal grams, run the save
+   command below and parse its JSON. When `dailyTotals.totalsOnlyCard` is
+   non-null, attach it unchanged in that same script:
+   `await tools.murph__attach_response_card({ card: saved.dailyTotals.totalsOnlyCard })`.
+   It is the complete card for the day and needs no tool discovery and no
+   further read. When it is null, print the save result and follow "When the
+   card is not ready".
+3. **Finish.** After the card attaches, end the turn with no text. The one
+   exception is the first-card invitation below.
 
-Ask at most one question, and only when the missing detail materially changes safety, the chosen focus, or whether the record will be useful.
+A meal sent in reply to a scheduled check-in is an ordinary meal log and
+follows these steps.
 
-For a connected carbohydrate, vitamin, mineral, or water question, read
-`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/meal-and-nutrient-reads.md`
-first.
-
-## Capture with low friction
-
-### Routine meal log in three steps
-
-Each step is one tool step: batch its independent calls together, in one
-code-mode `exec` script when available.
-
-1. Look up. Run the label lookups below for every material component whose
-   label or USDA facts are not already known. Phrase generic queries in USDA
-   order, primary food first: `bananas raw`, `milk reduced fat 2%`,
-   `rice white long-grain cooked`, `chicken breast meat only roasted`. For a
-   named restaurant, menu, or packaged item, run its database search and one
-   official-source web search in this same step. Skip lookups for
-   member-provided totals or a fully readable label.
-2. Save and attach. Scale and sum the components in that same script (no
-   separate calculation step), rounding to whole calories and one-decimal
-   grams. Save all five metrics: when a lookup row lacks one (Foundation rows
-   often omit fiber), use a marked estimate instead of omitting it, because a
-   missing metric leaves the day incomplete and blocks its card. Run the
-   combined save below and parse its JSON. When `dailyTotals.totalsOnlyCard`
-   is non-null, attach it unchanged with `murph.attach_response_card` in that
-   script; in code mode,
-   `await tools.murph__attach_response_card({ card: saved.dailyTotals.totalsOnlyCard })`
-   needs no tool discovery. It is the complete fresh no-goals card for the
-   saved day and needs no other read. Otherwise print the save result and
-   apply the recovery and accepted-goal rules below.
-3. Finish. After a successful card, end with no final text unless the fixed
-   optional introduction below applies.
-
-- A photo, voice note, or rough phrase can be a complete meal log.
-- A saved recipe lists one whole batch. For a portion, estimate the batch size from its ingredient amounts, scale to the amount the member describes, and save a marked estimate with all five metrics; never ask the member for the batch size or save the meal without nutrition. If their amount is unclear, use the likelier reading and name it in one short clause.
-- Preserve useful real-life context when the user volunteers it, such as eating out, alcohol, a late meal, stress, travel, illness, or social context.
-- Use existing canonical surfaces. Save meal facts to meal records, symptoms to their typed surface, and durable unstructured context to the best-fit existing journal or memory surface. Do not duplicate the same fact across stores.
-
-Do not list meals as a prerequisite to a new capture. For recent-meal recall
-or a saved-day review, read
-`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/meal-and-nutrient-reads.md` first.
-Use the typed save flags below directly; reading this skill
-already supplies the ordinary capture contract. Execute the documented save
-for a resolved meal; optional enrichment is not a reason to rediscover the
-schema before saving.
-
-When the user names a restaurant and recognizable menu item, and known context
-does not trigger one of the numeric safety exceptions below, resolve nutrition
-before the meal mutation. Use a normal exact restaurant/menu search rather
-than a generic substitute. Run this database search even when the user
-supplies an official restaurant URL, together with the official-source web
-search from step 1. Use an exact database result; otherwise use the official
-source under the bounded source fallback below. An official menu or label does
-not itself require a live browser.
-When using that official source, retain its URL in nutrition source detail.
-Use `--nutrition-source label` for published official item/serving facts;
-`database` is for facts returned by the food-label database.
-Only after the database result, official source, or clearly marked last-resort
-estimate is resolved may you call `meal add` or `meal edit` with the available
-nutrition and provenance. Do not save a nutrition-free restaurant meal first
-and then ask the member to repeat the item. Ask one narrow question only when a
-variant or portion difference would materially change the record.
-
-When a numeric safety exception already applies, save the meal without calorie
-or macro estimates. Do not force a nutrition lookup, clarification, or safety
-preflight just to capture the meal.
-
-- After every verified private meal mutation, apply default attachment intent for its eligible daily nutrition card. This includes an ordinary meal reply to an ordinary scheduled check-in; the reply is interactive meal intent, not target acceptance or new scheduled authority. Use fresh canonical same-date totals with resolved goals, including the combined-save result below. When numeric suitability, complete stored-meal coverage, private routing, and bounded-card checks pass and the card completely answers the turn, attach it. `goalContext.status: ready` uses the unchanged five accepted snapshots; `missing` uses five explicit null goals, even when a subset of compatible targets exists. Never author a mixed bundle or derive, propose, accept, activate, or mutate goals to send a summary. Conflict, incompatible, capacity, incomplete totals after the recovery below, or other failed prerequisites retain the short truthful fallback. Never replace a failed gate with improvised totals, targets, analysis, or a second response surface.
-
-### Save and read the day in one call
-
-Apply the member's numeric preferences before choosing this path. If canonical
-preferences are not already available in context, run
-`vault-cli memory show --compact --format json` once before saving, alongside
-independent label lookups when needed. Apply any numeric-suppression decision
-before adding estimates or `--with-daily-totals`, not after receiving totals.
-Reuse that preference read for suitability and invitation checks; do not repeat it.
-
-For a new meal whose identity, amount, and nutrition are already resolved, use
-`vault-cli meal add --with-daily-totals --format json` with the typed meal flags.
-Use this complete command shape with resolved values, omitting unknown optional
-nutrition fields:
+## The save
 
 ```sh
 vault-cli meal add --with-daily-totals --format json \
-  --name "<short dish name>" --note "<meal and portion>" --occurred-at "<ISO date/time>" \
-  --nutrition-calories <kcal> --nutrition-protein-grams <grams> \
-  --nutrition-carbs-grams <grams> --nutrition-fat-grams <grams> \
-  --nutrition-fiber-grams <grams> --nutrition-source <source> \
-  --nutrition-confidence <confidence> --nutrition-source-detail "<evidence or URL>"
+  --name "<dish name>" --note "<meal and portion>" --occurred-at "<ISO date/time>" \
+  --nutrition-calories <kcal> --nutrition-protein-grams <g> \
+  --nutrition-carbs-grams <g> --nutrition-fat-grams <g> --nutrition-fiber-grams <g> \
+  --nutrition-source <user|label|database|inherited|estimated> \
+  --nutrition-confidence <low|medium|high> \
+  --nutrition-source-detail "<sources, ids or URL, and the deciding assumption>"
 ```
-Use `--name` for a sentence-case dish name: 2–5 words, at most 40 characters.
-Keep portions, uncertainty, brands, and places in `--note`; omit meal-type
-prefixes and photo-review language from the name. Use `meal edit --name` when
-enriching an existing meal. When a member identifies a photo meal or gives its
-portion, edit that same meal: set its dish name and supported nutrition together,
-then read it back. Preserve its photo; do not add a second meal. Choose the most
-specific honest short name supported by the image or confirmation, such as
-"Green smoothie" rather than "Blended drink" or "Vegetable soup" rather than
-"Prepared food". Never log a meal from a non-food image or food/drink
-that the member did not consume.
-For imported device stubs, follow `automatic-meal-capture`: delete inspected
-non-food or unconsumed-food stubs and resolve pending repeats under its rules
-when they have no member-written notes; never annotate them as meals. Preserve member-written notes.
 
-Nutrition source is `user`, `label`, `database`, `inherited`, or `estimated`;
-confidence is `low`, `medium`, or `high`. Keep `--nutrition-source-detail` to
-at most 240 characters: the key sources, ids or URL, and decisive assumption.
-For member-provided portion totals, use `--nutrition-source user`; do not look
-up a substitute estimate.
-`--with-daily-totals` also works with `meal import-json` for structured ingredients.
-This command shape is the execution contract. Do not rediscover these flags
-through help/schema calls, repository searches, or CLI implementation reads
-unless a required field is genuinely unknown or validation identifies a problem.
+- Pass all five nutrition values every time. When a lookup row lacks one
+  (Foundation rows often omit fiber), estimate it. A missing value leaves the
+  day incomplete and blocks its card.
+- `--name` is the dish in sentence case: 2 to 5 words, 40 characters at most,
+  as specific as the evidence allows ("Green smoothie", "Vegetable soup").
+  Portions, brands, places and uncertainty go in `--note`. Leave out meal-type
+  prefixes and photo-review wording.
+- `--nutrition-source` is `user` for totals the member gave (do not look up a
+  substitute), `label` for a product label or a restaurant's published facts,
+  `database` for rows the label database returned, `inherited` for totals
+  copied from an earlier meal, and `estimated` for everything else. Set
+  confidence from the weakest material assumption about identity, amount or
+  preparation. The source detail holds 240 characters at most.
+- Put context the member volunteers (eating out, alcohol, a late meal, stress,
+  travel, illness) in `--note`. A symptom goes in its own symptom record. Save
+  each fact in one place.
+- Log only food or drink the member consumed. A non-food image, or food they
+  did not eat, is never a meal.
+- `meal import-json` also accepts `--with-daily-totals`, for structured
+  ingredients.
+- The save result is the readback. Do not follow it with `meal show`,
+  `meal list` or `meal totals`.
+- `dailyTotals.status: unavailable` means the meal saved and only the totals
+  read failed. Retry only
+  `vault-cli meal totals --from <date> --to <date> --resolve-goals --format json`.
+  Never repeat the save, because that would create a second meal.
 
-The successful save is the meal readback. `dailyTotals.status: available`
-provides `dailyTotals.data`, the fresh canonical `meal totals --resolve-goals`
-result for the saved meal's local date, including coverage and goal context.
-Reuse it for the eligible same-date card; do not add `meal show`, `meal list`,
-or a separate `meal totals` read just to confirm this save. With context already
-known and complete nutrition, this is one save-and-read call that attaches a
-non-null `dailyTotals.totalsOnlyCard` in the same step. For an ordinary card,
-the rules here and in the card tool provide the
-target-authority and complete active-Goal discovery contract.
-Do not read the goal-derivation reference or full nutrition-strategy skill
-unless the member explicitly engages in target-setting.
+## Lookups
 
-If `dailyTotals.status: unavailable`, the meal is still saved. Retry only the
-same-date totals read; never repeat the meal mutation. A later meal or Goal
-mutation invalidates this summary and requires a new totals read. Incomplete
-coverage still triggers the selected-date recovery below; conflicts and numeric
-suitability still apply. Omit `--with-daily-totals` when numeric guidance is
-suppressed. Never make a new meal to replace an existing meal needing an edit.
+```sh
+# ordinary ingredients: USDA rows, primary food first
+vault-cli food search-labels-batch --generic --query 'chickpeas mature seeds cooked' --query 'rice brown long-grain cooked'
+# branded, packaged, menu, UPC or exact FDC items
+vault-cli food search-labels-batch --query '<brand product variant>' --query '<restaurant menu item>'
+# one item
+vault-cli food search-labels 'rolled oats' --generic
+```
 
-### Optional introduction, not an onboarding requirement
+- Word generic queries the way USDA does: `bananas raw`,
+  `milk reduced fat 2%`, `chicken breast meat only roasted`.
+- `--generic` applies to the whole batch, so a mixed meal takes at most two
+  calls: one generic, one branded. Repeat `--query` once per food. There is no
+  `--queries` flag and no JSON array. The single-item command takes the query
+  as its argument or as `--query`, never both.
+- Each query returns one compact match: serving, calories, protein,
+  carbohydrate, fat, fiber and a contaminant summary. Raise `--limit` only for
+  an ambiguous match. Add `--full-label` for sugars, saturated fat, cholesterol,
+  sodium, micronutrients, ingredients, allergens or full contaminant detail.
+  Add `--format json` only when a script parses the output.
+- If a query is rejected as too long, retry once with the brand, product name
+  and variant inside the stated limit. Do not move the same text to another
+  lookup command or to the web. If the syntax is still unclear, read that
+  command's `--help` once. Do not mention a lookup error you recovered from.
+- Supplement products such as protein powder use
+  `vault-cli supplement search-labels-batch --query '<brand and name>'`. Do
+  not use a food lookup for it; the food database can return unrelated
+  products. For a product in a saved regimen, `vault-cli regimen show <id>`
+  has the ingredient amounts and `regimen list` does not. Look up only what
+  the record lacks.
+- Make one database pass per meal. Do not repeat an equivalent search after a
+  miss. New product details justify one more.
 
-For the first suitable complete totals-only card, include this exact brief
-final text after attachment succeeds. Goal setup is optional for the member;
-the first introduction should not be silently omitted when its conditions hold:
+## Estimating
+
+Every estimate answers two separate questions: what is this food's nutrient
+density, and how much of it was eaten. Take density from label or USDA rows.
+Take identity, amount and preparation from the photo, the description and the
+conversation. Do not let vision or memory answer both.
+
+- List the material components separately. Count visible pieces or slices, and
+  include oil, butter, dressing, sauce, cheese, toppings and caloric drinks that
+  are visible, named or implied by the preparation. Assume restaurant and
+  prepared food has added fat.
+- Prefer the exact product, menu item, variant, UPC or FDC id over a generic
+  stand-in. Do not merge facts from similarly named variants.
+- Read the row's serving basis (per serving, per stated grams, or per 100 g)
+  and scale to the amount eaten. The row's serving size says nothing about how
+  much the member ate.
+- Reuse facts already looked up in this conversation. Quantity corrections and
+  requests for totals do not require re-looking up unchanged products.
+- When the database has no usable row for a branded or menu item, make one
+  targeted web search for the official label/menu (`web.run` when available)
+  and read the page only to settle a material gap. For a generic food, use one
+  authoritative food-composition source. Read `computer-use` only when a
+  material fact needs page interaction. After that one pass, save a clearly
+  marked estimate with the deciding assumption in the source detail. Do not
+  keep researching minor ingredients or ask for brand details that would not
+  move the total.
+- Never present an estimate as a label fact, or a portion judged by eye as
+  measured.
+- Preserve exact evidence requirements for allergies, supplement doses,
+  clinical nutrient limits, and explicit exactness requests. If the fact stays
+  unknown, say so or ask the one necessary question. An estimate cannot confirm
+  safety or an exact figure.
+- When you answer in text instead of with a card, give the central estimate
+  ("about 640 kcal") and add a range only when portion or hidden fat could move
+  it materially. For a label fact you could not find, say what blocked it: no
+  matching label, a label without that field, or an unreachable source.
+
+## The first-card invitation
+
+After the member's first complete totals-only card attaches, end with exactly:
 
 > Here’s your nutrition card. If you’d like, we can set up goals too.
 
-Use it only when canonical memory/instructions and current conversation contain
-no prior decline, number-sensitive preference, or already-sent invitation. Read
-`vault-cli memory show --compact --format json` once when that context is not
-already available. If prior invitation evidence is pending rather than sent,
-defer another invitation; never call pending evidence delivery. Otherwise later
-cards have no invitation. A missing or unreadable preference read means omit the
-optional introduction, not block an otherwise eligible card. Never add analysis,
-numeric values, a second summary, or a follow-up question around that fixed copy.
-The runtime freezes the copy inside the card's single outbound effect and records
-a Context memory note only after successful send confirmation. Do not write an
-“offered” note at staging. Respect prior declines in any wording; an explicit
-“no goals” preference belongs in the existing canonical Instructions/Preferences
-owner. Declining the invitation is not authority to modify unrelated goals.
-Silence, a meal reply, and acceptance of a reminder never accept nutrition goals.
-Read `nutrition-strategy` only when the member engages in goal setup; an invitation
-is neither a numeric proposal nor acceptance.
+Send it once. Skip it when memory or this conversation shows the invitation
+was already sent or is pending, the member declined goals in any wording, or
+numbers are off for them. If memory cannot be read, skip it and still attach
+the card. Add nothing around it. The runtime records that it was sent, so
+write no memory note yourself.
 
+A meal log, a reply to a check-in, silence, or a yes to a reminder never sets,
+accepts or changes nutrition goals. When the member asks to set up or change
+goals for the card, read
+`$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`.
 
-## Provide numbers by default, with safety exceptions
+## When the card is not ready
 
-- Provide calorie and macro estimates by default when logging a meal, using available label facts or clearly marked estimates, such as "about 640 kcal"; mention an assumption only when it changes the totals, such as an unknown amount of oil.
-- Do not estimate or surface calories or macros for intuitive-eating contexts, eating-disorder risk, or number-sensitive users. In symptom or digestion work, keep numbers secondary to the focus rather than leading with them.
-- Structured label facts may remain available when useful; surface the details relevant to the user's request alongside the default totals.
+`totalsOnlyCard` is null in three cases. Look at `dailyTotals.data`:
 
-Before every requested daily nutrition card, apply the concise known-context
-numeric-suitability rule in the `murph.attach_response_card` prompt. Do not run
-a universal medical-history or measurement preflight. Use the fresh canonical
-goal context and the card tool's authority rules
-before selecting the all-null or accepted all-five presentation. Read
-`$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
-and use its proposal workflow only for an explicit target-setting request,
-never merely a meal log, daily summary, numeric-card request, or scheduled closeout.
-Treat a routine daily-card request, including a requested meal estimate needed
-for that card, as one fulfillment workflow. Reply once with the card or one
-concise truthful fallback. Never narrate individual safety, totals, estimation,
-or target-resolution mechanics.
+1. Any metric's `mealCount` is below the top-level `mealCount`. Another meal
+   that day has no nutrition. Read
+   `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/day-recovery.md` and
+   complete that meal before any card. Do not send a partial card or a
+   missing-estimate refusal.
+2. `goalContext.status: ready`. The member has accepted goals. Read the full
+   `murph.attach_response_card` description (native `tool_search` or code-mode
+   `ALL_TOOLS`) and attach the goal-aware card, copying the totals and the five
+   targets unchanged from `dailyTotals.data`.
+3. `goalContext.status` is `conflict`, `incompatible` or `capacity`. Reply
+   with one short truthful line. Attach no card and change no goal.
 
-### Complete an interactive day before attaching its card
+Never write your own totals, targets or analysis in place of a card that could
+not attach. A later meal or goal change makes these totals stale, so read them
+again before another card.
 
-When a fresh selected-date totals read (standalone or combined save) shows any
-metric `mealCount` below the top-level `mealCount`, read
-`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/day-recovery.md` before
-any card. This applies during private meal logging and estimation, explicit app
-submissions, and daily nutrition card or summary requests. Do not end with a missing-estimate refusal or a partial card
-before that recovery.
+For a card or daily-summary request with no new meal, run
+`vault-cli meal totals --from <date> --to <date> --resolve-goals --format json`,
+apply the same three cases, and build the card from the card tool's
+description. Reply once, with the card or one short fallback.
 
-## Ground numeric estimates in label and USDA data
+## Changing a meal that already exists
 
-Treat every calorie or macro estimate as two separate questions:
+Edit the existing meal. Never add a second meal for the same eating occasion.
 
-1. Which nutrient density or exact label facts apply?
-2. How much was actually eaten, including preparation and additions?
+- When the member says what a photo meal was, or gives its portion, run
+  `vault-cli meal edit <meal-id>` with `--name` and the nutrition flags
+  together, then read it back with `vault-cli meal show <meal-id> --format json`.
+  The photo stays on the meal.
+- For a correction, drop excluded components without researching them, rescale
+  the rest from facts already established, edit, and read back. If they asked
+  for totals, answer with the new totals.
+- `meal edit` has no `--with-daily-totals`. After an edit, run the
+  `meal totals` command above for that date and follow "When the card is not
+  ready" for its card.
+- For meals the iPhone app imported (a photo with no nutrition yet), read
+  `$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/SKILL.md` before
+  enriching, merging or deleting them.
 
-Do not let vision or memory answer both. For every numeric meal estimate—including
-interactive meal logs, user-sent photos, automatic-meal-capture enrichment, and
-scheduled closeouts—reuse already verified label or USDA nutrient density for
-unchanged components; resolve remaining identifiable material components from
-the hosted food-label database. Use the photo, description, and conversation
-to estimate identity, quantity, and preparation; use returned label or USDA
-facts for calories and macros. Quantity corrections and requests for totals
-do not require re-looking up unchanged products. Estimate portions, not fresh
-nutrient densities from memory, before the bounded fallback below.
+## Other cases
 
-Before calculating a meal total:
+- **Recipe portion.** A saved recipe lists one whole batch. Estimate the batch
+  size from its ingredient amounts, scale to the amount the member describes,
+  and save a marked estimate. Never ask the member for the batch size.
+- **Restaurant or packaged item.** Resolve nutrition before saving, so the
+  member never has to repeat the item. Use an exact database match. Without
+  one, use the official source, saved as `--nutrition-source label` with its
+  URL in the source detail. Without that, save a marked estimate. Run the
+  database search even when the member sends the restaurant's URL. Ask only
+  when a variant or size would materially change the record.
+- **Fridge or pantry photo.** Look up the distinct visible products in one
+  batch and summarize only the relevant nutrition, ingredient, allergen and
+  uncertainty points. Create food records only when asked.
+- **A food the member wants kept for reuse.** Save or update the food record
+  with serving, ingredients, nutrition and the label lookup id.
+- **Contaminant summary.** Read it silently. Mention it only when asked or
+  when an exact-product alert is material, and read
+  `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/contaminants.md`
+  before discussing one. It describes that exact product only and says nothing
+  about similar names or brands.
+- **How to start tracking meals, or the iPhone app.** Read
+  `$MURPH_ASSISTANT_SKILLS_ROOT/automatic-meal-capture/references/setup.md`.
+  In a group, answer with manual capture (text, voice note, photo).
+- **Saved-meal recall, a day review, stored nutrient totals, and connected
+  carbohydrate, vitamin, mineral or water questions.** Read
+  `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/meal-and-nutrient-reads.md`.
+  Do not list meals before logging a new one.
+- **"Notice patterns before I change anything."** Read
+  `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/observation-runs.md`.
+- **What to eat next, or judging a diet.** Read `nutrition-strategy`.
 
-- Enumerate the material components separately. Count discrete pieces or slices
-  when visible, and include cooking oil, butter, dressing, sauce, cheese,
-  toppings, and caloric drinks when they are visible, named, or strongly implied
-  by the preparation. Do not silently assume restaurant or prepared food has no
-  added fat.
-- Use `vault-cli food search-labels 'rolled oats' --generic`
-  for one item (the documented `--query 'rolled oats'` alternative is also
-  accepted; never supply both forms), or
-  `vault-cli food search-labels-batch` for several before estimating from memory
-  or searching the web. Use `--generic` for ordinary ingredients where a USDA
-  generic row is preferable; use normal lookup for branded, packaged, menu, UPC,
-  or exact-FDC searches. Because `--generic` applies to the whole batch, split a
-  mixed meal into at most two food lookups: one generic USDA batch and one normal
-  branded/menu/package batch. Repeat the singular `--query` flag, for example:
-  `vault-cli food search-labels-batch --generic --query 'chickpeas mature seeds cooked' --query 'rice brown long-grain cooked'`.
-  Do not pass a JSON array or invent `--queries`. Lookups use the compact
-  default output; add `--format json` only when a script parses the result. When independent label
-  lookups and a needed compact memory read are known, run them in the same
-  tool round; save only after their results are available.
-  For a syntax failure, correct the returned field using these examples.
-  If a package description exceeds the query length limit, retry once with
-  its brand, product name, and distinguishing variant within the returned limit;
-  preserve product identity rather than abandoning the lookup or searching the web.
-  Do not repeat the rejected description under another lookup command.
-  A successful repair needs no internal error explanation in the reply.
-  If still unclear, read the command's `--help` once. Do not fetch the full
-  output schema to discover a query flag or positional argument.
-  The default returns one compact nutrition match
-  per component with serving, calories, protein, carbohydrate, fat, fiber, and
-  a bounded exact-product contaminant summary. For a routine meal log, inspect
-  `contaminantSummary` silently and mention it only when the user asks or a
-  material exact-product alert warrants a brief, source-specific screening
-  caveat; read `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/contaminants.md`
-  before discussing one. Increase `--limit` only for an ambiguous match, and
-  use `--full-label` whenever the user needs a fact outside that compact
-  response. This includes sugars, saturated fat, cholesterol, sodium or other
-  micronutrients, ingredients, allergens, or complete contaminant observation,
-  sample, source, and threshold details.
-- For a supplement product such as a protein powder, including one from a saved
-  supplement regimen (read it with `regimen show`; `regimen list` omits
-  ingredient amounts), look up only requested facts the record lacks with
-  `vault-cli supplement search-labels-batch` and its saved brand and name, in
-  the same tool round as any food lookups. Do not use a food lookup for it; the
-  food database can return unrelated products.
-- Prefer an exact visible or user-named product, restaurant item, variant, UPC,
-  or FDC id over a nearby generic substitute. Never merge nutrition from
-  similarly named variants without evidence that they are the same item.
-- Read the returned serving basis before scaling. Determine whether nutrition is
-  per labeled serving, per stated gram amount, or per 100 g, then scale it to the
-  estimated amount actually eaten. A database serving is not evidence that the
-  user ate exactly one serving.
-- Sum component estimates only after that scaling. Give a central estimate plus
-  a useful range when portion size, preparation, hidden fat, or exact identity
-  could materially move the total. Avoid fake precision; set confidence from
-  the weakest material identity, quantity, or preparation assumption.
+## Wording
 
-### Bounded source fallback and corrections
-
-- Make one database pass for unresolved components, batched as above. Correct
-  malformed queries once. Increase the limit only for a genuinely ambiguous
-  match; do not repeat equivalent searches after a miss or clearly wrong item.
-- For unresolved branded or menu items, make one targeted web search for the
-  official label/menu (`web.run` when available). Use returned official text
-  when product, variant, serving, and requested values are clear; read the page
-  only to resolve a material gap or conflict. For an unresolved generic food,
-  target an authoritative food-composition source. Read `computer-use` and use
-  its bounded browser recovery only when a material fact requires interaction
-  or visual inspection unavailable through web search/text reading.
-- After this bounded pass, keep the requested facts it found. For each fact
-  still unresolved, briefly name the concrete blocker, such as no matching
-  label, a label without that field, or an unreachable source. Give a clearly
-  marked estimate or useful range only for those routine calories/macros,
-  naming only an assumption that materially changes it.
-  Do not keep researching minor ingredients or ask for brand details that would
-  not meaningfully change the answer. Never invent an exact label or imply that
-  a visual portion estimate was database-measured. New product identity or
-  label evidence can justify another lookup; repetition alone cannot.
-- Preserve exact evidence requirements for allergies, supplement doses,
-  clinical nutrient limits, and explicit exactness requests. If the critical
-  fact remains unknown, state it or ask one necessary question; an estimate is
-  not proof of safety or exactness. Numeric safety exceptions still apply.
-- On a correction, remove excluded components without researching them and
-  rescale unchanged components from established serving facts. If editing a
-  saved meal, read that record once when needed, edit the authorized record,
-  and verify the result. Answer a totals request with the recalculated totals,
-  never just an ingredient list or a new meal record.
-
-For a fridge or pantry photo, enumerate distinct visible products and resolve
-them in one batch. Summarize only relevant nutrition, ingredient, allergen, and
-uncertainty flags. Do not create recurring food records from a scan unless the
-user asks.
-
-When an exact label matters to a meal, preserve serving size and returned label
-nutrition on the meal with label-based provenance. For USDA generic rows, use
-database provenance and retain the lookup id or source detail used for scaling.
-For a user-approved recurring or pantry item, save or update the food record with serving, ingredients,
-nutrition, and the label lookup id in provenance so it can be found again.
-
-Treat contaminant observations as exact-product lab context only. Never infer
-them across similar names, brands, ingredients, categories, or product lines;
-absence of an exact test is not proof that a product is clean or safe.
-
-## Bounded observation runs
-
-When the user wants Murph to notice patterns before changing behavior, read
-`$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/references/observation-runs.md`.
-
-## Safety and sharing
-
-- Private is the default. Share or generate a group-ready recap only after explicit opt-in, and omit incidental sensitive details.
-- Avoid good/bad, clean/dirty, cheat, purity, compliance, streak, and score language.
-- When eating-disorder risk or number sensitivity is visible, avoid unsolicited nutrition numbers and minimize prompts. Encourage appropriate professional support when risk or significant symptoms warrant it.
-- Do not overclaim from sparse or confounded observations. Prefer language such as "showed up together" or "was associated with."
+Leave out good/bad, clean/dirty, cheat, streak and score language. In symptom
+or digestion work, lead with the symptom question and keep numbers secondary.
+Describe a pattern as "showed up together" or "was associated with", because a
+few logged days cannot show cause.

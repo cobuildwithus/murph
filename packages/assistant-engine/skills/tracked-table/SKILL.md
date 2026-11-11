@@ -1,236 +1,234 @@
 ---
 name: tracked-table
-description: Use when a private Murph member asks to start or update a live workout, log or correct sets, finish a workout, show a workout table, create a structured tracker, use a native workout card, or refresh a tracked table. Owns canonical live-workout mutations and compact native table presentation.
+description: Live workouts in a private conversation. Start one, log, correct or clear sets, finish it, and show the workout card. Also covers plain compact tables.
 ---
 
-# Tracked workout and table
+# Live workouts and tables
 
-## Goal
+A live workout is one saved workout event. The member logs by texting, each
+change is one `vault-cli workout` command on that event, and the reply is a
+fresh card built from the saved result. Keep no other copy of the workout: no
+table file, memory note or second record. A card is a snapshot. Cards already
+sent never change, and the buttons on an iMessage card only put a command into
+the member's message box for them to send.
 
-Make workout logging easier than opening a dedicated tracker while keeping one canonical workout record that the member can inspect for months. Text is the write interface; a compact table is an immutable presentation snapshot.
+A saved workout format holds a plan: its exercises, planned sets and targets.
+The workout event holds what happened. A target is never written into a set as
+if the set were done.
 
-A single total set count shared by multiple exercises without a per-exercise allocation is not complete or unambiguous. Ask how many sets belong to each exercise and create nothing; never apply the total to every exercise or divide it yourself.
+## Commands
 
-A tracked `compact_table` may add structured `workout` detail for one open or just-finished strength workout. An ordinary `compact_table` remains the right surface for arbitrary tables, historical comparisons, or tracked data that is not one live workout.
+```sh
+# Start with the member's own exercises: one --exercise per exercise, in order
+vault-cli workout start "<name>" \
+  --exercise 'name=<exercise>;mode=<mode>;unitOverride=lb|kg;sets=<n>;reps=<n>' \
+  --exercise 'name=<exercise>;mode=<mode>;targetWeight=<n>;targetWeightUnit=lb|kg;sets=<n>' \
+  [--type <activity type>] [--note "<text>"] [--started-at <ISO time>] --format json
 
-## Core invariant
+# Start from a saved format
+vault-cli workout start --routine "<format name or id>" --format json
 
-A saved workout format owns the plan: ordered exercises, stable `sourceExerciseId` values, planned sets, and target values. One canonical `activity_session` workout event owns what actually happened: session timing, ordered exercises, completed set values, notes, and the routine reference.
+# Read
+vault-cli workout show <evt_id> --format json
+vault-cli workout format show "<format name or id>" --format json
+vault-cli workout units show --format json
 
-The canonical event is the only mutable authority. Never create a parallel tracker file, table document, memory record, database row, mutable card record, or app-only workout state. Cards are immutable presentation snapshots. The Messages extension is offline and unauthenticated; its controls only insert visible commands into the current composer, and the member still sends the message. Only the normal Murph message path may mutate canonical workout state.
+# Log or correct one set
+vault-cli workout set log ["<exercise name>"] --workout-id <evt_id> \
+  [--exercise-id <id> | --exercise-order <n>] --set-order <n> \
+  [--reps <n>] [--weight <n> --weight-unit lb|kg] [--duration-seconds <n>] \
+  [--distance-meters <n>] [--rpe <n>] [--bodyweight-kg <n>] [--assistance-kg <n>] \
+  [--added-weight-kg <n>] [--type normal|warmup|dropset|failure] \
+  [--note "<text>"] [--require-existing-set] --format json
 
-A prior bubble never changes in place. Updating a workout means mutating the canonical event through the guarded command surface, verifying the result, and, when canonical state changes, sending a new snapshot on a supported private card route. The native URL must not contain the canonical event id, member identity, credentials, or write authority.
+# Undo one set without renumbering the others
+vault-cli workout set clear ["<exercise name>"] --workout-id <evt_id> \
+  [--exercise-id <id> | --exercise-order <n>] --set-order <n> --format json
 
-For ordinary live logging, use the targeted workout commands below. Do not reconstruct and replace the complete nested exercise/set array in model-authored shell arguments. The targeted commands read, preserve, validate, and rewrite the complete canonical structure inside the workout use-case boundary.
+# Add or remove an exercise
+vault-cli workout exercise add "<exercise name>" --workout-id <evt_id> --order <n> \
+  --mode <mode> [--unit-override lb|kg] [--sets <n>] --format json
+vault-cli workout exercise remove ["<exercise name>"] --workout-id <evt_id> \
+  [--exercise-id <id> | --exercise-order <n>] --expected-revision <n> --format json
 
-## Live workout command surface
+# Store or withdraw "every set of this exercise is N reps"
+vault-cli workout exercise set-reps ["<exercise name>"] --workout-id <evt_id> \
+  [--exercise-id <id> | --exercise-order <n>] --reps <n> --format json
+vault-cli workout exercise set-reps ["<exercise name>"] --workout-id <evt_id> \
+  [--exercise-id <id> | --exercise-order <n>] --clear --format json
 
-- Start: `vault-cli workout start [name]` with either optional `--routine <format lookup>` or one repeated `--exercise 'name=...;mode=...;sets=...;reps=...;targetWeight=...;targetWeightUnit=lb|kg'` value per ordered ad-hoc exercise. `targetWeight` and `targetWeightUnit` are an optional pair for an exact ad-hoc load; use the unit-selection rule in the required start flow below. Never combine `--routine` and `--exercise`. Preserve the returned canonical `eventId`.
-- Read one workout: `vault-cli workout show <evt_id> --format json`.
-- Delete one exact workout: `vault-cli workout delete <evt_id> --expected-revision <n>`. The expected revision must come from the exact approved workout read.
-- Add an exercise: `vault-cli workout exercise add <name> --workout-id <evt_id> --order <n> --mode <mode> [--unit-override <lb|kg>] [--sets <n>]`. An explicit `--sets` count is a finite plan; omitting it creates one targetless log slot.
-- Store a fixed repetition prescription: `vault-cli workout exercise set-reps [exercise] --workout-id <evt_id> --reps <n>`.
-- Log or correct a set: `vault-cli workout set log [exercise] --workout-id <evt_id> --set-order <n>`.
-- Undo one set without shifting later set numbers: `vault-cli workout set clear [exercise] --workout-id <evt_id> --set-order <n>`.
-- Finish an early or targetless session: `vault-cli workout finish --workout-id <evt_id>`.
+# End a workout early, or end one that has no planned sets
+vault-cli workout finish --workout-id <evt_id> --format json
 
-For state-changing workout commands, inspect the full code-mode command result rather than only `r.output`. If it includes a `session_id`, call `write_stdin` until the command is terminal; allow a 30-second initial yield. Never continue, retry, or replace a workout write while its outcome is unknown.
+# Delete a whole workout (the revision comes from a workout show of that workout)
+vault-cli workout delete <evt_id> --expected-revision <n> --format json
+```
 
-Saved target values remain in the workout format. A newly started session contains unlogged set coordinates, but no planned target value is copied into an actual set field. A target is not a completed set. Read the referenced routine with `vault-cli workout format show <routineId> --format json` when a card needs target labels; never copy those labels into canonical actuals.
+Fields inside one `--exercise` value are separated by semicolons.
 
-Every ad-hoc exercise must have one explicit editor mode. Use `weight_reps` for cable, machine, dumbbell, barbell, kettlebell, or other resistance movements even when the member has not supplied the load yet; the missing load stays an empty weight field. Use `bodyweight` for unloaded repetition work, and use the existing assisted-bodyweight, weighted-bodyweight, duration, or cardio mode only when that result family is actually intended. Never omit mode to represent an unknown actual. If the exercise's result family is genuinely ambiguous, ask one narrow question before writing it.
+- `mode` is required. Use `weight_reps` for cable, machine, dumbbell, barbell,
+  kettlebell and other resistance work, even when the member has not given a
+  load yet. Use `bodyweight` for unloaded repetitions. Use
+  `assisted_bodyweight`, `weighted_bodyweight`, `duration` or `cardio` only
+  when that is the kind of result the member will report. Ask one question
+  when you cannot tell which kind it is.
+- Every `weight_reps` exercise needs a unit, or the command is rejected. When
+  the member stated a load, pass `targetWeight=<n>;targetWeightUnit=<unit>`.
+  Otherwise pass `unitOverride=<unit>`. Take the unit from the member's
+  message. If they gave none, run `vault-cli workout units show --format json`
+  and use the saved strength unit. If there is none saved, ask whether they
+  mean lb or kg. Never make up a unit or a load. A `bodyweight` exercise takes
+  no unit.
+- `sets=<n>` is the number of sets the member stated. When they gave no number,
+  leave `sets` out, and the exercise gets one open slot to log into.
+- `reps=<n>` is only for one exact count the member gave for every set of that
+  exercise ("3 sets of 15"). Never take it from a range, "as many as possible",
+  a target, an earlier workout or your own suggestion.
 
-Every `weight_reps` exercise also needs an exact unit hint so the native editor can render separate weight and repetition fields before any load is logged. Use an explicit lb/kg unit from the current request when present. Otherwise read `vault-cli workout units show --format json` once and use the saved strength unit. If neither exists, ask whether the member means lb or kg; never invent a unit or a load. Put the hint in `unitOverride` for an initial exercise or `--unit-override` for a later addition. An exact `targetWeightUnit` already supplies the same hint for an initial exercise. Never put a resistance-unit hint on an unloaded `bodyweight` exercise.
+After any command that changes a workout, read the whole command result. If it
+contains a `session_id`, call `write_stdin` until the command has finished, and
+allow 30 seconds for the first wait. Never retry or replace a workout write
+while its outcome is unknown, because that can create a second workout or a
+second set.
 
-## Repetition defaults
+## Which workout
 
-Exact-read the workout first. A terse completion authorizes one set; it does not renew an older every-set instruction. Use `memberRepsPerSet` from the exact workout read before asking for a value:
+Act on a workout only when you have its exact id from one of three places: the
+result of a start or write earlier in this exchange, the marker on the card the
+member's message came from, or the workout reference the host attached to this
+message. Check that each write result names that same id. With no id, or more
+than one plausible workout, ask which workout and set the member means. Never
+pick the most recent workout.
 
-| Exact exercise field | Action for a completion without repetitions |
+Once a workout is established in the exchange, short follow-ups such as
+"set 2 done" stay on it, even when the member calls it a routine, spreads the
+sets across the day, or leaves out the exercise name. Other unfinished workouts
+are fine and stay untouched. Starting a new workout never ends an older one.
+
+Read the workout with `workout show` before a write unless this conversation
+already shows its current state, from a start or write result or from the card
+you sent after it.
+
+When the member names yesterday, an older date, an older workout id or an older
+card, change only that workout.
+
+## Start a workout
+
+A request to start a live workout is consent to create it, so run the start
+before replying.
+
+1. **Work out the exercises.** If the member names a saved format, look it up
+   with `workout format show`. Otherwise keep every distinct exercise they
+   named, in their order, including close variations. Dictated messages often
+   lack punctuation: "standing seated and kneeling cable presses" is three
+   exercises, standing cable press, seated cable press and kneeling cable
+   press. Ask only when the exercise names are still unclear.
+2. **Check the set counts.** If the member gives one total for several
+   exercises without saying how it splits ("8 sets total of rows and curls"),
+   ask how many sets each exercise gets and create nothing yet. Never divide
+   the total yourself. A count given per exercise ("3 sets each") needs no
+   question.
+3. **Run one `workout start`** that contains every exercise. Use `--routine`
+   for a saved format or `--exercise` values for the member's own list, never
+   both. Never start an empty workout and add the exercises afterward. Never
+   run the start a second time because a card or reply had a problem.
+4. **Keep the returned `eventId`** and use it for every later command.
+5. **Send the card** built from the start result and end the turn with no
+   text. For a saved format, read the format first so the card can show its
+   targets.
+
+`workout format log` records a workout that is already over. Never use it to
+start a live one.
+
+## Log, correct or clear a set
+
+Every set command passes `--workout-id`, one exercise selector and
+`--set-order`. Prefer `--exercise-id`. Otherwise use `--exercise-order` or the
+exact exercise name. Sending the same command again lands on the same set, so a
+repeat never adds a duplicate.
+
+Pass only the values the member stated. Never fill in weight, repetitions,
+effort, assistance or rest from a plan, an earlier workout, the time elapsed, a
+reminder or your own suggestion.
+
+- "Bench 185 for 8" logs the next open bench set:
+  `--weight 185 --weight-unit lb --reps 8`.
+- "Same weight, 6" reuses the weight of the set just before it in that
+  exercise, because the member said "same".
+- "Last rep spotted" goes on that set as `--note "final rep spotted"`. Save
+  every remark about a set in its note so it is not lost in the chat. If the
+  member uses shorthand of their own, ask once what it means, then save it as
+  a plain note.
+- "Ok", "yes" and "got it" are acknowledgements. They do not complete a set.
+- When a new result conflicts with a set that is already logged and the
+  member did not clearly ask for a correction, ask.
+- An extra set on a finished workout is allowed when the message names that
+  workout and the exercise and set. It moves the workout's end time to that
+  set.
+
+Carry out every change the message asks for, in order. Then send one card from
+the final result, with no text and no cards in between. If nothing changed,
+send no new card.
+
+### When the member says "done" without a count
+
+Run `set log` without `--reps`. What happens depends on the exercise's
+`memberRepsPerSet` in the workout:
+
+| `memberRepsPerSet` | What to do |
 | --- | --- |
-| Positive number | Log the named set with the stored rule; omit `--reps`. |
-| `memberRepsPerSet: null` | Explicit withdrawal. Ask for this set's repetitions. Do not call `set-reps` or log a count from saved Instructions, a plan, or earlier sets. |
-| Field omitted | First exact-read the relevant saved canonical source. Restore only an explicit member every-set instruction whose scope proves that it applies to this exact workout exercise; matching exercise names alone is insufficient. Otherwise ask for repetitions before attempting a set log. |
+| A number | The command fills in that count. One "done" logs one set. |
+| `null` | The member withdrew the every-set count. Ask for this set's repetitions. |
+| Not present | The command is rejected. If a saved instruction from the member clearly gives an every-set count for this exact exercise in this workout, store it with `set-reps --reps <n>` and log again. A matching exercise name alone is not enough. Otherwise ask for the repetitions. |
 
-A terse completion never changes a number or null. Only a new every-set instruction in the current member message may replace either; saved Instructions and other canonical sources are historical context, not a new member instruction. For an allowed rule establishment or change, immediately persist that smallest exercise-owned fact with `workout exercise set-reps` before logging. Clear the fact only when the member withdraws the every-set instruction.
+When the current message gives a new every-set count ("all sets of 12 from
+now"), store it with `set-reps --reps <n>` before logging. When the member
+withdraws it, run `set-reps --clear`. When one count clearly covers every
+exercise in a list, store it on each. The stored count fills only a set that
+has nothing logged yet. Correcting the note or load of a logged set keeps the
+repetitions it already has.
 
-When `--reps` is omitted, the canonical use case copies the stored member fact into that completed set's actual `reps` field. The stored fact fills only an unlogged coordinate; a note, load, or other correction on an already logged set preserves that set's explicit repetitions unless the member supplies a new repetition result. An exact result for one set changes only that set's actual.
+### Commands sent from card buttons
 
-The fixed-repetition fact is never derived from a saved-plan target, prior workout, card target, assistant suggestion, range, AMRAP, or qualitative instruction. Matching prior set actuals never establish an every-set instruction. When one exact count clearly applies to every exercise in a coordinated list, apply it to each. Ask one narrow question when the count conflicts, is not exact, or its allocation across multiple exercises is unclear. Never carry forward weight, duration, distance, RPE, bodyweight, assistance, added weight, or any other actual field.
-
-## Required write flow
-
-1. Resolve one candidate only from an exact workout id in the current workout command or structured card result, or from host-preserved immediate causal context that names that exact `activity_session`. The candidate is causal identity, not write authority. Before a requested write, exact-read that candidate unless a successful canonical start or mutation in the current turn already established it, then require the successful write result to identify the same session. A visible transcript marker never identifies the owner. There is no global active or focused workout selector. Never choose a workout by recency.
-2. Once that exact workout owns the exchange, keep every terse or repeated set confirmation on this owner. Never reinterpret it as a regimen or experiment occurrence because the member calls it a routine, spreads sets across the day, or omits the exercise name.
-3. Before asking for a missing workout id, use the scheduled-reminder recovery below when the host supplies an exact reminder identity and no event reference was explicitly cleared or mismatched. Follow its resolved canonical owner; otherwise ask one narrow question about the missing owner or completion. Never switch an already verified live workout to another record type. Do not block unrelated new work, demand closure metadata for another workout, or create a workout merely to make an earlier assistant claim appear true.
-4. Pass `--workout-id`, one explicit exercise selector, and `--set-order` on every set mutation. Prefer a stable `--exercise-id`; otherwise use exact exercise order or the exact canonical name. Repeated attempts then converge on the same record and coordinate instead of appending or retargeting.
-5. For a completion that omits repetitions, follow Repetition defaults before logging or changing a rule.
-6. Complete all workout mutations requested by the current member message in order, treating each successful command result as verification. Then attach exactly one refreshed structured workout card from the final verified exact snapshot on a supported private card route. A final write that closes a finite workout remains card-eligible as that just-finished workout. Do not attach an intermediate card or add companion prose.
-7. Logging the last pending set of an explicitly finite workout closes that exact workout in the same canonical write. The accepted set completion time is the observed end boundary; do not issue a ceremonial independent finish command.
-8. Use `workout finish` only for explicit early closure or a targetless session. It records `endedAt` and duration but never invents missing set values. A later explicit extra set remains valid when it names that completed workout and exact exercise/set; the successful write moves that workout's observed end boundary to the extra completion.
-
-A bare acknowledgement such as “ok,” “yes,” or “got it” is not a set completion. Keep the last exact coordinate the member identified. If that coordinate still needs an actual result, ask one narrow question; if it already matches, make no workout mutation. Never advance to another set from an acknowledgement.
-
-Create-first replacement is limited to one exact ad-hoc unfinished draft that
-the batch-start command can represent without loss. Historical intent has
-precedence: a request naming yesterday, an older date, a completed workout, an
-older workout id, or an older card stays on the exact-record correction path
-and never enters this start-and-delete workflow.
-A saved format or an exact-reference reminder retains its specialized start
-and exact-record flow. An ordinary request to start a workout does not itself
-authorize deletion.
-
-Before proposing replacement, exact-read the named workout. It qualifies only
-when it has no `endedAt`, routine ownership, completed-set actuals, set notes,
-metrics, heart-rate zones, route, media, attachments, provider workout
-identity, or other member-owned or history-bearing field that the new start
-cannot preserve. Every existing set must be an unlogged placeholder. If any
-eligibility fact is missing or the replacement cannot faithfully represent the
-record, retain the old workout and use the existing exact-record correction
-path; never issue the start-and-delete sequence. A broader historical
-replacement requires a separately specified, loss-aware operation and
-approval.
-
-When the member explicitly directs Murph to replace a qualifying draft, or
-immediately gives an unambiguous affirmative to a bounded proposal, retain its
-canonical id and `lifecycle.revision`. The proposal names the draft that may be
-deleted, says that its original start time, activity type, and session note will
-be preserved unless the member explicitly changes them, and repeats the
-replacement title, every exercise in order, every stated set count, and any
-exact repetition count the member assigned to every set of that exercise.
-
-After explicit approval:
-
-1. Run one `vault-cli workout start <name>` command with the qualifying draft's
-   exact `--started-at`, `--type`, and, when present, `--note`, plus one repeated
-   `--exercise` specification per requested exercise. Change or omit those
-   preserved session fields only when that change was explicitly approved.
-   The start command must contain the complete ordered initial exercise list;
-   never create an empty workout and follow it with exercise mutations.
-2. Verify the successful start result identifies the new canonical `eventId`
-   and contains the complete ordered requested workout. A verified pre-write
-   validation failure stops with the old workout unchanged. If the result is
-   missing, interrupted, or otherwise ambiguous after invocation, treat the
-   approval as consumed: keep the old workout, do not delete it, and never run
-   `workout start` again for that approval.
-3. Recover an ambiguous start before any later creation attempt. Run one bounded
-   `vault-cli workout list --from <old-start-local-date> --to
-   <old-start-local-date> --limit 200 --format json`, exclude the old event id,
-   and exact-read every remaining candidate with `workout show`. A candidate
-   matches only when its `recordedAt` falls between approval and recovery and
-   its title, activity type, session note, preserved start time, complete
-   ordered exercises, set counts, and repetition facts exactly equal the
-   approved replacement. Exactly one match recovers its canonical id and may
-   continue to guarded deletion. With zero matches, multiple matches, an
-   incomplete bounded list, or any failed read, keep every record, disclose the
-   uncertainty and exact candidate ids, and require a fresh bounded member
-   choice. Never retry creation or infer a candidate by recency.
-4. Only after a verified creation or exactly-one recovery, run
-   `vault-cli workout delete <old_evt_id> --expected-revision <proposal_revision>`.
-   Never delete first.
-5. If the guarded delete conflicts or fails, keep both workouts.
-   Never roll back or delete the successfully created replacement. Report the
-   exact ids and failure, reconcile from fresh exact reads, and obtain new
-   approval before any later deletion.
-
-Other unfinished workouts are valid and remain untouched. Omit an unstated set
-count so that exercise gets one targetless pending slot. Pass `reps=<n>` only
-for one exact member-stated integer count that applies to every set; never
-derive it from a range, AMRAP, target, prior workout, or assistant suggestion.
-
-## Scheduled reminder relationship context
-
-A scheduled reminder and its later ordinary private-chat follow-up may carry host-preserved `automationId`, occurrence timestamps, `supportSeriesId`, and exact `contextReferences`. Preservation proves only which ids were stored with the delivered reminder. References are routing and interpretation context, not read or write authority, and native iMessage Reply is not required.
-
-When a private set-completion reply follows a reminder with an exact host-preserved `automationId` but no workout reference, recover the saved reminder definition before asking the member to repeat the routine. Call `murph.automation` with `action: inspect` and that exact id as `lookup`. Inspect its returned `contextReferences` before interpreting its returned `title` and `instructions` together with the delivered cue; exact-read the referenced canonical owner. The definition is saved context, not evidence that a workout event exists or that any set was completed. Do not patch the reminder during recovery.
-
-If a returned reference or the definition identifies a regimen or experiment, resolve that canonical owner through its ordinary domain skill instead. A resolved experiment occurrence needs no daily workout; missing reminder provenance uses that owner's ordinary completion path. If it names a saved workout format, exact-read that format. Only an unambiguous standalone workout definition without an existing event or saved format uses the member's explicit completion to start one ad-hoc workout and record the reported set. Start exactly once through the complete `workout start` path, preserve its returned id, and log only the reported coordinate and actuals. A numbered reminder never proves that earlier sets happened: leave every unreported set pending. Do not select or finish an older workout by recency. Subsequent replies use the newly established exact event normally. Missing definition fields, an ambiguous exercise or owner, or conflicting context still require one narrow clarification and no write; an explicit cleared or mismatched event reference never enters this reference-missing recovery path.
-
-When saving or patching a reminder for a saved workout, resolve the routine with a successful current `vault-cli workout format show <lookup> --format json` read or format-creation result, then copy its returned id into `contextReferences: [{ "entityKind": "workout_format", "entityId": "<exact_format_id>" }]`. If current evidence does not identify exactly one format, save no reference. On a later completion, inspect that exact format before relying on it. Never synthesize the id from reminder text, title, card state, or recency.
-
-An exact `workout_format` reference can authorize starting that routine when the member's current message clearly requests or completes one of its sets. Run `workout start --routine <exact_format_id>`, preserve the returned workout id, and apply only the stated set to that new exact record. An older unfinished workout neither blocks this start nor needs to be closed first. The reminder does not establish any older workout's end time, and Murph never derives one from `durationMinutes`, a reminder time, a later reply, local midnight, plan targets, or last-write time.
-
-When immediate causal context instead names an existing exact workout id, exact-read it with `vault-cli workout show <evt_id> --format json` and mutate only that record. If the message and relationship context do not identify one exact workout and coordinate, ask which one is intended. Missing, completed, or changed coordinates fail closed without retargeting; a completed exact workout may still accept a clearly requested extra set.
-
-The host may preserve one exact `activity_session` reference from the latest explicit workout-context decision after a successful live-workout start or matching exact-workout mutation. Treat it as causal identity, not write authority: exact-read it, apply only the member-authorized mutation, and require the successful result to identify the same session. A later unrelated assistant delivery that makes no workout-context decision is transparent. An explicit clear, missing or multiple session identities, a mismatched result, or a conflict ends implicit continuation; never recover it by recency.
-
-Explicit historical intent remains explicit targeting. A correction naming yesterday, an older date, an older workout id, or an older card updates only that exact historical event; reminder context never redirects it to a different routine or closes another workout as a side effect.
-
-The legacy `workout edit` full-structure replacement remains available only for a deliberate identity-preserving structural operation that the targeted surface cannot express, such as a reorder, addition, or coordinated field edit. Read the complete record first and preserve every unrequested field. Keep an existing `sourceExerciseId` on that same exercise; without one, keep its exact canonical name. Presentation order never proves exercise identity. The CLI refuses a structured replacement that omits, ambiguously matches, or semantically replaces a saved exercise or omits a saved set. Use `--clear-workout` only when the member explicitly wants to remove all structured workout details while preserving the event, and use `vault-cli workout delete <evt_id> --expected-revision <n>` only when they want to remove the entire record and the revision comes from that exact approved read.
-
-## Starting a workout
-
-1. Resolve the requested saved format when the member names one. If there is no reusable plan, preserve the complete ordered list of every distinct exercise the member named, including closely related variations; never collapse or omit one.
-   Dictation and compact messages may omit punctuation. When ordinary coordinated position, angle, grip, stance, or equipment modifiers clearly share one exercise head, expand each modifier into one distinct exercise by carrying the shared exercise head across the list. For example, `standing seated and kneeling cable presses` names `standing cable press`, `seated cable press`, and `kneeling cable press`. Ask one narrow question only when the exercise identities remain genuinely ambiguous; do not ask what ordinary exercise modifiers mean merely because punctuation is absent.
-2. For a complete unambiguous new-workout request, run exactly one `vault-cli workout start`, passing `--routine` only for a saved format already resolved in step 1 or one repeated `--exercise` specification per ad-hoc exercise. Never pass an inline exercise plan as `--routine`, and never retry the start after a card or reply problem. Never combine routine and ad-hoc inputs, and never create an empty workout followed by initial exercise mutations. Starting a new workout is independent of every older unfinished workout and never infers or writes an end for another record.
-3. Put each stated set count in that exercise's initial specification; the count is finite. When no count is stated, omit `sets` so creation supplies one targetless unlogged slot, not a claimed plan or completed set.
-4. Put `reps=<n>` in the initial specification only when the member assigns one exact integer repetition count to every set of that exercise. Use `workout exercise set-reps` only for a later change to that exercise-owned fact.
-5. For an ad-hoc exact load, include `targetWeight` and `targetWeightUnit` in the matching `--exercise` value; never leave a member-stated load only in the workout title or response prose. An explicit unit in the current request wins. If the member gives a load without a unit, read `vault-cli workout units show --format json` and use the saved strength unit; when no preference exists, ask which unit they mean. Follow the unit-hint rule above for every `weight_reps` exercise, including one whose actual or target load is still unknown.
-6. Preserve the returned canonical event id and pass it to every later mutation. Treat the successful complete start result as verification and use its event id for the card immediately. Read the format separately before presenting saved-format targets.
-7. On a supported private card route, immediately attach exactly one structured workout card from that verified snapshot and end with no companion prose. For each returned exercise with `memberRepsPerSet`, copy `<n> reps` into every pending set's card target; never drop that canonical target from the widget. When `targetWeightPerSet` and `targetWeightUnit` are present, combine those exact typed facts with the repetition target instead of omitting the load. Never stop after the start command with a text-only acknowledgement or wait for another card request.
-
-Never use `workout format log` to start a live workout. That command records a completed workout from a format; a live session keeps targets in the format and actual performance in the event.
-
-## iMessage card commands
-
-Commands inserted by an iMessage card use explicit one-based presentation coordinates:
+An iMessage card inserts one of these for the member to send:
 
 - `Log workout exercise 2 set 1: ...`
 - `Correct workout exercise 2 set 1: ...`
 - `Finish this tracked workout.`
 
-The durable transcript marker—not the inserted sentence or native URL—owns the canonical event id and snapshot instant. Resolve exactly that card's marker. If multiple cards are plausible or the marker is missing, ask which workout rather than choosing the newest record.
+The numbers are positions on that card, counted from 1.
 
-Then:
+1. Take the workout id from that card's marker in the conversation. If the
+   marker is missing or more than one card could be meant, ask which workout.
+2. Read the workout with `workout show`. If it is missing, say so and stop. Do
+   not move to another workout.
+3. For Finish, run `workout finish`. A workout that is already finished needs
+   nothing more.
+4. Check that the card's exercises and set counts still match the saved
+   workout. If a position no longer points to exactly one set, ask. An old card
+   never overwrites a newer result.
+5. Turn each position into the saved `order` value, since a saved format can
+   skip numbers. Then run `workout set log` with `--exercise-order`,
+   `--set-order` and `--require-existing-set`, passing only what the member
+   stated. Use the same selectors for `workout set clear`.
+6. Send the refreshed card.
 
-1. Read the exact event with `vault-cli workout show <evt_id> --format json`. A missing or mismatched event fails closed instead of falling through to another workout.
-2. For Finish, run `vault-cli workout finish --workout-id <evt_id>`. An already-completed return is convergence.
-3. Reconcile the card's ordered exercise names and set counts against the exact canonical event. If a displayed coordinate no longer maps uniquely, fail closed. An old card never authorizes overwriting a newer actual.
-4. Map presentation positions to canonical exercise and set `order` values; saved formats may use sparse orders. Use `workout set log ... --workout-id <evt_id> --exercise-order <exercise-order> --set-order <set-order> --require-existing-set` for a card log or correction, passing only member-stated actuals. Use the same selectors for `workout set clear`.
-5. Persist qualitative annotations such as spotted reps on that exact set's canonical `note`.
-6. Treat the successful targeted command result as verification and send the refreshed immutable card.
+## Finish
 
-An exact replay converges on the same coordinate and never appends a duplicate. A clearly requested extra set may append only when the message names the exact workout and exercise/set coordinate; that path may extend a completed finite workout. If a later command conflicts with an existing actual and does not clearly request a correction, ask one narrow question.
+Logging the last planned set of a workout that has planned sets finishes it in
+that same write, with that set's time as the end. Do not run `workout finish`
+afterward.
 
-## Interpretation rules
+Run `workout finish` only when the member ends early or the workout has no
+planned sets. When one message has both a set result and "I'm done", log the
+set first and then finish. Never work out an end time from a reminder,
+midnight, a stored duration or the last write.
 
-- “Bench 185 for 8” may log the next unlogged bench set only when immediate causal context identifies one exact workout and one bench exercise.
-- “Same weight, 6” may reuse only the immediately preceding canonical set for that same exercise, and only because the member explicitly said “same.”
-- “The next set was 8 reps” may target the clearly current exercise only when the exact workout id remains causal. If more than one workout or exercise is plausible, ask one narrow disambiguating question.
-- Never infer weight, repetitions, effort, assistance, rest, or failure from a plan, prior workout, elapsed time, reminder, or assistant suggestion. Exact member-stated ad-hoc targets may be read from `memberRepsPerSet`, `targetWeightPerSet`, and `targetWeightUnit`; they remain planned defaults until the member explicitly logs the set.
-- Treat member-defined shorthand as ambiguous until explained. Once defined as spotted repetitions, persist a plain set note such as `note=final rep spotted` or `note=final 2 reps spotted`; do not reinterpret it as assisted-load data.
-- Persist every qualitative annotation on that exact set's canonical `note`. Never leave meaningful notation only in conversation text, an exercise summary, or the card snapshot.
-- An isolated completion with neither exact causal workout identity nor a recovered standalone reminder definition does not authorize choosing an unfinished workout or inventing one. Ask which workout and set is intended.
+## The workout card
 
-## Finishing
-
-The canonical set-log owner closes an explicitly finite workout when the accepted write completes its final pending planned set. That same atomic write records the actual result, `endedAt`, and final duration using the accepted completion as the observed end boundary. Do not require independent “I am done” language and do not call `workout finish` afterward merely for ceremony.
-
-Run `vault-cli workout finish --workout-id <evt_id>` only for explicit early closure or a targetless session. When one message contains both an unfinished set result and early closure intent, log that exact set first and then finish the same exact workout. Never derive an older end from a reminder, midnight, stored duration, last-write time, or plan target.
-
-A later clearly requested extra set may be logged against the completed workout's exact id. The accepted extra-set write becomes the new observed end boundary for that workout; the system does not keep all completed workouts globally active in anticipation of this rarer path.
-
-For completed presentation, every planned set without an actual becomes `skipped`. A targetless log slot that remains empty also becomes `skipped` with `target=null`; this preserves structure without turning the slot into a plan or actual performance.
-
-## Building a structured workout card
-
-Use `murph.attach_response_card` with `kind="compact_table"` and structured `workout` detail in a private direct conversation when a verified live or just-finished workout is the primary answer.
-
-Build it from the verified canonical workout event and, when present, its verified workout format:
-
-- `target`: the matching planned set from the verified format, otherwise the exact typed ad-hoc target on the canonical exercise, otherwise `null`;
-- `actual` and targetless log-slot coordinates: the verified canonical event.
-
-Do not add `rowHeader`, `columns`, or `rows` to a structured workout card. Text, provider-layout, and native-envelope consumers derive progress directly from `workout.exercises`. Map each planned set in `workout.exercises` to:
-
-- `pending`: no corresponding actual result and the workout is still live;
-- `completed`: a corresponding actual result exists;
-- `skipped`: no corresponding actual result and the workout has ended.
-
-Also include every canonical event set with no matching format set. Use `target=null`; mark it `completed` when an actual result exists, `pending` while the workout is live and the slot is empty, or `skipped` after the workout ends and the slot remains empty. An empty targetless slot is a verified logging coordinate, not evidence of a planned set. Preserve canonical exercise and set order. Build and attach the complete verified card without estimating its encoded size from exercise or set count. The card tool's validation of the actual encoded envelope is authoritative. Never ask the member to delete, merge, or simplify canonical workout data merely to fit the presentation.
-
-Send the complete tool input in this shape, replacing the synthetic values with
-the verified canonical workout snapshot:
+Call `murph.attach_response_card` after a start, after the changes a message
+asked for, or when the member asks to see the workout. The card is the whole
+reply.
 
 ```json
 {
@@ -240,10 +238,7 @@ the verified canonical workout snapshot:
     "title": "Strength workout",
     "subtitle": null,
     "footer": "Reply with the exercise, set, and result.",
-    "tracking": {
-      "kind": "workout",
-      "entityId": "evt_01K1ABCDEFGHJKMNPQRSTVWXYZ"
-    },
+    "tracking": { "kind": "workout", "entityId": "evt_01K1ABCDEFGHJKMNPQRSTVWXYZ" },
     "workout": {
       "version": 1,
       "state": "active",
@@ -251,11 +246,7 @@ the verified canonical workout snapshot:
         {
           "name": "Bench press",
           "sets": [
-            {
-              "status": "pending",
-              "target": "185 lb × 6–8",
-              "actual": null
-            }
+            { "status": "pending", "target": "185 lb × 6–8", "actual": null }
           ]
         }
       ]
@@ -264,55 +255,45 @@ the verified canonical workout snapshot:
 }
 ```
 
-Use `state="completed"` only after replacing every remaining `pending` set with `skipped`. A completed set always carries `actual`; pending and skipped sets never do.
+- Build it from the saved workout, keeping the saved order of exercises and
+  sets. Include every set, including open slots and sets the format did not
+  plan. Leave out `rowHeader`, `columns` and `rows`.
+- `status` is `completed` when the set has a result, `pending` when it has none
+  and the workout is still live, and `skipped` when it has none and the workout
+  has ended. Only a completed set carries `actual`.
+- `target` comes from the matching planned set of the saved format. Without a
+  format, use what the member stated when the workout started: `<n> reps` from
+  `memberRepsPerSet`, combined with the load when `targetWeightPerSet` and
+  `targetWeightUnit` are present. Otherwise use `null`.
+- `state` is `completed` only once every remaining `pending` set has become
+  `skipped`.
+- `tracking.entityId` is the workout's exact id. Keep `subtitle` null, because
+  progress is shown from the sets.
+- The footer is shown on every device, so tell the member to reply with the
+  exercise, set and result. Do not tell them to tap something.
+- Send the complete card and let the tool check its size. Never guess that it
+  is too big, and never ask the member to delete or merge exercises so it fits.
 
-Set the outer `subtitle` to `null`. Workout state and progress are derived from
-the structured sets, so do not author a second state or progress label there.
+Reply in plain text only when the card tool is unavailable or rejects the
+complete card, the workout or its format targets cannot be read, or a card
+alone would not answer what the member asked. Never say a write succeeded
+before its command result shows it. Do not send a card unprompted unless a
+reminder or automation the member set up calls for one.
 
-The footer is shared verbatim by the interactive native card and the static
-fallback. Keep it channel-neutral: never tell the member to tap an exercise or
-use another control that is unavailable on macOS or without the extension.
-When continuation guidance is useful, tell them to reply with the exercise,
-set, and result.
+## Less common cases
 
-Set `tracking` to `{ "kind": "workout", "entityId": "<exact evt id>" }`.
-The runtime records the canonical `snapshotAt`, keeps tracking in durable
-transcript text, and strips it from the native URL.
-
-## Card refresh behavior
-
-- After successfully starting or resuming one canonical live workout, use one verified structured workout card as the complete response on a supported private card route. Do not send a text-only start acknowledgement or wait for a separate card request.
-- Fall back to truthful ordinary text only when editable workout-card attachment remains unavailable after the tool-guided exact read and single retry, the card tool is unavailable, the canonical event cannot be verified, any claimed planned targets cannot be verified from their matching format, the card would not completely answer the turn, or the complete card is rejected by the card tool's actual encoded-envelope validation. Do not preempt that validation from an estimated exercise or set count, and do not ask the member to change the saved workout to make a card fit.
-- After completing all ordinary free-form workout mutations requested by the current message, send one refreshed card from the final verified snapshot; do not also repeat the update in prose.
-- After an accepted explicit card command, send the refreshed card as the response; do not also repeat the full workout in prose.
-- Do not send proactive cards without an existing authorized reminder or automation.
-- When a request does not materially change canonical workout state, do not emit a duplicate snapshot solely to acknowledge the no-op.
-
-## Generic and legacy compact tables
-
-Use an ordinary `compact_table` when the member explicitly asks for a table, when a table alone completely answers a non-live-workout request, or when a historical workout does not need the structured drill-down surface.
-
-- Use one flexible row-label column plus one to four compact value columns, with at most eight rows.
-- Prefer short human labels. Do not add columns merely because the schema permits them.
-- Never emit Markdown-table syntax on a messaging route.
-- A compact table cannot be combined with response media or a second response card.
-- Keep `tracking` null for a one-off table that is not backed by canonical state.
-- For a canonical workout snapshot, set the exact workout tracking marker only after re-reading the event.
-
-A message such as “show the workout table” or an update whose current exact command, structured card result, or host-preserved immediate causal context identifies one workout receives a refreshed snapshot on a supported private card route after an exact canonical read. Without that exact identity, do not choose a workout by recency or invent one from an update-like message; ask one narrow disambiguating question.
-
-When an exercise has one to four logged or planned sets and the member asks for a simple table, use the natural set-by-set shape:
-
-- row header: `Exercise`;
-- columns: `Set 1`, `Set 2`, `Set 3`, and `Set 4` as needed;
-- one row per exercise, preserving canonical exercise order;
-- each completed cell: the concise load/reps value plus any verified set note, such as `45 × 6 (final rep spotted)`;
-- each unlogged placeholder: an em dash or equally clear empty-state marker.
-
-Preserve all available set columns and set notes. Do not collapse or discard the fourth set merely to fit a dense grid; the native reader has a stacked four-set presentation. If any exercise has more than four sets, do not silently truncate it. Use a compact summary such as `Exercise | Completed | Latest | Notes`, or readable plain text when the full history is the point.
-
-For a compact-table workout that predates structured `workout` detail, accept an update only when the current exact command, structured card result, or host-preserved immediate causal context identifies one canonical event and coordinate. Before every mutation, re-read that event, use the targeted commands, and preserve all unrelated state. Persist annotations on the canonical set note, including `note=final rep spotted` or `note=final 2 reps spotted`. Never leave meaningful notation only in conversation text, an exercise summary, or a presentation snapshot.
-
-## Fallback
-
-Use readable text when explanation is necessary, the native card is not supported on the route, or the presentation would exceed its bounds. Never claim a write succeeded until the canonical command result proves it.
+- **Replies to a workout reminder**, and saving a reminder for a saved
+  workout: read
+  `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/references/reminder-replies.md`.
+- **Replacing an untouched draft workout with a new one**: read
+  `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/references/replace-draft.md`
+  before proposing or doing it. An ordinary request to start a workout never
+  deletes another one.
+- **A plain table, or a table for an older workout**: read
+  `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/references/tables.md`.
+- **Reordering exercises, or another change the commands above cannot make**:
+  use `vault-cli workout edit <evt_id>`, which replaces the whole exercise and
+  set structure. Read the complete workout first and send back every field you
+  were not asked to change, keeping each exercise's `sourceExerciseId` or exact
+  name. Use `--clear-workout` only when the member wants all exercise detail
+  removed and the event kept.
