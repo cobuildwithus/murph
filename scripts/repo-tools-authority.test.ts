@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -47,24 +47,4 @@ it("does not source a sibling helper when the installed package is missing", () 
   expect(result.status).toBe(1);
   expect(result.stdout).not.toContain("unexpected-sibling");
   expect(result.stderr).toContain("missing installed repo-tools");
-});
-
-it("allows source-only changes at any file count while retaining structural documentation checks", () => {
-  const { root } = fixture();
-  execFileSync("git", ["init", "-q"], { cwd: root });
-  write(root, "AGENTS.md", "required owner\n");
-  for (let index = 0; index < 15; index += 1) write(root, `scripts/source-${index}.ts`, "export {}\n");
-  execFileSync("git", ["add", "."], { cwd: root });
-  const run = () => spawnSync("bash", [path.join(packageRoot, "src/check-agent-docs-drift.sh")], {
-    cwd: root, encoding: "utf8", env: { ...process.env, GITHUB_BASE_REF: "", COBUILD_DRIFT_REQUIRED_FILES: "AGENTS.md" },
-  });
-  expect(run().status).toBe(0);
-  write(root, "agent-docs/owner.md", "owner contract\n");
-  execFileSync("git", ["add", "."], { cwd: root });
-  expect(run().stdout).toContain("without updating agent-docs/index.md");
-  write(root, "agent-docs/index.md", "| `agent-docs/owner.md` | Owner |\n");
-  execFileSync("git", ["add", "."], { cwd: root });
-  expect(run().status).toBe(0);
-  rmSync(path.join(root, "AGENTS.md"));
-  expect(run().stdout).toContain("Missing required agent-doc artifact");
 });

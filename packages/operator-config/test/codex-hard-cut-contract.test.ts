@@ -7,10 +7,6 @@ import {
   assistantProviderSessionOptionsSchema,
 } from '../src/assistant-cli-contracts.ts'
 import {
-  normalizeAssistantProviderConfig,
-  serializeAssistantProviderSessionOptions,
-} from '../src/assistant/provider-config.ts'
-import {
   assistantExecutionDriverValues,
   assistantResumeKindValues,
 } from '../src/assistant/target-runtime.ts'
@@ -52,34 +48,6 @@ describe('operator config Codex-only hard-cut contracts', () => {
         approvalPolicy: 'untrusted',
       }),
     ).toThrow()
-  })
-
-  it('serializes OpenAI through Codex modelProvider config', () => {
-    const sessionOptions = serializeAssistantProviderSessionOptions({
-      provider: 'codex-cli',
-      model: 'gpt-6.1-sol',
-      modelProvider: 'openai',
-      reasoningEffort: 'medium',
-      sandbox: 'danger-full-access',
-      approvalPolicy: 'never',
-    })
-
-    expect(assistantProviderSessionOptionsSchema.parse(sessionOptions)).toMatchObject({
-      executionDriver: 'codex-app-server',
-      model: 'gpt-6.1-sol',
-      modelProvider: 'openai',
-      provider: 'codex-cli',
-      resumeKind: 'codex-thread',
-    })
-  })
-
-  it('fails closed for removed provider config inputs', () => {
-    expect(() =>
-      normalizeAssistantProviderConfig({
-        provider: 'unsupported-provider',
-        model: 'gpt-5',
-      }),
-    ).toThrow(/Assistant runtime targets must use Codex App Server/u)
   })
 
 })

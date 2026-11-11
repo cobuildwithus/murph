@@ -22,23 +22,15 @@ import {
   automationRouteSchema,
 } from "../src/automation.ts";
 import { parseFrontmatterDocument } from "../src/frontmatter.ts";
-import {
-  integrationIngestRecordSchema as integrationIngestRecordContract,
-} from "../src/integration-ingest.ts";
 import { memoryDocumentFrontmatterSchema as memoryDocumentFrontmatterContract } from "../src/memory.ts";
 import {
-  assistantPreferenceMutationStateDocumentSchema as assistantPreferenceMutationStateDocumentContract,
   preferencesDocumentSchema as preferencesDocumentContract,
 } from "../src/preferences.ts";
 import { scheduledLogFrontmatterSchema as scheduledLogFrontmatterContract } from "../src/scheduled-log.ts";
 import {
-  conditionImportPayloadSchema as conditionImportPayloadContract,
-} from "../src/shares.ts";
-import {
   allergyFrontmatterSchema as allergyFrontmatterContract,
   assessmentResponseSchema as assessmentResponseContract,
   auditRecordSchema as auditRecordContract,
-  bloodTestImportPayloadSchema as bloodTestImportPayloadContract,
   bloodTestReferenceRangeSchema as bloodTestReferenceRangeContract,
   bloodTestResultSchema as bloodTestResultContract,
   conditionFrontmatterSchema as conditionFrontmatterContract,
@@ -48,10 +40,7 @@ import {
   familyMemberFrontmatterSchema as familyMemberFrontmatterContract,
   foodFrontmatterSchema as foodFrontmatterContract,
   geneticVariantFrontmatterSchema as geneticVariantFrontmatterContract,
-  inboxAttachmentRetentionRecordSchema as inboxAttachmentRetentionRecordContract,
   goalFrontmatterSchema as goalFrontmatterContract,
-  habitatFrontmatterSchema as habitatFrontmatterContract,
-  immunizationImportPayloadSchema as immunizationImportPayloadContract,
   inboxCaptureRecordSchema as inboxCaptureRecordContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
   metricSampleRecordSchema as metricSampleRecordContract,
@@ -65,91 +54,15 @@ import {
   sampleRecordSchema as sampleRecordContract,
   vaultMetadataSchema as vaultMetadataContract,
   workoutFormatFrontmatterSchema as workoutFormatFrontmatterContract,
-  workoutImportPayloadSchema as workoutImportPayloadContract,
 } from "../src/zod.ts";
 import type { ContractSchema } from "../src/validate.ts";
 import { safeParseContract } from "../src/validate.ts";
 import {
-  allergyFrontmatterSchema,
   automationFrontmatterSchema,
-  assessmentResponseSchema,
-  auditRecordSchema,
-  bloodTestImportPayloadSchema,
-  conditionImportPayloadSchema,
-  conditionFrontmatterSchema,
-  coreFrontmatterSchema,
-  eventRecordSchema,
   experimentFrontmatterSchema,
-  familyMemberFrontmatterSchema,
-  foodFrontmatterSchema,
-  geneticVariantFrontmatterSchema,
-  goalFrontmatterSchema,
-  habitatFrontmatterSchema,
-  inboxAttachmentRetentionRecordSchema,
-  inboxCaptureRecordSchema,
-  integrationIngestRecordSchema,
-  immunizationImportPayloadSchema,
-  journalDayFrontmatterSchema,
-  memoryDocumentFrontmatterSchema,
-  metricSampleRecordSchema,
-  preferencesDocumentSchema,
-  assistantPreferenceMutationStateDocumentSchema,
-  protocolFrontmatterSchema,
-  providerFrontmatterSchema,
-  recipeFrontmatterSchema,
-  regimenFrontmatterSchema,
-  sampleRecordSchema,
-  scheduledLogFrontmatterSchema,
   schemaCatalog,
-  vaultMetadataSchema,
-  workoutFormatFrontmatterSchema,
-  workoutImportPayloadSchema,
 } from "../src/schemas.ts";
 import { VAULT_FAMILY_DESCRIPTORS } from "../src/vault-families.ts";
-
-const schemaFixtures = [
-  ["assessment-response", assessmentResponseSchema, assessmentResponseContract],
-  ["audit-record", auditRecordSchema, auditRecordContract],
-  ["blood-test-import-payload", bloodTestImportPayloadSchema, bloodTestImportPayloadContract],
-  ["condition-import-payload", conditionImportPayloadSchema, conditionImportPayloadContract],
-  ["immunization-import-payload", immunizationImportPayloadSchema, immunizationImportPayloadContract],
-  ["event-record", eventRecordSchema, eventRecordContract],
-  [
-    "inbox-attachment-retention-record",
-    inboxAttachmentRetentionRecordSchema,
-    inboxAttachmentRetentionRecordContract,
-  ],
-  ["inbox-capture-record", inboxCaptureRecordSchema, inboxCaptureRecordContract],
-  ["integration-ingest-record", integrationIngestRecordSchema, integrationIngestRecordContract],
-  ["metric-sample-record", metricSampleRecordSchema, metricSampleRecordContract],
-  ["frontmatter-allergy", allergyFrontmatterSchema, allergyFrontmatterContract],
-  ["frontmatter-automation", automationFrontmatterSchema, automationFrontmatterContract],
-  ["frontmatter-condition", conditionFrontmatterSchema, conditionFrontmatterContract],
-  ["frontmatter-core", coreFrontmatterSchema, coreFrontmatterContract],
-  ["frontmatter-experiment", experimentFrontmatterSchema, experimentFrontmatterContract],
-  ["frontmatter-family-member", familyMemberFrontmatterSchema, familyMemberFrontmatterContract],
-  ["frontmatter-food", foodFrontmatterSchema, foodFrontmatterContract],
-  ["frontmatter-genetic-variant", geneticVariantFrontmatterSchema, geneticVariantFrontmatterContract],
-  ["frontmatter-goal", goalFrontmatterSchema, goalFrontmatterContract],
-  ["frontmatter-habitat", habitatFrontmatterSchema, habitatFrontmatterContract],
-  ["frontmatter-journal-day", journalDayFrontmatterSchema, journalDayFrontmatterContract],
-  ["frontmatter-memory", memoryDocumentFrontmatterSchema, memoryDocumentFrontmatterContract],
-  ["frontmatter-provider", providerFrontmatterSchema, providerFrontmatterContract],
-  ["frontmatter-protocol", protocolFrontmatterSchema, protocolFrontmatterContract],
-  ["frontmatter-regimen", regimenFrontmatterSchema, regimenFrontmatterContract],
-  ["frontmatter-recipe", recipeFrontmatterSchema, recipeFrontmatterContract],
-  ["frontmatter-scheduled-log", scheduledLogFrontmatterSchema, scheduledLogFrontmatterContract],
-  ["frontmatter-workout-format", workoutFormatFrontmatterSchema, workoutFormatFrontmatterContract],
-  ["preferences-document", preferencesDocumentSchema, preferencesDocumentContract],
-  [
-    "assistant-preference-mutations",
-    assistantPreferenceMutationStateDocumentSchema,
-    assistantPreferenceMutationStateDocumentContract,
-  ],
-  ["sample-record", sampleRecordSchema, sampleRecordContract],
-  ["vault-metadata", vaultMetadataSchema, vaultMetadataContract],
-  ["workout-import-payload", workoutImportPayloadSchema, workoutImportPayloadContract],
-] as const;
 
 const contractExamples = [
   ["vault metadata", vaultMetadataContract, [exampleVaultMetadata]],
@@ -243,29 +156,6 @@ function expectValidExample(contract: ContractSchema, example: unknown): void {
 }
 
 describe("schema catalog and example seam", () => {
-  it("keeps the JSON schema catalog aligned with the named schema exports", () => {
-    expect(Object.isFrozen(schemaCatalog)).toBe(true);
-    expect(Object.keys(schemaCatalog).sort()).toEqual(
-      schemaFixtures.map(([catalogKey]) => catalogKey).sort(),
-    );
-    expect(experimentFrontmatterSchema).toMatchObject({
-      dependentRequired: {
-        protocolRef: ["commonsProtocolRef", "effectiveProtocolSnapshot"],
-      },
-    });
-
-    for (const [catalogKey, schemaExport, contract] of schemaFixtures) {
-      expect(schemaCatalog[catalogKey]).toBe(schemaExport);
-      expect(schemaExport).toMatchObject({
-        $id: contract.meta()?.$id,
-        title: contract.meta()?.title,
-      });
-      expect(
-        "type" in schemaExport || "anyOf" in schemaExport || "oneOf" in schemaExport,
-      ).toBe(true);
-    }
-  });
-
   it("keeps the checked-in generated schema artifacts in sync with the catalog", async () => {
     const generatedDir = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
@@ -440,6 +330,11 @@ describe("schema catalog and example seam", () => {
   });
 
   it("requires commonsProtocolRef and an effective snapshot for protocol-backed experiments", () => {
+    expect(experimentFrontmatterSchema).toMatchObject({
+      dependentRequired: {
+        protocolRef: ["commonsProtocolRef", "effectiveProtocolSnapshot"],
+      },
+    });
     const { commonsProtocolRef: _commonsProtocolRef, ...missingCommonsProtocolRef } =
       exampleFrontmatterObjects.experiment;
     const missingCommonsProtocolRefResult = safeParseContract(

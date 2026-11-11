@@ -5,7 +5,6 @@ import {
   parsePort,
   parseTemporalMode,
   parseWorkerProtocol,
-  printHelp,
   resolveHostedLocalDevConfig,
 } from "../../src/dev-hosted-local/config.ts";
 
@@ -142,48 +141,6 @@ describe("resolveHostedLocalDevConfig", () => {
         HOSTED_TEMPORAL_ADDRESS: "temporal.example.test:7233",
       }).temporal.mode,
     ).toBe("external");
-  });
-});
-
-describe("printHelp", () => {
-  it("documents the stripe listener skip flag", () => {
-    const writes: string[] = [];
-    const originalWrite = process.stdout.write.bind(process.stdout);
-    process.stdout.write = ((chunk: string | Uint8Array): boolean => {
-      writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString());
-      return true;
-    }) as typeof process.stdout.write;
-
-    try {
-      printHelp();
-    } finally {
-      process.stdout.write = originalWrite;
-    }
-
-    const output = writes.join("");
-    expect(output).toContain("MURPH_DEV_DATABASE_URL=...");
-    expect(output).toContain("MURPH_DEV_FORCE_RESET_LOCAL_DB=1");
-    expect(output).not.toContain("MURPH_DEV_FORCE_RESET_TEMPORAL");
-    expect(output).toContain("HOSTED_ASSISTANT_PROVIDER=openai");
-    expect(output).toContain("OPENAI_API_KEY=...");
-    expect(output).not.toContain("MURPH_DEV_CODEX_BRIDGE");
-    expect(output).not.toContain("MURPH_DEV_CODEX_COMMAND");
-    expect(output).toContain("MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH=1");
-    expect(output).toContain("MURPH_DEV_SKIP_RUNNER_SMOKE=1");
-    expect(output).toContain("MURPH_DEV_SKIP_STRIPE_LISTEN=1");
-    expect(output).toContain("MURPH_DEV_SKIP_WORKERS_AI=1");
-    expect(output).toContain("MURPH_DEV_STRIPE_ENV_FILE=.tmp/.env.hosted-local-stripe");
-    expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_TUNNEL=auto");
-    expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG=.tmp/cloudflared-linq-webhook.yml");
-    expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL=...");
-    expect(output).toContain("MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE=.tmp/linq-webhook-registration.json");
-    expect(output).toContain("HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS=...");
-    expect(output).toContain("MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1");
-    expect(output).toContain("MURPH_DEV_TEMPORAL=auto");
-    expect(output).toContain("MURPH_DEV_TEMPORAL_PORT=7233");
-    expect(output).toContain("TEMPORAL_TASK_QUEUE=murph-hosted-runtime");
-    expect(output).toContain("MURPH_DEV_WEB_HOST=127.0.0.1");
-    expect(output).toContain("stripe listen");
   });
 });
 

@@ -1,3 +1,5 @@
+The local architecture and test cleanup checkpoint is recorded in [radical simplicity](exec-plans/completed/2026-11-11-radical-simplicity.md), with findings and retained-proof mappings in the [codebase audit](references/codebase-simplicity-audit-2026-11-11.md). The [PR review record](exec-plans/completed/2026-11-11-simplicity-pr-release.md) records implementation and review; [PR #4866](https://github.com/cobuildwithus/murph/pull/4866) tracks remaining merges and the single final Cloudflare deployment. Live game editing remains supported; categorical oxygen screening is retired in favor of numerical summaries.
+
 Repository tooling uses installed registry dependencies, one prepared-runtime
 build owner, author-controlled PR readiness, and structural documentation checks.
 The [verification owner](operations/verification-and-runtime.md),
@@ -1266,6 +1268,7 @@ Package verifier worker-exit result preservation is tracked in
 | `agent-docs/feature-user-story-audit/testing-errors.md` | Test errors captured during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
 | `agent-docs/references/game-selfplay-qa.md` | Synthetic game state map, native self-play rounds, canonical chat edits, confirmed fixes and remaining coverage gaps. | Game QA evidence | Medium | 2026-11-09 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
+| `agent-docs/references/codebase-simplicity-audit-2026-11-11.md` | Architecture findings, completed deletions, retained behavioral proof, deferred work and release tracking. | Codebase simplicity audit | Medium | 2026-11-11 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
 | `agent-docs/references/app-state-machines.md` | 88 cross-repository state families, invariants, transitions, confirmed failure schedules, retired Web dashboard lifecycles, group recovery retry ownership, the unified native reminder lifecycle, clinical receipt-derived outcomes, regression proof and release evidence. | Shared Murph/iOS audit | Medium | 2026-11-07 |
 | `agent-docs/exec-plans/completed/2026-11-06-state-machine-shipping.md` | Completed architecture simplifications, backend production receipts, native main fixes and linked final verification. | Historical shipping evidence | High | 2026-11-07 |

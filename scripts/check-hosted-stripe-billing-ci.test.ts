@@ -71,7 +71,7 @@ describe("hosted Stripe billing workflow guard", () => {
     const script = job.split("        run: |\n")[1].replace(/^ {10}/gmu, "");
     const result = spawnSync("bash", ["-c", script], {
       env: { PATH: process.env.PATH, EVENT_NAME: event, HERMETIC_RESULT: hermetic,
-        LIVE_RESULT: live, SCOPE_RESULT: "success", MARKDOWN_ONLY: "false" },
+        LIVE_RESULT: live },
       encoding: "utf8", timeout: 5_000,
     });
     expect(result.error).toBeUndefined();
@@ -128,18 +128,10 @@ describe("hosted Stripe billing workflow guard", () => {
 
   it("rejects dropping the pull-request live exclusion from the boundary", async () => {
     const source = (await readWorkflow()).replace(
-      'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]; then\n                  echo "Full pull-request proof requires hermetic success and must not start the secret-bearing live job."',
+      'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]; then\n                echo "Pull-request proof requires hermetic success and must not start the secret-bearing live job."',
       "if false",
     );
     expect(issueCodes(source)).toContain("missing-pr-live-exclusion");
-  });
-
-  it("rejects running Stripe jobs under the Markdown-only receipt", async () => {
-    const source = (await readWorkflow()).replace(
-      'if [[ "$HERMETIC_RESULT" != "skipped" || "$LIVE_RESULT" != "skipped" ]]',
-      "if false",
-    );
-    expect(issueCodes(source)).toContain("missing-docs-only-skip-boundary");
   });
 
   it("rejects restoring a marker that silently skips live proof", async () => {

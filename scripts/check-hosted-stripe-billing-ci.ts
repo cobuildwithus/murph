@@ -154,8 +154,8 @@ export function inspectHostedStripeBillingWorkflow(
   );
   requireText(
     "missing-required-boundary-always",
-    "  billing-required:\n    name: Required hosted Stripe billing boundary\n    needs:\n      - markdown-docs-scope\n      - billing-hermetic\n      - live-stripe-browser\n    if: ${{ always() }}",
-    "The required billing boundary must always inspect the trusted docs scope plus hermetic and live results.",
+    "  billing-required:\n    name: Required hosted Stripe billing boundary\n    needs:\n      - billing-hermetic\n      - live-stripe-browser\n    if: ${{ always() }}",
+    "The required billing boundary must always inspect the hermetic and live results.",
   );
   requireText(
     "missing-required-live-result",
@@ -169,13 +169,8 @@ export function inspectHostedStripeBillingWorkflow(
   );
   requireText(
     "missing-pr-live-exclusion",
-    'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]; then\n                  echo "Full pull-request proof requires hermetic success and must not start the secret-bearing live job."',
+    'if [[ "$HERMETIC_RESULT" != "success" || "$LIVE_RESULT" != "skipped" ]]; then\n                echo "Pull-request proof requires hermetic success and must not start the secret-bearing live job."',
     "Full pull-request proof must fail closed if hermetic proof is absent or the secret-bearing live job starts.",
-  );
-  requireText(
-    "missing-docs-only-skip-boundary",
-    'if [[ "$HERMETIC_RESULT" != "skipped" || "$LIVE_RESULT" != "skipped" ]]',
-    "Markdown-only proof must require both Stripe runtime jobs to remain skipped.",
   );
   const workflowConcurrency = source.match(
     /^concurrency:\n  group: .+\n  cancel-in-progress: (true|false)$/mu,

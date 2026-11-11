@@ -25,6 +25,7 @@ const DEFAULT_POLL_INTERVAL_MS = 250;
 const DEFAULT_STALE_METADATA_GRACE_MS = 10_000;
 const WAIT_LOG_INTERVAL_MS = 60_000;
 const OWNER_FILE_NAME = "owner.json";
+const BLOCKED_RECOVERY_MESSAGE = "Stale verification slot recovery is blocked by an existing recovery claim. Confirm its owner has exited before removing abandoned slot state.";
 const invocationCwd = process.cwd();
 const invocation = parseInvocation(process.argv.slice(2));
 const useDetachedChildProcessGroup = process.platform !== "win32";
@@ -145,9 +146,17 @@ function reclaimStaleSlot(slotPath, priorInspection, staleMetadataGraceMs) {
     mkdirSync(reaperPath, { mode: 0o700 });
     writeFileSync(path.join(reaperPath, reaperClaimId), "", { mode: 0o600 });
   } catch (error) {
-    if (isAlreadyExistsError(error) || isMissingPathError(error)) {
+    if (isAlreadyExistsError(error)) {
+      try {
+        if (Date.now() - statSync(reaperPath).mtimeMs >= staleMetadataGraceMs) {
+          throw new Error(BLOCKED_RECOVERY_MESSAGE);
+        }
+      } catch (inspectionError) {
+        if (!isMissingPathError(inspectionError)) throw inspectionError;
+      }
       return false;
     }
+    if (isMissingPathError(error)) return false;
     throw error;
   }
 
@@ -404,6 +413,7 @@ function formatOwner(owner) {
 }
 
 function formatError(error) {
+  if (error instanceof Error && error.message === BLOCKED_RECOVERY_MESSAGE) return error.message;
   if (error instanceof Error && error.message.startsWith(`${ENABLED_ENV} `)) {
     return error.message;
   }

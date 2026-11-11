@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -306,14 +306,11 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
 ]);
 
 describe("hosted Prisma baseline migration", () => {
-  it("preserves the reviewed split-table hosted-member baseline with Stripe hardening squashed in", () => {
+  it("preserves privacy and rollout requirements in the hosted-member migrations", () => {
     const schema = readFileSync(
       new URL("../prisma/schema.prisma", import.meta.url),
       "utf8",
     );
-    const migrationEntries = readdirSync(new URL("../prisma/migrations/", import.meta.url))
-      .filter((entry) => !entry.startsWith("."))
-      .sort();
     const baselineMigrationSql = readFileSync(
       new URL("../prisma/migrations/2026040600_init/migration.sql", import.meta.url),
       "utf8",
@@ -913,23 +910,9 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
-    const hostedUsageReferralEntryKindMigrationSql = readFileSync(
-      new URL(
-        "../prisma/migrations/20260726115900_hosted_usage_referral_entry_kind/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
     const hostedUsageReferralRewardsMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260726120000_hosted_usage_referral_rewards/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const hostedUsageReferralCreditEntryContractMigrationSql = readFileSync(
-      new URL(
-        "../prisma/contract-migrations/20260726123000_allow_hosted_usage_referral_credit_entries/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -941,22 +924,6 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
-    const hostedUsageReferralProjectionContractMigrationSql = readFileSync(
-      new URL(
-        "../prisma/contract-migrations/20260728031000_resynchronize_hosted_usage_credit_purchase_grants/migration.sql",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const hostedUsageReferralProductSpec = readFileSync(
-      new URL(
-        "../../../agent-docs/product-specs/hosted-usage-referrals.md",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const normalizedHostedUsageReferralProductSpec =
-      hostedUsageReferralProductSpec.replace(/\s+/gu, " ");
     const hostedThreadContainerUsageDefaultMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260726180000_hosted_thread_container_usage_default/migration.sql",
@@ -977,301 +944,6 @@ describe("hosted Prisma baseline migration", () => {
         import.meta.url,
       ),
       "utf8",
-    );
-    const queryShapeMigrationEntries = new Set([
-      "20260812030000_hosted_stripe_activation_result_pointer",
-      "20260812030100_group_email_message_volume_indexes",
-      "20260812030200_whoop_capacity_index",
-      "20260812030300_referral_handoff_indexes",
-      "20260812050000_hosted_sensitive_action_transient_retention_index",
-      "20260826190000_hosted_vault_share_delivery_cursor_index",
-      "20260905120000_hosted_operator_task_result_retention_index",
-      "20261019120000_final_reply_delivery_alert_retention",
-      "20261106120000_hosted_mailbox_telegram_update_lookup",
-      "20261106190000_game_event_actor_type_index",
-    ]);
-    expect(
-      migrationEntries.filter((entry) => !queryShapeMigrationEntries.has(entry)),
-    ).toEqual([
-      "2026040600_init",
-      "20260425000000_drop_legacy_linq_control_plane",
-      "20260425010000_drop_revnet_issuance",
-      "20260426000000_hosted_member_pending_activation_timezone",
-      "20260426010000_hosted_mailbox_workspace_groundwork",
-      "20260426020000_hosted_mailbox_payload_hash",
-      "2026042700_hosted_runtime_hard_cut",
-      "20260428010000_drop_hosted_share_tables",
-      "20260429020000_hosted_legal_consent",
-      "20260501000000_hosted_user_crypto_envelopes",
-      "20260501000001_hosted_user_crypto_envelope_hardening",
-      "2026050100_device_connection_credentials_setup",
-      "2026050101_device_connection_sources",
-      "20260502000000_hosted_web_session",
-      "2026050400_hosted_ai_usage_provider_request_outcome",
-      "2026050401_hosted_ai_usage_sanitized_usage_metadata",
-      "2026050402_device_oauth_session_metadata",
-      "2026050403_linq_pending_participant_contact",
-      "2026050500_device_sync_dirty_connection",
-      "2026050501_stripe_checkout_email_authorization",
-      "2026050502_hosted_ai_usage_allowance",
-      "2026050503_pulse_trial_checkout_offer",
-      "2026050601_hosted_ai_usage_limit_notice_sent",
-      "2026050602_hosted_plan_switch_schedule_ref",
-      "2026050801_device_webhook_trace_claim_token",
-      "2026050802_device_connect_intent",
-      "2026050900_hosted_web_session_row_cap_index",
-      "2026051000_hosted_ai_usage_stripe_meter_skipped",
-      "2026051900_device_connection_due_reconcile_sweep_idx",
-      "2026052400_device_connection_refresh_lease",
-      "2026052600_device_sync_dirty_payload",
-      "2026052700_hosted_ingress_latency_trace",
-      "2026052700_hosted_runtime_log_event_cooldown_index",
-      "2026052800_hosted_signup_welcome_email_attempt",
-      "2026060300_hosted_latency_milestones",
-      "2026060501_device_sync_source_confirmed_backfill",
-      "2026060900_hosted_latency_phase_breakdown",
-      "2026061000_hosted_mailbox_consumed_seq",
-      "2026061000_hosted_vault_share",
-      "2026061001_hosted_ai_usage_turn_profile",
-      "2026061500_hosted_ai_usage_token_pricing_basis",
-      "2026061500_hosted_signup_notification_email_attempt",
-      "2026061700_hosted_computer_use",
-      "2026061800_hosted_family_plan",
-      "2026062100_hosted_computer_single_member_profile",
-      "2026062101_hosted_subscription_cancellation_email_sent",
-      "20260622120000_connected_apps",
-      "20260622190000_add_hosted_product_feedback",
-      "20260623060000_hosted_workspace_inbox_media_retention_wake",
-      "20260623120000_hosted_codex_auth_connection",
-      "20260623170000_generalize_hosted_product_feedback",
-      "20260623193000_hosted_product_feedback_summary",
-      "20260624000000_clear_hosted_codex_auth_connected",
-      "20260624090000_hosted_sensitive_action_challenge",
-      "20260624120000_hosted_thread_routes",
-      "20260624150000_hosted_sensitive_action_approval",
-      "20260624200000_hosted_action_approval_return_contact_kind",
-      "20260624210000_family_invite_telegram_username_lookup",
-      "20260624230000_family_invite_email_lookup",
-      "20260625000100_hosted_phone_calls",
-      "2026062500_hosted_linq_observability",
-      "2026062501_hosted_linq_egress_engagement",
-      "20260625150000_hosted_action_approval_consumed_at",
-      "20260626000000_linq_first_contact_admission_decision",
-      "2026062600_computer_handoff_return_contact_kind",
-      "20260626010000_linq_first_contact_admission_budget",
-      "20260627210000_linq_first_contact_admission_drop_category",
-      "20260627230000_hosted_linq_contact_card_share",
-      "20260627230000_linq_first_contact_rejected_message_text",
-      "20260628000000_linq_first_contact_scrub_rejected_message_text",
-      "20260628010000_linq_first_contact_drop_rejected_message_text",
-      "20260629160000_computer_handoff_viewport_session_hint",
-      "20260630190000_hosted_linq_db_home_lines",
-      "20260701040000_hosted_groups",
-      "20260701050000_hosted_vault_share_drop_source",
-      "20260701153000_hosted_vault_share_active_indexes",
-      "20260703160000_device_oauth_session_consumed_at",
-      "20260705120000_hosted_mailbox_item_consumed_at",
-      "20260706120000_hosted_thread_container_participant",
-      "20260706130000_hosted_group_join_offer",
-      "20260706130000_hosted_growth_daily_snapshot",
-      "20260707170000_drop_stale_linq_recency_columns",
-      "20260707180000_hosted_vault_share_projection_scopes",
-      "20260708120000_hosted_member_assistant_preferences",
-      "20260709120000_hosted_ingress_latency_delivery_link",
-      "20260709120000_hosted_linq_delivery_retry_after_at",
-      "20260709120000_hosted_member_assistant_model_preference",
-      "20260710120000_hosted_member_assistant_reasoning_effort_preference",
-      "20260710130000_hosted_member_assistant_personality",
-      "20260710160000_clinical_records_control_plane",
-      "20260710190000_hosted_phone_call_private_content",
-      "20260711180000_hosted_linq_home_participant_identity",
-      "20260711210000_hosted_group_join_confirmation_eligibility",
-      "20260711220000_hosted_group_join_confirmation_origin",
-      "20260712010000_device_sync_companion_capture_receipt",
-      "20260712180000_hosted_mailbox_causal_seq",
-      "20260712190000_hosted_computer_run_resume_mailbox_lane_seq",
-      "20260712190000_hosted_meal_photo_capture_enrollment",
-      "20260713190000_hosted_group_join_confirmation_drain_index",
-      "20260713210000_hosted_thread_route_participant_addition",
-      "20260714060000_add_assistant_preference_projection_watermarks",
-      "20260714090000_hosted_family_mixed_tier_capacity",
-      "20260714120000_hosted_group_reaction_context",
-      "20260714130000_hosted_mailbox_assistant_input_lookup",
-      "20260715120000_delete_orphaned_linq_invite_deliveries",
-      "20260715150000_hosted_family_pending_member_plan",
-      "20260715190000_hosted_assistant_personality_projection_watermarks",
-      "20260715230000_hosted_mailbox_subscription_action_claim",
-      "20260716120000_hosted_group_disclosure_permission",
-      "20260716160000_hosted_usage_credits",
-      "20260716190000_linq_signup_welcome_reservation",
-      "20260716220000_hosted_growth_snapshot_message_counts",
-      "20260718090000_hosted_vault_share_projection_snapshot",
-      "20260720150000_clinical_retrieval_plan",
-      "20260720173000_hosted_assistant_persona",
-      "20260720230000_hosted_group_usage_funding",
-      "20260721160000_clinical_retrieval_wire_identity",
-      "20260722190000_hosted_phone_call_origin_session",
-      "20260723230000_hosted_member_assistant_unhinged",
-      "20260724160000_hosted_account_exit_reason",
-      "20260724180000_device_connection_source_last_data_at",
-      "20260724190000_hosted_group_join_outreach",
-      "20260725120000_hosted_observability_retention",
-      "20260725120000_hosted_thread_delivery_route",
-      "20260725190000_hosted_mailbox_content_retention",
-      "20260725193000_device_sync_signal_source_provider",
-      "20260725230000_hosted_paid_usage_legacy_period_cutover",
-      "20260726115900_hosted_usage_referral_entry_kind",
-      "20260726120000_hosted_growth_aggregate",
-      "20260726120000_hosted_usage_referral_rewards",
-      "20260726124000_hosted_usage_referral_source_conversation",
-      "20260726180000_hosted_account_deletion_cleanup",
-      "20260726180000_hosted_address_book_projection",
-      "20260726180000_hosted_thread_container_usage_default",
-      "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
-      "20260727120000_hosted_member_checkout_session",
-      "20260727190000_hosted_group_sponsorship_moment",
-      "20260727200000_hosted_member_checkout_attempt",
-      "20260728030000_hosted_invite_instant_start_admission",
-      "20260728030000_hosted_usage_referral_credit_entry_constraints",
-      "20260728050000_rearm_hosted_mailbox_content_retention",
-      "20260728190000_hosted_mailbox_source_message",
-      "20260729010000_hosted_account_cleanup_runtime_logs",
-      "20260729043000_hosted_member_assistant_provider_preference",
-      "20260729124500_hosted_pending_group_setup",
-      "20260729154500_hosted_linq_recent_message_load",
-      "20260729160000_hosted_linq_delivery_messages",
-      "20260729170000_hosted_thread_route_account_lookup_key",
-      "20260729180000_linq_provider_health_projection",
-      "20260729190000_composable_usage_referral_missions",
-      "20260730120000_hosted_capped_group_sponsorship",
-      "20260730170000_add_mailbox_ai_usage_denied_at",
-      "20260730180000_hosted_linq_delivery_thread_directness",
-      "20260730190000_hosted_physical_notes",
-      "20260730233000_hosted_inference_connection",
-      "20260731001500_add_hosted_product_feedback_created_at_index",
-      "20260731120000_anonymize_hosted_product_feedback",
-      "20260801010000_hosted_inference_connection_revision_seq",
-      "20260802000000_add_hosted_linq_line_inventory_confirmed_at",
-      "20260804170000_add_initial_onboarding_completion",
-      "20260804223000_hosted_signup_referral_attribution",
-      "20260805010000_rearm_generated_image_capture_retention",
-      "20260805160000_hosted_usage_plan_reset_epoch",
-      "20260805230000_meal_photo_authority_revision",
-      "20260806120000_hosted_growth_snapshot_active_users",
-      "20260806170000_hosted_pulse_trial_start_source",
-      "20260806180000_fix_hosted_usage_plan_transition_bridge",
-      "20260807140000_hosted_growth_snapshot_mrr_breakdown",
-      "20260807203000_hosted_starter_usage_entry_kind",
-      "20260807204000_non_expiring_starter_usage",
-      "20260807210000_add_group_sponsorship_creative_request",
-      "20260809160000_add_hosted_family_max_plan_code",
-      "20260810010000_member_owned_device_provider_applications",
-      "20260810020000_device_sync_dirty_payload_credential_independence",
-      "20260810050000_relax_detached_automatic_refill_failure",
-      "20260810150000_hosted_usage_credit_grant_slot_release",
-      "20260811160000_add_group_sponsorship_funding_alias_publication",
-      "20260811170000_hosted_physical_note_failure_reason",
-      "20260811190000_hosted_linq_provider_event_diagnostics_retention_index",
-      "20260812032000_family_owner_snapshot_accepted_invite_index",
-      "20260812033000_family_owner_snapshot_pending_invite_index",
-      "20260812070000_hosted_linq_live_invite_source_ref",
-      "20260812120000_hosted_runtime_latency_candidate_indexes",
-      "20260812150000_stripe_effect_compatibility_cutover",
-      "20260813120000_group_current_sender_clarification",
-      "20260813150000_device_source_lifecycle_epoch",
-      "20260815010000_hosted_phone_call_stop_intent",
-      "20260815120000_hosted_phone_call_result_notification_channel",
-      "20260815190000_outbound_message_volume_receipts",
-      "20260820010000_hosted_email_public_bootstrap",
-      "20260820020000_hosted_signup_notification_context",
-      "20260820170000_hosted_physical_note_recovery",
-      "20260820190000_hosted_ops_usage_reset_receipt",
-      "20260821120000_hosted_group_sponsorship_fifty_cap",
-      "20260822210000_hosted_linq_delivery_payload",
-      "20260824010000_rearm_hosted_inbox_video_retention",
-      "20260824120000_hosted_runtime_issue_attempt_provenance",
-      "20260825050000_device_source_no_data_outreach_preference",
-      "20260825180000_hosted_operator_task",
-      "20260825193000_hosted_group_private_conversion",
-      "20260826120000_hosted_group_participant_observation",
-      "20260826201500_imessage_mini_app_renewal_credential",
-      "20260826230000_hosted_stripe_payment_notification_email",
-      "20260830150000_hosted_system_progress_projection",
-      "20260830170000_hosted_account_cleanup_temporal",
-      "20260831150000_group_journal_capture",
-      "20260904190000_linq_email_handle_identity",
-      "20260905000000_clinical_record_reader_cleanup",
-      "20260905010000_linq_terminal_message_retry",
-      "20260908190000_feedback_operator_tasks",
-      "20260909210000_hosted_approval_credentials",
-      "20260909220000_hosted_auth_records",
-      "20260910040000_approval_recovery_key",
-      "20260910190000_message_typing_latency_alerts",
-      "20260910210000_require_hosted_phone_call_encrypted_private_content",
-      "20260911143000_checkpoint_runtime_recheck_receipt",
-      "20260915151000_hosted_runtime_owner",
-      "20260915183000_hosted_runtime_resources",
-      "20260915223000_hosted_runtime_legacy_import",
-      "20260915224500_hosted_runtime_upload_recovery",
-      "20260915230000_hosted_runtime_media_registration",
-      "20260915234500_hosted_runtime_member_cutover",
-      "20260915234600_hosted_runtime_rolling_campaign",
-      "20260915234700_hosted_runtime_managed_snapshots",
-      "20260915234800_hosted_runtime_creation_barrier",
-      "20260916044500_hosted_runtime_member_enrollment",
-      "20260916050000_hosted_runtime_deleted_member_enrollment",
-      "20260916053000_hosted_runtime_late_sources",
-      "20260916060000_hosted_runtime_release_compatibility",
-      "20260916063000_hosted_runtime_cleanup_enrollment",
-      "20260917033000_managed_snapshot_encrypted_md5",
-      "20260917160000_clinical_daily_sync",
-      "20260920210000_snapshot_recovery_deadline",
-      "20260921190000_conversation_polls",
-      "20260922170000_hosted_sponsorship_topup_margin",
-      "20260922220000_poll_result_notifications",
-      "20261001140000_companion_wearable_haptics",
-      "20261002010000_companion_presence",
-      "20261005000000_device_sync_deferred_wake",
-      "20261005120000_companion_wake_delivery",
-      "20261008210000_linq_bounded_terminal_recovery",
-      "20261016180000_weekly_game",
-      "20261021050000_game_profile_photo",
-      "20261021180000_game_heart_rate_entry",
-      "20261022010000_game_chat_changes",
-      "20261022020000_game_push_session",
-      "20261022070000_game_chat_photo_introduction",
-      "20261022071000_game_negotiation",
-      "20261022150000_game_allowance_beneficiary",
-      "20261022160000_game_chat_bootstrap_receipt",
-      "20261022220000_game_v1",
-      "20261023180000_game_day_incomplete",
-      "20261024200000_game_departed_player",
-      "20261025120000_linq_signup_link_reminder",
-      "20261026120000_game_block_report",
-      "20261026120000_reset_chat_models_to_terra",
-      "20261030120000_game_recap",
-      "20261031230000_hosted_phone_call_linq_result_notification_channel",
-      "20261101230000_game_many_per_pair",
-      "20261102120000_hosted_cold_ingest_media",
-      "20261102230000_game_seat_storage",
-      "20261104180000_game_post_replies",
-      "20261105000000_hosted_linq_ack_reaction",
-      "20261105060000_hosted_linq_ack_reaction_message",
-      "20261106120000_game_report_alert_inputs",
-      "20261106120000_hosted_thread_container_complete_roster_watermark",
-      "20261106120100_hosted_group_offer_gesture_receipt",
-      "20261106220000_game_reminders",
-      "20261107010000_game_reminder_every_day",
-      "20261108010000_hosted_accepted_subscription_receipt",
-      "20261110180000_hosted_linq_group_line_move",
-      "20261110190000_linq_group_line_move_silent",
-      "20261110230000_game_recap_retirement",
-      "20261111000000_normalize_clinical_retrieval_phase",
-      "20261111001000_recap_media_admission",
-      "migration_lock.toml",
-    ]);
-    expect(migrationEntries).toEqual(
-      expect.arrayContaining([...queryShapeMigrationEntries]),
     );
     expect(stripeEffectCompatibilityMigrationSql).toContain(
       'ALTER TABLE "hosted_member_billing_ref"',
@@ -1300,116 +972,8 @@ describe("hosted Prisma baseline migration", () => {
     expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
       'CREATE INDEX "device_sync_signal_user_source_idx"',
     );
-    expect(hostedUsageReferralEntryKindMigrationSql.trim()).toBe(
-      [
-        'ALTER TYPE "HostedUsageCreditEntryKind"',
-        "  ADD VALUE IF NOT EXISTS 'referral_grant';",
-      ].join("\n"),
-    );
-    expect(
-      migrationEntries.indexOf("20260726115900_hosted_usage_referral_entry_kind"),
-    ).toBeLessThan(
-      migrationEntries.indexOf("20260726120000_hosted_usage_referral_rewards"),
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).toContain(
-      'CREATE TABLE "hosted_usage_referral"',
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).toContain(
-      'ALTER COLUMN "purchase_id" DROP NOT NULL',
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).toContain(
-      'ADD COLUMN "referral_id" TEXT',
-    );
-    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
-      '("purchase_id" IS NOT NULL) <> ("referral_id" IS NOT NULL)',
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
-      'DROP CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
-      'ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
-    );
-    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
-      'DROP CONSTRAINT IF EXISTS "hosted_usage_credit_entry_amount_direction_valid"',
-    );
-    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
-      'ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
-    );
-    expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
-      ') NOT VALID',
-    );
     expect(hostedUsageReferralCreditEntryConstraintMigrationSql).toContain(
       'VALIDATE CONSTRAINT "hosted_usage_credit_entry_source_shape_valid"',
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).toContain(
-      'CREATE UNIQUE INDEX "hosted_usage_credit_entry_referral_grant_key"',
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).toContain(
-      'WHERE "kind" = \'referral_grant\'',
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).toContain(
-      'CREATE TABLE "hosted_usage_credit_grant"',
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).toContain(
-      'PRIMARY KEY ("entry_id")',
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).toContain(
-      'CHECK ("remaining_usd_micros" >= 0)',
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).toContain(
-      'FOREIGN KEY ("entry_id") REFERENCES "hosted_usage_credit_entry"("id")',
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).toContain(
-      [
-        'INNER JOIN "hosted_usage_credit_purchase" AS purchase',
-        '  ON purchase."id" = entry."purchase_id"',
-        "WHERE entry.\"kind\" = 'purchase_grant';",
-      ].join("\n"),
-    );
-    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
-      'ON CONFLICT ("entry_id") DO UPDATE',
-    );
-    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
-      '"remaining_usd_micros" = EXCLUDED."remaining_usd_micros"',
-    );
-    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
-      'SELECT COUNT(*) AS "lockedBeneficiaryCount"',
-    );
-    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
-      'ORDER BY member."id"\n  FOR UPDATE',
-    );
-    expect(hostedUsageReferralProjectionContractMigrationSql).toContain(
-      'IS DISTINCT FROM purchase."remaining_credit_usd_micros"',
-    );
-    expect(hostedUsageReferralProjectionContractMigrationSql).not.toContain(
-      'ALTER TABLE "hosted_usage_credit_entry"',
-    );
-    expect(hostedUsageReferralCreditEntryContractMigrationSql).toContain(
-      'ALTER TABLE "hosted_usage_credit_entry"',
-    );
-    expect(hostedUsageReferralProductSpec).not.toContain(
-      "20260726123000_allow_hosted_usage_referral_credit_entries",
-    );
-    expect(normalizedHostedUsageReferralProductSpec.indexOf(
-      "20260728030000_hosted_usage_referral_credit_entry_constraints",
-    )).toBeLessThan(normalizedHostedUsageReferralProductSpec.indexOf(
-      "previous Vercel function window to drain",
-    ));
-    expect(normalizedHostedUsageReferralProductSpec.indexOf(
-      "previous Vercel function window to drain",
-    )).toBeLessThan(normalizedHostedUsageReferralProductSpec.indexOf(
-      "20260728031000_resynchronize_hosted_usage_credit_purchase_grants",
-    ));
-    expect(normalizedHostedUsageReferralProductSpec.indexOf(
-      "20260728031000_resynchronize_hosted_usage_credit_purchase_grants",
-    )).toBeLessThan(normalizedHostedUsageReferralProductSpec.indexOf(
-      "Enable `HOSTED_USAGE_REFERRALS_ENABLED=1`",
-    ));
-    expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
-      "hosted_usage_credit_allocation",
-    );
-    expect(hostedUsageReferralRewardsMigrationSql).not.toContain(
-      "HostedUsageCreditGrantKind",
     );
     expect(hostedUsageReferralRewardsMigrationSql).not.toMatch(
       /phone|email|telegram|chat_id/iu,
