@@ -682,7 +682,8 @@ export function createAssistantHostedToolContext(input: {
       const scope = executionContext?.gameRecapScope
       const admission = executionContext?.gameRecapAdmission
       if (!scope?.show || !admission || !recapWorkspace || !executionContext.groupTool) throw new Error('Read the authorized recap material before generating media.')
-      return createRecapMediaRuntime({ vault: input.messageInput.vault, workspace: recapWorkspace, scope, admission,
+      return createRecapMediaRuntime({ env: input.messageInput.turnEnvironment?.env ?? process.env,
+        vault: input.messageInput.vault, workspace: recapWorkspace, scope, admission,
         tool: executionContext.groupTool, fetchImpl, request })
     },
     prepareGameRecapInputs: async material => {

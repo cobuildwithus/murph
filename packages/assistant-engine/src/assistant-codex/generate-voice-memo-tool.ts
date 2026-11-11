@@ -254,7 +254,7 @@ export async function executeGenerateSongTool(input: {
 }): Promise<GenerateVoiceMemoToolResult> {
   if (input.args.output === 'file') {
     const runtime = input.fileRuntime
-    const apiKey = resolveElevenLabsApiKey(input.env ?? {})
+    const apiKey = runtime?.elevenLabsApiKey ?? resolveElevenLabsApiKey(input.env ?? {})
     if (!runtime || !apiKey) return { rpcSuccess: false, rpcText: 'Song file output is unavailable.' }
     try {
       const result = await generateElevenLabsMusic({ apiKey, durationMs: input.args.durationSeconds * 1000,

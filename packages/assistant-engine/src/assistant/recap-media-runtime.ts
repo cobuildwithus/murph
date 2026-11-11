@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
 import { inspectRecapProviderRequest, RECAP_FINALIZATION_MS, RECAP_REFERENCE_MAX_COUNT } from '@murphai/contracts/recap-admission'
+import { resolveElevenLabsApiKey } from '@murphai/operator-config/elevenlabs-runtime'
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
 import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
 import type { GenerateSongToolArgs } from '../assistant-codex/generate-voice-memo-tool.js'
@@ -35,7 +36,7 @@ export async function finishRecapRun(context: AssistantHostedExecutionContext | 
 }
 
 export function createRecapMediaRuntime(input: {
-  vault: string; workspace: Awaited<ReturnType<typeof materializeRecapWorkspace>>;
+  env: NodeJS.ProcessEnv; vault: string; workspace: Awaited<ReturnType<typeof materializeRecapWorkspace>>;
   scope: NonNullable<AssistantHostedExecutionContext['gameRecapScope']>;
   admission: RecapRunAdmission; tool: AssistantHostedGroupTool; fetchImpl: typeof fetch;
   request: { kind: 'image'; args: GenerateImageToolArgs } | { kind: 'song'; args: GenerateSongToolArgs };
@@ -52,6 +53,7 @@ export function createRecapMediaRuntime(input: {
   const remaining = Date.parse(input.admission.deadline) - Date.now() - RECAP_FINALIZATION_MS
   const signal = remaining > 0 ? AbortSignal.timeout(remaining) : AbortSignal.abort(new Error('Recap generation deadline reached.'))
   return {
+    elevenLabsApiKey: resolveElevenLabsApiKey(input.env) ?? undefined,
     signal,
     resolveReferences: async refs => {
       if (JSON.stringify(refs) !== JSON.stringify(referenceIds)) throw new Error('Reference request changed.')

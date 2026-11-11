@@ -103,6 +103,7 @@ export type HostedLocalE2eScenarioName =
   | "openai-egress-authority"
   | "personalized-next-trials"
   | "provider-egress-token-bridge"
+  | "recap-show-files"
   | "retell-call-result-roundtrip"
   | "retryable-outbox-foreground-restart"
   | "shutdown-checkpoint-conversation-ahead"
@@ -157,6 +158,13 @@ export interface HostedLocalE2eScenario {
 }
 
 export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
+  {
+    file: "apps/cloudflare/test/hosted-local-recap-files-e2e.test.ts",
+    name: "recap-show-files",
+    // Runs in the native Linux permission gate, not emulated Docker suites.
+    manualOnly: true,
+    dedicatedVitestProcess: true,
+  },
   {
     file: "apps/cloudflare/test/hosted-local-hot-admission-latency-e2e.test.ts",
     manualOnly: true,

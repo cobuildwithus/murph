@@ -102,6 +102,10 @@
     "./outbound-channel": {
       "types": "./dist/outbound-channel.d.ts",
       "default": "./dist/outbound-channel.js"
+    },
+    "./recap-show-testkit": {
+      "types": "./dist/recap-show-testkit.d.ts",
+      "default": "./dist/recap-show-testkit.js"
     }
   },
   "files": [
