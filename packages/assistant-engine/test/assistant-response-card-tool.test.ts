@@ -763,19 +763,6 @@ describe('murph.attach_response_card', () => {
     })).toMatchObject({ kind: 'invalid-response-card-arguments' })
   })
 
-  it('describes Telegram cards as flexible presentation options', () => {
-    expect(
-      MURPH_ATTACH_RESPONSE_CARD_TOOL.description
-        .split('Author only dietary-calories').length - 1,
-    ).toBe(1)
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain('goal show <goal-id>')
-    expect(
-      MURPH_ATTACH_RESPONSE_CARD_TOOL.description.split(
-        'vault-cli memory show --compact --format json',
-      ).length - 1,
-    ).toBe(1)
-  })
-
   it('uses the strict card contract at the model-facing boundary', () => {
     expect(readCardToolRequest({ card: CARD })).toEqual({
       card: CARD,

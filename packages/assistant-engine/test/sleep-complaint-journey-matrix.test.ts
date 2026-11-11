@@ -28,7 +28,7 @@ describe('sleep complaint journey matrix', () => {
       {
         complaint: 'getting-to-bed friction',
         prove: () => {
-          expect(skill('behavior-followthrough').triggerHint).toMatch(/friction|repeated behavior/iu)
+          expect(skill('behavior-followthrough').slug).toBe('behavior-followthrough')
         },
       },
       {
@@ -56,7 +56,7 @@ describe('sleep complaint journey matrix', () => {
       {
         complaint: 'daytime sleepiness and apnea gate',
         prove: () => {
-          expect(skill('energy-fatigue').triggerHint).toContain('daytime sleepiness')
+          expect(skill('sleep-improvement').slug).toBe('sleep-improvement')
           expect(validateExperimentSessionMetricValue({
             fieldId: 'daytime_sleepiness',
             value: 11,

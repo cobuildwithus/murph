@@ -21,8 +21,10 @@ onboardingGuidance: false,
 describe('private Journal capture and recovery instructions', () => {
   it('supplies the canonical icon catalog and note command without a help round', async () => {
     const skill = await readFile(path.join(resolveAssistantSkillsRoot(), 'journal', 'SKILL.md'), 'utf8')
-    const icons = skill.split('Valid ids:')[1]?.split('## Timing')[0] ?? ''
-    expect([...icons.matchAll(/`([^`]+)`/gu)].map((match) => match[1])).toEqual(JOURNAL_ICON_IDS)
+    // The skill's Icon section lists every id the contract accepts and no other.
+    const icons = /^#+ Icon\n([\s\S]*?)(?=^#+ )/mu.exec(skill)?.[1] ?? ''
+    const listed = new Set([...icons.matchAll(/`([a-z][a-z-]*)`/gu)].map((match) => match[1]))
+    expect([...listed].sort()).toEqual([...JOURNAL_ICON_IDS].sort())
   })
 
   it('grounds shell execution in the current workspace and distinguishes launch failures from ambiguous writes', () => {

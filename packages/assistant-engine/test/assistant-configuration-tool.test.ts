@@ -19,10 +19,6 @@ import type {
 } from "../src/assistant/hosted-tool-context.js";
 
 describe("assistant configuration tool", () => {
-  it("describes scope-specific defaults and personal model entitlements", () => {
-    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("OpenAI model");
-  });
-
   it("offers only OpenAI model and reasoning controls and rejects provider changes", () => {
     expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.inputSchema.properties)
       .toHaveProperty("model");

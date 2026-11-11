@@ -106,10 +106,6 @@ const GLOBAL_CLI_FLAGS = new Set([
   'format', 'schema', 'help', 'vault', 'llms', 'llms-full', 'verbose', 'token-count',
   'token-limit', 'token-offset', 'filter-output', 'json', 'version', 'mcp', 'compact',
 ])
-// Commands that instructions name only to say they must not be used. Both are
-// gone from the CLI; the private group skills still prohibit them by name.
-// Delete these entries when that prose is rewritten.
-const DEAD_COMMAND_PROHIBITIONS = new Set(['group shared', 'group weekly'])
 
 function findCliProblems(source: Source): string[] {
   const problems: string[] = []
@@ -133,7 +129,7 @@ function findCliProblems(source: Source): string[] {
     if (!command) {
       const known = [3, 2, 1].some((size) => cliGroups.has(words.slice(0, size).join(' ')))
       const named = words.slice(0, 2).join(' ')
-      if (!known && !DEAD_COMMAND_PROHIBITIONS.has(named)) {
+      if (!known) {
         problems.push(`${source.where}: unknown command \`vault-cli ${named}\``)
       }
       continue
@@ -156,6 +152,27 @@ function findCliProblems(source: Source): string[] {
       if (!previousWasFlag && !placeholder) break
       previousWasFlag = false
     }
+  }
+  return problems
+}
+
+// `vault-cli batch --command '["goal","list"]'` names a command as a JSON argv
+// array. Each array is checked as the command line it stands for.
+function findBatchCommandProblems(source: Source): string[] {
+  const problems: string[] = []
+  for (const match of source.text.matchAll(/--command[ \t]+'(\[[^'\n]*\])'/gu)) {
+    let argv: unknown
+    try {
+      argv = JSON.parse(match[1]!)
+    } catch {
+      argv = null
+    }
+    if (!Array.isArray(argv) || argv.length === 0 || argv.some((item) => typeof item !== 'string')) {
+      problems.push(`${source.where}: batch command is not a JSON array of strings: ${match[1]}`)
+      continue
+    }
+    const words = (argv as string[]).map((item) => (/^[A-Za-z0-9_.:/@=,+-]+$/u.test(item) ? item : JSON.stringify(item)))
+    problems.push(...findCliProblems({ where: source.where, text: `vault-cli ${words.join(' ')}` }))
   }
   return problems
 }
@@ -218,18 +235,21 @@ const registeredSlugs = new Set<string>(ASSISTANT_SKILLS.map((skill) => skill.sl
 // Skill directories that are reached only through a tool description and are
 // deliberately absent from the skill registry and router.
 const TOOL_OWNED_SKILL_DIRECTORIES = ['physical-notes']
-// Reference files that no file in their own skill names today, so the model is
-// never routed to them. Each entry is a finding for the skill rewrite: name the
-// file from its skill or delete it, then remove the entry.
-const KNOWN_ORPHAN_REFERENCE_FILES = [
-  'physical-therapy/references/evidence-register.md',
-  'physical-therapy/references/exercise-catalog-contract.md',
-  'physical-therapy/templates/response-templates.md',
+// Files that exist only in the managed skills overlay (murph-cloud
+// packages/hosted-assistant-skills), which replaces a public fallback skill in
+// hosted builds. This repository cannot check them, so each one is listed by
+// hand, must sit under a skill that carries the public fallback marker, and
+// must still be named by some instruction.
+const PUBLIC_FALLBACK_MARKER = 'This public fallback intentionally'
+const MANAGED_OVERLAY_SKILL_FILES = [
+  'group-chat/references/access.md',
+  'group-chat/references/private-handoffs.md',
 ]
 
 function findSkillPathProblems(source: Source): string[] {
   const problems: string[] = []
   for (const match of source.text.matchAll(/MURPH_ASSISTANT_SKILLS_ROOT"?\/([a-z0-9-]+)\/([A-Za-z0-9_./-]+\.md)/gu)) {
+    if (MANAGED_OVERLAY_SKILL_FILES.includes(`${match[1]}/${match[2]}`)) continue
     if (!existsSync(path.join(skillsRoot, match[1]!, match[2]!))) {
       problems.push(`${source.where}: missing skill file ${match[1]}/${match[2]}`)
     }
@@ -267,6 +287,7 @@ describe('instruction reference integrity', () => {
     expect(count(/vault-cli [a-z]/gu)).toBeGreaterThan(100)
     expect(count(/(?<![\w./-])murph\.[a-z]/gu)).toBeGreaterThan(100)
     expect(count(/MURPH_ASSISTANT_SKILLS_ROOT"?\/[a-z0-9-]+\//gu)).toBeGreaterThan(50)
+    expect(count(/--command[ \t]+'\[/gu)).toBeGreaterThan(3)
   })
 
   it('catches an unknown command, flag, tool, action and skill file', () => {
@@ -275,6 +296,11 @@ describe('instruction reference integrity', () => {
     expect(findCliProblems({ where, text: 'Run `vault-cli nonexistent-group thing`.' })).toHaveLength(1)
     expect(findCliProblems({ where, text: 'Run `vault-cli meal add --no-such-flag x`.' })).toHaveLength(1)
     expect(findCliProblems({ where, text: 'Run `vault-cli meal add` and then pass --no-such-flag elsewhere.' })).toEqual([])
+    expect(findBatchCommandProblems({ where, text: `vault-cli batch --command '["goal","list","--limit","5"]'` })).toEqual([])
+    expect(findBatchCommandProblems({ where, text: `vault-cli batch --command '["nonexistent-group","thing"]'` })).toHaveLength(1)
+    expect(findBatchCommandProblems({ where, text: `vault-cli batch --command '["goal","list","--no-such-flag","x"]'` })).toHaveLength(1)
+    expect(findBatchCommandProblems({ where, text: `vault-cli batch --command '["goal","list"'` })).toEqual([])
+    expect(findBatchCommandProblems({ where, text: `vault-cli batch --command '[goal list]'` })).toHaveLength(1)
     expect(findToolProblems({ where, text: 'Call `murph.no_such_tool`.' })).toHaveLength(1)
     expect(findToolProblems({ where, text: 'Call `murph.group_data action="no_such_action"`.' })).toHaveLength(1)
     expect(findSkillPathProblems({ where, text: '$MURPH_ASSISTANT_SKILLS_ROOT/no-such-skill/SKILL.md' })).toHaveLength(1)
@@ -282,6 +308,7 @@ describe('instruction reference integrity', () => {
 
   it('names only vault-cli commands and flags that exist', () => {
     expect(allSources.flatMap(findCliProblems)).toEqual([])
+    expect(allSources.flatMap(findBatchCommandProblems)).toEqual([])
   })
 
   it('names only murph tools and tool actions that exist', () => {
@@ -291,6 +318,16 @@ describe('instruction reference integrity', () => {
   it('points only at skill files that exist', () => {
     expect(allSources.flatMap(findSkillPathProblems)).toEqual([])
     expect(skillFiles.flatMap(findSkillLinkProblems)).toEqual([])
+  })
+
+  it('excuses a missing file only inside a public fallback skill, and only while it is named', () => {
+    const everything = allSources.map((source) => source.text).join('\n')
+    for (const file of MANAGED_OVERLAY_SKILL_FILES) {
+      const slug = file.split('/')[0]!
+      expect(existsSync(path.join(skillsRoot, file)), `${file} now exists here; drop it from the list`).toBe(false)
+      expect(readFileSync(path.join(skillsRoot, slug, 'SKILL.md'), 'utf8'), slug).toContain(PUBLIC_FALLBACK_MARKER)
+      expect(everything, `${file} is no longer named; drop it from the list`).toContain(`/${file}`)
+    }
   })
 
   it('registers every skill directory and ships every registered skill', () => {
@@ -312,7 +349,7 @@ describe('instruction reference integrity', () => {
         if (!texts.includes(relative) && !texts.includes(path.basename(file))) orphans.push(`${slug}/${relative}`)
       }
     }
-    expect(orphans).toEqual(KNOWN_ORPHAN_REFERENCE_FILES)
+    expect(orphans).toEqual([])
   })
 
   it('keeps each skill naming the same tools and sibling skills', () => {

@@ -9,6 +9,8 @@ import {
 } from '../src/assistant/system-prompt.js'
 import {
   ASSISTANT_PROMPT_BLOCK_DEFINITIONS,
+  ASSISTANT_SCHEDULED_GROUP_TURN_PROMPT_BLOCK_IDS,
+  ASSISTANT_SCHEDULED_TURN_PROMPT_BLOCK_IDS,
   type AssistantPromptBlock,
   type AssistantPromptBlockAudience,
   type AssistantPromptBlockId,
@@ -139,27 +141,33 @@ describe('prompt route matrix', () => {
 
 describe('prompt boundary blocks', () => {
   const direct = ['direct-linq', 'direct-linq-onboarding', 'direct-scheduled', 'direct-local'] as const
-  const group = ['group-linq', 'group-telegram', 'group-email'] as const
-  const groupChat = ['group-linq', 'group-telegram'] as const
+  const groupEmail = ['group-email', 'group-email-scheduled'] as const
+  const groupChat = ['group-linq', 'group-telegram', 'group-linq-scheduled'] as const
+  const group = [...groupChat, ...groupEmail] as const
   // Every block that states a privacy, safety or authority rule, and the
   // routes that must carry it. Its wording is free; its presence is not.
   const REQUIRED: Partial<Record<AssistantPromptBlockId, readonly string[]>> = {
     'core.unverified-external': ['unverified-external'],
     'core.identity.direct': direct,
     'core.identity.group': group,
-    'core.follow-through-authorization': [...direct, ...group],
+    'core.social-role.group': group,
+    'core.humor.group': group,
+    'core.private-data.group': group,
+    'core.follow-through-authorization': group,
     'core.health-evidence-safety.direct': direct,
     'core.health-evidence-safety.group': group,
     'core.tool-truthfulness.direct': direct,
     'core.tool-truthfulness.group': group,
+    'route.acting-permission.direct': direct,
     'route.private-delivery-context': [...direct, ...group],
     'route.computer-use': direct,
     'route.connected-apps.group': group,
     'route.family-plan.group': group,
     'route.hosted-groups.private-consult': direct,
     'route.hosted-groups': group,
+    'route.hosted-groups.shared-data-detail': group,
     'route.group-cli-boundary': groupChat,
-    'route.group-email-no-cli': ['group-email'],
+    'route.group-email-no-cli': groupEmail,
     'thread.conversation-scope.direct': direct,
     'thread.conversation-scope.group': group,
     'thread.conversation-scope.unverified': ['unverified-external'],
@@ -193,11 +201,13 @@ describe('prompt boundary blocks', () => {
       if (scope === 'direct') {
         expect(admitted).toEqual(expect.arrayContaining([
           'core.identity.direct', 'core.health-evidence-safety.direct', 'core.tool-truthfulness.direct',
-          'route.private-delivery-context', 'route.computer-use', 'thread.conversation-scope.direct',
+          'route.acting-permission.direct', 'route.private-delivery-context', 'route.computer-use',
+          'thread.conversation-scope.direct',
         ]))
       } else if (scope === 'group') {
         expect(admitted).toEqual(expect.arrayContaining([
-          'core.identity.group', 'core.health-evidence-safety.group', 'core.tool-truthfulness.group',
+          'core.identity.group', 'core.social-role.group', 'core.humor.group', 'core.private-data.group',
+          'core.follow-through-authorization', 'core.health-evidence-safety.group', 'core.tool-truthfulness.group',
           'route.private-delivery-context', 'route.connected-apps.group', 'route.family-plan.group',
           'thread.conversation-scope.group',
           input.channel === 'email' ? 'route.group-email-no-cli' : 'route.group-cli-boundary',
@@ -208,6 +218,67 @@ describe('prompt boundary blocks', () => {
         ]))
       }
     }
+  })
+})
+
+describe('scheduled turn admission', () => {
+  const SCHEDULED = { scheduledOccurrenceAt: '2026-11-10T13:00:00.000Z', turnTrigger: 'automation-cron' } as const
+  const ATTENDED = { scheduledOccurrenceAt: null, turnTrigger: null } as const
+  const SCHEDULED_TURN_BLOCKS = [
+    'turn.execution-context', 'turn.scheduled-occurrence', 'turn.delivery-decision-contract',
+  ] as const
+  // Each sweep input rendered twice: as a scheduled occurrence and attended.
+  const pairs = sweepPromptInputs().map((input) => ({
+    scope: input.conversationScope ?? 'direct',
+    scheduled: render({ ...input, ...SCHEDULED }),
+    attended: render({ ...input, ...ATTENDED }),
+  }))
+
+  it('admits only boundary blocks and the scheduled allow-lists', () => {
+    for (const { scope, scheduled } of pairs) {
+      const offenders = scheduled.blocks
+        .filter((block) => !(
+          block.boundary
+          || ASSISTANT_SCHEDULED_TURN_PROMPT_BLOCK_IDS.has(block.id)
+          || (scope === 'group' && ASSISTANT_SCHEDULED_GROUP_TURN_PROMPT_BLOCK_IDS.has(block.id))
+        ))
+        .map((block) => `${block.id} reached a scheduled ${scope} turn`)
+      expect(offenders).toEqual([])
+    }
+  })
+
+  it('keeps every boundary block the attended turn carries', () => {
+    for (const { scheduled, attended } of pairs) {
+      const kept = ids(scheduled)
+      expect(attended.blocks.filter((block) => block.boundary && !kept.includes(block.id)).map((block) => block.id))
+        .toEqual([])
+    }
+  })
+
+  it('only drops blocks: outside the turn layer it carries attended blocks, unchanged', () => {
+    for (const { scheduled, attended } of pairs) {
+      const attendedText = new Map(attended.blocks.map((block) => [block.id, block.text]))
+      for (const block of scheduled.blocks) {
+        if (block.layer !== 'turn') expect(attendedText.get(block.id), block.id).toBe(block.text)
+      }
+    }
+  })
+
+  it('adds its own turn blocks on a verified route and never on an attended turn', () => {
+    for (const { scope, scheduled, attended } of pairs) {
+      for (const id of SCHEDULED_TURN_BLOCKS) expect(ids(attended)).not.toContain(id)
+      if (scope !== 'unverified-external') {
+        expect(ids(scheduled)).toEqual(expect.arrayContaining([...SCHEDULED_TURN_BLOCKS]))
+      }
+    }
+  })
+
+  it('lists only registered, non-boundary blocks that some scheduled turn admits', () => {
+    const listed = [...ASSISTANT_SCHEDULED_TURN_PROMPT_BLOCK_IDS, ...ASSISTANT_SCHEDULED_GROUP_TURN_PROMPT_BLOCK_IDS]
+    const admitted = new Set(pairs.flatMap(({ scheduled }) => ids(scheduled)))
+    expect(listed.filter((id) => !ALL_IDS.includes(id))).toEqual([])
+    expect(listed.filter((id) => (ASSISTANT_PROMPT_BLOCK_DEFINITIONS[id] as { boundary?: true }).boundary === true)).toEqual([])
+    expect(listed.filter((id) => !admitted.has(id))).toEqual([])
   })
 })
 
@@ -230,18 +301,18 @@ describe('prompt capability gates', () => {
     { name: 'onboarding', base: directBase, on: { onboardingGuidance: true }, off: { onboardingGuidance: false }, onOnly: ['thread.onboarding'] },
     { name: 'hosted automation', base: directBase, on: { assistantHostedAutomationAvailable: true }, off: { assistantHostedAutomationAvailable: false }, onOnly: ['route.automation'], offOnly: ['route.automation.unavailable'] },
     { name: 'group hosted automation', base: groupBase, on: { assistantHostedAutomationAvailable: true }, off: { assistantHostedAutomationAvailable: false }, onOnly: ['route.automation'], offOnly: ['route.automation.unavailable'] },
-    { name: 'hosted runtime', base: directBase, on: { hostedRuntime: true }, off: { hostedRuntime: false }, onOnly: ['route.low-usage', 'route.late-child-results', 'route.non-blocking-delegation', 'turn.ordinary-inbound'] },
-    { name: 'ordinary inbound turn', base: directBase, on: { ordinaryInboundTurn: true }, off: { ordinaryInboundTurn: false }, onOnly: ['route.non-blocking-delegation', 'turn.ordinary-inbound'] },
+    { name: 'hosted runtime', base: directBase, on: { hostedRuntime: true }, off: { hostedRuntime: false }, onOnly: ['route.low-usage', 'route.non-blocking-delegation', 'turn.ordinary-inbound'] },
+    { name: 'group hosted runtime', base: groupBase, on: { hostedRuntime: true }, off: { hostedRuntime: false }, onOnly: ['route.low-usage', 'route.late-child-results', 'thread.tone', 'turn.ordinary-inbound'] },
+    { name: 'ordinary inbound turn', base: directBase, on: { ordinaryInboundTurn: true }, off: { ordinaryInboundTurn: false }, onOnly: ['route.non-blocking-delegation', 'turn.ordinary-inbound'], offOnly: ['route.private-reminder-location'] },
     { name: 'direct style settings', base: directBase, on: { assistantStyleSettingsAvailable: true }, off: { assistantStyleSettingsAvailable: false }, onOnly: ['route.style-settings.direct'] },
     { name: 'group style settings', base: groupBase, on: { assistantStyleSettingsAvailable: true }, off: { assistantStyleSettingsAvailable: false }, onOnly: ['route.style-settings.group'] },
     { name: 'persona', base: directBase, on: { assistantPersona: 'classic' }, off: { assistantPersona: null }, onOnly: ['thread.persona'] },
     { name: 'personality dials', base: directBase, on: { assistantPersonality: { humor: 5 } }, off: { assistantPersonality: null }, onOnly: ['thread.personality-dials'] },
-    { name: 'scheduled occurrence', base: directBase, on: { scheduledOccurrenceAt: '2026-11-10T13:00:00.000Z' }, off: { scheduledOccurrenceAt: null }, onOnly: ['turn.scheduled-occurrence', 'turn.execution-context', 'turn.delivery-decision-contract'] },
     { name: 'CLI contract', base: directBase, on: { assistantCliContract: PROMPT_ROUTE_CLI_CONTRACT }, off: { assistantCliContract: null }, onOnly: ['route.cli-contract'] },
     { name: 'injected context', base: directBase, on: { assistantDynamicContextPrompts: ['Gate context.'] }, off: { assistantDynamicContextPrompts: [] }, onOnly: ['turn.injected-context'] },
     { name: 'product base URL', base: directBase, on: { murphProductBaseUrl: 'https://murph.example.test' }, off: { murphProductBaseUrl: null }, onOnly: ['thread.product-base-url'] },
     { name: 'current instant', base: directBase, on: { currentInstant: '2026-11-10T15:00:00.000Z' }, off: {}, onOnly: ['turn.current-time'] },
-    { name: 'group tool surface', base: groupBase, on: { assistantHostedGroupToolSurface: 'families' }, off: { assistantHostedGroupToolSurface: 'none' }, onOnly: ['route.hosted-groups'] },
+    { name: 'group tool surface', base: groupBase, on: { assistantHostedGroupToolSurface: 'families' }, off: { assistantHostedGroupToolSurface: 'none' }, onOnly: ['route.hosted-groups', 'route.hosted-groups.shared-data-detail'] },
     { name: 'private group consult', base: directBase, on: { assistantHostedGroupToolSurface: 'families' }, off: { assistantHostedGroupToolSurface: 'none' }, onOnly: ['route.hosted-groups.private-consult'] },
   ]
 

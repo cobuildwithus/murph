@@ -162,10 +162,8 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('keeps route hints and SKILL.md descriptions under parser limits', async () => {
+  it('keeps SKILL.md descriptions under parser limits', async () => {
     for (const skill of ASSISTANT_SKILLS) {
-      expect(skill.triggerHint.length).toBeLessThan(1024)
-
       const raw = await readSkillFile(skill)
       const frontmatter = raw.match(/^---\n(?<body>[\s\S]*?)\n---/u)
       expect(frontmatter?.groups?.body).toBeTruthy()

@@ -1,33 +1,10 @@
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
-
 import { describe, expect, it } from 'vitest'
 
-import {
-  ASSISTANT_SKILLS,
-  resolveAssistantSkillsRoot,
-} from '../src/assistant-skill-assets.js'
 import {
   buildOnboardingGoalCheckinSeed,
 } from '../src/assistant/onboarding-goal-checkin-automation.js'
 
-const behaviorFollowthroughSkillPath = path.join(
-  resolveAssistantSkillsRoot(),
-  'behavior-followthrough',
-  'SKILL.md',
-)
-
 describe('assistant proactive follow-through', () => {
-  it('keeps exact-package acceptance and narrow support boundaries in the owning skill', async () => {
-    const setup = await readFile(behaviorFollowthroughSkillPath, 'utf8')
-    expect(setup).toContain('references/support-runtime.md')
-    await readFile(path.join(path.dirname(behaviorFollowthroughSkillPath), 'references/support-runtime.md'), 'utf8')
-
-    expect(ASSISTANT_SKILLS.find(({ slug }) =>
-      slug === 'behavior-followthrough'
-    )).toBeDefined()
-  })
-
   it('keeps the first health read separate from one finite three-day support check', () => {
     const completedAt = '2026-06-01T18:15:00.000Z'
     const seed = buildOnboardingGoalCheckinSeed({

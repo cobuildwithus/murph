@@ -37,13 +37,6 @@ afterEach(() => {
 })
 
 describe('Codex thread instructions', () => {
-  it('keeps the Murph execution kernel compact without coding-agent baggage', () => {
-    // Includes result-reading and scheduled JSON delivery guidance. The complete
-    // native first request was measured at +0.460% individual / +0.605% group
-    // against the Terra release base; this cap still bounds kernel growth.
-    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_800)
-  })
-
   it('includes the base instructions in the native-thread contract fingerprint', () => {
     const fingerprintInput = {
       developerInstructions: 'Stable Murph instructions.',

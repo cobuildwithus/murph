@@ -20,10 +20,11 @@ async function readSkill(slug: string): Promise<string> {
 // its own id format, because the runtime matches on that prefix.
 describe('support series ownership', () => {
   it.each([
-    ['micronutrients-supplements', 'supportSeriesId: "supplement:<regimenId>"'],
-    ['behavior-followthrough', 'supportSeriesId: "habit:<regimenId>"'],
-    ['experiment-onboarding', 'supportSeriesId: "experiment:<experimentId>"'],
-  ])('%s names its support series id format', async (slug, seriesId) => {
-    expect(await readSkill(slug)).toContain(seriesId)
+    ['micronutrients-supplements', 'supplement'],
+    ['behavior-followthrough', 'habit'],
+    ['experiment-onboarding', 'experiment'],
+  ])('%s names its support series id format', async (slug, prefix) => {
+    // The prefix is the contract; how the placeholder after it is spelled is not.
+    expect(await readSkill(slug)).toMatch(new RegExp(`supportSeriesId: "${prefix}:<[A-Za-z-]+>"`, 'u'))
   })
 })

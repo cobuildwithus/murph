@@ -35,12 +35,7 @@ import {
 async function readOnboardingCompletionGuidance(): Promise<string> {
   const skillsRoot = resolveAssistantSkillsRoot()
   const raw = await readFile(
-    path.join(
-      skillsRoot,
-      'murph-onboarding',
-      'references',
-      'return-launch-completion.md',
-    ),
+    path.join(skillsRoot, 'murph-onboarding', 'SKILL.md'),
     'utf8',
   )
   return raw.replace(/\s+/gu, ' ')

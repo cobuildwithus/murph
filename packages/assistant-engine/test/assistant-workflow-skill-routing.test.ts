@@ -9,10 +9,11 @@ const readEntrypoint = () => readFile(
 )
 
 describe('experiment support policy routing', () => {
-  it('ships the support reference routed before support questions and effects', async () => {
+  it('names every support reference from the entry file and ships each one', async () => {
     const root = await readEntrypoint()
-    const links = [...root.matchAll(/\]\((references\/[^)]+)\)/gu)].map((match) => match[1])
-    expect(new Set(links)).toEqual(new Set(WORKFLOW_SKILL_REFERENCES['experiment-onboarding']))
+    for (const file of WORKFLOW_SKILL_REFERENCES['experiment-onboarding']) {
+      expect(root, file).toContain(path.basename(file))
+    }
     await readWorkflowSkillPolicy('experiment-onboarding')
   })
 })

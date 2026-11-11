@@ -50,11 +50,10 @@ describe("managed hosted skill boundary", () => {
     }
   });
 
-  it("keeps public routing metadata for the private-owned challenge skills", () => {
-    const challenge = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === "group-challenge",
-    );
+  it("registers the private-owned challenge skills", () => {
+    const registered = ASSISTANT_SKILLS.map((skill) => skill.slug);
 
-    expect(challenge?.triggerHint).toContain("group-challenge-scorecards");
+    expect(registered).toContain("group-challenge");
+    expect(registered).toContain("group-challenge-scorecards");
   });
 });

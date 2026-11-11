@@ -1,32 +1,23 @@
 {
-  "aerobic-fitness": {
-    "skills": [
-      "competition-training",
-      "physical-therapy",
-      "running-cardio"
-    ],
-    "tools": []
-  },
   "appointment-scheduling": {
     "skills": [
-      "computer-use"
+      "computer-use",
+      "phone-calls",
+      "reminders"
     ],
     "tools": [
-      "murph.create_phone_call"
+      "murph.computer_os_control"
     ]
   },
   "assistant-style": {
     "skills": [],
     "tools": [
-      "murph.assistant_configuration",
-      "murph.assistant_style",
-      "murph.personalization"
+      "murph.assistant_style"
     ]
   },
   "automatic-meal-capture": {
     "skills": [
-      "food-journal",
-      "nutrition-strategy"
+      "food-journal"
     ],
     "tools": [
       "murph.attach_response_card"
@@ -36,9 +27,6 @@
     "skills": [
       "experiment-onboarding",
       "goal-setup",
-      "group-chat",
-      "murph-onboarding",
-      "music-generation",
       "physical-therapy",
       "stress-regulation"
     ],
@@ -59,12 +47,13 @@
       "daily-activity",
       "experiment-onboarding",
       "food-journal",
+      "goal-setup",
       "group-challenge",
       "gut-digestion",
       "nutrition-strategy",
-      "sleep-recovery-readiness",
-      "strength-training",
-      "tracked-table"
+      "sleep-improvement",
+      "tracked-table",
+      "training"
     ],
     "tools": []
   },
@@ -78,52 +67,11 @@
   },
   "chronic-illness-support": {
     "skills": [
-      "chronic-pain-support",
-      "physical-therapy",
-      "self-management-experiments"
-    ],
-    "tools": []
-  },
-  "chronic-pain-support": {
-    "skills": [
-      "chronic-illness-support",
-      "physical-therapy",
-      "self-management-experiments"
-    ],
-    "tools": []
-  },
-  "circadian-rhythm": {
-    "skills": [
       "behavior-followthrough",
-      "cycle-hormonal-health",
-      "energy-fatigue",
-      "experiment-onboarding",
-      "micronutrients-supplements",
-      "sleep-improvement"
-    ],
-    "tools": []
-  },
-  "cognitive-focus": {
-    "skills": [
-      "circadian-rhythm",
-      "energy-fatigue",
-      "sleep-improvement",
-      "substance-load"
-    ],
-    "tools": []
-  },
-  "competition-training": {
-    "skills": [
-      "behavior-followthrough",
-      "body-composition",
-      "chronic-illness-support",
-      "chronic-pain-support",
-      "computer-use",
-      "experiment-onboarding",
-      "food-journal",
       "physical-therapy",
       "self-management-experiments",
-      "strength-training"
+      "sleep-improvement",
+      "stress-regulation"
     ],
     "tools": []
   },
@@ -135,6 +83,7 @@
       "experiment-onboarding"
     ],
     "tools": [
+      "murph.automation",
       "murph.computer_act",
       "murph.computer_finish_run",
       "murph.computer_open",
@@ -157,9 +106,8 @@
   },
   "cycle-hormonal-health": {
     "skills": [
-      "energy-fatigue",
       "sleep-improvement",
-      "strength-training"
+      "training"
     ],
     "tools": []
   },
@@ -167,26 +115,12 @@
     "skills": [
       "cardiometabolic-health",
       "physical-therapy",
-      "running-cardio",
-      "strength-training"
-    ],
-    "tools": []
-  },
-  "energy-fatigue": {
-    "skills": [
-      "cardiometabolic-health",
-      "circadian-rhythm",
-      "hrv-resting-heart-rate",
-      "micronutrients-supplements",
-      "sleep-improvement"
+      "training"
     ],
     "tools": []
   },
   "experiment-onboarding": {
-    "skills": [
-      "behavior-followthrough",
-      "self-management-experiments"
-    ],
+    "skills": [],
     "tools": [
       "murph.automation"
     ]
@@ -198,9 +132,7 @@
   "food-journal": {
     "skills": [
       "automatic-meal-capture",
-      "behavior-followthrough",
       "computer-use",
-      "experiment-onboarding",
       "micronutrients-supplements",
       "nutrition-strategy"
     ],
@@ -243,7 +175,6 @@
   },
   "gut-digestion": {
     "skills": [
-      "cardiometabolic-health",
       "food-journal",
       "nutrition-strategy"
     ],
@@ -260,20 +191,16 @@
     "tools": []
   },
   "hosted-low-usage": {
-    "skills": [],
+    "skills": [
+      "murph-family",
+      "signup-link"
+    ],
     "tools": [
       "murph.family_plan",
       "murph.group_usage",
-      "murph.plan_usage"
+      "murph.plan_usage",
+      "murph.subscription"
     ]
-  },
-  "hrv-resting-heart-rate": {
-    "skills": [
-      "aerobic-fitness",
-      "sleep-recovery-readiness",
-      "substance-load"
-    ],
-    "tools": []
   },
   "journal": {
     "skills": [
@@ -283,7 +210,8 @@
   },
   "journal-connected-context": {
     "skills": [
-      "connected-apps"
+      "connected-apps",
+      "training"
     ],
     "tools": [
       "murph.automation"
@@ -298,7 +226,6 @@
   "micronutrients-supplements": {
     "skills": [
       "cardiometabolic-health",
-      "circadian-rhythm",
       "computer-use",
       "experiment-onboarding",
       "food-journal",
@@ -308,30 +235,22 @@
     ],
     "tools": []
   },
-  "mobility-posture": {
-    "skills": [
-      "physical-therapy",
-      "strength-training"
-    ],
-    "tools": []
-  },
   "murph-family": {
     "skills": [],
     "tools": [
       "murph.family_plan",
-      "murph.group_usage",
-      "murph.plan_usage"
+      "murph.group_usage"
     ]
   },
   "murph-onboarding": {
     "skills": [
-      "behavior-followthrough",
+      "experiment-onboarding",
+      "goal-setup",
       "micronutrients-supplements"
     ],
     "tools": [
       "murph.automation",
       "murph.device",
-      "murph.generate_voice_memo",
       "murph.send_progress_update"
     ]
   },
@@ -349,7 +268,6 @@
       "chronic-illness-support",
       "experiment-onboarding",
       "food-journal",
-      "goal-setup",
       "gut-digestion",
       "micronutrients-supplements"
     ],
@@ -374,13 +292,16 @@
     ]
   },
   "physical-therapy": {
-    "skills": [],
+    "skills": [
+      "behavior-followthrough",
+      "chronic-illness-support",
+      "stress-regulation",
+      "training"
+    ],
     "tools": []
   },
   "private-group-access": {
-    "skills": [
-      "group-chat"
-    ],
+    "skills": [],
     "tools": [
       "murph.group_consult",
       "murph.group_data",
@@ -405,24 +326,9 @@
       "murph.connected_apps_search"
     ]
   },
-  "running-cardio": {
-    "skills": [
-      "behavior-followthrough",
-      "body-composition",
-      "chronic-illness-support",
-      "chronic-pain-support",
-      "competition-training",
-      "daily-activity",
-      "physical-therapy",
-      "self-management-experiments"
-    ],
-    "tools": []
-  },
   "self-management-experiments": {
     "skills": [
-      "behavior-followthrough",
       "chronic-illness-support",
-      "chronic-pain-support",
       "experiment-onboarding",
       "goal-setup",
       "sleep-improvement"
@@ -440,60 +346,34 @@
   "sleep-improvement": {
     "skills": [
       "behavior-followthrough",
-      "circadian-rhythm",
-      "energy-fatigue",
+      "cardiometabolic-health",
+      "chronic-illness-support",
+      "cycle-hormonal-health",
       "experiment-onboarding",
       "micronutrients-supplements",
-      "sleep-recovery-readiness",
-      "substance-load"
+      "physical-therapy",
+      "substance-load",
+      "training"
     ],
     "tools": [
       "murph.attach_sleep_card"
     ]
   },
-  "sleep-recovery-readiness": {
-    "skills": [
-      "behavior-followthrough",
-      "chronic-illness-support",
-      "chronic-pain-support",
-      "circadian-rhythm",
-      "energy-fatigue",
-      "experiment-onboarding",
-      "hrv-resting-heart-rate",
-      "physical-therapy",
-      "self-management-experiments",
-      "sleep-improvement"
-    ],
-    "tools": []
-  },
-  "strength-training": {
-    "skills": [
-      "behavior-followthrough",
-      "body-composition",
-      "experiment-onboarding",
-      "tracked-table"
-    ],
-    "tools": []
-  },
   "stress-regulation": {
     "skills": [
       "behavior-followthrough",
       "chronic-illness-support",
-      "chronic-pain-support",
-      "experiment-onboarding",
-      "food-journal",
       "physical-therapy",
-      "self-management-experiments"
+      "sleep-improvement",
+      "substance-load"
     ],
     "tools": []
   },
   "substance-load": {
     "skills": [
-      "circadian-rhythm",
-      "cognitive-focus",
-      "energy-fatigue",
       "micronutrients-supplements",
-      "sleep-improvement"
+      "sleep-improvement",
+      "stress-regulation"
     ],
     "tools": []
   },
@@ -504,10 +384,21 @@
       "murph.automation"
     ]
   },
-  "workout-csv-import": {
+  "training": {
     "skills": [
-      "strength-training"
+      "behavior-followthrough",
+      "chronic-illness-support",
+      "daily-activity",
+      "experiment-onboarding",
+      "physical-therapy",
+      "sleep-improvement",
+      "tracked-table",
+      "workout-csv-import"
     ],
+    "tools": []
+  },
+  "workout-csv-import": {
+    "skills": [],
     "tools": []
   }
 }

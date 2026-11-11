@@ -15,13 +15,13 @@ connected_apps_manage connected_apps_search connected_apps_execute`.split(/\s+/u
 // Ids from src/assistant/system-prompt-blocks.ts; their wording is free.
 export const PRODUCTION_HOSTED_PROMPT_BLOCK_IDS = [
   'route.native-polls', 'route.labs', 'route.vault-navigation', 'route.hosted-groups.private-consult',
-  'route.automation', 'route.health-commons-tools', 'route.late-child-results', 'route.non-blocking-delegation',
+  'route.automation', 'route.health-commons-tools', 'route.non-blocking-delegation',
   'route.cli-contract', 'thread.onboarding',
 ] as const
 
-// Ceiling only: a smaller prompt always passes. Measured 94,447 bytes with the
+// Ceiling only: a smaller prompt always passes. Measured 81,637 bytes with the
 // generated CLI contract; the margin absorbs machine-specific paths.
-export const PRODUCTION_HOSTED_DEVELOPER_INSTRUCTIONS_CEILING_BYTES = 95_500
+export const PRODUCTION_HOSTED_DEVELOPER_INSTRUCTIONS_CEILING_BYTES = 84_100
 
 export function assertProductionHostedCapabilityParity(input: {
   developerInstructions?: string | null

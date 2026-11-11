@@ -1722,7 +1722,6 @@ text(result.output);
           }],
         },
         prompt: 'How much daylight did I get on July 12?',
-        skillHeading: '# Daily Activity',
         skillSlug: 'daily-activity',
       },
       {
@@ -1754,7 +1753,6 @@ text(result.output);
           }],
         },
         prompt: 'How long was my workout on July 12?',
-        skillHeading: '# Daily Activity',
         skillSlug: 'daily-activity',
       },
       {
@@ -1802,7 +1800,6 @@ text(result.output);
           }],
         },
         prompt: 'Compare my two workouts on July 12: average heart rate, cycling cadence, speed, power, and retained splits.',
-        skillHeading: '# Daily Activity',
         skillSlug: 'daily-activity',
       },
       {
@@ -1821,7 +1818,6 @@ text(result.output);
           }],
         },
         prompt: 'How many basal calories did my connected device record on July 12?',
-        skillHeading: '# Daily Activity',
         skillSlug: 'daily-activity',
       },
       {
@@ -1848,7 +1844,6 @@ text(result.output);
           }],
         },
         prompt: 'How much insulin did my connected device record on July 12?',
-        skillHeading: '# Cardiometabolic Health',
         skillSlug: 'cardiometabolic-health',
       },
       {
@@ -1867,7 +1862,6 @@ text(result.output);
           }],
         },
         prompt: 'How many carbohydrates did my connected device record on July 12?',
-        skillHeading: '# Food journal',
         skillSlug: 'food-journal',
       },
       {
@@ -1895,7 +1889,6 @@ text(result.output);
           vault: 'synthetic-vault',
         },
         prompt: 'Which nutrients are low on July 12, and did Cronometer record all my iron?',
-        skillHeading: '# Food journal',
         skillSlug: 'food-journal',
       },
       {
@@ -1925,7 +1918,6 @@ text(result.output);
           ],
         },
         prompt: 'What is my body-fat trend from July 1 through July 12?',
-        skillHeading: '# Body Composition',
         skillSlug: 'body-composition',
       },
       {
@@ -1933,7 +1925,6 @@ text(result.output);
         command: 'measurement entry list --metric daylight_exposure --from 2026-07-13 --to 2026-07-13 --limit 50 --format json',
         evidence: { count: 0, items: [] },
         prompt: 'How much daylight did I get on July 13?',
-        skillHeading: '# Daily Activity',
         skillSlug: 'daily-activity',
       },
     ] as const
@@ -2013,7 +2004,8 @@ text(result.output);
           .requestSummariesSinceBaseline()
           .flatMap((summary) => summary.customToolCallOutputs ?? [])
           .join('\n')
-        expect(providerToolOutputs, 'skill and CLI tool outputs').toContain(input.skillHeading)
+        // The skill file really was read: its frontmatter name came back.
+        expect(providerToolOutputs, 'skill and CLI tool outputs').toContain(`name: ${input.skillSlug}`)
         expect(providerToolOutputs, 'CLI evidence output').toContain(JSON.stringify(input.evidence))
         expect((await readFile(commandLog, 'utf8')).trim()).toBe(input.command)
         expect(result.finalMessage).toBe(input.answer)
@@ -2489,7 +2481,7 @@ text(result.output);
         customToolCall: {
           input: `
 const result = await tools.exec_command({
-  cmd: "sed -n '1,360p' skills/murph-onboarding/references/return-launch-completion.md",
+  cmd: "sed -n '1,360p' skills/murph-onboarding/references/context.md",
 });
 text(result.output);
 `,
@@ -2553,11 +2545,8 @@ text(result.output);
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
       .flatMap((summary) => summary.customToolCallOutputs ?? [])
       .join('\n')
-    // The completion reference really was read: its first line came back.
-    const completionReference = await readFile(
-      path.join(skillsRoot, 'murph-onboarding', 'references', 'return-launch-completion.md'), 'utf8',
-    )
-    expect(toolOutputs).toContain(completionReference.trim().split('\n')[0])
+    // The onboarding skill, which holds the completion steps, really was read.
+    expect(toolOutputs).toContain('name: murph-onboarding')
     expect(result.finalMessage).not.toContain(
       'If I find something genuinely useful',
     )
@@ -2611,7 +2600,7 @@ text(result.output);
         customToolCall: {
           input: `
 const result = await tools.exec_command({
-  cmd: "sed -n '1,360p' skills/murph-onboarding/references/return-launch-completion.md",
+  cmd: "sed -n '1,360p' skills/murph-onboarding/references/context.md",
 });
 text(result.output);
 `,
@@ -2712,9 +2701,7 @@ text(JSON.stringify(result));
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
       .flatMap((summary) => summary.customToolCallOutputs ?? [])
       .join('\n')
-    expect(toolOutputs.replace(/\s+/gu, ' ')).toContain(
-      'post-completion first-personal-read one-shot',
-    )
+    expect(toolOutputs).toContain('name: murph-onboarding')
     expect(toolOutputs).toContain('routeBinding')
     expect(toolOutputs).toContain('current_conversation')
   })

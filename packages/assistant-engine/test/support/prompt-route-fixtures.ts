@@ -80,6 +80,22 @@ export const PROMPT_ROUTE_INPUTS = {
     channel: 'email',
     conversationScope: 'group',
   },
+  'group-linq-scheduled': {
+    ...HOSTED_ROUTE_BASE,
+    assistantStyleSettingsAvailable: true,
+    conversationScope: 'group',
+    ordinaryInboundTurn: false,
+    scheduledOccurrenceAt: '2026-11-10T13:00:00.000Z',
+    turnTrigger: 'automation-cron',
+  },
+  'group-email-scheduled': {
+    ...HOSTED_ROUTE_BASE,
+    channel: 'email',
+    conversationScope: 'group',
+    ordinaryInboundTurn: false,
+    scheduledOccurrenceAt: '2026-11-10T13:00:00.000Z',
+    turnTrigger: 'automation-cron',
+  },
   'unverified-external': {
     ...HOSTED_ROUTE_BASE,
     conversationScope: 'unverified-external',

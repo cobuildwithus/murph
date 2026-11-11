@@ -19,10 +19,16 @@ import { renderPromptRoutes } from './support/prompt-route-fixtures.js'
  *   MURPH_UPDATE_INSTRUCTION_BUDGETS=1 pnpm --dir packages/assistant-engine \
  *     exec vitest run --config vitest.config.ts --no-coverage test/instruction-budgets.test.ts
  *
+ * Regenerating sets each ceiling to the measured size plus 3%, rounded up to
+ * the next 50 bytes, so a small edit passes and real growth does not. An item
+ * that measures zero keeps a ceiling of zero.
+ *
  * The table is test/support/instruction-budgets.json. Git history is its changelog.
  */
 const BUDGETS_PATH = fileURLToPath(new URL('./support/instruction-budgets.json', import.meta.url))
 const bytes = (text: string) => Buffer.byteLength(text, 'utf8')
+const HEADROOM = 1.03
+const ceilingFor = (size: number) => Math.ceil((size * HEADROOM) / 50) * 50
 
 function measure(): Record<string, Record<string, number>> {
   const prompt: Record<string, number> = { 'base-instructions': bytes(MURPH_CODEX_BASE_INSTRUCTIONS) }
@@ -87,7 +93,11 @@ function measure(): Record<string, Record<string, number>> {
 describe('instruction budgets', () => {
   const actual = measure()
   if (process.env.MURPH_UPDATE_INSTRUCTION_BUDGETS === '1') {
-    writeFileSync(BUDGETS_PATH, `${JSON.stringify(actual, null, 2)}\n`)
+    const regenerated = Object.fromEntries(Object.entries(actual).map(([table, sizes]) => [
+      table,
+      Object.fromEntries(Object.entries(sizes).map(([name, size]) => [name, ceilingFor(size)])),
+    ]))
+    writeFileSync(BUDGETS_PATH, `${JSON.stringify(regenerated, null, 2)}\n`)
   }
   const ceilings = JSON.parse(readFileSync(BUDGETS_PATH, 'utf8')) as Record<string, Record<string, number>>
 
