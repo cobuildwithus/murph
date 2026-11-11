@@ -1289,6 +1289,16 @@ describeRealCodex('real natural goal canary journey', () => {
       expect(await listFollowUpAutomations(fixture.vault)).toHaveLength(0)
       expect(accepted.response).toMatch(/walk|plan/iu)
       expect(accepted.response).not.toMatch(/goal_[A-Z0-9]+|reg_[A-Z0-9]+|subagent|vault-cli/iu)
+      // With onboarding open, the plan they asked for came first; the reply
+      // that settles it then asks about their health background, once: the
+      // whole voice memo ask, or one short question about one item.
+      if (capabilities) {
+        expect(
+          /voice memo/iu.test(accepted.response) || asksOneMissingBackgroundItem(accepted.response),
+          accepted.response,
+        ).toBe(true)
+        expect((accepted.response.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+      }
     } finally {
       observer?.mockRestore()
       await fixture.close()
@@ -3246,6 +3256,11 @@ const ONBOARDING_POLICY_PATHS = [
   ['SKILL.md', 'murph-onboarding/SKILL.md'],
   ['context.md', 'murph-onboarding/references/context.md'],
 ] as const
+const REAL_CODEX_ONBOARDING_FIRST_STEP_POLICY_PATHS = [
+  'goal-setup/SKILL.md',
+  'goal-setup/references/existing-goals.md',
+  'sleep-improvement/SKILL.md',
+] as const
 const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
   fresh_greeting: [ONBOARDING_POLICY_PATHS[0][1]],
   generic_records_vague_opener: [ONBOARDING_POLICY_PATHS[0][1]],
@@ -3267,8 +3282,15 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
   wearable_connection_deferred: [
     ...ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
   ],
+  // The first-step offer after the background reads goal-setup and the sleep
+  // domain skill; settling it may reread them.
   wearable_connection_deferred_return: [
     ...ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
+    ...REAL_CODEX_ONBOARDING_FIRST_STEP_POLICY_PATHS,
+  ],
+  first_step_settled: [
+    ...ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
+    ...REAL_CODEX_ONBOARDING_FIRST_STEP_POLICY_PATHS,
   ],
 } as const
 type RealCodexOnboardingScenario =
@@ -4820,20 +4842,24 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         process.stdout.write(`[onboarding-opening-e2e] ${JSON.stringify({
           replyMs, providerActionCount: result.providerActionCount, reply: result.finalMessage.trim(),
           actionTimings, progressUpdates,
+          commands: actions.flatMap((action) => action.kind === 'command' ? [action.command.slice(0, 240)] : []),
         })}\n`)
         const parentIdentityWrites = actions.filter((action) => action.kind === 'command' && !isRecordedVaultHelpCommand(action.command) && /memory (?:set-name|upsert|update)/u.test(action.command))
         if (opening === 'Web aspiration reply') {
-          // Saying what they want gets a concrete first step in this reply,
-          // through goal-setup, with at most one question and nothing saved yet.
+          // Saying what they want gets the one health background ask, before
+          // any plan: no goal-setup read, nothing saved for the goal, and no
+          // early update for an ordinary onboarding question.
           expect(result.finalMessage).not.toMatch(/what would you most like from your health/iu)
           expect(result.finalMessage).toMatch(/energy|walk|weekend/iu)
+          expect(result.finalMessage).toMatch(/voice memo/iu)
+          expect(result.finalMessage).toMatch(/\bmeds\b|medications?|medical|conditions|injur/iu)
+          expect(result.finalMessage).not.toMatch(/save this plan|set up (?:those |the )?reminders/iu)
           expect((result.finalMessage.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
-          expect(actions.some((action) => action.kind === 'command' && action.command.includes('goal-setup/SKILL.md') && action.output.includes('name: goal-setup')), 'goal-setup skill read').toBe(true)
+          expect(actions.some((action) => action.kind === 'command' && action.command.includes('goal-setup/SKILL.md')), 'goal-setup skill read').toBe(false)
           expect(await listGoals(workingDirectory)).toHaveLength(0)
           expect((await readVaultRawTolerant(workingDirectory)).regimens).toHaveLength(0)
-          // Goal setup sends its one early update; the website already handled
-          // identity, so this turn saves it itself.
-          expect(progressUpdates).toHaveLength(1)
+          expect(progressUpdates).toEqual([])
+          // The website already handled identity, so this turn saves it itself.
           expect(parentIdentityWrites.length).toBeGreaterThan(0)
         } else {
           expect(result.finalMessage).toMatch(/Robin/iu)
@@ -5183,8 +5209,8 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           developerInstructions: buildDirectConversationDeveloperInstructions(
             true,
             [
-              'Assistant context snapshot (engine-supplied evidence): private onboarding is open. The welcome and the name, age, and gender question are answered. The member said they want to sleep more consistently, that goal is saved, and the first step is settled: they chose to leave a plan for later. The one invitation to share background context has not been sent yet. Nothing is known yet about how they move, what they take, their medical basics, or recent labs.',
-              'The last Murph message accepted leaving the sleep plan for later.',
+              'Assistant context snapshot (engine-supplied evidence): private onboarding is open. The welcome and the name, age, and gender question are answered. The member said they want to sleep more consistently. Murph has not asked about their health background yet, and no first step has been proposed. Nothing is known yet about how they move, what they take, their medications, or recent labs.',
+              'The last Murph message reflected the sleep goal and said it wants to learn a bit about their health before suggesting where to start.',
               ...(scenario.knownNone ? [
                 'Current operational evidence: Apple Health has an active connection. No completed sync is reported.',
                 'Earlier in this conversation, the member explicitly said they do not use a wearable.',
@@ -5220,9 +5246,11 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           scenario: scenario.name, deviceRequests, reply,
         })}\n`)
         expect(deviceRequests).toEqual(scenario.knownNone ? [] : [{ action: 'list_accounts' }])
-        // The background invitation is the next step, and it is one question.
+        // The health background ask is the next step, before any plan, and it
+        // is one question.
         expect(reply).toMatch(/voice memo/iu)
         expect((reply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+        expect(reply).not.toMatch(/save this plan|set up (?:those |the )?reminders/iu)
         if (scenario.source !== 'oura' && !scenario.knownNone) {
           expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
         }
@@ -5383,8 +5411,8 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           developerInstructions: buildDirectConversationDeveloperInstructions(
             true,
             [
-              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the welcome and the name, age, and gender question are answered, the member said they want to sleep more consistently, that goal is saved, and the first step is settled: they chose to leave a plan for later.',
-              'The latest visible Murph message is the one invitation to share background context, including whether they wear a watch or ring. No wearable connection is visible.',
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the welcome and the name, age, and gender question are answered, and the member said they want to sleep more consistently. No first step has been proposed yet.',
+              'The latest visible Murph message is the health background ask: a voice memo covering how they move, what they take, their medical basics, whether they wear a watch or ring, and recent blood tests. No wearable connection is visible.',
               'Nothing is known yet about how they move, what they take, their medical basics, or recent labs.',
             ].join('\n'),
             supportedProviders,
@@ -5415,10 +5443,12 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         ).toHaveLength(0)
         expect(reply).toMatch(/oura|connect/iu)
         expect(hasWearableConnectionDeferralMeaning(reply), reply).toBe(true)
-        // "Later" is a complete answer to the invitation: nothing it left out
-        // is asked again, and there is no questionnaire to continue.
-        expect(reasksOnboardingBackground(reply), reply).toBe(false)
-        expect((reply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+        // Naming Oura settles the wearable item; putting off the connection
+        // does not pause onboarding. The reply asks one short question about
+        // an item still missing, never the wearable again, and no plan yet.
+        expect(asksOneMissingBackgroundItem(reply), reply).toBe(true)
+        expect(reasksWearable(reply), reply).toBe(false)
+        expect(reply).not.toMatch(/save this plan|set up (?:those |the )?reminders/iu)
         expect(reply).not.toContain('https://')
         expect(reply).not.toMatch(
           /\b(?:oura(?:'s| is)|it(?:'s| is)|you(?:'re| are)|we(?:'re| are)) (?:now )?(?:connected|linked|syncing)\b|\bi (?:have )?(?:connected|linked) (?:your )?oura\b|\b(?:connected|linked) (?:to )?(?:your )?oura\b|\bi can (?:see|use|pull) (?:your )?oura\b|\b(?:oura )?data (?:is|are) (?:syncing|coming in|available)\b/iu,
@@ -5429,8 +5459,8 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           developerInstructions: buildDirectConversationDeveloperInstructions(
             true,
             [
-              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the welcome and the name, age, and gender question are answered, the member said they want to sleep more consistently, that goal is saved, and the first step is settled: they chose to leave a plan for later.',
-              'The latest visible Murph message is the one invitation to share background context, including whether they wear a watch or ring. No wearable connection is visible.',
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the welcome and the name, age, and gender question are answered, and the member said they want to sleep more consistently. No first step has been proposed yet.',
+              'The latest visible Murph message is the health background ask: a voice memo covering how they move, what they take, their medical basics, whether they wear a watch or ring, and recent blood tests. No wearable connection is visible.',
               'Nothing is known yet about how they move, what they take, their medical basics, or recent labs.',
             ].join('\n'),
             supportedProviders,
@@ -5457,8 +5487,8 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           developerInstructions: buildDirectConversationDeveloperInstructions(
             true,
             [
-              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the welcome and the name, age, and gender question are answered, the member said they want to sleep more consistently, that goal is saved, and the first step is settled: they chose to leave a plan for later.',
-              'The visible conversation contains the one invitation to share background context, identifies Oura as the data source, and contains Murph\'s real connection-link handoff. No wearable connection is visible.',
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the welcome and the name, age, and gender question are answered, and the member said they want to sleep more consistently. No first step has been proposed yet.',
+              'The visible conversation contains the health background ask, identifies Oura as the data source, and contains Murph\'s real connection-link handoff. No wearable connection is visible.',
               'Nothing is known yet about how they move, what they take, their medical basics, or recent labs.',
             ].join('\n'),
             supportedProviders,
@@ -5477,12 +5507,14 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             .filter((request) => request.action !== 'list_accounts'),
           'later-turn connection writes',
         ).toHaveLength(0)
+        // A bare "I'll do that later" after the link may be accepted plainly.
         expect(
-          hasWearableConnectionDeferralMeaning(laterReply),
+          hasWearableConnectionDeferralMeaning(laterReply)
+            || /\b(?:that(?:'s| is) (?:totally )?fine|no problem|sounds good|of course)\b/iu.test(laterReply),
           laterReply,
         ).toBe(true)
-        expect(reasksOnboardingBackground(laterReply), laterReply).toBe(false)
-        expect((laterReply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+        expect(asksOneMissingBackgroundItem(laterReply), laterReply).toBe(true)
+        expect(reasksWearable(laterReply), laterReply).toBe(false)
         expect(laterReply).not.toContain('https://')
         expect(laterReply).not.toMatch(
           /\b(?:oura(?:'s| is)|it(?:'s| is)|you(?:'re| are)|we(?:'re| are)) (?:now )?(?:connected|linked|syncing)\b|\bi (?:have )?(?:connected|linked) (?:your )?oura\b|\b(?:connected|linked) (?:to )?(?:your )?oura\b|\bi can (?:see|use|pull) (?:your )?oura\b|\b(?:oura )?data (?:is|are) (?:syncing|coming in|available)\b/iu,
@@ -5505,6 +5537,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           `${JSON.stringify({
             ...returnContext,
             deviceAccounts: emptySurface,
+            experiments: emptySurface,
             memory: {
               ...returnContext.memory,
               recordCount: returnMemoryRecords.length,
@@ -5513,6 +5546,8 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           })}\n`,
           { encoding: 'utf8', mode: 0o600 },
         )
+        const completionLogPath = path.join(workingDirectory, 'onboarding-complete.log')
+        const progressBeforeProposal = progressUpdates.length
         const returnRequestOffset = deviceRequests.length
         const contextualReturn = await executeRealCodexOnboardingProbe({
           ...turnInput,
@@ -5520,34 +5555,74 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             true,
             [
               'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; Oura is the identified data source and only its optional connection was deferred.',
-              'The invitation to share background context was sent and answered: how they move, what they take, their medical basics, and recent labs are saved.',
-              'The saved sleep goal has its first step settled: they chose to leave a plan for later.',
+              'The member said they want to sleep more consistently, and every item of the health background ask is answered and saved: how they move, what they take, their medical basics, and recent labs.',
+              'No first step has been proposed yet.',
             ].join('\n'),
             supportedProviders,
           ),
           dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           hostedToolContext,
           progressDelivery,
+          // A fresh thread, so the snapshot alone says the background is done.
           prompt: "That's everything from me. What's next?",
-          resumeSessionId: laterDeferral.sessionId,
           scenario: 'wearable_connection_deferred_return',
         })
+        const proposal = contextualReturn.finalMessage.trim()
+        process.stdout.write(`[onboarding-first-step-e2e] ${JSON.stringify({ reply: proposal })}\n`)
         expect(
           deviceRequests
             .slice(returnRequestOffset)
             .filter((request) => request.action !== 'list_accounts'),
           'return-stage connection writes',
         ).toHaveLength(0)
-        // Every onboarding step has happened, so nothing already answered is
-        // reopened and onboarding is completed without a further checkpoint.
-        expect(contextualReturn.finalMessage).not.toMatch(
-          /wearable|oura|connect|health app/iu,
-        )
-        expect(reasksOnboardingBackground(contextualReturn.finalMessage), contextualReturn.finalMessage).toBe(false)
-        expect((contextualReturn.finalMessage.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
-        const completionLogPath = path.join(workingDirectory, 'onboarding-complete.log')
+        // With the background answered, the next step is the first-step offer
+        // for the sleep goal. The deferred connection and the answered
+        // background are not raised again, and nothing is settled yet.
+        expect(proposal).toMatch(/sleep|bed|wind|night/iu)
+        expect(proposal).not.toMatch(/wearable|oura|connect|health app/iu)
+        expect(reasksOnboardingBackground(proposal), proposal).toBe(false)
+        expect((proposal.match(/\?/gu) ?? []).length).toBe(1)
+        expect(contextualReturn.policyFiles).toContain('SKILL.md')
+        expect(contextualReturn.actions.some((action) => action.kind === 'command' && action.command.includes('goal-setup/SKILL.md')), 'goal-setup skill read').toBe(true)
+        expect(progressUpdates.length - progressBeforeProposal).toBeLessThanOrEqual(1)
+        expect(await readFile(completionLogPath, 'utf8').catch(() => '')).toBe('')
+
+        const settleRequestOffset = deviceRequests.length
+        const progressBeforeSettle = progressUpdates.length
+        const settled = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          developerInstructions: buildDirectConversationDeveloperInstructions(
+            true,
+            [
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; Oura is the identified data source and only its optional connection was deferred.',
+              'The member said they want to sleep more consistently, and every item of the health background ask is answered and saved. The sleep goal is saved.',
+              'The latest visible Murph message is the first-step offer for the sleep goal.',
+            ].join('\n'),
+            supportedProviders,
+          ),
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
+          hostedToolContext,
+          progressDelivery,
+          prompt: "Let's leave the plan for now, maybe later.",
+          resumeSessionId: contextualReturn.sessionId,
+          scenario: 'first_step_settled',
+        })
+        const settledReply = settled.finalMessage.trim()
+        process.stdout.write(`[onboarding-first-step-settled-e2e] ${JSON.stringify({ reply: settledReply })}\n`)
+        expect(
+          deviceRequests
+            .slice(settleRequestOffset)
+            .filter((request) => request.action !== 'list_accounts'),
+          'settle-turn connection writes',
+        ).toHaveLength(0)
+        // Leaving the plan for later settles the first step. Every step has
+        // now happened, so onboarding completes exactly once, in this turn.
+        expect(settledReply).not.toMatch(/wearable|oura|connect|health app/iu)
+        expect(reasksOnboardingBackground(settledReply), settledReply).toBe(false)
+        expect((settledReply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+        expect(progressUpdates.length - progressBeforeSettle).toBe(0)
         const completionsBeforePause = await readFile(completionLogPath, 'utf8').catch(() => '')
-        expect(completionsBeforePause).toMatch(/--reason[= ]user_answered/u)
+        expect(completionsBeforePause.match(/--reason[= ]user_answered/gu) ?? []).toHaveLength(1)
         expect(completionsBeforePause).not.toMatch(/user_declined/u)
 
         await writeFile(
@@ -5562,7 +5637,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             true,
             [
               'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; Oura is the identified data source and no connection is visible.',
-              'The member said they want to sleep more consistently. No first step has been proposed yet, and the invitation to share background context has not been sent.',
+              'The member said they want to sleep more consistently. Murph has not asked about the rest of their health background yet, and no first step has been proposed.',
             ].join('\n'),
             supportedProviders,
           ),
@@ -5585,20 +5660,117 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(onboardingPause.finalMessage.match(/\?/gu) ?? []).toHaveLength(0)
         // Asking to continue another time leaves onboarding open.
         expect(await readFile(completionLogPath, 'utf8').catch(() => '')).toBe(completionsBeforePause)
+        // Only the goal-setup proposal may send an early update; ordinary
+        // onboarding questions and replies send none.
         const progressCalls = [
           result,
           linkOffer,
           laterDeferral,
-          contextualReturn,
+          settled,
           onboardingPause,
         ].flatMap((turn) => turn.actions.filter((action) =>
           action.kind === 'dynamic'
           && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
         ))
-        expect(progressUpdates).toEqual([])
         expect(progressCalls).toEqual([])
+        expect(progressUpdates.length).toBeLessThanOrEqual(1)
       } finally {
         await removeRealCodexTemporaryPaths(temporaryPaths)
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'proposes a first step that fits the health background the member just shared',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await prepareRealCodexOnboardingDirectory()
+      const progressUpdates: string[] = []
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      try {
+        await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+        await writeFile(path.join(workingDirectory, 'vault-cli'), [
+          '#!/bin/sh',
+          'set -eu',
+          'exec "$MURPH_ONBOARDING_TEST_NODE" --import "$MURPH_ONBOARDING_TEST_LOADER" "$MURPH_ONBOARDING_TEST_CLI" "$@" --vault "$MURPH_ONBOARDING_TEST_VAULT"',
+          '',
+        ].join('\n'), { mode: 0o700 })
+        const turnInput = buildRealCodexOnboardingTurnInput({ config, workingDirectory })
+        const now = new Date().toISOString()
+        const result = await executeRealCodexAppServerTurn({
+          ...turnInput,
+          configOverrides: [...CHILD_MODEL_SELECTION_CONFIG_OVERRIDES, ...await readHostedDelegationHintOverrides()],
+          developerInstructions: buildDirectConversationDeveloperInstructions(true, [
+            'Visible direct conversation:',
+            `Murph: ${ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE}`,
+            'Member: Yes, ready.',
+            `Murph: ${MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal}`,
+            "Member: I'm Sam, 38, a woman.",
+            'Murph: Good to meet you, Sam. What would you most like from your health: something you want to improve, understand, handle, or be able to do?',
+            'Member: I want to get stronger.',
+            [
+              "Murph: Stronger, love that. Before I suggest where to start, I'd like to learn a bit about you so it fits. Can you send me a voice memo covering a few things?",
+              'You can type it out instead. Either works just as well.',
+              "- how you move right now (gym, running, sports, mostly desk-bound) and whether you're training for anything specific",
+              '- anything you take regularly (supplements, protein, that stuff), with brands if you know them',
+              '- the medical basics: any meds, conditions, injuries, or allergies I should know for safety',
+              '- whether you wear a watch or ring',
+              "- whether you've had blood tests in the last year or two",
+              '- anything else you reckon I should know',
+              "Ramble as long as you want, I'll sort it out.",
+            ].join('\n'),
+          ].join('\n\n'), [], now, true),
+          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
+          progressDelivery: { async send(text) {
+            progressUpdates.push(text)
+            return { kind: 'sent', source: 'model' }
+          } },
+          env: {
+            ...turnInput.env,
+            MURPH_ONBOARDING_TEST_NODE: process.execPath,
+            MURPH_ONBOARDING_TEST_LOADER: path.resolve(path.dirname(VAULT_E2E_TSX_BIN), '../tsx/dist/loader.mjs'),
+            MURPH_ONBOARDING_TEST_CLI: VAULT_E2E_CLI_ENTRYPOINT,
+            MURPH_ONBOARDING_TEST_VAULT: workingDirectory,
+            TSX_TSCONFIG_PATH: path.resolve(path.dirname(VAULT_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
+          },
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                automationRequests.push(request)
+                throw new Error('Nothing is scheduled before the first step is settled.')
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => { throw new Error('No file sends in onboarding proof.') },
+            vaultFileSendAvailable: false,
+          },
+          prompt: "Desk job, but I walk the dog every day. No gym. I take vitamin D most days. I hurt my lower back last year and it still flares up if I lift anything heavy off the floor. No meds, no allergies, nothing else medical. I don't wear a watch, and I haven't had blood work in years.",
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const reply = result.finalMessage.trim()
+        process.stdout.write(`[onboarding-proposal-uses-background-e2e] ${JSON.stringify({ progressUpdates, reply })}\n`)
+        // Every background item is answered, so this reply is the first-step
+        // offer. It is shaped by the back injury and the dog walks, asks
+        // nothing already answered, and saves no plan before a yes.
+        expect(reply).toMatch(/\bback\b/iu)
+        expect(reply).toMatch(/strong|strength/iu)
+        expect(reasksOnboardingBackground(reply), reply).toBe(false)
+        expect(reply).not.toMatch(/blood (?:tests?|work)|\blabs?\b|watch or (?:a )?ring|vitamin d[^.?!\n]{0,40}\?/iu)
+        expect((reply.match(/\?/gu) ?? []).length).toBe(1)
+        expect(actions.some((action) => action.kind === 'command' && action.command.includes('goal-setup/SKILL.md')), 'goal-setup skill read').toBe(true)
+        expect(progressUpdates.length).toBeLessThanOrEqual(1)
+        expect(automationRequests).toHaveLength(0)
+        expect(actions.filter((action) => action.kind === 'command' && /assistant\s+onboarding\s+complete\b/u.test(action.command))).toEqual([])
+        // Background workers may save the routine they described, but no Goal
+        // exists until the member accepts the offer.
+        await waitForWarmCodexBackgroundWork()
+        expect(await listGoals(workingDirectory)).toHaveLength(0)
+      } finally {
+        await stopWarmCodexAppServer('onboarding-proposal-uses-background-e2e-complete')
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
       }
     },
     360_000,
@@ -40794,12 +40966,26 @@ function hasWearableConnectionDeferralMeaning(message: string): boolean {
     .test(message)
 }
 
-// True when a reply asks again for background the member left out of the one
-// onboarding invitation: a question about those topics, or the list re-sent.
+// True when a reply asks again for onboarding health background: a question
+// about those topics, or the list re-sent.
 function reasksOnboardingBackground(message: string): boolean {
   const topics = /voice memo|supplements|\bmeds\b|medications|conditions|allergies|medical basics|blood tests|\blabs\b|how you move/iu
   return message.split(/(?<=[.!?])\s+|\n+/u).some((part) => part.includes('?') && topics.test(part))
     || message.split('\n').filter((line) => /^\s*[-•]/u.test(line) && topics.test(line)).length >= 2
+}
+
+// True when a reply asks exactly one short question, about a background item
+// the member has not answered yet, without sending a list again.
+function asksOneMissingBackgroundItem(message: string): boolean {
+  const topics = /\b(?:move|moving|movement|active|activity|exercise|workouts?|training|gym|routine|supplements?|protein|vitamins?|meds|medications?|conditions?|allerg(?:y|ies)|injur(?:y|ies)|medical|health basics|blood tests?|blood work|labs?)\b/iu
+  const questions = message.split(/(?<=[.!?])\s+|\n+/u).filter((part) => part.includes('?'))
+  const bulletLines = message.split('\n').filter((line) => /^\s*[-•]/u.test(line))
+  return questions.length === 1 && topics.test(questions[0] ?? '') && bulletLines.length < 2
+}
+
+// True when a reply asks again whether the member wears a watch or ring.
+function reasksWearable(message: string): boolean {
+  return /watch or (?:a )?ring|do you (?:also )?(?:use|wear|have) (?:a |any )?(?:watch|ring|wearable)|which (?:watch|ring|wearable)/iu.test(message)
 }
 
 function hasNoFurtherWearableCheckinMeaning(message: string): boolean {
@@ -41028,12 +41214,36 @@ if [ "$1 $2 $3" = "assistant onboarding complete" ]; then
   printf '%s\\n' '{"vault":"redacted:/vault","stateRoot":"redacted:/state","statePath":"redacted:/state/onboarding.json","onboarding":{"schemaVersion":"murph.assistant-onboarding.v1","status":"completed","createdAt":"2026-08-01T12:00:00.000Z","updatedAt":"2026-08-05T12:00:00.000Z","completedAt":"2026-08-05T12:00:00.000Z","completedReason":"user_answered"}}'
   exit 0
 fi
-if [ "$1" = "memory" ]; then
+if [ "$1" = "memory" ] || [ "$1" = "batch" ]; then
   if [ -f "$(dirname "$0")/memory-command-result.json" ]; then
     cat "$(dirname "$0")/memory-command-result.json"
     exit 1
   fi
+fi
+if [ "$1" = "memory" ]; then
   printf '%s\n' '{"status":"ok"}'
+  exit 0
+fi
+# A goal-setup proposal reads through one batch: every lookup comes back empty.
+if [ "$1" = "batch" ]; then
+  shift
+  results=''
+  count=0
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--command" ] && [ "$#" -ge 2 ]; then
+      count=$((count + 1))
+      [ -n "$results" ] && results="$results,"
+      results="$results{\\"argv\\":$2,\\"ok\\":true,\\"data\\":{\\"items\\":[],\\"total\\":0}}"
+      shift 2
+    else
+      shift
+    fi
+  done
+  printf '{"count":%s,"failed":0,"succeeded":%s,"commands":[%s]}\\n' "$count" "$count" "$results"
+  exit 0
+fi
+if [ "$1 $2" = "goal save" ]; then
+  printf '%s\\n' '{"created":false,"goal":{"id":"goal_sleep","status":"active","title":"Sleep more consistently"}}'
   exit 0
 fi
 printf '%s\n' '{"error":"unsupported onboarding routing probe command"}' >&2

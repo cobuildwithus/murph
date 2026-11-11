@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 100,
+  "item": {
+    "id": "health-background-in-one-ask",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph learns your health in one easy ask",
+    "summary": "After you say what you want from your health, Murph asks about your background in one go: how you move, what you take, the medical basics, your watch or ring, and recent blood tests. Send a voice memo or type it, and your first step is built from what you shared.",
+    "details": "Say none or skip and it moves on. Say later about one thing and it won't hold you up. If you put off connecting a device, Murph leaves it alone until you bring it up.",
+    "relevanceTags": [
+      "assistant",
+      "onboarding"
+    ],
+    "sourcePullRequests": [
+      4817
+    ]
+  }
+}
