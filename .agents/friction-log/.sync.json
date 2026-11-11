@@ -1949,6 +1949,10 @@
       "path": ".agents/friction-log/20261019175826-cli-artifact-generation/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#4226",
+      "path": ".agents/friction-log/20261018201218-hosted-workspace-runner/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#4227",
       "path": ".agents/friction-log/20261019181400-runner-bundle-latency/friction.md"
     },
@@ -2223,6 +2227,10 @@
     {
       "issue": "cobuildwithus/murph#4838",
       "path": ".agents/friction-log/20261111114337-browser-ci-cannot/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4855",
+      "path": ".agents/friction-log/20261111162237-device-admission-proof/friction.md"
     }
   ],
   "version": 1
