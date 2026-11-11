@@ -41,20 +41,8 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-vi.mock("@/src/components/home/onboarding-steps", () => ({
-  OnboardingSteps: () => createElement("section", null, "Onboarding steps"),
-}));
 
-vi.mock("@/src/components/home/upload-labs-action", () => ({
-  UploadLabsActionFallback: () =>
-    createElement("button", { type: "button" }, "Sync fallback"),
-  UploadLabsMurphContactAction: () =>
-    createElement("button", { type: "button" }, "Sync"),
-}));
 
-vi.mock("@/src/components/home/usage-limit-banner", () => ({
-  UsageLimitBanner: () => createElement("section", null, "Usage limit"),
-}));
 
 vi.mock("@/src/components/ui/button", () => ({
   Button: ({
@@ -115,9 +103,6 @@ vi.mock("@/src/components/ui/page-header", () => ({
     ]),
 }));
 
-vi.mock("@/src/lib/device-sync/home-onboarding", () => ({
-  shouldShowHomeDeviceSyncStep: mocks.shouldShowHomeDeviceSyncStep,
-}));
 
 vi.mock("@/src/lib/device-sync/settings-service", () => ({
   buildHostedDeviceSyncSettingsResponse: mocks.buildHostedDeviceSyncSettingsResponse,
@@ -133,22 +118,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberBillingEligibilityState: mocks.readHostedMemberBillingEligibilityState,
-}));
-
-// The dashboard-layout provider owns the browser vault; stub it since this test
-// renders the home page in isolation without the layout.
-vi.mock("@/src/lib/browser-vault/context", () => ({
-  BrowserVaultProvider: ({ children }: { children: ReactNode }) => children,
-  useBrowserVault: () => ({
-    client: null,
-    dataVersion: null,
-    deviceSyncImportPending: false,
-    error: null,
-    ref: null,
-    refreshPending: false,
-    refresh: async () => {},
-    status: "empty",
-  }),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
@@ -202,7 +171,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-test("DeviceSyncConnectCompletePage redirects callbacks to the home completion dialog", async () => {
+test("DeviceSyncConnectCompletePage redirects callbacks to the settings completion dialog", async () => {
   const { default: DeviceSyncConnectCompletePage, metadata } = await import(
     "../app/device-sync/connect/complete/page"
   );
@@ -216,12 +185,12 @@ test("DeviceSyncConnectCompletePage redirects callbacks to the home completion d
       source: "connect",
     }),
   })).rejects.toThrow(
-    "NEXT_REDIRECT:/home?deviceSyncCompletion=1&source=connect&connectSource=oura&connectTarget=oura&deviceSyncStatus=connected&deviceSyncProvider=junction",
+    "NEXT_REDIRECT:/settings?deviceSyncCompletion=1&source=connect&connectSource=oura&connectTarget=oura&deviceSyncStatus=connected&deviceSyncProvider=junction",
   );
 
   assert.equal(metadata.title, "Device Connected - Murph");
   expect(mocks.redirect).toHaveBeenCalledWith(
-    "/home?deviceSyncCompletion=1&source=connect&connectSource=oura&connectTarget=oura&deviceSyncStatus=connected&deviceSyncProvider=junction",
+    "/settings?deviceSyncCompletion=1&source=connect&connectSource=oura&connectTarget=oura&deviceSyncStatus=connected&deviceSyncProvider=junction",
   );
 });
 
@@ -252,10 +221,9 @@ test("resolveDeviceSyncCompletionDialogModel owns the WHOOP action contract", as
   });
 });
 
-test("HomePage shows the connected dialog with the signed-in member's assigned Messages line", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion shows the connected dialog with the signed-in member's assigned Messages line", async () => {
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       deviceSyncCompletion: "1",
       deviceSyncProvider: "whoop",
@@ -274,7 +242,7 @@ test("HomePage shows the connected dialog with the signed-in member's assigned M
   assert.doesNotMatch(markup, /href="whoop:/);
   assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, /Open Messages</);
-  assert.match(markup, />Continue exploring</);
+  assert.match(markup, />Continue</);
   assert.doesNotMatch(markup, /Go home/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   expect(mocks.buildHostedDeviceSyncSettingsResponse).toHaveBeenCalledWith({
@@ -286,10 +254,9 @@ test("HomePage shows the connected dialog with the signed-in member's assigned M
   });
 });
 
-test("HomePage renders replay-stripped matching store truth as connected", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion renders replay-stripped matching store truth as connected", async () => {
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       connectSource: "whoop",
       connectTarget: "whoop",
@@ -306,9 +273,8 @@ test("HomePage renders replay-stripped matching store truth as connected", async
   assert.doesNotMatch(markup, /Device connection complete/);
 });
 
-test("HomePage uses a DB-assigned Messages line even when it is not in the legacy env pool", async () => {
+test("ConnectionCompletion uses a DB-assigned Messages line even when it is not in the legacy env pool", async () => {
   vi.stubEnv("HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS", "+15550100001");
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
   mocks.readHostedMemberRoutingState.mockResolvedValueOnce({
     linqChatId: "linq-chat",
     linqRecipientPhone: "+15550100999",
@@ -320,7 +286,7 @@ test("HomePage uses a DB-assigned Messages line even when it is not in the legac
     telegramUserLookupKey: null,
   });
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       deviceSyncCompletion: "1",
       deviceSyncProvider: "whoop",
@@ -335,8 +301,7 @@ test("HomePage uses a DB-assigned Messages line even when it is not in the legac
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
 });
 
-test("HomePage falls back to Telegram when no Messages line is assigned", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion falls back to Telegram when no Messages line is assigned", async () => {
   mocks.readHostedMemberRoutingState.mockResolvedValueOnce({
     linqChatId: null,
     linqRecipientPhone: null,
@@ -348,7 +313,7 @@ test("HomePage falls back to Telegram when no Messages line is assigned", async 
     telegramUserLookupKey: "lookup",
   });
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       deviceSyncCompletion: "1",
       deviceSyncProvider: "whoop",
@@ -359,12 +324,11 @@ test("HomePage falls back to Telegram when no Messages line is assigned", async 
   assert.match(markup, /href="https:\/\/t\.me\/murph_bot\?text=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, /aria-label="Text Murph in Telegram"/);
   assert.match(markup, />Text Murph</);
-  assert.match(markup, />Continue exploring</);
+  assert.match(markup, />Continue</);
   assert.doesNotMatch(markup, /href="sms:/);
 });
 
-test("HomePage uses connect source labels for Junction-backed targets", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion uses connect source labels for Junction-backed targets", async () => {
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-03T22:05:48.000Z",
     ok: true,
@@ -380,7 +344,7 @@ test("HomePage uses connect source labels for Junction-backed targets", async ()
     ],
   });
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       connectSource: "fitbit",
       connectTarget: "fitbit",
@@ -401,8 +365,7 @@ test("HomePage uses connect source labels for Junction-backed targets", async ()
   assert.doesNotMatch(markup, />Get full sync</);
 });
 
-test("HomePage does not attribute setup-only Mobvoi callbacks to an active Junction source", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion does not attribute setup-only Mobvoi callbacks to an active Junction source", async () => {
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-03T22:05:48.000Z",
     ok: true,
@@ -418,7 +381,7 @@ test("HomePage does not attribute setup-only Mobvoi callbacks to an active Junct
     ],
   });
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       connectSource: "mobvoi-health",
       deviceSyncCompletion: "1",
@@ -432,8 +395,7 @@ test("HomePage does not attribute setup-only Mobvoi callbacks to an active Junct
   assert.doesNotMatch(markup, /I%20just%20connected%20my%20Mobvoi/u);
 });
 
-test("HomePage preserves a completed non-WHOOP Junction source when WHOOP is also connected", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion preserves a completed non-WHOOP Junction source when WHOOP is also connected", async () => {
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-03T22:05:48.000Z",
     ok: true,
@@ -455,7 +417,7 @@ test("HomePage preserves a completed non-WHOOP Junction source when WHOOP is als
     ],
   });
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       connectSource: "fitbit",
       connectTarget: "fitbit",
@@ -473,8 +435,7 @@ test("HomePage preserves a completed non-WHOOP Junction source when WHOOP is als
   assert.doesNotMatch(markup, />Get full sync</);
 });
 
-test("HomePage does not trust replay-stripped Junction child matches unless the child is connected", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion does not trust replay-stripped Junction child matches unless the child is connected", async () => {
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-03T22:05:48.000Z",
     ok: true,
@@ -496,7 +457,7 @@ test("HomePage does not trust replay-stripped Junction child matches unless the 
     ],
   });
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       connectSource: "oura",
       connectTarget: "oura",
@@ -512,8 +473,7 @@ test("HomePage does not trust replay-stripped Junction child matches unless the 
   assert.doesNotMatch(markup, /Open Messages</);
 });
 
-test("HomePage matches replay-stripped Junction upstream aliases by resolved connect identity", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion matches replay-stripped Junction upstream aliases by resolved connect identity", async () => {
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-03T22:05:48.000Z",
     ok: true,
@@ -531,7 +491,7 @@ test("HomePage matches replay-stripped Junction upstream aliases by resolved con
     ],
   });
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       connectSource: "whoop",
       connectTarget: "whoop",
@@ -547,8 +507,7 @@ test("HomePage matches replay-stripped Junction upstream aliases by resolved con
   assert.doesNotMatch(markup, /data-completion-unverified/);
 });
 
-test("HomePage keeps a continue-only dialog when there is no messaging destination", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion keeps a continue-only dialog when there is no messaging destination", async () => {
   mocks.readHostedMemberRoutingState.mockResolvedValueOnce({
     linqChatId: null,
     linqRecipientPhone: null,
@@ -560,7 +519,7 @@ test("HomePage keeps a continue-only dialog when there is no messaging destinati
     telegramUserLookupKey: null,
   });
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       deviceSyncCompletion: "1",
       deviceSyncProvider: "whoop",
@@ -572,22 +531,21 @@ test("HomePage keeps a continue-only dialog when there is no messaging destinati
   assert.match(markup, /WHOOP doesn&#x27;t share all of your data automatically\./);
   assert.match(markup, />Get full sync</);
   assert.doesNotMatch(markup, /data-completion-unverified/);
-  assert.match(markup, />Continue exploring</);
+  assert.match(markup, />Continue</);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /t\.me\/murph_bot/);
   assert.doesNotMatch(markup, /Open Messages</);
   assert.doesNotMatch(markup, /aria-label="Text Murph in Telegram"/);
 });
 
-test("HomePage keeps the no-member fallback generic", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion keeps the no-member fallback generic", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
     authenticated: false,
     authenticatedMember: null,
     session: null,
   });
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       deviceSyncCompletion: "1",
       deviceSyncProvider: "whoop",
@@ -607,15 +565,14 @@ test("HomePage keeps the no-member fallback generic", async () => {
   expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
 });
 
-test("HomePage marks replay-stripped member completions unverified when strict identity misses", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion marks replay-stripped member completions unverified when strict identity misses", async () => {
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-03T22:05:48.000Z",
     ok: true,
     sources: [buildConnectedSource("oura", "Oura")],
   });
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       connectSource: "whoop",
       connectTarget: "whoop",
@@ -634,10 +591,9 @@ test("HomePage marks replay-stripped member completions unverified when strict i
   assert.doesNotMatch(markup, /href="sms:/);
 });
 
-test("HomePage keeps bare completion markers generic and verified", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion keeps bare completion markers generic and verified", async () => {
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       deviceSyncCompletion: "1",
     }),
@@ -650,15 +606,14 @@ test("HomePage keeps bare completion markers generic and verified", async () => 
   assert.doesNotMatch(markup, /Open Messages</);
 });
 
-test("HomePage marks replay-stripped no-member completions unverified", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion marks replay-stripped no-member completions unverified", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
     authenticated: false,
     authenticatedMember: null,
     session: null,
   });
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       connectSource: "whoop",
       connectTarget: "whoop",
@@ -678,15 +633,14 @@ test("HomePage marks replay-stripped no-member completions unverified", async ()
   expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
 });
 
-test("HomePage does not trust connected query state without a matching active source", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion does not trust connected query state without a matching active source", async () => {
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-03T22:05:48.000Z",
     ok: true,
     sources: [],
   });
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       deviceSyncCompletion: "1",
       deviceSyncProvider: "whoop",
@@ -704,13 +658,12 @@ test("HomePage does not trust connected query state without a matching active so
   assert.doesNotMatch(markup, /aria-label="Text Murph in Telegram"/);
 });
 
-test("HomePage marks connected callbacks unverified when settings fail to load", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion marks connected callbacks unverified when settings fail to load", async () => {
   mocks.buildHostedDeviceSyncSettingsResponse.mockRejectedValueOnce(
     new Error("settings unavailable"),
   );
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       deviceSyncCompletion: "1",
       deviceSyncProvider: "whoop",
@@ -727,10 +680,9 @@ test("HomePage marks connected callbacks unverified when settings fail to load",
   assert.doesNotMatch(markup, /Open Messages</);
 });
 
-test("HomePage does not mark provider-only completion URLs unverified", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion does not mark provider-only completion URLs unverified", async () => {
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       deviceSyncCompletion: "1",
       deviceSyncProvider: "whoop",
@@ -744,10 +696,9 @@ test("HomePage does not mark provider-only completion URLs unverified", async ()
   assert.doesNotMatch(markup, /Open Messages</);
 });
 
-test("HomePage does not offer a messaging success CTA after callback errors", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion does not offer a messaging success CTA after callback errors", async () => {
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       deviceSyncCompletion: "1",
       deviceSyncError: "OAUTH_STATE_INVALID",
@@ -760,7 +711,7 @@ test("HomePage does not offer a messaging success CTA after callback errors", as
   assert.match(markup, /Nothing changed\. Try again\./);
   assert.doesNotMatch(markup, /data-completion-unverified/);
   assert.match(markup, /href="\/connect"[^>]*>.*Try again/s);
-  assert.match(markup, />Continue exploring</);
+  assert.match(markup, />Continue</);
   assert.doesNotMatch(markup, /apps\.apple\.com\/us\/app\/murph-ai/);
   assert.doesNotMatch(markup, />Get full sync</);
   assert.doesNotMatch(markup, /href="sms:/);
@@ -769,10 +720,9 @@ test("HomePage does not offer a messaging success CTA after callback errors", as
   assert.doesNotMatch(markup, /aria-label="Text Murph in Telegram"/);
 });
 
-test("HomePage guides failed Fitbit links toward Google Health setup", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion guides failed Fitbit links toward Google Health setup", async () => {
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       connectSource: "fitbit",
       connectTarget: "fitbit",
@@ -793,10 +743,9 @@ test("HomePage guides failed Fitbit links toward Google Health setup", async () 
   assert.doesNotMatch(markup, /Nothing changed\. Try again\./);
 });
 
-test("HomePage keeps generic retry copy for other Fitbit callback failures", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion keeps generic retry copy for other Fitbit callback failures", async () => {
 
-  const markup = renderToStaticMarkup(await HomePage({
+  const markup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       connectSource: "fitbit",
       connectTarget: "fitbit",
@@ -813,10 +762,9 @@ test("HomePage keeps generic retry copy for other Fitbit callback failures", asy
   assert.doesNotMatch(markup, /Google Health/);
 });
 
-test("HomePage keeps connected-app completion dialogs verified", async () => {
-  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+test("ConnectionCompletion keeps connected-app completion dialogs verified", async () => {
 
-  const successMarkup = renderToStaticMarkup(await HomePage({
+  const successMarkup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       connectedAppCompletion: "1",
       connectedAppStatus: "success",
@@ -828,7 +776,7 @@ test("HomePage keeps connected-app completion dialogs verified", async () => {
   assert.match(successMarkup, /brand-logos\/connect\/gmail\.svg/);
   assert.doesNotMatch(successMarkup, /data-completion-unverified/);
 
-  const failureMarkup = renderToStaticMarkup(await HomePage({
+  const failureMarkup = renderToStaticMarkup(await ConnectionCompletion({
     searchParams: Promise.resolve({
       connectedAppCompletion: "1",
       connectedAppStatus: "error",
@@ -868,4 +816,10 @@ function buildConnectedSource(
     updatedAt: "2026-05-03T22:05:47.835Z",
     upstreamSources,
   };
+}
+
+async function ConnectionCompletion({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const { renderConnectionCompletion } = await import("@/src/components/device-sync/connection-completion");
+  const { authenticatedMember } = await mocks.getHostedPageAuthSnapshot();
+  return renderConnectionCompletion({ member: authenticatedMember, searchParams: await searchParams });
 }

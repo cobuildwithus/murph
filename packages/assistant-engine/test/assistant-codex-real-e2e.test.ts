@@ -47229,6 +47229,7 @@ describeRealCodex('real Codex game chat adjustment e2e', () => {
   it.each([
     { name: 'game chat counter-proposal says it replaces the partner ask', scenario: 'counter' as const },
     { name: 'game chat proposal carries only the current ask, not an earlier deferred one', scenario: 'only_current' as const },
+    { name: 'game chat repeated declined change applies without asking original proposer again', scenario: 'same_declined' as const },
     { name: 'game chat open day with no post is not called missed', scenario: 'open_day' as const },
   ])('$name', async ({ scenario }) => {
     const config = await resolveRealCodexE2eConfig()
@@ -47252,9 +47253,12 @@ describeRealCodex('real Codex game chat adjustment e2e', () => {
       ? 'Leo: can we switch to weekdays only?\nMurph: Leo wants to switch to weekdays only, Monday to Friday. Ava, does that work for you?'
       : scenario === 'only_current'
       ? 'Leo: lets make it 10 days\nAva: can we do every day including weekends?\nMurph: Ava proposed every day, including weekends. Leo, does that work? Leo’s 10 days can follow once that is settled.\nAva: actually never mind, keep weekdays.'
+      : scenario === 'same_declined'
+      ? 'Leo: can we switch to weekdays only?\nMurph: Leo wants weekdays only. Ava, good with that?\nAva: no, keep every day\nMurph: Keeping every day.'
       : 'Leo: walked this morning'
     const message = scenario === 'counter' ? 'how about we keep every day but cut it to 10 days instead'
-      : scenario === 'only_current' ? 'ok instead lets do any 4 days whenever we want' : 'I didn\'t do my walk today either fyi'
+      : scenario === 'only_current' ? 'ok instead lets do any 4 days whenever we want'
+      : scenario === 'same_declined' ? 'actually Leo lets switch to weekdays only after all' : 'I didn\'t do my walk today either fyi'
     try {
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -47273,7 +47277,9 @@ describeRealCodex('real Codex game chat adjustment e2e', () => {
             if (request.action === 'update_game') {
               const update = request.update
               if (update.operation === 'decline' || update.operation === 'cancel') game = { ...game, pendingChange: null, changeControls: { ...game.changeControls, canEdit: true, canEditSchedule: true, editableFromDay: 3 } }
-              else if (update.operation === 'propose') game = { ...game, pendingChange: { ...pendingWeekdays, id: update.proposalId, proposedByMemberId: speaker === 'Ava' ? 'player_ava' : 'player_leo', change: update.change as typeof pendingWeekdays.change } }
+              else if (update.operation === 'propose') game = scenario === 'same_declined'
+                ? { ...game, terms: { ...game.terms, n: 2, schedule: { days: [0, 1, 2, 3, 4] } }, pendingChange: null }
+                : { ...game, pendingChange: { ...pendingWeekdays, id: update.proposalId, proposedByMemberId: speaker === 'Ava' ? 'player_ava' : 'player_leo', change: update.change as typeof pendingWeekdays.change } }
               else if (update.operation === 'mark_incomplete') return { action: 'update_game', result: { status: 'ok', state: { games: [game] }, dayOutcome: { date: update.date, status: 'no_artifact' } } }
               else throw new Error('Unexpected game operation')
             }
@@ -47295,6 +47301,12 @@ describeRealCodex('real Codex game chat adjustment e2e', () => {
         expect(result.finalMessage).toMatch(/replac|instead of|turn(?:s|ed)? down|declin|off the table|drop/iu)
         expect(result.finalMessage).toMatch(/Leo/u)
         expect(result.finalMessage).toMatch(/weekday/iu)
+      } else if (scenario === 'same_declined') {
+        expect(updates.map((update) => update.operation)).toEqual(['propose'])
+        const proposal = updates[0]
+        expect(proposal?.operation === 'propose' && proposal.change).toEqual({ kind: 'edit', schedule: { days: [0, 1, 2, 3, 4] } })
+        expect(result.finalMessage).toMatch(/weekday|Monday.*Friday/iu)
+        expect(result.finalMessage).not.toMatch(/\?|waiting|pending|propos|(?:need|please|can you|could you).*\b(?:confirm|agree)|good with|does that work/iu)
       } else if (scenario === 'only_current') {
         expect(updates.map((update) => update.operation)).toEqual(['propose'])
         const proposal = updates[0]

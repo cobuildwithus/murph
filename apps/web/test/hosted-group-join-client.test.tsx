@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
     inviteCode?: string | null;
     methods: readonly ("phone" | "telegram" | "email")[];
     onCompleted?: (payload: {
-      stage: "active" | "activating" | "blocked" | "checkout";
+      stage: "active" | "blocked" | "checkout";
     }) => Promise<void> | void;
     requireLaunchConsentOnCompletion?: boolean;
   } | null,

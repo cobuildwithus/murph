@@ -45,7 +45,7 @@ function buildMessagingReturnHtml(input: {
   const escapedDestination = input.destinationUrl ? escapeHtml(input.destinationUrl) : null;
   const escapedService = escapeHtml(input.serviceLabel);
   const message = input.status === "error"
-    ? "The connection did not finish. Go home and try again when you are ready."
+    ? "The connection did not finish. Go to Settings and try again when you are ready."
     : `Returning you to ${escapedService}. If it does not open automatically, use the button below.`;
 
   return `<!doctype html>
@@ -63,7 +63,7 @@ function buildMessagingReturnHtml(input: {
     <h1>${escapeHtml(title)}</h1>
     <p>${escapeHtml(message)}</p>
     <div class="actions">
-      <a href="/home">Go home</a>
+      <a href="/settings">Go to Settings</a>
       ${escapedDestination ? `<a href="${escapedDestination}" rel="noreferrer" class="secondary">Text Murph</a>` : ""}
     </div>
   </main>

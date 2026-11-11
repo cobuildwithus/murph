@@ -65,3 +65,7 @@ its artifact directory, and its repeatable invocation is in the testing map.
 
 Candidate PR: #4837. Status: active; implementation complete, live/native proof
 pending. No ReviewGPT requested or started.
+
+Current-main integration preserves published history with a merge. The only
+conflict is the documentation index; retain both the recap plan and main's
+Home-restoration pointer. Full typecheck passes on the integrated tree.
