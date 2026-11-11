@@ -511,6 +511,17 @@ describe('assistant CLI delivery contracts', () => {
     expect(run.scheduledOccurrenceAt).toBeUndefined()
 
     expect(assistantCronRunRecordSchema.parse({
+      ...run, outcome: 'no_op', status: undefined,
+      reason: '  background_maintenance_non_replayable_work  ',
+    })).toMatchObject({
+      outcome: 'no_op', status: 'skipped',
+      reason: 'background_maintenance_non_replayable_work',
+    })
+    expect(assistantCronRunRecordSchema.safeParse({
+      ...run, status: null,
+    }).success).toBe(false)
+
+    expect(assistantCronRunRecordSchema.parse({
       ...run,
       notificationDecision: {
         kind: 'skip',

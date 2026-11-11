@@ -12,6 +12,13 @@ Home restoration and Training retirement are recorded in the
 
 Shared reminder awareness is owned by the [assistant engine](../packages/assistant-engine/README.md) and [assistant runtime](../packages/assistant-runtime/README.md); the [execution plan](exec-plans/completed/2026-11-10-reminder-awareness.md) records the implementation and proof.
 
+Assistant cron history stores outcomes once and derives compatibility status;
+shared occurrence bookkeeping and phase-result composition stay at their existing
+owners. [Execution plan](exec-plans/completed/2026-11-10-simplify-assistant-state.md),
+[engine contract](../packages/assistant-engine/README.md#cron-occurrence-and-history-ownership)
+and [runtime owner](../packages/assistant-runtime/README.md) record the scope and
+remaining snapshot retirement gates.
+
 [Hosted Linux recap file access](exec-plans/completed/2026-11-11-recap-show-hosted-files.md) records the restricted mount fix, host-only song credentials and native container proof.
 
 [Pair recap show presentation](references/recap-show-contract.md) owns the final-at-acceptance native presentation payload and synthetic decoder fixtures. Implementation follows the [active plan](exec-plans/active/2026-11-10-recap-show.md).

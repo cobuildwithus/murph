@@ -1211,9 +1211,18 @@ function normalizeAssistantCronRunRecordInput(value: unknown): unknown {
     ? record.outcome.trim()
     : ''
   if (outcome.length > 0) {
+    const reason = normalizeAssistantCronRunReason(record.reason, outcome)
     return {
       ...record,
-      reason: normalizeAssistantCronRunReason(record.reason, outcome),
+      reason,
+      status: record.status === undefined
+        ? outcome === 'failed' ? 'failed'
+          : outcome === 'delivered' ? 'succeeded'
+          : outcome === 'no_op'
+            && reason !== 'background_maintenance_non_replayable_work'
+            && reason !== 'legacy_no_op' ? 'succeeded'
+          : 'skipped'
+        : record.status,
     }
   }
 
