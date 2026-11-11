@@ -101,4 +101,5 @@ retired Stripe-meter schema cleanup belongs to the separate billing lane.
   entry `20261110232635-worktree-storage-guard` records the diagnostic gap; no
   unrelated checkout was mutated and no guard was bypassed.
 - Root owns candidate review, ReviewGPT, CI and final plan completion. Draft PR
-  publication is pending; the plan stays active for that owner.
+  [#4826](https://github.com/cobuildwithus/murph/pull/4826) is published; the plan
+  stays active for that owner.
