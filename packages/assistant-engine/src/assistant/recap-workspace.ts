@@ -17,15 +17,22 @@ export function recapTaskDirectory(vault: string, eventId: string): string {
   return path.join(vault, '.runtime/tmp/recap', createHash('sha256').update(eventId).digest('hex').slice(0, 32))
 }
 
+/** Read roots must exist before Codex resolves the Linux permission profile. */
+export async function prepareRecapWorkspaceDirectories(vault: string, eventId: string): Promise<string> {
+  const root = recapTaskDirectory(vault, eventId)
+  const relativeRoot = path.relative(vault, root)
+  for (const name of ['inputs', 'media', 'previews', 'drafts']) await recapDirectory(vault, `${relativeRoot}/${name}`)
+  return root
+}
+
 /** The trusted context owns material in memory; editable JSON cannot authorize a write. */
 export async function materializeRecapWorkspace(input: {
   vault: string; eventId: string; gameId: string; sessionId: string;
   material: unknown; lore: string; tool: AssistantHostedGroupTool;
 }): Promise<{ root: string; material: RecapMaterial; chat: RecapTranscriptMessage[]; manifest: unknown }> {
   const material = recapMaterialSchema.parse(input.material)
-  const root = recapTaskDirectory(input.vault, input.eventId)
+  const root = await prepareRecapWorkspaceDirectories(input.vault, input.eventId)
   const relativeRoot = path.relative(input.vault, root)
-  for (const name of ['inputs', 'media', 'previews', 'drafts']) await recapDirectory(input.vault, `${relativeRoot}/${name}`)
   const chat: RecapTranscriptMessage[] = []
   let after: string | undefined
   let through: string | undefined

@@ -1,8 +1,10 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { materializeRecapWorkspace, readCommittedRecapReplies } from '../src/assistant/recap-workspace.js'
+import { materializeRecapWorkspace, readCommittedRecapReplies, recapTaskDirectory } from '../src/assistant/recap-workspace.js'
+import { admitRecapRun } from '../src/assistant/recap-media-runtime.js'
+import type { AssistantHostedExecutionContext } from '../src/assistant/execution-context.js'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import { resolveAssistantTranscriptPath } from '../src/assistant/store/persistence.js'
 
@@ -46,4 +48,32 @@ describe('recap workspace material', () => {
     expect(await readCommittedRecapReplies(vault, sessionId, startedAt, settledAt)).toEqual({ messages: [], incomplete: true })
     await expect(readCommittedRecapReplies(vault, '../foreign', startedAt, settledAt)).rejects.toThrow()
   })
+})
+
+
+it('creates readable roots at admission before Codex starts, without fetching material', async () => {
+  const vault = await mkdtemp(path.join(os.tmpdir(), 'recap-admission-')); roots.push(vault)
+  const scope = { gameId: 'synthetic-game', eventId: 'synthetic-recap', pairFingerprint: 'synthetic-pair', show: true as const }
+  const context: AssistantHostedExecutionContext = { memberId: 'synthetic-room', userEnvKeys: [], gameRecapScope: scope,
+    groupTool: { async request(request) {
+      if (request.action !== 'read_game' || request.recapRead?.kind !== 'admit') throw new Error('Unexpected material request')
+      return { action: 'read_game', result: { status: 'ok', recapGame: { admitted: true, runId: request.recapRead.runId,
+        token: 'a'.repeat(64), deadline: new Date(Date.now() + 120_000).toISOString() } } }
+    } },
+  }
+  await expect(admitRecapRun(context, vault)).resolves.toMatchObject({ admitted: true })
+  const root = recapTaskDirectory(vault, scope.eventId)
+  expect((await readdir(root)).sort()).toEqual(['drafts', 'inputs', 'media', 'previews'])
+  expect(await readdir(path.join(root, 'inputs'))).toEqual([])
+})
+
+it('does not prepare file roots for a denied or ordinary turn', async () => {
+  const vault = await mkdtemp(path.join(os.tmpdir(), 'recap-denied-')); roots.push(vault)
+  const context: AssistantHostedExecutionContext = { memberId: 'synthetic-room', userEnvKeys: [],
+    groupTool: { async request() { return { action: 'read_game', result: { status: 'ok', recapGame: { admitted: false } } } } },
+  }
+  await expect(admitRecapRun(context, vault)).resolves.toBeNull()
+  context.gameRecapScope = { gameId: 'synthetic-game', eventId: 'synthetic-recap', pairFingerprint: 'synthetic-pair', show: true }
+  await expect(admitRecapRun(context, vault)).rejects.toThrow('exhausted')
+  await expect(stat(path.join(vault, '.runtime'))).rejects.toMatchObject({ code: 'ENOENT' })
 })

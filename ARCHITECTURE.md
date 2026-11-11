@@ -5905,8 +5905,9 @@ the default input estimate is 36,847 tokens with an optional operator override.
 The estimate is not a provider-guaranteed Flare bound. The task shell reads its
 bundle and writes drafts, media and previews, with network disabled. Recap shows
 use the concrete restored vault as their shell cwd and workspace root: the
-`/proc/self/cwd` alias cannot survive the Linux restricted mount setup. Inputs
-use an explicit read-only leaf mount; only that task's drafts, media and previews
+`/proc/self/cwd` alias cannot survive the Linux restricted mount setup. After successful admission, the host creates the four task directories before
+Codex resolves its profile; `read_game` fills the inputs later. Inputs use an
+explicit read-only leaf mount; only that task's drafts, media and previews
 are writable. File-mode song credentials come from the host-owned media runtime,
 not the sanitized Codex child environment; the shell still receives no audio key.
 Ordinary turns and plain/group recaps retain the stable provider cwd.

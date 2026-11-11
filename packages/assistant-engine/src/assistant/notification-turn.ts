@@ -2293,7 +2293,7 @@ async function completePreparedRecapNotification(prepared: { kind: 'repair' } | 
 
 async function prepareRecapNotification(hosted: AssistantHostedExecutionContext | null | undefined,
   context: ReturnType<typeof createAssistantHostedToolContext> | null,
-  messageInput: { abortSignal?: AbortSignal | null }): Promise<{ kind: 'continue' } | { kind: 'repair' } | { kind: 'recovered'; text: string }> {
+  messageInput: { abortSignal?: AbortSignal | null; vault: string }): Promise<{ kind: 'continue' } | { kind: 'repair' } | { kind: 'recovered'; text: string }> {
   const scope = hosted?.gameRecapScope
   if (!scope?.show || !hosted?.groupTool) return { kind: 'continue' }
   const origin = { kind: 'game_recap' as const, gameId: scope.gameId, eventId: scope.eventId }
@@ -2314,7 +2314,7 @@ async function prepareRecapNotification(hosted: AssistantHostedExecutionContext 
     await recordAcceptedRecap({ context, origin: scope }, recovered.result, true)
     return { kind: 'recovered', text: recovered.result.chatLine }
   }
-  hosted.gameRecapAdmission = await admitRecapRun(hosted)
+  hosted.gameRecapAdmission = await admitRecapRun(hosted, messageInput.vault)
   const remaining = Math.max(1, Date.parse(hosted.gameRecapAdmission!.deadline) - Date.now())
   messageInput.abortSignal = AbortSignal.any([...(messageInput.abortSignal ? [messageInput.abortSignal] : []), AbortSignal.timeout(remaining)])
   return { kind: 'continue' }

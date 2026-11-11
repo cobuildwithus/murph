@@ -7,7 +7,7 @@ import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-med
 import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
 import type { GenerateSongToolArgs } from '../assistant-codex/generate-voice-memo-tool.js'
 import type { AssistantHostedExecutionContext, AssistantHostedGroupTool } from './execution-context.js'
-import { fetchRecapReference, type materializeRecapWorkspace } from './recap-workspace.js'
+import { fetchRecapReference, prepareRecapWorkspaceDirectories, type materializeRecapWorkspace } from './recap-workspace.js'
 import { saveRecapMediaFile } from './recap-files.js'
 
 export const recapRunAdmissionSchema = z.object({ admitted: z.literal(true), runId: z.string().uuid(),
@@ -15,7 +15,7 @@ export const recapRunAdmissionSchema = z.object({ admitted: z.literal(true), run
 export type RecapRunAdmission = z.infer<typeof recapRunAdmissionSchema>
 
 /** Host-only: finish admission before enabling shell or provider tools. */
-export async function admitRecapRun(context: AssistantHostedExecutionContext): Promise<RecapRunAdmission | null> {
+export async function admitRecapRun(context: AssistantHostedExecutionContext, vault: string): Promise<RecapRunAdmission | null> {
   const scope = context.gameRecapScope
   if (!scope?.show) return null
   if (!context.groupTool) throw new Error('Recap control is unavailable.')
@@ -24,6 +24,7 @@ export async function admitRecapRun(context: AssistantHostedExecutionContext): P
   if (response.result.status !== 'ok' || !('recapGame' in response.result)) throw new Error('Recap admission is unavailable.')
   const admission = recapRunAdmissionSchema.safeParse(response.result.recapGame)
   if (!admission.success) throw new Error('Recap agent attempts or deadline exhausted.')
+  await prepareRecapWorkspaceDirectories(vault, scope.eventId)
   return admission.data
 }
 
