@@ -3633,72 +3633,37 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
   const foregroundReplyFailed = input.assistantResult.foregroundReplyFailed;
   const invocationLocalAssistantWakeAt =
     input.assistantResult.invocationLocalAssistantWakeAt ?? null;
-  if (progressedResult) {
-    return withHostedRuntimeProjectionCheckpointRequest({
-      requested: hostedRuntimeProjectionCheckpointWasRequested([
-        input.systemMailboxResult,
-        input.assistantResult,
-      ]),
-      result: {
-        ...(afterCheckpoint ? { afterCheckpoint } : {}),
-        ...(afterDurableCheckpoint ? { afterDurableCheckpoint } : {}),
-        ...(browserVaultReplicaRefreshRequested
-          ? { browserVaultReplicaRefreshRequested: true }
-          : {}),
-        ...(afterCheckpointKeepsForegroundImportLoop
-          ? { afterCheckpointKeepsForegroundImportLoop: true }
-          : {}),
-        checkpointReason: progressedResult.checkpointReason,
-        ...(foregroundReplyFailed === undefined
-          ? {}
-          : { foregroundReplyFailed }),
-        ...(foregroundPrioritySystemCompletionProcessed
-          ? { foregroundPrioritySystemCompletionProcessed: true }
-          : {}),
-        ...(invocationLocalAssistantWakeAt
-          ? { invocationLocalAssistantWakeAt }
-          : {}),
-        ...(systemMailboxProgressed
-          ? { systemMailboxProgressed: true as const }
-          : {}),
-        ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
-        nextWakeAutonomous: nextWake.autonomous,
-        ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
-          ? { nextWakeReason: nextWake.reason }
-          : {}),
-        progressed: true,
-        ...(redactedStatus ? { redactedStatus } : {}),
-      },
-    });
-  }
-
+  const common = {
+    ...(browserVaultReplicaRefreshRequested
+      ? { browserVaultReplicaRefreshRequested: true as const }
+      : {}),
+    ...(foregroundReplyFailed === undefined ? {} : { foregroundReplyFailed }),
+    ...(foregroundPrioritySystemCompletionProcessed
+      ? { foregroundPrioritySystemCompletionProcessed: true as const }
+      : {}),
+    ...(invocationLocalAssistantWakeAt ? { invocationLocalAssistantWakeAt } : {}),
+    ...(systemMailboxProgressed ? { systemMailboxProgressed: true as const } : {}),
+    ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
+    nextWakeAutonomous: nextWake.autonomous,
+    ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
+      ? { nextWakeReason: nextWake.reason }
+      : {}),
+    ...(redactedStatus ? { redactedStatus } : {}),
+  };
   return withHostedRuntimeProjectionCheckpointRequest({
-    requested: hostedRuntimeProjectionCheckpointWasRequested([
-      input.systemMailboxResult,
-      input.assistantResult,
-    ]),
-    result: {
-      ...(browserVaultReplicaRefreshRequested
-        ? { browserVaultReplicaRefreshRequested: true }
-        : {}),
-      ...(foregroundReplyFailed === undefined ? {} : { foregroundReplyFailed }),
-      ...(foregroundPrioritySystemCompletionProcessed
-        ? { foregroundPrioritySystemCompletionProcessed: true }
-        : {}),
-      ...(invocationLocalAssistantWakeAt
-        ? { invocationLocalAssistantWakeAt }
-        : {}),
-      ...(systemMailboxProgressed
-        ? { systemMailboxProgressed: true as const }
-        : {}),
-      ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
-      nextWakeAutonomous: nextWake.autonomous,
-      ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
-        ? { nextWakeReason: nextWake.reason }
-        : {}),
-      progressed: false,
-      ...(redactedStatus ? { redactedStatus } : {}),
-    },
+    requested: hostedRuntimeProjectionCheckpointWasRequested(results),
+    result: progressedResult
+      ? {
+          ...common,
+          ...(afterCheckpoint ? { afterCheckpoint } : {}),
+          ...(afterDurableCheckpoint ? { afterDurableCheckpoint } : {}),
+          ...(afterCheckpointKeepsForegroundImportLoop
+            ? { afterCheckpointKeepsForegroundImportLoop: true }
+            : {}),
+          checkpointReason: progressedResult.checkpointReason,
+          progressed: true,
+        }
+      : { ...common, progressed: false },
   });
 }
 

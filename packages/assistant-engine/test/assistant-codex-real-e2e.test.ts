@@ -45694,6 +45694,11 @@ describeRealCodex('real Codex reminder execution inspection e2e', () => {
         scheduledOccurrenceAt: '2026-07-28T20:00:00.000Z', sessionId: null,
         response: null, responseLength: 0, error: 'The assistant service was temporarily unavailable.',
       })
+      const journal = JSON.parse(await readFile(
+        path.join(paths.cronRunsDirectory, `${automationId}.jsonl`), 'utf8',
+      ))
+      expect(journal).toMatchObject({ outcome: 'failed', reason: 'provider_unavailable' })
+      expect(journal).not.toHaveProperty('status')
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,

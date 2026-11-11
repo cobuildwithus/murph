@@ -1,3 +1,10 @@
+Assistant cron history stores outcomes once and derives compatibility status;
+shared occurrence bookkeeping and phase-result composition stay at their existing
+owners. [Execution plan](exec-plans/completed/2026-11-10-simplify-assistant-state.md),
+[engine contract](../packages/assistant-engine/README.md#cron-occurrence-and-history-ownership)
+and [runtime owner](../packages/assistant-runtime/README.md) record the scope and
+remaining snapshot retirement gates.
+
 Bound pair and group games tolerate bystanders while retaining current-player,
 route and restriction checks. [Architecture](../ARCHITECTURE.md),
 [Weekly Game](product-specs/weekly-game.md), and
