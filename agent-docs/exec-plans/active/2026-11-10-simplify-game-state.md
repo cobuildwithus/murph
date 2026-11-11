@@ -78,7 +78,9 @@ removing Talk and reminder back-imports without adding a repository layer.
   stopped before provider action because the default binary lacks the native
   patch. Existing Frog `20261026172108-local-live-runner` owns this friction;
   the assistant execution workstream owns the supported binary build.
-- Final privacy/diff review, release note, scoped commit and draft PR: pending.
+- Authored privacy/diff review passed. Source-linked release note added for
+  draft PR 4825; changelog generation and 4 rendered archive tests passed.
+- Initial scoped commit pushed; final live proof and plan closure remain pending.
 
 ## Completion ownership
 
