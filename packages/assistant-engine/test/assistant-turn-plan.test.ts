@@ -50,7 +50,7 @@ describe('assistant turn plan', () => {
       vault,
       executionContext: { hosted: {
         memberId: 'synthetic-room', userEnvKeys: [],
-        gameRecapScope: { gameId: 'synthetic-game', eventId: 'synthetic-recap', pairFingerprint: 'synthetic-pair', show: false },
+        gameRecapScope: { gameId: 'synthetic-game', eventId: 'synthetic-recap', pairFingerprint: 'synthetic-pair' },
       } },
     }), { currentWorkingDirectory: vault, env: { MURPH_HOSTED_RUNTIME_PROCESS: '1' }, platform: 'linux' })).toBe(HOSTED_STABLE_PROVIDER_WORKING_DIRECTORY)
   })
