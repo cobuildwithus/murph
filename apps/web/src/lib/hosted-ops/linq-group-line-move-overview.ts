@@ -15,7 +15,7 @@ export async function readHostedLinqGroupLineMoveOverview(input: {
   const rows = await prisma.hostedLinqGroupLineMove.findMany({ where: { status: input.status,
     ...(input.afterMoveId ? { id: { gt: input.afterMoveId } } : {}) }, orderBy: { id: "asc" }, take: 51, select: groupMoveOperatorSelect });
   const lines = await listHostedLinqAssignableHomeLines({ prisma });
-  const page = input.sourceLineLookupKey ? await readCandidates(input.sourceLineLookupKey, input.afterContainerRef, prisma) : { candidates: [], nextContainerRef: null };
+  const page = input.sourceLineLookupKey ? await readCandidates(input.sourceLineLookupKey, input.afterContainerRef, prisma) : { candidates: [], unresolvedCandidates: [], nextContainerRef: null };
   return { moves: rows.slice(0, 50).map(summarizeOperatorGroupMove), nextMoveId: rows.length > 50 ? rows[49]!.id : null,
     assignableTargetLines: lines.map(line => ({ lineLookupKey: line.phoneNumberLookupKey, lineHint: line.phoneNumberHint })),
     ...page };
@@ -36,7 +36,13 @@ async function readCandidates(sourceLineLookupKey: string, after: string | undef
     } } } },
   } });
   const candidates = [];
+  const unresolvedCandidates = [];
   for (const route of routes.slice(0, 50)) {
+    if (route.deliveryRouteEncrypted === null) {
+      unresolvedCandidates.push({ containerRef: route.threadIdentityLookupKey,
+        containerHint: route.containerMemberId.slice(-8), code: "delivery_route_missing" });
+      continue;
+    }
     let account = route.accountLookupKey;
     if (account === null) {
       const sealed = await openHostedThreadDeliveryRoute({ channel: "linq", containerMemberId: route.containerMemberId,
@@ -49,5 +55,5 @@ async function readCandidates(sourceLineLookupKey: string, after: string | undef
       lastActivityAt: route.container.member.hostedMailboxItems[0]?.createdAt.toISOString() ?? null,
       hasLiveGame: route.container.member.chatHostedGames.length > 0 });
   }
-  return { candidates, nextContainerRef: routes.length > 50 ? routes[49]!.threadIdentityLookupKey : null };
+  return { candidates, unresolvedCandidates, nextContainerRef: routes.length > 50 ? routes[49]!.threadIdentityLookupKey : null };
 }

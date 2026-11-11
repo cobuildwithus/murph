@@ -3907,6 +3907,11 @@ transaction and no foreground-path work. Source departure uses existing cleanup.
 Candidate overview also resolves legacy null account projections from sealed
 routes, at most 50 sequential opens per page; cursor advancement uses the raw
 page, even when legacy routes belong to another line. It does not rewrite routes.
+Rows with no sealed delivery route are returned separately as opaque
+`unresolvedCandidates` with `delivery_route_missing`; a null account projection
+does not identify their source line. They cannot authorize a move and do not
+prevent the same bounded page from listing usable routes. The cursor still
+advances over the raw page, including unresolved rows.
 
 Cancellation claims `remove_started_at` once under the source-chat lock before
 dispatch and records `remove_accepted_at` only after a successful provider
