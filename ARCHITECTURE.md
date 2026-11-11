@@ -5904,8 +5904,8 @@ Reference images fit within 1024 pixels per edge, with at most three references;
 the default input estimate is 36,847 tokens with an optional operator override.
 The estimate is not a provider-guaranteed Flare bound. The task shell reads its
 bundle and writes drafts, media and previews, with network disabled. Recap shows
-use the concrete restored vault as their shell cwd and workspace root: the
-`/proc/self/cwd` alias cannot survive the Linux restricted mount setup. The restricted profile starts from an empty filesystem and mounts the input
+use the same concrete restored vault for their shell cwd and workspace grants,
+avoiding the procfs alias that failed under the original recap profile. The restricted profile starts from an empty filesystem and mounts the input
 leaf read-only plus the three writable leaves. It must not explicitly deny the
 workspace ancestor: the pinned Linux sandbox masks read-only descendants after
 binding them, then restores only writable children. File-mode song credentials come from the host-owned media runtime,

@@ -93,8 +93,8 @@ export function resolveAssistantRequestedWorkingDirectory(
     explicitWorkingDirectory !== null
     && path.resolve(explicitWorkingDirectory) === path.resolve(input.vault)
 
-  // Recap file grants are rooted in the restored vault. A procfs cwd alias
-  // disappears when the Linux deny-by-default sandbox mounts that workspace.
+  // Recap manifest paths and restricted file grants share one concrete vault
+  // root. Avoid procfs alias handling for this isolated filesystem.
   if (executionContext.hosted?.gameRecapScope?.show === true) {
     return path.resolve(input.vault)
   }
