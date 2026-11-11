@@ -1,193 +1,60 @@
-# Tracking and Adjustment
+# Body composition: tracking and adjustment
 
-Last reviewed: **2026-08-09**
+Read this before setting up measurements, reviewing progress, calling a plateau or changing a plan.
 
-This file defines the minimum evidence Murph should gather before calling progress, a plateau, or an adjustment. It applies to fat loss, muscle gain, recomposition, maintenance, and unexplained weight trends.
+## What to track
 
-## Principles
+Choose one main outcome and one or two supporting signals. A member who does not want to weigh can use waist, clothing fit, performance or a marker agreed with their clinician.
 
-1. **Track only what can change a decision.**
-2. **Preserve canonical measurements and provenance.**
-3. **Separate direct measurements from estimates and interpretations.**
-4. **Use trends, not verdicts from single readings.** One reading should almost never trigger a plan adjustment.
-5. **Change one main lever at a time.**
-6. **Never auto-adjust intake or exercise without enough evidence and user consent.**
-7. **Reduce tracking when its psychological or practical cost exceeds its value.**
+| Goal | Main outcome | Supporting signals |
+|---|---|---|
+| Fat loss | Weight trend or waist trend | Strength or training quality; appetite, energy or steps |
+| Muscle gain | Training performance or one circumference | Weight trend; waist, appetite or recovery |
+| Recomposition | Waist or another circumference | Strength; weight trend |
+| Maintenance | A broad weight or waist range | One habit or ability the member values |
+| Unexplained change | Weight readings with source and time | Medications, illness, fluid, food, activity, cycle; symptoms |
 
-## Minimum Useful Tracking Sets
+## Measuring
 
-Choose one primary outcome and one or two context signals.
+- Weight: same scale, after waking and using the bathroom, before food, in similar clothing. How often is the member's choice. Daily, a few times a week and weekly all work, and not weighing at all is a valid choice when weighing is distressing.
+- With frequent readings, summarize each week with either the mean or the median and keep the same method for every week you compare. With few readings, say that the trend is uncertain.
+- Waist: same site, posture and time of day. Weekly or less often is enough.
+- Photos are optional and private. Do not ask for them by default, do not require revealing clothing, and never share one to a group without the member's consent for that photo.
+- Smart-scale body-fat, lean-mass and visceral-fat values are estimates. Keep the same device and conditions, use them only for a rough long-term direction that agrees with other signals, and do not join readings from different devices into one trend.
 
-### Fat loss
+## Commands
 
-- primary: same-condition weight trend or waist trend
-- context: strength or training quality
-- context: appetite, energy, adherence, or steps
+- Read: `vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json`. A full page may leave out older readings, so narrow the dates or raise the limit before saying the history is complete.
+- Record a reading the member reports: `vault-cli measurement add --metric weight --value <number> --unit <lb or kg> --source manual --occurred-at <YYYY-MM-DD>`. Use the same metric names the read returns, such as `weight` and `waist_circumference`.
+- Keep units as recorded and compare only readings in the same unit.
+- When a connected scale already supplies a reading, do not add a manual copy.
+- Do not save a trend or a BMI you calculated as if it were a measurement, and do not keep a separate tracker file. The saved measurements and the Goal are the record.
+- A body-composition goal uses `vault-cli goal save` once the member asks to set one up. `goal-setup` owns that flow.
 
-### Lean-mass gain
+## Reviewing progress
 
-- primary: training performance or a target circumference
-- context: same-condition weight trend
-- context: waist, appetite, digestion, or recovery
+Report the time window and number of readings, the source when it matters, the weekly summaries at the start and the end, anything unusual in the period, one main reading of the trend with its uncertainty, and whether to hold, adjust, pause or involve a clinician. Do not present a fitted slope from a handful of readings.
 
-### Recomposition
+## Calling a plateau
 
-- primary: waist or another chosen circumference
-- context: strength or repetitions
-- context: weight trend
+Wait for two to four weeks of comparable weight or waist data before calling a plateau. Wait longer for muscle gain in a trained lifter, around cycle-related fluid shifts, illness or travel, after starting creatine, or when readings are sparse. A flat scale with a smaller waist or rising strength is progress.
 
-### Maintenance
+Before changing intake or activity, check in this order:
 
-- primary: broad weight or waist range, checked at a tolerable cadence
-- context: one behavior or capability the user values
-- context: symptoms or health marker when relevant
+1. Was the plan actually doable, including weekends, restaurant meals, alcohol and drinks?
+2. Did steps or training change?
+3. Could salt, carbohydrate, constipation, soreness, sleep, cycle phase or a medication explain it?
+4. Is waist, strength or another main outcome still improving?
+5. Is the member near a sensible stopping point or due for a maintenance phase?
 
-### Understand an unexpected trend
+## Making an adjustment
 
-- primary: verified weight measurements with source and timestamps
-- context: medications, illness, fluid, food, activity, bowel, cycle, and training changes
-- context: symptoms and whether the change was intentional
+An adjustment names the evidence window, the trend and its uncertainty, what you ruled out, the one thing that changes, the direction you expect, the next review date and what would make you reverse it. Ask the member before Murph updates a goal, a target, a check-in or a reminder.
 
-Do not require all of these. A user who does not want to weigh can use waist, clothing fit, performance, mobility, or a clinician-agreed marker.
+Example: "Across three comparable weeks, weight and waist are flat, training is steady and the restaurant change happened most weeks. Trim the evening snack portion or add a short walk after lunch, one of the two, and review in two weeks."
 
-## Measurement Protocols
+Never turn an incomplete food log into a claim that the member ate a specific surplus or deficit.
 
-### Weight
+## Groups
 
-Prefer:
-
-- the same scale
-- after waking and bathroom use when practical
-- before food and large drinks
-- similar clothing or no clothing
-- a consistent surface and scale placement
-- direct connected-scale data when available, without duplicate manual entries
-- units preserved as recorded; aggregate only same-unit values until an explicit shared conversion contract exists
-
-Cadence is a preference and safety choice:
-
-- daily values can improve the trend estimate for users comfortable with them
-- several readings per week are often sufficient
-- weekly may be the highest tolerable cadence
-- no weighing is valid when it is distressing or unsafe
-
-Use one declared seven-day summary method, mean or median, when sampling is frequent, and keep that method stable across compared windows. Do not silently switch methods to improve the story. For sparse data, state the limitation rather than manufacturing a precise slope.
-
-### Waist and other circumferences
-
-Keep site, posture, breathing phase, tape tension, time of day, and measurer consistent. Weekly or less often is usually enough. Do not infer visceral fat or exact fat mass from a small tape change.
-
-### Training performance
-
-Prefer repeated exercises or movement patterns with comparable technique, range of motion, equipment, and effort. A personal record can reflect skill, leverage, motivation, or fatigue as well as muscle. Use several sessions.
-
-### Photos
-
-Photos are optional and private. Never ask by default, never require revealing clothing, and never share to a group without explicit per-item consent. Lighting, pose, distance, pump, and camera processing can dominate small changes.
-
-### Consumer body-composition devices
-
-Label BIA body-fat, lean-mass, muscle-mass, and visceral-fat outputs as estimates. At the individual level, absolute values can differ substantially from criterion methods. Hydration, food, glycogen, skin temperature, recent exercise, and device equations can move the result.
-
-- keep device and conditions consistent
-- use coarse long-term direction only when it agrees with other signals
-- do not merge estimates from different devices into one seamless trend
-- do not claim a precise amount of fat lost or muscle gained
-- do not let a BIA change override weight, waist, performance, symptoms, or clinical imaging
-- preserve the vendor metric name and source rather than rewriting it as measured tissue
-
-### BMI
-
-BMI is derived context, not a body-composition measurement. Do not store it as though it were directly measured, use it alone to prescribe loss or gain, or present a category as a personal judgment.
-
-## Trend Read
-
-For every progress review, report:
-
-- measurement window and number of observations
-- source or device when relevant
-- whether current-day data are provisional
-- summary method
-- start and end summaries, not only endpoints
-- important confounders
-- one primary interpretation with uncertainty
-- whether the current evidence supports hold, adjust, pause, or escalate
-
-Avoid presenting a linear regression slope when the sample is sparse or the pattern is visibly nonlinear. A simple comparison of adjacent weekly summaries is often more honest.
-
-## Plateau Criteria
-
-Do not call a plateau until:
-
-- the window is long enough for the goal and expected rate
-- measurements are comparable
-- at least one primary and one context signal are available when practical
-- transient confounders have been considered
-- the plan was executable enough to evaluate
-- the apparent lack of change would actually alter the next decision
-
-Two to four weeks is a common minimum for weight or waist decisions. Use longer windows for trained muscle gain, cycle-related fluid shifts, illness, travel, creatine initiation, or sparse measurements.
-
-A stable scale can still be progress when waist falls or strength rises. A rising scale can still be a problem when waist rises rapidly without performance or recovery benefit.
-
-## Adjustment Contract
-
-An adjustment must specify:
-
-- evidence window
-- current trend and uncertainty
-- confounders checked
-- one lever changing
-- expected direction, not a guaranteed number
-- next review date or data threshold
-- stop or rollback condition
-- user consent when Murph will update a goal, target, automation, or recurring check-in
-
-Good adjustment:
-
-> Across three comparable weekly summaries, weight and waist are flat, training is stable, and the planned restaurant change happened most weeks. Reduce the one recurring evening snack portion or add a short walk after lunch—not both—then review after two more weeks.
-
-Bad adjustment:
-
-> Yesterday’s weight was up 1.2 lb, so I cut 300 calories.
-
-Never turn an incomplete food log into a claim that the user ate a specific surplus or deficit.
-
-## Canonical Data and Current CLI Audit
-
-Current primitives already cover the durable facts:
-
-- `murph measurement add` records open scalar metrics such as body weight or waist with value, unit, timestamp, source, qualifiers, and notes.
-- `vault-cli measurement entry list --metric weight --from <date> --to <date> --limit <bounded-count> --format json` reads lossless metric-filtered values, units, notes and sources. Use a small metric-filtered read first when the latest date is unknown; avoid the broad event list for a single metric. Full pages may omit older readings: narrow the date range or increase the bounded limit before claiming complete coverage.
-- `murph goal save` stores goal identity, status, horizon, priority, dates, domains, and relations.
-- food, meal, exercise or workout, experiment, journal, wearable, and device commands provide surrounding context.
-
-Use those surfaces when available. Do not create a second JSON or Markdown “weight tracker” as canonical truth.
-
-Current limitations are documented in `docs/body-composition-cli-audit.md`. Until generic metric-filtered trend reads exist:
-
-- inspect canonical measurements rather than relying on conversation memory
-- state when the read is incomplete
-- do not hand-calculate and persist a derived trend as a new direct measurement
-- do not invent a body-composition command
-- keep proposed calorie or rate targets in the response unless the user explicitly asks to activate a supported goal or experiment
-
-## Suggested Check-In Shape
-
-A low-burden check-in can ask:
-
-1. What changed in the primary trend?
-2. How did training or capability change?
-3. How were appetite, energy, recovery, and symptoms?
-4. Was the chosen behavior repeatable?
-5. Was there a major confounder?
-6. Hold, small adjustment, maintenance, pause, or clinician follow-up?
-
-Ask fewer questions when existing data answer them.
-
-## Privacy and Sharing
-
-- Default all body-composition data to private.
-- Do not include weight, waist, calories, photos, eating-disorder history, medication use, or body commentary in a group summary without explicit consent.
-- Do not rank people by weight lost, calories eaten, thinness, or body-fat percentage.
-- In a group challenge, prefer participant-chosen behaviors or capabilities and use `group-challenge` consent rules.
+In a group, do not include a member's weight, waist, calories, photos or body commentary without their consent, and never rank people by weight lost, calories, thinness or body fat. For a group challenge, prefer behaviors or abilities the participants choose, and follow `group-challenge` for consent.

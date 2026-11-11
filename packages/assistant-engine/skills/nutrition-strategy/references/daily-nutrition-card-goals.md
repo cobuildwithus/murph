@@ -1,315 +1,95 @@
-# Daily nutrition-card goals
+# Daily nutrition targets
 
-## Totals do not require targets
+Read this file when a member asks to set or change their saved daily targets for calories, protein, carbohydrate, fat or fiber, or when they reply to a target proposal you made. Showing totals or a nutrition card never needs this file; the card tool and `food-journal` cover that.
 
-Use the canonical target-authority read below before every private daily card,
-including ordinary meal replies and replies to scheduled check-ins. Subject to
-numeric suitability, complete same-date totals, routing and request scope,
-`ready` uses the five accepted compatible snapshots unchanged. `missing` uses
-V2 with all five goals explicitly null, including when only some compatible
-targets exist. Never mix nulls with snapshots in fresh authoring. Missing targets
-are optional, not an error or an invitation to derive new ones. Conflict,
-incompatible and capacity remain text-only; never relabel them missing.
+These rules hold throughout:
 
-A meal log, daily summary, numeric-card request, and managed closeout never
-create, explain, repeat, accept, activate, revise, or abandon a target proposal.
-Only explicit target-setting intent authorizes the proposal workflow below.
-The proposal remains paused until explicit acceptance after explanation. Silence,
-a meal reply, reminder acceptance, and a request for totals are not acceptance.
-Prior decline remains authoritative; food-journal owns the once-only optional
-goal-setup introduction and runtime-owned sent evidence, not a new Goal.
+- Only an explicit request to set targets starts this workflow. A meal log, a request for totals or a card, and a scheduled check-in or closeout do not. A scheduled turn never asks target questions and never creates, changes, repeats or activates a proposal.
+- A proposal stays paused until the member accepts it after you have explained it. Silence, a meal reply, accepting a reminder and asking for totals are not acceptance. A decline stands until the member asks for targets again.
+- The card tool description says when numeric guidance is unsuitable for a member. When it is, write no Goal and no measurement, leave any existing paused proposal as it is, and reply helpfully without numbers.
+- Use the card's date throughout: the date the member asked about, or the occurrence date the engine supplies. Never substitute today's wall-clock date.
 
-Apply the card tool's known-context suitability rule without a universal medical
-or measurement checklist. Number-sensitive/intuitive-eating/eating-disorder
-contexts suppress numeric cards. A constraint affecting target advice does not
-by itself prohibit benign logged totals. Use context already known or read only
-what a concrete concern requires; do not fan out across unrelated clinical history.
-If known context suppresses numeric guidance, make no Goal or measurement mutation
-and leave an existing paused proposal alone.
+## 1. Read current targets
 
-## Target authority
+Run `vault-cli meal totals --from <date> --to <same-date> --resolve-goals --format json` for the card's date. You may instead reuse `dailyTotals.data` from a successful same-date `meal add --with-daily-totals` or `meal import-json --with-daily-totals` when `dailyTotals.status` is `available`. The `goalContext` in that result is the answer about active targets. It has already applied the date, unit, comparator and conflict rules, so do not re-derive it from `goal list` or `goal show`. Rerun the read after any meal or Goal change.
 
-- Before treating any target bundle as complete or deciding that a metric is
-  missing, run `vault-cli meal totals --from <date> --to <same-date> --resolve-goals --format json`.
-  Alternatively, reuse `dailyTotals.data` from a successful same-date
-  `meal add --with-daily-totals` or `meal import-json --with-daily-totals` when
-  `dailyTotals.status` is `available`. It is the same fresh canonical read,
-  performed after the save; do not run a separate totals query to confirm it.
-  The date is the selected card localDate. Copy the fresh canonical totals and
-  resolved `goalContext.targets` points. This query owns the complete active
-  target scan and deterministic rules below; do not repeat goal list/show to
-  re-resolve active authority. `ready` permits a card only after the existing
-  suitability, intent, and meal-completeness gates pass. `missing` permits a
-  totals-only card with all five goals null. Only a separate explicit
-  target-setting request permits the paused-proposal workflow, holding resolved
-  points fixed. `conflict`, `incompatible`, or `capacity` means ordinary text, no Goal
-  or measurement mutation, and no card. Never derive from or replace unresolved
-  values. Historical compatibility is read-only display authority.
-  Rerun after any meal or Goal mutation before a card. Otherwise reuse this
-  turn's successful read after read-only suitability checks or skill reads.
-  Keep this active-target
-  authority read separate from the all-status lookup used below to reuse or
-  honor Murph's managed paused or abandoned proposal; neither read substitutes
-  for the other.
-- For explicit target-setting only, read already-known goals, body measurements,
-  training, weight trend, activity, and stated body-composition direction before
-  asking. A totals-only card needs none of these derivation inputs. Never infer a missing
-  physiological sex input from a name, pronouns, or gender label, and never infer
-  usual activity from a few workouts or one wearable day.
-- A member- or clinician-chosen active target always wins for its metric. Do not
-  replace it, average conflicts, or create a default over it. A range or dynamic
-  target cannot be collapsed into the card's scalar target; ask one narrow
-  question or use ordinary text instead.
-- Comparator compatibility is part of target authority. This point-target card
-  and its managed derivation normally accept a target only when its evaluation
-  is `selected-value`, its comparator is `between`, and its numeric `value` and
-  `highValue` are identical. The complete same-Goal historical `daily-*`
-  nutrition set below has one read-only display-compatibility path when every
-  target instead uses `evaluation.kind: rolling-window` with `statistic: mean`
-  plus `selectionPolicyOverride.kind: daily-aggregate` with `statistic: mean`.
-  Copy each unchanged point bound into the card for the selected `localDate`,
-  preserve the Goal, and never extend this exception to another target identity
-  or workflow. A mixed evaluation bundle or any other rolling-window or
-  daily-aggregate statistic is incompatible.
-  A one-sided `<`, `<=`, `>`, or `>=` threshold, a non-identical `between`
-  range, or any other target shape remains authoritative canonical state but is
-  incompatible with this workflow. Never translate its bound into a point:
-  do not expose, compare, or copy it into the card; use it for the 1,200 kcal
-  boundary, residual-energy, or fiber calculations; or create, replace, or
-  remove managed targets around it. Use ordinary text or one narrow interactive
-  question without mutation; a scheduled closeout asks nothing and sends no
-  card. Apply this rule before any low-energy check or derivation. Multiple
-  active explicit owners are also ambiguous.
-- Calorie metric compatibility has one narrow read-only exception for an
-  existing complete nutrition Goal. New authoring uses `dietary-calories`.
-  First resolve applicable canonical `dietary-calories` authority under the
-  date, comparator, and unit rules here. When exactly one compatible canonical
-  owner remains, use it and ignore every `calories` target; that globally
-  ambiguous key neither overrides nor conflicts with canonical dietary
-  authority. Only when no canonical owner exists may the historical target
-  `daily-calories` with metric `calories` and unit `kcal` fill the card's calorie
-  slot. Its same containing Goal must also own exactly one applicable compatible
-  exact-point target for each historical id, metric, and unit pair:
-  `daily-protein` / `protein-grams` / `g`, `daily-carbohydrates` /
-  `carbs-grams` / `g`, `daily-fat` / `fat-grams` / `g`, and `daily-fiber` /
-  `fiber-grams` / `g`. Require exactly one complete historical set. Any other
-  `calories` target is not dietary authority, even when co-located with all four
-  macro and fiber metrics. Never combine the historical calorie target with
-  targets from another Goal or a managed proposal. Multiple qualifying sets or
-  ambiguity or incompatibility inside the qualifying Goal means no card and no
-  managed Goal mutation. Do not use titles, slugs, domains, descriptions, or
-  guessed intent as authority. Apply the 1,200-kcal boundary and residual-energy
-  calculations to the one resolved calorie value exactly as if it came from
-  `dietary-calories`. Never rename or mutate the Goal, extend this exception to
-  another workflow, or author new `calories` targets.
-- Unit compatibility is part of target authority. This fixed-unit workflow
-  accepts the resolved calorie owner above in `kcal`, and `protein-grams`,
-  `carbs-grams`, `fat-grams`, and `fiber-grams` in `g`. An explicit target in
-  another unit
-  remains authoritative and must not be overwritten, but its raw value must not
-  be compared with the 1,200 kcal boundary, copied into a card, or used by the
-  residual-energy or fiber calculations. Do not invent a card-specific
-  conversion. Without an existing owning conversion that yields the exact
-  canonical unit, treat the bundle as incomplete and incompatible: perform no
-  managed Goal mutation, use ordinary text or one narrow interactive question,
-  and let a scheduled closeout use ordinary text without a question or card.
-  Apply this rule before any low-energy check or derivation.
-- Effective dates are also part of target authority. Resolve them against the
-  exact card `localDate`: the engine-supplied occurrence local date for a
-  scheduled closeout, or the explicitly requested date for an interactive
-  request. A historical automatic capture cannot authorize a scheduled card.
-  Never use wall-clock today as a substitute.
-  The containing Goal applies only when
-  `window.startAt <= localDate` and its optional `window.targetAt` is absent or
-  `localDate <= window.targetAt`. A target inside it also applies only when its
-  optional `startAt` is absent or `startAt <= localDate`, and its optional
-  `targetAt` is absent or `localDate <= targetAt`; both boundaries are
-  inclusive. An out-of-window target remains canonical authority for its own
-  period, but it is not a current owner or conflict: do not copy or expose its
-  value, compare it with the 1,200 kcal boundary, derive from it, or let it
-  cause any managed Goal mutation. A genuinely missing applicable bundle uses
-  all-null totals-only goals; conflict, incompatible and capacity stay text-only.
-- After explicit interactive target-setting intent, if one consolidated question
-  can collect the genuinely missing inputs, ask it once. Until a responsible
-  calorie estimate and feasible five-target proposal exist, save no active
-  defaults and attach no goal-aware card. This is not a prerequisite for a
-  totals-only summary. Scheduled closeouts never enter this derivation workflow.
+- `ready`: all five targets are set. Derive nothing unless the member asked to change a target Murph proposed earlier.
+- `missing`: one or more targets are unset. `goalContext.targets.<metric>.status` shows which metrics are `resolved` and which are `missing`. Keep every resolved value fixed and derive only the missing ones.
+- A target Murph proposed has a `provenance.targetId` that starts with `murph-default-`. Any other resolved target is the member's own.
+- `conflict`, `incompatible` or `capacity`: the member has targets this workflow cannot combine, such as a range, another unit or two Goals that set the same metric. Write no Goal and attach no card. Say in plain words what you found and ask which target they want to keep.
 
-## Derive a conservative proposal
+A target the member or their clinician set always wins for its metric. Do not replace it, average it with another value or save a default over it.
 
-Keep population guidance separate from Murph's product judgment.
+Before asking the member for inputs, read what Murph already has: goals, body measurements, training, weight trend, activity and the direction `body-composition` set (maintenance, gain or loss). Do not infer sex from a name, pronouns or a gender label, and do not infer usual activity from a few workouts or one day of wearable data. If inputs are still missing, ask for them in one question. Save nothing until you have a responsible calorie estimate and five targets that fit together.
 
-1. **Calories.** Prefer representative measured total energy expenditure, or a
-   member-confirmed usual intake that coincided with a stable multi-week weight
-   trend and usual activity. Otherwise, for adults 19 and older, use the 2023
-   National Academies EER equation only when age, height in centimeters, current
-   weight in kilograms, the physiological sex input supplied for this
-   calculation, and a representative physical-activity category are known:
+## 2. Derive the missing targets
 
-   - Men: inactive `753.07 - 10.83*age + 6.50*height + 14.10*weight`; low active
-     `581.47 - 10.83*age + 8.30*height + 14.94*weight`; active
-     `1004.82 - 10.83*age + 6.52*height + 15.91*weight`; very active
-     `-517.88 - 10.83*age + 15.61*height + 19.11*weight`.
-   - Women: inactive `584.90 - 7.01*age + 5.72*height + 11.71*weight`; low active
-     `575.77 - 7.01*age + 6.60*height + 12.14*weight`; active
-     `710.25 - 7.01*age + 6.54*height + 12.34*weight`; very active
-     `511.83 - 7.01*age + 9.07*height + 12.56*weight`.
+Keep population guidance and Murph's own judgment separate when you explain the result.
 
-   Treat the result as a starting estimate, not a measured requirement. Use it
-   unchanged for maintenance or recomp. For an explicit muscle-gain direction,
-   start conservatively around 5-10% above maintenance; for an explicit fat-loss
-   direction, start around 10-20% below maintenance and do not begin with a
-   deficit larger than about 500 kcal/day. These adjustments are Murph product
-   judgment informed by limited athlete literature, not DRI prescriptions.
-   Round the final target to the nearest 100 kcal and plan to adjust from a
-   multi-week trend, training performance, hunger, and recovery.
-   If the adjusted or rounded target is below 1,200 kcal/day, stop; do not floor
-   it upward, save a Goal, or attach a goal-comparison card.
-2. **Protein preference.** For a generally healthy adult with regular resistance
-   training or a muscle-gain goal, start near 1.6 g/kg/day. Use about 1.4
-   g/kg/day for other regularly exercising adults and 0.8 g/kg/day for a
-   generally healthy non-exercising adult when weight is a responsible
-   reference. Round to the nearest 5 g. This is the preferred derived protein
-   value when more than one macro is missing, not authority to override an
-   explicit metric or an energy-feasibility check.
-3. **One residual-energy algorithm.** Run this only after the calorie target and
-   every explicit protein, carbohydrate, and fat target are proven applicable
-   to the proposal's card date and exact points with comparator `between` and
-   identical endpoints, then prove the calorie target is in `kcal` and each
-   macro target is in `g`. Hold those applicable, compatible explicit targets
-   fixed. Use 4 kcal/g for protein and carbohydrate and 9 kcal/g for fat. Then
-   derive only missing macros:
+**Calories.** Prefer a representative measured total energy expenditure, or a usual intake the member confirms held their weight stable for several weeks at their usual activity. Otherwise, for adults 19 and older, use the 2023 National Academies estimated energy requirement equations. They need age in years, height in cm, weight in kg, the sex the member supplies for this calculation, and a representative activity category.
 
-   - With exactly one macro missing, assign that macro the remaining energy.
-   - With protein plus another macro missing, start from the weight-based protein
-     preference, but clamp it to the feasible value nearest that preference
-     inside the 10-35% protein AMDR that leaves the other missing macro inside
-     its AMDR. If no such value exists, the bundle is infeasible.
-   - With fat and carbohydrate both missing, choose the feasible fat share
-     closest to 30%, or closest to 25% when running or another endurance demand
-     is material; carbohydrate receives the remainder. Fat must remain within
-     20-35% and carbohydrate within 45-65%.
-   - With all three macros missing, apply the protein rule first, then the
-     fat-and-carbohydrate rule.
+- Men, inactive: `753.07 - 10.83*age + 6.50*height + 14.10*weight`
+- Men, low active: `581.47 - 10.83*age + 8.30*height + 14.94*weight`
+- Men, active: `1004.82 - 10.83*age + 6.52*height + 15.91*weight`
+- Men, very active: `-517.88 - 10.83*age + 15.61*height + 19.11*weight`
+- Women, inactive: `584.90 - 7.01*age + 5.72*height + 11.71*weight`
+- Women, low active: `575.77 - 7.01*age + 6.60*height + 12.14*weight`
+- Women, active: `710.25 - 7.01*age + 6.54*height + 12.34*weight`
+- Women, very active: `511.83 - 7.01*age + 9.07*height + 12.56*weight`
 
-   Round each derived missing macro to the nearest 5 g, then recompute the full
-   bundle once. Every explicit value must remain unchanged, each macro must be
-   inside its adult AMDR, and `4*protein + 4*carbohydrate + 9*fat` must be within
-   50 kcal of the calorie target. Do not independently reapply percentage
-   defaults after an explicit value consumes part of the energy budget. If the
-   residual is negative, the feasible interval is empty, rounding breaks an
-   AMDR or the 50 kcal tolerance, or known inputs cannot prove one result, do
-   not write or update the Goal. Explain the conflict and ask which explicit
-   target the member wants to change.
+The result is a starting estimate. Then apply the direction:
 
-   Example: with explicit 2,000 kcal, 150 g protein, and 250 g carbohydrate,
-   fat is the sole missing macro. Residual energy gives about 44 g, which rounds
-   to 45 g; the 2,005 kcal macro total and all three shares pass. With the same
-   calories and protein but explicit 300 g carbohydrate, the residual fat is
-   below its 20% AMDR, so the bundle is infeasible and no Goal write is allowed.
-4. **Fiber.** Start from the adult reference density of 14 g per 1,000 kcal and
-   round to the nearest 5 g. This is population guidance, not a personalized
-   gastrointestinal prescription.
+- Maintenance or recomposition: use it unchanged.
+- Muscle gain: add about 5 to 10%.
+- Fat loss: subtract about 10 to 20%, and never start with a deficit larger than about 500 kcal a day.
 
-## Save once, explain, then activate
+These adjustments are Murph's judgment, informed by limited athlete research. Round the final target to the nearest 100 kcal and tell the member it will be adjusted from the multi-week weight trend, training, hunger and recovery. If the adjusted or rounded target is below 1,200 kcal a day, stop. Do not raise it to 1,200, save a Goal or attach a card with targets.
 
-Enter only for explicit target-setting or an explicit response to an explained
-proposal. Use the existing canonical Goal owner; add no new state surface.
+**Protein.** Use about 1.6 g/kg/day for a healthy adult who does regular resistance training or wants to gain muscle, about 1.4 g/kg/day for other adults who exercise regularly, and 0.8 g/kg/day for a healthy adult who does not exercise, when body weight is a sensible reference. Round to the nearest 5 g. This is the preferred value when protein is one of several missing macros. It never overrides a resolved target or the energy check below.
 
-1. Separately run `vault-cli goal list --limit 200 --format json`, then show only
-   candidate records, to find the managed Goal in any status. If this all-status
-   list is saturated or target authority is ambiguous, do not write or attach a
-   card. Do not use this lookup in place of the complete active-target authority
-   read above.
-2. Reuse at most one Goal with slug `murph-daily-nutrition-starting-targets`.
-   Create it only when absent, with title `Daily nutrition targets`, domain
-   `nutrition`, horizon `ongoing`, and status `paused`. Before that first write,
-   establish one proposal-effective local date. Use the member's explicitly
-   requested effective date when present; otherwise use the selected card
-   `localDate` for a dated card request, including a historical date; otherwise
-   use the engine-supplied current vault-local date for an undated target or
-   card request. Include `window: { startAt: <proposal-effective-localDate> }`
-   in the initial `goal import-json` payload. Do not rely on the Goal owner's
-   write-day default or substitute a wall-clock date. A paused record is the
-   proposal awaiting the member's review; an abandoned or completed record is
-   an opt-out and must not be recreated automatically.
-3. Save only metrics without an explicit owner through
-   `vault-cli goal import-json --input -`. Each point target uses `kind: "metric"`,
-   `evaluation.kind: "selected-value"`, comparator `between`, and identical
-   `value` and `highValue`. Use these stable target ids and metric/unit pairs:
+**Carbohydrate and fat.** Hold the calorie target and every resolved macro fixed. Count 4 kcal per gram for protein and carbohydrate and 9 kcal per gram for fat. The adult acceptable ranges are protein 10 to 35% of energy, fat 20 to 35% and carbohydrate 45 to 65%.
 
+- One macro missing: give it the remaining energy.
+- Protein and one other macro missing: start from the protein value above, then move it to the nearest value inside 10 to 35% that leaves the other missing macro inside its range.
+- Fat and carbohydrate both missing: choose the fat share closest to 30% of energy, or closest to 25% when running or other endurance training is a large part of the member's week. Carbohydrate takes the rest.
+- All three missing: set protein first, then fat and carbohydrate.
+
+Round each derived macro to the nearest 5 g and recompute once. The bundle is valid when every resolved value is unchanged, each macro is inside its range, and `4*protein + 4*carbohydrate + 9*fat` is within 50 kcal of the calorie target. Do not reapply the percentage defaults after a resolved value has used part of the energy. If the remaining energy is negative, no value fits, or rounding breaks a range or the 50 kcal check, write nothing. Explain the clash and ask which of their own targets the member wants to change.
+
+Example: with 2,000 kcal, 150 g protein and 250 g carbohydrate already set, fat is the only missing macro. The remaining energy gives about 44 g, which rounds to 45 g. The macros total 2,005 kcal and all three shares are in range, so the bundle is valid. With 300 g carbohydrate instead, the remaining fat falls below 20% of energy, so no bundle fits and nothing is written.
+
+**Fiber.** Use 14 g per 1,000 kcal, rounded to the nearest 5 g. This is the adult reference figure and not a prescription for a digestive condition.
+
+## 3. Save the proposal as a paused Goal
+
+1. Find Murph's managed Goal in any status. Run `vault-cli goal list --limit 200 --format json`, then `vault-cli goal show <id>` on the candidate. This lookup is separate from the read in step 1, and neither replaces the other. If the list returns 200 Goals, or you cannot tell which Goal owns a metric, write nothing and attach no card.
+2. Reuse the one Goal with slug `murph-daily-nutrition-starting-targets`. A paused Goal is a proposal waiting for the member. An abandoned or completed Goal means the member opted out, so do not recreate it unless they ask.
+3. Create the Goal only when it is absent, with `vault-cli goal import-json --input -`: title `Daily nutrition targets`, domain `nutrition`, horizon `ongoing`, status `paused`, and `window: { startAt: <effective date> }`. The effective date is the date the member asked the targets to start. Without one, use the card's date for a dated card request, and otherwise the engine-supplied current vault-local date. Always set `startAt` yourself.
+4. Save only metrics the member has not set themselves. Each target has `kind: "metric"`, `evaluation.kind: "selected-value"`, comparator `between`, and the same number in `value` and `highValue`. Use these target ids, metrics and units:
    - `murph-default-dietary-calories`: `dietary-calories`, `kcal`
    - `murph-default-protein-grams`: `protein-grams`, `g`
    - `murph-default-carbs-grams`: `carbs-grams`, `g`
    - `murph-default-fat-grams`: `fat-grams`, `g`
    - `murph-default-fiber-grams`: `fiber-grams`, `g`
+5. On every later update, reuse the same Goal id and target ids. `metricTargets` replaces the stored array, so always send the complete array you want the Goal to hold afterward. Leave out a metric only when the member now has their own target for it.
+6. Leave `window` out of later updates so the original start date is kept. Change it only when the member asks for a different effective date, and tell them you did.
+7. Any update that adds or changes a derived value must also set `status: "paused"`, even if the Goal was active. The revised bundle is a proposal again until the member accepts it. An update that only removes a metric the member now owns can leave the Goal active. A status-only update can omit `metricTargets`.
+8. After every write, run `vault-cli goal show <goal-id>` and check the complete target set, the status and the unchanged window before you tell the member anything.
 
-   Reuse the same Goal id and stable target ids on every update. Supplying
-   `metricTargets` replaces that Goal's stored array; every edit or overlap
-   removal must therefore send the complete intended post-update array for the
-   managed Goal. Preserve every unchanged target and stable target id, and omit
-   only a metric deliberately removed because an explicit owner now exists.
-   Never send only the changed or removed target. Read the Goal back and verify
-   the complete retained set and window; never create a duplicate or rewrite an
-   unchanged proposal. Preserve the existing Goal window on every later value,
-   overlap-removal, status, or card-request turn; omit `window` from those
-   patches and never silently rebase it to another requested card date. Change
-   the window only when the member explicitly changes the proposal's effective
-   date, then explain that revision and verify the complete record. Any write
-   that adds or changes a derived managed value must include `status: "paused"`
-   atomically, even when the same Goal was active; this keeps the revised bundle
-   a proposal until the member accepts it. Removing an overlapping metric
-   without adding or changing a derived value may leave the managed Goal active
-   because the explicit owner supplies that metric. A status-only update may
-   omit `metricTargets`.
-4. A turn that creates or changes the paused proposal must be ordinary text,
-   never a card. Briefly name all five effective values, which facts and labeled
-   assumptions materially drove them, and why calories, protein, carbohydrate,
-   fat, and fiber landed there. State the proposal-effective date, especially
-   when it is historical or future. Call the values provisional and invite
-   correction or acceptance. This explanation must happen before the first
-   goal-aware card.
-5. When the member accepts the proposal, reapply the card tool's known-context
-   numeric-suitability rule. If it suppresses numeric guidance, leave the
-   proposal paused and unchanged, surface no target values, use ordinary
-   non-numeric text, and attach no card. Otherwise re-read target authority. If
-   a metric has gained an explicit
-   owner, remove it from the managed proposal by sending the complete intended
-   post-update array and read the Goal back. Then run
-   `vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active`
-   and read that same Goal back. When the member changes a proposed value, or a
-   missing metric needs a newly derived replacement after an explicit owner
-   disappears, send the complete intended post-update `metricTargets` array
-   with `status: "paused"` for the same Goal through `goal import-json`,
-   explain the revision briefly, and wait for acceptance. If the member
-   declines, update the same Goal to `abandoned`. Do not silently recalculate
-   accepted values later. If an explicit target appears after activation, send
-   the managed Goal's complete retained array without that overlapping metric;
-   never edit the explicit Goal.
-6. The proposal turn never attaches a card. If explicit target-setting included
-   a card request, its next unambiguous acceptance may be the first later eligible
-   response: after the known-context suitability rule in step 5 passes,
-   activate and read back the Goal, re-read same-date canonical meal totals,
-   and attach exactly one card
-   in that acceptance response when the pending
-   request is still unambiguous and the card alone completes it. A
-   target-setting-only request, correction, decline, ambiguous acceptance, or
-   compound request remains ordinary text with no card. Otherwise, a later
-   eligible response may attach a goal-aware card only when the target-authority
-   read above resolves one complete, unambiguous card-authorizing bundle. Consume
-   that resolved bundle directly; do not restate accepted metric keys or require
-   a second `dietary-calories` owner after calorie resolution. An ordinary
-   interactive card request does not repeat a paused proposal: use totals-only
-   when the active bundle is missing, without changing any Goal.
+## 4. Explain it in text
 
-## Evidence register
+A turn that creates or changes the proposal replies in ordinary text and attaches no card. Name all five values, the facts and assumptions that drove them, and briefly why each landed where it did. State the effective date, especially when it is in the past or the future. Call the values provisional and invite the member to correct or accept them.
 
-- [National Academies, 2023 adult EER equations and individual uncertainty](https://www.ncbi.nlm.nih.gov/books/NBK591034/)
-- [National Academies adult AMDR and DRI reference tables](https://www.ncbi.nlm.nih.gov/books/NBK208874/)
-- [ISSN position stand: protein and exercise](https://link.springer.com/article/10.1186/s12970-017-0177-8)
-- [National Academies fiber reference method](https://www.ncbi.nlm.nih.gov/books/NBK208887/)
-- [National Academies energy-risk context and the adult underweight boundary](https://www.ncbi.nlm.nih.gov/books/NBK591042/)
-- [NIH/NHLBI low-calorie diet guidance and nutrient-adequacy limits](https://www.ncbi.nlm.nih.gov/books/NBK278991/)
-- [Critical review of athlete weight-gain guidance and its evidence limits](https://pubmed.ncbi.nlm.nih.gov/35233712/)
-- [Off-season bodybuilding review: surplus and rate-of-gain context](https://pubmed.ncbi.nlm.nih.gov/31247944/)
-- [Meta-analysis: energy deficiency and resistance-training lean-mass gains](https://pubmed.ncbi.nlm.nih.gov/34623696/)
+## 5. Accept, change or decline
+
+- Accept: check suitability again. If numeric guidance is now unsuitable, leave the proposal paused and reply without numbers. Otherwise repeat the read in step 1. If the member has since set their own target for a metric, remove that metric from the managed Goal by sending the complete remaining array, and read the Goal back. Then run `vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active` and read the Goal back.
+- Change: when the member changes a value, or a metric needs a new derived value because the member's own target went away, send the complete array with `status: "paused"` through `goal import-json`, explain the revision briefly and wait for acceptance.
+- Decline: update the same Goal to `abandoned`.
+
+Do not recalculate accepted values later without being asked. If the member sets their own target for a metric after activation, remove that metric from the managed Goal by sending the complete remaining array. Never edit the member's own Goal.
+
+## 6. The first card with targets
+
+When the member's request to set targets also asked for a card, the reply to a clear acceptance may attach exactly one card. Do this only after suitability passes, the Goal is active and read back, and you have re-read the same-date totals, and only when the card alone completes the request. A request that was only about targets, a correction, a decline, an unclear acceptance or a request with several parts gets ordinary text.
+
+On later turns, attach a card with targets only when the read in step 1 returns `ready`, and use the resolved values as returned. An ordinary card request never repeats a paused proposal. When targets are missing it shows totals only and changes no Goal.

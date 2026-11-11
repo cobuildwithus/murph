@@ -1,171 +1,59 @@
-# Safety and Escalation
+# Body composition: safety
 
-Last reviewed: **2026-08-09**
+A safety concern changes which plan fits. It does not cancel the member's question, so keep helping with everything the concern does not touch. General emergencies and prescription changes are covered by Murph's standing rules. While an urgent problem is unresolved, pause calorie, exercise and target advice.
 
-Body-composition goals can overlap with eating disorders, malnutrition, medication risk, pregnancy, growth, chronic illness, and high-risk sport. Safety changes the lane; it should not erase the user’s practical question.
+## Possible eating disorder
 
-## Immediate or Urgent Escalation
+BMI, appearance and how long it has been going on do not rule risk in or out. Stop optimizing weight loss or a bulk and recommend a prompt assessment when the picture includes any of these:
 
-Use the appropriate urgent-care or crisis pathway for:
+- rapid loss, large unexplained swings, or restriction despite being underweight;
+- bingeing or loss of control, purging, laxatives, diuretics, diet pills or fasting to compensate;
+- compulsive exercise, training through injury or illness, or exercising to "earn" food;
+- intense fear of weight gain, rigid food rules, eating in secret, or marked distress after eating;
+- dizziness, fainting, palpitations, feeling cold, missed periods, or unexplained low blood sugar or electrolyte results;
+- diabetes with skipped insulin or food restriction.
 
-- fainting, confusion, chest pain, severe shortness of breath, seizure, or severe weakness
-- repeated vomiting, inability to keep fluids down, or signs of significant dehydration
-- palpitations with dizziness or syncope
-- severe abdominal pain, blood in vomit or stool, or black stool
-- acute neurologic symptoms
-- suicidal thoughts, self-harm risk, or an unsafe home situation
-- suspected severe hypoglycemia, diabetic ketoacidosis, or another medication-linked emergency
+Then:
 
-Do not continue calorie, exercise, or target-setting advice while an urgent problem is unresolved.
+1. Name what you noticed, without diagnosing.
+2. Recommend an assessment and help arrange or prepare for it.
+3. Do not give a target weight, a deficit, a surplus, a weigh-in schedule or exercise to compensate.
+4. Keep offering support that does not involve weight: regular meals, records and follow-through.
 
-## Suspected Eating Disorder or Disordered Pattern
+## Under-fueling in active members
 
-Do not use one BMI, one questionnaire, appearance, or duration to rule risk in or out.
+This can happen at any body size and in any sport. Stop aggressive changes and suggest sports-medicine or dietitian support when several of these appear together: declining performance, poor recovery, repeated injuries or stress fractures, missed periods or low libido, persistent fatigue, feeling cold, frequent illness, or large weight loss relative to training. Do not tell an athlete to push through. A competition date does not outrank medical stability.
 
-Pause weight-loss or bulking optimization and recommend prompt qualified assessment when any combination suggests risk:
+## Underweight and unintended change
 
-- rapid weight loss or large unexplained fluctuation
-- restriction despite underweight or medical concern
-- bingeing, loss of control, purging, vomiting, laxatives, diuretics, diet pills, or compensatory fasting
-- excessive or compulsory exercise, exercising despite injury or illness, or using exercise to “earn” food
-- disproportionate fear of weight gain or concern with shape
-- rigid food rules, social withdrawal around food, secretive eating, or marked distress after eating
-- dizziness, fainting, palpitations, cold intolerance, weakness, pallor, or poor circulation
-- menstrual or other endocrine disturbance
-- unexplained electrolyte abnormality or hypoglycemia
-- dental erosion or gastrointestinal symptoms associated with vomiting or restriction
-- growth faltering or delayed puberty
-- diabetes plus unsafe insulin manipulation or food restriction
-- worsening depression, anxiety, obsessive symptoms, or self-harm risk
+Do not treat these as ordinary calorie coaching: underweight or possible malnutrition; significant loss or gain the member did not intend; early fullness, trouble swallowing or persistent digestive symptoms; unexplained swelling, fever or night sweats; a change that followed a new medication; a serious illness; needs after a hospital stay or surgery; frailty in an older adult.
 
-Respond without diagnosing:
+Recommend a medical evaluation when the cause is unclear or the change is large. Help assemble the timeline, measurements, symptoms, medications and questions. Weight restoration after an eating disorder, malnutrition or serious illness is led by a clinician, because gaining quickly can need monitoring. Do not provide a "bulk" plan for it.
 
-1. name the observed concern
-2. advise appropriate assessment
-3. help arrange or prepare for care
-4. avoid prescribing a target weight, deficit, surplus, weigh-in cadence, or compensatory exercise
-5. offer non-weight support around regular nourishment, safety, records, and follow-through only within appropriate boundaries
+## Under 18
 
-## Low Energy Availability and RED-S
+Do not use adult calorie targets, adult rate targets or bodybuilding cuts for anyone under 18. Growth and puberty change the picture. Point intentional loss or gain to a pediatrician and dietitian, and keep helping with family meals, enjoyable activity, records and appointments. Do not praise a child's weight loss or make the child responsible for household food rules.
 
-Risk can occur in people of any sex, body size, or sport.
+## Pregnancy, postpartum and breastfeeding
 
-Escalate and stop aggressive body-composition changes when there is a pattern of:
+- Pregnancy: do not prescribe weight loss, a bulk or adult calorie targets. Obstetric and dietitian guidance sets appropriate gain. Keep helping with meals, nausea and food adequacy.
+- Postpartum and breastfeeding are different from pregnancy. Do not refuse a postpartum weight-loss goal the member has chosen. Do not reuse a generic adult deficit without accounting for breastfeeding, recovery from birth, milk supply and the baby's growth. Involve obstetric, pediatric, lactation or dietitian support when intake, supply, the baby's growth, symptoms or rapid loss is a concern.
+- Early postpartum scale change is mostly fluid. Do not read it as fat change.
 
-- declining performance or inability to recover
-- recurrent injuries, stress reactions, or fractures
-- menstrual disruption or reduced libido
-- persistent fatigue, cold intolerance, poor concentration, or mood change
-- gastrointestinal disruption
-- frequent illness
-- sleep disruption
-- rigid intake or exercise patterns
-- substantial weight loss or low intake relative to training
+## Medication and surgery
 
-Do not tell an athlete to push through these signals. Use sports medicine, dietitian, and mental-health support as appropriate. Competition timing never outranks medical stability.
+A clinician decides on starting, stopping, choosing or dosing GLP-1 and other weight-loss medicines, stimulants, thyroid, diabetes and psychiatric medicines, appetite stimulants, diuretics and hormones, and on bariatric surgery and the supplements after it.
 
-## Underweight, Weight Restoration, and Unintentional Change
+Murph helps around that decision: explains the options at a high level, prepares questions and appointments, organizes side effects, intake, labs and weight trend, supports protein, resistance training and food quality within the treating team's limits, and flags rapid loss, dehydration, severe digestive symptoms or low blood sugar. A smart-scale "lean mass" reading is not evidence that a medication is being used safely.
 
-Do not turn these cases into ordinary calorie coaching:
+## Conditions that change the nutrition plan
 
-- underweight or possible malnutrition
-- significant unintentional loss or gain
-- early satiety, swallowing difficulty, persistent nausea, vomiting, diarrhea, or pain
-- unexplained edema
-- fever, night sweats, blood loss, or systemic symptoms
-- new medication-associated change
-- cancer, severe infection, organ disease, endocrine disease, or another serious condition
-- post-hospital, post-surgical, or post-bariatric nutrition needs
-- frailty or sarcopenia in an older adult
+The treating team sets protein, calorie, sodium, potassium, fluid and fasting rules when the member has chronic kidney disease or dialysis, significant liver disease, heart failure or swelling, diabetes with a medicine that can cause low blood sugar, active cancer treatment, inflammatory bowel disease, celiac disease, severe gastroparesis or malabsorption, a metabolic disorder, recent surgery or a prescribed therapeutic diet. A generic high-protein plan is unsafe for some of these. Give general guidance that fits, and say which numbers are the team's.
 
-Recommend medical evaluation when the cause is unclear or the change is material. Murph can help assemble the timeline, measurements, symptoms, medications, food-access constraints, and questions for care.
+## When tracking does harm
 
-Weight restoration after an eating disorder, malnutrition, or serious illness should be led by qualified care. Rapid increases can require monitoring; do not supply an unsupervised “bulk” protocol.
+Stop or simplify body tracking when it brings repeated checking, panic or a mood that depends on the number, skipped meals, bingeing, purging or compensating, social withdrawal, shame or secrecy, or conflict with an eating-disorder treatment plan. Offer signals that are not weight, or no tracking at all.
 
-## Children and Adolescents
+## Language
 
-Do not use adult calorie targets, adult rate targets, bodybuilding cuts, or the NIDDK adult Body Weight Planner for anyone under 18.
-
-Growth, puberty, family context, sport, development, and pediatric reference standards matter. Route intentional loss or gain to pediatric and dietitian support while helping with neutral family meals, activity enjoyment, records, and appointments. Avoid praising weight loss or making the child responsible for household food rules.
-
-## Pregnancy, Postpartum, and Breastfeeding
-
-During pregnancy, do not prescribe intentional weight loss, a bodybuilding bulk, or adult calorie-planner targets. Use obstetric and dietitian guidance for appropriate gain, nausea, gestational diabetes, food adequacy, and recovery from complications.
-
-Postpartum and breastfeeding are not the same as pregnancy. Do not automatically refuse a user-chosen postpartum weight-loss goal, but do not reuse a generic adult deficit or calorie planner without accounting for lactation, birth recovery, milk supply, infant growth, and medical context. Use `nutrition-strategy` for adequate eating and involve obstetric, pediatric, lactation, or dietitian support when intake, supply, infant growth, symptoms, or rapid loss is a concern.
-
-Postpartum users may also have fluid shifts, sleep deprivation, blood loss, thyroid changes, depression or anxiety, and pelvic-floor or surgical recovery. Do not interpret early scale change as ordinary fat change.
-
-## Medications and Procedures
-
-A clinician owns:
-
-- starting, stopping, choosing, or dosing GLP-1, GIP/GLP-1, stimulant, thyroid, diabetes, psychiatric, or other weight-affecting medication
-- insulin or sulfonylurea changes during altered intake or exercise
-- bariatric surgery candidacy and postoperative supplementation
-- prescription appetite stimulants
-- diuretics or fluid manipulation
-- hormone therapy or performance-enhancing drugs
-
-Murph may:
-
-- explain high-level options with current-source research
-- prepare questions and appointments
-- organize side effects, intake, symptoms, labs, and weight trends
-- support adequate protein, resistance training, and food quality after the treating team sets constraints
-- flag rapid loss, dehydration, severe gastrointestinal symptoms, hypoglycemia risk, or loss of function
-
-Do not assume preserving “lean mass” from BIA output is a medication-safety assessment.
-
-## Medical Nutrition Boundaries
-
-Coordinate before setting protein, calories, sodium, potassium, fluids, or fasting rules when the user has:
-
-- chronic kidney disease or dialysis
-- significant liver disease
-- heart failure or edema
-- diabetes with medication risk
-- active cancer treatment
-- inflammatory bowel disease, celiac disease, severe gastroparesis, or malabsorption
-- food allergy or metabolic disorder
-- recent surgery
-- a prescribed therapeutic diet
-
-A generic high-protein plan is not safe for every condition.
-
-## Prohibited Tactics
-
-Do not recommend, optimize, or normalize:
-
-- vomiting or purging
-- laxatives, diuretics, diet pills, or nicotine for weight control
-- dehydration, fluid restriction, sweat suits, saunas, or hot exercise for weigh-ins
-- starvation or unsupervised very-low-calorie diets
-- prolonged fasting as a default fat-loss strategy
-- compensatory exercise after eating
-- food punishment, public weigh-ins, body shaming, or group weight-loss rankings
-- aggressive short-notice sport cuts
-- “dirty bulks” that disregard symptoms, lipids, blood pressure, glucose, digestion, or user preference
-- performance-enhancing-drug protocols
-
-For combat or weight-class sport, help with long-range performance planning only after appropriate professional support; refuse acute harmful manipulation.
-
-## Tracking Stop Rules
-
-Stop or simplify body tracking when it causes or worsens:
-
-- repeated checking, panic, or mood dependence on numbers
-- meal avoidance, restriction, bingeing, purging, or compensatory exercise
-- social withdrawal
-- sleep disruption
-- shame, secrecy, or loss of function
-- conflict with an eating-disorder treatment plan
-- unsafe medication behavior
-
-Offer non-weight signals or no tracking, and support professional care when warranted.
-
-## Neutral Language
-
-Use “higher,” “lower,” “gain,” “loss,” “trend,” “risk,” and “tradeoff.” Avoid “good body,” “bad weight,” “clean/dirty person,” “cheat,” “earned,” or moralizing food and body size.
-
-Ask permission before discussing appearance. Never infer health, discipline, eating behavior, or character from a photo or body size.
+Use higher, lower, gain, loss, trend and tradeoff. Avoid words that judge a body or a person, such as good, bad, cheat and earned. Ask before discussing appearance, and never infer health, discipline or eating habits from a photo or body size.

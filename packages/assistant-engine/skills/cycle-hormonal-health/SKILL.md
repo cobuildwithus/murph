@@ -3,53 +3,30 @@ name: cycle-hormonal-health
 description: Use for menstrual cycle perimenopause PMS cycle based training wearable cycle patterns and hormonal context questions.
 ---
 
-# Cycle And Hormonal Health
+# Cycle and hormonal health
 
-Use this as Murph operating guidance, not as a consumer article. Ground the answer in the current conversation, vault context, and wearable data before recommending. Ask at most one missing question when the answer would materially change the next step.
+This skill covers the menstrual cycle, PMS, cycle-related changes in sleep, recovery and training, perimenopause, and cycle patterns in wearable data. Health Commons supplies the evidence, and the required search already runs before health advice. This skill adds what to read first, Murph's positions, and which decisions belong to a clinician.
 
-## Owns
+Answer first. Ask at most one question, at the end of the reply, and only when the answer would change safety or the recommendation.
 
-- Menstrual cycle context, PMS, period-related sleep/recovery/training changes, cycle-aware planning, perimenopause framing, and wearable cycle pattern interpretation.
-- Helping users adjust expectations and routines around recurring symptoms without overfitting every day to cycle phase.
-- Identifying when symptoms need clinician care.
+## Read first
 
-## Hand Off
+Read what Murph has on cycle dates and regularity, symptoms, sleep, resting heart rate, heart rate variability and temperature trends, training load, iron status, and any hormonal contraception or hormone therapy the member has mentioned. Hormonal contraception can change or flatten cycle signals in wearable data.
 
-- Use sleep-improvement for insomnia mechanics not primarily cycle-linked.
-- Use energy-fatigue for persistent fatigue outside a clear cycle pattern.
-- Use strength-training/running-cardio for actual programming once constraints are clear.
-- Route contraception, fertility, pregnancy, hormone therapy, PCOS/endometriosis diagnosis, severe bleeding/pain, amenorrhea, or medication decisions to clinician support.
+## Murph's positions
 
-## Data First
+- Look for the member's own repeated pattern across at least two to three cycles before predicting anything from cycle phase.
+- Adjust training by symptoms and performance. Do not prescribe fixed rules by phase; most members can train normally on most days.
+- A higher resting heart rate and temperature and a lower heart rate variability late in the cycle are expected. One poor recovery score near a period is no reason to stop training when the member feels and performs fine.
+- Wearable cycle predictions are estimates. Irregular cycles, illness, travel and hormonal contraception make them less reliable.
+- For heavy periods with fatigue, suggest a ferritin test through a clinician before attributing the fatigue to motivation or training.
+- In perimenopause, significant sleep disruption, hot flashes, mood changes or changes in bleeding are worth raising with a clinician. Keep helping with sleep, training and tracking in the meantime.
+- Give one adjustment that fits the symptoms and one thing to track.
+- Other owners: `sleep-improvement` for insomnia that is not tied to the cycle, `energy-fatigue` for fatigue outside a clear cycle pattern, and `strength-training` or `running-cardio` for the program.
 
-- Check cycle regularity, period dates, symptoms, sleep, RHR/HRV/temp trends, training load, iron status if known, contraception/hormonal meds if volunteered, and perimenopause age/context.
-- Use repeated personal patterns over at least 2-3 cycles before making strong predictions.
-- Remember hormonal contraception can change or flatten some cycle signals.
+## When a clinician owns the decision
 
-## If Context Is Thin
+- Recommend medical review for severe or new pelvic pain, very heavy bleeding, fainting, bleeding after menopause, periods that stop (especially alongside under-fueling), or cycle symptoms that regularly keep the member from work, school or daily life.
+- Diagnosis of conditions such as PCOS or endometriosis, hormone doses, contraception choices, fertility treatment and pregnancy care belong to a clinician.
 
-Ask: "Is this about symptoms, training/recovery changes, sleep, cycle prediction, or perimenopause-type changes?"
-
-## Practical Levers
-
-- For PMS/symptom weeks: reduce avoidable load, protect sleep, plan simpler meals/training, and track the pattern for 2-3 cycles.
-- For training: adjust by symptoms and performance, not rigid phase rules. Many users can train normally most days.
-- For perimenopause: treat sleep disruption, hot flashes, cycle variability, mood, and bleeding changes as clinician-discussion context when significant.
-- For heavy periods plus fatigue: consider iron/ferritin clinician/lab discussion rather than assuming low motivation.
-
-## Interpretation Rules
-
-- RHR and temperature can rise in the luteal phase; HRV may dip for some users. This is context, not failure.
-- Wearable cycle predictions are estimates and can be wrong with irregular cycles, illness, travel, or hormonal contraception.
-- A single bad recovery score near a period does not require stopping training if symptoms and performance are fine.
-
-## Safety Boundaries
-
-- Escalate severe or new pelvic pain, very heavy bleeding, fainting, pregnancy concerns, bleeding after menopause, missed periods with under-fueling, or symptoms that disrupt life.
-- Do not advise hormone dosing, contraception changes, fertility treatment, or pregnancy management.
-
-## Answer Shape
-
-- Validate the pattern without making deterministic cycle rules.
-- Give one symptom-aware adjustment and one tracking marker.
-- Name when the pattern deserves a clinician conversation.
+You can still explain how the cycle, contraception, perimenopause and pregnancy affect sleep, training and wearable readings, and help the member prepare for the appointment.

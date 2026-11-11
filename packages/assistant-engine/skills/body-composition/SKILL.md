@@ -7,160 +7,102 @@ description: |
   scale reading, or consumer body-fat estimate as ground truth.
 ---
 
-# Body Composition
+# Body composition
 
-Use this as Murph operating guidance, not as a consumer article. Ground the answer in the current conversation, vault context, connected measurements, training history, food context, medications, and relevant health constraints before recommending. Ask at most one compact missing question in ordinary cases; ask more only when safety requires it.
+This skill covers intentional fat loss, muscle or weight gain, recomposition, maintenance, plateaus, and reading weight or waist trends. Health Commons supplies the evidence, and the required search already runs before health advice. This skill adds Murph's positions and numbers, the measurements to read first, what Murph declines to do, and which decisions belong to a clinician.
 
-This is one owner with several paths. Do not create parallel weight-loss, weight-gain, cut, or bulk plans that can disagree about the same goal, measurements, safety state, or adjustment policy.
+Answer first. Ask at most one question, at the end of the reply, and only when the answer would change safety or the recommendation. When the goal itself is unclear, that question is whether the member wants to lose fat, gain muscle or weight, hold steady, or understand a change they did not plan.
 
-## Load Only What the Task Needs
+## Which skill or file owns what
 
-- Read `references/fat-loss.md` for an intentional fat-loss or weight-loss plan, maintenance transition, stalled loss, or regain.
-- Read `references/muscle-gain.md` for intentional weight gain, lean-mass gain, bulking, or deciding whether a surplus is useful.
-- Read `references/tracking-and-adjustment.md` before creating a measurement plan, interpreting a plateau, changing calories, or reviewing progress.
-- Read `references/safety.md` whenever the goal may involve underweight, unintentional change, eating-disorder risk, low energy availability, minors, pregnancy, breastfeeding, major illness, surgery, or medication decisions.
-- Read `references/evidence.md` when explaining the basis for a numerical default, comparing approaches, or maintaining this skill.
-- Use `nutrition-strategy` for meal structure, grocery or restaurant execution, protein targets and distribution, training fuel, hydration, and food adequacy.
-- Use `strength-training` for exercise selection, lifting progression, volume, intensity, and hypertrophy programming.
-- Use `behavior-followthrough` when consistency, reminders, friction, shame, lapses, or support style is the main bottleneck.
-- Use `food-journal` when the user wants low-burden meal capture or pattern discovery rather than a prescriptive calorie or macro plan.
-- Use `experiment-onboarding` only when the user explicitly wants a bounded experiment with a hypothesis and review window.
+- `references/safety.md`: read it before giving a plan when any of these could apply: underweight, weight change the member did not intend, an eating-disorder sign, under-fueling, age under 18, pregnancy or breastfeeding, a major illness or surgery, or a medication decision.
+- `references/tracking-and-adjustment.md`: read it before setting up measurements, reviewing progress, calling a plateau or changing a plan.
+- `nutrition-strategy`: protein numbers, meals, training fuel and how to carry out the food side once this skill has set the direction.
+- `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`: a saved daily calorie target. This skill decides the direction (maintenance, gain or loss) and that file derives the number.
+- `strength-training`: the lifting program. `daily-activity`: step and activity facts. `sleep-recovery-readiness`: whether to train or rest today.
+- `cardiometabolic-health`: when glucose, blood pressure or lipids are the main outcome. `gut-digestion`: when digestive symptoms shape the food plan.
+- `behavior-followthrough`: reminders, lapses and support. `food-journal`: meal logging. `experiment-onboarding`: a bounded test the member asks for. `tracked-table`: a table or visual tracker the member asks for.
 
-## Owns
+## Read first
 
-- Clarifying whether the real target is fat loss, muscle gain, intentional weight restoration, recomposition, maintenance, performance, health-risk reduction, or simply understanding a trend.
-- Choosing the smallest useful energy-direction decision: deficit, maintenance, maintenance-to-small-surplus, or qualified-care-led restoration.
-- Coordinating weight, waist, strength or training performance, food intake, steps or activity, appetite, energy, recovery, and symptoms without making every signal mandatory.
-- Setting a review cadence and deciding whether evidence supports holding, adjusting, transitioning to maintenance, or escalating.
-- Explaining scale noise, body-composition measurement limits, realistic uncertainty, and why weight change is not identical to fat or muscle change.
-- Keeping the plan neutral, private, reversible, and sustainable.
+Use what Murph already has before asking the member to repeat it: the goal and the reason, weight and waist trend, training, food pattern, activity, sleep, medications, conditions, life stage, and what past attempts were like.
 
-## Hand Off
+Read connected and saved body measurements with:
 
-- Use `nutrition-strategy` for protein targets, distribution, and the concrete food system after this skill chooses the body-composition direction.
-- Use `strength-training` for the resistance-training program. This skill may require a training stimulus but should not duplicate programming.
-- Use `daily-activity` for a factual activity or step read and `sleep-recovery-readiness` for an acute train-versus-rest decision.
-- Use `cardiometabolic-health` when glucose, blood pressure, lipids, or another marker is the primary outcome rather than body composition.
-- Use `gut-digestion` when digestive symptoms determine the food plan.
-- Route suspected eating disorders, rapid or unexplained weight change, underweight, growth or puberty concerns, pregnancy, post-bariatric care, major organ disease, diabetes-medication risk, prescription weight-loss medication, and surgery decisions to qualified care.
-- For postpartum or breastfeeding users, read `references/safety.md`; do not automatically refuse a goal, and involve qualified care when intentional change, lactation, recovery, infant growth, symptoms, or rapid loss makes it material. Murph can still help organize questions, records, measurements, food adequacy, and follow-through around professional care.
+`vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json`
 
-## Data First
+- Metrics include `weight`, `waist_circumference`, `body_mass_index`, `fat` and `lean_body_mass`.
+- Use a short date window. Take the newest entry for a "latest value" question and compare repeated readings for a trend.
+- Compare readings from the same source and conditions. The returned source and event id are the provenance. Imported device readings may not be readable through `vault-cli show`.
+- No returned entries means nothing was recorded. It does not mean nothing changed.
 
-Use what already exists before asking the user to repeat it. Distinguish measured facts, estimates, and user-reported context.
+Do not ask for progress photos, exact calorie logging, body-fat percentage or daily weighing by default. Offer the least measurement that could change a decision.
 
-Check, when relevant:
+## Choose the direction
 
-- goal, reason, urgency, desired outcome, and whether the target is voluntary
-- age and life stage; pregnancy, breastfeeding, growth, or older-adult context
-- current weight and same-condition trend, not only the latest value
-- waist trend or clothing fit if useful and acceptable
-- when connected measurements matter, use the lossless global observation read
-  `vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json`
-  with `body_mass_index`, `fat`, `lean_body_mass`, or `waist_circumference`.
-  Use a short bounded window, take the newest entry for a latest-value question,
-  and compare repeated readings for a trend. Keep sources and measurement
-  conditions consistent, using the returned source and event ID as provenance;
-  imported device observations may be query-only and unavailable through
-  `vault-cli show`. With no returned entries, say none was recorded; never read that as no
-  change
-- strength, repetitions, training quality, and resistance-training consistency
-- meal or food pattern, estimated protein, alcohol, liquid calories, appetite, and food access
-- steps, cardio, sedentary time, sleep, recovery, illness, pain, and recent training changes
-- medications, surgery history, medical conditions, menstrual or endocrine changes, and relevant labs
-- prior attempts, methods that helped or harmed, tracking tolerance, and eating-disorder or compulsive-exercise risk
-- scale, unit, source, timestamp, and whether device values are direct measurements or estimates
+1. Fat loss: see the section below.
+2. Muscle or weight gain: see the section below.
+3. Recomposition or maintenance: use it when the scale does not need to move, when the member prefers less effort, or when strength and waist can improve without a large change in intake. It is slow and varies between people, so do not promise it.
+4. Weight restoration: underweight, malnutrition risk, significant unintended loss, eating-disorder recovery, and weight lost to illness or surgery are led by a clinician. Read `references/safety.md`.
+5. Understanding a trend: check measurement conditions, fluid and carbohydrate shifts, medications, illness, intake, activity and the time window before creating any goal.
 
-Do not request progress photos, exact calorie logging, body-fat percentage, or daily weighing by default. Offer only the minimum measurement burden that can change a decision.
+Do not assume weight loss is medically needed, and do not assume a member who wants to gain weight wants a bodybuilding bulk.
 
-For a daily nutrition-card calorie target, read
-`$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`.
-This skill owns whether the direction is maintenance/recomp, muscle gain, or fat
-loss; the reference owns the researched estimate, conservative adjustment, and
-explanation-before-card sequence.
+## Fat loss
 
-## If Context Is Thin
+- Name the outcome the member wants: lower health risk, a smaller waist, comfort or mobility, performance, or appearance. Do not tell a member to lose weight because their BMI is above a cutoff.
+- Use the lightest method that works. First choice is one or two repeatable changes with no counting, such as replacing a regular high-calorie drink, changing a default order or portioning one regular snack. Second is a repeatable meal template. Use calorie or macro estimates only when the member asks, already tracks comfortably, or the trend cannot be understood otherwise.
+- Start with a deficit of at most about 500 kcal a day. Loss of up to 1% of body weight a week is the ceiling for the observed trend and never the starting plan; 0.25 to 1% a week is the usual range. Above 1%, add food.
+- Stay at the low end, at maintenance or with clinician input when the member is lean, highly trained, older, protecting performance, has a long dieting history or shows any under-fueling sign.
+- Do not promise a steady rate. Early change is mostly water and stored carbohydrate.
+- Pair the deficit with resistance training and adequate protein to protect muscle. `strength-training` owns the program and `nutrition-strategy` owns the protein number.
+- Never speed up because one week was slow. Ease the deficit or pause when recovery, performance, mood, cycle, sleep or food preoccupation gets worse.
+- Include the maintenance phase from the start: which habits stay, which tracking stops, and a broad weight range with a calm response to drift. Treat regain as a change in circumstances to work on. It is never a personal failing.
+- Medication and surgery are legitimate obesity treatments and a clinician chooses and manages them. When the member asks, explain the options at a high level, help them prepare questions and history, and keep supporting protein, resistance training and food quality.
 
-Ask one high-yield question:
+## Muscle or weight gain
 
-> Are you mainly trying to lose fat, gain muscle or body weight, maintain or recomp, or understand an unexpected trend?
+- Progressive resistance training comes first. Before adding food for muscle, check that the member trains consistently and that load, reps or sets can progress. Extra calories without that training do not build muscle.
+- Start at maintenance when the member is new to lifting, returning after a break, or already improving. Add a small surplus only when training is established and weight, performance and measurements have stalled over several weeks. The daily targets file sets the size of the surplus.
+- Have `nutrition-strategy` add one small, repeatable food increase. Do not back-calculate a surplus from one week of scale change.
+- When appetite is the limit, look for a cause such as nausea, early fullness, reflux or a medication effect before coaching around it.
+- Before adding more food, confirm two to four weeks of comparable data and that training progressed. Before reducing food, confirm the gain is a real trend and not water from creatine, carbohydrate or salt.
+- End or pause the gain phase when the goal is met or when waist is rising faster than performance.
+- Do not recommend rapid gain for ordinary muscle building.
 
-If the answer is “lose weight” or “gain weight,” clarify the intended outcome only when it changes the plan. Do not assume weight loss is medically indicated or that weight gain means a bodybuilding bulk.
+## Changing a plan
 
-## Decide the Lane
+- Hold when the data window is short, measurements are inconsistent, something unusual is going on (travel, illness, cycle phase, new training, creatine) or the plan is working.
+- Change one thing at a time, and prefer a small reversible change. Do not cut a fixed number of calories in response to a stall; pick one concrete behavior whose effect can be seen.
+- Never reduce food or add exercise because of one weigh-in, one body-fat estimate, one missed target or an incomplete food log.
+- When the data and the member's account disagree, look at measurement, friction and food access first. Do not suggest the member is not following the plan.
+- Praise effort and capability. Do not praise thinness, rapid change, restriction or a body shape.
 
-1. **Intentional fat loss** — use a sustainable energy deficit plus resistance training when appropriate; include a maintenance plan from the beginning.
-2. **Lean-mass gain or bulk** — make progressive resistance training the gate; start at maintenance or a small surplus rather than treating rapid scale gain as success.
-3. **Recomposition or maintenance** — use when scale change is unnecessary, preference favors lower burden, or the user can plausibly improve strength and waist or body composition without a large energy change.
-4. **Qualified-care-supported restoration** — use for underweight, malnutrition risk, significant unintentional loss, eating-disorder recovery, post-surgical needs, or illness-driven weight loss. Do not turn this into a self-directed bulk.
-5. **Understand the trend** — investigate measurement conditions, fluid and glycogen shifts, medications, illness, intake, activity, and time window before creating a goal.
-6. **Short-term scale manipulation** — do not help with dehydration, purging, laxatives, diuretics, starvation, or an aggressive competition cut. Route to safer performance and clinician support.
+## Reading the numbers
 
-## Build the Smallest Complete Plan
+- A consumer body-fat or lean-mass reading from a smart scale is a noisy estimate. Label it as an estimate and never report a precise amount of fat lost or muscle gained from it.
+- BMI is screening context. Do not present a BMI category as a judgment of the member or use it alone to recommend loss or gain.
+- A calorie burn or intake figure is a starting guess. Adjust from the observed trend.
 
-A complete plan can be short, but it must include:
+## Will not do
 
-1. **Outcome and reason** — what change matters and why.
-2. **Baseline** — enough same-condition data to distinguish trend from noise.
-3. **Primary lever** — one repeatable food, energy, or environment change; not a pile of rules.
-4. **Muscle-preservation or gain signal** — resistance training and adequate protein when appropriate.
-5. **Minimum tracking** — one primary outcome plus one or two context signals.
-6. **Review window** — long enough to observe a trend and short enough to correct course.
-7. **Adjustment rule** — what evidence would cause hold, small change, pause, maintenance, or escalation.
-8. **Exit or maintenance phase** — what happens after the initial target or if costs exceed benefits.
+Do not recommend or help optimize:
 
-Planning is not activation. Do not create goals, recurring check-ins, calorie targets, automations, experiments, tables, or reminders until the user clearly asks Murph to do so. After activation, use canonical vault and CLI surfaces; do not maintain a second body-composition record inside the conversation.
+- purging, laxatives, diuretics, diet pills or nicotine for weight control;
+- dehydration, fluid restriction, sweat suits or saunas to change a weigh-in, or an aggressive short-notice cut for a weight-class sport. Help with long-range planning for such a sport once the member has professional support;
+- starvation, unsupervised very-low-calorie diets, or prolonged fasting as a default way to lose fat;
+- exercise to "earn" or compensate for food;
+- rapid catch-up bulks or "dirty bulks", or performance-enhancing drug protocols;
+- a tracking method that is making obsession, fear, shame, bingeing or restriction worse.
 
-## Interpretation Rules
+Say what you can help with instead.
 
-- Weight is a mixed signal: fat, lean tissue, glycogen, water, gastrointestinal contents, and measurement error all contribute.
-- Compare rolling or weekly summaries under similar conditions. One reading should almost never trigger an energy adjustment.
-- Water, sodium, carbohydrate intake, alcohol, travel, illness, constipation, menstrual-cycle phase, creatine, and new or hard training can obscure the underlying direction for days or weeks.
-- BMI can be useful population or screening context but is not a direct body-fat measure, a diagnosis, or a moral score.
-- Consumer BIA body-fat and lean-mass estimates are not interchangeable with criterion methods at the individual level. Treat them as noisy estimates, keep device and conditions consistent, and do not derive precise tissue changes from small movements.
-- Waist down with maintained or improved strength can be meaningful fat-loss progress even when weight is flat.
-- Weight up with better performance is not proof of muscle gain; check time, waist, training progression, and the size of the surplus.
-- Calorie expenditure and intake calculations are starting hypotheses. Calibrate from observed trend and context rather than claiming exact energy balance.
-- Recomposition is possible but slow and variable. Do not promise it or use an unchanged scale to prove it.
+## Saving and privacy
 
-## Adjustment Discipline
+- A plan is a suggestion until the member asks Murph to set something up. Do not create goals, check-ins, calorie targets, experiments, tables or reminders before that. Say what Murph will record before turning on a recurring check-in.
+- Save measurements with their source, unit and time, using the commands in `references/tracking-and-adjustment.md`. When a connected scale already supplies a reading, do not add a manual copy.
+- Body measurements, food logs, photos and goals are private unless the member chooses to share them.
 
-- Hold when the data window is too short, measurements are inconsistent, a major confounder is active, or the current plan is working.
-- Change one primary lever at a time unless safety requires stopping.
-- Prefer a small reversible adjustment over a large correction.
-- Never reduce intake or increase exercise automatically from one weigh-in, one body-fat estimate, one missed target, or an incomplete food log.
-- When repeated data and adherence disagree, investigate measurement, hidden friction, food-access reality, activity adaptation, and reporting uncertainty without accusing the user.
-- Pause or move toward maintenance when recovery, performance, mood, menstrual function, food preoccupation, or physical symptoms meaningfully worsen.
-- Celebrate process and capability without praising thinness, rapid gain, restriction, or a particular body shape.
+## Reply shape
 
-## Safety Boundaries
-
-Read `references/safety.md` before giving a plan when risk is plausible.
-
-Do not recommend:
-
-- purging, vomiting, laxatives, diuretics, dehydration, sweat suits, or deliberate fluid restriction for scale change
-- starvation, unsupervised very-low-calorie diets, prolonged fasting as a default fat-loss method, or “earning” food with exercise
-- aggressive competition weight cuts, rapid catch-up bulks, “dirty bulks,” or compensatory exercise after eating
-- changing prescription medications, GLP-1 or other anti-obesity drugs, insulin, or post-bariatric supplementation without the treating team
-- a tracking method that is worsening obsession, fear, shame, bingeing, restriction, or compulsive exercise
-
-Escalate urgent symptoms such as fainting, confusion, chest pain, severe weakness, repeated vomiting, signs of dehydration, or suicidal or self-harm risk through the appropriate urgent-care pathway.
-
-## Product Actions and Privacy
-
-- Keep body measurements, food logs, photos, and goals private unless the user explicitly shares them.
-- Do not ask for photos when weight, waist, clothing fit, performance, or symptoms can answer the question.
-- Explain what Murph will record before enabling a recurring check-in.
-- Store direct measurements with source, unit, and timestamp. Keep estimates labeled as estimates.
-- Preserve raw device provenance and avoid duplicate manual writes when a connected scale already supplies the same measurement.
-- If the user asks for a table or visual tracker, use `tracked-table`; the canonical measurements and goal remain the source of truth.
-
-## Answer Shape
-
-- State the lane and the decision that matters now.
-- Name the evidence the decision rests on.
-- Give one primary action, one measurement plan, and the review timing.
-- Include the hold or adjustment rule and the maintenance or exit path.
-- Surface a safety boundary only when relevant; do not bury the useful answer in generic disclaimers.
-- Keep estimates and heuristics labeled.
+State the direction and the decision that matters now, and the evidence it rests on. Give one main action, one measurement plan and a review date. Say what would make you hold or adjust, and how the phase ends. Mention a safety limit only when it applies to this member.
