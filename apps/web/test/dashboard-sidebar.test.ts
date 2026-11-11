@@ -177,14 +177,15 @@ beforeEach(() => {
   mocks.setOpenMobile.mockClear();
 });
 
-test("Sidebar exposes Home and Settings without retired destinations", () => {
+test("Sidebar exposes Home, Wearables and Settings without retired destinations", () => {
   mocks.usePathname.mockReturnValue("/biomarkers");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
   assert.match(markup, /href="\/home"[^>]*>\s*<svg/);
   assert.match(markup, /href="\/settings"[^>]*>\s*<svg/);
-  assert.doesNotMatch(markup, /href="\/(?:training|connect)"/);
+  assert.match(markup, /href="\/connect"[^>]*>.*Wearables<\/a>/);
+  assert.doesNotMatch(markup, /href="\/training"/);
   assert.doesNotMatch(markup, /href="\/journal"/);
   assert.doesNotMatch(markup, />Journal<\/a>/);
   assert.doesNotMatch(markup, /href="\/voice"/);
@@ -390,18 +391,25 @@ test("Sidebar surfaces a visible error when sign out fails", async () => {
   assert.equal(container.querySelector('[role="alert"]'), null);
 });
 
-test.each(["/home", "/home/example", "/connect", "/settings", "/settings/billing"])(
+test.each([
+  ["/home", "/home"],
+  ["/home/example", "/home"],
+  ["/connect", "/connect"],
+  ["/connect/example", "/connect"],
+  ["/settings", "/settings"],
+  ["/settings/billing", "/settings"],
+])(
   "Sidebar highlights the direct account destination for %s",
-  (pathname) => {
+  (pathname, href) => {
     mocks.usePathname.mockReturnValue(pathname);
     const markup = renderToStaticMarkup(
       createElement(Sidebar, {
         initialAuth: { authenticated: true, label: null },
       }),
     );
-    const href = pathname.startsWith("/home") ? "/home" : "/settings";
     assert.match(markup, new RegExp(`data-active="true"><a[^>]*href="${href}"`));
-    assert.equal((markup.match(/href="\/connect"/g) ?? []).length, 0);
+    assert.equal((markup.match(/data-active="true"/g) ?? []).length, 1);
+    assert.equal((markup.match(/href="\/connect"/g) ?? []).length, 1);
     assert.equal((markup.match(/href="\/home"/g) ?? []).length, 2);
     assert.equal((markup.match(/href="\/settings"/g) ?? []).length, 1);
     assert.match(markup, /Sign out/);

@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 100,
+  "item": {
+    "id": "wearables-sidebar",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "Wearables in the sidebar",
+    "summary": "Open your wearable connections directly from Wearables in the website sidebar.",
+    "details": "The shortcut sits between Home and Settings and opens the existing page for connecting and managing devices.",
+    "relevanceTags": ["wearables", "navigation"],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Manage wearables",
+      "href": "/connect"
+    }
+  }
+}

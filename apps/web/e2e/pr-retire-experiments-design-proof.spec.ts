@@ -15,7 +15,7 @@ for (const width of [390, 1280]) {
     await expect(study).toBeVisible();
     await expect(study.locator('a[href="/experiments"]')).toHaveCount(0);
     await expect(study.locator('a[href="/home"]')).toHaveCount(1);
-    await expect(study.getByRole("link", { name: "Devices", includeHidden: true })).toHaveAttribute("href", "/connect");
+    await expect(study.getByRole("link", { name: "Wearables", includeHidden: true })).toHaveAttribute("href", "/connect");
     await expect(study.getByRole("link", { name: "Settings", includeHidden: true })).toHaveAttribute("href", "/settings");
     await expect(study.locator('a[href="/environment"]')).toHaveCount(0);
     await page.evaluate(async () => {
