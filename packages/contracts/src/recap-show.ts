@@ -66,9 +66,9 @@ export const recapAssetSchema = z.object({
   recipeId: ref,
   storageKey: z.string().min(1).max(512),
   references: z.array(z.object({
-    kind: z.enum(["profile", "entry", "murph"]),
+    kind: z.enum(["profile", "contact", "entry", "murph"]),
     memberId: ref.optional(), entryId: ref.optional(), key: z.string().min(1).max(512),
-  }).strict()).max(5),
+  }).strict()).max(16),
   hash: z.string().regex(/^[a-f0-9]{64}$/u),
   mediaType: z.enum(["image/jpeg", "audio/mpeg"]),
   byteLength: z.number().int().positive().max(2 * 1024 * 1024),
@@ -173,5 +173,5 @@ export function presentGameRecap(input: {
   const songMedia = media("song");
   if (story.song && songMedia.status === "ready") pages.push({ id: "song", kind: "song", background: "night", blocks: [], media: songMedia, song: { title: story.song.title, lyrics: story.song.lyrics } });
   pages.push({ id: "result", kind: "result", background: "paper", blocks: [] });
-  return { ...legacy, show: { version: 1, generationId: envelope.generationId, treatment: story.treatment ?? "", acceptedAt: envelope.acceptedAt, pages } };
+  return { ...legacy, show: { version: 1, generationId: envelope.generationId, treatment: (story.treatment ?? "").replace(/[\s.,;:]+$/u, ""), acceptedAt: envelope.acceptedAt, pages } };
 }

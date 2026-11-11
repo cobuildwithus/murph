@@ -3,7 +3,7 @@ import * as z from "./zod-runtime.ts";
 const ref = z.string().min(1).max(128);
 export const recapReferenceSchema = z.object({
   id: z.string().regex(/^[a-f0-9]{64}$/u),
-  kind: z.enum(["profile", "entry", "murph"]),
+  kind: z.enum(["profile", "contact", "entry", "murph"]),
   memberId: ref.optional(),
   entryId: ref.optional(),
 }).strict();
@@ -33,6 +33,6 @@ export const recapMaterialSchema = z.object({
   }).strict()).max(1460),
   result: z.array(z.object({ memberId: ref, name: z.string(), score: z.number().int() }).strict()).length(2),
   startedAt: z.isoDateTime({ offset: true }), settledAt: z.isoDateTime({ offset: true }),
-  references: z.array(recapReferenceSchema).max(1463),
+  references: z.array(recapReferenceSchema).max(1465),
 }).strict();
 export type RecapMaterial = z.infer<typeof recapMaterialSchema>;

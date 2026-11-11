@@ -21,14 +21,19 @@ export async function readRecapSourceReferences(material: Material, eventId: str
   const db = getPrisma();
   const memberIds = material.validation.playerNamesByMemberId.map(player => player.memberId);
   const entryIds = material.entries.filter(entry => entry.kind === "photo").map(entry => entry.entryId);
-  const [profiles, entries, character] = await Promise.all([
+  const [profiles, contacts, entries, character] = await Promise.all([
     db.gameProfile.findMany({ where: { memberId: { in: memberIds } }, select: { memberId: true, photoKey: true } }),
+    db.gameContactLabel.findMany({ where: { OR: [
+      { ownerMemberId: memberIds[0], subjectMemberId: memberIds[1] },
+      { ownerMemberId: memberIds[1], subjectMemberId: memberIds[0] },
+    ], photoKey: { not: null } }, select: { subjectMemberId: true, photoKey: true } }),
     db.gameEntry.findMany({ where: { gameId: material.game.id, id: { in: entryIds }, memberId: { in: memberIds },
       withdrawnAt: null, attempt: { gt: 0 }, reports: { none: {} } }, select: { id: true, memberId: true, mediaKeys: true } }),
     readApprovedRecapCharacterSheet(),
   ]);
   const values: Omit<RecapSourceReference, "id">[] = [
     ...profiles.flatMap(profile => profile.photoKey ? [{ kind: "profile" as const, memberId: profile.memberId, key: profile.photoKey }] : []),
+    ...contacts.flatMap(contact => contact.photoKey ? [{ kind: "contact" as const, memberId: contact.subjectMemberId, key: contact.photoKey }] : []),
     ...entries.flatMap(entry => entry.mediaKeys.slice(0, 1).map(key => ({ kind: "entry" as const, memberId: entry.memberId, entryId: entry.id, key }))),
     ...(character ? [{ kind: "murph" as const, key: "murph-character-sheet-v1" }] : []),
   ];
