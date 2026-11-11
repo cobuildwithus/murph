@@ -1,6 +1,6 @@
 # Recap show real-provider recovery
 
-Status: active
+Status: completed
 
 ## Outcome and boundary
 
@@ -34,3 +34,10 @@ Synthetic pair shows use the hosted image and song file paths successfully, pres
 - Native Linux sandbox CI is required on the pushed candidate. Local ARM emulation cannot replace that proof. No production access, regeneration, messages or deployment performed.
 
 Updated: 2026-11-11
+
+## Completion handoff
+
+PR #4833 contains the implementation and local proof. Real image runs passed twice (95 seconds and 103 seconds); the last run generated two high-quality portrait JPEGs from two and one permitted synthetic references. The final preview and accepted JSON remain in the ignored audit directory above. Live song-provider response verification remains unavailable without a local ElevenLabs test credential. No behavior is inferred from unavailable production logs.
+
+Local checks passed: full workspace typecheck, scoped lint (existing warnings), complexity guard, 134 assistant tests, 259 Worker/host-env tests, 31 Web route tests, 94 isolated Postgres game tests, 14 contract tests, and 77 hosted-execution tests (six existing opt-in tests skipped). Native Linux CI runs both successful and failed media flows on the pushed candidate. Final deployment and any real-member regeneration belong to the parent.
+Completed: 2026-11-11
