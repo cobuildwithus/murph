@@ -27120,7 +27120,8 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       const knowledgeCommands = result.actions.flatMap((action) =>
         action.kind === 'command'
         && action.ok
-        && action.command.includes('vault-cli commons knowledge search')
+        // One search counts whether it runs alone or inside a `vault-cli batch`.
+        && /commons\W{1,4}knowledge\W{1,4}search/u.test(action.command)
           ? [action.command]
           : []
       )

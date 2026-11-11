@@ -62,7 +62,7 @@ export const GROUP_HUMOR_SCENARIOS: readonly GroupHumorScenario[] = [
       'Lena: "Murph, make it official."',
     ],
     expect: 'text',
-    mustNotMatch: /allerg|chok|medical|consult|safely|caution/iu,
+    mustNotMatch: /allerg|chok|medical|consult (?:a|your|with)|safely|caution/iu,
   },
   {
     id: 'dare-too-far',

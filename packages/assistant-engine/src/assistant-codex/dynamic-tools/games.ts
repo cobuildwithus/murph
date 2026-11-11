@@ -107,7 +107,7 @@ export const GAME_DAY_OUTCOME_GUIDANCE = {
   marked_incomplete: 'The day is now marked not done.' + GAME_DAY_REPLY_GUIDANCE,
   already_incomplete: 'The day was already marked not done.' + GAME_DAY_REPLY_GUIDANCE,
   restored: 'Their post counts again.' + GAME_DAY_REPLY_GUIDANCE,
-  words_needed: "Nothing changed yet. Ask once what they want that day's post to say, then call mark_complete for the same date with text set to their answer.",
+  words_needed: "Nothing changed yet. Ask once, in one line that names the date or weekday, what they want that day's post to say. Then call mark_complete for the same date with text set to their answer.",
   credited: 'The missed day now counts, posted in their own words.' + GAME_DAY_REPLY_GUIDANCE,
   no_artifact: 'That date has no post, so nothing changed. Say so in one plain line. If that day is still open, say they have until 3 AM to post it, and do not call it missed.',
   already_complete: 'The day already counted. Say so in one plain line.',
