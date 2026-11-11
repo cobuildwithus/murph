@@ -51,9 +51,11 @@ existing recap and silently retires its delivery receipt.
   Ubuntu CI remains the required sandbox proof; do not weaken the sandbox.
 - The single real-provider journey and synthetic PostgreSQL bridge are ready.
   The bridge creates two seven-day synthetic games successfully. The two live
-  journeys are blocked: this task has no approved local image key source or
-  patched native Codex binary; the standard binary lacks `--ignore-user-config`.
-  No paid calls or production actions have run. This is a proof gap, not a pass.
+  journeys are blocked: this task has no approved local image key source.
+  Main's native-runtime simplification removed the earlier patched-binary
+  prerequisite. No paid calls or production actions have run; this is not a pass.
+- Rebased onto `3a31792d92`; retained main's deletion of the Live voice test.
+  Full typecheck, focused egress tests and complete input measurements pass again.
 
 Candidate PR: #4837. Status: active; implementation complete, live/native proof
 pending. No ReviewGPT requested or started.
