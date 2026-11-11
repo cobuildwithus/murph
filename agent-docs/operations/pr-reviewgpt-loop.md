@@ -19,7 +19,14 @@ a causing change, plausible trigger, and serious current harm. Code-path proof
 suffices without a prior incident; practical rare exploits and destructive failures remain in scope.
 Complexity Collapse independently qualifies when a bounded correction removes
 meaningful code, concepts, or owners while preserving required behavior and
-invariants without replacement machinery. Minor refactoring, UX polish,
+invariants without replacement machinery. Inspect the touched flow's surrounding
+owners, callers, state, and recovery paths as a connected subsystem, including
+pre-existing complexity. A finding must name the removable machinery and explain
+why its implementation and verification are proportionate to this change. Label
+pre-existing adjacent opportunities `ADJACENT_EXISTING`; bugs still require a
+causing PR change. Correction rounds stay within the remediation's directly
+affected flow. No repository-wide cleanup or unrelated rewrite is required.
+Minor refactoring, UX polish,
 disclosure gaps, and speculative edge cases are not blocking findings. The
 targeted exploratory presets remain available separately.
 
@@ -558,7 +565,8 @@ the current user explicitly asks for it.
    current PR. Label every finding by its actual origin; a failed correction does
    not relabel the original cause. Verify claimed fixes and reassess old
    findings against the serious-bug and Complexity Collapse bars. Rejected or
-   out-of-scope observations do not remain blockers. Exclude findings equivalent on the base.
+   out-of-scope observations do not remain blockers. Exclude bugs equivalent on
+   the base; adjacent Complexity Collapse follows the bounded scope above.
 
    ReviewGPT findings are adversarial signals, not implementation instructions.
    Before accepting a finding, identify the invariant it protects and any

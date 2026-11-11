@@ -1737,6 +1737,30 @@ function parseHostedExecutionAssistantNotificationDeliveryDispatchMode(
   return mode;
 }
 
+function parseGameRecapResponsePolicy(record: Record<string, unknown>, label: string) {
+      assertExactHostedExecutionKeys(
+        record,
+        ["eventId", "gameId", "kind", "pairFingerprint", "loreAccess", "show"],
+        label,
+      );
+      if (record.show !== undefined && record.show !== true) throw new TypeError(`${label}.show must be true.`);
+      if (record.show && record.loreAccess === "read") throw new TypeError(`${label}.show is pair-only.`);
+      if (record.loreAccess !== undefined && record.loreAccess !== "read") {
+        throw new TypeError(`${label}.loreAccess must be read.`);
+      }
+      return {
+        kind: "require_game_recap" as const,
+        ...(record.loreAccess === "read" ? { loreAccess: "read" as const } : {}),
+        ...(record.show === true ? { show: true as const } : {}),
+        eventId: requireString(record.eventId, `${label}.eventId`),
+        gameId: requireString(record.gameId, `${label}.gameId`),
+        pairFingerprint: requireString(
+          record.pairFingerprint,
+          `${label}.pairFingerprint`,
+        ),
+      };
+}
+
 function parseHostedExecutionAssistantNotificationResponsePolicy(
   value: unknown,
   label: string,
@@ -1763,24 +1787,7 @@ function parseHostedExecutionAssistantNotificationResponsePolicy(
         text: requireString(record.text, `${label}.text`),
       };
     case "require_game_recap":
-      assertExactHostedExecutionKeys(
-        record,
-        ["eventId", "gameId", "kind", "pairFingerprint", "loreAccess"],
-        label,
-      );
-      if (record.loreAccess !== undefined && record.loreAccess !== "read") {
-        throw new TypeError(`${label}.loreAccess must be read.`);
-      }
-      return {
-        kind,
-        ...(record.loreAccess === "read" ? { loreAccess: "read" as const } : {}),
-        eventId: requireString(record.eventId, `${label}.eventId`),
-        gameId: requireString(record.gameId, `${label}.gameId`),
-        pairFingerprint: requireString(
-          record.pairFingerprint,
-          `${label}.pairFingerprint`,
-        ),
-      };
+      return parseGameRecapResponsePolicy(record, label);
     case "game_group_missed_check_in":
       return gameGroupMissedCheckInPolicySchema.parse(record);
     case "game_evening_check_in":

@@ -168,7 +168,7 @@ describe.skipIf(!runPostgresProof)(
       const memberId = `member_message_retention_floor_${suffix}`;
       memberIds.push(memberId);
       const cleanupAt = new Date("2026-07-25T12:00:00.000Z");
-      const expiredAt = new Date("2026-07-10T12:00:00.000Z");
+      const expiredAt = new Date("2026-06-24T12:00:00.000Z");
       const liveAt = new Date("2026-07-24T12:00:00.000Z");
       const firstId = `retention_first_${suffix}`;
       const gapId = `retention_gap_${suffix}`;

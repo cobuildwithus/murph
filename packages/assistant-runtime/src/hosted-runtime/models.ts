@@ -159,6 +159,7 @@ export interface HostedDeviceSyncDirtyProcessedPostCheckpointRecord {
 }
 
 export type HostedSystemMailboxPostCheckpointRecord =
+  | { kind: "game.recap-lore-checkpointed"; gameId: string; eventId: string; generationIds: string[]; resume: boolean; nextWakeAt?: null }
   | {
       kind: "clinical-records.outcome-recorded";
       nextWakeAt?: null;

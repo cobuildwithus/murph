@@ -1,3 +1,4 @@
+import { pairRecapShowCapability } from "./access";
 import "server-only";
 import { recordGameRecapWitnessTx } from "./recap-witness";
 import { groupGameRecapPlayers } from "./recap-cohort";
@@ -701,7 +702,7 @@ async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMembe
     // Instructions carry no entries; publication fixes the witness.
     const material = await readGameRecapMaterial(game.id, game.chatContainerMemberId, players);
     return material
-      ? buildGameRecapInstructions(await readGameRecapChatMessages({ containerMemberId: game.chatContainerMemberId, material }), await noticeRoom(), game.maxPlayers === 10)
+      ? buildGameRecapInstructions(await readGameRecapChatMessages({ containerMemberId: game.chatContainerMemberId, material }), await noticeRoom(), game.maxPlayers === 10, material.validation.show)
       : null;
   }
   if (kind === "rematch") {
@@ -782,7 +783,7 @@ async function enqueueGameLifecycle(input: {
       ? { kind: "require_game_recap", gameId: input.gameId, eventId: input.eventId,
           ...(input.game.maxPlayers === 10
             ? { pairFingerprint: gameGroupLoreFingerprint(input.game.audienceKey!), loreAccess: "read" }
-            : { pairFingerprint: gamePairLoreFingerprint(input.players) }) }
+            : { pairFingerprint: gamePairLoreFingerprint(input.players), ...pairRecapShowCapability(input.game.maxPlayers) }) }
       : input.kind === "missed"
       ? (() => {
           const match = /^game-missed:[^:]+:([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(input.eventId);

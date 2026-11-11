@@ -467,7 +467,9 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       userId: "user-123",
     });
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
-      createBrowserVaultExportSession: vi.fn(),
+    createBrowserVaultExportSession: vi.fn(),
+      putRecapMedia: vi.fn(),
+      readRecapMedia: vi.fn(),
       mealThumbnailDeliveries: vi.fn(),
       createBrowserVaultSession: vi.fn(),
       deleteGameMedia: vi.fn(),
@@ -510,6 +512,8 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
   it("keeps a legacy Worker response pending without deleteAll completion evidence", async () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultExportSession: vi.fn(),
+      putRecapMedia: vi.fn(),
+      readRecapMedia: vi.fn(),
       mealThumbnailDeliveries: vi.fn(),
       createBrowserVaultSession: vi.fn(),
       deleteGameMedia: vi.fn(),
@@ -564,6 +568,8 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
       ));
       vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
         createBrowserVaultExportSession: vi.fn(),
+      putRecapMedia: vi.fn(),
+      readRecapMedia: vi.fn(),
       mealThumbnailDeliveries: vi.fn(),
         createBrowserVaultSession: vi.fn(),
         deleteGameMedia: vi.fn(),

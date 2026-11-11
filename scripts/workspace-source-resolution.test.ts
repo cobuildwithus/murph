@@ -30,6 +30,13 @@ describe("workspace source resolution", () => {
 
   it.each([
     { packageName: "core", entry: "event-read.ts", specifier: "@murphai/core/event-read", symbol: "readEvent" },
+    { packageName: "contracts", entry: "recap-show.ts", specifier: "@murphai/contracts/recap-show", symbol: "gameRecapDraftSchema" },
+    { packageName: "contracts", entry: "recap-admission.ts", specifier: "@murphai/contracts/recap-admission", symbol: "recapProviderRequestSchema" },
+    { packageName: "contracts", entry: "recap-renderer.ts", specifier: "@murphai/contracts/recap-renderer", symbol: "renderRecapPageSvg" },
+    { packageName: "contracts", entry: "recap-material.ts", specifier: "@murphai/contracts/recap-material", symbol: "recapMaterialSchema" },
+    { packageName: "contracts", entry: "recap-validation.ts", specifier: "@murphai/contracts/recap-validation", symbol: "withValidGameSuperlatives" },
+    { packageName: "contracts", entry: "zod-runtime.ts", specifier: "@murphai/contracts/zod-runtime", symbol: "object" },
+    { packageName: "operator-config", entry: "generated-audio.ts", specifier: "@murphai/operator-config/generated-audio", symbol: "inspectGeneratedMp3Audio" },
     { packageName: "device-syncd", entry: "service.ts", specifier: "@murphai/device-syncd/service", symbol: "SqliteDeviceSyncStore" },
     { packageName: "hosted-execution", entry: "usage-diagnostics.ts", specifier: "@murphai/hosted-execution/usage-diagnostics", symbol: "parseHostedUsageDiagnosticsRequest" },
     { packageName: "importers", entry: "clinical-records/index.ts", specifier: "@murphai/importers/clinical-records", symbol: "readClinicalAttachmentText" },
@@ -85,6 +92,12 @@ describe("workspace source resolution", () => {
 
     expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution")).toBe(
       path.join(repoRoot, "packages/hosted-execution/src/index.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "@murphai/contracts/recap-admission")).toBe(
+      path.join(repoRoot, "packages/contracts/src/recap-admission.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "@murphai/operator-config/generated-audio")).toBe(
+      path.join(repoRoot, "packages/operator-config/src/generated-audio.ts"),
     );
     expect(resolveAliasReplacement(aliases, "@murphai/clinical-records")).toBe(
       path.join(repoRoot, "packages/clinical-records/src/index.ts"),

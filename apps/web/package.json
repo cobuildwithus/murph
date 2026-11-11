@@ -67,6 +67,7 @@
     "@murphai/health-metrics": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
+    "@murphai/operator-config": "workspace:*",
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@onkernel/sdk": "^0.76.0",

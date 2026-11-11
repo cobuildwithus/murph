@@ -393,6 +393,24 @@
       ],
       "@murphai/hosted-execution/companion-presence": [
         "../../packages/hosted-execution/src/companion-presence.ts"
+      ],
+      "@murphai/contracts/recap-admission": [
+        "../../packages/contracts/src/recap-admission.ts"
+      ],
+      "@murphai/contracts/recap-show": [
+        "../../packages/contracts/src/recap-show.ts"
+      ],
+      "@murphai/contracts/recap-renderer": [
+        "../../packages/contracts/src/recap-renderer.ts"
+      ],
+      "@murphai/contracts/recap-material": [
+        "../../packages/contracts/src/recap-material.ts"
+      ],
+      "@murphai/contracts/recap-validation": [
+        "../../packages/contracts/src/recap-validation.ts"
+      ],
+      "@murphai/operator-config/generated-audio": [
+        "../../packages/operator-config/src/generated-audio.ts"
       ]
     },
     "sourceMap": false,

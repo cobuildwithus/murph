@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 100,
+  "item": {
+    "id": "quieter-group-acknowledgments",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer reactions during group conversations",
+    "summary": "Quick requests in iMessage groups no longer get an extra acknowledgment reaction when Murph has replied within the last five minutes.",
+    "details": "This covers data lookups, reminders, calendar requests, and game updates. Longer tasks and requests after a quiet period can still receive an acknowledgment.",
+    "relevanceTags": ["group-chat", "imessage"],
+    "sourcePullRequests": [4816]
+  }
+}

@@ -1,11 +1,19 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import { assertGeneratedMp3Audio } from '../src/generated-audio.ts'
+import { assertGeneratedMp3Audio, inspectGeneratedMp3Audio } from '../src/generated-audio.ts'
 import { generateElevenLabsSpeech } from '../src/elevenlabs-runtime.ts'
 import { sendLinqVoiceMemo, uploadLinqAttachment } from '../src/linq-runtime.ts'
 
 afterEach(() => vi.restoreAllMocks())
+
+test('derives bounded duration from playable samples and rejects a forged MP3 header', async () => {
+  const bytes = new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/music.mp3', import.meta.url)))
+  const result = await inspectGeneratedMp3Audio(bytes)
+  expect(result.durationMs).toBeGreaterThan(0)
+  expect(result.durationMs).toBeLessThan(300_000)
+  await expect(inspectGeneratedMp3Audio(new Uint8Array([0xff, 0xfb, 0x90, 0x64]))).rejects.toMatchObject({ code: 'ELEVENLABS_INVALID_AUDIO' })
+})
 
 test.each(['speech', 'music', 'stream'])('accepts the encoded %s fixture without changing its bytes', async (name) => {
   const bytes = new Uint8Array(readFileSync(new URL(`../../../fixtures/generated-audio/${name}.mp3`, import.meta.url)))

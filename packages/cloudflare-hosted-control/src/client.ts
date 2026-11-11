@@ -255,6 +255,8 @@ export interface CloudflareHostedControlClient {
   gameImageDelivery(input: { mediaId: string; userId: string; variant: "face" | "thumb" | "avatar" | "photo" }): Promise<{ url: string; expiresAt: string } | null>;
   statGameImage(input: { mediaId: string; userId: string }): Promise<{ byteLength: number } | null>;
   /** Legacy weekly game photos: Web seals them; the Worker stores the sealed envelope. */
+  putRecapMedia(input: { envelope: string; hash: string; mediaId: string; userId: string }): Promise<void>;
+  readRecapMedia(input: { mediaId: string; userId: string }): Promise<{ envelope: string; hash: string } | null>;
   deleteGameMedia(input: { mediaId: string; userId: string }): Promise<void>;
   putGameMedia(input: { envelope: string; mediaId: string; userId: string }): Promise<void>;
   /** The sealed envelope, or null when there's none under that name. */
@@ -615,6 +617,21 @@ export function createCloudflareHostedControlClient(
         path: buildCloudflareHostedControlGameMediaPath("gameImageStat", userId),
         request: { method: "GET", headers: gameMediaHeaders(input.mediaId) }, timeoutMs: options.timeoutMs,
       }));
+    },
+    async putRecapMedia(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      await requestHostedExecutionAuthorizedJson({ baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "recap media staging", path: buildCloudflareHostedControlGameMediaPath("recapMediaStage", userId),
+        parse: value => { if (requireRecord(value, "Recap storage").stored !== true) throw new TypeError("Recap storage was not confirmed."); },
+        request: { method: "POST", headers: { "content-type": "application/json", "x-murph-recap-media-id": input.mediaId, "x-murph-recap-hash": input.hash }, body: input.envelope }, timeoutMs: options.timeoutMs });
+    },
+    async readRecapMedia(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return nullWhenNotFound(requestHostedExecutionAuthorizedJson({ baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "recap media read", path: buildCloudflareHostedControlGameMediaPath("recapMediaRead", userId),
+        parse(value) { const record = requireRecord(value, "Recap storage"); return {
+          envelope: requireString(record.envelope, "Recap envelope"), hash: requireString(record.hash, "Recap hash"),
+        }; }, request: { method: "GET", headers: { "x-murph-recap-media-id": input.mediaId } }, timeoutMs: options.timeoutMs }));
     },
     async deleteGameMedia(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);

@@ -1,3 +1,5 @@
+import { MURPH_RECAP_IMAGE_TOOL, MURPH_RECAP_SONG_TOOL } from '../../assistant-codex/dynamic-tool-catalog.js'
+import { MURPH_PREVIEW_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL } from '../../assistant-codex/dynamic-tools/games.js'
 import { GAME_PHOTO_CHAT_GUIDANCE, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
 import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
 import { supportsCodexTurnDeveloperInstructions } from '../../assistant-codex/config.js'
@@ -284,8 +286,7 @@ export interface AssistantCodexTurnExecutionProfile {
   toolProfile?: AssistantCodexTurnToolProfile
 }
 
-export interface AssistantCodexTurnThreadScopeProfile
-  extends AssistantCodexTurnExecutionProfile {}
+export type AssistantCodexTurnThreadScopeProfile = AssistantCodexTurnExecutionProfile
 
 export type AssistantCodexTurnResolvedExecutionProfile =
   Required<AssistantCodexTurnExecutionProfile>
@@ -467,6 +468,7 @@ function areConversationGamesAvailable(input: AssistantRouteTurnPlanInput, accep
 export function resolveAssistantGameHostDynamicTools(
   context: Pick<AssistantHostedToolContext, 'currentGameRecapScope' | 'currentGameMissedCheckInScope'> | null,
 ): MurphDynamicTool[] {
+  if (context?.currentGameRecapScope?.()?.show) return [MURPH_READ_GAME_RECAP_TOOL, MURPH_PREVIEW_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL, MURPH_GAME_LORE_TOOL, MURPH_RECAP_IMAGE_TOOL, MURPH_RECAP_SONG_TOOL]
   if (context?.currentGameRecapScope?.() != null) {
     return [MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL]
   }

@@ -1,4 +1,5 @@
 import "server-only";
+import { retireGameRecapAssetsTx } from "./recap-retirement";
 
 import { Prisma, type Game, type GamePlayer, type GameInvitee } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -67,7 +68,7 @@ function participants(row: GameRow) {
 }
 function fingerprint(row: GameRow): string {
   return JSON.stringify([row.updatedAt, row.maxPlayers, row.status, row.createdBy, row.wordsOwnerMemberId, row.termsWordsEncrypted,
-    row.inviteTokenEncrypted, row.pendingChange, row.result,
+    row.inviteTokenEncrypted, row.pendingChange, row.result, row.recapEncrypted,
     [...row.players].sort((a, b) => a.seat - b.seat), [...row.invitees].sort((a, b) => a.seat - b.seat)]);
 }
 
@@ -136,6 +137,7 @@ export async function applyGameAccountDeletionTx(input: { memberIds: readonly st
   let calledOff = 0;
   let deleted = 0;
   for (const row of current) {
+    await retireGameRecapAssetsTx(tx, row.id, row.wordsOwnerMemberId, input.now);
     const plan = prepared.get(row.id)!.kept;
     if (!plan) { await tx.game.delete({ where: { id: row.id } }); deleted += 1; continue; }
     const remaining = row.players.filter(player => player.memberId && !leaving.includes(player.memberId) && player.leftAt === null);
