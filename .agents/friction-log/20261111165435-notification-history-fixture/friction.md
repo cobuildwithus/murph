@@ -1,6 +1,7 @@
 ---
 title: 'Notification history fixture loses configured receipts after an earlier reader import'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4858'
 ---
 
 ## Expected Behavior
