@@ -436,24 +436,16 @@ function buildHostedAssistantDeliveryEffects({
   intents: readonly AssistantOutboxIntent[];
   workspace: Pick<HostedWorkspaceState, "checkpointedAt"> | null | undefined;
 }): HostedAssistantDeliveryEffect[] {
-  const obligationBoundaryKeys = new Set(
-    intents.filter(hostedLinqIntentCarriesDurableObligation)
+  // Replies never wait on publication. A Linq boundary carrying a parked
+  // approval cycle or a settlement obligation sends inline, then requests an
+  // immediate snapshot that makes the obligation durable.
+  const publishAfterBoundaryKeys = new Set(
+    intents.filter((intent) => hostedLinqIntentCarriesDurableObligation(intent)
+      || (intent.channel === "linq"
+        && hostedAssistantIntentOwesProviderSend(intent)
+        && assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(intent)))
       .map(readHostedAssistantDeliveryBoundaryKey),
   );
-  const settlementBoundaryKeys = new Set(
-    intents.filter((intent) => intent.channel === "linq"
-      && hostedAssistantIntentOwesProviderSend(intent)
-      && assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(intent))
-      .map(readHostedAssistantDeliveryBoundaryKey),
-  );
-  for (const intent of intents) {
-    const boundaryKey = readHostedAssistantDeliveryBoundaryKey(intent);
-    if (settlementBoundaryKeys.has(boundaryKey)
-      && hostedAssistantIntentOwesProviderSend(intent)
-      && !intent.deliveryTransportIdempotent) {
-      obligationBoundaryKeys.add(boundaryKey);
-    }
-  }
   const claimedBoundaryKeys = new Set<string>();
   const effects: HostedAssistantDeliveryEffect[] = [];
   for (const [candidates, phase] of [
@@ -466,15 +458,14 @@ function buildHostedAssistantDeliveryEffects({
       const effect = buildHostedAssistantDeliveryEffectFromIntent(intent, phase);
       if (
         hostedAssistantIntentRetryNeedsPublishedClaim(intent, workspace?.checkpointedAt)
-        || (hostedAssistantIntentOwesProviderSend(intent) && (
-          (intent.channel === "telegram" && intent.media.some((media) => media.kind === "vault_file"))
-          || obligationBoundaryKeys.has(boundaryKey)
-        ))
+        || (hostedAssistantIntentOwesProviderSend(intent)
+          && intent.channel === "telegram"
+          && intent.media.some((media) => media.kind === "vault_file"))
       ) {
         effect.publishBeforeDispatch = true;
         // A blocked successor must get its own published claim in a later pass.
         if (!intent.deliveryTransportIdempotent) claimedBoundaryKeys.add(boundaryKey);
-      } else if (settlementBoundaryKeys.has(boundaryKey)) {
+      } else if (publishAfterBoundaryKeys.has(boundaryKey)) {
         effect.publishAfterDispatch = true;
       }
       effects.push(effect);

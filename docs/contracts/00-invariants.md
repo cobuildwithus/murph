@@ -256,10 +256,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   advances the existing checkpoint deadline after foreground work, so waiting
   does not consume the request's ten-minute validity. An exact foreground reply
   prerequisite may also advance it; no later pass may rearm the deadline while
-  that reply waits. Dispatching a transport-idempotent Linq reply boundary with a
-  follow-up or direct nutrition invitation also advances publication to now to
-  preserve its settlement state, even if delivery fails; runner loss
-  before publication finishes can still lose that obligation. Internal assistant,
+  that reply waits. Member-visible replies never wait on publication: dispatching
+  a Linq reply boundary with a parked file-approval cycle, a follow-up or a direct
+  nutrition invitation sends first and advances publication to now to preserve
+  that state, even if delivery fails; runner loss before publication finishes
+  can still lose that obligation. Internal assistant,
   maintenance, retention, cleanup, projection, and scheduled wakes must not shorten
   it. A background delivery
   claim waiting for publication keeps that window within eight minutes of the
