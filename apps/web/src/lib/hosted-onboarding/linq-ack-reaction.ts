@@ -257,7 +257,7 @@ export async function runHostedLinqAckReactionBestEffort(input: {
       messageReceivedAt: input.messageReceivedAt,
       prisma: input.prisma,
       reaction: decision.emoji,
-      skipLiveConversation: shouldSkipLiveConversation(input.event, decision),
+      skipLiveConversation: HOSTED_LINQ_ACK_REACTION_QUICK_KINDS.includes(decision.kind),
     });
   } catch (error) {
     finish("store_error", { error });
@@ -318,15 +318,6 @@ export async function runHostedLinqAckReactionBestEffort(input: {
     return;
   }
   finish("provider_ambiguous", { httpStatus: result.status });
-}
-
-/** Groups lack early typing, so even quick named asks keep their acknowledgment. */
-function shouldSkipLiveConversation(
-  event: HostedLinqMessageReceivedEvent,
-  decision: HostedLinqAckReactionDecision,
-): boolean {
-  return event.data.chat?.is_group !== true
-    && HOSTED_LINQ_ACK_REACTION_QUICK_KINDS.includes(decision.kind);
 }
 
 /** Advisory group availability only; runtime admission remains authoritative. */

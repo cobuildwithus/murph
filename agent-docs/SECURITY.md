@@ -1146,9 +1146,9 @@ Existing product admission, delivery and runtime safety rules still apply.
   Persist only per-chat burst timestamps, the blinded target-message key, and
   reaction in `hosted_linq_ack_reaction`; never persist message content or raw
   classifier output. Diagnostics carry only outcome, kind, heavy flag, error
-  name, and timings. Groups retain ordinary burst suppression but skip the
-  direct-only five-minute live-conversation rule. Typing coverage, progress
-  suppression, and runtime reaction lookup remain direct-only.
+  name, and timings. Direct and group chats share ordinary burst suppression
+  and the five-minute live-conversation rule for quick requests. Typing coverage,
+  progress suppression, and runtime reaction lookup remain direct-only.
   It stays off unless `HOSTED_LINQ_ACK_REACTIONS=on`; the key is
   `HOSTED_LINQ_ACK_REACTION_OPENAI_API_KEY` with the `OPENAI_API_KEY` fallback,
   in Web configuration only.
