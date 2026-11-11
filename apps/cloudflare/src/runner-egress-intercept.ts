@@ -3119,7 +3119,7 @@ async function checkRecapProviderRequest(input: {
     const result = await fetchHostedWebControlPlaneJson({
       body: { attemptId: fence.attemptId, generation: fence.leaseGeneration,
         token: input.request.headers.get('x-murph-recap-reservation'), providerRequest,
-        nativeImage: input.nativeImage || invalidMedia },
+        opaque: false, nativeImage: input.nativeImage || invalidMedia },
       boundUserId: fence.userId, description: 'Recap provider admission', fetchImpl: fetch,
       route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.recapMediaAccess, timeoutMs: environment.webControlTimeoutMs,
       transport: { callbackSigning: environment.webCallbackSigning, mode: 'direct', webControlBaseUrl: environment.hostedWebBaseUrl, workspaceCheckpointBridge: null },

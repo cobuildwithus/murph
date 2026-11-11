@@ -1498,6 +1498,44 @@ describe("hostedRunnerIntercept", () => {
     expect(findFetchCall(upstream, 'api.openai.com')).toBeUndefined();
   });
 
+  it.each(['unscoped image', 'unscoped TTS', 'scoped recap'] as const)('validates the actual Worker callback with the Web schema for %s', async scenario => {
+    const scoped = scenario === 'scoped recap';
+    const tts = scenario === 'unscoped TTS';
+    const token = 'c'.repeat(64);
+    let consumed = 0;
+    const admission = mockRecapMediaAdmission((body: import('@murphai/contracts/recap-admission').RecapMediaAccessRequest) => {
+      expect(body).toMatchObject({ attemptId: 'attempt_1', generation: '7', opaque: false });
+      expect(body.nativeImage).toBe(tts);
+      if (tts) expect(body.providerRequest).toBeNull();
+      else expect(body.providerRequest).toMatchObject({ kind: 'image', quality: 'high', outputFormat: 'jpeg' });
+      if (scoped) {
+        expect(body.token).toBe(token);
+        expect(body.providerRequest?.requestHash).toMatch(/^[a-f0-9]{64}$/u);
+        consumed++;
+      } else expect(body.token).toBeNull();
+      return { scoped, allowed: true };
+    });
+    const host = tts ? 'api.elevenlabs.io' : 'api.openai.com';
+    const upstream = vi.fn<typeof fetch>(async target => new URL(readFetchTargetUrl(target)).hostname === host
+      ? new Response('synthetic media', { headers: { 'content-type': tts ? 'audio/mpeg' : 'application/json' } })
+      : Response.json({ allowed: true, reason: 'allowed' }));
+    vi.stubGlobal('fetch', upstream);
+    const response = await hostedRunnerIntercept(new Request(tts
+      ? 'https://api.elevenlabs.io/v1/text-to-speech/voice_123?output_format=mp3_44100_128'
+      : 'https://api.openai.com/v1/images/generations', {
+      method: 'POST', headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, 'content-type': 'application/json',
+        authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`, 'xi-api-key': HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        ...(scoped ? { 'x-murph-recap-reservation': token } : {}) },
+      body: JSON.stringify(tts ? { model_id: 'eleven_multilingual_v2', text: 'Synthetic memo.' }
+        : { model: 'gpt-image-2.6-flare', prompt: 'A synthetic portrait scene.', quality: 'high', size: '1024x1536', output_format: 'jpeg' }),
+    }), createInterceptEnv({ OPENAI_API_KEY: 'synthetic-key', ELEVENLABS_API_KEY: 'synthetic-key', validateRuntimeWriteFence: async () => true }),
+    { className: 'RunnerContainer', containerId: 'member_123--v-version_1' });
+    expect(response.status).toBe(200);
+    expect(admission.mock.calls.filter(([input]) => input.route.path === '/api/internal/hosted-execution/recap-media/access')).toHaveLength(1);
+    expect(consumed).toBe(scoped ? 1 : 0);
+    expect(findFetchCall(upstream, host)).toBeDefined();
+  });
+
   it.each(['POST', 'GET'])('forwards ordinary Responses %s with zero recap admission calls even when admission is unavailable', async method => {
     const admission = mockRecapMediaAdmission(new Error('Synthetic admission outage'));
     const upstream = vi.fn<typeof fetch>(async request => new URL(readFetchTargetUrl(request)).hostname === 'api.openai.com'

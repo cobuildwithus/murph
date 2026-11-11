@@ -18,6 +18,13 @@ export const recapProviderRequestSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('song'), model: z.literal('music_v2'), requestHash: hash,
     promptBytes: z.number().int().min(1).max(16_400), durationMs: z.literal(20_000) }).strict(),
 ])
+/** Signed Worker callback, decoded by Web and exercised at the egress boundary. */
+export const recapMediaAccessRequestSchema = z.object({
+  attemptId: z.string().min(1).max(191), generation: z.string().regex(/^\d+$/u),
+  token: hash.nullable(), providerRequest: recapProviderRequestSchema.nullable(),
+  opaque: z.boolean(), nativeImage: z.boolean(),
+}).strict()
+export type RecapMediaAccessRequest = z.infer<typeof recapMediaAccessRequestSchema>
 export type RecapProviderRequest = z.infer<typeof recapProviderRequestSchema>
 export const RECAP_IMAGE_ATTEMPTS = 6
 export const RECAP_MEDIA_CAP_MICRODOLLARS = 3_000_000

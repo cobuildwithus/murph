@@ -36,6 +36,8 @@ Status: active. ReviewGPT (GPT-6 Pro) wrote this plan on 2026-11-10 from the own
 
 23. **Round 2 expand-only retirement (A2):** the orphan kind extension required dropping its existing CHECK, which predeploy correctly rejects. Replace the undeployed migration with an additive FK-free `game_recap_asset` receipt table; retain the existing runtime cleanup worker, combined bounded candidate selection, ownership locks, revision fences and retry pacing. Existing orphan constraints/rows stay unchanged. The nullable runtime-owner scope migration remains additive. No contract migration or destructive SQL is part of PR A.
 
+24. **Round 2 admission callback (B1, accepted):** send `opaque: false` in the Worker callback. Share the receiving Web request schema through the contracts public entrypoint and validate every intercepted test callback with it before returning admission results. Focused unscoped image, unscoped TTS and scoped reservation cases now use the actual Worker-built body; ordinary Responses/websocket/Live retain zero admission calls.
+
 ## PR A execution
 
 Outcome: pair players receive one accepted themed recap through one text line and link. Full, sparse, failed-media and retired generations use the existing game authority; groups retain their current path. Proof includes contract fixtures, focused unit/Postgres checks and synthetic live parent journeys. Native visual implementation remains separate work; child forwarding is canceled.
