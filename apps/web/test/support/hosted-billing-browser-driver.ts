@@ -122,17 +122,15 @@ export class HostedBillingBrowserDriver {
       await assertSuccessfulResponse(response);
       await actor.page.waitForURL(
         (url) => url.origin === new URL(this.webBaseUrl).origin
-          && url.pathname === "/home",
+          && url.pathname === "/settings",
       );
       // router.replace() changes the URL before the new React Server Component
       // tree is necessarily committed. Waiting on DOMContentLoaded here only
       // observes the invite document's already-fired lifecycle event, so a
-      // following document navigation can race the still-pending Home commit.
-      const homeEyebrow = actor.page.getByText("Live Well", { exact: true });
-      await homeEyebrow.waitFor();
-      await homeEyebrow.locator("xpath=parent::div").getByRole("heading", {
+      // following document navigation can race the still-pending Settings commit.
+      await actor.page.getByRole("heading", {
         exact: true,
-        name: "Welcome to Murph",
+        name: "Your account",
       }).waitFor();
     });
   }

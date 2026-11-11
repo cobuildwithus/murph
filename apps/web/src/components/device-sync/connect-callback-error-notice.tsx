@@ -50,7 +50,7 @@ export function ConnectCallbackErrorNotice({
           )}
           href="/settings"
         >
-          Go to home
+          Go to Settings
         </a>
       </div>
     </Alert>

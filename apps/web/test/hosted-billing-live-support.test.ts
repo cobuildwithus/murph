@@ -176,7 +176,7 @@ describe("hosted billing live browser support", () => {
     expect(subscriptionWaitFor).not.toHaveBeenCalled();
   });
 
-  it("waits for the enrolled Home tree to commit before opening settings", async () => {
+  it("waits for the enrolled Settings tree to commit before another navigation", async () => {
     const enrollmentResponse = createApiResponse({
       method: "POST",
       ok: true,
@@ -187,30 +187,20 @@ describe("hosted billing live browser support", () => {
     const waitForURL = vi.fn(async (
       predicate: (url: URL) => boolean,
     ) => {
-      expect(predicate(new URL("https://app.example.test/home"))).toBe(true);
+      expect(predicate(new URL("https://app.example.test/settings"))).toBe(true);
     });
-    let releaseHomeCommit!: () => void;
-    const homeCommitted = new Promise<void>((resolve) => {
-      releaseHomeCommit = resolve;
+    let releaseSettingsCommit!: () => void;
+    const settingsCommitted = new Promise<void>((resolve) => {
+      releaseSettingsCommit = resolve;
     });
-    const homeHeadingWaitFor = vi.fn(async () => undefined);
-    const homeHeaderGetByRole = vi.fn((role: string, options: unknown) => {
+    const settingsHeadingWaitFor = vi.fn(() => settingsCommitted);
+    const getByRole = vi.fn((role: string, options: unknown) => {
       expect(role).toBe("heading");
-      expect(options).toEqual({ exact: true, name: "Welcome to Murph" });
-      return { waitFor: homeHeadingWaitFor };
-    });
-    const homeEyebrowLocator = vi.fn((selector: string) => {
-      expect(selector).toBe("xpath=parent::div");
-      return { getByRole: homeHeaderGetByRole };
-    });
-    const homeWaitFor = vi.fn(() => homeCommitted);
-    const getByText = vi.fn((text: string, options: unknown) => {
-      expect(text).toBe("Live Well");
-      expect(options).toEqual({ exact: true });
-      return { locator: homeEyebrowLocator, waitFor: homeWaitFor };
+      expect(options).toEqual({ exact: true, name: "Your account" });
+      return { waitFor: settingsHeadingWaitFor };
     });
     const page = {
-      getByText,
+      getByRole,
       goto: vi.fn(async () => navigation),
       waitForResponse: vi.fn(async (
         predicate: (response: ReturnType<typeof createApiResponse>) => boolean,
@@ -236,11 +226,10 @@ describe("hosted billing live browser support", () => {
     });
 
     await vi.waitFor(() => {
-      expect(homeWaitFor).toHaveBeenCalledOnce();
+      expect(settingsHeadingWaitFor).toHaveBeenCalledOnce();
     });
-    expect(homeHeadingWaitFor).not.toHaveBeenCalled();
     expect(activationSettled).toBe(false);
-    releaseHomeCommit();
+    releaseSettingsCommit();
     await activation;
 
     expect(page.goto).toHaveBeenCalledWith(
@@ -248,8 +237,8 @@ describe("hosted billing live browser support", () => {
       { waitUntil: "commit" },
     );
     expect(waitForURL).toHaveBeenCalledOnce();
-    expect(homeHeadingWaitFor).toHaveBeenCalledOnce();
-    expect(homeWaitFor.mock.invocationCallOrder[0]).toBeGreaterThan(
+    expect(settingsHeadingWaitFor).toHaveBeenCalledOnce();
+    expect(settingsHeadingWaitFor.mock.invocationCallOrder[0]).toBeGreaterThan(
       waitForURL.mock.invocationCallOrder[0] ?? 0,
     );
   });
