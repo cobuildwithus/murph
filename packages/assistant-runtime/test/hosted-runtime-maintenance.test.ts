@@ -4476,6 +4476,23 @@ describe("runHostedDeviceSyncPass", () => {
       extraDetails: { ...crowdedRequestDetails, ...timeoutDetails },
       expectedExtra: crowdedRequestDetails,
     },
+    ...["explicit_calendar", "timestamp_calendar", "source_offset", "vault_timezone", "utc", "missing"].map((basis) => ({
+      label: `calendar day basis ${basis}`, code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      extraDetails: { normalizationDayBasis: basis }, expectedExtra: { normalizationDayBasis: basis },
+    })),
+    ...["before", "equal", "after", "missing"].map((relation) => ({
+      label: `calendar day relation ${relation}`, code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      extraDetails: { normalizationUtcDayRelation: relation, normalizationResolvedDayRelation: relation },
+      expectedExtra: { normalizationUtcDayRelation: relation, normalizationResolvedDayRelation: relation },
+    })),
+    {
+      label: "private calendar details are omitted", code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      extraDetails: { normalizationDayBasis: "synthetic-private-timezone", normalizationUtcDayRelation: "2026-04-21", normalizationResolvedDayRelation: -14400 },
+    },
+    {
+      label: "calendar details on another failure are omitted", code: "SYNC_JOB_FAILED",
+      extraDetails: { normalizationDayBasis: "source_offset", normalizationUtcDayRelation: "equal", normalizationResolvedDayRelation: "before" },
+    },
     {
       label: "oxygen classification", code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
       extraDetails: { normalizationValueKind: "number", normalizationValueRange: "zero", normalizationUnitKind: "percent", validationRetryDelayMs: 1_800_000 },
