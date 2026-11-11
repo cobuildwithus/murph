@@ -290,6 +290,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const fence = vi.spyOn(owner, "requireHostedRuntimeCallbackTx").mockImplementation(async (tx, id) => tx.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: id } }));
     const active = vi.spyOn(access, "requireHostedRuntimeActiveAccessForUpdateTx").mockResolvedValue();
     vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
+    vi.stubEnv("HOSTED_WEB_BASE_URL", "https://recaps.murph.test");
     vi.stubEnv("MURPH_GAME_RECAP_MEDIA_DIR", path.join(mediaDir, "recap"));
     const fixtures = new Map<string, { gameId: string; room: string; a: string; eventId: string }>();
     let finish: () => void = () => {};

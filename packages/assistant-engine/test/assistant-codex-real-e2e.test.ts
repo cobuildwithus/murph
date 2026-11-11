@@ -48110,6 +48110,7 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     }
   }, 360_000)
   it('pair recap show real providers canonical publication', async () => {
+    const startedAt = Date.now();
     if (!process.env.OPENAI_API_KEY) throw new Error('The sanctioned journey requires a local OpenAI test credential.');
     const artifacts = fileURLToPath(new URL('../../../audit-packages/recap-show-simplify/', import.meta.url));
     const { url } = JSON.parse(await readFile(path.join(artifacts, 'bridge.json'), 'utf8'));
@@ -48171,7 +48172,12 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       const run = path.join(artifacts, `run-${Date.now()}`);
       await mkdir(run, { recursive: true });
       await writeFile(path.join(run, 'presentation.json'), JSON.stringify(presentation, null, 2));
-      await writeFile(path.join(run, 'proof.json'), JSON.stringify({ model: config.model, media, accepted: 1, chatMessages: 1, chatMedia: 0 }, null, 2));
+      const toolErrors = readCapabilityRoutingActions(events).filter(action => action.kind === 'command' ? action.ok === false : action.success === false)
+        .map(action => action.kind === 'command' ? { kind: action.kind, output: action.output.slice(-800) }
+          : { kind: action.kind, tool: action.tool, output: action.output.slice(-1500) });
+      const proof = { model: config.model, wallTimeMs: Date.now() - startedAt, media, imageCount: media.filter(call => call.kind === 'image' && call.status === 200).length, toolErrors, accepted: 1, chatMessages: 1, chatMedia: 0 };
+      await writeFile(path.join(run, 'proof.json'), JSON.stringify(proof, null, 2).replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>'));
+      process.stdout.write(`[recap proof] ${JSON.stringify(proof).replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>')}\n`);
       process.stdout.write(`[recap show] ${JSON.stringify({ reply: result.response, media, presentation, accepted: 1, chatMessages: 1, chatMedia: 0 })}\n`);
     } catch (error) {
       const diagnostics = readCapabilityRoutingActions(events).map(action => action.kind === 'command'
