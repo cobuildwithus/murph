@@ -1,3 +1,4 @@
+import { readMediaTransportError } from "@murphai/contracts/recap-admission";
 import { inspectRecapProviderRequest, type RecapProviderRequest } from "@murphai/contracts/recap-admission";
 import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
 import { HOSTED_RUNTIME_DATA_API_PATHS } from "@murphai/hosted-execution/routes";
@@ -2507,6 +2508,13 @@ async function fetchAuthorizedProviderUpstream(input: {
       upstreamDurationMs: Date.now() - upstreamStartedAt,
       url: input.url,
     });
+    if (input.providerKind === 'elevenlabs') {
+      const details = readMediaTransportError(error);
+      return Response.json({ detail: { code: 'MURPH_MEDIA_TRANSPORT_FAILED' } }, { status: 502, headers: {
+        'x-murph-media-transport-code': details.mediaTransportCode ?? 'unknown',
+        'x-murph-media-transport-name': details.mediaTransportName ?? 'unknown',
+      } });
+    }
     throw error;
   }
 }

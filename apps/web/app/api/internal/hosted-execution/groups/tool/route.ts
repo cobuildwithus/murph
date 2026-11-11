@@ -1,3 +1,4 @@
+import { RecapRejectionError, formatRecapRejections } from '@murphai/contracts/recap-validation';
 import { RecapControlError } from '@murphai/contracts/recap-admission';
 import { readHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 import {
@@ -42,6 +43,15 @@ import {
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
+
+function recapToolRejection(body: ReturnType<typeof parseHostedRuntimeGroupToolRequest>, error: unknown): Response | null {
+  if ((body.action !== 'read_game' && body.action !== 'write_recap') || body.origin.kind !== 'game_recap') return null;
+  if (error instanceof RecapRejectionError) return jsonOk({ action: body.action, result: { status: 'rejected', error: error.rejections[0]?.rule,
+    recapOutcome: formatRecapRejections(error.rejections), recapGame: { rejections: error.rejections } } });
+  if (error instanceof RecapControlError) return jsonOk({ action: body.action, result: { status: 'rejected', error: error.code, recapOutcome: error.message,
+    recapGame: { rejections: [{ rule: error.code === 'recap_submission_frozen' ? 'frozen_mismatch' : 'media_attempt_limit', message: error.message }] } } });
+  return null;
+}
 
 export const POST = withJsonError(async (request: Request) => {
   // The runner's web-control hop is already running when this handler is
@@ -97,9 +107,8 @@ export const POST = withJsonError(async (request: Request) => {
         await executeTool(), currentSenderWire.compatibility,
       ));
     } catch (error) {
-      if ((body.action === "read_game" || body.action === "write_recap") && body.origin.kind === "game_recap" && error instanceof RecapControlError) {
-        return jsonOk({ action: body.action, result: { status: "rejected", error: error.code, recapOutcome: error.message } });
-      }
+      const rejection = recapToolRejection(body, error);
+      if (rejection) return rejection;
       throw error;
     }
   }

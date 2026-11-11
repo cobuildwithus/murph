@@ -15,10 +15,10 @@ test('malformed drafts return actionable schema paths without echoing prose', as
     await recapDirectory(vault, `${relativeRoot}/drafts`)
     await writeFile(path.join(vault, draftPath), JSON.stringify({ story: { pages: [], chatLine: 'Synthetic private prose',
       song: { title: 'x'.repeat(31), style: 'Synthetic style', lyrics: ['one', 'two', 'three', 'four'] } }, files: [] }))
-    await expect(readRecapDraftFile({ vault, relativeRoot, draftPath })).rejects.toThrow(/story.song.title/)
+    await expect(readRecapDraftFile({ vault, relativeRoot, draftPath })).rejects.toThrow(/\[song_line\]/)
     await expect(readRecapDraftFile({ vault, relativeRoot, draftPath })).rejects.not.toThrow('Synthetic private prose')
     await writeFile(path.join(vault, draftPath), '{broken synthetic prose')
-    await expect(readRecapDraftFile({ vault, relativeRoot, draftPath })).rejects.toEqual(new RecapDraftValidationError('Draft must contain valid JSON.'))
+    await expect(readRecapDraftFile({ vault, relativeRoot, draftPath })).rejects.toEqual(new RecapDraftValidationError([{ rule: 'draft_json', message: 'Draft must contain valid JSON. Fix JSON syntax before retrying.' }]))
   } finally { await rm(vault, { recursive: true, force: true }) }
 })
 

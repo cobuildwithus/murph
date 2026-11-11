@@ -1,5 +1,6 @@
+import { validateGameRecapDetailed, formatRecapRejections } from '@murphai/contracts/recap-validation';
 import { buildRecapFallback } from './recap-fallback';
-import { storedRecapAdmissionSchema } from './recap-admission';
+import { requireRecapAdmissionAuthorityTx, storedRecapAdmissionSchema } from './recap-admission';
 import { prepareRecapSubmission, stageRecapSubmissionFile } from "./recap-submission";
 import { handleRecapAdmission } from "./recap-admission";
 import { readPendingRecapUsages } from "./recap-lore";
@@ -22,9 +23,9 @@ import { resolveHostedGroupMessageSenderMemberId } from "../hosted-groups/group-
 import { assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { getPrisma } from "../prisma";
 import { readGameChatState, readGameChatProfiles, readGameRecapMaterial, runGameCommand, runGameChatUpdate, sealGameRecap } from "./service";
-import { isGameRecapGenerationRetired } from "./recap-witness";
+import { isGameRecapGenerationRetired, retireGameRecapGenerationTx, GAME_RECAP_REGENERATION_FAILED } from "./recap-witness";
 import { acceptedGameRecapMessage, gameRecapMessage } from "./recap-message";
-import { gameRecapToolResult, validateGameRecap, withValidGameSuperlatives, type GameRecapChatMessage } from "./recap";
+import { gameRecapToolResult, withValidGameSuperlatives, type GameRecapChatMessage } from "./recap";
 import { addressedGameRematchWhere, gameChatPlayerIds, gamePairWhere, readGameChatPlayerIds, readGameChatAudience, readGameChatAuthority, type GameChatAudience, hasGameChatRestriction, requireExactGameChat, sameGamePlayers } from "./chat-membership";
 import { isGameEnabled, isGameOn } from "./access";
 import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "./audience";
@@ -253,6 +254,20 @@ async function recoverGameRecap(input: RecapToolInput, context: RecapToolContext
       const row = await prisma.gameEvent.findUnique({ where: { commandKey: `${eventId}:admission` }, select: { payload: true } });
       const admission = row ? storedRecapAdmissionSchema.parse(row.payload) : null;
       if (!admission || admission.runs.length < 2 && Date.now() < Date.parse(admission.deadline)) return { action: 'read_game', result: { status: 'ok', recapGame: { recovered: false } } };
+      if (parseGameRecapEventId(eventId)?.regenerationId) {
+        const audience = context.audience ?? await readGameChatAudience(input.memberId);
+        const retired = await prisma.$transaction(async tx => {
+          await requireRecapAdmissionAuthorityTx(tx, { ...input, gameId, eventId }, audience);
+          const current = await tx.gameEvent.findUnique({ where: { commandKey: `${eventId}:admission` }, select: { payload: true } });
+          const state = current && storedRecapAdmissionSchema.parse(current.payload);
+          if (!state || state.runs.length < 2 && Date.now() < Date.parse(state.deadline)) return false;
+          if (await tx.gameEvent.findUnique({ where: { commandKey: `${eventId}:accepted` }, select: { id: true } })) return false;
+          await retireGameRecapGenerationTx(tx, eventId, GAME_RECAP_REGENERATION_FAILED);
+          return true;
+        });
+        if (retired) return { action: 'read_game', result: { status: 'unavailable', error: GAME_RECAP_GENERATION_RETIRED } };
+        return { action: 'read_game', result: { status: 'ok', recapGame: { recovered: false } } };
+      }
       const recap = buildRecapFallback(material);
       await prepareRecapSubmission({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity, gameId, eventId, draft: { story: recap, files: [] }, trustedFallback: true });
       saved = await sealGameRecap({ ...scope, recap, files: [] });
@@ -283,13 +298,13 @@ async function handleAuthorizedRecapWrite(input: RecapToolInput & { request: Ext
   if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(replay, input.request.recap), chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, replay.chatLine) : gameRecapMessage(gameId, replay.chatLine) } };
   if (await isGameRecapGenerationRetired(prisma, eventId, input.memberId)) return { action: "write_recap", result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
   const chatMessages = await readGameRecapChatMessages({ containerMemberId: input.memberId, material, eventId, beforeMutationTx: authorizeMutation });
-  const errors = validateGameRecap({ recap: input.request.recap, players: material.players, entries: material.entries,
+  const errors = validateGameRecapDetailed({ recap: input.request.recap, players: material.players, entries: material.entries,
     chatMessages, priorChatLines: input.request.priorChatLines, result: material.validation.result, group: material.validation.group, show: material.validation.show, usedTreatments: input.request.usedTreatments });
-  if (errors.length > 0) return { action: "write_recap", result: { status: "rejected", recapOutcome: gameRecapToolResult(errors) } };
+  if (errors.length > 0) return { action: "write_recap", result: { status: "rejected", recapOutcome: formatRecapRejections(errors), recapGame: { rejections: errors } } };
   if (material.validation.show) {
     if (!input.request.files || !input.request.phase) return { action: "write_recap", result: { status: "rejected", recapOutcome: "Submit a local {story, files} draft through write_recap." } };
-    if (input.request.phase === "prepare") return { action: "write_recap", result: { status: "ok", recapGame: await prepareRecapSubmission({ memberId: input.memberId,
-      runtimeIdentity: input.runtimeIdentity, gameId, eventId, draft: { story: input.request.recap, files: input.request.files } }) } };
+    if (input.request.phase === "prepare" || input.request.phase === "preview") return { action: "write_recap", result: { status: "ok", recapGame: await prepareRecapSubmission({ memberId: input.memberId,
+      runtimeIdentity: input.runtimeIdentity, gameId, eventId, draft: { story: input.request.recap, files: input.request.files }, validateOnly: input.request.phase === "preview" }) } };
   }
   if (!await refreshGameChatAudience({ ...input, audience }, players)) return { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const saved = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, files: input.request.files, recap: withValidGameSuperlatives(input.request.recap, material.validation.result.map(player => player.memberId), material.validation.group) });

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 200,
+  "item": {
+    "id": "recap-replacement-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Keep the recap that already works",
+    "summary": "If a replacement pair-game recap cannot finish, the existing recap stays available.",
+    "details": "An unsuccessful replacement sends no new group message. A later successful replacement can still update the recap.",
+    "relevanceTags": ["games", "recaps"],
+    "sourcePullRequests": []
+  }
+}

@@ -52,3 +52,18 @@ test('file runtime preparation failures are captured as redacted typed tool issu
   expect(result.rpcResult.success).toBe(false)
   expect(result.runtimeIssueInputs?.[0]?.details).toMatchObject({ mediaFailureReason: 'audio_duration', failureStage: 'validation' })
 })
+
+test.each(['UND_ERR_HEADERS_TIMEOUT', 'ECONNRESET', 'AbortError'])('song runtime issue records %s without provider content', async code => {
+  const hosted = context()
+  hosted.prepareRecapMedia = async () => ({ elevenLabsApiKey: 'synthetic-host-key', resolveReferences: async () => [],
+    save: async () => { throw new Error('Unexpected save') }, fetchImpl: async () => {
+      if (code === 'AbortError') throw new DOMException(privateValue, 'AbortError')
+      throw new TypeError(privateValue, { cause: Object.assign(new Error(privateValue), { code }) })
+    },
+  })
+  const result = await executeMurphDynamicToolRequest({ request: { kind: 'generate-song', args: { output: 'file', operationId: 'song', durationSeconds: 20, instrumental: false, prompt: 'Synthetic laundry song.' } },
+    env: {}, fetchImpl: fetch, hostedToolContext: hosted, nextUsageOrdinal: () => 1, progressDelivery: null })
+  expect(result.runtimeIssueInputs?.[0]?.details).toMatchObject({ mediaFailureReason: code === 'AbortError' ? 'provider_timeout' : 'provider_transport', mediaResponseHeadersReceived: false,
+    ...(code === 'AbortError' ? { mediaTransportName: 'AbortError' } : { mediaTransportCode: code }), mediaElapsedMsBucket: 'lt_1s' })
+  expect(JSON.stringify(result.runtimeIssueInputs)).not.toMatch(/SYNTHETIC_PRIVATE|synthetic-host-key/)
+})

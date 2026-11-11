@@ -4444,6 +4444,25 @@ test.each(['send_message', 'skip'] as const)('group missed-day notifications iso
   } }))
 })
 
+test.each(['preflight', 'recovery'])('failed regeneration stays silent at %s without another provider turn', async phase => {
+  const scope = { eventId: 'game-recap:game_synthetic:retry', gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const }
+  const retired = { result: { status: 'unavailable', error: 'recap_generation_retired' } }
+  const request = vi.fn().mockResolvedValue(retired)
+  if (phase === 'recovery') request.mockResolvedValueOnce({ result: { status: 'ok', recapGame: { pendingRecapUsages: [] } } })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    providerResult: createProviderResult({ response: 'Must not run.' }), turnId: 'turn-silent-recap',
+  })
+  const result = await sendAssistantNotificationLocal({ channel: 'linq', deliveryIdempotencyKey: scope.eventId, deliveryTarget: 'synthetic-game-thread',
+    executionContext: { hosted: { gameRecapScope: scope, groupTool: { request }, memberId: 'synthetic-group', userEnvKeys: [] } },
+    instructions: 'Recover the recap.', responsePolicy: { kind: 'require_game_recap', ...scope },
+    threadId: 'synthetic-game-thread', threadIsDirect: false, vault: '/synthetic-vault',
+  })
+  expect(result).toMatchObject({ decision: { kind: 'skip' }, response: null, deliveryOutcome: null })
+  expect(result.recapLoreRepairOnly).toBeUndefined()
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+})
+
 test('recap recovery delivers one accepted fallback line and link without another model turn', async () => {
   const eventId = 'game-recap:game_synthetic'
   const chatLine = 'The morning walks made the week.\nWatch the recap: https://recaps.murph.test/recap/game_synthetic'

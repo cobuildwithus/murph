@@ -4,42 +4,41 @@ import { open } from 'node:fs/promises'
 import path from 'node:path'
 import sharp from 'sharp'
 import { gameRecapDraftSchema, presentGameRecap, type GameRecapDraft, type GameRecapEnvelope } from '@murphai/contracts/recap-show'
-import { validateGameRecap } from '@murphai/contracts/recap-validation'
+import { validateGameRecapDetailed, RecapRejectionError, recapSchemaRejections, type RecapRejection } from '@murphai/contracts/recap-validation'
 import type { RecapMaterial, RecapTranscriptMessage } from '@murphai/contracts/recap-material'
 import { renderRecapPageSvg } from '@murphai/contracts/recap-renderer'
 import { readRecapUsages } from './game-recap-lore.js'
 import { readRecapFile, recapDirectory } from './recap-files.js'
 
 /** Safe draft feedback contains schema paths and constraints, never file contents. */
-export class RecapDraftValidationError extends Error {}
+export class RecapDraftValidationError extends RecapRejectionError {}
 
 export async function readRecapDraftFile(input: { vault: string; relativeRoot: string; draftPath: string }): Promise<GameRecapDraft> {
-  const bytes = await readRecapFile({ ...input, file: input.draftPath, maxBytes: 128 * 1024 })
+  const bytes = await readRecapFile({ ...input, file: input.draftPath, maxBytes: 128 * 1024 }).catch(() => { throw new RecapDraftValidationError([{ rule: 'draft_file', message: 'Read a JSON draft under this task’s drafts directory, at most 128 KiB; use the path returned by read_game.' }]) })
   let value: unknown
   try { value = JSON.parse(bytes.toString('utf8')) }
-  catch { throw new RecapDraftValidationError('Draft must contain valid JSON.') }
+  catch { throw new RecapDraftValidationError([{ rule: 'draft_json', message: 'Draft must contain valid JSON. Fix JSON syntax before retrying.' }]) }
   const parsed = gameRecapDraftSchema.safeParse(value)
-  if (!parsed.success) throw new RecapDraftValidationError(`Invalid recap draft: ${parsed.error.issues.slice(0, 8)
-    .map(issue => `${issue.path.join('.') || 'draft'}: ${issue.message}`).join('; ')}`)
+  if (!parsed.success) throw new RecapDraftValidationError(recapSchemaRejections(parsed.error.issues))
   return parsed.data
 }
 
 export async function previewRecap(input: {
   vault: string; relativeRoot: string; draftPath: string; material: RecapMaterial;
   chat: readonly RecapTranscriptMessage[]; lore: string;
+  validateDraft?: (draft: GameRecapDraft) => Promise<RecapRejection[]>;
   photo: (entryId: string) => Promise<Uint8Array | null>;
 }) {
   const draft = await readRecapDraftFile(input)
-  if (draft.story.pages.length > 7) throw new Error('A show has at most seven authored pages.')
   const usages = readRecapUsages(input.lore)
-  const errors = validateGameRecap({ recap: draft.story, players: input.material.players, entries: input.material.entries,
+  const rejections = input.validateDraft ? await input.validateDraft(draft) : validateGameRecapDetailed({ recap: draft.story, players: input.material.players, entries: input.material.entries,
     result: input.material.result, chatMessages: input.chat.filter(message => message.source === 'player'),
     priorChatLines: usages.map(usage => usage.chatLine), usedTreatments: usages.map(usage => usage.treatment), show: true, group: false })
   const media = new Map<string, string>()
   const assets: GameRecapEnvelope['assets'] = []
   for (const { slot, receipt } of draft.files) {
     const bytes = await readRecapFile({ ...input, file: receipt.path, maxBytes: 2 * 1024 * 1024 })
-    if (createHash('sha256').update(bytes).digest('hex') !== receipt.hash || bytes.length !== receipt.byteLength) throw new Error('Selected media changed after generation.')
+    if (createHash('sha256').update(bytes).digest('hex') !== receipt.hash || bytes.length !== receipt.byteLength) throw new RecapRejectionError([{ rule: 'media_integrity', message: 'Selected bytes no longer match the receipt. Restore the original generated file; do not edit receipts.' }])
     if (receipt.mediaType === 'image/jpeg') media.set(slot, `data:image/jpeg;base64,${bytes.toString('base64')}`)
     assets.push({ slot, kind: receipt.mediaType === 'image/jpeg' ? 'image' : 'song', recipeId: receipt.operationId,
       storageKey: slot, references: [], hash: receipt.hash, byteLength: receipt.byteLength,
@@ -76,7 +75,7 @@ export async function previewRecap(input: {
     .composite(thumbs.map((input, index) => ({ input, left: (index % 3) * 256, top: Math.floor(index / 3) * 427 }))).png().toBuffer()
   await writePreview(path.join(directory, 'contact-sheet.png'), sheet)
   await writePreview(path.join(directory, 'presentation.json'), Buffer.from(JSON.stringify(presentation, null, 2)))
-  return { valid: errors.length === 0, errors, warnings, draftHash, pages,
+  return { valid: rejections.length === 0, rejections, errors: rejections.map(issue => `[${issue.rule}] ${issue.message}`), warnings, draftHash, pages,
     contactSheet: `${input.relativeRoot}/previews/${draftHash.slice(0, 16)}/contact-sheet.png`,
     selectedMedia: draft.files.map(({ slot, receipt }) => ({ slot, hash: receipt.hash, path: receipt.path })) }
 }

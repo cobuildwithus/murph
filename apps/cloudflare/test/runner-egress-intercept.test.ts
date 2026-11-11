@@ -1498,7 +1498,7 @@ describe("hostedRunnerIntercept", () => {
     expect(findFetchCall(upstream, 'api.openai.com')).toBeUndefined();
   });
 
-  it('runs file-mode music from generated host credentials through the real SDK and Worker to a validated receipt', async () => {
+  it.each(['success', 'ECONNRESET', 'UND_ERR_HEADERS_TIMEOUT', 'WORKER_SUBREQUEST_LIMIT'])('runs file-mode music through host credentials, SDK and Worker with %s', async outcome => {
     const { mkdtemp, readFile, rm } = await import('node:fs/promises');
     const { tmpdir } = await import('node:os');
     const path = await import('node:path');
@@ -1512,6 +1512,7 @@ describe("hostedRunnerIntercept", () => {
       expect(request.headers.get('xi-api-key')).toBe('synthetic-worker-key');
       expect(request.headers.has('x-murph-recap-reservation')).toBe(false);
       expect(await request.json()).toMatchObject({ model_id: 'music_v2', music_length_ms: 20_000 });
+      if (outcome !== 'success') throw Object.assign(new Error(outcome === 'WORKER_SUBREQUEST_LIMIT' ? 'Too many subrequests: private synthetic text' : 'Private synthetic transport text'), { code: outcome });
       return new Response(song, { headers: { 'content-type': 'audio/mpeg' } });
     });
     vi.stubGlobal('fetch', upstream);
@@ -1533,6 +1534,11 @@ describe("hostedRunnerIntercept", () => {
       const args = { output: 'file' as const, operationId: 'theme', durationSeconds: 20, instrumental: false, prompt: 'A synthetic laundry theme song.' };
       const fileRuntime = createRecapMediaRuntime({ env: runnerEnv, vault, workspace, scope, tool, admission, fetchImpl: fixture.providerFetch, request: { kind: 'song', args } });
       const result = await executeGenerateSongTool({ env: {}, args, fileRuntime });
+      if (outcome !== 'success') {
+        expect(result).toMatchObject({ rpcSuccess: false, failureDiagnostic: { mediaFailureReason: 'provider_transport', mediaTransportCode: outcome, mediaTransportName: 'Error', mediaElapsedMsBucket: 'lt_1s', mediaResponseHeadersReceived: false } });
+        expect(JSON.stringify(result.failureDiagnostic)).not.toMatch(/Private|private|synthetic-worker-key/);
+        return;
+      }
       expect(result).toMatchObject({ rpcSuccess: true });
       expect(result.responseMedia).toBeUndefined();
       expect(result.rpcText).not.toContain('synthetic-worker-key');

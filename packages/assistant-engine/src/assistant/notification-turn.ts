@@ -2280,10 +2280,12 @@ function assertVerifiedNotificationAudience(scope: ReturnType<typeof resolveAssi
     'ASSISTANT_AUDIENCE_UNVERIFIED', 'Notification audience could not be verified as direct or group.')
 }
 
-async function completePreparedRecapNotification(prepared: { kind: 'repair' } | { kind: 'recovered'; text: string },
+async function completePreparedRecapNotification(prepared: { kind: 'repair' } | { kind: 'silent' } | { kind: 'recovered'; text: string },
   input: Omit<Parameters<typeof sendAssistantExactTextNotificationLocal>[0], 'responseText' | 'session' | 'privateCompletionContinuitySessionId'> & {
     resolved: { session: AssistantSession; privateCompletionContinuitySessionId?: string | null }
   }): Promise<AssistantNotificationResult> {
+  if (prepared.kind === 'silent') return { decision: { kind: 'skip', privateSummary: 'Failed recap regeneration ended without delivery.' },
+    deliveryOutcome: null, response: null, session: input.resolved.session }
   if (prepared.kind === 'repair') return {
     decision: { kind: 'skip', privateSummary: 'Accepted recap usage repaired.' },
     deliveryOutcome: null, response: null, session: input.resolved.session, recapLoreRepairOnly: true }
@@ -2291,24 +2293,33 @@ async function completePreparedRecapNotification(prepared: { kind: 'repair' } | 
     session: input.resolved.session, privateCompletionContinuitySessionId: input.resolved.privateCompletionContinuitySessionId ?? null })
 }
 
+function pendingRecapUsages(game: unknown) {
+  return game && typeof game === 'object' && 'pendingRecapUsages' in game
+    ? z.array(recapUsageSchema).max(20).parse(game.pendingRecapUsages) : []
+}
+
+function recapGenerationRetired(result: { status: string; error?: string }): boolean {
+  return result.status === 'unavailable' && result.error === 'recap_generation_retired'
+}
+
 async function prepareRecapNotification(hosted: AssistantHostedExecutionContext | null | undefined,
   context: ReturnType<typeof createAssistantHostedToolContext> | null,
-  messageInput: { abortSignal?: AbortSignal | null }): Promise<{ kind: 'continue' } | { kind: 'repair' } | { kind: 'recovered'; text: string }> {
+  messageInput: { abortSignal?: AbortSignal | null }): Promise<{ kind: 'continue' } | { kind: 'repair' } | { kind: 'silent' } | { kind: 'recovered'; text: string }> {
   const scope = hosted?.gameRecapScope
   if (!scope?.show || !hosted?.groupTool) return { kind: 'continue' }
   const origin = { kind: 'game_recap' as const, gameId: scope.gameId, eventId: scope.eventId }
   // Checkpoint repaired usage before another model run or chat send.
   const repair = await hosted.groupTool.request({ action: 'read_game', origin })
+  if (recapGenerationRetired(repair.result)) return { kind: 'silent' }
   if (repair.result.status !== 'ok') throw new Error('Recap lore repair authority is unavailable.')
-  const game = 'recapGame' in repair.result ? repair.result.recapGame : null
-  const pending = game && typeof game === 'object' && 'pendingRecapUsages' in game
-    ? z.array(recapUsageSchema).max(20).parse(game.pendingRecapUsages) : []
+  const pending = pendingRecapUsages('recapGame' in repair.result ? repair.result.recapGame : null)
   if (pending.length) {
     if (!context?.appendGameRecapUsage) throw new Error('Trusted recap lore is unavailable.')
     for (const usage of pending) await context.appendGameRecapUsage(usage)
     return { kind: 'repair' }
   }
   const recovered = await hosted.groupTool.request({ action: 'read_game', origin, recapRead: { kind: 'recover' } })
+  if (recapGenerationRetired(recovered.result)) return { kind: 'silent' }
   if (recovered.result.status !== 'ok') throw new Error('Recap recovery authority is unavailable.')
   if ('chatLine' in recovered.result && recovered.result.chatLine) {
     await recordAcceptedRecap({ context, origin: scope }, recovered.result, true)

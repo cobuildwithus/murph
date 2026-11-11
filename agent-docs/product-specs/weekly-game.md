@@ -582,8 +582,21 @@ resulting avatar. No private photo is shared with the subject or other players.
   owns the stable synthetic native fixtures and media authentication.
   Failed scenes preserve setup and payoff; failed songs disappear. After two
   exhausted attempts or the twenty-minute deadline, trusted code validates and seals
-  a plain three-page fallback from canonical facts. Revocation ends without save
+  a plain three-page fallback from canonical facts for the first publication only.
+  An exhausted regeneration instead terminally skips its delivery receipt, preserves
+  the existing published story and media, and sends nothing. A fresh regeneration
+  id can request another attempt. Revocation ends without save
   or send. An accepted recap is replayed without further generation.
+
+  Preview calls the same Web story, selected-receipt and current-reference
+  validation as submission, without freezing the draft. Correctable rejections
+  return a stable rule plus a fix. Runtime issues record only closed rule codes
+  and counts; member copy, names, IDs and media never enter those diagnostics.
+  Draft/schema errors are corrected before freezing; uncertain uploads retry
+  the identical frozen draft. Music transport diagnostics retain only allowlisted
+  error/cause codes, an elapsed bucket and whether provider headers arrived.
+  Deploy this preview consumer on Web before the runner that emits it; iOS
+  presentation and database schema do not change.
 
   Activation order: apply the retirement and admission migrations, deploy the Web
   control/storage consumers, deploy the Worker egress fence and runtime image,

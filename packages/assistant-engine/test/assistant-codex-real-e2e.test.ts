@@ -48110,14 +48110,15 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }
   }, 360_000)
-  it.each([
+  it.each<{ name: string; weekendsOff: boolean; regeneration: boolean; superlatives: boolean; mediaJourney?: boolean; realMedia?: boolean; longRun?: number }>([
     { name: 'pair recap show production validation seals once and queues its saved line', weekendsOff: false, regeneration: false, superlatives: false },
     { name: 'pair recap show production validation with weekends off', weekendsOff: true, regeneration: false, superlatives: false },
     { name: 'pair recap show production validation regeneration', weekendsOff: true, regeneration: true, superlatives: false },
     { name: 'pair recap show production validation optional grounded cards', weekendsOff: true, regeneration: false, superlatives: true },
     { name: 'pair recap show parent files preview revision and selected media', weekendsOff: false, regeneration: false, superlatives: false, mediaJourney: true },
     { name: 'pair recap show real providers file media and accepted presentation', weekendsOff: false, regeneration: false, superlatives: false, mediaJourney: true, realMedia: true },
-  ])('$name', async ({ weekendsOff, regeneration, mediaJourney = false, realMedia = false }) => {
+    ...[1, 2, 3].map(longRun => ({ name: `pair recap show seven day diagnostic journey ${longRun}`, weekendsOff: false, regeneration: false, superlatives: false, mediaJourney: true, longRun })),
+  ])('$name', async ({ weekendsOff, regeneration, mediaJourney = false, realMedia = false, longRun = 0 }) => {
     if (realMedia && !process.env.OPENAI_API_KEY) throw new Error('The real recap media journey requires a local OpenAI test credential.')
     const eventId = `game-recap:game_recap_synthetic${regeneration ? ':synthetic_request' : ''}`
     const config = await resolveRealCodexE2eConfig()
@@ -48126,10 +48127,12 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control')
     const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
     const saved: Array<import('@murphai/hosted-execution/runtime-control').HostedGameRecap> = []
-    const { validateGameRecap, gameRecapToolResult, withValidGameSuperlatives } = await import('@murphai/contracts/recap-validation')
+    const { validateGameRecapDetailed, formatRecapRejections, gameRecapToolResult, withValidGameSuperlatives } = await import('@murphai/contracts/recap-validation')
     const { readRecapUsages } = await import('../src/assistant/game-recap-lore.js')
-    const chatMessages = [{ playerName: 'Leo', text: weekendsOff ? 'The laundry basket is my personal trainer.' : 'I was spiritually doing pushups.' }, { playerName: 'Ava', text: 'Murph, the notification toggle is broken. Please add a calendar export feature.' }]
-    const material = {
+    const { createLongPairRecapFixture } = await import('@murphai/assistant-engine/recap-show-testkit')
+    const longFixture = longRun ? createLongPairRecapFixture() : undefined
+    const chatMessages = longFixture?.chat ?? [{ playerName: 'Leo', text: weekendsOff ? 'The laundry basket is my personal trainer.' : 'I was spiritually doing pushups.' }, { playerName: 'Ava', text: 'Murph, the notification toggle is broken. Please add a calendar export feature.' }]
+    const material = longFixture?.game ?? {
               id: 'game_recap_synthetic', recapShow: true, maxPlayers: 2, players: [{ memberId: 'player_first', name: 'Ava', task: '10 minutes of abs' }, { memberId: 'player_second', name: 'Leo', task: '100 pushups' }],
               lengthDays: weekendsOff ? 8 : 3, schedule: { days: weekendsOff ? [0, 1, 2, 3, 4] : [0, 1, 2] }, stakes: [{ kind: 'prize', item: 'breakfast in bed' }],
               score: weekendsOff ? [{ name: 'Ava', score: 6 }, { name: 'Leo', score: 6 }] : [{ name: 'Ava', score: 3 }, { name: 'Leo', score: 2 }], days: weekendsOff ? Array.from({ length: 8 }, (_, dayIndex) => ({
@@ -48144,7 +48147,7 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
                 { dayNumber: 3, posts: { Ava: { entryId: 'entry_ava_3', kind: 'photo', text: 'crunches' }, Leo: { entryId: 'entry_leo_3', kind: 'words', text: 'I was spiritually doing pushups' } } },
               ],
     }
-    const entries = material.days.flatMap(day => Object.entries(day.posts).flatMap(([playerName, post]) =>
+    const entries = longFixture?.entries ?? material.days.flatMap(day => Object.entries(day.posts).flatMap(([playerName, post]) =>
       typeof post === 'object' && post ? [{ entryId: post.entryId, kind: post.kind, text: post.text, playerName, visibleToBoth: true }] : []))
     const scores = material.score.map((score, index) => ({ ...score, memberId: material.players[index]!.memberId }))
     const { createRecapShowLiveProviders } = await import('@murphai/assistant-engine/recap-show-testkit')
@@ -48161,11 +48164,12 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       } } : {}) })
     const events: unknown[] = []
     let rejectedWrites = 0
+    const rejectionRules: { phase: string; rules: string[] }[] = []
     let conflictingTreatment: string | undefined
     try {
       await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
       await mkdir(path.join(workingDirectory, 'games'), { recursive: true })
-      await writeFile(path.join(workingDirectory, 'games', 'lore-0123456789abcdef0123456789abcdef.md'), '# Ava & Leo\n\n- Used bit: sauna citizenship.\n', 'utf8')
+      await writeFile(path.join(workingDirectory, 'games', 'lore-0123456789abcdef0123456789abcdef.md'), '# Synthetic pair\n\n- Used bit: sauna citizenship.\n', 'utf8')
       const modelTarget = createAssistantModelTarget({
         approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
         codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
@@ -48186,14 +48190,16 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
             if (request.action === 'write_recap') {
               // Simulate a concurrent lore repair discovering the first genre.
               if (regeneration && conflictingTreatment === undefined) conflictingTreatment = request.recap.treatment
-              const corrections = validateGameRecap({ recap: request.recap, players: material.players.map(player => player.name),
-                entries, chatMessages, result: scores, show: true, usedTreatments: conflictingTreatment ? [conflictingTreatment] : [], priorChatLines: [] })
+              const corrections = [...validateGameRecapDetailed({ recap: request.recap, players: material.players.map(player => player.name),
+                entries, chatMessages, result: scores, show: true, usedTreatments: conflictingTreatment ? [conflictingTreatment] : [], priorChatLines: [] }), ...providers.validate({ story: request.recap, files: request.files ?? [] })]
               if (corrections.length) {
-                rejectedWrites += 1
-                return { action: 'write_recap', result: { status: 'rejected', recapOutcome: gameRecapToolResult(corrections) } }
+                if (request.phase === 'prepare') rejectedWrites += 1
+                rejectionRules.push({ phase: request.phase ?? 'missing', rules: corrections.map(issue => issue.rule) })
+                return { action: 'write_recap', result: { status: 'rejected', recapOutcome: formatRecapRejections(corrections), recapGame: { rejections: corrections } } }
               }
               if (saved[0]) return { action: 'write_recap', result: { status: 'ok', recapOutcome: gameRecapToolResult([]), recap: saved[0], chatLine: `${saved[0].chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic` } }
-              if (request.phase === 'prepare') return { action: 'write_recap', result: { status: 'ok', recapGame: providers.prepare({ story: request.recap, files: request.files }) } }
+              if (request.phase === 'preview') return { action: 'write_recap', result: { status: 'ok', recapGame: { validated: true } } };
+    if (request.phase === 'prepare') return { action: 'write_recap', result: { status: 'ok', recapGame: providers.prepare({ story: request.recap, files: request.files }) } }
               providers.accept()
               saved.push(withValidGameSuperlatives(request.recap, material.players.map(player => player.memberId)))
               return { action: 'write_recap', result: { status: 'ok', recapOutcome: gameRecapToolResult([]), recap: request.recap, chatLine: `${request.recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic` } }
@@ -48215,7 +48221,7 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       expect(calls.filter((call) => call.action === 'write_recap' && call.phase === 'accept')).toHaveLength(1)
       expect(calls.filter((call) => call.action === 'write_recap' && call.phase === 'prepare')).toHaveLength(rejectedWrites + 1)
       expect(saved).toHaveLength(1)
-      if (regeneration) { expect(rejectedWrites).toBeGreaterThanOrEqual(1); expect(saved[0]?.treatment).not.toBe(conflictingTreatment) }
+      if (regeneration) { expect(rejectionRules.length).toBeGreaterThanOrEqual(1); expect(saved[0]?.treatment).not.toBe(conflictingTreatment) }
       expect(saved[0]).not.toHaveProperty('scoreLine')
       {
         const pair = saved[0].superlatives ?? []
@@ -48227,7 +48233,7 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
           expect(item.title.split(/\s+/u).length).toBeLessThanOrEqual(6)
           expect(item.title).not.toMatch(/\.$|^most\s+likely\s+to\b/iu)
           expect(item.line.length).toBeLessThanOrEqual(160)
-          expect(item.title + ' ' + item.line).toMatch(item.memberId === 'player_first' ? /mat|purple|abs/iu : /laundry|basket|pushups/iu)
+          expect(item.title + ' ' + item.line).toMatch(longRun ? /mat|purple|abs|laundry|basket|pushups|fold|towel/iu : item.memberId === 'player_first' ? /mat|purple|abs/iu : /laundry|basket|pushups/iu)
           expect(item.title + ' ' + item.line).not.toMatch(/lazy|fat|weight|ugly|loser|pathetic|body|bodies/iu)
         }
         process.stdout.write('[game-recap superlatives] ' + JSON.stringify(pair) + '\n')
@@ -48259,13 +48265,14 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
           if (realSong) expect(providers.accept().files.some(file => file.slot === 'song')).toBe(true)
         }
         const actions = readCapabilityRoutingActions(events)
+        const localRejections = actions.flatMap(action => action.kind === 'dynamic' && !action.success && /(?:write|preview)_recap$/u.test(action.tool) ? [{ tool: action.tool, feedback: action.output, rules: [...action.output.matchAll(/\[([a-z_]+)\]/gu)].map(match => match[1]) }] : [])
         const previews = actions.filter(action => action.kind === 'dynamic' && /(?:^|[.])preview_recap$/u.test(action.tool) && action.success)
         expect(previews.length).toBeGreaterThanOrEqual(2)
         const hashes = previews.flatMap(action => action.kind === 'dynamic' ? [JSON.parse(action.output).draftHash] : [])
         expect(new Set(hashes).size).toBeGreaterThanOrEqual(2)
         expect(actions.some(action => action.kind === 'command' && /chat[.]jsonl|writing-guide[.]md/u.test(action.command ?? ''))).toBe(true)
         const { recapTaskDirectory } = await import('../src/assistant/recap-workspace.js')
-        const artifactRoot = fileURLToPath(new URL(realMedia ? '../../../audit-packages/recap-show-real-providers/' : '../../../audit-packages/recap-show-live/', import.meta.url))
+        const artifactRoot = fileURLToPath(new URL(longRun ? `../../../audit-packages/recap-show-diagnose/run-${longRun}/` : realMedia ? '../../../audit-packages/recap-show-real-providers/' : '../../../audit-packages/recap-show-live/', import.meta.url))
         await mkdir(artifactRoot, { recursive: true })
         await cp(path.join(recapTaskDirectory(workingDirectory, eventId), 'previews'), path.join(artifactRoot, 'previews'), { recursive: true })
         const { presentGameRecap } = await import('@murphai/contracts/recap-show')
@@ -48278,15 +48285,15 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
           permittedPhotoIds: new Set(entries.map(entry => entry.entryId)), mediaUrl: slot => `/api/game/v1/games/synthetic-game/recap-assets/${slot}?generation=synthetic-accepted` })
         await writeFile(path.join(artifactRoot, 'accepted-presentation.json'), JSON.stringify(presentation, null, 2) + '\n')
         await writeFile(path.join(artifactRoot, 'verification.json'), JSON.stringify({ model: config.model, mediaProviders: realMedia ? { image: 'real OpenAI', song: realSong ? 'real ElevenLabs' : 'credential absent' } : 'synthetic in-process fixtures', providerResponses,
-          accepted: saved.length, chatMessages: intents.length, chatMedia: 0, previewDrafts: [...new Set(hashes)], providerCalls: providers.providerCalls.map(call => ({ kind: call.kind, ...(call.kind === 'image' ? { referenceCount: call.referenceHashes.length } : {}) })) }, null, 2) + '\n')
+          rejectionRules, localRejections, accepted: saved.length, chatMessages: intents.length, chatMedia: 0, previewDrafts: [...new Set(hashes)], providerCalls: providers.providerCalls.map(call => ({ kind: call.kind, ...(call.kind === 'image' ? { referenceCount: call.referenceHashes.length } : {}) })) }, null, 2) + '\n')
       }
       expect(saved[0]?.chatLine).not.toMatch(/https?:\/\//iu)
       expect(saved[0]?.chatLine.length).toBeLessThan(160)
       const chatLine = saved[0]?.chatLine ?? ''
-      expect(chatLine).toMatch(weekendsOff ? /6\s*(?:[-–—:]|to)\s*6/u : /3\s*(?:[-–—:]|to)\s*2/u)
-      expect(chatLine.split(/[.!?]/u)[0]).toMatch(weekendsOff ? /tie|tied|draw|week|game|finished|over/iu : /Ava/iu)
+      expect(chatLine).toMatch(longRun ? /7\s*(?:[-–—:]|to)\s*6/u : weekendsOff ? /6\s*(?:[-–—:]|to)\s*6/u : /3\s*(?:[-–—:]|to)\s*2/u)
+      expect(chatLine.split(/[.!?]/u)[0]).toMatch(longRun ? /Céleste Marín/u : weekendsOff ? /tie|tied|draw|week|game|finished|over/iu : /Ava/iu)
       expect(chatLine).not.toMatch(/\b(?:open|watch|swipe|tap|click)\b|recap.{0,10}(?:ready|up)/iu)
-      process.stdout.write(`[game-recap chatLine] ${JSON.stringify({ weekendsOff, regeneration, chatLine })}\n`)
+      process.stdout.write(`[game-recap chatLine] ${JSON.stringify({ weekendsOff, regeneration, longRun, rejectionRules, chatLine })}\n`)
 
       const lore = await readFile(path.join(workingDirectory, 'games', 'lore-0123456789abcdef0123456789abcdef.md'), 'utf8')
       expect(readRecapUsages(lore)).toEqual([{ generationId: eventId, treatment: saved[0]?.treatment, chatLine: saved[0]?.chatLine }])
@@ -48307,7 +48314,7 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }
-  }, 360_000)
+  }, 600_000)
 })
 
 describeRealCodex('real Codex game bootstrap e2e', () => {

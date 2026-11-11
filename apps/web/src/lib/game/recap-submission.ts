@@ -1,4 +1,5 @@
 import { RecapControlError } from '@murphai/contracts/recap-admission';
+import { RecapRejectionError, validateRecapFileSelection } from '@murphai/contracts/recap-validation';
 import { readGameRecapMaterial } from './service';
 import 'server-only';
 import { createHash } from 'node:crypto';
@@ -22,7 +23,7 @@ export const recapMediaKey = (eventId: string, receipt: RecapFileReceipt) => `re
 export const recapDraftHash = (draft: GameRecapDraft) => createHash('sha256').update(JSON.stringify(gameRecapDraftSchema.parse(draft))).digest('hex');
 
 /** Validation happens first. Freeze precisely what this submission may upload. */
-export async function prepareRecapSubmission(input: Identity & { draft: GameRecapDraft; trustedFallback?: true }) {
+export async function prepareRecapSubmission(input: Identity & { draft: GameRecapDraft; trustedFallback?: true; validateOnly?: boolean }) {
   const audience = await readGameChatAudience(input.memberId);
   const material = await readGameRecapMaterial(input.gameId, input.memberId, audience.memberIds, input.eventId, audience);
   if (!material) throw new Error('Recap material is unavailable.');
@@ -38,9 +39,10 @@ export async function prepareRecapSubmission(input: Identity & { draft: GameReca
     if (input.trustedFallback) {
       if (admission.runs.length < 2 && Date.now() < Date.parse(admission.deadline)) throw new Error('Recap attempts remain.');
       if (input.draft.files.length) throw new Error('Fallback cannot select provider media.');
-    } else if (Date.now() >= Date.parse(admission.deadline)) throw new Error('Recap submission deadline reached.');
-    if (new Set(input.draft.files.map(file => file.receipt.operationId)).size !== input.draft.files.length) throw new Error('Select each generated operation at most once.');
+    } else if (Date.now() >= Date.parse(admission.deadline)) throw new RecapRejectionError([{ rule: 'submission_deadline', message: 'The generation deadline passed. Stop; the host owns terminal recovery.' }]);
+    if (new Set(input.draft.files.map(file => file.receipt.operationId)).size !== input.draft.files.length) throw new RecapRejectionError([{ rule: 'media_operation_duplicate', message: 'Select each generated operation at most once. Keep its receipt in only one scene-N/song slot.' }]);
     await validateSelectedRecapFiles(tx, input, admission, material);
+    if (input.validateOnly) return { validated: true, draftHash: hash };
     const payload = { v: 1, hash, deadline: input.trustedFallback ? new Date(Date.now() + 30_000).toISOString() : admission.deadline, files: input.draft.files };
     await tx.gameEvent.upsert({ where: { commandKey: recapSelectionKey(input.eventId) },
       create: { gameId: input.gameId, actor: 'system', type: 'recap_selection', commandKey: recapSelectionKey(input.eventId), payload }, update: { payload } });
@@ -54,16 +56,16 @@ export async function stageRecapSubmissionFile(input: Identity & { receipt: Reca
   const storageKey = recapMediaKey(input.eventId, input.receipt);
   const metadata = await inspectRecapMedia(bytes, storageKey, input.receipt.mediaType === 'audio/mpeg' ? 20_000 : undefined);
   if (metadata.hash !== input.receipt.hash || metadata.bytes !== input.receipt.byteLength
-    || metadata.width !== input.receipt.width || metadata.height !== input.receipt.height || metadata.durationMs !== input.receipt.durationMs) throw new Error('Selected file integrity failed.');
+    || metadata.width !== input.receipt.width || metadata.height !== input.receipt.height || metadata.durationMs !== input.receipt.durationMs) throw new RecapRejectionError([{ rule: 'media_integrity', message: 'Selected bytes do not match the receipt. Restore the original generated file and unchanged receipt.' }]);
   const audience = await readGameChatAudience(input.memberId);
   const ownerMemberId = await getPrisma().$transaction(async tx => {
     const { game } = await requireRecapAdmissionAuthorityTx(tx, input, audience);
     const row = await tx.gameEvent.findUnique({ where: { commandKey: recapSelectionKey(input.eventId) }, select: { payload: true } });
     const selection = recapSelectionSchema.parse(row?.payload);
-    if (Date.now() >= Date.parse(selection.deadline) || !selection.files.some(file => JSON.stringify(file.receipt) === JSON.stringify(input.receipt))) throw new Error('File is not in the frozen recap submission.');
+    if (Date.now() >= Date.parse(selection.deadline) || !selection.files.some(file => JSON.stringify(file.receipt) === JSON.stringify(input.receipt))) throw new RecapRejectionError([{ rule: 'frozen_mismatch', message: 'Upload only the unchanged receipt selected in the frozen draft, before its deadline.' }]);
     const admission = await readRecapAdmissionTx(tx, input.eventId);
     const operation = admission.operations.find(operation => operation.id === input.receipt.operationId);
-    if (!operation || !await recapReferencesCurrent(tx, input.gameId, [operation])) throw new Error('Selected media references were revoked.');
+    if (!operation || !await recapReferencesCurrent(tx, input.gameId, [operation])) throw new RecapRejectionError([{ rule: 'reference_revoked', message: 'Selected references are no longer authorized. Stop this generation; do not reuse revoked photos.' }]);
     await registerRecapAssetsTx(tx, { gameId: input.gameId, generationId: recapGenerationId(input.eventId), ownerMemberId: game.wordsOwnerMemberId,
       storageKeys: [storageKey], acceptedAt: new Date(), recoveryUntil: new Date(selection.deadline) });
     return game.wordsOwnerMemberId;
@@ -79,20 +81,8 @@ export async function readRecapAdmissionTx(tx: Prisma.TransactionClient, eventId
 
 async function validateSelectedRecapFiles(tx: Prisma.TransactionClient, input: Identity & { draft: GameRecapDraft },
   admission: Awaited<ReturnType<typeof readRecapAdmissionTx>>, material: NonNullable<Awaited<ReturnType<typeof readGameRecapMaterial>>>) {
-    for (const file of input.draft.files) {
-      const operation = admission.operations.find(operation => operation.id === file.receipt.operationId);
-      if (!operation?.receipt || !operation.consumed || operation.active
-        || JSON.stringify(operation.receipt) !== JSON.stringify(file.receipt)
-        || !await recapReferencesCurrent(tx, input.gameId, [operation])) throw new Error('Selected media lacks a current verified provider receipt.');
-      if (file.slot === 'song' ? !input.draft.story.song || operation.kind !== 'song'
-        : operation.kind !== 'image' || !input.draft.story.pages[Number(file.slot.slice(6))]?.blocks.some(block => block.kind === 'scene')) throw new Error('Selected media does not match its story slot.');
-      if (file.slot !== 'song') {
-        const scene = input.draft.story.pages[Number(file.slot.slice(6))]?.blocks.find(block => block.kind === 'scene')?.scene;
-        if (!scene || scene.cast.some(name => {
-          const player = material.validation.playerNamesByMemberId.find(player => player.name === name);
-          return !player || !operation.references.some(reference => reference.kind !== 'murph' && reference.memberId === player.memberId);
-        }) || scene.murph && !operation.references.some(reference => reference.kind === 'murph')) throw new Error('Scene cast lacks permitted identity references.');
-      }
-
-    }
+  const errors = validateRecapFileSelection({ draft: input.draft, players: material.validation.playerNamesByMemberId, operations: admission.operations });
+  if (errors.length) throw new RecapRejectionError(errors);
+  const selected = admission.operations.filter(operation => input.draft.files.some(file => file.receipt.operationId === operation.id));
+  if (!await recapReferencesCurrent(tx, input.gameId, selected)) throw new RecapRejectionError([{ rule: 'reference_revoked', message: 'Selected photo references are no longer authorized. Stop this generation.' }]);
 }

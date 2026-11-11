@@ -629,6 +629,76 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       await db.gameRecapAsset.deleteMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
     }
   });
+  it.each(['attempts', 'deadline'])('silently retires a failed regeneration after %s and permits a fresh request', async failure => {
+    const a = await member('PlayerA', 'UTC', true), b = await member('PlayerB', 'UTC', true);
+    const room = await member('Room', 'UTC', true), db = getPrisma();
+    const { gameId } = await startGame(a, b);
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await devStartNow(gameId, a); await devSettleNow(gameId, a);
+    const initialEvent = gameChatLifecycleEventId(gameId, 'recap');
+    await markGameChatGenerationQueuedTx(initialEvent, db, room);
+    const original = { pages: [{ background: 'paper' as const, blocks: [{ kind: 'headline' as const, text: 'The published week' }] }], chatLine: 'The published line.' };
+    const scope = { beforeMutationTx: async () => {}, containerMemberId: room, gameId, playerMemberIds: [a, b] };
+    const { requestGameRecapRegeneration } = await import('@/src/lib/game/recap-regeneration');
+    const { recordGameRecapWitnessTx, isGameRecapGenerationRetired } = await import('@/src/lib/game/recap-witness');
+    const owner = await import('@/src/lib/hosted-execution/runtime-owner');
+    const access = await import('@/src/lib/hosted-mailbox/runtime-access');
+    await db.hostedRuntimeOwner.upsert({ where: { userId: room }, create: { userId: room }, update: {} });
+    const fence = vi.spyOn(owner, 'requireHostedRuntimeCallbackTx').mockImplementation(async tx => tx.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: room } }));
+    const active = vi.spyOn(access, 'requireHostedRuntimeActiveAccessForUpdateTx').mockResolvedValue();
+    vi.stubEnv('MURPH_GAME_RECAP_SHOW_ENABLED', 'true');
+    vi.stubEnv('MURPH_GAME_RECAP_MEDIA_DIR', path.join(mediaDir, 'recap'));
+    try {
+      const { handleRecapAdmission, storedRecapAdmissionSchema } = await import('@/src/lib/game/recap-admission');
+      const { prepareRecapSubmission } = await import('@/src/lib/game/recap-submission');
+      const { buildRecapFallback } = await import('@/src/lib/game/recap-fallback');
+      await db.$transaction(tx => recordGameRecapWitnessTx(tx, gameId, initialEvent));
+      const initialIdentity = { memberId: room, runtimeIdentity: null, gameId, eventId: initialEvent };
+      const initialMaterial = (await readGameRecapMaterial(gameId, room, [a, b], initialEvent))!;
+      for (let attempt = 0; attempt < 2; attempt++) await handleRecapAdmission({ ...initialIdentity, material: initialMaterial, command: { kind: 'admit', runId: randomUUID() } });
+      const publishedStory = buildRecapFallback(initialMaterial);
+      await prepareRecapSubmission({ ...initialIdentity, draft: { story: publishedStory, files: [] }, trustedFallback: true });
+      await sealGameRecap({ ...scope, eventId: initialEvent, recap: publishedStory, files: [] });
+      const stored = await db.game.findUniqueOrThrow({ where: { id: gameId }, select: { recapEncrypted: true } });
+      const assets = await db.gameRecapAsset.findMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
+      expect(assets).toHaveLength(1);
+      const presented = (await readGame(gameId, a))?.recap;
+      await db.hostedLinqDelivery.updateMany({ where: { payloadOwnerMemberId: room }, data: { status: 'delivered', deliveredAt: new Date() } });
+      const request = { gameId, regenerationId: 'synthetic-failed-show', execute: true, operatorMemberId: 'system' };
+      expect((await requestGameRecapRegeneration(request)).outcome).toBe('reserved');
+      const eventId = gameChatLifecycleEventId(gameId, 'recap', undefined, request.regenerationId);
+      await markGameChatGenerationQueuedTx(eventId, db, room);
+      await db.$transaction(tx => recordGameRecapWitnessTx(tx, gameId, eventId));
+      const { handleGameChatTool } = await import('@/src/lib/game/chat-tool');
+      const identity = { memberId: room, runtimeIdentity: null, gameId, eventId };
+      const material = (await readGameRecapMaterial(gameId, room, [a, b], eventId))!;
+      await handleRecapAdmission({ ...identity, material, command: { kind: 'admit', runId: randomUUID() } });
+      if (failure === 'attempts') await handleRecapAdmission({ ...identity, material, command: { kind: 'admit', runId: randomUUID() } });
+      else {
+        const row = await db.gameEvent.findUniqueOrThrow({ where: { commandKey: `${eventId}:admission` } });
+        await db.gameEvent.update({ where: { id: row.id }, data: { payload: { ...storedRecapAdmissionSchema.parse(row.payload), deadline: new Date(Date.now() - 1).toISOString() } } });
+      }
+      const recover = () => handleGameChatTool({ memberId: room, runtimeIdentity: null, multiplayer: true,
+        request: { action: 'read_game', origin: { kind: 'game_recap', gameId, eventId }, recapRead: { kind: 'recover' } } });
+      expect(await recover()).toEqual({ action: 'read_game', result: { status: 'unavailable', error: 'recap_generation_retired' } });
+      expect(await recover()).toEqual({ action: 'read_game', result: { status: 'unavailable', error: 'recap_generation_retired' } });
+      expect(await db.game.findUniqueOrThrow({ where: { id: gameId }, select: { recapEncrypted: true } })).toEqual(stored);
+      expect(await isGameRecapGenerationRetired(db, eventId, room)).toBe(true);
+      expect(await db.gameEvent.count({ where: { commandKey: `${eventId}:accepted` } })).toBe(0);
+      expect(await db.gameRecapAsset.findMany({ where: { resourceId: { startsWith: `${gameId}|` } } })).toEqual(assets);
+      expect((await readGame(gameId, a))?.recap).toEqual(presented);
+      expect((await requestGameRecapRegeneration({ ...request, regenerationId: 'synthetic-next-show' })).outcome).toBe('reserved');
+      const nextId = gameChatLifecycleEventId(gameId, 'recap', undefined, 'synthetic-next-show');
+      await markGameChatGenerationQueuedTx(nextId, db, room);
+      const replacement = { ...original, chatLine: 'A fresh accepted line.' };
+      expect(await sealGameRecap({ ...scope, eventId: nextId, recap: replacement })).toEqual(replacement);
+      expect(await db.gameEvent.count({ where: { commandKey: `${nextId}:accepted` } })).toBe(1);
+    } finally {
+      fence.mockRestore(); active.mockRestore(); vi.unstubAllEnvs();
+      await db.hostedRuntimeOwner.deleteMany({ where: { userId: room } });
+      await db.gameRecapAsset.deleteMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
+    }
+  });
   it.each([
     { purge: false, revoke: false }, { purge: true, revoke: false },
     { purge: false, revoke: true }, { purge: true, revoke: true },
@@ -805,6 +875,13 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       }
       await expect(handleRecapAdmission({ ...identity, material, command: { ...command, operationId: "seventh-image" } })).rejects.toMatchObject({ code: "recap_media_attempt_limit" });
       const files = [{ slot: "scene-0", receipt }];
+      // The same receipt/cast preflight runs without creating the frozen selection.
+      const invalidFiles = [{ slot: 'scene-0', receipt: { ...receipt, hash: 'f'.repeat(64) } }];
+      for (const validateOnly of [true, false]) await expect(prepareRecapSubmission({ ...identity, draft: { story: recap, files: invalidFiles }, validateOnly }))
+        .rejects.toMatchObject({ rejections: [expect.objectContaining({ rule: 'media_receipt_missing' })] });
+      await expect(prepareRecapSubmission({ ...identity, draft: { story: recap, files }, validateOnly: true })).resolves.toMatchObject({ validated: true });
+      expect(await db.gameEvent.count({ where: { commandKey: `${eventId}:selection` } })).toBe(0);
+
       await prepareRecapSubmission({ ...identity, draft: { story: recap, files } });
       await expect(prepareRecapSubmission({ ...identity, draft: { story: { ...recap, chatLine: "Changed" }, files } })).rejects.toMatchObject({ code: "recap_submission_frozen" });
       await expect(sealGameRecap({ ...scope, recap, files })).rejects.toThrow("not been uploaded");

@@ -128,7 +128,7 @@ it.each([false, true])('accepts a recap show through the production hosted Linux
       expect(fixture.saved[0]?.song).toBeUndefined();
     }
     expect(fixture.providerCalls.map(call => call.kind)).toEqual(['image', 'song']);
-    expect(fixture.phases).toEqual(['prepare', 'accept']);
+    expect(fixture.phases).toEqual(['preview', 'preview', 'prepare', 'accept']);
     expect(fixture.saved).toHaveLength(1);
     const intents = await listAssistantOutboxIntents(vault);
     expect(result.decision.kind).toBe('send_message');

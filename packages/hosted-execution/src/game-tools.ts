@@ -74,7 +74,7 @@ export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("game_photo"), origin: acceptedInputOrigin, photo: hostedGamePhotoSchema }).strict(),
   z.object({ action: z.literal("update_game"), origin: acceptedInputOrigin, update: hostedGameUpdateSchema }).strict(),
   z.object({ action: z.literal("write_recap"), origin: gameRecapOrigin, recap: gameRecapWriterSchema,
-    files: gameRecapDraftSchema.shape.files.optional(), phase: z.enum(["prepare", "accept"]).optional(),
+    files: gameRecapDraftSchema.shape.files.optional(), phase: z.enum(["preview", "prepare", "accept"]).optional(),
     usedTreatments: z.array(z.string().min(1).max(60)).max(1000).optional(),
     priorChatLines: z.array(z.string().max(160)).max(100) }).strict(),
 ]);

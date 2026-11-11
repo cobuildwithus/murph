@@ -1,3 +1,4 @@
+import { recapRejectionDetails } from '@murphai/contracts/recap-validation'
 import type { MediaFailureDetails } from './generated-media-failure.js'
 import { HostedCanonicalWriteOutcomeUnknownError } from '@murphai/core'
 import { AssistantWorkspaceArtifactMaterializationError } from '../assistant/execution-context.js'
@@ -15,7 +16,7 @@ import type {
 } from './dynamic-tools.js'
 
 /** Private metadata only. Never serialize this alongside model/RPC content. */
-export interface ToolFailureDiagnostic extends Partial<MediaFailureDetails> {
+export interface ToolFailureDiagnostic extends Partial<MediaFailureDetails>, Partial<ReturnType<typeof recapRejectionDetails>> {
   failureStage: 'admission' | 'execution' | 'result' | 'validation' | 'delivery'
   failureReason: ToolFailureReason
   errorCategory?: ToolErrorCategory
@@ -502,6 +503,7 @@ export function createDynamicToolRuntimeIssueInput(input: {
       summary: 'Tool input failed schema validation.',
       details: {
         ...validationDigest,
+        ...(['murph.write_recap', 'murph.preview_recap'].includes(validationDigest.toolName ?? '') ? recapRejectionDetails([{ rule: 'draft_schema', message: '' }]) : {}),
         ...toolFailureDiagnostic('invalid_input'),
         diagnosticRole: 'classification',
       },

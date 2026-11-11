@@ -1,3 +1,5 @@
+[Recap rejection diagnosis](exec-plans/active/2026-11-11-recap-show-diagnose.md) tracks shared preview validation, redacted transport evidence and silent regeneration recovery.
+
 [Recap real-provider recovery](exec-plans/completed/2026-11-11-recap-show-real-providers.md) tracks media validation, safe failure diagnostics and submission recovery.
 
 Shared reminder awareness is owned by the [assistant engine](../packages/assistant-engine/README.md) and [assistant runtime](../packages/assistant-runtime/README.md); the [execution plan](exec-plans/completed/2026-11-10-reminder-awareness.md) records the implementation and proof.

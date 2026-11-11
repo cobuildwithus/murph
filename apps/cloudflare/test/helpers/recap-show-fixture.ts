@@ -1,6 +1,6 @@
 import { expect } from 'vitest';
 import type { GameRecapStory, RecapFileReceipt } from '@murphai/contracts/recap-show';
-import { gameRecapToolResult, validateGameRecap } from '@murphai/contracts/recap-validation';
+import { gameRecapToolResult, validateGameRecap, formatRecapRejections } from '@murphai/contracts/recap-validation';
 import type { HostedGameToolResponse, HostedRuntimeGroupToolRequest } from '@murphai/hosted-execution/runtime-control';
 // Reuse the sanctioned live lane's synthetic media and real reservation/byte checks.
 import { createRecapShowLiveProviders } from '@murphai/assistant-engine/recap-show-testkit';
@@ -46,9 +46,10 @@ export async function createHostedRecapFixture(gameId: string, mediaFails = fals
       return response;
     }
     if (request.action !== 'write_recap') throw new Error('Unexpected synthetic action.');
-    const errors = validateGameRecap({ recap: request.recap, players: players.map(player => player.name), entries, result, chatMessages: chat, show: true });
-    if (errors.length) return { action: 'write_recap', result: { status: 'rejected', recapOutcome: gameRecapToolResult(errors) } };
+    const rejections = providers.validate({ story: request.recap, files: request.files ?? [] });
+    if (rejections.length) return { action: 'write_recap', result: { status: 'rejected', recapGame: { rejections }, recapOutcome: formatRecapRejections(rejections) } };
     phases.push(request.phase ?? 'missing');
+    if (request.phase === 'preview') return { action: 'write_recap', result: { status: 'ok', recapGame: { validated: true } } };
     if (request.phase === 'prepare') return { action: 'write_recap', result: { status: 'ok', recapGame: providers.prepare({ story: request.recap, files: request.files }) } };
     providers.accept();
     saved.push(request.recap);

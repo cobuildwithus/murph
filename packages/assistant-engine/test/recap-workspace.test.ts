@@ -41,6 +41,18 @@ describe('recap workspace material', () => {
     expect(exported.manifest).toMatchObject({ coverage: { incomplete: true, throughConversationLaneSeq: '205' } })
     expect(JSON.stringify(exported.manifest)).not.toContain(vault)
   })
+  it('materializes a production-shaped seven-day pair with all 300 messages and twenty photos', async () => {
+    const { createLongPairRecapFixture, createRecapShowLiveProviders } = await import('../src/recap-show-testkit.js')
+    const fixture = createLongPairRecapFixture(), providers = await createRecapShowLiveProviders(fixture)
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'recap-long-')); roots.push(vault)
+    const workspace = await materializeRecapWorkspace({ vault, gameId: 'synthetic', eventId: 'game-recap:synthetic', sessionId,
+      material: providers.material, lore: '', tool: { request: providers.control } })
+    const lines = (await readFile(path.join(workspace.root, 'inputs/chat.jsonl'), 'utf8')).trim().split('\n')
+    expect(lines).toHaveLength(300)
+    expect(providers.material.entries).toHaveLength(20)
+    expect(fixture.game.days).toHaveLength(7)
+    expect(JSON.stringify(fixture)).toContain('Céleste Marín 🌿')
+  })
   it('reports unavailable reply history and cannot import another session', async () => {
     const vault = await mkdtemp(path.join(os.tmpdir(), 'recap-replies-')); roots.push(vault)
     expect(await readCommittedRecapReplies(vault, sessionId, startedAt, settledAt)).toEqual({ messages: [], incomplete: true })

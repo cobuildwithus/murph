@@ -1,3 +1,4 @@
+import { MEDIA_TRANSPORT_NAMES, MEDIA_TRANSPORT_CODES, MEDIA_ELAPSED_BUCKETS, type MediaTransportDetails } from '@murphai/contracts/recap-admission'
 import { types } from 'node:util'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
@@ -5,7 +6,7 @@ import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failur
 const validationRules = ['image_byte_limit', 'image_format', 'image_dimensions', 'image_decode',
   'audio_byte_limit', 'audio_duration', 'audio_decode', 'invalid_response', 'credentials', 'reservation', 'receipt'] as const
 export type MediaValidationRule = typeof validationRules[number]
-export interface MediaFailureDetails {
+export interface MediaFailureDetails extends MediaTransportDetails {
   mediaFailureReason: MediaValidationRule | 'provider_http' | 'provider_timeout' | 'provider_transport' | 'unknown'
   mediaHttpStatusClass?: '4xx' | '5xx' | 'other'
   mediaTypeClass?: 'jpeg' | 'png' | 'webp' | 'mp3' | 'unknown'
@@ -21,8 +22,8 @@ export function mediaValidationError(rule: MediaValidationRule, bytes?: Uint8Arr
 
 /** Closed source-owned fields only: never copy messages, IDs, bodies or causes. */
 export function generatedMediaFailureDiagnostic(error: unknown): ToolFailureDiagnostic & MediaFailureDetails {
-  const base = toolFailureDiagnostic('handler_exception')
   const context = !types.isProxy(error) && error instanceof VaultCliError ? readOwn(error, 'context') : undefined
+  const base = { ...toolFailureDiagnostic('handler_exception'), ...readTransportDetails(context) }
   const code = readOwn(error, 'code')
   const rule = readOwn(context, 'mediaFailureReason')
   if (code === 'RECAP_MEDIA_VALIDATION_FAILED' && validationRules.some(known => known === rule)) {
@@ -33,6 +34,7 @@ export function generatedMediaFailureDiagnostic(error: unknown): ToolFailureDiag
     if (size) details.mediaSizeClass = size
     return { ...base, failureStage: 'validation', ...details }
   }
+  if (base.mediaTransportCode && base.mediaTransportCode !== 'unknown') return { ...base, mediaFailureReason: 'provider_transport' }
   const status = readOwn(context, 'status')
   if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599) return {
     ...base, mediaFailureReason: 'provider_http', mediaHttpStatusClass: status >= 500 ? '5xx' : status >= 400 ? '4xx' : 'other',
@@ -44,8 +46,9 @@ export function generatedMediaFailureDiagnostic(error: unknown): ToolFailureDiag
   return { ...base, mediaFailureReason: 'unknown' }
 }
 
-export function generatedMediaFailureResult(error: unknown) {
-  const failureDiagnostic = generatedMediaFailureDiagnostic(error)
+export function generatedMediaFailureResult(error: unknown, transport: MediaTransportDetails = {}) {
+  const base = generatedMediaFailureDiagnostic(error)
+  const failureDiagnostic = { ...base, ...transport, ...(base.mediaFailureReason === 'unknown' && transport.mediaTransportName ? { mediaFailureReason: 'provider_transport' as const } : {}) }
   return { rpcSuccess: false, failureDiagnostic,
     rpcText: `Media failed (${failureDiagnostic.mediaFailureReason}). Do not retry this failure class. Omit its receipt and finish a readable photo/text show. Before write_recap, omit an unavailable song. After submission starts, retry only the identical frozen draft without regenerating media.` }
 }
@@ -68,4 +71,13 @@ function classifyMediaType(bytes: Uint8Array): NonNullable<MediaFailureDetails['
 
 function readEnum<T extends string>(value: unknown, values: readonly T[]): T | undefined {
   return values.find(known => known === value)
+}
+
+function readTransportDetails(context: unknown): MediaTransportDetails {
+  const name = readEnum(readOwn(context, 'mediaTransportName'), MEDIA_TRANSPORT_NAMES)
+  const code = readEnum(readOwn(context, 'mediaTransportCode'), MEDIA_TRANSPORT_CODES)
+  const elapsed = readEnum(readOwn(context, 'mediaElapsedMsBucket'), MEDIA_ELAPSED_BUCKETS)
+  const headers = readOwn(context, 'mediaResponseHeadersReceived')
+  return { ...(name ? { mediaTransportName: name } : {}), ...(code ? { mediaTransportCode: code } : {}),
+    ...(elapsed ? { mediaElapsedMsBucket: elapsed } : {}), ...(typeof headers === 'boolean' ? { mediaResponseHeadersReceived: headers } : {}) }
 }

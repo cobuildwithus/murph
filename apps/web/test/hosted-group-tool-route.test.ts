@@ -1,3 +1,4 @@
+import { RecapRejectionError } from '@murphai/contracts/recap-validation';
 import { RecapControlError } from '@murphai/contracts/recap-admission';
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
@@ -110,6 +111,18 @@ describe("hosted group tool route", () => {
     expect(await response.json()).toMatchObject({ action: "read_game", result: {
       status: "rejected", error: code, recapOutcome: new RecapControlError(code).message,
     } });
+  });
+
+  it.each(['preview', 'prepare'] as const)('returns the same actionable media rejection for %s', async phase => {
+    const body = { action: 'write_recap', origin: { kind: 'game_recap', gameId: 'synthetic-game', eventId: 'game-recap:synthetic-game' },
+      phase, files: [], priorChatLines: [], recap: { pages: [], chatLine: 'Synthetic line.' } };
+    const rejections = [{ rule: 'identity_reference' as const, message: 'Each cast member needs a permitted identity reference. Omit the receipt before submission.' }];
+    mocks.handleTool.mockRejectedValue(new RecapRejectionError(rejections));
+    const response = await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`, {
+      method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json' },
+    }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ result: { status: 'rejected', error: 'identity_reference', recapGame: { rejections } } });
   });
 
   it("forwards the signed runtime identity for the recap write fence", async () => {

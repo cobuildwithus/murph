@@ -1,3 +1,5 @@
+import * as z from '@murphai/contracts/zod-runtime'
+import { RecapRejectionError, recapRejectionsSchema } from '@murphai/contracts/recap-validation'
 import type { RecapFileReceipt } from '@murphai/contracts/recap-show'
 import { readRecapFile } from './recap-files.js'
 import { previewRecap, readRecapDraftFile } from './recap-preview.js'
@@ -5,7 +7,7 @@ import { createRecapMediaRuntime } from './recap-media-runtime.js'
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
 import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
 import type { GenerateSongToolArgs } from '../assistant-codex/generate-voice-memo-tool.js'
-import { appendRecapUsage, replaceRecapNarrative, type RecapUsage } from './game-recap-lore.js'
+import { readRecapUsages, appendRecapUsage, replaceRecapNarrative, type RecapUsage } from './game-recap-lore.js'
 import { fetchRecapReference, materializeRecapReference, materializeRecapWorkspace } from './recap-workspace.js'
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import { createHash } from 'node:crypto'
@@ -655,7 +657,7 @@ export function createAssistantHostedToolContext(input: {
     readGameRecapMedia: async receipt => {
       if (!executionContext?.gameRecapScope?.show || !recapWorkspace) throw new Error('Read recap material first.')
       const bytes = await readRecapFile({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, recapWorkspace.root), file: receipt.path, maxBytes: 2 * 1024 * 1024 })
-      if (bytes.length !== receipt.byteLength || createHash('sha256').update(bytes).digest('hex') !== receipt.hash) throw new Error('Selected recap media changed.')
+      if (bytes.length !== receipt.byteLength || createHash('sha256').update(bytes).digest('hex') !== receipt.hash) throw new RecapRejectionError([{ rule: 'media_integrity', message: 'Selected bytes changed. Restore the original file and unchanged receipt before retrying.' }])
       return bytes.toString('base64')
     },
     materializeGameRecapReferences: async ids => {
@@ -673,7 +675,17 @@ export function createAssistantHostedToolContext(input: {
       if (!scope?.show || !workspace || !tool) throw new Error('Read recap material first.')
       const material = workspace.material
       return previewRecap({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, workspace.root),
-        draftPath, material, chat: workspace.chat, lore: await readGameLore(), photo: async entryId => {
+        draftPath, material, chat: workspace.chat, lore: await readGameLore(), validateDraft: async draft => {
+          const usages = readRecapUsages(await readGameLore())
+          const response = await tool.request({ action: 'write_recap', origin: { kind: 'game_recap', gameId: scope.gameId, eventId: scope.eventId },
+            phase: 'preview', recap: draft.story, files: draft.files, priorChatLines: usages.map(usage => usage.chatLine).slice(-100), usedTreatments: usages.map(usage => usage.treatment).slice(-1000) })
+          if (response.action !== 'write_recap') throw new Error('Wrong recap preflight response.')
+          if (response.result.status === 'ok') return []
+          const parsed = z.object({ rejections: recapRejectionsSchema }).safeParse(response.result.recapGame)
+          if (parsed.success) return parsed.data.rejections
+          throw new RecapRejectionError([{ rule: response.result.error === 'recap_submission_frozen' ? 'frozen_mismatch' : 'authority_unavailable',
+            message: response.result.recapOutcome ?? 'Recap preflight authority is unavailable. Retry preview before submitting.' }])
+        }, photo: async entryId => {
           const ref = material.references.find(reference => reference.entryId === entryId)
           return ref ? (await fetchRecapReference({ ...scope, id: ref.id, material, tool })).bytes : null
         } })

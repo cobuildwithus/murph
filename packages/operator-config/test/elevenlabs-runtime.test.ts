@@ -506,3 +506,40 @@ test('elevenlabs runtime tolerates a non-JSON error body', async () => {
     error.context?.responseBodyTextLength === 24
   )
 })
+
+test.each(['UND_ERR_HEADERS_TIMEOUT', 'ECONNRESET', 'WORKER_SUBREQUEST_LIMIT'])('music preserves the redacted transport cause %s through the SDK', async code => {
+  const onFailure = vi.fn()
+  await expect(generateElevenLabsMusic({ apiKey: 'synthetic-test-key', forceInstrumental: false, modelId: ELEVENLABS_MUSIC_MODEL_ID, outputFormat: ELEVENLABS_MUSIC_OUTPUT_FORMAT, durationMs: 20_000, prompt: 'Synthetic laundry song', onFailure,
+    fetchImplementation: async () => {
+      if (code === 'WORKER_SUBREQUEST_LIMIT') return Response.json({ detail: { code: 'MURPH_MEDIA_TRANSPORT_FAILED' } }, { status: 502,
+        headers: { 'x-murph-media-transport-code': code, 'x-murph-media-transport-name': 'Error' } })
+      throw new TypeError('Private synthetic provider content', { cause: Object.assign(new Error('Private cause'), { code }) })
+    },
+  })).rejects.toBeInstanceOf(VaultCliError)
+  expect(onFailure).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ mediaTransportCode: code,
+    mediaResponseHeadersReceived: false, mediaElapsedMsBucket: 'lt_1s' }))
+  expect(JSON.stringify(onFailure.mock.calls)).not.toMatch(/Private|synthetic-test-key/)
+})
+
+test('music waits for 90-second headers then consumes a delayed body inside its five-minute deadline', async () => {
+  vi.useFakeTimers()
+  const onFailure = vi.fn()
+  const generation = generateElevenLabsMusic({ apiKey: 'synthetic-test-key', forceInstrumental: false, modelId: ELEVENLABS_MUSIC_MODEL_ID, outputFormat: ELEVENLABS_MUSIC_OUTPUT_FORMAT, durationMs: 20_000, prompt: 'Synthetic laundry song', onFailure,
+    fetchImplementation: async () => {
+      await new Promise(resolve => setTimeout(resolve, 90_000))
+      return new Response(new ReadableStream({ start(controller) { setTimeout(() => { controller.enqueue(musicAudio); controller.close() }, 30_000) } }), { headers: { 'content-type': 'audio/mpeg' } })
+    },
+  })
+  await vi.advanceTimersByTimeAsync(120_000)
+  await expect(generation).resolves.toMatchObject({ bytes: musicAudio, contentType: 'audio/mpeg' })
+  expect(onFailure).not.toHaveBeenCalled()
+})
+
+test('music records body transport failures after headers without recording provider text', async () => {
+  const onFailure = vi.fn()
+  await expect(generateElevenLabsMusic({ apiKey: 'synthetic-test-key', forceInstrumental: false, modelId: ELEVENLABS_MUSIC_MODEL_ID, outputFormat: ELEVENLABS_MUSIC_OUTPUT_FORMAT, durationMs: 20_000, prompt: 'Synthetic laundry song', onFailure,
+    fetchImplementation: async () => new Response(new ReadableStream({ start(controller) { controller.error(Object.assign(new Error('Private body text'), { code: 'UND_ERR_BODY_TIMEOUT' })) } })),
+  })).rejects.toBeInstanceOf(VaultCliError)
+  expect(onFailure).toHaveBeenCalledWith(expect.objectContaining({ mediaTransportCode: 'UND_ERR_BODY_TIMEOUT', mediaResponseHeadersReceived: true }))
+  expect(JSON.stringify(onFailure.mock.calls)).not.toContain('Private')
+})

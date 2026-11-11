@@ -1,3 +1,4 @@
+import { validateGameRecapDetailed, validateRecapFileSelection, RecapRejectionError } from '@murphai/contracts/recap-validation'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import sharp from 'sharp'
@@ -45,9 +46,14 @@ export async function createRecapShowLiveProviders(input: {
   let state: RecapAdmissionState = { v: 1, deadline: new Date(Date.now() + RECAP_DEADLINE_MS).toISOString(), runs: [], operations: [] }
   const reservations = new Map<string, { id: string; descriptor: RecapProviderRequest; consumed: boolean }>()
   const receipts = new Map<string, RecapFileReceipt>()
+  const operationReferences = new Map<string, RecapMaterial['references']>()
   const staged = new Set<string>()
   const providerCalls: RecapProviderRequest[] = []
   let frozen: GameRecapDraft | null = null
+  const transcriptPage = (after?: string) => {
+    const start = Number(after ?? 0), messages = chat.slice(start, start + 200)
+    return { messages, next: start + messages.length < chat.length ? String(start + messages.length) : null, through: String(chat.length), since: startedAt, until: settledAt, retainedSince: startedAt, incomplete: false }
+  }
   const control = async (request: HostedRuntimeGroupToolRequest): Promise<HostedGameToolResponse> => {
     if (request.action !== 'read_game') throw new Error('Expected a synthetic recap read.')
     const command = request.recapRead
@@ -58,7 +64,7 @@ export async function createRecapShowLiveProviders(input: {
       state = { ...state, runs: [...state.runs, command.runId] }
       recapGame = { admitted: true, runId: command.runId, token: 'a'.repeat(64), deadline: state.deadline }
     } else if (command.kind === 'end') recapGame = { ended: true }
-    else if (command.kind === 'transcript') recapGame = { messages: chat, next: null, through: String(chat.length), since: startedAt, until: settledAt, retainedSince: startedAt, incomplete: false }
+    else if (command.kind === 'transcript') recapGame = transcriptPage(command.after)
     else if (command.kind === 'reference') {
       const bytes = photos.get(command.id)
       if (!bytes) throw new Error('Unknown synthetic photo.')
@@ -69,6 +75,7 @@ export async function createRecapShowLiveProviders(input: {
       requireReferenceHashes(photos, descriptor, command.referenceIds)
       state = reserveRecapOperation(state, { id: command.operationId, runId: command.runId, request: descriptor,
         reserved: recapReservationMicrodollars(descriptor), now: new Date() })
+      operationReferences.set(command.operationId, (command.referenceIds ?? []).map(id => references.find(reference => reference.id === id)!))
       const token = hash(command.operationId)
       reservations.set(token, { id: command.operationId, descriptor, consumed: false })
       recapGame = { token, deadline: state.deadline }
@@ -91,15 +98,21 @@ export async function createRecapShowLiveProviders(input: {
     const reservation = reservations.get(request.headers.get('x-murph-recap-reservation') ?? '')
     if (!reservation || reservation.consumed || descriptor.requestHash !== reservation.descriptor.requestHash) throw new Error('Synthetic provider rejected unreserved media.')
     reservation.consumed = true
+    state.operations.find(operation => operation.id === reservation.id)!.consumed = true
     providerCalls.push(descriptor)
     if (input.mediaFetch) return input.mediaFetch(url, init)
     return descriptor.kind === 'song' ? new Response(song, { headers: { 'content-type': 'audio/mpeg' } })
       : Response.json({ data: [{ b64_json: image.toString('base64') }], usage: { input_tokens: 100, output_tokens: 100, total_tokens: 200 } })
   }
-  return { material, control, providerFetch, providerCalls,
+  const validate = (draft: GameRecapDraft) => [
+    ...validateGameRecapDetailed({ recap: draft.story, players: material.players, entries: material.entries, result: material.result, chatMessages: input.chat, show: true }),
+    ...validateRecapFileSelection({ draft, players: input.players, operations: state.operations.map(operation => ({ ...operation, receipt: receipts.get(operation.id), references: operationReferences.get(operation.id) ?? [] })) }),
+  ]
+  return { material, control, providerFetch, providerCalls, validate,
     prepare(draft: unknown) {
       const parsed = gameRecapDraftSchema.parse(draft)
-      for (const file of parsed.files) if (JSON.stringify(receipts.get(file.receipt.operationId)) !== JSON.stringify(file.receipt)) throw new Error('Unknown provider receipt.')
+      const errors = validate(parsed)
+      if (errors.length) throw new RecapRejectionError(errors)
       if (frozen && JSON.stringify(frozen) !== JSON.stringify(parsed)) throw new Error('Frozen draft changed.')
       frozen = parsed
       return { prepared: true }
@@ -115,3 +128,23 @@ export async function createRecapShowLiveProviders(input: {
 export { createRecapMediaRuntime, recapRunAdmissionSchema } from './assistant/recap-media-runtime.js'
 export { materializeRecapWorkspace } from './assistant/recap-workspace.js'
 export { executeGenerateSongTool } from './assistant-codex/generate-voice-memo-tool.js'
+
+/** Deliberately synthetic, production-shaped long pair game: pagination, replacement photos and opaque names. */
+export function createLongPairRecapFixture() {
+  const players = [{ memberId: 'player_first', name: 'Céleste Marín 🌿', task: '10 minutes of abs' }, { memberId: 'player_second', name: 'Noé Dupré', task: '100 pushups' }]
+  const entries = Array.from({ length: 20 }, (_, index) => ({ entryId: `synthetic-photo-${index}`, kind: 'photo',
+    playerName: players[index % 2]!.name, text: index % 2 ? 'Pushups beside the laundry basket' : 'Purple mat, still here', visibleToBoth: true }))
+  const days = Array.from({ length: 7 }, (_, day) => ({ dayNumber: day + 1,
+    posts: Object.fromEntries(players.map((player, seat) => [player.name, day === 3 && seat === 1 ? 'missed' : {
+      entryId: entries[day * 2 + seat]!.entryId, kind: 'photo', text: entries[day * 2 + seat]!.text,
+      postedAt: { local: `2026-10-${String(day + 12)}T${day === 5 ? '23:57' : '08:12'}:00`, timeZone: 'America/New_York', instant: `2026-10-${String(day + 12)}T12:12:00Z` },
+      data: null, incomplete: false, proveIt: null,
+    }])) }))
+  const chat = Array.from({ length: 300 }, (_, index) => ({ playerName: players[index % 2]!.name,
+    text: index === 135 ? 'The laundry basket is my personal trainer.' : index === 140 ? 'I folded the towel instead of doing pushups.'
+      : index % 19 === 0 ? '[Voice note: no transcript available]' : index % 17 === 0 ? 'Route idea: https://example.test/walk 🌳'
+        : index % 11 === 0 ? 'Mat report: still purple 🟣' : `Day ${Math.min(7, Math.floor(index / 43) + 1)} check-in chat, message ${index + 1}.` }))
+  const result = players.map((player, index) => ({ memberId: player.memberId, name: player.name, score: 7 - index }))
+  return { players, entries, chat, result, game: { id: 'game_recap_synthetic', recapShow: true, maxPlayers: 2, players, lengthDays: 7,
+    schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize', item: 'breakfast in bed' }], score: result, days } }
+}

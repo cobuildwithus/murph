@@ -50,3 +50,13 @@ test('request admission hashes final prompts, settings and ordered reference byt
   form.append('image[]', new Blob(['synthetic reference'], { type: 'image/jpeg' }), 'photo.jpg')
   expect(await inspectRecapProviderRequest(new Request('https://api.openai.com/v1/images/edits', { method: 'POST', body: form }))).toMatchObject({ kind: 'image', referenceHashes: [expect.stringMatching(/^[a-f0-9]{64}$/u)] })
 })
+
+
+test('classifies DOM aborts and bounded causes without copying arbitrary names, messages or getters', async () => {
+  const { readMediaTransportError, mediaElapsedBucket } = await import('../src/recap-admission.js');
+  expect(readMediaTransportError(new DOMException('Private synthetic reason', 'AbortError'))).toMatchObject({ mediaTransportName: 'AbortError' });
+  expect(readMediaTransportError(new TypeError('private', { cause: Object.assign(new Error('private'), { code: 'ECONNRESET' }) }))).toMatchObject({ mediaTransportCode: 'ECONNRESET' });
+  expect(readMediaTransportError({ name: 'private name', code: 'private code', message: 'private message' })).toEqual({ mediaTransportName: 'unknown', mediaTransportCode: 'unknown' });
+  expect(readMediaTransportError({ get name() { throw new Error('Must not run'); } })).toEqual({ mediaTransportName: 'unknown', mediaTransportCode: 'unknown' });
+  expect([500, 1500, 40_000, 100_000, 300_000].map(mediaElapsedBucket)).toEqual(['lt_1s', '1_30s', '30_90s', '90_300s', 'ge_300s']);
+});

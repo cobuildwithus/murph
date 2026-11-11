@@ -53,3 +53,24 @@ describe("receipt times in frozen player zones", () => {
     expect(gameLocalDate(new Date(stamp), zone)).toBe(date);
   });
 });
+
+it('preserves accented, multiword and emoji names without disabling copy bans', () => {
+  const names = ['Céleste Marín 🌿', 'He'];
+  const candidate = structuredClone(recap);
+  for (const page of candidate.pages) for (const block of page.blocks) if (block.scene) block.scene.cast = names;
+  candidate.chatLine = 'Céleste Marín 🌿 won 7–6. He folded the towel.';
+  candidate.pages[2].blocks[0].text = 'He folded the towel';
+  const input = { recap: candidate, players: names, show: true, entries: [] };
+  expect(validateGameRecap(input)).toEqual([]);
+  candidate.pages[2].blocks[0].text = 'He left his towel 🧺';
+  expect(validateGameRecap(input)).toEqual(expect.arrayContaining([expect.stringContaining('he/she/him/her'), expect.stringContaining('no emoji')]));
+});
+
+it('does not reject a repeated multiword accented name as repeated authored copy', () => {
+  const candidate = structuredClone(recap);
+  candidate.chatLine = 'The game ended in a tie 3–3. Céleste Marín Dupré balanced the tray.';
+  const names = ['Céleste Marín Dupré', 'Noé'];
+  for (const page of candidate.pages) for (const block of page.blocks) if (block.scene) block.scene.cast = names;
+  expect(validateGameRecap({ recap: candidate, players: names, show: true, entries: [],
+    priorChatLines: ['Céleste Marín Dupré carried the mat.'] })).toEqual([]);
+});

@@ -1,3 +1,4 @@
+import { readMediaTransportError, mediaElapsedBucket, MEDIA_TRANSPORT_NAMES, MEDIA_TRANSPORT_CODES, type MediaTransportDetails } from '@murphai/contracts/recap-admission'
 import type { ElevenLabsClient } from '@elevenlabs/elevenlabs-js'
 
 import type {
@@ -140,6 +141,7 @@ export async function generateElevenLabsMusic(input: {
   outputFormat: typeof ELEVENLABS_MUSIC_OUTPUT_FORMAT
   prompt: string
   signal?: AbortSignal
+  onFailure?: (details: MediaTransportDetails) => void
 }): Promise<GenerateElevenLabsAudioResult> {
   const prompt = normalizeRequiredElevenLabsString(input.prompt, 'music prompt')
   if (prompt.length > 4100) {
@@ -184,6 +186,7 @@ export async function generateElevenLabsMusic(input: {
       ),
     signal: input.signal,
     timeoutMs: ELEVENLABS_MUSIC_TIMEOUT_MS,
+    onFailure: input.onFailure,
   })
 }
 
@@ -226,6 +229,9 @@ interface ElevenLabsRequestDiagnostics {
   errorBodyText: string | null
   requestId: string | null
   responseTooLarge: boolean
+  transportError?: unknown
+  responseHeadersReceived: boolean
+  workerTransport?: MediaTransportDetails
 }
 
 async function requestElevenLabsAudio(input: {
@@ -238,6 +244,7 @@ async function requestElevenLabsAudio(input: {
   ) => Promise<ReadableStream<Uint8Array>>
   signal?: AbortSignal
   timeoutMs: number
+  onFailure?: (details: MediaTransportDetails) => void
 }): Promise<GenerateElevenLabsAudioResult> {
   const apiKey = normalizeRequiredElevenLabsString(input.apiKey, 'api key')
   const fetchImplementation =
@@ -261,6 +268,7 @@ async function requestElevenLabsAudio(input: {
     errorBodyText: null,
     requestId: null,
     responseTooLarge: false,
+    responseHeadersReceived: false,
   }
   const client = new ElevenLabsClient({
     apiKey,
@@ -288,6 +296,10 @@ async function requestElevenLabsAudio(input: {
       filenameExtension: 'mp3',
     }
   } catch (error) {
+    const transportDetails = { ...readMediaTransportError(diagnostics.transportError ?? error),
+      ...diagnostics.workerTransport, mediaElapsedMsBucket: mediaElapsedBucket(Date.now() - startedAtMs),
+      mediaResponseHeadersReceived: diagnostics.responseHeadersReceived }
+    input.onFailure?.(transportDetails)
     if (input.signal?.aborted) {
       throw timeout.signal.reason ?? error
     }
@@ -331,6 +343,7 @@ async function requestElevenLabsAudio(input: {
         {
           elapsedMs: Date.now() - startedAtMs,
           failureStage: 'http',
+          ...transportDetails,
           operation: input.operation,
           provider: 'elevenlabs',
           providerErrorCode: responseBody.code,
@@ -353,6 +366,7 @@ async function requestElevenLabsAudio(input: {
       {
         elapsedMs: Date.now() - startedAtMs,
         failureStage: 'transport',
+        ...transportDetails,
         operation: input.operation,
         provider: 'elevenlabs',
         retryable: true,
@@ -365,6 +379,14 @@ async function requestElevenLabsAudio(input: {
   } finally {
     timeout.cleanup()
   }
+}
+
+function recordElevenLabsTransportResponse(headers: Parameters<typeof readResponseHeader>[0], diagnostics: ElevenLabsRequestDiagnostics): void {
+    const workerCode = readResponseHeader(headers, 'x-murph-media-transport-code')
+    const workerName = readResponseHeader(headers, 'x-murph-media-transport-name')
+    const code = MEDIA_TRANSPORT_CODES.find(value => value === workerCode)
+    diagnostics.responseHeadersReceived = !code
+    if (code) diagnostics.workerTransport = { mediaTransportCode: code, mediaTransportName: MEDIA_TRANSPORT_NAMES.find(value => value === workerName) ?? 'unknown' }
 }
 
 function createElevenLabsSdkFetch(
@@ -384,7 +406,8 @@ function createElevenLabsSdkFetch(
         redirect: 'error',
         signal: init?.signal ?? request?.signal ?? undefined,
       },
-    )
+    ).catch(error => { diagnostics.transportError = error; throw error })
+    recordElevenLabsTransportResponse(response.headers, diagnostics)
 
     if (response instanceof Response) {
       if (!response.ok) {

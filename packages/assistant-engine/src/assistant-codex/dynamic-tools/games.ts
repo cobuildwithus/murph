@@ -1,3 +1,4 @@
+import { RecapRejectionError, recapRejectionsSchema, recapRejectionDetails, recapSchemaRejections, formatRecapRejections, type RecapRejection } from '@murphai/contracts/recap-validation'
 import { type GameRecapDraft, gameRecapDraftSchema } from '@murphai/contracts/recap-show'
 import { readRecapUsages, recapUsageSchema } from '../../assistant/game-recap-lore.js'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -165,13 +166,13 @@ async function executeTrustedGameRecapTool(input: { request: GameDynamicRequest;
       ? await executeTrustedGameRecapRead({ origin, tool, context: input.context, referenceIds: input.request.referenceIds })
       : await executeTrustedGameRecapWrite({ context: input.context, origin, recap: input.request.recap, tool })
   } catch (error) {
-    return toolTextResult(false, 'The recap action could not be confirmed. Read the game and fix every reported problem before trying again.', 'handler_exception', error)
+    return input.request.action === 'write_recap' ? recapExceptionResult(error, { rule: 'submission_unconfirmed', message: 'Submission was not confirmed. Retry the identical draft.' }) : toolTextResult(false, 'The recap action could not be confirmed. Read the game and fix every reported problem before trying again.', 'handler_exception', error)
   }
 }
 
 function unavailableGameRecapToolResult(action: 'read_game' | 'write_recap'): ReturnType<typeof toolTextResult> | null {
   return action === 'write_recap'
-    ? toolTextResult(false, 'write_recap is available only in the bound game recap turn.', 'authority_rejected')
+    ? recapRejectedResult([{ rule: 'authority_unavailable', message: 'write_recap is available only in the bound game recap turn. Stop this generation.' }])
     : null
 }
 
@@ -213,12 +214,13 @@ async function executeTrustedGameRecapWrite(input: {
     .concat(show ? readRecapUsages(lore).map(usage => usage.chatLine) : [])
     .slice(-100)
   const result = await input.tool.request({ action: 'write_recap', origin: input.origin, recap: input.recap, priorChatLines, ...(show ? { usedTreatments: readRecapUsages(lore).map(usage => usage.treatment) } : {}) })
+  if (result.action !== 'write_recap') throw new Error('Wrong recap response.')
   const payload = result.result
   if ('recapOutcome' in payload) await recordAcceptedRecap(input, payload, show)
   const output = 'recapOutcome' in payload && typeof payload.recapOutcome === 'string'
     ? payload.recapOutcome
     : JSON.stringify(result)
-  return toolTextResult(true, output)
+  return payload.status === 'ok' ? toolTextResult(true, output) : rejectedRecapResult(payload)
 }
 
 export async function recordAcceptedRecap(input: { context: AssistantHostedToolContext | null; origin: { gameId: string; eventId: string } }, payload: HostedGameToolResponse['result'], show: boolean): Promise<void> {
@@ -302,7 +304,7 @@ export async function executeGameTool(input: { request: GameDynamicRequest; cont
   if (input.request.action === 'game_lore') return executeGameLoreTool({ ...input, request: input.request })
   const recapResult = await executeTrustedGameRecapTool(input)
   if (recapResult) return recapResult
-  if (input.request.action === 'write_recap') return toolTextResult(false, 'write_recap is available only in the bound game recap turn.', 'authority_rejected')
+  if (input.request.action === 'write_recap') return recapRejectedResult([{ rule: 'authority_unavailable', message: 'write_recap is available only in the bound game recap turn. Stop this generation.' }])
   if (input.request.action === 'read_game') {
     const scheduledRead = await executeScheduledGameRead(input.context)
     if (scheduledRead) return scheduledRead
@@ -330,7 +332,7 @@ async function executeRecapFileWrite(input: { context: AssistantHostedToolContex
   const context = input.context
   const scope = context?.currentGameRecapScope?.()
   const tool = context?.groupTool
-  if (!scope?.show || !tool || !context?.readGameRecapDraft || !context.readGameRecapMedia) return toolTextResult(false, 'File submission requires a bound pair show.', 'authority_rejected')
+  if (!scope?.show || !tool || !context?.readGameRecapDraft || !context.readGameRecapMedia) return recapRejectedResult([{ rule: 'authority_unavailable', message: 'File submission requires a bound pair show. Stop this generation.' }])
   try {
     const draft = gameRecapDraftSchema.parse(await context.readGameRecapDraft(input.draftPath))
     const lore = await context.readGameLore?.() ?? ''
@@ -346,14 +348,14 @@ async function executeRecapFileWrite(input: { context: AssistantHostedToolContex
       await recordAcceptedRecap({ context, origin }, prepared.result, true)
       return toolTextResult(true, prepared.result.recapOutcome ?? 'ok')
     }
-    if (prepared.result.status !== 'ok') return toolTextResult(true, prepared.result.recapOutcome ?? JSON.stringify(prepared.result))
+    if (prepared.result.status !== 'ok') return rejectedRecapResult(prepared.result)
     await stageSelectedRecapFiles(tool, origin, selected)
     const accepted = await tool.request({ ...request, phase: 'accept' })
     if (accepted.action !== 'write_recap') throw new Error('Wrong recap acceptance response.')
     await recordAcceptedRecap({ context, origin }, accepted.result, true)
-    return toolTextResult(true, accepted.result.recapOutcome ?? JSON.stringify(accepted.result))
+    return accepted.result.status === 'ok' ? toolTextResult(true, accepted.result.recapOutcome ?? 'ok') : rejectedRecapResult(accepted.result)
   } catch (error) {
-    return toolTextResult(false, 'Submission was not confirmed. Retry the same local draft; do not regenerate media.', 'handler_exception', error)
+    return recapExceptionResult(error, { rule: 'submission_unconfirmed', message: 'Submission was not confirmed. Retry the identical local draft and receipts; do not regenerate media.' })
   }
 }
 
@@ -370,12 +372,14 @@ async function prepareRecapReadResult(context: AssistantHostedToolContext, resul
 }
 
 async function executeRecapPreview(context: AssistantHostedToolContext | null, draftPath: string) {
-    if (!context?.currentGameRecapScope?.()?.show || !context.previewGameRecap) return toolTextResult(false, 'Preview requires a bound pair show.', 'authority_rejected')
-    try { return toolTextResult(true, JSON.stringify(await context.previewGameRecap(draftPath))) }
-    catch (error) {
-      const { RecapDraftValidationError } = await import('../../assistant/recap-preview.js')
-      return toolTextResult(false, error instanceof RecapDraftValidationError ? error.message
-        : 'Preview failed. Check the selected file paths, hashes and image formats.', 'invalid_result', error)
+    if (!context?.currentGameRecapScope?.()?.show || !context.previewGameRecap) return recapRejectedResult([{ rule: 'authority_unavailable', message: 'Preview requires a bound pair show. Stop this generation.' }])
+    try {
+      const preview = await context.previewGameRecap(draftPath)
+      const parsed = z.object({ valid: z.boolean(), rejections: recapRejectionsSchema }).safeParse(preview)
+      return parsed.success && !parsed.data.valid ? recapRejectedResult(parsed.data.rejections, JSON.stringify(preview))
+        : toolTextResult(true, JSON.stringify(preview))
+    } catch (error) {
+      return recapExceptionResult(error, { rule: 'preview_unconfirmed', message: 'Preview failed. Check draft and selected file paths and retry the preview before submitting.' })
     }
 }
 
@@ -383,6 +387,27 @@ async function stageSelectedRecapFiles(tool: NonNullable<AssistantHostedToolCont
   origin: { kind: 'game_recap'; gameId: string; eventId: string }, selected: { receipt: GameRecapDraft['files'][number]['receipt']; bytes: string }[]) {
     for (const file of selected) {
       const staged = await tool.request({ action: 'read_game', origin, recapRead: { kind: 'stage', receipt: file.receipt, bytes: file.bytes } })
-      if (staged.result.status !== 'ok') throw new Error('Selected media upload was not confirmed.')
+      if (staged.action !== 'read_game') throw new Error('Wrong recap stage response.')
+      if (staged.result.status !== 'ok') {
+        const parsed = z.object({ rejections: recapRejectionsSchema }).safeParse(staged.result.recapGame)
+        throw new RecapRejectionError(parsed.success ? parsed.data.rejections : [{ rule: 'submission_unconfirmed', message: 'Media upload was not confirmed. Retry the identical frozen draft and receipts.' }])
+      }
     }
+}
+
+function recapRejectedResult(rejections: RecapRejection[], text = formatRecapRejections(rejections)) {
+  const result = toolTextResult(false, text, 'invalid_result')
+  return { ...result, failureDiagnostic: { ...result.failureDiagnostic!, ...recapRejectionDetails(rejections) } }
+}
+function recapExceptionResult(error: unknown, fallback: RecapRejection) {
+  const rejections = error instanceof RecapRejectionError ? error.rejections
+    : error instanceof z.ZodError ? recapSchemaRejections(error.issues) : [fallback]
+  return recapRejectedResult(rejections)
+}
+function rejectedRecapResult(payload: HostedGameToolResponse['result']) {
+  const parsed = z.object({ rejections: recapRejectionsSchema }).safeParse(payload.recapGame)
+  if (parsed.success && parsed.data.rejections.length) return recapRejectedResult(parsed.data.rejections)
+  const rule = payload.error === 'recap_submission_frozen' ? 'frozen_mismatch'
+    : payload.error === 'recap_media_attempt_limit' ? 'media_attempt_limit' : 'authority_unavailable'
+  return recapRejectedResult([{ rule, message: payload.recapOutcome ?? 'Recap authority is unavailable. Stop this generation; the host will recover it.' }])
 }

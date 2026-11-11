@@ -60,13 +60,14 @@ export async function readGameRecapEntryIdsTx(tx: Prisma.TransactionClient, game
 }
 
 export const GAME_RECAP_RETIRED = "game_recap_retired";
+export const GAME_RECAP_REGENERATION_FAILED = "game_recap_regeneration_failed";
 
 /** Only published, unclaimed work. Claimed provider work keeps its uncertainty; unpublished work exposed nothing and gets a clean witness. */
-async function retireGameRecapGenerationTx(tx: Prisma.TransactionClient, eventId: string): Promise<void> {
+export async function retireGameRecapGenerationTx(tx: Prisma.TransactionClient, eventId: string, reason = GAME_RECAP_RETIRED): Promise<void> {
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(eventId);
   if (!idempotencyKey) return;
   await tx.hostedLinqDelivery.updateMany({ where: { idempotencyKey, source: "game_lifecycle", template: "game_recap", status: "generation_queued" },
-    data: { status: "skipped", skippedAt: new Date(), skipReason: GAME_RECAP_RETIRED, retryAfterAt: null } });
+    data: { status: "skipped", skippedAt: new Date(), skipReason: reason, retryAfterAt: null } });
 }
 
 /** The check, and retirement when it fails. The caller holds the game row lock. */
@@ -82,7 +83,7 @@ export async function isGameRecapGenerationRetired(db: Prisma.TransactionClient,
   if (!idempotencyKey) return false;
   return Boolean(await db.hostedLinqDelivery.findFirst({ where: {
     idempotencyKey, source: "game_lifecycle", template: "game_recap", status: "skipped", payloadOwnerMemberId: roomId,
-    skipReason: { in: [GAME_RECAP_RETIRED, GAME_CHAT_BLOCKED] },
+    skipReason: { in: [GAME_RECAP_RETIRED, GAME_RECAP_REGENERATION_FAILED, GAME_CHAT_BLOCKED] },
   }, select: { skipReason: true } }));
 }
 

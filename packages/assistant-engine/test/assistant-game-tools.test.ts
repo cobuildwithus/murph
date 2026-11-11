@@ -627,7 +627,7 @@ it('retries the identical frozen file draft after staging fails and records only
   const call = () => executeGameTool({ context: ctx, request: { action: 'write_recap_file', draftPath: 'drafts/show.json' } })
   const failed = await call()
   expect(failed.rpcResult.success).toBe(false)
-  expect(failed.rpcResult.contentItems[0]?.text).toContain('Retry the same local draft; do not regenerate media')
+  expect(failed.rpcResult.contentItems[0]?.text).toContain('Retry the identical local draft and receipts; do not regenerate media')
   expect(record).not.toHaveBeenCalled()
   expect((await call()).rpcResult.success).toBe(true)
   expect((await call()).rpcResult.success).toBe(true)
@@ -635,4 +635,36 @@ it('retries the identical frozen file draft after staging fails and records only
   expect(drafts[0]).toEqual(draft)
   expect(drafts.every(value => JSON.stringify(value) === JSON.stringify(drafts[0]))).toBe(true)
   expect(record.mock.calls.every(([value]) => value === line)).toBe(true)
+})
+
+it.each(['write_recap_file', 'preview_recap'] as const)('reports correctable %s schema failures with rule counts, without logging draft text', async action => {
+  const { RecapDraftValidationError } = await import('../src/assistant/recap-preview.js')
+  const hidden = 'SYNTHETIC_PRIVATE_DRAFT_TEXT'
+  const failed = async () => { throw new RecapDraftValidationError([{ rule: 'superlative_shape', message: `Use 2–6 title words; fix ${hidden}.` }]) }
+  const ctx: AssistantHostedToolContext = { ...context(),
+    currentGameRecapScope: () => ({ gameId: 'synthetic', eventId: 'game-recap:synthetic', pairFingerprint: 'a'.repeat(32), show: true }),
+    readGameRecapDraft: failed, readGameRecapMedia: async () => '', previewGameRecap: failed,
+  }
+  const result = await executeMurphDynamicToolRequest({ request: { kind: 'game', request: { action, draftPath: 'drafts/show.json' } },
+    hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+  expect(result.rpcResult.success).toBe(false)
+  expect(result.rpcResult.contentItems[0]?.text).toContain('[superlative_shape]')
+  expect(result.rpcResult.contentItems[0]?.text).not.toContain('Retry the same local draft')
+  expect(result.runtimeIssueInputs?.[0]?.details).toMatchObject({ recapRejectionRule: 'superlative_shape', recapRejectionCount: 1, recapRejectionCounts: { superlative_shape: 1 } })
+  expect(JSON.stringify(result.runtimeIssueInputs)).not.toContain(hidden)
+})
+
+it('reports all server rejection rules and an invalid preview as runtime issues', async () => {
+  const rejections = [{ rule: 'headline_length', message: 'Shorten the title.' }, { rule: 'pronoun_ban', message: 'Use names.' }]
+  const ctx: AssistantHostedToolContext = { ...context(),
+    currentGameRecapScope: () => ({ gameId: 'synthetic', eventId: 'game-recap:synthetic', pairFingerprint: 'a'.repeat(32), show: true }),
+    readGameRecapDraft: async () => ({ story: { pages: [], chatLine: '' }, files: [] }), readGameRecapMedia: async () => '',
+    previewGameRecap: async () => ({ valid: false, rejections, pages: [] }),
+    groupTool: { request: async () => ({ action: 'write_recap', result: { status: 'rejected', recapGame: { rejections } } }) },
+  }
+  for (const action of ['preview_recap', 'write_recap_file'] as const) {
+    const result = await executeMurphDynamicToolRequest({ request: { kind: 'game', request: { action, draftPath: 'drafts/show.json' } },
+      hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.runtimeIssueInputs?.[0]?.details).toMatchObject({ recapRejectionRule: 'headline_length', recapRejectionCount: 2, recapRejectionCounts: { headline_length: 1, pronoun_ban: 1 } })
+  }
 })
