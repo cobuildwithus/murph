@@ -864,7 +864,6 @@ model HostedComputerRun {
   lastUrl                    String?                        @map("last_url")
   lastTitle                  String?                        @map("last_title")
   awaitingReason             HostedComputerAwaitingReason?  @map("awaiting_reason")
-  awaitingMessage            String?                        @map("awaiting_message")
   suggestedReply             String?                        @map("suggested_reply")
   pausedAt                   DateTime?                      @map("paused_at")
   resumeAfterMailboxLaneSeq  BigInt?                        @map("resume_after_mailbox_lane_seq")

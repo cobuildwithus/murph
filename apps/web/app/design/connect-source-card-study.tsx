@@ -8,7 +8,7 @@ import {
   ConnectDisconnectDialog,
   ConnectSourceDialog,
 } from "@/app/(dashboard)/connect/connect-page-dialogs";
-import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
+import { DeviceSyncSetupGuideDialog } from "@/src/components/device-sync/device-sync-completion-dialog";
 import { markLocallyDisconnectedSources } from "@/app/(dashboard)/connect/connect-page-helpers";
 import {
   APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,

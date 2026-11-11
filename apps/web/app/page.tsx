@@ -25,7 +25,6 @@ import { TogetherSection } from "@/src/components/homepage/together-section";
 import { TrustSection } from "@/src/components/homepage/trust-section";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/homepage-auth-runtime-provider";
-import { scheduleHomepageBrowserVaultPreparation } from "@/src/lib/browser-vault/homepage-preparation";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
@@ -94,7 +93,7 @@ function resolveHeroMessengerChannel(country: string): HeroMessengerChannel {
 
 export default async function HomePage() {
   const [
-    { authenticated, authenticatedMember },
+    { authenticated },
     githubStarCount,
     heroContactInfo,
     headerList,
@@ -104,11 +103,6 @@ export default async function HomePage() {
     fetchHeroContactInfo(),
     headers(),
   ]);
-  if (authenticatedMember) {
-    scheduleHomepageBrowserVaultPreparation({
-      memberId: authenticatedMember.id,
-    });
-  }
 
   const country = headerList.get("x-vercel-ip-country") ?? "";
   const messengerChannel = resolveHeroMessengerChannel(country);
@@ -118,7 +112,7 @@ export default async function HomePage() {
     ? {
         body: "Manage billing and connected wearables from one place.",
         metaItems: ["Subscription and billing", "Wearable connections"],
-        signupLabel: "Go to dashboard",
+        signupLabel: "Go to Home",
         title: "You’re already set up.",
       }
     : {

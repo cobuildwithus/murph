@@ -33,10 +33,11 @@ import { cn } from "@/src/lib/utils";
 import { BillingPortalButton } from "./billing-portal-button";
 import { HostedFamilyAbandonButton } from "./hosted-family-abandon-button";
 import { HostedFamilyStartButton } from "./hosted-family-start-button";
-import { HostedPlanChangeButton } from "./hosted-plan-change-button";
+import {
+  EdgeToPulseSwitchSummary,
+  HostedPlanChangeButton,
+} from "./hosted-plan-change-button";
 import { HostedPlanCheckoutButton } from "./hosted-plan-checkout-button";
-import { SwitchToPulseButton } from "./hosted-plan-switch-to-pulse-button";
-import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import { HostedSponsoredFamilyRecoveryDialog } from "./hosted-sponsored-family-recovery-dialog";
 import {
@@ -236,9 +237,17 @@ export function HostedBillingSettings(props: {
     }
     if (props.canSwitchToPulse === true) {
       return (
-        <SwitchToPulseButton block currentPeriodEnd={currentPeriodEndIso}>
+        <HostedPlanChangeButton
+          block
+          confirmationDetails={
+            <EdgeToPulseSwitchSummary currentPeriodEnd={currentPeriodEndIso} />
+          }
+          currentPeriodEnd={currentPeriodEndIso}
+          mode="schedule"
+          targetPlanCode="launch_monthly"
+        >
           Switch to Pulse
-        </SwitchToPulseButton>
+        </HostedPlanChangeButton>
       );
     }
     if (canStartDirectPlan) {
@@ -287,9 +296,14 @@ export function HostedBillingSettings(props: {
       )
     ) {
       return (
-        <UpgradeToEdgeButton block expectedCurrentPlanCode={currentPlanCode}>
+        <HostedPlanChangeButton
+          block
+          expectedCurrentPlanCode={currentPlanCode}
+          mode="upgrade"
+          targetPlanCode="launch_edge_monthly"
+        >
           Choose Edge
-        </UpgradeToEdgeButton>
+        </HostedPlanChangeButton>
       );
     }
     if (canStartDirectPlan) {
@@ -722,23 +736,6 @@ function renderDirectUsageRecoveryAction(input: {
       </HostedPlanCheckoutButton>
     );
   }
-  if (
-    input.targetPlanCode === "launch_edge_monthly"
-    && (
-      input.currentPlanCode === "launch_group_monthly"
-      || input.currentPlanCode === "launch_monthly"
-    )
-  ) {
-    return (
-      <UpgradeToEdgeButton
-        block
-        expectedCurrentPlanCode={input.currentPlanCode}
-        primary
-      >
-        {label}
-      </UpgradeToEdgeButton>
-    );
-  }
   if (!input.currentPlanCode) {
     return null;
   }
@@ -966,7 +963,9 @@ function PlanUsageBand(props: {
               )
             : !props.planChangePending && action?.kind === "upgrade_edge"
               ? (
-                  <UpgradeToEdgeButton
+                  <HostedPlanChangeButton
+                    mode="upgrade"
+                    targetPlanCode="launch_edge_monthly"
                     expectedCurrentPlanCode={
                       status.planCode === "launch_group_monthly"
                         ? "launch_group_monthly"
@@ -974,7 +973,7 @@ function PlanUsageBand(props: {
                     }
                   >
                     {action.label}
-                  </UpgradeToEdgeButton>
+                  </HostedPlanChangeButton>
                 )
               : null}
       </div>

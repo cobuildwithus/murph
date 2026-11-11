@@ -5,6 +5,8 @@ import { isPairRecapShowEnabled, isRecapMediaVisible } from "./access";
 import { presentGameRecap, storedGameRecapSchema, readGameRecapStory } from "@murphai/contracts/recap-show";
 import { retireGameRecapAssetsTx } from "./recap-retirement";
 import "server-only";
+import { after } from "next/server";
+import { fromDbDate, toEntryKind, toRuleState, toRuleStateGame, type GameRow } from "./row";
 import { clearGameRecapQuotingEntryTx, gameRecapStoryMayQuoteEntry, readLatestGameRecapEventIdTx, settleGameRecapGenerationTx, readGameRecapStoryWitnesses, readPermittedGameRecapEntryIds } from "./recap-witness";
 import { compareGroupRematch, rematchSeat } from "./rematch";
 
@@ -19,7 +21,7 @@ import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
 import { submitMemberAction } from "../member-actions/submit";
 import { adoptVaultGameProfile } from "./vault-profile";
 
-import { Prisma, type Game, type GameEntry, type GameInvitee, type GamePlayer, type GameProfile, type GameReport } from "@prisma/client";
+import { Prisma, type Game, type GameEntry, type GameProfile, type GameReport } from "@prisma/client";
 
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
 import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
@@ -41,7 +43,6 @@ import { lookupHostedGroupParticipantMemberIdsByHandles } from "../hosted-groups
 import { moderateGameCommand } from "./moderation";
 import { parseStoredGameEntryData } from "./entry-data";
 import {
-  GAME_ENTRY_KINDS,
   type GamePendingChange,
   type AcceptInviteBody,
   type GameChange,
@@ -53,7 +54,6 @@ import {
   type GameProfileView,
   type GameInvitePreview,
   type GameInviteRecipient,
-  type GameStatus,
   type GameView,
   type CreateGameView,
 } from "./contract";
@@ -149,7 +149,6 @@ export { mediaKeyPrefixFor } from "./access";
 
 type Tx = Prisma.TransactionClient;
 type Db = Tx | ReturnType<typeof getPrisma>;
-type GameRow = Game & { players: GamePlayer[]; invitees: GameInvitee[] };
 interface LoadedGame {
   row: GameRow;
   entries: GameEntry[];
@@ -246,8 +245,7 @@ export async function runGameCommand(input: {
     const applied = command.type === "watchRecap" ? await watchRecap({ actor, beforeMutationTx: input.beforeMutationTx }, command.gameId)
       : await runCommand({ chatAudience, actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx, postGuard: input.postGuard }, command);
     const { gameId, dayOutcome, composer } = typeof applied === "object" && applied !== null ? applied : { gameId: applied };
-    await deliverAppGameNegotiation(command, gameId, input.chatContainerMemberId);
-    await deliverCreatedRematch(command, input.chatContainerMemberId);
+    await deliverAppGameEffectsAfterResponse(command, gameId, input.chatContainerMemberId);
     await activatePrivateAfterGameCommand(command, gameId, input.now ?? new Date());
     const game = gameId && !input.chatContainerMemberId ? await readGame(gameId, actor, input.multiplayer) : null;
     return { game: game && composer ? { ...game, composer } : game, ok: true, ...(dayOutcome ? { dayOutcome } : {}) };
@@ -286,38 +284,30 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
   });
 }
 
-async function deliverAppGameNegotiation(command: GameCommand, gameId: string | null, chatContainerMemberId?: string): Promise<void> {
-  if (!gameId || chatContainerMemberId) return;
-  if (command.type === "negotiate" && command.note !== undefined) {
+/** Durable receipts already committed; optional delivery does not delay the app response. */
+async function deliverAppGameEffectsAfterResponse(command: GameCommand, gameId: string | null, room?: string): Promise<void> {
+  if (!gameId || room) return;
+  const proposal = command.type === "proposeChange" || command.type === "editTerms" && command.proposalId !== undefined
+    || command.type === "negotiate" && command.change !== undefined;
+  const talk = command.type === "negotiate" && command.note !== undefined;
+  const rematch = command.type === "createGame" && (command.previousGameId || command.maxPlayers === 10);
+  if (!proposal && !talk && !rematch) return;
+  const task = async () => {
     try {
-      const { deliverGameChatLifecycle } = await import("./chat-lifecycle");
-      await deliverGameChatLifecycle(gameId, "talk", command.proposalId);
+      if (proposal && "proposalId" in command) await deliverGameChangeProposal(gameId, command.proposalId!);
+      else {
+        const { deliverGameChatLifecycle } = await import("./chat-lifecycle");
+        await deliverGameChatLifecycle(gameId, talk ? "talk" : "rematch", talk && command.type === "negotiate" ? command.proposalId : undefined);
+      }
     } catch {
-      // The committed receipt stays recoverable by the lifecycle sweep.
-    }
-  }
-  if ((command.type === "proposeChange" || command.type === "editTerms" && command.proposalId !== undefined || command.type === "negotiate" && command.change !== undefined)) {
-    const proposalId = command.proposalId!;
-    try {
-      await deliverGameChangeProposal(gameId, proposalId);
-    } catch {
-      // The durable proposal survives unavailable routing/provider work. A retry
-      // uses the same identity; never overwrite a later proposal or queued send.
-      await getPrisma().$executeRaw`UPDATE game SET pending_change = jsonb_set(pending_change, '{deliveryStatus}', '"failed"'::jsonb)
-        WHERE id = ${gameId} AND pending_change->>'id' = ${proposalId}
+      // Keep the failed-attempt hint without overwriting a later or published proposal.
+      // The committed receipt remains recoverable by the lifecycle sweep.
+      if (proposal && "proposalId" in command) await getPrisma().$executeRaw`UPDATE game SET pending_change = jsonb_set(pending_change, '{deliveryStatus}', '"failed"'::jsonb)
+        WHERE id = ${gameId} AND pending_change->>'id' = ${command.proposalId}
         AND pending_change->>'deliveryStatus' IN ('pending', 'failed')`;
     }
-  }
-}
-
-async function deliverCreatedRematch(command: GameCommand, chatContainerMemberId?: string): Promise<void> {
-  if (command.type !== "createGame" || chatContainerMemberId || (!command.previousGameId && command.maxPlayers !== 10)) return;
-  try {
-    const { deliverGameChatLifecycle } = await import("./chat-lifecycle");
-    await deliverGameChatLifecycle(command.gameId, "rematch");
-  } catch {
-    // The committed receipt survives; the lifecycle sweep owns retry.
-  }
+  };
+  try { after(task); } catch { await task(); } // Non-request callers retain ownership of their work.
 }
 
 /** Immutable size policy is checked before preparing any legacy mutation. */
@@ -2995,63 +2985,8 @@ async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: st
   });
 }
 
-export function toRuleState(row: GameRow, entries: readonly Pick<GameEntry, "attempt" | "dayIndex" | "id" | "kind" | "mediaKeys" | "memberId" | "withdrawnAt" | "receivedAt" | "blurHash" | "incomplete">[]): RuleState {
-  return {
-    entries: entries.map((entry) => ({
-      attempt: entry.attempt,
-      dayIndex: entry.dayIndex,
-      id: entry.id,
-      kind: toEntryKind(entry.kind),
-      mediaKeys: entry.mediaKeys,
-      memberId: entry.memberId,
-      withdrawnAt: entry.withdrawnAt,
-      receivedAt: entry.receivedAt,
-      blurHash: entry.blurHash,
-      incomplete: entry.incomplete === true,
-    })),
-    game: { ...toRuleStateGame(row, parseStoredTerms(row.terms)), admittedSeats: row.players.map(player => player.seat) },
-    players: row.players.filter(hasGameIdentity).map((player) => ({
-      dayOne: fromDbDate(player.dayOne),
-      memberId: player.memberId,
-      seat: player.seat,
-      timeZone: player.timeZone,
-      joinedAt: player.joinedAt, leftAt: player.leftAt,
-    })),
-  };
-}
-
-function toRuleStateGame(row: Game & Pick<GameRow, "invitees">, terms: RuleState["game"]["terms"]): RuleState["game"] {
-  return {
-    chatContainerMemberId: row.chatContainerMemberId,
-    createdBy: row.createdBy,
-    id: row.id,
-    inviteExpiresAt: row.inviteExpiresAt,
-    invitees: row.invitees,
-    lengthDays: row.lengthDays,
-    seats: row.maxPlayers,
-    startsOn: fromDbDate(row.startsOn),
-    status: toStatus(row.status),
-    terms,
-  };
-}
-
-function toStatus(value: string): GameStatus {
-  if (value === "invited" || value === "negotiating" || value === "live" || value === "settled" || value === "void") return value;
-  throw new Error("Stored game status is malformed.");
-}
-
-function toEntryKind(value: string): GameEntryKind {
-  const kind = GAME_ENTRY_KINDS.find((candidate) => candidate === value);
-  if (!kind) throw new Error("Stored game entry kind is malformed.");
-  return kind;
-}
-
 function toDbDate(date: string): Date {
   return new Date(`${date}T00:00:00Z`);
-}
-
-function fromDbDate(date: Date | null): string | null {
-  return date ? date.toISOString().slice(0, 10) : null;
 }
 
 /**

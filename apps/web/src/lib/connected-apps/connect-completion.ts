@@ -15,7 +15,7 @@ import type { HostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-m
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { getPrisma } from "@/src/lib/prisma";
 
-export const CONNECTED_APP_COMPLETION_HOME_MARKER = "connectedAppCompletion";
+export const CONNECTED_APP_COMPLETION_MARKER = "connectedAppCompletion";
 
 export type ConnectedAppCompletionStatus = "success" | "error";
 
@@ -24,20 +24,20 @@ export type ConnectedAppCompletionSearchParams = Record<
   string | string[] | undefined
 >;
 
-interface BuildHomeRedirectInput {
+interface BuildSettingsRedirectInput {
   alias?: string | null;
   status: ConnectedAppCompletionStatus;
   toolkit?: string | null;
 }
 
-// Builds the /home URL that triggers the connected-app completion dialog.
-// Mirrors the device-sync `buildDeviceSyncCompletionHomeRedirectHref` shape
-// so the home page just resolves both models in parallel.
-export function buildConnectedAppCompletionHomeRedirectHref(
-  input: BuildHomeRedirectInput,
+// Builds the /settings URL that triggers the connected-app completion dialog.
+// Mirrors the device-sync `buildDeviceSyncCompletionSettingsRedirectHref` shape
+// so Settings can render either connection result.
+export function buildConnectedAppCompletionSettingsRedirectHref(
+  input: BuildSettingsRedirectInput,
 ): string {
   const params = new URLSearchParams();
-  params.set(CONNECTED_APP_COMPLETION_HOME_MARKER, "1");
+  params.set(CONNECTED_APP_COMPLETION_MARKER, "1");
   params.set("connectedAppStatus", input.status);
   if (input.toolkit) {
     params.set("toolkit", input.toolkit);
@@ -45,7 +45,7 @@ export function buildConnectedAppCompletionHomeRedirectHref(
   if (input.alias) {
     params.set("alias", input.alias);
   }
-  return `/home?${params.toString()}`;
+  return `/settings?${params.toString()}`;
 }
 
 export async function resolveConnectedAppCompletionDialogModel(input: {
@@ -53,7 +53,7 @@ export async function resolveConnectedAppCompletionDialogModel(input: {
   searchParams: ConnectedAppCompletionSearchParams;
 }): Promise<DeviceSyncCompletionDialogModel | null> {
   if (
-    readSearchParamString(input.searchParams, CONNECTED_APP_COMPLETION_HOME_MARKER)
+    readSearchParamString(input.searchParams, CONNECTED_APP_COMPLETION_MARKER)
       !== "1"
   ) {
     return null;

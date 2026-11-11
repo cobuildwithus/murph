@@ -18,6 +18,7 @@ import { computerUseError } from "../src/lib/computer-use/errors";
 import { ComputerUseService } from "../src/lib/computer-use/service";
 import type {
   ComputerHandoffRecord,
+  ComputerHandoffCreateInput,
   ComputerRunRecord,
   ComputerUseStore,
 } from "../src/lib/computer-use/store";
@@ -67,7 +68,6 @@ describe("ComputerUseService", () => {
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
     expect(store.run).toMatchObject({
-      awaitingMessage: null,
       awaitingReason: "login_needed",
       pausedAt: now,
       pendingHandoffId: "hch_handoff123",
@@ -279,7 +279,6 @@ describe("ComputerUseService", () => {
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
     expect(store.run).toMatchObject({
-      awaitingMessage: null,
       awaitingReason: "final_confirmation",
       pausedAt: now,
       pendingHandoffId: "hch_handoff123",
@@ -303,7 +302,6 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({
       handoff: oldHandoff,
       run: createRunRecord({
-        awaitingMessage: "Old login request.",
         awaitingReason: "login_needed",
         pausedAt: new Date("2026-06-17T12:00:00.000Z"),
         pendingHandoffId: oldHandoff.id,
@@ -332,7 +330,6 @@ describe("ComputerUseService", () => {
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
     expect(store.run).toMatchObject({
-      awaitingMessage: "Old login request.",
       awaitingReason: "login_needed",
       pausedAt: now,
       pendingHandoffId: "hch_handoff124",
@@ -363,7 +360,6 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({
       handoff: oldHandoff,
       run: createRunRecord({
-        awaitingMessage: "Secure login is open.",
         awaitingReason: "login_needed",
         kernelLiveViewUrlEncrypted: null,
         kernelSessionId: null,
@@ -519,7 +515,6 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({
       handoff: oldHandoff,
       run: createRunRecord({
-        awaitingMessage: "Old login request.",
         awaitingReason: "login_needed",
         expiresAt: new Date("2026-06-17T12:35:00.000Z"),
         pausedAt: new Date("2026-06-17T12:00:00.000Z"),
@@ -575,7 +570,6 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({
       handoff: oldHandoff,
       run: createRunRecord({
-        awaitingMessage: "Should I book this appointment?",
         awaitingReason: "final_confirmation",
         checkpointContext: {
           conversationId: "conversation-a",
@@ -618,7 +612,6 @@ describe("ComputerUseService", () => {
       /^https:\/\/web\.example\.test\/computer\/handoff\/[A-Za-z0-9_-]+$/u,
     );
     expect(store.run).toMatchObject({
-      awaitingMessage: "Should I book this appointment?",
       awaitingReason: "final_confirmation",
       checkpointContext: {
         conversationId: "conversation-a",
@@ -648,7 +641,6 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({
       handoff: oldHandoff,
       run: createRunRecord({
-        awaitingMessage: "Should I submit this booking?",
         awaitingReason: "final_confirmation",
         pausedAt: new Date("2026-06-17T12:00:00.000Z"),
         pendingHandoffId: oldHandoff.id,
@@ -705,7 +697,6 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({
       handoff: oldHandoff,
       run: createRunRecord({
-        awaitingMessage: "Old login request.",
         awaitingReason: "login_needed",
         checkpointContext: {
           conversationId: "conversation-a",
@@ -853,7 +844,7 @@ describe("ComputerUseService", () => {
     });
   });
 
-  it("expires a new handoff if pause loses the run transition race", async () => {
+  it("creates no handoff if pause loses the run transition race", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({
       completeRunBeforeMarkAwaitingUser: true,
@@ -878,9 +869,7 @@ describe("ComputerUseService", () => {
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
     });
-    expect(store.handoff).toMatchObject({
-      status: "expired",
-    });
+    expect(store.handoff).toBeNull();
     expect(store.run).toMatchObject({
       kernelSessionId: null,
       status: "completed",
@@ -1107,7 +1096,6 @@ describe("ComputerUseService", () => {
   it("does not auto-resume a final-confirmation pause from browser actions", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const run = createRunRecord({
-      awaitingMessage: "Should I book this appointment?",
       awaitingReason: "final_confirmation",
       pausedAt: new Date("2026-06-17T12:00:00.000Z"),
       status: "awaiting_user",
@@ -1143,7 +1131,6 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({
       handoff,
       run: createRunRecord({
-        awaitingMessage: "Secure login is open.",
         awaitingReason: "login_needed",
         pausedAt: new Date("2026-06-17T12:00:00.000Z"),
         pendingHandoffId: handoff.id,
@@ -1199,7 +1186,6 @@ describe("ComputerUseService", () => {
         laneSeq: replyBoundarySeq,
       })],
       run: createRunRecord({
-        awaitingMessage: "Secure login is open.",
         awaitingReason: "login_needed",
         pausedAt: new Date("2026-06-17T12:00:00.000Z"),
         pendingHandoffId: handoff.id,
@@ -1276,7 +1262,6 @@ describe("ComputerUseService", () => {
       handoff,
       resumeMailboxItems: [createResumeMailboxItem()],
       run: createRunRecord({
-        awaitingMessage: "Please sign in.",
         awaitingReason: "login_needed",
         pausedAt: new Date("2026-06-17T12:00:00.000Z"),
         pendingHandoffId: handoff.id,
@@ -1363,7 +1348,6 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({
       handoff,
       run: createRunRecord({
-        awaitingMessage: "Secure login is open.",
         awaitingReason: "login_needed",
         pausedAt: new Date("2026-06-17T12:00:00.000Z"),
         pendingHandoffId: handoff.id,
@@ -1408,7 +1392,6 @@ describe("ComputerUseService", () => {
     const store = new FakeComputerUseStore({
       handoff,
       run: createRunRecord({
-        awaitingMessage: "Secure login is open.",
         awaitingReason: "login_needed",
         pausedAt: new Date("2026-06-17T12:00:00.000Z"),
         pendingHandoffId: handoff.id,
@@ -1456,7 +1439,6 @@ describe("ComputerUseService", () => {
       handoff,
       resumeMailboxItems: [createResumeMailboxItem()],
       run: createRunRecord({
-        awaitingMessage: "Secure login is open.",
         awaitingReason: "login_needed",
         pausedAt: new Date("2026-06-17T12:00:00.000Z"),
         pendingHandoffId: handoff.id,
@@ -6887,7 +6869,6 @@ describe("PrismaComputerUseStore", () => {
 
     expect(tx.hostedComputerRun.updateMany).toHaveBeenCalledWith({
       data: {
-        awaitingMessage: null,
         awaitingReason: null,
         metadataJson: Prisma.JsonNull,
         pausedAt: null,
@@ -7766,23 +7747,26 @@ describe("PrismaComputerUseStore", () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const findUnique = vi.fn(async () => createRunRecord({
-      awaitingMessage: "Can you log in here?",
       awaitingReason: "login_needed",
       pendingHandoffId: "hch_handoff124",
       status: "awaiting_user",
       updatedAt: now,
     }));
-    const store = new PrismaComputerUseStore({
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+      hostedComputerHandoff: { create: vi.fn(async () => createHandoffRecord()), updateMany: vi.fn(async () => ({ count: 1 })) },
       hostedComputerRun: {
         findUnique,
         updateMany,
       },
-    } as never);
+    };
+    const store = new PrismaComputerUseStore({ $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(tx) } as never);
 
     await store.replaceAwaitingRunHandoff({
+      memberId: "member_123",
       expectedHandoffUpdatedAt: oldUpdatedAt,
       expectedPendingHandoffId: "hch_handoff123",
-      newPendingHandoffId: "hch_handoff124",
+      handoff: createHandoffRecord({ id: "hch_handoff124" }),
       now,
       runId: "hcr_run123",
     });
@@ -7802,6 +7786,7 @@ describe("PrismaComputerUseStore", () => {
           },
         },
         id: "hcr_run123",
+        memberId: "member_123",
         pendingHandoffId: "hch_handoff123",
         status: "awaiting_user",
       },
@@ -7819,17 +7804,21 @@ describe("PrismaComputerUseStore", () => {
       status: "awaiting_user",
       updatedAt: now,
     }));
-    const store = new PrismaComputerUseStore({
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+      hostedComputerHandoff: { create: vi.fn(async () => createHandoffRecord()), updateMany: vi.fn(async () => ({ count: 1 })) },
       hostedComputerRun: {
         findUnique,
         updateMany,
       },
-    } as never);
+    };
+    const store = new PrismaComputerUseStore({ $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(tx) } as never);
 
     await store.attachAwaitingRunHandoff({
+      memberId: "member_123",
       awaitingReason: "final_confirmation",
       expectedPausedAt: pausedAt,
-      newPendingHandoffId: "hch_handoff123",
+      handoff: createHandoffRecord(),
       now,
       runId: "hcr_run123",
     });
@@ -7844,6 +7833,7 @@ describe("PrismaComputerUseStore", () => {
         awaitingReason: "final_confirmation",
         expiresAt: { gt: now },
         id: "hcr_run123",
+        memberId: "member_123",
         kernelSessionId: { not: null },
         pausedAt,
         pendingHandoffId: null,
@@ -7882,7 +7872,6 @@ describe("PrismaComputerUseStore", () => {
 
     expect(updateMany).toHaveBeenCalledWith({
       data: {
-        awaitingMessage: null,
         awaitingReason: null,
         metadataJson: Prisma.JsonNull,
         pausedAt: null,
@@ -7937,7 +7926,6 @@ describe("PrismaComputerUseStore", () => {
 
     expect(updateMany).toHaveBeenCalledWith({
       data: {
-        awaitingMessage: null,
         awaitingReason: null,
         metadataJson: Prisma.JsonNull,
         pausedAt: null,
@@ -7996,7 +7984,6 @@ describe("PrismaComputerUseStore", () => {
 
     expect(updateMany).toHaveBeenCalledWith({
       data: {
-        awaitingMessage: null,
         awaitingReason: null,
         completedAt: now,
         lastTitle: null,
@@ -8046,7 +8033,6 @@ describe("PrismaComputerUseStore", () => {
 
     expect(updateMany).toHaveBeenCalledWith({
       data: {
-        awaitingMessage: null,
         awaitingReason: null,
         completedAt: now,
         lastTitle: null,
@@ -8103,7 +8089,6 @@ describe("PrismaComputerUseStore", () => {
 
     expect(updateMany).toHaveBeenCalledWith({
       data: {
-        awaitingMessage: null,
         awaitingReason: null,
         completedAt: now,
         lastTitle: null,
@@ -8536,7 +8521,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     ) {
       this.run = {
         ...this.run,
-        awaitingMessage: "Waiting for user.",
         awaitingReason: "stuck",
         pausedAt: new Date("2026-06-17T12:00:00.000Z"),
         status: "awaiting_user",
@@ -8588,7 +8572,7 @@ class FakeComputerUseStore implements ComputerUseStore {
     );
   }
 
-  async createHandoff(input: Parameters<ComputerUseStore["createHandoff"]>[0]): Promise<ComputerHandoffRecord> {
+  private async createHandoff(input: ComputerHandoffCreateInput): Promise<ComputerHandoffRecord> {
     const id = this.handoffs.some((handoff) => handoff.id === "hch_handoff123")
       ? `hch_handoff${123 + this.handoffs.length}`
       : "hch_handoff123";
@@ -8597,10 +8581,10 @@ class FakeComputerUseStore implements ComputerUseStore {
       createdAt: new Date("2026-06-17T12:00:00.000Z"),
       expiresAt: input.expiresAt,
       id,
-      memberId: input.memberId,
+      memberId: this.run.memberId,
       purpose: input.purpose,
       returnContactKind: input.returnContactKind,
-      runId: input.runId,
+      runId: this.run.id,
       status: "open",
       suggestedReply: input.suggestedReply,
       tokenHash: input.tokenHash,
@@ -8703,7 +8687,6 @@ class FakeComputerUseStore implements ComputerUseStore {
         this.pauseRunAfterFailedAttachRunBrowser = false;
         this.run = {
           ...this.run,
-          awaitingMessage: "Waiting for user.",
           awaitingReason: "login_needed",
           pausedAt: input.now,
           status: "awaiting_user",
@@ -8940,13 +8923,13 @@ class FakeComputerUseStore implements ComputerUseStore {
     if (this.run.id !== input.runId || this.run.status !== "running") {
       throw staleRunStateError();
     }
+    const handoff = input.handoff ? await this.createHandoff(input.handoff) : null;
     this.run = {
       ...this.run,
-      awaitingMessage: input.awaitingMessage,
       awaitingReason: input.awaitingReason,
       checkpointContext: input.checkpointContext,
       pausedAt: input.now,
-      pendingHandoffId: input.pendingHandoffId,
+      pendingHandoffId: handoff?.id ?? null,
       resumeAfterMailboxLaneSeq: null,
       status: "awaiting_user",
       suggestedReply: input.suggestedReply,
@@ -8958,7 +8941,6 @@ class FakeComputerUseStore implements ComputerUseStore {
   async attachAwaitingRunHandoff(
     input: Parameters<ComputerUseStore["attachAwaitingRunHandoff"]>[0],
   ): Promise<ComputerRunRecord> {
-    const handoff = this.findStoredHandoff(input.newPendingHandoffId);
     if (
       this.run.id !== input.runId ||
       this.run.status !== "awaiting_user" ||
@@ -8967,16 +8949,15 @@ class FakeComputerUseStore implements ComputerUseStore {
       this.run.pendingHandoffId !== null ||
       !this.run.pausedAt ||
       this.run.pausedAt.getTime() !== input.expectedPausedAt.getTime() ||
-      this.run.expiresAt <= input.now ||
-      !handoff ||
-      handoff.status !== "open"
+      this.run.expiresAt <= input.now
     ) {
       throw staleRunStateError();
     }
+    const handoff = await this.createHandoff(input.handoff);
     this.run = {
       ...this.run,
       pausedAt: input.now,
-      pendingHandoffId: input.newPendingHandoffId,
+      pendingHandoffId: handoff.id,
       resumeAfterMailboxLaneSeq: null,
       updatedAt: input.now,
     };
@@ -8987,26 +8968,27 @@ class FakeComputerUseStore implements ComputerUseStore {
     input: Parameters<ComputerUseStore["replaceAwaitingRunHandoff"]>[0],
   ): Promise<ComputerRunRecord> {
     const existing = this.findStoredHandoff(input.expectedPendingHandoffId);
-    const replacement = this.findStoredHandoff(input.newPendingHandoffId);
     if (
       this.run.id !== input.runId ||
       this.run.pendingHandoffId !== input.expectedPendingHandoffId ||
       this.run.status !== "awaiting_user" ||
       !existing ||
       !["open", "expired", "completed"].includes(existing.status) ||
-      existing.updatedAt.getTime() !== input.expectedHandoffUpdatedAt.getTime() ||
-      !replacement ||
-      replacement.status !== "open"
+      existing.updatedAt.getTime() !== input.expectedHandoffUpdatedAt.getTime()
     ) {
       throw staleRunStateError();
     }
+    const handoff = await this.createHandoff(input.handoff);
     this.run = {
       ...this.run,
       pausedAt: input.now,
-      pendingHandoffId: input.newPendingHandoffId,
+      pendingHandoffId: handoff.id,
       resumeAfterMailboxLaneSeq: null,
       updatedAt: input.now,
     };
+    if (existing.status === "open") {
+      this.storeHandoff({ ...existing, status: "expired", updatedAt: input.now });
+    }
     return this.run;
   }
 
@@ -9056,7 +9038,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.lastResumeAwaitingReason = input.awaitingReason;
     this.run = {
       ...this.run,
-      awaitingMessage: null,
       awaitingReason: null,
       checkpointContext: null,
       pausedAt: null,
@@ -9117,7 +9098,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     this.lastResumeAwaitingReason = input.awaitingReason;
     this.run = {
       ...this.run,
-      awaitingMessage: null,
       awaitingReason: null,
       checkpointContext: null,
       pausedAt: null,
@@ -9220,7 +9200,6 @@ class FakeComputerUseStore implements ComputerUseStore {
       this.completeRunBeforeUpdateBrowserState = false;
       this.run = {
         ...this.run,
-        awaitingMessage: null,
         awaitingReason: null,
         completedAt: new Date("2026-06-17T12:05:00.000Z"),
         lastTitle: null,
@@ -9264,7 +9243,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     if (this.completeRunBeforeMarkExpired) {
       run = this.storeRun({
         ...run,
-        awaitingMessage: null,
         awaitingReason: null,
         completedAt: input.now,
         lastTitle: null,
@@ -9294,7 +9272,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     expired = true;
     run = this.storeRun({
       ...run,
-      awaitingMessage: null,
       awaitingReason: null,
       completedAt: input.now,
       lastTitle: null,
@@ -9376,7 +9353,6 @@ class FakeComputerUseStore implements ComputerUseStore {
     }
     this.run = {
       ...this.run,
-      awaitingMessage: null,
       awaitingReason: null,
       completedAt: input.now,
       ...(input.terminalBrowserCleanupId ? { kernelSessionId: input.terminalBrowserCleanupId } : {}),
@@ -9706,7 +9682,6 @@ function createResumeMailboxItem(overrides: Partial<ResumeMailboxItem> = {}): Re
 
 function createRunRecord(overrides: Partial<ComputerRunRecord> = {}): ComputerRunRecord {
   return {
-    awaitingMessage: null,
     awaitingReason: null,
     checkpointContext: null,
     completedAt: null,

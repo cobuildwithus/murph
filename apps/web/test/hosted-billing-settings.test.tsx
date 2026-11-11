@@ -2247,8 +2247,12 @@ describe("HostedBillingSettings", () => {
   });
 
   test("opens Stripe directly for an Edge upgrade without a duplicate confirmation", async () => {
-    const { UpgradeToEdgeButton } = await import("@/src/components/settings/hosted-plan-upgrade-button");
-    const rendered = await renderClientComponent(createElement(UpgradeToEdgeButton));
+    const { HostedPlanChangeButton } = await import("@/src/components/settings/hosted-plan-change-button");
+    const rendered = await renderClientComponent(createElement(HostedPlanChangeButton, {
+      expectedCurrentPlanCode: "launch_monthly",
+      mode: "upgrade",
+      targetPlanCode: "launch_edge_monthly",
+    }));
 
     await act(async () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
@@ -2275,8 +2279,11 @@ describe("HostedBillingSettings", () => {
       details: { code: "cancellation" },
       message: "Your subscription is scheduled to cancel.",
     }));
-    const { SwitchToPulseButton } = await import("@/src/components/settings/hosted-plan-switch-to-pulse-button");
-    const rendered = await renderClientComponent(createElement(SwitchToPulseButton));
+    const { HostedPlanChangeButton } = await import("@/src/components/settings/hosted-plan-change-button");
+    const rendered = await renderClientComponent(createElement(HostedPlanChangeButton, {
+      mode: "schedule",
+      targetPlanCode: "launch_monthly",
+    }));
 
     try {
       await act(async () => {
@@ -2296,7 +2303,7 @@ describe("HostedBillingSettings", () => {
           .dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
       });
       assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls.map(([request]) => request), [
-        { method: "POST", url: "/api/settings/billing/switch-to-pulse" },
+        { method: "POST", payload: { targetPlanCode: "launch_monthly" }, url: "/api/settings/billing/switch-plan" },
         { method: "POST", url: "/api/settings/billing/portal" },
       ]);
       assert.deepEqual(rendered.assign.mock.calls, [["https://stripe.example.test/portal/recovery"]]);
@@ -2312,9 +2319,14 @@ describe("HostedBillingSettings", () => {
       scheduledBillingPlanCode: "launch_monthly",
       status: "scheduled",
     });
-    const { SwitchToPulseButton } = await import("@/src/components/settings/hosted-plan-switch-to-pulse-button");
-    const rendered = await renderClientComponent(createElement(SwitchToPulseButton, {
+    const { EdgeToPulseSwitchSummary, HostedPlanChangeButton } = await import("@/src/components/settings/hosted-plan-change-button");
+    const rendered = await renderClientComponent(createElement(HostedPlanChangeButton, {
+      confirmationDetails: createElement(EdgeToPulseSwitchSummary, {
+        currentPeriodEnd: "2026-05-06T12:00:00.000Z",
+      }),
       currentPeriodEnd: "2026-05-06T12:00:00.000Z",
+      mode: "schedule",
+      targetPlanCode: "launch_monthly",
     }));
 
     await act(async () => {
@@ -2334,7 +2346,8 @@ describe("HostedBillingSettings", () => {
 
     assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
       method: "POST",
-      url: "/api/settings/billing/switch-to-pulse",
+      payload: { targetPlanCode: "launch_monthly" },
+      url: "/api/settings/billing/switch-plan",
     });
     assert.equal(mocks.routerRefresh.mock.calls.length, 1);
 
@@ -2594,8 +2607,12 @@ describe("HostedBillingSettings", () => {
       status: "pending_payment",
     });
 
-    const { UpgradeToEdgeButton } = await import("@/src/components/settings/hosted-plan-upgrade-button");
-    const rendered = await renderClientComponent(createElement(UpgradeToEdgeButton));
+    const { HostedPlanChangeButton } = await import("@/src/components/settings/hosted-plan-change-button");
+    const rendered = await renderClientComponent(createElement(HostedPlanChangeButton, {
+      expectedCurrentPlanCode: "launch_monthly",
+      mode: "upgrade",
+      targetPlanCode: "launch_edge_monthly",
+    }));
 
     await act(async () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
@@ -2614,12 +2631,16 @@ describe("HostedBillingSettings", () => {
       new Error("Could not open Stripe. Try again."),
     );
 
-    const { UpgradeToEdgeButton } = await import(
-      "@/src/components/settings/hosted-plan-upgrade-button"
+    const { HostedPlanChangeButton } = await import(
+      "@/src/components/settings/hosted-plan-change-button"
     );
     const rendered = await renderClientComponent(createElement(
-      UpgradeToEdgeButton,
-      { expectedCurrentPlanCode: "launch_monthly" },
+      HostedPlanChangeButton,
+      {
+        expectedCurrentPlanCode: "launch_monthly",
+        mode: "upgrade",
+        targetPlanCode: "launch_edge_monthly",
+      },
     ));
 
     await act(async () => {

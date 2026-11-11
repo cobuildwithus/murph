@@ -8,7 +8,7 @@ import {
   ConnectLinkSignInScreen,
   ConnectRedirectScreen,
 } from "@/app/(dashboard)/connect/connect-page-dialogs";
-import { DeviceSyncCompletionScreen } from "@/app/(dashboard)/home/device-sync-completion-dialog";
+import { DeviceSyncCompletionScreen } from "@/src/components/device-sync/device-sync-completion-dialog";
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import {
   FITBIT_GOOGLE_HEALTH_LINK_FAILED_DETAIL,
