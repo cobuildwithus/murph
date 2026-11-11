@@ -1,15 +1,14 @@
 ---
 name: murph-onboarding
-description: Use only when direct first-run Murph onboarding is open, including the private welcome, what the member wants from their health, the health background Murph asks for before suggesting anything, the first proposal, completion, or an overall decline.
+description: Use only when direct first-run Murph onboarding is open, including the private welcome, what the member wants from their health, their wearable, the health background Murph asks for before suggesting anything, the first proposal, completion, or an overall decline.
 ---
 
 # Murph onboarding
 
 A new member says what they want from their health, tells Murph about their
-health, then gets one concrete first step that fits both. The background comes
-first so nothing Murph suggests clashes with a medication, condition, injury, or
-their routine. It is one easy ask plus a few short follow-ups, never a
-questionnaire.
+wearable and their health, then gets one concrete first step that fits. This
+comes first so nothing Murph suggests clashes with a medication, condition,
+injury, or their routine.
 
 ## The immediate need comes first
 
@@ -21,8 +20,9 @@ question to it. Pick onboarding back up on a later turn.
 
 An answer to Murph's question about what they want is not a request. "I want to
 get stronger" goes to step 4. "Can you make me a strength plan?" is a request:
-make goal-setup's offer now, and ask about their health in the reply that
-settles it. When it is unclear, treat it as an answer.
+make goal-setup's offer now, ending with its save question, and end your reply
+to their answer with step 4's question. When it is unclear, treat it as an
+answer.
 
 ## The steps, in order
 
@@ -42,30 +42,39 @@ is saved.
    Ready to get started?
    ```
 
-2. **Name, age, and gender**, asked together. The onboarding instructions in
-   the prompt own this question, how the answer is saved, and the next one.
-3. **What they want from their health.** The prompt owns this question and
-   its wording too.
-4. **Their health background** (next section). It is required: Murph proposes
-   nothing before it unless the member asked for something now.
-5. **Propose a first step** that fits what they shared (the section after).
-6. **Settle it.** They accept, edit, decline, or leave it for later.
-7. **Complete onboarding.**
+2. **Name, age, and gender**, asked together. The prompt owns this question,
+   how the answer is saved, and the next one.
+3. **What they want from their health.** The prompt owns its wording too.
+4. **Their wearable** (next section).
+5. **Their health background.** Steps 4 and 5 are required: Murph proposes
+   nothing before them unless the member asked for something now.
+6. **Propose a first step** that fits.
+7. **Settle it.** They accept, edit, decline, or leave it for later.
+8. **Complete onboarding.**
 
-A member partway through an older, longer version of this flow is not taken
-back through it: use what they already answered and continue from there.
+A member partway through an older version of this flow is not taken back
+through it: continue from what they already answered.
 
-## Ask about their health
+## Ask about their wearable
 
 Before asking, check what is already known: the conversation, saved records, and
 connected devices. Unless this conversation already showed them, run the resume
-check below once, and check devices as `references/context.md` describes.
+check below once and make the one `murph.device` `list_accounts` call that
+`references/context.md` describes.
 
-Answer their goal with a few of their own words, name any connection you can
-already see ("I can see Apple Health is connected"), and say you want to learn
-a bit about them first so what you suggest fits. Then send this ask, leaving out
-any line you already know the answer to; a connected watch or ring answers the
-watch line, but Apple Health alone does not:
+In the reply to their goal, reflect it in a few of their own words and say
+that before you decide where to start you want to understand a bit more so the
+advice actually fits. Then ask the wearable question in
+`references/context.md`, which also covers their answer. When a connected
+wearable is visible, or they already named one or said they have none, skip the
+question: acknowledge it and send the background ask in this reply. Any answer,
+a skip, or putting off connecting settles this step. Never ask it again.
+
+## Ask about their health
+
+Name any source you can see connected, Apple Health included ("I can see Apple
+Health is connected"), then send this ask, leaving out any line you already
+know the answer to:
 
 ```text
 Can you send me a voice memo covering a few things?
@@ -75,7 +84,6 @@ You can type it out instead. Either works just as well.
 - how you move right now (gym, running, sports, mostly desk-bound) and whether you're training for anything specific
 - anything you take regularly (supplements, protein, that stuff), with brands if you know them
 - the medical basics: any meds, conditions, injuries, or allergies I should know for safety
-- whether you wear a watch or ring
 - whether you've had blood tests in the last year or two
 - anything else you reckon I should know
 
@@ -87,17 +95,16 @@ walk you through sending a voice memo." Do not guess their age. Send the ask as
 text, because a list cannot be a voice memo, and keep its lines as phrases, not
 questions.
 
-The first five lines are what Murph needs before proposing; the last is
+The first four lines are what Murph needs before proposing; the last is
 optional. Read `references/context.md` before saving what they send. Their
 reply answers the ask even if it covers only one line. Then, one reply at a
-time, ask one short, plain question about one of the five still missing,
+time, ask one short, plain question about one of the four still missing,
 medical basics first and labs last, without sending the list again or pointing
 back to it. When labs is the only one left, you can say it is the last
-question. Never ask for something already known.
+question. Never ask for something already known, and never about devices.
 
 Any answer settles an item, including "none", "not relevant", "I'd rather not
-say", or "skip". Naming a wearable, or saying they have none, settles that item;
-connecting it is optional. "Later" for one item ("I'll send my labs later") is
+say", or "skip". "Later" for one item ("I'll send my labs later") is
 fine: say so and move on. Onboarding stays open until it is answered or
 skipped, but only the member or one scheduled recovery message brings it up
 again. If they put off the whole ask, say that is fine and wait without
@@ -106,14 +113,14 @@ missing as skipped and propose.
 
 ## Propose a first step
 
-Once each of the five is known, answered, or put off, propose in that same
-reply. Build from what they said in this conversation, even while the saves
-run. Never suggest anything that conflicts with a medication, condition,
-injury, allergy, or what they already do, and name the one thing they shared
-that shaped the step, never a device they put off connecting. When what they
-shared calls for a clinician first, the domain skill's care route is the first
-step. Do not hold the proposal for a baseline, past attempts, their reasons, or
-a definition of success.
+Once steps 4 and 5 are settled, every item known, answered, or put off,
+propose in that same reply. Build from what they said in this conversation,
+even while the saves run. Never suggest anything that conflicts with a
+medication, condition, injury, allergy, or what they already do, and name the
+one thing they shared that shaped the step, never a device they put off
+connecting. When what they shared calls for a clinician first, the domain
+skill's care route is the first step. Do not hold the proposal for a baseline,
+past attempts, their reasons, or a definition of success.
 
 - **Something they want to change or reach** ("sleep better", "get stronger",
   "lose 10 pounds"): read `goal-setup` and the matching domain skill, and make
@@ -164,8 +171,7 @@ something they share conflicts with it, say so and offer the change.
   "Send them whenever, I'll take a look then."
 - If your last onboarding question is unanswered, do not send a different one.
   Wait for a reply.
-- Do not repeat what the welcome said or explain memory controls unless they
-  ask.
+- Do not repeat the welcome or explain memory controls unless asked.
 
 ## Resuming
 
@@ -180,8 +186,7 @@ Treat every useful fact in it as known and never ask for it again. Saved
 records alone do not show that onboarding started; a bare "let's continue" with
 nothing visible to continue gets the welcome. When something you need is left
 out, cut off, or errored in that output, make one targeted read, such as
-`vault-cli memory show --compact --format json` for memory or
-`vault-cli blood-test list --format json` for labs.
+`vault-cli memory show --compact --format json` for memory.
 
 If the output reports a non-retryable `memory_document_invalid`, stop: do not
 read, write, or advance. Tell the member briefly that you cannot read their
@@ -196,9 +201,9 @@ Onboarding is complete when all of these are true:
 1. The welcome was delivered, and name, age, and gender are known or skipped.
 2. The member said what they want, or said they have nothing particular in
    mind.
-3. Each of the five background items is known or answered ("none" and "skip"
-   count; "later" does not). Anything they supplied is saved or handed off as
-   `references/context.md` describes.
+3. Step 4 is settled, and each of the four background items is known or
+   answered ("none" and "skip" count; "later" does not). Anything they supplied
+   is saved or handed off as `references/context.md` describes.
 4. A first step was settled: accepted and saved, declined, left for later, or
    their immediate request was handled.
 
@@ -217,15 +222,13 @@ Check that the output says `completed`. Then, in the same turn, call
 {"action":"save_onboarding_first_personal_read"}
 ```
 
-This schedules Murph's first look across what the member shared. Pass nothing
-else; the host owns its timing, prompt, and model, and accepts it only on this
-turn. Skip it when the member asked for no follow-up. If it fails or the tool is
-unavailable, do not retry, undo the completion, or mention it, and do not
-promise a later read. If it succeeds, add one sentence to your reply with this
-meaning: "I'm going to take a proper look across what you shared and any data
-you connected. If I find something useful, I'll send it over. Keep texting me
-normally in the meantime." Do not mention timing, schedules, or automations, and
-do not promise a surprising finding.
+This schedules Murph's first look across what the member shared; pass nothing
+else. Skip it when the member asked for no follow-up. If it fails or the tool is
+unavailable, do not retry, undo the completion, mention it, or promise a later
+read. If it succeeds, add one sentence meaning: "I'm going to take a proper look
+across what you shared and any data you connected. If I find something useful,
+I'll send it over. Keep texting me normally in the meantime." Do not mention
+timing, schedules, or automations, or promise a surprising finding.
 
 If the member declines onboarding or setup as a whole, run the same command
 with `--reason user_declined`, check the output, ask nothing further, and do
@@ -236,15 +239,15 @@ timing they gave.
 ## Scheduled recovery (the three-day and next-day recovery rule)
 
 Murph may be woken at most once on each of the three days after the welcome to
-continue unfinished onboarding. On such a turn, read the onboarding state and
-the recent messages first. Never run the completion command or change
-onboarding state; only the member's next reply can advance or complete it.
+continue unfinished onboarding. Read the onboarding state and recent messages
+first. Never run the completion command or change onboarding state; only the
+member's next reply can advance it.
 
-Return an ordinary skip when the member has answered, declined, asked for no
-follow-up, asked for a later time that has not come, or raised something urgent
-or safety-related, or when the evidence is too old or thin for a useful message.
-Otherwise send one message with exactly one easy question: the next step that
-has not happened. Never repeat an unanswered question's wording or switch to a
-different question; you may reopen it once in the whole window, on a later day,
-more briefly. Do not mention setup, schedules, automations, or final attempts,
-and never create, extend, or reschedule this recovery.
+Return an ordinary skip when the member answered, declined, asked for no
+follow-up or for a later time that has not come, or raised something urgent or
+safety-related, or when the evidence is too old or thin. Otherwise send one
+message with exactly one easy question: the next step that has not happened.
+Never switch away from an unanswered question or repeat its wording; you may
+reopen it once in the whole window, on a later day, more briefly. Do not
+mention setup, schedules, automations, or final attempts, and never create,
+extend, or reschedule this recovery.

@@ -1,7 +1,8 @@
 # Saving what a new member shares
 
-Read this when the member answers the health background ask, names a wearable
-or health app, or sends labs during onboarding. Reply fast and let the saving
+Read this when you ask about their wearable, or when the member answers the
+health background ask, names a wearable or health app, or sends labs during
+onboarding. Reply fast and let the saving
 happen behind the reply.
 
 ## Where things are saved
@@ -69,31 +70,55 @@ before replying, and leave label details for later.
 
 ## A wearable or health app
 
-Before mentioning devices, check what is already connected: the conversation,
-saved context, and, when the connection state is unknown, one unfiltered
-`murph.device` `list_accounts` call this turn. If that call fails, say briefly
-that you could not check and carry on; do not retry it, claim nothing is
-connected, or offer to reconnect. Without the tool, ask without comment.
+Before asking about devices, check what is already connected: the conversation,
+saved context, and, when the connection state is unknown (an error in the
+resume check counts as unknown), one unfiltered `murph.device` `list_accounts`
+call this turn. If that call fails, say briefly that you could not check and
+carry on; do not retry it, claim nothing is connected, or offer to reconnect.
+Without the tool, ask without comment.
 
-- **Already connected:** acknowledge it and do not ask about it. A connection
-  does not prove data has arrived.
-- **They name a provider on the prompt's "Hosted wearable connection links are
-  available for" line:** call `murph.device` `connect` and send the returned
-  link in a short message of its own, inviting them to connect and tell you
-  when it is done. Send only a link the tool returned. If they would rather
-  connect later, say that is fine and ask the next background question in the
-  same reply; do not send the link again unprompted, and do not speak as if it
-  is connected until you can see that it is.
-- **They have no wearable**, the prompt includes the Apple Health relay, Apple
-  Health is not connected, and nothing rules out an iPhone: offer once, in a
-  reply that asks nothing else, "No wearable is totally fine. If you use an
-  iPhone, you can connect Apple Health in the Murph app so I can use the daily
-  steps your phone sends. Want the app link?" Using iMessage does not prove they own an iPhone. If they want it, send
-  a short message with the App Store listing alone on the last line. The app
-  handles sign-in and permission; never use `murph.device` for Apple Health, and
-  do not say steps are syncing until data shows it.
-- When giving examples of supported devices, use only names from that prompt
-  line, and keep Apple Health out of the examples.
+Ask the wearable question below. In it, `<examples>` stands for providers from
+the list on the prompt's "Device connections" line, the ones `murph.device` can
+link: one when it lists one and a few when it lists more, never Apple Health.
+Without that line, drop the "like" clause rather than naming devices yourself.
+
+- **Nothing connected:** "Do you use a wearable or health app, like
+  <examples>?", plus one line saying that connecting one cuts down on manual
+  reporting and helps you read things later.
+- **Apple Health connected, wearable use unknown:** "I can see Apple Health is
+  connected. Do you also use a wearable, like <examples>?" Do not offer Apple
+  Health setup.
+- **A wearable already connected:** acknowledge it and do not ask. A
+  connection does not prove data has arrived.
+
+How to handle their answer:
+
+- **They name a provider on that line and do not put it off:** call
+  `murph.device` `connect` and send the returned link in one short message by
+  itself, inviting them to connect and let you know afterward. Send only a link
+  the tool returned. Do not move on until they reply or the connection is
+  visible; that next reply carries the background ask, whatever they said. When
+  they say it is done, check once with `list_accounts` before calling it
+  connected.
+- **They would rather connect later:** say that is fine, send no link, and send
+  the background ask in the same reply. Never speak as if it is connected until
+  you can see that it is.
+- **They name a device with no link on that line:** say plainly that Murph
+  cannot connect it directly. If the prompt's Apple Health relay lists it, say
+  it can reach Murph through Apple Health in the Murph app. Send the background
+  ask in the same reply.
+- **A clear "none":** when the prompt includes the Apple Health relay, Apple
+  Health is not connected, nothing rules out an iPhone, and they have not
+  turned down connection help, offer once, in a reply that asks nothing else:
+  "No wearable is totally fine. If you use an iPhone, you can connect Apple
+  Health in the Murph app so I can start using the daily steps your phone
+  sends. Want the app link?" Using iMessage does not prove they own an iPhone.
+  If they want it, send one short message inviting them to connect and let you
+  know afterward, with the App Store listing alone on the last line, and wait
+  for their reply as with a connection link. When the offer does not apply, or
+  they turn it down, send the background ask in that reply. The app handles
+  sign-in and permission; never use `murph.device` for Apple Health, and do not
+  say steps are syncing until data shows it.
 
 ## Labs
 

@@ -1291,14 +1291,11 @@ describeRealCodex('real natural goal canary journey', () => {
       expect(accepted.response).toMatch(/walk|plan/iu)
       expect(accepted.response).not.toMatch(/goal_[A-Z0-9]+|reg_[A-Z0-9]+|subagent|vault-cli/iu)
       // With onboarding open, the plan they asked for came first; the reply
-      // that settles it then asks about their health background, once: the
-      // whole voice memo ask, or one short question about one item.
+      // that settles it then asks the next onboarding question, about their
+      // wearable, once.
       if (capabilities) {
-        expect(
-          /voice memo/iu.test(accepted.response) || asksOneMissingBackgroundItem(accepted.response),
-          accepted.response,
-        ).toBe(true)
-        expect((accepted.response.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+        expect(asksWearableQuestion(accepted.response), accepted.response).toBe(true)
+        expect(accepted.response).not.toMatch(/voice memo/iu)
       }
     } finally {
       observer?.mockRestore()
@@ -4847,15 +4844,14 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         })}\n`)
         const parentIdentityWrites = actions.filter((action) => action.kind === 'command' && !isRecordedVaultHelpCommand(action.command) && /memory (?:set-name|upsert|update)/u.test(action.command))
         if (opening === 'Web aspiration reply') {
-          // Saying what they want gets the one health background ask, before
-          // any plan: no goal-setup read, nothing saved for the goal, and no
-          // early update for an ordinary onboarding question.
+          // Saying what they want gets the wearable question, before the
+          // health background ask and any plan: no goal-setup read, nothing
+          // saved for the goal, and no early update for an onboarding question.
           expect(result.finalMessage).not.toMatch(/what would you most like from your health/iu)
           expect(result.finalMessage).toMatch(/energy|walk|weekend/iu)
-          expect(result.finalMessage).toMatch(/voice memo/iu)
-          expect(result.finalMessage).toMatch(/\bmeds\b|medications?|medical|conditions|injur/iu)
+          expect(asksWearableQuestion(result.finalMessage), result.finalMessage).toBe(true)
+          expect(result.finalMessage).not.toMatch(/voice memo|\bmeds\b|medications?|blood tests?/iu)
           expect(result.finalMessage).not.toMatch(/save this plan|set up (?:those |the )?reminders/iu)
-          expect((result.finalMessage.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
           expect(actions.some((action) => action.kind === 'command' && action.command.includes('goal-setup/SKILL.md')), 'goal-setup skill read').toBe(false)
           expect(await listGoals(workingDirectory)).toHaveLength(0)
           expect((await readVaultRawTolerant(workingDirectory)).regimens).toHaveLength(0)
@@ -5210,8 +5206,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           developerInstructions: buildDirectConversationDeveloperInstructions(
             true,
             [
-              'Assistant context snapshot (engine-supplied evidence): private onboarding is open. The welcome and the name, age, and gender question are answered. The member said they want to sleep more consistently. Murph has not asked about their health background yet, and no first step has been proposed. Nothing is known yet about how they move, what they take, their medications, or recent labs.',
-              'The last Murph message reflected the sleep goal and said it wants to learn a bit about their health before suggesting where to start.',
+              'Assistant context snapshot (engine-supplied evidence): private onboarding is open. The welcome and the name, age, and gender question are answered, and the latest visible Murph message asked what they want from their health. Murph has not asked about their wearable or health background yet, and no first step has been proposed. Nothing is known yet about how they move, what they take, their medications, or recent labs.',
               ...(scenario.knownNone ? [
                 'Current operational evidence: Apple Health has an active connection. No completed sync is reported.',
                 'Earlier in this conversation, the member explicitly said they do not use a wearable.',
@@ -5239,7 +5234,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             },
             vaultFileSendAvailable: false,
           },
-          prompt: 'Yes, let’s keep going.',
+          prompt: 'I want to sleep more consistently and wake up rested.',
           scenario: 'wearable_source_awareness',
         })
         const reply = result.finalMessage.trim()
@@ -5247,13 +5242,20 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           scenario: scenario.name, deviceRequests, reply,
         })}\n`)
         expect(deviceRequests).toEqual(scenario.knownNone ? [] : [{ action: 'list_accounts' }])
-        // The health background ask is the next step, before any plan, and it
-        // is one question.
-        expect(reply).toMatch(/voice memo/iu)
+        // The reply to the goal asks the wearable question, unless a wearable
+        // or its absence is already known; then it sends the health
+        // background ask. Either way it is one question and no plan.
+        const wearableKnown = scenario.knownNone || scenario.source === 'oura'
+        expect(reply).toMatch(/sleep|rest/iu)
         expect((reply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
         expect(reply).not.toMatch(/save this plan|set up (?:those |the )?reminders/iu)
-        if (scenario.source !== 'oura' && !scenario.knownNone) {
-          expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(reply).not.toMatch(/watch or (?:a )?ring/iu)
+        if (wearableKnown) {
+          expect(reply).toMatch(/voice memo/iu)
+          expect(reasksWearable(reply), reply).toBe(false)
+        } else {
+          expect(asksWearableQuestion(reply), reply).toBe(true)
+          expect(reply).not.toMatch(/voice memo/iu)
         }
         expect(reply).not.toMatch(/https?:\/\/|\bjunction\b|list_accounts|vault-cli/iu)
         expect(reply).not.toMatch(/(?:your|the) (?:steps|sleep|workouts|data) (?:are|is) (?:syncing|coming in|up to date)/iu)
@@ -5269,23 +5271,22 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           expect(reply).not.toMatch(/do you use (?:a |any )?wearable or health app/iu)
           expect(reply).not.toMatch(/(?:want|need|like|help)[^.!?\n]{0,40}(?:connect|app link)|reconnect/iu)
           if (!scenario.knownNone) {
-            // Wearable use is still unknown, so the invitation keeps that line.
-            expect(reply).toMatch(/\bwatch\b/iu)
-            expect(reply).toMatch(/\bring\b/iu)
-            expect(reply).not.toMatch(/your (?:watch|ring)/iu)
+            // Apple Health alone does not say whether they use a wearable.
+            expect(reply).toMatch(/also use a wearable/iu)
+            expect(reply).toMatch(/\boura\b/iu)
           }
-        }
-        if (scenario.knownNone || scenario.source === 'oura') {
-          // The invitation leaves out what Murph already knows.
-          expect(reply).toMatch(/voice memo|how you move|movement/iu)
-          expect(reply).not.toMatch(/do you (?:also )?(?:use|wear|have)|which (?:watch|ring|wearable)|wear a (?:watch|ring)|watch or (?:a )?ring/iu)
         }
         if (scenario.source === 'oura') {
           expect(reply).toMatch(/oura/iu)
           expect(reply).toMatch(/connected|linked|I can see your Oura connection/iu)
         }
         if (scenario.source === 'none') {
-          expect(reply).toMatch(/wearable|watch|ring|health app/iu)
+          // Examples come only from the hosted connection line, never Apple
+          // Health, and the question says why connecting one helps.
+          expect(reply).toMatch(/health app/iu)
+          expect(reply).toMatch(/\boura\b/iu)
+          expect(reply).not.toMatch(/apple health/iu)
+          expect(reply).toMatch(/manual|report|read|interpret|log/iu)
           if (scenario.failure) {
             expect(reply).toMatch(/couldn[’']t|can[’']t|unable|unavailable|trouble|could not/iu)
             expect(reply).not.toMatch(/no (?:device|wearable|account|source|connection)|nothing connected|reconnect/iu)
@@ -5413,7 +5414,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             true,
             [
               'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the welcome and the name, age, and gender question are answered, and the member said they want to sleep more consistently. No first step has been proposed yet.',
-              'The latest visible Murph message is the health background ask: a voice memo covering how they move, what they take, their medical basics, whether they wear a watch or ring, and recent blood tests. No wearable connection is visible.',
+              'The latest visible Murph message reflected the sleep goal and asked whether they use a wearable or health app, like Oura. No wearable connection is visible.',
               'Nothing is known yet about how they move, what they take, their medical basics, or recent labs.',
             ].join('\n'),
             supportedProviders,
@@ -5444,10 +5445,11 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         ).toHaveLength(0)
         expect(reply).toMatch(/oura|connect/iu)
         expect(hasWearableConnectionDeferralMeaning(reply), reply).toBe(true)
-        // Naming Oura settles the wearable item; putting off the connection
-        // does not pause onboarding. The reply asks one short question about
-        // an item still missing, never the wearable again, and no plan yet.
-        expect(asksOneMissingBackgroundItem(reply), reply).toBe(true)
+        // Naming Oura settles the wearable step; putting off the connection
+        // does not pause onboarding. The same reply sends the health
+        // background ask, never the wearable question again, and no plan yet.
+        expect(reply).toMatch(/voice memo/iu)
+        expect((reply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
         expect(reasksWearable(reply), reply).toBe(false)
         expect(reply).not.toMatch(/save this plan|set up (?:those |the )?reminders/iu)
         expect(reply).not.toContain('https://')
@@ -5461,7 +5463,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             true,
             [
               'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the welcome and the name, age, and gender question are answered, and the member said they want to sleep more consistently. No first step has been proposed yet.',
-              'The latest visible Murph message is the health background ask: a voice memo covering how they move, what they take, their medical basics, whether they wear a watch or ring, and recent blood tests. No wearable connection is visible.',
+              'The latest visible Murph message reflected the sleep goal and asked whether they use a wearable or health app, like Oura. No wearable connection is visible.',
               'Nothing is known yet about how they move, what they take, their medical basics, or recent labs.',
             ].join('\n'),
             supportedProviders,
@@ -5481,6 +5483,11 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(linkOffer.finalMessage).toContain(
           'https://connect.example.test/oura',
         )
+        // The link goes in a short handoff of its own; the background ask
+        // waits for their reply.
+        process.stdout.write(`[onboarding-wearable-link-e2e] ${JSON.stringify({ reply: linkOffer.finalMessage.trim() })}\n`)
+        expect(linkOffer.finalMessage).not.toMatch(/voice memo|supplements|\bmeds\b|medications|blood tests?/iu)
+        expect((linkOffer.finalMessage.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
 
         const laterRequestOffset = deviceRequests.length
         const laterDeferral = await executeRealCodexOnboardingProbe({
@@ -5489,7 +5496,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             true,
             [
               'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the welcome and the name, age, and gender question are answered, and the member said they want to sleep more consistently. No first step has been proposed yet.',
-              'The visible conversation contains the health background ask, identifies Oura as the data source, and contains Murph\'s real connection-link handoff. No wearable connection is visible.',
+              'The visible conversation contains the wearable question, identifies Oura as the data source, and contains Murph\'s real connection-link handoff. Murph has not sent the health background ask yet. No wearable connection is visible.',
               'Nothing is known yet about how they move, what they take, their medical basics, or recent labs.',
             ].join('\n'),
             supportedProviders,
@@ -5508,13 +5515,16 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             .filter((request) => request.action !== 'list_accounts'),
           'later-turn connection writes',
         ).toHaveLength(0)
-        // A bare "I'll do that later" after the link may be accepted plainly.
+        process.stdout.write(`[onboarding-wearable-later-e2e] ${JSON.stringify({ reply: laterReply })}\n`)
+        // A bare "I'll do that later" after the link may be accepted plainly,
+        // and this reply carries the health background ask.
         expect(
           hasWearableConnectionDeferralMeaning(laterReply)
             || /\b(?:that(?:'s| is) (?:totally )?fine|no problem|sounds good|of course)\b/iu.test(laterReply),
           laterReply,
         ).toBe(true)
-        expect(asksOneMissingBackgroundItem(laterReply), laterReply).toBe(true)
+        expect(laterReply).toMatch(/voice memo/iu)
+        expect((laterReply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
         expect(reasksWearable(laterReply), laterReply).toBe(false)
         expect(laterReply).not.toContain('https://')
         expect(laterReply).not.toMatch(
@@ -5710,18 +5720,19 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             "Member: I'm Sam, 38, a woman.",
             'Murph: Good to meet you, Sam. What would you most like from your health: something you want to improve, understand, handle, or be able to do?',
             'Member: I want to get stronger.',
+            "Murph: Stronger, love that. Before we decide where to start, I want to understand a bit more so the advice actually fits. Do you use a wearable or health app, like Oura? Connecting one cuts down on manual reporting and helps me read things later.",
+            "Member: I've got an Oura ring, but I'll connect it later.",
             [
-              "Murph: Stronger, love that. Before I suggest where to start, I'd like to learn a bit about you so it fits. Can you send me a voice memo covering a few things?",
+              "Murph: No problem, we can leave Oura for later. Can you send me a voice memo covering a few things?",
               'You can type it out instead. Either works just as well.',
               "- how you move right now (gym, running, sports, mostly desk-bound) and whether you're training for anything specific",
               '- anything you take regularly (supplements, protein, that stuff), with brands if you know them',
               '- the medical basics: any meds, conditions, injuries, or allergies I should know for safety',
-              '- whether you wear a watch or ring',
               "- whether you've had blood tests in the last year or two",
               '- anything else you reckon I should know',
               "Ramble as long as you want, I'll sort it out.",
             ].join('\n'),
-          ].join('\n\n'), [], now, true),
+          ].join('\n\n'), [{ label: 'Oura', provider: 'oura' }], now, true),
           dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           progressDelivery: { async send(text) {
             progressUpdates.push(text)
@@ -5748,18 +5759,20 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             sendVaultFile: async () => { throw new Error('No file sends in onboarding proof.') },
             vaultFileSendAvailable: false,
           },
-          prompt: "Desk job, but I walk the dog every day. No gym. I take vitamin D most days. I hurt my lower back last year and it still flares up if I lift anything heavy off the floor. No meds, no allergies, nothing else medical. I don't wear a watch, and I haven't had blood work in years.",
+          prompt: "Desk job, but I walk the dog every day. No gym. I take vitamin D most days. I hurt my lower back last year and it still flares up if I lift anything heavy off the floor. No meds, no allergies, nothing else medical. And I haven't had blood work in years.",
         })
         const actions = readCapabilityRoutingActions(result.jsonEvents)
         const reply = result.finalMessage.trim()
         process.stdout.write(`[onboarding-proposal-uses-background-e2e] ${JSON.stringify({ progressUpdates, reply })}\n`)
         // Every background item is answered, so this reply is the first-step
         // offer. It is shaped by the back injury and the dog walks, asks
-        // nothing already answered, and saves no plan before a yes.
+        // nothing already answered, leaves the deferred Oura connection alone,
+        // and saves no plan before a yes.
         expect(reply).toMatch(/\bback\b/iu)
         expect(reply).toMatch(/strong|strength/iu)
         expect(reasksOnboardingBackground(reply), reply).toBe(false)
-        expect(reply).not.toMatch(/blood (?:tests?|work)|\blabs?\b|watch or (?:a )?ring|vitamin d[^.?!\n]{0,40}\?/iu)
+        expect(reasksWearable(reply), reply).toBe(false)
+        expect(reply).not.toMatch(/blood (?:tests?|work)|\blabs?\b|\boura\b|wearable|vitamin d[^.?!\n]{0,40}\?/iu)
         expect((reply.match(/\?/gu) ?? []).length).toBe(1)
         expect(actions.some((action) => action.kind === 'command' && action.command.includes('goal-setup/SKILL.md')), 'goal-setup skill read').toBe(true)
         expect(progressUpdates.length).toBeLessThanOrEqual(1)
@@ -40977,18 +40990,20 @@ function reasksOnboardingBackground(message: string): boolean {
     || message.split('\n').filter((line) => /^\s*[-•]/u.test(line) && topics.test(line)).length >= 2
 }
 
-// True when a reply asks exactly one short question, about a background item
-// the member has not answered yet, without sending a list again.
-function asksOneMissingBackgroundItem(message: string): boolean {
-  const topics = /\b(?:move|moving|movement|active|activity|exercise|workouts?|training|gym|routine|supplements?|protein|vitamins?|meds|medications?|conditions?|allerg(?:y|ies)|injur(?:y|ies)|medical|health basics|blood tests?|blood work|labs?)\b/iu
-  const questions = message.split(/(?<=[.!?])\s+|\n+/u).filter((part) => part.includes('?'))
-  const bulletLines = message.split('\n').filter((line) => /^\s*[-•]/u.test(line))
-  return questions.length === 1 && topics.test(questions[0] ?? '') && bulletLines.length < 2
+// True when a reply asks again whether the member uses a wearable.
+function reasksWearable(message: string): boolean {
+  return /watch or (?:a )?ring|wearable or (?:a )?health app|do you (?:also )?(?:use|wear|have) (?:a |any )?(?:watch|ring|wearable)|which (?:watch|ring|wearable)/iu.test(message)
 }
 
-// True when a reply asks again whether the member wears a watch or ring.
-function reasksWearable(message: string): boolean {
-  return /watch or (?:a )?ring|do you (?:also )?(?:use|wear|have) (?:a |any )?(?:watch|ring|wearable)|which (?:watch|ring|wearable)/iu.test(message)
+// True when a reply asks exactly one question, the wearable question, without
+// a list and without the health background ask.
+function asksWearableQuestion(message: string): boolean {
+  const questions = message.split(/(?<=[.!?])\s+|\n+/u).filter((part) => part.includes('?'))
+  const bulletLines = message.split('\n').filter((line) => /^\s*[-•]/u.test(line))
+  return questions.length === 1
+    && /\bwearables?\b|health app/iu.test(questions[0] ?? '')
+    && bulletLines.length === 0
+    && !/voice memo/iu.test(message)
 }
 
 function hasNoFurtherWearableCheckinMeaning(message: string): boolean {
