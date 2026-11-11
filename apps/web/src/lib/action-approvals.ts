@@ -223,7 +223,7 @@ export async function consumeHostedActionApproval(input: {
       kind: ACTION_APPROVAL_KIND,
       memberId: prepared.memberId,
       tokenHash: approval.tokenHash,
-      AND: [buildHostedActionApprovalHashWhere(prepared)],
+      actionHash: prepared.actionHash,
     },
     data: {
       consumedAt: prepared.now,
@@ -498,38 +498,6 @@ export function hashHostedActionApprovalRequest(input: {
   ].join("\n"));
 }
 
-function hashLegacyNullReturnContactKindHostedActionApprovalRequest(input: {
-  memberId: string;
-  request: HostedActionApprovalRequest;
-}): string {
-  return sha256Hex([
-    ACTION_APPROVAL_HASH_VERSION,
-    input.memberId,
-    JSON.stringify([
-      "murph.hosted-action-approval-request.v1",
-      input.request.actionId,
-      input.request.actionKind,
-      input.request.actionFingerprint,
-      input.request.presentation.title,
-      input.request.presentation.body,
-    ]),
-  ].join("\n"));
-}
-
-function buildHostedActionApprovalHashWhere(
-  prepared: PreparedHostedActionApprovalRequest,
-): Prisma.HostedSensitiveActionChallengeWhereInput {
-  if (prepared.legacyNullReturnContactKindActionHash === null) {
-    return { actionHash: prepared.actionHash };
-  }
-  return {
-    OR: [
-      { actionHash: prepared.actionHash },
-      { actionHash: prepared.legacyNullReturnContactKindActionHash },
-    ],
-  };
-}
-
 function buildHostedActionApprovalResult(
   approval: HostedSensitiveActionChallenge,
   now: Date,
@@ -559,7 +527,6 @@ interface PreparedHostedActionApprovalRequest {
   actionHash: string;
   approvalId: string;
   expiresAt: Date;
-  legacyNullReturnContactKindActionHash: string | null;
   memberId: string;
   now: Date;
   request: HostedActionApprovalRequest;
@@ -586,12 +553,6 @@ function prepareHostedActionApprovalRequest(input: {
     actionHash,
     approvalId,
     expiresAt: new Date(now.getTime() + ACTION_APPROVAL_TTL_MS),
-    legacyNullReturnContactKindActionHash: request.returnContactKind === null
-      ? hashLegacyNullReturnContactKindHostedActionApprovalRequest({
-          memberId: input.memberId,
-          request,
-        })
-      : null,
     memberId: input.memberId,
     now,
     request,
@@ -626,40 +587,32 @@ async function refreshHostedActionApprovalRequest(input: {
   prepared: PreparedHostedActionApprovalRequest;
   prisma: HostedActionApprovalWriteStore;
 }): Promise<HostedSensitiveActionChallenge> {
-  const updated = await input.prisma.hostedSensitiveActionChallenge.updateMany({
+  await input.prisma.hostedSensitiveActionChallenge.updateMany({
     where: {
       actionId: input.prepared.request.actionId,
       approvalKey: input.prepared.approvalId,
       kind: ACTION_APPROVAL_KIND,
       memberId: input.prepared.memberId,
       tokenHash: input.approval.tokenHash,
-      AND: [
-        buildHostedActionApprovalHashWhere(input.prepared),
+      actionHash: input.prepared.actionHash,
+      OR: [
+        { approvalStatus: "denied" },
         {
-          OR: [
-            { approvalStatus: "denied" },
-            {
-              approvalStatus: "pending",
-              expiresAt: { lte: input.prepared.now },
-            },
-            {
-              approvalStatus: "approved",
-              consumedAt: { not: null },
-            },
-            {
-              approvalStatus: "approved",
-              expiresAt: { lte: input.prepared.now },
-            },
-          ],
+          approvalStatus: "pending",
+          expiresAt: { lte: input.prepared.now },
+        },
+        {
+          approvalStatus: "approved",
+          consumedAt: { not: null },
+        },
+        {
+          approvalStatus: "approved",
+          expiresAt: { lte: input.prepared.now },
         },
       ],
     },
     data: buildPendingHostedActionApprovalData(input.prepared),
   });
-
-  if (updated.count !== 1) {
-    return findHostedActionApprovalForRequest(input);
-  }
 
   return findHostedActionApprovalForRequest(input);
 }
@@ -699,13 +652,6 @@ function assertHostedActionApprovalMatchesRequest(
     });
   }
   if (approval.actionHash === prepared.actionHash) {
-    return;
-  }
-  if (
-    prepared.legacyNullReturnContactKindActionHash !== null
-    && approval.actionHash === prepared.legacyNullReturnContactKindActionHash
-    && approval.returnContactKind === null
-  ) {
     return;
   }
   throw hostedOnboardingError({

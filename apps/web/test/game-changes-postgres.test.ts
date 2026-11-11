@@ -10,6 +10,14 @@ import { addDays, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
 import { parseStoredTerms, scorePlayer, settleDueAt, type RuleState } from "@/src/lib/game/rules";
 import type { GameCommand, GameSchedule, Weekday } from "@/src/lib/game/contract";
 const delivery = vi.hoisted(() => vi.fn(async () => {}));
+const response = vi.hoisted(() => ({ tasks: null as Array<() => Promise<void>> | null }));
+vi.mock("next/server", async original => ({
+  ...await original<typeof import("next/server")>(),
+  after: (task: () => Promise<void>) => {
+    if (!response.tasks) throw new Error("No active request");
+    response.tasks.push(task);
+  },
+}));
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: delivery }));
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Game changes proof needs an isolated local test database.");
@@ -38,6 +46,27 @@ const fence = async () => {};
 describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL", () => {
   afterAll(async () => { await cleanupGameFixtures(getPrisma(), members);
     await getPrisma().hostedMember.deleteMany({where:{id:{in:members}}}); });
+  it("returns the accepted proposal before optional delivery and retains it when that delivery fails", async () => {
+    const { a, gameId } = await setup();
+    const db = getPrisma(), proposalId = randomUUID();
+    delivery.mockClear(); response.tasks = [];
+    try {
+      const result = await run(a, { type: "proposeChange", gameId, proposalId, expectedTermsVersion: 1,
+        change: { kind: "edit", lengthDays: 10 } });
+      expect(result).toMatchObject({ ok: true, game: { pendingChange: { id: proposalId, deliveryStatus: "pending" } } });
+      expect(delivery).not.toHaveBeenCalled();
+      expect(response.tasks).toHaveLength(1);
+      const stored = (await db.game.findUniqueOrThrow({ where: { id: gameId } })).pendingChange;
+      expect(stored).toHaveProperty("deliveryStatus", "pending");
+      delivery.mockRejectedValueOnce(new Error("Provider unavailable"));
+      await response.tasks[0]!();
+      expect(delivery).toHaveBeenCalledOnce();
+      expect((await db.game.findUniqueOrThrow({ where: { id: gameId } })).pendingChange).toMatchObject({ id: proposalId, deliveryStatus: "failed" });
+      expect(await db.hostedLinqDelivery.findUnique({ where: {
+        idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(`game-change:${gameId}:${proposalId}`)!,
+      } })).toMatchObject({ status: "awaiting_generation", retryAfterAt: null });
+    } finally { response.tasks = null; }
+  });
   it("reserves acceptance and app proposals once, but never a second chat announcement", async () => {
     const { a,b,room,gameId } = await setup();
     const db = getPrisma();

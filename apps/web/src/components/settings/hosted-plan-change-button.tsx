@@ -1,5 +1,6 @@
 "use client";
 
+import { MinusIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
@@ -22,6 +23,7 @@ import {
   type HostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedBillingPlanSwitchResult } from "@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service";
+import { EDGE_ONLY_FEATURES } from "@/src/lib/hosted-onboarding/plan-features";
 import { cn } from "@/src/lib/utils";
 
 import { BillingPortalButton } from "./billing-portal-button";
@@ -30,6 +32,7 @@ import { toErrorMessage } from "./hosted-settings-sync-helpers";
 export function HostedPlanChangeButton(props: {
   block?: boolean;
   children?: ReactNode;
+  confirmationDetails?: ReactNode;
   currentPeriodEnd?: string | null;
   disabled?: boolean;
   targetPlanCode: HostedBillingPlanCode;
@@ -123,7 +126,7 @@ export function HostedPlanChangeButton(props: {
       >
         {label}
       </Button>
-      {props.mode === "upgrade" && errorMessage ? (
+      {!confirmationOpen && errorMessage ? (
         <p
           role="alert"
           aria-live="polite"
@@ -136,6 +139,7 @@ export function HostedPlanChangeButton(props: {
         <Dialog open={confirmationOpen} onOpenChange={setConfirmationOpen}>
           <DialogContent className="max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7">
             <HostedPlanChangeConfirmationContent
+              details={props.confirmationDetails}
               currentPeriodEnd={props.currentPeriodEnd}
               errorMessage={errorMessage}
               onClose={() => setConfirmationOpen(false)}
@@ -152,6 +156,7 @@ export function HostedPlanChangeButton(props: {
 }
 
 export function HostedPlanChangeConfirmationContent(props: {
+  details?: ReactNode;
   currentPeriodEnd?: string | null;
   errorMessage: string | null;
   onClose: () => void;
@@ -168,29 +173,33 @@ export function HostedPlanChangeConfirmationContent(props: {
 
   return (
     <>
-      <DialogHeader className="pr-10">
-        <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
-          Switch to {plan.displayName}
-        </DialogTitle>
-        <DialogDescription className="text-sm leading-6 text-[#736a58]">
-          Your current plan continues through {effectiveDate}. Then {plan.displayName} starts at {price}/month.
-        </DialogDescription>
-      </DialogHeader>
+      {props.details ?? (
+        <>
+          <DialogHeader className="pr-10">
+            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+              Switch to {plan.displayName}
+            </DialogTitle>
+            <DialogDescription className="text-sm leading-6 text-[#736a58]">
+              Your current plan continues through {effectiveDate}. Then {plan.displayName} starts at {price}/month.
+            </DialogDescription>
+          </DialogHeader>
 
-      <div className="rounded-xl border border-[#c4a882]/25 bg-white/55 px-5 py-4">
-        <p className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436]">
-          {price}
-          <span className="ml-1 font-sans text-sm font-normal text-[#736a58]">
-            / month
-          </span>
-        </p>
-        {props.targetPlanCode === "launch_group_monthly" ? (
-          <p className="mt-2 text-sm leading-6 text-[#736a58]">
-            For confirmed group members who want wearable syncing, group
-            participation, and lighter private Murph usage.
-          </p>
-        ) : null}
-      </div>
+          <div className="rounded-xl border border-[#c4a882]/25 bg-white/55 px-5 py-4">
+            <p className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436]">
+              {price}
+              <span className="ml-1 font-sans text-sm font-normal text-[#736a58]">
+                / month
+              </span>
+            </p>
+            {props.targetPlanCode === "launch_group_monthly" ? (
+              <p className="mt-2 text-sm leading-6 text-[#736a58]">
+                For confirmed group members who want wearable syncing, group
+                participation, and lighter private Murph usage.
+              </p>
+            ) : null}
+          </div>
+        </>
+      )}
 
       {props.errorMessage ? (
         <p
@@ -225,6 +234,53 @@ export function HostedPlanChangeConfirmationContent(props: {
         >
           Cancel
         </Button>
+      </div>
+    </>
+  );
+}
+
+export function EdgeToPulseSwitchSummary({ currentPeriodEnd }: {
+  currentPeriodEnd?: string | null;
+}) {
+  const renewalDate = formatHostedBillingDate(currentPeriodEnd);
+  const pulsePriceLabel = formatHostedBillingPrice(
+    getHostedBillingPlanDefinition("launch_monthly").recurringAmountUsdCents,
+  );
+  const edgePriceLabel = formatHostedBillingPrice(
+    getHostedBillingPlanDefinition("launch_edge_monthly").recurringAmountUsdCents,
+  );
+
+  return (
+    <>
+      <DialogHeader className="pr-10">
+        <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-[#2d3436]">
+          Switch to Pulse
+        </DialogTitle>
+        <DialogDescription className="text-sm leading-6 text-[#736a58]">
+          You keep Edge through {renewalDate}, then Pulse at {pulsePriceLabel}/mo.
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="rounded-lg border border-[#c4a882]/25 px-5 py-4">
+        <div className="flex items-baseline gap-1">
+          <span className="font-serif text-3xl font-semibold tracking-tight text-[#2d3436]">
+            {pulsePriceLabel}
+          </span>
+          <span className="text-sm text-[#736a58]">/ month</span>
+        </div>
+        <p className="mt-1 text-xs text-[#736a58]">
+          Down from {edgePriceLabel}/mo
+        </p>
+        <ul className="mt-4 flex flex-col gap-2.5">
+          {EDGE_ONLY_FEATURES.map((feature) => (
+            <li key={feature} className="flex items-start gap-2.5 text-sm text-[#736a58]">
+              <span aria-hidden className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+                <MinusIcon className="size-3 text-destructive/70" strokeWidth={2.5} />
+              </span>
+              {feature}
+            </li>
+          ))}
+        </ul>
       </div>
     </>
   );

@@ -839,7 +839,6 @@ describe("hosted execution coverage gaps", () => {
       "./temporal-env",
       "./usage-diagnostics",
       "./vault-share",
-      "./voice-control",
       "./workspace-snapshot-store",
       "./workspace-snapshot-v2",
     ]);
@@ -1026,7 +1025,6 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_MAX_LENGTH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
-      "HOSTED_RUNTIME_VOICE_INPUT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
       "buildHostedRuntimeOwnerReleaseSearch",

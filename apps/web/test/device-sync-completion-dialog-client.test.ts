@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
-import { DeviceSyncCompletionDialog } from "../app/(dashboard)/home/device-sync-completion-dialog";
+import { DeviceSyncCompletionDialog } from "../src/components/device-sync/device-sync-completion-dialog";
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
 
 const mocks = vi.hoisted(() => ({
@@ -140,7 +140,7 @@ test("DeviceSyncCompletionDialog strips an unverified marker before its close re
     closeRefreshLocations.push(firstRender.window.location.href);
   });
   const continueButton = [...firstRender.container.querySelectorAll("button")]
-    .find((button) => button.textContent?.trim() === "Continue exploring");
+    .find((button) => button.textContent?.trim() === "Continue");
   expect(continueButton).not.toBeNull();
 
   await act(async () => {
@@ -152,10 +152,10 @@ test("DeviceSyncCompletionDialog strips an unverified marker before its close re
   expect(firstRender.replaceState).toHaveBeenCalledWith(
     {},
     "",
-    "/home?keep=1#source",
+    "/settings?keep=1#source",
   );
   expect(closeRefreshLocations).toEqual([
-    "https://app.example.test/home?keep=1#source",
+    "https://app.example.test/settings?keep=1#source",
   ]);
   expect(firstRender.replaceState.mock.invocationCallOrder[0]).toBeLessThan(
     mocks.routerRefresh.mock.invocationCallOrder[1] ?? 0,
@@ -171,7 +171,7 @@ test("DeviceSyncCompletionDialog strips an unverified marker before its close re
   expect(remount.replaceState).toHaveBeenCalledWith(
     {},
     "",
-    "/home?keep=1#source",
+    "/settings?keep=1#source",
   );
 
   await remount.cleanup();
@@ -186,11 +186,11 @@ test("DeviceSyncCompletionDialog refreshes plain Home after the result closes", 
   expect(render.replaceState).toHaveBeenCalledWith(
     {},
     "",
-    "/home?keep=1#source",
+    "/settings?keep=1#source",
   );
   expect(mocks.routerRefresh).not.toHaveBeenCalled();
   const continueButton = [...render.container.querySelectorAll("button")]
-    .find((button) => button.textContent?.trim() === "Continue exploring");
+    .find((button) => button.textContent?.trim() === "Continue");
   expect(continueButton).not.toBeNull();
 
   await act(async () => {
@@ -287,7 +287,8 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
   expect(continueLink?.getAttribute("rel")).toBe("noopener noreferrer");
   expect(continueLink?.getAttribute("target")).toBe("_blank");
   expect(continueLink?.textContent).toContain("Continue with Murph");
-  expect(render.container.innerHTML).not.toContain("Continue exploring");
+  expect([...render.container.querySelectorAll("button")]
+    .some((button) => button.textContent?.trim() === "Continue")).toBe(false);
   expect(
     render.container.querySelector("audio[src='/audio/whoop-sync-memos/grandpa.mp3']"),
   ).not.toBeNull();
@@ -399,8 +400,8 @@ async function renderDeviceSyncCompletionDialog(
     {
       location: {
         hash: "#source",
-        href: "https://app.example.test/home?deviceSyncCompletion=1&deviceSyncStatus=connected&deviceSyncProvider=whoop&keep=1#source",
-        pathname: "/home",
+        href: "https://app.example.test/settings?deviceSyncCompletion=1&deviceSyncStatus=connected&deviceSyncProvider=whoop&keep=1#source",
+        pathname: "/settings",
         search: "?deviceSyncCompletion=1&deviceSyncStatus=connected&deviceSyncProvider=whoop&keep=1",
       },
     },

@@ -24,26 +24,14 @@ const mocks = vi.hoisted(() => ({
   projectHostedPersonalAiUsageStatus: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
   routerRefresh: vi.fn(),
+  readHomeLabBiomarkers: vi.fn(),
   shouldShowHomeDeviceSyncStep: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 
-// The dashboard route-group template owns the browser vault, so the home
-// page body reads it through context. Stub it here since these tests render the
-// page in isolation without the layout.
-vi.mock("@/src/lib/browser-vault/context", () => ({
-  BrowserVaultProvider: ({ children }: { children: ReactNode }) => children,
-  useBrowserVault: () => ({
-    client: null,
-    dataVersion: null,
-    deviceSyncImportPending: false,
-    error: null,
-    ref: null,
-    refreshPending: false,
-    refresh: async () => {},
-    status: "empty",
-  }),
+vi.mock("@/src/lib/browser-vault/home-labs", () => ({
+  readHomeLabBiomarkers: mocks.readHomeLabBiomarkers,
 }));
 
 vi.mock("next/link", () => ({
@@ -106,7 +94,7 @@ vi.mock("../app/(dashboard)/home/initial-visit-contact-picker-client", () => ({
   },
 }));
 
-vi.mock("../app/(dashboard)/home/device-sync-completion-dialog", () => ({
+vi.mock("@/src/components/device-sync/device-sync-completion-dialog", () => ({
   DeviceSyncCompletionDialog({
     model,
   }: {
@@ -155,13 +143,13 @@ vi.mock("@/src/lib/device-sync/home-onboarding", () => ({
 }));
 
 vi.mock("@/src/lib/device-sync/connect-completion", () => ({
-  DEVICE_SYNC_COMPLETION_HOME_MARKER: "deviceSyncCompletion",
+  DEVICE_SYNC_COMPLETION_MARKER: "deviceSyncCompletion",
   resolveDeviceSyncCompletionDialogModel:
     mocks.resolveDeviceSyncCompletionDialogModel,
 }));
 
 vi.mock("@/src/lib/connected-apps/connect-completion", () => ({
-  CONNECTED_APP_COMPLETION_HOME_MARKER: "connectedAppCompletion",
+  CONNECTED_APP_COMPLETION_MARKER: "connectedAppCompletion",
   resolveConnectedAppCompletionDialogModel:
     mocks.resolveConnectedAppCompletionDialogModel,
 }));
@@ -203,6 +191,7 @@ const MEMBER = {
 };
 
 beforeEach(() => {
+  mocks.readHomeLabBiomarkers.mockResolvedValue(false);
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-05-26T12:00:00.000Z"));
   vi.clearAllMocks();
@@ -1303,4 +1292,28 @@ test("HomePage hides the message step once Murph has a way to reach the member",
 
   assert.doesNotMatch(markup, /Murph can&#x27;t message you first/);
   assert.match(markup, /Connect devices/);
+});
+
+
+test("HomePage hides the lab upload only for confirmed labs or an unknown projection", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  for (const hasLabs of [true, false, null]) {
+    mocks.readHomeLabBiomarkers.mockResolvedValueOnce(hasLabs);
+    const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
+    assert.equal(markup.includes("Sync labs"), hasLabs === false);
+    assert.equal(markup.includes("Some dashboard details are unavailable"), hasLabs === null);
+    assert.match(markup, /Welcome to Murph/);
+    assert.match(markup, /Connect devices/);
+    if (hasLabs === null) assert.doesNotMatch(markup, /data-home-empty-state/);
+  }
+});
+
+test("HomePage passes no member authority for a signed-out visitor", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: false, authenticatedMember: null, session: null,
+  });
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) }));
+  assert.match(markup, /Welcome to Murph/);
+  assert.deepEqual(mocks.readHomeLabBiomarkers.mock.calls, [[null]]);
 });

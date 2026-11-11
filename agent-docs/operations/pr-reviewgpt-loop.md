@@ -156,7 +156,7 @@ failed export succeed.
 
 A successful export recovers evidence; it does not by itself validate a review.
 Check the exact accepted prompt and attachment, completed response and
-`REVIEW_COMPLETE` marker, requested model evidence, and minimum response time
+`REVIEW_COMPLETE` marker, requested model evidence, and substantive review
 under the final gate below. Preserve the original round and head when these
 checks pass. If the response is still incomplete, keep the original completion
 owner and paced polling rule. If identity or model evidence remains missing,
@@ -318,7 +318,7 @@ the current user explicitly asks for it.
    the full PR body, current patch,
    exact round metadata, and guarded repository snapshot to `codebase.zip`:
 
-   Full snapshots include `patches/codex-public-live.patch` even when unchanged,
+   Full snapshots include `patches/codex-websocket-ack.patch` even when unchanged,
    because the hosted runner applies that production-source patch during its
    native Codex build. Keep it with the Dockerfiles in the mandatory snapshot paths.
 
@@ -534,19 +534,12 @@ the current user explicitly asks for it.
    against the same pushed head. An authorized head change before any valid
    initial review uses the round-one baseline recovery above.
 
-   Require at least 80 seconds for a marked concrete-model final
-   response. The repository wrapper passes `--minimum-marked-response-time 80s`
-   to align the tool's attestation fallback with this final-gate minimum. Below
-   that minimum, the response does not count. At or above it, inspect the exact
-   turn, attachment, requested model selection, completion marker, and a
-   substantive review proportionate to the requested scope. Record the elapsed
-   time, selected lane/model evidence, artifact-quality judgment, and acceptance
-   reason in the round handoff. Duration alone never establishes a valid review.
-
-   Preserve a too-fast response only as diagnostic output and retry the same
-   substantive round number against the same pushed head. Browser, model,
-   capture, attachment, and
-   too-fast-response retries never advance the round counter. If evidence shows
+   Inspect the exact turn, attachment, requested model selection, completion
+   marker, and a substantive review proportionate to the requested scope. Use
+   the package's model-attestation checks; Murph adds no minimum response time.
+   Record selected lane/model evidence, artifact-quality judgment, and acceptance
+   reason in the round handoff. Browser, model, capture, and attachment recovery
+   never advance the round counter. If evidence shows
    a different or downgraded model, incomplete response, missing snapshot, or
    shallow/templated output, discard the round regardless of duration, correct
    the profile or invocation, and retry. A different-lane retry must use a fresh

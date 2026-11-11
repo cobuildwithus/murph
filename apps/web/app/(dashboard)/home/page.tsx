@@ -1,11 +1,12 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 
-import { DeviceSyncCompletionDialog } from "./device-sync-completion-dialog";
+import { DeviceSyncCompletionDialog } from "@/src/components/device-sync/device-sync-completion-dialog";
 import { HomeInitialVisitContactPickerClient } from "./initial-visit-contact-picker-client";
 
 import { HostedMurphChatAction, resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
-import { BrowserVaultOnboardingStepsContent } from "@/src/components/home/browser-vault-onboarding-steps";
+import { OnboardingSteps } from "@/src/components/home/onboarding-steps";
+import { readHomeLabBiomarkers } from "@/src/lib/browser-vault/home-labs";
 import { HomeDataLoadAlert } from "@/src/components/home/home-data-load-alert";
 import {
   MessageMurphActionFallback,
@@ -19,12 +20,12 @@ import {
   UploadLabsMurphContactAction,
 } from "@/src/components/home/upload-labs-action";
 import {
-  CONNECTED_APP_COMPLETION_HOME_MARKER,
+  CONNECTED_APP_COMPLETION_MARKER,
   type ConnectedAppCompletionSearchParams,
   resolveConnectedAppCompletionDialogModel,
 } from "@/src/lib/connected-apps/connect-completion";
 import {
-  DEVICE_SYNC_COMPLETION_HOME_MARKER,
+  DEVICE_SYNC_COMPLETION_MARKER,
   resolveDeviceSyncCompletionDialogModel,
   type DeviceSyncCompletionSearchParams,
 } from "@/src/lib/device-sync/connect-completion";
@@ -59,9 +60,9 @@ export default async function HomePage({
   const prisma = getPrisma();
   const usageGateCheckedAt = new Date();
   const hasCompletionMarker = readsCompletionMarker(
-    resolvedSearchParams[DEVICE_SYNC_COMPLETION_HOME_MARKER],
+    resolvedSearchParams[DEVICE_SYNC_COMPLETION_MARKER],
   ) || readsCompletionMarker(
-    resolvedSearchParams[CONNECTED_APP_COMPLETION_HOME_MARKER],
+    resolvedSearchParams[CONNECTED_APP_COMPLETION_MARKER],
   );
   const initialVisitProjectionPromise = member
     ? (async () => {
@@ -123,6 +124,7 @@ export default async function HomePage({
     connectedAppCompletionPromise,
     initialVisitProjectionPromise,
     messagingSetupStatePromise,
+    readHomeLabBiomarkers(member),
   ]);
   const [
     showDeviceStepResult,
@@ -131,6 +133,7 @@ export default async function HomePage({
     connectedAppCompletionDialogResult,
     initialVisitProjectionResult,
     messagingSetupStateResult,
+    labBiomarkersResult,
   ] = homeProjectionResults;
   const showDeviceStep = readSettledValue(showDeviceStepResult, false);
   const usageGate = readSettledValue(usageGateResult, null);
@@ -188,9 +191,10 @@ export default async function HomePage({
     projectedUsageStatusResult,
     null,
   );
+  const hasLabBiomarkers = readSettledValue(labBiomarkersResult, null);
   const hasHomeDataLoadError =
-    hasRejectedProjection(homeProjectionResults)
-    || hasRejectedProjection(dependentProjectionResults);
+    hasLabBiomarkers === null
+    || hasRejectedProjection([...homeProjectionResults, ...dependentProjectionResults]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -221,7 +225,8 @@ export default async function HomePage({
         />
       ) : null}
 
-      <BrowserVaultOnboardingStepsContent
+      <OnboardingSteps
+        hideLabsStep={hasLabBiomarkers !== false}
         showEmptyState={!hasHomeDataLoadError}
         emptyStateAction={
           <Suspense fallback={<MurphChatActionFallback />}>

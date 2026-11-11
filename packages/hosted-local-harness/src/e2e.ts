@@ -88,7 +88,6 @@ export type HostedLocalE2eScenarioName =
   | "group-sleep-source-sharing"
   | "foreground-reply-priority"
   | "hosted-web-browser-smoke"
-  | "native-voice"
   | "idle-checkpoint-deferred-progress"
   | "idle-checkpoint-runtime-handoff"
   | "imessage-member-action-timestamp"
@@ -218,12 +217,6 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     file: "apps/cloudflare/test/hosted-local-web-browser-smoke-e2e.test.ts",
     manualOnly: true,
     name: "hosted-web-browser-smoke",
-  },
-  {
-    dedicatedVitestProcess: true,
-    file: "apps/cloudflare/test/hosted-local-native-voice-e2e.test.ts",
-    manualOnly: true,
-    name: "native-voice",
   },
   {
     file: "apps/cloudflare/test/hosted-local-device-sync-wake-e2e.test.ts",

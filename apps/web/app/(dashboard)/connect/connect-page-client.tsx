@@ -9,7 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { Input } from "@/src/components/ui/input";
 import { releaseLinkPageVeil } from "@/src/components/link-page/link-page-veil";
-import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
+import { DeviceSyncSetupGuideDialog } from "@/src/components/device-sync/device-sync-completion-dialog";
 import type { DeviceSyncCompletionContactAction } from "@/src/lib/device-sync/connect-completion-types";
 import {
   buildAppleHealthRelaySetupGuide,

@@ -4,7 +4,6 @@ import {
 import {
   executeCodexAppServerTurn,
   preinitializeCodexAppServer,
-  startCodexAppServerRealtime,
   readCodexAppServerTurnFailureContext,
 } from '../../assistant-codex.js'
 import {
@@ -45,8 +44,6 @@ import type {
   CodexAppServerTurnInput,
   CodexAppServerTurnFailureContext,
   CodexAppServerLiveTurn,
-  CodexRealtimeOptions,
-  CodexRealtimeSession,
 } from '../../assistant-codex.js'
 import { extractCodexAppServerUserMessageImages } from '../../assistant-codex/images.js'
 
@@ -81,26 +78,6 @@ export async function preinitializeCodexAssistantProcess(
   return await preinitializeCodexAppServer({
     ...resolveCodexAssistantProcessLaunchInput(input),
     signal: input.signal ?? undefined,
-  })
-}
-
-export async function startCodexAssistantVoice(
-  input: CodexAssistantProcessPreparationInput & CodexRealtimeOptions & {
-    mediaModel: string
-    mediaModelProvider: string
-  },
-): Promise<CodexRealtimeSession> {
-  return await startCodexAppServerRealtime({
-    ...resolveCodexAssistantProcessLaunchInput(input),
-    model: input.mediaModel,
-    modelProvider: input.mediaModelProvider,
-    sessionId: input.sessionId,
-    sdp: input.sdp,
-    prompt: input.prompt,
-    voice: input.voice,
-    signal: input.signal,
-    onInput: input.onInput,
-    onUsage: input.onUsage,
   })
 }
 

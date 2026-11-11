@@ -123,9 +123,6 @@ export function JoinInviteStudy() {
           message: "Starter usage is unavailable.",
         }} />
       </Stage>
-      <Stage label="Activating" state="activating">
-        <JoinInviteStageServer model={model({ status: status("activating") })} />
-      </Stage>
       <Stage label="Welcome" state="active">
         <JoinInviteStageServer model={model({ status: status("active") })} />
       </Stage>
@@ -167,11 +164,8 @@ export function JoinInviteStudy() {
       <Stage label="Payment received" state="payment-received">
         <JoinInviteSuccessScreen status={status("checkout")} />
       </Stage>
-      <Stage label="Payment confirmed" state="payment-confirmed">
-        <JoinInviteSuccessScreen status={status("activating")} />
-      </Stage>
       <Stage label="Setup delayed" state="setup-delayed">
-        <JoinInviteSuccessScreen showSetupDelaySupport status={status("activating")} />
+        <JoinInviteSuccessScreen showSetupDelaySupport status={status("checkout")} />
       </Stage>
     </div>
   );

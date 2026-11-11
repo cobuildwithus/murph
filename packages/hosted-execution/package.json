@@ -20,10 +20,6 @@
       "types": "./dist/auth.d.ts",
       "default": "./dist/auth.js"
     },
-    "./voice-control": {
-      "types": "./dist/voice-control.d.ts",
-      "default": "./dist/voice-control.js"
-    },
     "./runtime-owner": {
       "types": "./dist/runtime-owner.d.ts",
       "default": "./dist/runtime-owner.js"

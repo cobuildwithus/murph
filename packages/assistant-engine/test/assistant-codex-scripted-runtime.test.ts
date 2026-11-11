@@ -8597,39 +8597,7 @@ text(JSON.stringify(result));
     ])
   })
 
-  it('labels only the scheduled turn so the Codex build can shorten its cache retention', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async () => {
-    const scenario = await prepareScriptedTurnScenario()
-    const scheduledLabel = String.raw`\"turn_trigger\":\"automation-cron\"`
-    scenario.stub.queue({
-      requestIncludes: [scheduledLabel],
-      text: 'SCRIPTED_SCHEDULED_OK',
-    })
-    const scheduled = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      prompt: 'Reply exactly SCRIPTED_SCHEDULED_OK.',
-      turnTrigger: 'automation-cron',
-    })
-    expect(scheduled.finalMessage).toBe('SCRIPTED_SCHEDULED_OK')
-
-    // The label is per turn: a reply on the same thread keeps 12-hour retention.
-    scenario.stub.queue({
-      requestExcludes: ['turn_trigger'],
-      text: 'SCRIPTED_REPLY_OK',
-    })
-    const reply = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      prompt: 'Reply exactly SCRIPTED_REPLY_OK.',
-      resumeSessionId: scheduled.sessionId,
-      turnTrigger: 'automation-auto-reply',
-    })
-    expect(reply.finalMessage).toBe('SCRIPTED_REPLY_OK')
-    expect(reply.sessionId).toBe(scheduled.sessionId)
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
-  })
-
-  it.runIf(Boolean(process.env.MURPH_TEST_CODEX_COMMAND?.trim()))('keeps scheduled turns and compaction on 30-minute cache retention in the deployed Codex build', {
+  it('leaves turns and compaction on provider-default cache retention', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario({ apiKeyEnv: 'OPENAI_API_KEY' })
@@ -8638,24 +8606,21 @@ text(JSON.stringify(result));
       env: { ...scenario.turnInput.env, MURPH_HOSTED_RUNTIME_PROCESS: '1' },
       groupConversation: true,
     }
-    const retention = (ttl: '30m' | '12h') => `"prompt_cache_options":{"ttl":"${ttl}"}`
 
     scenario.stub.queue({
-      requestIncludes: [retention('30m')],
+      requestExcludes: ['prompt_cache_options', 'turn_trigger'],
       text: 'RETENTION_SCHEDULED_OK',
       usageInputTokens: 50_000,
     })
     const scheduled = await executeCodexAppServerTurn({
       ...turnInput,
       prompt: 'Reply exactly RETENTION_SCHEDULED_OK.',
-      turnTrigger: 'automation-cron',
     })
     expect(scheduled.finalMessage).toBe('RETENTION_SCHEDULED_OK')
 
-    // A 12-hour request cannot read a 30-minute entry, so the compaction that
-    // follows a scheduled turn must stay on 30 minutes to read its prefix.
+    // Compaction uses the same native default as every other request.
     scenario.stub.queue({
-      requestIncludes: [retention('30m')],
+      requestExcludes: ['prompt_cache_options', 'turn_trigger'],
       text: 'RETENTION_COMPACT_SUMMARY',
     })
     const compacted = await compactWarmCodexThread({
@@ -8666,14 +8631,13 @@ text(JSON.stringify(result));
     expect(compacted.kind).toBe('compacted')
 
     scenario.stub.queue({
-      requestIncludes: [retention('12h')],
+      requestExcludes: ['prompt_cache_options', 'turn_trigger'],
       text: 'RETENTION_REPLY_OK',
     })
     const reply = await executeCodexAppServerTurn({
       ...turnInput,
       prompt: 'Reply exactly RETENTION_REPLY_OK.',
       resumeSessionId: scheduled.sessionId,
-      turnTrigger: 'automation-auto-reply',
     })
     expect(reply.finalMessage).toBe('RETENTION_REPLY_OK')
     expect(reply.threadId).toBe(scheduled.threadId)

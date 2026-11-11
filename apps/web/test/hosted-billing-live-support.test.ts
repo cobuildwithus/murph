@@ -193,24 +193,14 @@ describe("hosted billing live browser support", () => {
     const homeCommitted = new Promise<void>((resolve) => {
       releaseHomeCommit = resolve;
     });
-    const homeHeadingWaitFor = vi.fn(async () => undefined);
-    const homeHeaderGetByRole = vi.fn((role: string, options: unknown) => {
+    const homeHeadingWaitFor = vi.fn(() => homeCommitted);
+    const getByRole = vi.fn((role: string, options: unknown) => {
       expect(role).toBe("heading");
       expect(options).toEqual({ exact: true, name: "Welcome to Murph" });
       return { waitFor: homeHeadingWaitFor };
     });
-    const homeEyebrowLocator = vi.fn((selector: string) => {
-      expect(selector).toBe("xpath=parent::div");
-      return { getByRole: homeHeaderGetByRole };
-    });
-    const homeWaitFor = vi.fn(() => homeCommitted);
-    const getByText = vi.fn((text: string, options: unknown) => {
-      expect(text).toBe("Live Well");
-      expect(options).toEqual({ exact: true });
-      return { locator: homeEyebrowLocator, waitFor: homeWaitFor };
-    });
     const page = {
-      getByText,
+      getByRole,
       goto: vi.fn(async () => navigation),
       waitForResponse: vi.fn(async (
         predicate: (response: ReturnType<typeof createApiResponse>) => boolean,
@@ -236,9 +226,8 @@ describe("hosted billing live browser support", () => {
     });
 
     await vi.waitFor(() => {
-      expect(homeWaitFor).toHaveBeenCalledOnce();
+      expect(homeHeadingWaitFor).toHaveBeenCalledOnce();
     });
-    expect(homeHeadingWaitFor).not.toHaveBeenCalled();
     expect(activationSettled).toBe(false);
     releaseHomeCommit();
     await activation;
@@ -249,7 +238,7 @@ describe("hosted billing live browser support", () => {
     );
     expect(waitForURL).toHaveBeenCalledOnce();
     expect(homeHeadingWaitFor).toHaveBeenCalledOnce();
-    expect(homeWaitFor.mock.invocationCallOrder[0]).toBeGreaterThan(
+    expect(homeHeadingWaitFor.mock.invocationCallOrder[0]).toBeGreaterThan(
       waitForURL.mock.invocationCallOrder[0] ?? 0,
     );
   });

@@ -36,7 +36,6 @@ it('selects complete live titles while preserving ordinary display and ambiguous
     const requests: AssistantRealCodexCommandRequest[] = []
     const runCommand = (request: AssistantRealCodexCommandRequest) => {
       requests.push(request)
-      if (request.args[0] === 'app-server') return { status: 0, stdout: '--ignore-user-config' }
       if (request.args[0] === 'login') return { status: 0 }
       const args = request.args.slice(request.args.indexOf('vitest') + 1)
         .map((argument) => argument === 'vitest.config.ts' ? configPath
@@ -63,7 +62,7 @@ it('selects complete live titles while preserving ordinary display and ambiguous
       writeStdout: () => undefined,
     }
     expect(executeAssistantRealCodexRun(parseAssistantRealCodexRunArgs([selected]), dependencies)).toBe(0)
-    expect(requests.map((request) => request.stdio)).toEqual(['capture', 'capture', 'ignore', 'inherit'])
+    expect(requests.map((request) => request.stdio)).toEqual(['capture', 'ignore', 'inherit'])
     expect(await readFile(receiptPath, 'utf8')).toBe(`${selected}\n`)
     requests.length = 0
     expect(executeAssistantRealCodexRun(parseAssistantRealCodexRunArgs(['selects one synthetic']), dependencies)).toBe(2)

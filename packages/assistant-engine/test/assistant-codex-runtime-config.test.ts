@@ -444,22 +444,6 @@ describe('assistant codex runtime', () => {
     expect(
       buildCodexTurnStartParams({
         images: [],
-        input: { ...baseInput, turnTrigger: 'automation-cron' },
-        codexThreadId: 'thread-1',
-      }),
-    ).toMatchObject({ turnTrigger: 'automation-cron' })
-    for (const turnTrigger of ['automation-auto-reply', 'manual-ask', 'manual-deliver', null] as const) {
-      expect(
-        buildCodexTurnStartParams({
-          images: [],
-          input: { ...baseInput, turnTrigger },
-          codexThreadId: 'thread-1',
-        }),
-      ).not.toHaveProperty('turnTrigger')
-    }
-    expect(
-      buildCodexTurnStartParams({
-        images: [],
         input: {
           ...baseInput,
           serviceTier: 'priority',
