@@ -69,3 +69,8 @@ pending. No ReviewGPT requested or started.
 Current-main integration preserves published history with a merge. The only
 conflict is the documentation index; retain both the recap plan and main's
 Home-restoration pointer. Full typecheck passes on the integrated tree.
+
+The real journey exposed an inherited 60-character treatment copy cutoff. Pair
+show authoring and persisted presentation now accept descriptive genre strings;
+legacy/group validation stays unchanged. Contract projection and canonical
+PostgreSQL acceptance/replay cover the longer treatment.

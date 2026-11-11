@@ -40,6 +40,7 @@ export type GameRecapStory = z.infer<typeof gameRecapWriterSchema>;
 
 /** Local selections carry paths; the host owns hashes, bytes and source lineage. */
 export const recapShowWriterSchema = gameRecapWriterSchema.extend({
+  treatment: z.string().trim().min(1).optional(),
   pages: z.array(gameRecapWriterSchema.shape.pages.element.extend({ blocks: z.array(recapBlockSchema).min(1).max(4) })).min(1).max(7),
   superlatives: showSuperlatives.max(2).refine(cards => new Set(cards.map(card => card.memberId)).size === cards.length).optional(),
   song: z.object({ title: z.string().trim().min(1).max(200), style: z.string().trim().min(1).max(2000), lyrics: z.array(z.string().trim().min(1).max(500)).min(1).max(20) }).strict().optional(),

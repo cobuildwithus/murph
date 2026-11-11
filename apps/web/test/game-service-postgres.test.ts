@@ -671,8 +671,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       { memberId: a, title: "Cross examine mats", line: "PlayerA calls the mat as a witness." },
       { memberId: b, title: "Object to burpees", line: "PlayerB files a motion for recess." },
     ].slice(0, cardCount);
-    const { gameRecapWriterSchema } = await import('@murphai/contracts/recap-show');
-    const recap = gameRecapWriterSchema.parse({ ...(cards.length ? { superlatives: cards } : {}), treatment: "Courtroom drama", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
+    const { recapShowWriterSchema } = await import('@murphai/contracts/recap-show');
+    const recap = recapShowWriterSchema.parse({ ...(cards.length ? { superlatives: cards } : {}), treatment: "A silent-film courtroom melodrama about two athletes and a mat that takes the witness stand", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
       scene: { cast: ["PlayerA", "PlayerB"], prompt: "A synthetic paper courtroom stage with a rolled mat on a witness stand, with warm lighting and simple wooden benches." } }] }], chatLine: "The mat entered evidence." });
     const scope = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [a, b] };
     vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
