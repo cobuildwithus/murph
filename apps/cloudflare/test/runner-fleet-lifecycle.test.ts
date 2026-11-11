@@ -951,8 +951,8 @@ describe("native warm retention and terminal retirement", () => {
     const legacy = runnerHarness({ legacy: true, running: true });
     const names: unknown[][] = [];
     const router = createHostedRunnerContainerNamespaceRouter({
-      exactUser: { getByName(name) { names.push(["main", name]); return main.container; } },
-      standby: { getByName(name, options) { names.push(["legacy", name, options]); return legacy.container; } },
+      RUNNER_CONTAINER: { getByName(name) { names.push(["main", name]); return main.container; } },
+      STANDBY_RUNNER_CONTAINER: { getByName(name, options) { names.push(["legacy", name, options]); return legacy.container; } },
     });
     assert.ok(router);
     router.getByName(GLOBAL_SLOT);
@@ -967,7 +967,7 @@ describe("native warm retention and terminal retirement", () => {
     assert.equal((await destroyHostedExecutionContainer({ runnerContainerNamespace: router, runnerContainerName: LEGACY_SLOT, userId: MEMBER })).ok, true);
     await assert.rejects(main.container.bindStandbySlot(claimInput(LEGACY_SLOT)), /namespace/u);
     await assert.rejects(legacy.container.bindStandbySlot(claimInput(GLOBAL_SLOT)), /namespace/u);
-    const noLegacy = createHostedRunnerContainerNamespaceRouter({ exactUser: { getByName: () => main.container }, standby: null });
+    const noLegacy = createHostedRunnerContainerNamespaceRouter({ RUNNER_CONTAINER: { getByName: () => main.container }, STANDBY_RUNNER_CONTAINER: null });
     assert.throws(() => noLegacy?.getByName(LEGACY_SLOT), /unavailable/u);
   });
 });

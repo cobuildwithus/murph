@@ -222,8 +222,8 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     const phones = f.people.map(() => `+1555${String(parseInt(randomUUID().slice(0, 8), 16) % 10_000_000).padStart(7, "0")}`);
     for (const [seat, person] of f.people.entries()) await db.$transaction(tx => upsertHostedMemberIdentity({
       ...buildHostedMemberPhoneIdentityFields(phones[seat]), memberId: person.id, prisma: tx,
-      phoneNumberVerifiedAt: clock, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null, signupPhoneNumber: null,
+      phoneNumberVerifiedAt: clock,
+      signupPhoneNumber: null,
     }));
     proof.rooms.set(f.roomId, phones);
     const ending = await f.addGame(2, ["America/New_York", "America/Los_Angeles"]);
@@ -554,7 +554,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
   it("skips a room whose phone handle resolves to two members", async () => {
     const phone = "+12025550172";
     const claimPhone = (memberId: string) => db.$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(phone), memberId, prisma: tx,
-      phoneNumberVerifiedAt: now, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
+      phoneNumberVerifiedAt: now, signupPhoneNumber: null }));
     await drainPastBrokenRoom("identity_ambiguous", async f => {
       await claimPhone(f.people[0]!.id); await secondMemberBehind(claimPhone);
       proof.rooms.set(f.roomId, [phone, ...f.people.map(person => person.email)]);

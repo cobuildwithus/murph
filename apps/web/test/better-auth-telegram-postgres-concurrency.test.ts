@@ -407,8 +407,8 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     await prisma.hostedMember.create({ data: { id: memberId } });
     await prisma.$transaction(async (tx) => {
       await upsertHostedMemberIdentity({ memberId, prisma: tx, phoneNumber: null, phoneNumberVerifiedAt: null,
-        phoneLookupKey: null, maskedPhoneNumberHint: null, signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null });
+        phoneLookupKey: null, maskedPhoneNumberHint: null,
+        signupPhoneNumber: null });
       await upsertHostedMemberTelegramRoutingBindingTx({ memberId, telegramUserId: flow.id, prisma: tx });
     });
     const response = await finish(flow); expect(response.status).toBe(200); expect(await response.json()).toMatchObject({ memberId });

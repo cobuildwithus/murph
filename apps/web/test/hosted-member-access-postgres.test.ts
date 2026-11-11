@@ -48,8 +48,6 @@ describe.skipIf(!runPostgresProof)("hosted member-access PostgreSQL projection",
     const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
     const memberId = `lapsed_access_${randomUUID()}`;
     const now = new Date();
-    const previous = await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
-    await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "postgres" } });
     try {
       await prisma.hostedMember.create({ data: { id: memberId, billingStatus } });
       expect(await readActiveHostedMemberAccess({ memberId, now, prisma })).toBe(true);
@@ -100,7 +98,6 @@ describe.skipIf(!runPostgresProof)("hosted member-access PostgreSQL projection",
     } finally {
       await prisma.hostedRuntimeOwner.deleteMany({ where: { userId: memberId } });
       await prisma.hostedMember.deleteMany({ where: { id: memberId } });
-      await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: previous.phase } });
       vi.restoreAllMocks();
       await prisma.$disconnect();
       vi.unstubAllEnvs();

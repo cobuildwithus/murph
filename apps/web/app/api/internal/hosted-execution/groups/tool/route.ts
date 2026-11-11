@@ -1,3 +1,4 @@
+import { RecapControlError } from '@murphai/contracts/recap-admission';
 import { readHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 import {
   parseHostedRuntimeGroupToolRequest,
@@ -49,13 +50,14 @@ export const POST = withJsonError(async (request: Request) => {
   // charged to the operation that has to finish inside it.
   const requestStartedAtMs = Date.now();
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
-    maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
+    maxBodyBytes: new URL(request.url).searchParams.get("recapMedia") === "1" ? 3 * 1024 * 1024 : HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   });
   const runtimeAuthority = readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers);
   const currentSenderWire = readHostedCurrentSenderWire(payload);
   const body = parseHostedRuntimeGroupToolRequest(currentSenderWire.payload, {
     privateMediaDeliveryOrigin: readHostedExecutionControlOrigin(),
   });
+  if (new URL(request.url).searchParams.get("recapMedia") === "1" && !(body.action === "read_game" && body.origin.kind === "game_recap" && body.recapRead?.kind === "stage")) throw new TypeError("Recap protocol requires its own command.");
   const supportedProjectionScopeKeys =
     readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
   const membershipInventoryProtocol = new URL(request.url).searchParams.get(
@@ -90,10 +92,16 @@ export const POST = withJsonError(async (request: Request) => {
   );
 
   if (body.action !== "ask") {
-    return jsonOk(encodeHostedCurrentSenderLegacyWireResponse(
-      await executeTool(),
-      currentSenderWire.compatibility,
-    ));
+    try {
+      return jsonOk(encodeHostedCurrentSenderLegacyWireResponse(
+        await executeTool(), currentSenderWire.compatibility,
+      ));
+    } catch (error) {
+      if ((body.action === "read_game" || body.action === "write_recap") && body.origin.kind === "game_recap" && error instanceof RecapControlError) {
+        return jsonOk({ action: body.action, result: { status: "rejected", error: error.code, recapOutcome: error.message } });
+      }
+      throw error;
+    }
   }
 
   const responseHeaders = {

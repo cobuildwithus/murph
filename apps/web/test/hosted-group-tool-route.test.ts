@@ -1,3 +1,4 @@
+import { RecapControlError } from '@murphai/contracts/recap-admission';
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
@@ -97,6 +98,18 @@ describe("hosted group tool route", () => {
       memberId: "member_group_runtime", request: body,
       runtimeIdentity: { userId: "member_group_runtime", attemptId: "attempt-synthetic", generation: "7", workspaceVersion: "3" },
     }));
+  });
+
+  it.each(["recap_media_attempt_limit", "recap_submission_frozen"] as const)("returns typed recap rejection for %s without HTTP 500", async code => {
+    const body = { action: "read_game", origin: { kind: "game_recap", gameId: "synthetic-game", eventId: "game-recap:synthetic-game" } };
+    mocks.handleTool.mockRejectedValue(new RecapControlError(code));
+    const response = await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`, {
+      method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ action: "read_game", result: {
+      status: "rejected", error: code, recapOutcome: new RecapControlError(code).message,
+    } });
   });
 
   it("forwards the signed runtime identity for the recap write fence", async () => {

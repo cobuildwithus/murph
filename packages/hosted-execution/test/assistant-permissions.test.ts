@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGameHostPermissionProfileTomlLines,
+  buildMurphRecapPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
   buildMurphHostedPermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
@@ -11,6 +12,15 @@ import {
 } from "../src/assistant-permissions.ts";
 
 describe("hosted Codex permissions", () => {
+  it("keeps recap access implicit-deny without masking its read-only descendants", () => {
+    const profile = buildMurphRecapPermissionProfileTomlLines().join("\n");
+    expect(profile).toContain('":minimal" = "read"');
+    expect(profile).toContain('"/app" = "read"');
+    expect(profile).toContain("enabled = false");
+    expect(profile).not.toContain(":workspace_roots");
+    expect(profile).not.toMatch(/"(?:\.|\/)" =/u);
+  });
+
   it("grants read-only workspace access with non-overlapping secret carve-outs", () => {
     expect(buildMurphGroupReadPermissionProfileTomlLines()).toEqual([
       "# Read-only, ephemeral consultations initiated by a current group member.",
@@ -101,6 +111,7 @@ describe("hosted Codex permissions", () => {
   it("composes every hosted permission profile from the canonical builders", () => {
     expect(buildMurphHostedPermissionProfileTomlLines()).toEqual([
       ...buildMurphGameHostPermissionProfileTomlLines(),
+      ...buildMurphRecapPermissionProfileTomlLines(),
       ...buildMurphGroupReadPermissionProfileTomlLines(),
       ...buildMurphOperatorDiagnosticReadPermissionProfileTomlLines(),
       ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),

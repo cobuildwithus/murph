@@ -564,13 +564,10 @@ test("buildHostedWebTurbopackConfig always points Turbopack at the repo root", (
   const hasOptionalModule = resolveHostedOptionalModule();
 
   assert.equal(turbopackConfig?.root, process.cwd());
-  if (hasOptionalModule) {
-    assert.equal(resolveAlias, undefined);
-  } else {
-    assert.deepEqual(resolveAlias, {
-      "@farcaster/mini-app-solana": "./src/lib/empty-module.ts",
-    });
-  }
+  assert.deepEqual(resolveAlias, {
+    "@eshaz/web-worker": "./src/lib/server-web-worker.ts",
+    ...(hasOptionalModule ? {} : { "@farcaster/mini-app-solana": "./src/lib/empty-module.ts" }),
+  });
 });
 
 

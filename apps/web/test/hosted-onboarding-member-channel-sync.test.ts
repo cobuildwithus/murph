@@ -383,9 +383,6 @@ function makeMemberSnapshot(): HostedMemberSnapshot {
       phoneLookupKey: "hbidx:phone:v1:lookup",
       phoneNumber: "+15550100001",
       phoneNumberVerifiedAt: new Date("2026-04-12T00:00:00.000Z"),
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
       signupPhoneNumber: null,
 
 

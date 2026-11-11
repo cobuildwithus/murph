@@ -8,7 +8,7 @@ import { createMurphOgImageRef, createMurphPageMetadata, MURPH_NOINDEX_PAGE_ROBO
 
 import { GameRecapView } from "./game-recap-view";
 
-export const metadata: Metadata = {
+const genericMetadata: Metadata = {
   ...createMurphPageMetadata({
     title: "Watch your recap in Murph",
     description: "Who won, who owes, and the best of it.",
@@ -23,6 +23,15 @@ export const metadata: Metadata = {
   }),
   referrer: "no-referrer",
 };
+
+export async function generateMetadata(props: { params: Promise<{ gameId: string }>; searchParams: Promise<{ preview?: string }> }): Promise<Metadata> {
+  const [{ gameId }, { preview }] = await Promise.all([props.params, props.searchParams]);
+  if (!preview || !/^[A-Za-z0-9_-]{43}$/u.test(preview)) return genericMetadata;
+  const { readRecapCoverPreview } = await import("@/src/lib/game/recap-preview");
+  if (!await readRecapCoverPreview(gameId, preview)) return genericMetadata;
+  const image = { url: `/recap/${encodeURIComponent(gameId)}/cover/${encodeURIComponent(preview)}`, alt: "Murph recap", type: "image/jpeg" };
+  return { ...genericMetadata, openGraph: { ...genericMetadata.openGraph, images: [image] }, twitter: { ...genericMetadata.twitter, images: [image] } };
+}
 
 export default async function GameRecapPage(props: { params: Promise<{ gameId: string }> }) {
   const { gameId } = await props.params;

@@ -92,3 +92,15 @@ export function mediaKeyOwner(key: string): string | null {
   const match = /^game\/([A-Za-z0-9_-]+)\//u.exec(key);
   return match ? match[1] : null;
 }
+
+/** Producer stays dark until compatible consumers and provider privacy gates are approved. */
+export function isPairRecapShowEnabled(maxPlayers: number, env: GameEnv = process.env): boolean {
+  return maxPlayers === 2 && env.MURPH_GAME_RECAP_SHOW_ENABLED === "true";
+}
+export function isRecapMediaVisible(env: GameEnv = process.env): boolean {
+  return env.MURPH_GAME_RECAP_MEDIA_VISIBLE !== "false";
+}
+
+export function pairRecapShowCapability(maxPlayers: number): { show?: true } {
+  return isPairRecapShowEnabled(maxPlayers) ? { show: true } : {};
+}
