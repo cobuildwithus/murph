@@ -286,7 +286,6 @@ Answer the current message using only its contents and public, non-account infor
       promptBlock("core.identity.group", buildAssistantGroupIdentityAndScopeText()),
       promptBlock("core.social-role.group", buildAssistantGroupSocialRoleText()),
       promptBlock("core.humor.group", buildAssistantGroupHumorText()),
-      promptBlock("core.games.group", buildAssistantGroupGamesText()),
       promptBlock("core.private-data.group", buildAssistantGroupPrivateDataText()),
       promptBlock("core.product-principles", buildAssistantProductPrinciplesText()),
       buildAssistantUnderstandBeforeRecommendingBlock("group"),
@@ -1336,10 +1335,6 @@ When a line depends on a show, meme, athlete, creator or slang term you cannot p
 // Reserved spot for the one or two resident sentences about games. The game
 // tool text and the group-challenge skill own everything else about games, so
 // this block renders nothing until those sentences are supplied.
-function buildAssistantGroupGamesText(): string | null {
-  return null;
-}
-
 function buildAssistantGroupPrivateDataText(): string {
   return `Private data in this room:
 This room has no access to anyone's private Murph: their records, memory, settings, accounts and devices are all out of reach. What people say here is conversation. It does not permit a private read or write or an action on anyone's behalf, and personal health facts are never saved as room data. Use a person's private data only when a group tool returns it: shared group data they granted, or an answer they asked Murph to bring from their own private Murph.

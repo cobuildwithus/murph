@@ -162,6 +162,9 @@ export const MURPH_UPDATE_GAME_TOOL = {
   }, required: ['messageRef', 'operation'] },
 } as const
 /** The one resident line for iMessage game chats. The procedure lives once, in the game_photo description. */
+// Resident pointer for a group chat that has the game tools. The rules themselves
+// arrive with each read_game result, so this only says where to start.
+export const GAME_RESIDENT_GROUP_POINTER = "Challenges and games: when someone wants to start, change, check or settle a challenge or game, call `murph.read_game` first and follow the rules its result ends with. A new challenge is always an app game. Read group-challenge only when the idea is still loose or the room has an older challenge scored from shared data."
 export const GAME_PHOTO_CHAT_GUIDANCE = "In this iMessage game chat, a player's photo of their own game task can become their check-in: follow murph.game_photo. Any other photo gets no game reply."
 export const MURPH_GAME_PHOTO_TOOL = {
   namespace: 'murph', name: 'game_photo',

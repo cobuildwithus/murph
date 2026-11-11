@@ -36,8 +36,6 @@ export const ASSISTANT_PROMPT_BLOCK_DEFINITIONS = {
   "core.identity.group": { layer: "core", audience: "group", boundary: true },
   "core.social-role.group": { layer: "core", audience: "group", boundary: true },
   "core.humor.group": { layer: "core", audience: "group", boundary: true },
-  // Reserved for the resident sentences about games; admits nothing until they exist.
-  "core.games.group": { layer: "core", audience: "group" },
   "core.private-data.group": { layer: "core", audience: "group", boundary: true },
   "core.product-principles": { layer: "core", audience: "group" },
   "core.how-you-help.direct": { layer: "core", audience: "private" },
