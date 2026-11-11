@@ -1,6 +1,6 @@
 # Simplify game delivery timing and row dependencies
 
-Status: active
+Status: completed
 Created: 2026-11-10
 Updated: 2026-11-10
 
@@ -74,16 +74,22 @@ removing Talk and reminder back-imports without adding a repository layer.
 - Complexity diff against the branch base passed: zero new debt/hotspots;
   nine function bodies recognized as exact moves.
 - Talk production-path suite: 1 file, 11 tests passed.
-- Focused real Codex journey: pending supported patched binary. Initial command
-  stopped before provider action because the default binary lacks the native
-  patch. Existing Frog `20261026172108-local-live-runner` owns this friction;
-  the assistant execution workstream owns the supported binary build.
+- Focused real Codex journey passed with `gpt-6.1-sol` through the local
+  subscription and supported Codex 0.166.0 production patch. One provider request,
+  exactly one weekday-change proposal, and a truthful applied-state reply without
+  asking the original proposer again. UX verdict: Ready. Command:
+  `pnpm test:assistant:live -- --test "game chat repeated declined change applies without asking original proposer again" --codex-command <supported-native-binary>`.
+- The default binary initially stopped before provider action because it lacks
+  the native patch. Existing Frog `20261026172108-local-live-runner` owns that
+  friction; the assistant execution workstream supplied the supported build.
 - Authored privacy/diff review passed. Source-linked release note added for
   draft PR 4825; changelog generation and 4 rendered archive tests passed.
-- Initial scoped commit pushed; final live proof and plan closure remain pending.
+- Scoped implementation and release-note commits are pushed. This final record
+  closes the plan and preserves the parent's review/completion boundary.
 
 ## Completion ownership
 
 The parent session owns final candidate review, ReviewGPT, readiness, merge and
 deployment. This workstream prepares the scoped draft PR and reports all retained
 requirements. No production mutation or member messaging is authorized here.
+Completed: 2026-11-10

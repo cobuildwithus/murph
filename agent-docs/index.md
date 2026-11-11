@@ -2055,4 +2055,4 @@ App image sizing and native decoding proof: [image sizing plan](exec-plans/compl
 
 Frog backlog resolution and verification: [execution record](exec-plans/completed/2026-11-10-frog-backlog.md).
 
-Game delivery timing and row conversion use the [weekly game contract](product-specs/weekly-game.md) and [architecture](../ARCHITECTURE.md#weekly-game). The simplification decisions and verification are recorded in the [execution record](exec-plans/active/2026-11-10-simplify-game-state.md).
+Game delivery timing and row conversion use the [weekly game contract](product-specs/weekly-game.md) and [architecture](../ARCHITECTURE.md#weekly-game). The simplification decisions and verification are recorded in the [execution record](exec-plans/completed/2026-11-10-simplify-game-state.md).

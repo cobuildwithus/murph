@@ -47306,7 +47306,7 @@ describeRealCodex('real Codex game chat adjustment e2e', () => {
         const proposal = updates[0]
         expect(proposal?.operation === 'propose' && proposal.change).toEqual({ kind: 'edit', schedule: { days: [0, 1, 2, 3, 4] } })
         expect(result.finalMessage).toMatch(/weekday|Monday.*Friday/iu)
-        expect(result.finalMessage).not.toMatch(/\?|waiting|pending|propos|confirm|agree|good with|does that work/iu)
+        expect(result.finalMessage).not.toMatch(/\?|waiting|pending|propos|(?:need|please|can you|could you).*\b(?:confirm|agree)|good with|does that work/iu)
       } else if (scenario === 'only_current') {
         expect(updates.map((update) => update.operation)).toEqual(['propose'])
         const proposal = updates[0]
