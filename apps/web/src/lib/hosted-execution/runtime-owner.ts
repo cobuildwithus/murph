@@ -9,8 +9,7 @@ import { isGameEnabled } from "../game/access";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 
-// Migration columns remain in the schema only until contract cleanup.
-export type HostedRuntimeOwner = Omit<StoredHostedRuntimeOwner, "migrationPhase" | "migrationId">;
+export type HostedRuntimeOwner = StoredHostedRuntimeOwner;
 
 export interface HostedRuntimeIdentity {
   userId: string;
@@ -92,7 +91,7 @@ export async function claimHostedRuntime(input: {
     };
     const owner = existing
       ? await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data })
-      : await tx.hostedRuntimeOwner.create({ data: { ...data, userId: input.userId, migrationPhase: "postgres" } });
+      : await tx.hostedRuntimeOwner.create({ data: { ...data, userId: input.userId } });
     return { cutover, status: "claimed", owner };
   }, OWNER_TRANSACTION_OPTIONS);
 }

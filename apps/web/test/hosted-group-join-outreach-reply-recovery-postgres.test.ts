@@ -577,9 +577,6 @@ describe.skipIf(!runPostgresProof)(
               phoneNumber: participantPhone,
               prisma,
 
-              signupPhoneCodeSendAttemptId: null,
-              signupPhoneCodeSendAttemptStartedAt: null,
-              signupPhoneCodeSentAt: null,
               signupPhoneNumber: null,
             })),
             maskedPhoneNumberHint: `*** ${participantPhone.slice(-4)}`,
@@ -4085,9 +4082,6 @@ describe.skipIf(!runPostgresProof)(
               phoneNumber: fixture.participantPhone,
               prisma: fixture.deletionPrisma,
 
-              signupPhoneCodeSendAttemptId: null,
-              signupPhoneCodeSendAttemptStartedAt: null,
-              signupPhoneCodeSentAt: null,
               signupPhoneNumber: null,
             })),
             maskedPhoneNumberHint:
@@ -4911,9 +4905,6 @@ async function createGroupLineRecoveryFixture():
         phoneNumber: participantPhone,
         prisma,
 
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
         signupPhoneNumber: null,
       })),
       maskedPhoneNumberHint: `*** ${participantPhone.slice(-4)}`,
@@ -5142,9 +5133,6 @@ async function createPhoneBoundMemberIdentityTx(input: {
         phoneNumber: input.phoneNumber,
         prisma: input.tx,
 
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
         signupPhoneNumber: null,
       })),
       maskedPhoneNumberHint: `*** ${input.phoneNumber.slice(-4)}`,

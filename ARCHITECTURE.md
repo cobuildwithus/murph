@@ -2307,7 +2307,7 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   discovery/import, legacy selection and materialization are removed.
   [Hosted Postgres runtime ownership](agent-docs/references/hosted-postgres-runtime.md)
   owns the exact attempt, target, workspace, provider authority, resource cleanup,
-  deploy-skew proof and deferred non-destructive schema contract. The terminal
+  deploy-skew proof and workflow-gated schema contract cleanup. The terminal
   `cutover: "postgres"` wire field remains for deployed readers.
 - Fresh member execution uses one globally eligible `RunnerContainer` fleet.
   Warm inventory is an allocation optimization within that fleet: the memberless
@@ -2332,21 +2332,19 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   invocation joins it. Standby launches no disposable Codex process. Deployment
   validates the software; the member-specific resident process starts only after
   workspace restore.
-  Bound slots never return to inventory or change members. Legacy exact-user and
+  Bound slots never return to inventory or change members. Legacy exact-user, small, next-bank and
   ENAM standby references retain their original namespace for recovery and drain;
   they are not fresh allocation paths. One fleet budget includes the temporary
   legacy application reservation until that application drains.
 - Runner-secret storage is read only when its effective configured key allowlist is nonempty. Disabled overrides require no R2 read or decoding; configured overrides and historical account-deletion cleanup retain their existing owners.
-- `UserRunner` remains the sole durable runtime write-fence owner when a
-  `RunnerContainer` Durable Object activation is replaced. After a successful
-  invocation, the container entrypoint first clears its wake and abort pointers,
-  decrements active work, and cleans up request transport. It then sends the
-  exact result, attempt, and generation over the existing bound internal
-  runner-control route before running shutdown drain. `UserRunner` applies its
-  existing exact completion compare-and-swap; the ordinary outer result remains
-  the normal completion path, and a duplicate or stale receipt is a no-op. The
-  one-second best-effort receipt adds no recovery queue, poller, persisted
-  promise, or second completion authority.
+- Web/Postgres owns the exact runtime attempt and generation. Native container
+  receipts record execution and settlement for the persisted physical target;
+  they cannot admit a successor. Completion callbacks first reconcile the
+  canonical owner, resolve that target through the shared namespace router,
+  and record the exact native receipt before requesting canonical completion.
+  An early completion receipt can close admission while native cleanup remains
+  unsettled. Only exact physical settlement releases the target for reuse;
+  duplicate or stale completion never proves stoppedness.
 - The same Cloudflare app owns one production database-health singleton that is
   deliberately independent of hosted Web and Postgres. A five-minute Cron
   Trigger asks a SQLite-backed `DatabaseHealthDurableObject` to discover and

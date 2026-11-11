@@ -19,9 +19,8 @@ class CleanupBucket extends MemoryEncryptedR2Bucket {
   }
 }
 
-function harness() {
+function harness(target = `runner--v-release_1--${"1".repeat(32)}`) {
   const userId = "synthetic-control-member";
-  const target = `runner--v-release_1--${"1".repeat(32)}`;
   const owner: HostedRuntimeOwnerSnapshot = { userId, attemptId: "synthetic-control-attempt", generation: "1",
     phase: "active", processingMode: "default", allocationId: "standby-claim-11111111-1111-4111-8111-111111111111",
     runnerContainerName: target, workspaceVersion: "0", platformAiUsageAllowed: true,
@@ -44,7 +43,24 @@ function harness() {
 }
 
 describe("Postgres runtime user controls", () => {
-
+  it.each(["withdrawal", "deletion"] as const)("keeps a retained small target in its exact namespace during %s", async action => {
+    const h = harness(`runner-small--v-release_1--${"1".repeat(32)}`);
+    const smallGet = vi.fn(() => h.slot);
+    const source = { ...h.source, SMALL_RUNNER_CONTAINER: { getByName: smallGet } };
+    if (action === "withdrawal") {
+      vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockResolvedValue(Response.json({ userId: h.userId, processingAllowed: false, consentState: "revoked" }));
+      await expect(reconcilePostgresRuntimeConsent(source, h.userId)).resolves.toMatchObject({ runnerContainerDestroyOk: true });
+    } else {
+      // Deletion remains blocked on its separate upload-drain proof after the exact stop.
+      await expect(deletePostgresRunnerUserData(source, h.userId)).resolves.toMatchObject({ ok: false, reason: "r2_upload_drain_pending" });
+    }
+    expect(smallGet).toHaveBeenCalledExactlyOnceWith(h.target);
+    expect(h.source.RUNNER_CONTAINER.getByName).not.toHaveBeenCalled();
+    expect(h.slot.bindStandbySlot).not.toHaveBeenCalled();
+    expect(h.slot.retireStandbySlot).toHaveBeenCalledExactlyOnceWith({
+      claimId: h.owner.allocationId, target: { slotName: h.target, userId: h.userId },
+    });
+  });
 
   beforeEach(() => vi.clearAllMocks());
 

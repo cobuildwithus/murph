@@ -84,8 +84,8 @@ describe("hosted standby contract", () => {
     const exactGet = vi.fn(() => exactStub);
     const standbyGet = vi.fn(() => standbyStub);
     const router = createHostedRunnerContainerNamespaceRouter({
-      exactUser: { getByName: exactGet },
-      standby: { getByName: standbyGet },
+      RUNNER_CONTAINER: { getByName: exactGet },
+      STANDBY_RUNNER_CONTAINER: { getByName: standbyGet },
     });
     if (!router) {
       throw new Error("Expected a routed container namespace.");
@@ -222,11 +222,11 @@ describe("retained small namespace", () => {
   it("routes persisted names only to their original namespace and allocates ordinary names", () => {
     const small = createSlotStub(slotName), regular = createSlotStub("regular");
     const exactGet = vi.fn(() => regular), smallGet = vi.fn(() => small);
-    const router = createHostedRunnerContainerNamespaceRouter({ exactUser: { getByName: exactGet }, small: { getByName: smallGet }, standby: null })!;
+    const router = createHostedRunnerContainerNamespaceRouter({ RUNNER_CONTAINER: { getByName: exactGet }, SMALL_RUNNER_CONTAINER: { getByName: smallGet }, STANDBY_RUNNER_CONTAINER: null })!;
     expect(router.getByName(slotName)).toBe(small);
     expect(exactGet).not.toHaveBeenCalled();
     expect(router.getByName(createHostedRunnerSlotName(RELEASE_ID))).toBe(regular);
-    const missing = createHostedRunnerContainerNamespaceRouter({ exactUser: { getByName: exactGet }, standby: null })!;
+    const missing = createHostedRunnerContainerNamespaceRouter({ RUNNER_CONTAINER: { getByName: exactGet }, STANDBY_RUNNER_CONTAINER: null })!;
     expect(() => missing.getByName(slotName)).toThrow("binding is unavailable");
     expect(exactGet).toHaveBeenCalledOnce();
   });

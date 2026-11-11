@@ -986,9 +986,6 @@ model HostedMemberIdentity {
   phoneNumberEncrypted                String?      @map("phone_number_encrypted")
   phoneNumberVerifiedAt               DateTime?    @map("phone_number_verified_at")
   signupPhoneNumberEncrypted          String?      @map("signup_phone_number_encrypted")
-  signupPhoneCodeSentAt               DateTime?    @map("signup_phone_code_sent_at")
-  signupPhoneCodeSendAttemptId        String?      @map("signup_phone_code_send_attempt_id")
-  signupPhoneCodeSendAttemptStartedAt DateTime?    @map("signup_phone_code_send_attempt_started_at")
   createdAt                           DateTime     @default(now()) @map("created_at")
   updatedAt                           DateTime     @updatedAt @map("updated_at")
   member                              HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
@@ -1313,9 +1310,6 @@ model HostedRuntimeOwner {
   // Sticky until trusted recap finalization or invocation turnover; no game FK.
   recapMediaScope           Json?    @map("recap_media_scope")
   userId                    String   @id @map("user_id")
-  // Retired migration metadata; retained for a later contract migration.
-  migrationPhase            String   @default("legacy") @map("migration_phase")
-  migrationId               String?  @map("migration_id")
   generation                BigInt   @default(0)
   attemptId                 String?  @map("attempt_id")
   phase                     String   @default("idle")
@@ -1334,45 +1328,7 @@ model HostedRuntimeOwner {
   lastErrorCode             String?  @map("last_error_code")
   updatedAt                 DateTime @updatedAt @map("updated_at")
 
-  @@index([migrationPhase, userId])
   @@map("hosted_runtime_owner")
-}
-
-/// Retired campaign record, retained only for schema compatibility and inert triggers.
-model HostedRuntimeCutover {
-  id              String    @id
-  phase           String    @default("legacy")
-  namespaceId     String?   @map("namespace_id")
-  workerVersion   String?   @map("worker_version")
-  inventoryAfter  String    @default("") @map("inventory_after")
-  inventoryHash   String?   @map("inventory_hash")
-  inventoryCount Int       @default(0) @map("inventory_count")
-  inventorySealedAt DateTime? @map("inventory_sealed_at")
-  selectedObjectId String? @map("selected_object_id")
-  namespaceProbeId String? @map("namespace_probe_id")
-  discoveryCompletedAt DateTime? @map("discovery_completed_at")
-  creationClosedAt DateTime? @map("creation_closed_at")
-  activatedAt     DateTime? @map("activated_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-
-  @@map("hosted_runtime_cutover")
-}
-
-/// Retired import inventory and page receipts; drop only in the contract cleanup.
-model HostedRuntimeLegacyImport {
-  objectId     String    @id @map("object_id")
-  inventoryClass String @default("baseline") @map("inventory_class")
-  admittedUserId String? @unique @map("admitted_user_id")
-  userId       String?   @unique @map("user_id")
-  generation   BigInt?
-  nextCursor   Json      @map("next_cursor")
-  lastCursor   Json?     @map("last_cursor")
-  lastHash     String?   @map("last_hash")
-  completedAt  DateTime? @map("completed_at")
-
-  @@index([completedAt, objectId])
-  @@index([inventoryClass, objectId])
-  @@map("hosted_runtime_legacy_import")
 }
 
 // Runtime resource obligations outlive member deletion until physical cleanup.
@@ -1776,8 +1732,6 @@ model HostedAccountDeletionCleanup {
   runtimeLogsCompletedAt DateTime? @map("runtime_logs_completed_at")
   temporalCompletedAt   DateTime? @map("temporal_completed_at")
   temporalNextRuntimeIndex Int     @default(0) @map("temporal_next_runtime_index")
-  // Retired census cursor; retained for a later contract migration.
-  runtimeMigrationNextIndex Int?   @default(0) @map("runtime_migration_next_index")
   attemptCount          Int       @default(0) @map("attempt_count")
   nextAttemptAt         DateTime  @map("next_attempt_at")
   lastAttemptedAt       DateTime? @map("last_attempted_at")
@@ -1788,7 +1742,6 @@ model HostedAccountDeletionCleanup {
   updatedAt             DateTime  @updatedAt @map("updated_at")
 
   @@index([nextAttemptAt, leaseExpiresAt])
-  @@index([runtimeMigrationNextIndex, id], map: "hosted_cleanup_runtime_enrollment_idx")
   @@map("hosted_account_deletion_cleanup")
 }
 

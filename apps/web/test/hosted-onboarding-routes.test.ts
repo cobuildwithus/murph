@@ -8,17 +8,14 @@ import {
 
 const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
-  abortHostedInvitePhoneCode: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
-  confirmHostedInvitePhoneCode: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
   getHostedAppSessionFromRequest: vi.fn(),
   getHostedInviteStatus: vi.fn(),
   getPrisma: vi.fn(),
   issueHostedAppSession: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
-  prepareHostedInvitePhoneCode: vi.fn(),
   readHostedConsentStatus: vi.fn(),
   requirePrivyCompletionSession: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
@@ -67,10 +64,7 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
 
   return {
     ...actual,
-    abortHostedInvitePhoneCode: mocks.abortHostedInvitePhoneCode,
-    confirmHostedInvitePhoneCode: mocks.confirmHostedInvitePhoneCode,
     getHostedInviteStatus: mocks.getHostedInviteStatus,
-    prepareHostedInvitePhoneCode: mocks.prepareHostedInvitePhoneCode,
   };
 });
 
@@ -94,16 +88,10 @@ vi.mock("@/src/lib/hosted-onboarding/route-helpers", () => ({
 }));
 
 type BillingCheckoutRouteModule = typeof import("../app/api/hosted-onboarding/billing/checkout/route");
-type AbortSendCodeRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/abort/route");
-type ConfirmSendCodeRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/confirm/route");
 type HostedOnboardingHttpModule = typeof import("../src/lib/hosted-onboarding/http");
-type SendCodeRouteModule = typeof import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/route");
 
 let billingCheckoutRoute: BillingCheckoutRouteModule;
-let abortSendCodeRoute: AbortSendCodeRouteModule;
-let confirmSendCodeRoute: ConfirmSendCodeRouteModule;
 let hostedOnboardingHttp: HostedOnboardingHttpModule;
-let sendCodeRoute: SendCodeRouteModule;
 
 const SAME_ORIGIN_HEADERS = {
   origin: "https://join.example.test",
@@ -116,11 +104,8 @@ function setHostedOnboardingTestNodeEnv(value: string | undefined): void {
 
 describe("hosted onboarding routes", () => {
   beforeAll(async () => {
-    abortSendCodeRoute = await import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/abort/route");
     billingCheckoutRoute = await import("../app/api/hosted-onboarding/billing/checkout/route");
-    confirmSendCodeRoute = await import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/confirm/route");
     hostedOnboardingHttp = await import("../src/lib/hosted-onboarding/http");
-    sendCodeRoute = await import("../app/api/hosted-onboarding/invites/[inviteCode]/send-code/route");
   });
 
   beforeEach(() => {
@@ -178,17 +163,6 @@ describe("hosted onboarding routes", () => {
       url: "https://billing.example.test/session_123",
     });
     mocks.getPrisma.mockReturnValue({ prisma: true });
-    mocks.confirmHostedInvitePhoneCode.mockResolvedValue({
-      ok: true,
-    });
-    mocks.abortHostedInvitePhoneCode.mockResolvedValue({
-      ok: true,
-    });
-    mocks.prepareHostedInvitePhoneCode.mockResolvedValue({
-      phoneHint: "*** 4567",
-      phoneNumber: "+15551234567",
-      sendAttemptId: "send_attempt_123",
-    });
     mocks.requirePrivyMemberAuth.mockResolvedValue({
       identity: {
         email: {
@@ -454,250 +428,6 @@ describe("hosted onboarding routes", () => {
       ),
     ).rejects.toThrow("Request body must be a JSON object.");
   });
-
-  it("returns no-store invite send-code responses and resolves the decoded invite code from the route", async () => {
-    const request = new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/send-code", {
-      headers: SAME_ORIGIN_HEADERS,
-      method: "POST",
-    });
-
-    const response = await sendCodeRoute.POST(request, {
-      params: Promise.resolve({
-        inviteCode: "invite-code",
-      }),
-    });
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
-    expect(mocks.prepareHostedInvitePhoneCode).toHaveBeenCalledWith({
-      inviteCode: "invite-code",
-    });
-    await expect(response.json()).resolves.toEqual({
-      phoneHint: "*** 4567",
-      phoneNumber: "+15551234567",
-      sendAttemptId: "send_attempt_123",
-    });
-  });
-
-  it("serializes invite send-code errors without dropping no-store headers", async () => {
-    mocks.prepareHostedInvitePhoneCode.mockRejectedValue(
-      hostedOnboardingError({
-        code: "PHONE_CODE_COOLDOWN",
-        httpStatus: 429,
-        message: "Wait a moment before requesting another code.",
-        retryable: true,
-      }),
-    );
-
-    const response = await sendCodeRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/send-code", {
-        headers: SAME_ORIGIN_HEADERS,
-        method: "POST",
-      }),
-      {
-        params: Promise.resolve({
-          inviteCode: "invite-code",
-        }),
-      },
-    );
-
-    expect(response.status).toBe(429);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "PHONE_CODE_COOLDOWN",
-        message: "Wait a moment before requesting another code.",
-        retryable: true,
-      },
-    });
-  });
-
-  it("logs sanitized Prisma diagnostics for unexpected invite send-code failures", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.prepareHostedInvitePhoneCode.mockRejectedValue(
-      new Prisma.PrismaClientKnownRequestError("column missing", {
-        clientVersion: "test",
-        code: "P2022",
-        meta: {
-          column: "signup_phone_code_send_attempt_id",
-          modelName: "HostedMemberIdentity",
-          secretValue: "should-not-log",
-        },
-      }),
-    );
-
-    const response = await sendCodeRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/send-code", {
-        headers: SAME_ORIGIN_HEADERS,
-        method: "POST",
-      }),
-      {
-        params: Promise.resolve({
-          inviteCode: "invite-code",
-        }),
-      },
-    );
-
-    expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "INTERNAL_ERROR",
-        message: "Internal error.",
-      },
-    });
-    expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
-      errorCode: "P2022",
-      errorMessage: "column missing",
-      errorResponseCode: "INTERNAL_ERROR",
-      errorType: "PrismaClientKnownRequestError",
-      internalMessage: "Hosted onboarding route failed unexpectedly.",
-      prismaClientVersion: "test",
-      prismaCode: "P2022",
-      prismaMessage: "column missing",
-      prismaMeta: {
-        column: "signup_phone_code_send_attempt_id",
-        modelName: "HostedMemberIdentity",
-      },
-      requestMethod: "POST",
-    });
-  });
-
-  it("logs sanitized Prisma initialization diagnostics for unexpected invite send-code failures", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.prepareHostedInvitePhoneCode.mockRejectedValue(
-      new Prisma.PrismaClientInitializationError(
-        "connect failed for https://db.example.test from /Users/test/app while notifying user@example.com at +1 415 555 2671",
-        "7.5.0",
-        "P1001",
-      ),
-    );
-
-    const response = await sendCodeRoute.POST(
-      new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/send-code", {
-        headers: SAME_ORIGIN_HEADERS,
-        method: "POST",
-      }),
-      {
-        params: Promise.resolve({
-          inviteCode: "invite-code",
-        }),
-      },
-    );
-
-    expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "INTERNAL_ERROR",
-        message: "Internal error.",
-      },
-    });
-    expect(errorSpy).toHaveBeenCalledWith("Hosted onboarding route failed.", {
-      errorCode: "P1001",
-      errorMessage:
-        "connect failed for <redacted-url> from <redacted-path> while notifying <redacted-email> at <redacted-phone>",
-      errorResponseCode: "INTERNAL_ERROR",
-      errorType: "PrismaClientInitializationError",
-      internalMessage: "Hosted onboarding route failed unexpectedly.",
-      prismaClientVersion: "7.5.0",
-      prismaCode: "P1001",
-      prismaMessage:
-        "connect failed for <redacted-url> from <redacted-path> while notifying <redacted-email> at <redacted-phone>",
-      requestMethod: "POST",
-    });
-  });
-
-  it("confirms invite send-code attempts through the same-origin no-store route", async () => {
-    const request = new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/send-code/confirm", {
-      body: JSON.stringify({
-        sendAttemptId: "send_attempt_123",
-      }),
-      headers: {
-        ...SAME_ORIGIN_HEADERS,
-        "content-type": "application/json",
-      },
-      method: "POST",
-    });
-
-    const response = await confirmSendCodeRoute.POST(request, {
-      params: Promise.resolve({
-        inviteCode: "invite-code",
-      }),
-    });
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
-    expect(mocks.confirmHostedInvitePhoneCode).toHaveBeenCalledWith({
-      inviteCode: "invite-code",
-      sendAttemptId: "send_attempt_123",
-    });
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-    });
-  });
-
-  it("aborts failed invite send-code attempts through the same-origin no-store route", async () => {
-    const request = new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/send-code/abort", {
-      body: JSON.stringify({
-        sendAttemptId: "send_attempt_123",
-      }),
-      headers: {
-        ...SAME_ORIGIN_HEADERS,
-        "content-type": "application/json",
-      },
-      method: "POST",
-    });
-
-    const response = await abortSendCodeRoute.POST(request, {
-      params: Promise.resolve({
-        inviteCode: "invite-code",
-      }),
-    });
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
-    expect(mocks.abortHostedInvitePhoneCode).toHaveBeenCalledWith({
-      inviteCode: "invite-code",
-      sendAttemptId: "send_attempt_123",
-    });
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-    });
-  });
-
-  it.each([
-    ["missing", {}],
-    ["blank", { sendAttemptId: "  " }],
-    ["non-string", { sendAttemptId: 123 }],
-  ])("rejects %s invite send-code abort attempt ids", async (_label, body) => {
-    const request = new Request("https://join.example.test/api/hosted-onboarding/invites/invite-code/send-code/abort", {
-      body: JSON.stringify(body),
-      headers: {
-        ...SAME_ORIGIN_HEADERS,
-        "content-type": "application/json",
-      },
-      method: "POST",
-    });
-
-    const response = await abortSendCodeRoute.POST(request, {
-      params: Promise.resolve({
-        inviteCode: "invite-code",
-      }),
-    });
-
-    expect(response.status).toBe(400);
-    expect(mocks.abortHostedInvitePhoneCode).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_INVITE_SEND_ATTEMPT_ID_REQUIRED",
-        message: "A send attempt id is required to cancel this code.",
-        retryable: false,
-      },
-    });
-  });
-
 
   it("ignores a retained legacy trial offer on ordinary paid checkout", async () => {
     mocks.requireHostedInviteCodeFromRequest.mockResolvedValueOnce({

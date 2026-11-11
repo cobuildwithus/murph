@@ -1,6 +1,5 @@
 import { readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName, readHostedRunnerDeployment } from "./hosted-runner-release.ts";
 import type {
-  HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
 } from "./runner-container.js";
 
@@ -366,36 +365,38 @@ function isRunnerBindingRecord(value: unknown): value is Record<string, unknown>
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function createHostedRunnerContainerNamespaceRouter(input: {
-  exactUser: HostedExecutionContainerNamespaceLike | null;
-  next?: HostedExecutionContainerNamespaceLike | null;
-  small?: HostedExecutionContainerNamespaceLike | null;
-  standby: HostedStandbyRunnerContainerNamespaceLike | null;
-}): HostedExecutionContainerNamespaceLike | null {
-  const runner = input.exactUser;
-  if (!runner) {
+/** Every caller resolves persisted targets from the complete namespace environment. */
+export function createHostedRunnerContainerNamespaceRouter<T>(input: {
+  RUNNER_CONTAINER?: { getByName?(name: string): T } | null;
+  NEXT_RUNNER_CONTAINER?: { getByName?(name: string): T } | null;
+  SMALL_RUNNER_CONTAINER?: { getByName?(name: string): T } | null;
+  STANDBY_RUNNER_CONTAINER?: { getByName?(name: string, options?: HostedStandbyNamespaceLocationOptions): T } | null;
+}): { getByName(name: string): T } | null {
+  const runner = input.RUNNER_CONTAINER;
+  if (!runner?.getByName) {
     return null;
   }
 
+  const primary = runner.getByName.bind(runner);
   return {
     getByName(name: string) {
       if (isHostedSmallRunnerSlotName(name)) {
-        if (!input.small) throw new Error("Hosted small runner container binding is unavailable.");
-        return input.small.getByName(name);
+        if (!input.SMALL_RUNNER_CONTAINER?.getByName) throw new Error("Hosted small runner container binding is unavailable.");
+        return input.SMALL_RUNNER_CONTAINER.getByName(name);
       }
       if (readHostedRunnerBankFromName(name) === "next") {
-        if (!input.next) throw new Error("Hosted next runner container binding is unavailable.");
-        return input.next.getByName(name);
+        if (!input.NEXT_RUNNER_CONTAINER?.getByName) throw new Error("Hosted next runner container binding is unavailable.");
+        return input.NEXT_RUNNER_CONTAINER.getByName(name);
       }
       if (isHostedStandbySlotName(name)) {
-        if (!input.standby) {
+        if (!input.STANDBY_RUNNER_CONTAINER?.getByName) {
           throw new Error("Hosted standby runner container binding is unavailable.");
         }
-        return input.standby.getByName(name, {
+        return input.STANDBY_RUNNER_CONTAINER.getByName(name, {
           locationHint: HOSTED_STANDBY_LOCATION_HINT,
         });
       }
-      return runner.getByName(name);
+      return primary(name);
     },
   };
 }
