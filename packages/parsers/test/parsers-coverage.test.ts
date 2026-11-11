@@ -112,11 +112,9 @@ async function parseAttachmentWithProviderResult(
     {
       discover: async () => ({ available: true, reason: "available" }),
       id: "normalization-test-provider",
-      locality: "local",
-      openness: "open_source",
-      priority: 100,
+
       run: async () => result,
-      runtime: "node",
+
       supports: async () => true,
     },
   ]);
@@ -344,11 +342,9 @@ test("parseAttachment stops on aborts and forwards live signals to providers", a
     {
       discover: async () => ({ available: true, reason: "available" }),
       id: "signal-test-provider",
-      locality: "local",
-      openness: "open_source",
-      priority: 100,
+
       run: async () => ({ metadata: {}, text: "should not run" }),
-      runtime: "node",
+
       supports: async () => {
         supportsCalls += 1;
         return true;
@@ -373,14 +369,12 @@ test("parseAttachment stops on aborts and forwards live signals to providers", a
     {
       discover: async () => ({ available: true, reason: "available" }),
       id: "signal-test-provider",
-      locality: "local",
-      openness: "open_source",
-      priority: 100,
+
       run: async (request) => {
         providerSawSignal = request.signal === live.signal;
         return { metadata: {}, text: "parsed" };
       },
-      runtime: "node",
+
       supports: async () => true,
     },
   ]);
@@ -778,34 +772,28 @@ test("parser registry sorts candidates, retries failures, and reports unavailabl
     {
       discover: async () => ({ available: true, reason: "available" }),
       id: "flaky",
-      locality: "local",
-      openness: "open_source",
-      priority: 900,
+
       run: async () => {
         flakyAttempts += 1;
         throw new Error("flaky failure");
       },
-      runtime: "node",
+
       supports: async () => true,
     },
     {
       discover: async () => ({ available: true, reason: "available" }),
       id: "steady",
-      locality: "local",
-      openness: "open_source",
-      priority: 800,
+
       run: async () => ({ blocks: [], metadata: {}, text: "steady result" }),
-      runtime: "node",
+
       supports: async () => true,
     },
     {
       discover: async () => ({ available: false, reason: "missing" }),
       id: "missing",
-      locality: "local",
-      openness: "open_source",
-      priority: 1_000,
+
       run: async () => ({ blocks: [], metadata: {}, text: "should not run" }),
-      runtime: "node",
+
       supports: async () => true,
     },
   ]);
@@ -822,11 +810,9 @@ test("parser registry sorts candidates, retries failures, and reports unavailabl
       {
         discover: async () => ({ available: false, reason: "missing" }),
         id: "none",
-        locality: "local",
-        openness: "open_source",
-        priority: 1,
+
         run: async () => ({ blocks: [], metadata: {}, text: "noop" }),
-        runtime: "node",
+
         supports: async () => true,
       },
     ]).select(request),
@@ -838,25 +824,21 @@ test("parser registry sorts candidates, retries failures, and reports unavailabl
       {
         discover: async () => ({ available: true, reason: "available" }),
         id: "fails-1",
-        locality: "local",
-        openness: "open_source",
-        priority: 2,
+
         run: async () => {
           throw new Error("first");
         },
-        runtime: "node",
+
         supports: async () => true,
       },
       {
         discover: async () => ({ available: true, reason: "available" }),
         id: "fails-2",
-        locality: "local",
-        openness: "open_source",
-        priority: 1,
+
         run: async () => {
           throw new Error("second");
         },
-        runtime: "node",
+
         supports: async () => true,
       },
     ]).run(request),

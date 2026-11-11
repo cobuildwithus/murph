@@ -1234,6 +1234,9 @@ test("latest-lab policy does not silently fall back to non-lab event points", ()
 
   assert.equal(noLab.status, "no_data");
   assert.equal(noLab.point, null);
+  assert.deepEqual(selectMetricSeries({ metricKey: "glucose", points: [manualMeasurement] }).rows, []);
+  assert.equal(selectMetricSeries({ metricKey: "glucose", points: [manualMeasurement, olderLab] }).rows[0]?.value, 82);
+
 });
 
 test("catalog metrics require reported units when canonical fields are unavailable", () => {

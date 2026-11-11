@@ -84,7 +84,7 @@ function normalizeBatchSourceFileName(value: string): string {
 
 const sampleSummaryProfileSchema = z
   .enum(['oxygen-night'])
-  .describe('Optional summary preset. oxygen-night adds SpO2 thresholds and a cautious oxygen-trace screen.')
+  .describe('Optional summary preset. oxygen-night adds numerical SpO2 thresholds.')
 
 function normalizeThresholdBelowOption(value: number[] | undefined): number[] | undefined {
   if (!Array.isArray(value)) {
@@ -98,7 +98,6 @@ function normalizeThresholdBelowOption(value: number[] | undefined): number[] | 
 function buildCsvImportOptions(options: {
   delimiter?: string
   metadataColumns?: string[]
-  preset?: string
   requestId?: string
   source?: string
   stream?: string
@@ -113,7 +112,6 @@ function buildCsvImportOptions(options: {
       options.metadataColumns,
       'metadata-columns',
     ),
-    presetId: options.preset,
     requestId: requestIdFromOptions(options),
     source: options.source,
     stream: options.stream,
@@ -653,11 +651,6 @@ export function registerSamplesCommands(
         file: pathSchema.describe('Source CSV file to import.'),
       }),
       options: withBaseOptions({
-        preset: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Optional preset id that supplies stream, delimiter, and column defaults.'),
         stream: z
           .string()
           .min(1)
@@ -677,7 +670,7 @@ export function registerSamplesCommands(
           .string()
           .min(1)
           .optional()
-          .describe('Optional unit override. When omitted, the importer will use the preset unit or a stream-specific default.'),
+          .describe('Optional unit override. When omitted, the importer will use a stream-specific default.'),
         delimiter: z
           .string()
           .length(1)
@@ -720,11 +713,6 @@ export function registerSamplesCommands(
         file: pathSchema.describe('Source CSV file to profile.'),
       }),
       options: withBaseOptions({
-        preset: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Optional preset id that supplies stream, delimiter, and column defaults.'),
         stream: z
           .string()
           .min(1)
@@ -801,11 +789,6 @@ export function registerSamplesCommands(
         file: pathSchema.describe('Source CSV file to import.'),
       }),
       options: withBaseOptions({
-        preset: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('Optional preset id that supplies stream, delimiter, and column defaults.'),
         stream: z
           .string()
           .min(1)

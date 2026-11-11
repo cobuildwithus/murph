@@ -332,10 +332,6 @@ async function acquireCanonicalWriteLockUntimed(
           continue;
         }
 
-        if (inspection.state === "stale") {
-          throw buildCanonicalWriteLockedError(inspection);
-        }
-
         if (Date.now() - startedAt >= (options.timeoutMs ?? DEFAULT_CANONICAL_WRITE_LOCK_TIMEOUT_MS)) {
           throw buildCanonicalWriteLockedError(inspection);
         }

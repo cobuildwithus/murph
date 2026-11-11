@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { SUPPLEMENT_INGREDIENTS_MAX_ITEMS } from "@murphai/contracts";
 
@@ -1250,114 +1250,92 @@ test("markdown registry helpers keep provider and recipe rename writes on the sh
   assert.ok(operations.every((operation) => operation.status === "committed"));
 });
 
-test("food, provider, and recipe deletes remove the markdown registry record cleanly", async () => {
+test.each([
+  {
+    name: "provider",
+    create: (vaultRoot: string) => upsertProvider({
+      vaultRoot,
+      providerId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      title: "Labcorp",
+      slug: "labcorp",
+      status: "active",
+      body: "# Labcorp\n",
+    }),
+    read: readProvider,
+    remove: deleteProvider,
+    selector: { providerId: "prov_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+    relativePath: "bank/providers/labcorp.md",
+    missingCode: "PROVIDER_MISSING",
+    action: "provider_delete",
+    commandName: "core.deleteProvider",
+  },
+  {
+    name: "food",
+    create: (vaultRoot: string) => upsertFood({
+      vaultRoot,
+      foodId: "food_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      title: "Regular Acai Bowl",
+      slug: "regular-acai-bowl",
+      status: "active",
+    }),
+    read: readFood,
+    remove: deleteFood,
+    selector: { foodId: "food_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+    relativePath: "bank/foods/regular-acai-bowl.md",
+    missingCode: "VAULT_FOOD_MISSING",
+    action: "food_delete",
+    commandName: "core.deleteFood",
+  },
+  {
+    name: "recipe",
+    create: (vaultRoot: string) => upsertRecipe({
+      vaultRoot,
+      recipeId: "rcp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      title: "Sheet Pan Salmon Bowls",
+      slug: "sheet-pan-salmon-bowls",
+      status: "saved",
+      ingredients: ["2 salmon fillets"],
+      steps: ["Roast the salmon."],
+    }),
+    read: readRecipe,
+    remove: deleteRecipe,
+    selector: { recipeId: "rcp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+    relativePath: "bank/recipes/sheet-pan-salmon-bowls.md",
+    missingCode: "VAULT_RECIPE_MISSING",
+    action: "recipe_delete",
+    commandName: "core.deleteRecipe",
+  },
+])("$name deletion removes the document and commits the deletion with its audit", async (row) => {
   const vaultRoot = await makeTempDirectory("murph-bank-deletes");
   const auditRelativePath = resolveAuditShardPath(new Date());
   await initializeVault({ vaultRoot });
-
-  const provider = await upsertProvider({
-    vaultRoot,
-    title: "Labcorp",
-    slug: "labcorp",
-    status: "active",
-    body: "# Labcorp\n",
-  });
-  const food = await upsertFood({
-    vaultRoot,
-    title: "Regular Acai Bowl",
-    slug: "regular-acai-bowl",
-    status: "active",
-  });
-  const recipe = await upsertRecipe({
-    vaultRoot,
-    title: "Sheet Pan Salmon Bowls",
-    slug: "sheet-pan-salmon-bowls",
-    status: "saved",
-    ingredients: ["2 salmon fillets"],
-    steps: ["Roast the salmon."],
-  });
-
-  const deletedProvider = await deleteProvider({
-    vaultRoot,
-    providerId: provider.providerId,
-  });
-  const deletedFood = await deleteFood({
-    vaultRoot,
-    foodId: food.record.foodId,
-  });
-  const deletedRecipe = await deleteRecipe({
-    vaultRoot,
-    recipeId: recipe.record.recipeId,
-  });
-  const auditRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: auditRelativePath,
-  });
+  await row.create(vaultRoot);
+  const deleted = await row.remove({ vaultRoot, ...row.selector });
+  expect(deleted).toMatchObject({ ...row.selector, deleted: true, relativePath: row.relativePath });
+  await assert.rejects(() => fs.access(path.join(vaultRoot, row.relativePath)));
+  await assert.rejects(
+    () => row.read({ vaultRoot, ...row.selector }),
+    (error: unknown) => error instanceof VaultError && error.code === row.missingCode,
+  );
+  const auditRecords = await readJsonlRecords({ vaultRoot, relativePath: auditRelativePath });
+  assert.deepEqual(selectAuditMetadata(auditRecords, row.action), [
+    { action: row.action, commandName: row.commandName, op: "delete" },
+  ]);
   const operations = await Promise.all(
     (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
       readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
-
-  assert.equal(deletedProvider.providerId, provider.providerId);
-  assert.equal(deletedProvider.deleted, true);
-  assert.equal(deletedFood.foodId, food.record.foodId);
-  assert.equal(deletedFood.deleted, true);
-  assert.equal(deletedRecipe.recipeId, recipe.record.recipeId);
-  assert.equal(deletedRecipe.deleted, true);
-
-  await assert.rejects(() =>
-    fs.access(path.join(vaultRoot, deletedProvider.relativePath)));
-  await assert.rejects(() =>
-    fs.access(path.join(vaultRoot, deletedFood.relativePath)));
-  await assert.rejects(() =>
-    fs.access(path.join(vaultRoot, deletedRecipe.relativePath)));
-
-  await assert.rejects(
-    () =>
-      readProvider({
-        vaultRoot,
-        providerId: provider.providerId,
-      }),
-    (error: unknown) => error instanceof VaultError && error.code === "PROVIDER_MISSING",
-  );
-  await assert.rejects(
-    () =>
-      readFood({
-        vaultRoot,
-        foodId: food.record.foodId,
-      }),
-    (error: unknown) => error instanceof VaultError && error.code === "VAULT_FOOD_MISSING",
-  );
-  await assert.rejects(
-    () =>
-      readRecipe({
-        vaultRoot,
-        recipeId: recipe.record.recipeId,
-      }),
-    (error: unknown) => error instanceof VaultError && error.code === "VAULT_RECIPE_MISSING",
-  );
-  assert.deepEqual(selectAuditMetadata(auditRecords, "provider_delete"), [
-    { action: "provider_delete", commandName: "core.deleteProvider", op: "delete" },
-  ]);
-  assert.deepEqual(selectAuditMetadata(auditRecords, "food_delete"), [
-    { action: "food_delete", commandName: "core.deleteFood", op: "delete" },
-  ]);
-  assert.deepEqual(selectAuditMetadata(auditRecords, "recipe_delete"), [
-    { action: "recipe_delete", commandName: "core.deleteRecipe", op: "delete" },
-  ]);
   assert.deepEqual(
-    operations
-      .filter((operation) => operation.operationType === "provider_delete")
-      .map((operation) => ({
-        status: operation.status,
-        actions: operation.actions.map((action) => ({
-          kind: action.kind,
-          state: action.state,
-          effect: action.effect,
-          targetRelativePath: action.targetRelativePath,
-        })),
+    operations.filter((operation) => operation.operationType === row.action).map((operation) => ({
+      status: operation.status,
+      actions: operation.actions.map((action) => ({
+        kind: action.kind,
+        state: action.state,
+        effect: action.effect,
+        targetRelativePath: action.targetRelativePath,
       })),
+    })),
     [
       {
         status: "committed",
@@ -1366,71 +1344,7 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
             kind: "delete",
             state: "applied",
             effect: "delete",
-            targetRelativePath: deletedProvider.relativePath,
-          },
-          {
-            kind: "jsonl_append",
-            state: "applied",
-            effect: "append",
-            targetRelativePath: auditRelativePath,
-          },
-        ],
-      },
-    ],
-  );
-  assert.deepEqual(
-    operations
-      .filter((operation) => operation.operationType === "food_delete")
-      .map((operation) => ({
-        status: operation.status,
-        actions: operation.actions.map((action) => ({
-          kind: action.kind,
-          state: action.state,
-          effect: action.effect,
-          targetRelativePath: action.targetRelativePath,
-        })),
-      })),
-    [
-      {
-        status: "committed",
-        actions: [
-          {
-            kind: "delete",
-            state: "applied",
-            effect: "delete",
-            targetRelativePath: deletedFood.relativePath,
-          },
-          {
-            kind: "jsonl_append",
-            state: "applied",
-            effect: "append",
-            targetRelativePath: auditRelativePath,
-          },
-        ],
-      },
-    ],
-  );
-  assert.deepEqual(
-    operations
-      .filter((operation) => operation.operationType === "recipe_delete")
-      .map((operation) => ({
-        status: operation.status,
-        actions: operation.actions.map((action) => ({
-          kind: action.kind,
-          state: action.state,
-          effect: action.effect,
-          targetRelativePath: action.targetRelativePath,
-        })),
-      })),
-    [
-      {
-        status: "committed",
-        actions: [
-          {
-            kind: "delete",
-            state: "applied",
-            effect: "delete",
-            targetRelativePath: deletedRecipe.relativePath,
+            targetRelativePath: row.relativePath,
           },
           {
             kind: "jsonl_append",
@@ -1520,28 +1434,6 @@ test("foods use first-class markdown registry reads for regular meals and staple
     foodId: createdFood.record.foodId,
     slug: "usual-acai-bowl",
     title: "Usual Acai Bowl",
-    status: "active",
-    kind: "acai bowl",
-    vendor: "Neighborhood Acai Bar",
-    serving: "1 bowl",
-    nutrition: {
-      perServing: {
-        calories: 540,
-        proteinGrams: 11,
-        carbsGrams: 68,
-        fatGrams: 24,
-        fiberGrams: 11,
-      },
-      provenance: {
-        source: "label",
-        confidence: "medium",
-        sourceDetail: "Menu board plus saved toppings.",
-      },
-    },
-    aliases: ["usual acai bowl", "regular acai bowl", "usual acai bowl"],
-    ingredients: ["banana", "acai base", "banana", "granola"],
-    tags: ["breakfast", "favorite"],
-    note: "Typical order includes extra granola.",
   });
   const secondFood = await upsertFood({
     vaultRoot,
@@ -2100,425 +1992,214 @@ test("workout formats normalize blank status and rich template formatting", asyn
   );
 });
 
-test("conditions and allergies are stored as deterministic markdown registry pages", async () => {
-  const vaultRoot = await makeTempDirectory("murph-conditions");
+test.each([
+  {
+    name: "conditions",
+    upsert: upsertCondition,
+    read: readCondition,
+    list: listConditions,
+    selector: { conditionId: "cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+    input: {
+      title: "Migraine",
+      clinicalStatus: "active",
+      verificationStatus: "confirmed",
+      assertedOn: "2024-05-01",
+      bodySites: ["head"],
+      relatedGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      relatedRegimenIds: ["reg_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      note: "Likely worsened by sleep disruption.",
+    } satisfies Omit<Parameters<typeof upsertCondition>[0], "vaultRoot">,
+    expected: {
+      title: "Migraine",
+      clinicalStatus: "active",
+      verificationStatus: "confirmed",
+      assertedOn: "2024-05-01",
+      bodySites: ["head"],
+      note: "Likely worsened by sleep disruption.",
+      relatedGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      relatedRegimenIds: ["reg_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      links: [
+        { type: "related_goal", targetId: "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+        { type: "related_regimen", targetId: "reg_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+      ],
+    },
+    clear: { relatedGoalIds: [], relatedRegimenIds: [] },
+    sections: [/## Related Goals/, /## Related Regimens/],
+    other: { title: "Asthma" },
+    slug: "migraine",
+    relativePath: "bank/conditions/migraine.md",
+    action: "condition_upsert",
+    conflictCode: "VAULT_CONDITION_CONFLICT",
+    conflictMessage: "Condition id and slug resolve to different records.",
+    missingCode: "VAULT_CONDITION_MISSING",
+    missingMessage: "Condition was not found.",
+    invalidCode: "VAULT_INVALID_CONDITION",
+    invalidMessage: "Condition registry document has an unexpected shape.",
+  },
+  {
+    name: "allergies",
+    upsert: upsertAllergy,
+    read: readAllergy,
+    list: listAllergies,
+    selector: { allergyId: "alg_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+    input: {
+      title: "Penicillin allergy",
+      substance: "penicillin",
+      status: "active",
+      criticality: "high",
+      reaction: "rash",
+      recordedOn: "2018-04-10",
+      relatedConditionIds: ["cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      note: "Avoid beta-lactam exposure until formally reviewed.",
+    } satisfies Omit<Parameters<typeof upsertAllergy>[0], "vaultRoot">,
+    expected: {
+      title: "Penicillin allergy",
+      substance: "penicillin",
+      status: "active",
+      criticality: "high",
+      reaction: "rash",
+      recordedOn: "2018-04-10",
+      note: "Avoid beta-lactam exposure until formally reviewed.",
+      relatedConditionIds: ["cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      links: [{ type: "related_condition", targetId: "cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" }],
+    },
+    clear: { relatedConditionIds: [] },
+    sections: [/## Related Conditions/],
+    other: { title: "Shellfish allergy", substance: "shellfish" },
+    slug: "penicillin-allergy",
+    relativePath: "bank/allergies/penicillin-allergy.md",
+    action: "allergy_upsert",
+    conflictCode: "VAULT_ALLERGY_CONFLICT",
+    conflictMessage: "Allergy id and slug resolve to different records.",
+    missingCode: "VAULT_ALLERGY_MISSING",
+    missingMessage: "Allergy was not found.",
+    invalidCode: "VAULT_INVALID_ALLERGY",
+    invalidMessage: "Allergy registry document has an unexpected shape.",
+  },
+])("$name preserve domain fields, links, and validation through the registry lifecycle", async (row) => {
+  const vaultRoot = await makeTempDirectory("murph-condition-allergy-registry");
   await initializeVault({ vaultRoot });
-
-  const goal = await upsertGoal({
-    vaultRoot,
-    title: "Reduce migraine frequency",
-    window: {
-      startAt: "2026-03-01",
-    },
-  });
-  const regimen = await upsertRegimen({
-    vaultRoot,
-    title: "Magnesium glycinate",
-    kind: "supplement",
-    status: "active",
-    startedOn: "2026-03-03",
-    dose: 200,
-    unit: "mg",
-    schedule: "nightly",
-  });
-  const condition = await upsertCondition({
-    vaultRoot,
-    title: "Migraine",
-    clinicalStatus: "active",
-    verificationStatus: "confirmed",
-    assertedOn: "2024-05-01",
-    bodySites: ["head"],
-    relatedGoalIds: [goal.record.entity.goalId],
-    relatedRegimenIds: [regimen.record.entity.regimenId],
-    note: "Likely worsened by sleep disruption.",
-  });
-  const allergy = await upsertAllergy({
-    vaultRoot,
-    title: "Penicillin allergy",
-    substance: "penicillin",
-    status: "active",
-    criticality: "high",
-    reaction: "rash",
-    recordedOn: "2018-04-10",
-    relatedConditionIds: [condition.record.entity.conditionId],
-    note: "Avoid beta-lactam exposure until formally reviewed.",
-  });
-
-  const conditions = await listConditions(vaultRoot);
-  const allergies = await listAllergies(vaultRoot);
-  const readConditionRecord = await readCondition({
-    vaultRoot,
-    slug: condition.record.entity.slug,
-  });
-  const readAllergyRecord = await readAllergy({
-    vaultRoot,
-    allergyId: allergy.record.entity.allergyId,
-  });
-  const patchedCondition = await upsertCondition({
-    vaultRoot,
-    conditionId: condition.record.entity.conditionId,
-  });
-  const patchedAllergy = await upsertAllergy({
-    vaultRoot,
-    allergyId: allergy.record.entity.allergyId,
-  });
-  const conditionAuditRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: patchedCondition.auditPath,
-  });
-  const allergyAuditRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: patchedAllergy.auditPath,
-  });
-
-  assert.equal(conditions.length, 1);
-  assert.equal(allergies.length, 1);
-  assert.equal(patchedCondition.record.entity.title, condition.record.entity.title);
-  assert.equal(patchedAllergy.record.entity.title, allergy.record.entity.title);
-  assert.deepEqual(readConditionRecord.entity.relatedGoalIds, [goal.record.entity.goalId]);
-  assert.deepEqual(readConditionRecord.entity.links, [
-    {
-      type: "related_goal",
-      targetId: goal.record.entity.goalId,
-    },
-    {
-      type: "related_regimen",
-      targetId: regimen.record.entity.regimenId,
-    },
-  ]);
-  assert.deepEqual(readAllergyRecord.entity.relatedConditionIds, [condition.record.entity.conditionId]);
-  assert.deepEqual(readAllergyRecord.entity.links, [
-    {
-      type: "related_condition",
-      targetId: condition.record.entity.conditionId,
-    },
-  ]);
-  assert.match(readConditionRecord.document.markdown, /## Related Regimens/);
-  assert.match(readAllergyRecord.document.markdown, /## Related Conditions/);
-  assert.deepEqual(patchedCondition.record.entity.relatedGoalIds, [goal.record.entity.goalId]);
-  assert.deepEqual(patchedCondition.record.entity.relatedRegimenIds, [regimen.record.entity.regimenId]);
-  assert.deepEqual(patchedCondition.record.entity.links, [
-    {
-      type: "related_goal",
-      targetId: goal.record.entity.goalId,
-    },
-    {
-      type: "related_regimen",
-      targetId: regimen.record.entity.regimenId,
-    },
-  ]);
-  assert.equal(patchedCondition.record.entity.note, "Likely worsened by sleep disruption.");
-  assert.deepEqual(patchedAllergy.record.entity.relatedConditionIds, [condition.record.entity.conditionId]);
-  assert.deepEqual(patchedAllergy.record.entity.links, [
-    {
-      type: "related_condition",
-      targetId: condition.record.entity.conditionId,
-    },
-  ]);
-  assert.equal(patchedAllergy.record.entity.substance, "penicillin");
+  if (row.name === "conditions") {
+    await upsertGoal({
+      vaultRoot,
+      goalId: "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      title: "Reduce migraine frequency",
+      window: { startAt: "2026-03-01" },
+    });
+    await upsertRegimen({
+      vaultRoot,
+      regimenId: "reg_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      title: "Magnesium glycinate",
+      kind: "supplement",
+      startedOn: "2026-03-03",
+      dose: 200,
+      unit: "mg",
+      schedule: "nightly",
+    });
+  } else {
+    await upsertCondition({
+      vaultRoot,
+      conditionId: "cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      title: "Migraine",
+    });
+  }
+  const created = await row.upsert({ vaultRoot, ...row.selector, ...row.input });
+  const patched = await row.upsert({ vaultRoot, ...row.selector });
+  assert.equal(created.created, true);
+  assert.equal(patched.created, false);
+  const listed = await row.list(vaultRoot);
+  assert.equal(listed.length, 1);
+  for (const record of [
+    patched.record,
+    listed[0]!,
+    await row.read({ vaultRoot, ...row.selector }),
+    await row.read({ vaultRoot, slug: row.slug }),
+  ]) {
+    expect(record.entity).toMatchObject({ ...row.selector, ...row.expected });
+    assert.deepEqual(record.entity.links, row.expected.links);
+    assert.equal(record.document.relativePath, row.relativePath);
+    for (const section of row.sections) {
+      assert.match(record.document.markdown, section);
+    }
+  }
+  const auditRecords = await readJsonlRecords({ vaultRoot, relativePath: patched.auditPath });
   assert.equal(
-    conditionAuditRecords.filter((record) => (record as { action?: string }).action === "condition_upsert").length,
+    auditRecords.filter((record) => (record as AuditLikeRecord).action === row.action).length,
     2,
   );
-  assert.equal(
-    allergyAuditRecords.filter((record) => (record as { action?: string }).action === "allergy_upsert").length,
-    2,
-  );
-
   const operations = await Promise.all(
     (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
       readObservedWriteOperation(vaultRoot, relativePath),
     ),
   );
-  const conditionOperations = operations.filter((operation) => operation.operationType === "condition_upsert");
-  const allergyOperations = operations.filter((operation) => operation.operationType === "allergy_upsert");
-
-  assert.equal(conditionOperations.length, 2);
-  assert.ok(conditionOperations.every((operation) => operation.status === "committed"));
-  assert.equal(allergyOperations.length, 2);
-  assert.ok(allergyOperations.every((operation) => operation.status === "committed"));
-});
-
-test("condition and allergy updates clear normalized relations without leaving stale markdown", async () => {
-  const vaultRoot = await makeTempDirectory("murph-condition-allergy-clear-links");
-  await initializeVault({ vaultRoot });
-
-  const goal = await upsertGoal({
-    vaultRoot,
-    title: "Reduce migraine frequency",
-    window: {
-      startAt: "2026-03-01",
-    },
-  });
-  const regimen = await upsertRegimen({
-    vaultRoot,
-    title: "Magnesium glycinate",
-    kind: "supplement",
-    status: "active",
-    startedOn: "2026-03-03",
-    dose: 200,
-    unit: "mg",
-    schedule: "nightly",
-  });
-  const condition = await upsertCondition({
-    vaultRoot,
-    title: "Migraine",
-    relatedGoalIds: [goal.record.entity.goalId],
-    relatedRegimenIds: [regimen.record.entity.regimenId],
-    note: "Likely worsened by sleep disruption.",
-  });
-  const allergy = await upsertAllergy({
-    vaultRoot,
-    title: "Penicillin allergy",
-    substance: "penicillin",
-    relatedConditionIds: [condition.record.entity.conditionId],
-    note: "Avoid beta-lactam exposure until formally reviewed.",
-  });
-
-  const clearedCondition = await upsertCondition({
-    vaultRoot,
-    conditionId: condition.record.entity.conditionId,
-    relatedGoalIds: [],
-    relatedRegimenIds: [],
-  });
-  const clearedAllergy = await upsertAllergy({
-    vaultRoot,
-    allergyId: allergy.record.entity.allergyId,
-    relatedConditionIds: [],
-  });
-  const readConditionRecord = await readCondition({
-    vaultRoot,
-    conditionId: condition.record.entity.conditionId,
-  });
-  const readAllergyRecord = await readAllergy({
-    vaultRoot,
-    allergyId: allergy.record.entity.allergyId,
-  });
-
-  assert.equal(clearedCondition.created, false);
-  assert.equal(clearedAllergy.created, false);
-  assert.equal(readConditionRecord.entity.relatedGoalIds, undefined);
-  assert.equal(readConditionRecord.entity.relatedRegimenIds, undefined);
-  assert.deepEqual(readConditionRecord.entity.links, []);
-  assert.match(readConditionRecord.document.markdown, /## Related Goals[\s\S]*- none/);
-  assert.match(readConditionRecord.document.markdown, /## Related Regimens[\s\S]*- none/);
-  assert.doesNotMatch(readConditionRecord.document.markdown, new RegExp(goal.record.entity.goalId));
-  assert.doesNotMatch(readConditionRecord.document.markdown, new RegExp(regimen.record.entity.regimenId));
-
-  const relinkedCondition = await upsertCondition({
-    vaultRoot,
-    conditionId: condition.record.entity.conditionId,
-    links: [
-      {
-        type: "related_goal",
-        targetId: goal.record.entity.goalId,
-      },
-      {
-        type: "related_regimen",
-        targetId: regimen.record.entity.regimenId,
-      },
-    ],
-  });
-  assert.deepEqual(relinkedCondition.record.entity.relatedGoalIds, [goal.record.entity.goalId]);
-  assert.deepEqual(relinkedCondition.record.entity.relatedRegimenIds, [
-    regimen.record.entity.regimenId,
-  ]);
-
-  const clearedConditionByNullLinks = await upsertCondition({
-    vaultRoot,
-    conditionId: condition.record.entity.conditionId,
-    links: null,
-  });
-  const readConditionClearedByNullLinks = await readCondition({
-    vaultRoot,
-    conditionId: condition.record.entity.conditionId,
-  });
-
-  assert.equal(clearedConditionByNullLinks.created, false);
-  assert.equal(readConditionClearedByNullLinks.entity.relatedGoalIds, undefined);
-  assert.equal(readConditionClearedByNullLinks.entity.relatedRegimenIds, undefined);
-  assert.deepEqual(readConditionClearedByNullLinks.entity.links, []);
-  assert.match(
-    readConditionClearedByNullLinks.document.markdown,
-    /## Related Goals[\s\S]*- none/,
-  );
-  assert.match(
-    readConditionClearedByNullLinks.document.markdown,
-    /## Related Regimens[\s\S]*- none/,
-  );
-  assert.doesNotMatch(
-    readConditionClearedByNullLinks.document.markdown,
-    new RegExp(goal.record.entity.goalId),
-  );
-  assert.doesNotMatch(
-    readConditionClearedByNullLinks.document.markdown,
-    new RegExp(regimen.record.entity.regimenId),
+  assert.deepEqual(
+    operations.filter((operation) => operation.operationType === row.action).map((operation) => operation.status),
+    ["committed", "committed"],
   );
 
-  assert.equal(readAllergyRecord.entity.relatedConditionIds, undefined);
-  assert.deepEqual(readAllergyRecord.entity.links, []);
-  assert.match(readAllergyRecord.document.markdown, /## Related Conditions[\s\S]*- none/);
-  assert.doesNotMatch(readAllergyRecord.document.markdown, new RegExp(condition.record.entity.conditionId));
-});
+  const cleared = await row.upsert({ vaultRoot, ...row.selector, ...row.clear });
+  assert.equal(cleared.created, false);
+  const readCleared = await row.read({ vaultRoot, ...row.selector });
+  for (const field of Object.keys(row.clear)) {
+    assert.equal(Reflect.get(readCleared.entity, field), undefined);
+  }
+  assert.deepEqual(readCleared.entity.links, []);
+  for (const section of row.sections) {
+    assert.match(readCleared.document.markdown, new RegExp(`${section.source}[\\s\\S]*- none`));
+  }
+  for (const link of row.expected.links) {
+    assert.doesNotMatch(readCleared.document.markdown, new RegExp(link.targetId));
+  }
 
-test("condition and allergy id-or-slug resolution preserves conflict, missing, and read-preference behavior", async () => {
-  const vaultRoot = await makeTempDirectory("murph-condition-allergy-resolution");
-  await initializeVault({ vaultRoot });
+  if (row.name === "conditions") {
+    const linked = await upsertCondition({
+      vaultRoot,
+      conditionId: "cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      links: [
+        { type: "related_goal", targetId: "goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+        { type: "related_regimen", targetId: "reg_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+      ],
+    });
+    assert.deepEqual(linked.record.entity.relatedGoalIds, ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
+    assert.deepEqual(linked.record.entity.relatedRegimenIds, ["reg_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
+    const cleared = await upsertCondition({
+      vaultRoot,
+      conditionId: linked.record.entity.conditionId,
+      links: null,
+    });
+    const read = await readCondition({ vaultRoot, conditionId: linked.record.entity.conditionId });
+    assert.equal(cleared.created, false);
+    assert.equal(read.entity.relatedGoalIds, undefined);
+    assert.equal(read.entity.relatedRegimenIds, undefined);
+    assert.deepEqual(read.entity.links, []);
+    assert.match(read.document.markdown, /## Related Goals[\s\S]*- none/);
+    assert.match(read.document.markdown, /## Related Regimens[\s\S]*- none/);
+    assert.doesNotMatch(read.document.markdown, /goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8/);
+    assert.doesNotMatch(read.document.markdown, /reg_01JNW7YJ7MNE7M9Q2QWQK4Z3F8/);
+  }
 
-  const firstCondition = await upsertCondition({
-    vaultRoot,
-    title: "Migraine",
-  });
-  const secondCondition = await upsertCondition({
-    vaultRoot,
-    title: "Asthma",
-  });
-
+  const other = await row.upsert({ vaultRoot, ...row.other });
   await assert.rejects(
-    () =>
-      upsertCondition({
-        vaultRoot,
-        conditionId: firstCondition.record.entity.conditionId,
-        slug: secondCondition.record.entity.slug,
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_CONDITION_CONFLICT" &&
-      error.message === "Condition id and slug resolve to different records.",
+    () => row.upsert({ vaultRoot, ...row.selector, slug: other.record.entity.slug }),
+    (error: unknown) => error instanceof VaultError &&
+      error.code === row.conflictCode && error.message === row.conflictMessage,
   );
-
-  const readConditionByConflictingSelectors = await readCondition({
-    vaultRoot,
-    conditionId: firstCondition.record.entity.conditionId,
-    slug: secondCondition.record.entity.slug,
-  });
-
-  assert.equal(readConditionByConflictingSelectors.entity.conditionId, firstCondition.record.entity.conditionId);
-
+  expect((await row.read({ vaultRoot, ...row.selector, slug: other.record.entity.slug })).entity)
+    .toMatchObject(row.selector);
   await assert.rejects(
-    () =>
-      readCondition({
-        vaultRoot,
-        slug: "missing-condition",
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_CONDITION_MISSING" &&
-      error.message === "Condition was not found.",
-  );
-
-  const firstAllergy = await upsertAllergy({
-    vaultRoot,
-    title: "Peanut allergy",
-    substance: "peanut",
-  });
-  const secondAllergy = await upsertAllergy({
-    vaultRoot,
-    title: "Shellfish allergy",
-    substance: "shellfish",
-  });
-
-  await assert.rejects(
-    () =>
-      upsertAllergy({
-        vaultRoot,
-        allergyId: firstAllergy.record.entity.allergyId,
-        slug: secondAllergy.record.entity.slug,
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_ALLERGY_CONFLICT" &&
-      error.message === "Allergy id and slug resolve to different records.",
-  );
-
-  const readAllergyByConflictingSelectors = await readAllergy({
-    vaultRoot,
-    allergyId: firstAllergy.record.entity.allergyId,
-    slug: secondAllergy.record.entity.slug,
-  });
-
-  assert.equal(readAllergyByConflictingSelectors.entity.allergyId, firstAllergy.record.entity.allergyId);
-
-  await assert.rejects(
-    () =>
-      readAllergy({
-        vaultRoot,
-        slug: "missing-allergy",
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_ALLERGY_MISSING" &&
-      error.message === "Allergy was not found.",
-  );
-});
-
-test("condition and allergy reads reject non-canonical frontmatter after the hard cut", async () => {
-  const vaultRoot = await makeTempDirectory("murph-condition-allergy-strict-frontmatter");
-  await initializeVault({ vaultRoot });
-
-  await fs.writeFile(
-    path.join(vaultRoot, "bank/conditions/legacy-condition.md"),
-    [
-      "---",
-      "schemaVersion: murph.frontmatter.condition.v1",
-      "docType: condition",
-      "conditionId: cond_01JNYB6M9A6W4K2N8P3Q7R5S4T",
-      "slug: legacy-condition",
-      "title: Legacy condition",
-      "clinicalStatus: active",
-      "owner: coach",
-      "---",
-      "",
-      "# Legacy condition",
-      "",
-      "Out-of-schema condition document.",
-      "",
-    ].join("\n"),
-    "utf8",
+    () => row.read({ vaultRoot, slug: "missing-record" }),
+    (error: unknown) => error instanceof VaultError &&
+      error.code === row.missingCode && error.message === row.missingMessage,
   );
   await fs.writeFile(
-    path.join(vaultRoot, "bank/allergies/legacy-allergy.md"),
-    [
-      "---",
-      "schemaVersion: murph.frontmatter.allergy.v1",
-      "docType: allergy",
-      "allergyId: alg_01JNYB6M9A6W4K2N8P3Q7R5S4T",
-      "slug: legacy-allergy",
-      "title: Legacy allergy",
-      "substance: Peanut",
-      "status: active",
-      "owner: coach",
-      "---",
-      "",
-      "# Legacy allergy",
-      "",
-      "Out-of-schema allergy document.",
-      "",
-    ].join("\n"),
+    path.join(vaultRoot, row.relativePath),
+    readCleared.document.markdown.replace("---\n", "---\nowner: coach\n"),
     "utf8",
   );
-
   await assert.rejects(
-    () =>
-      readCondition({
-        vaultRoot,
-        slug: "legacy-condition",
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_INVALID_CONDITION" &&
-      error.message === "Condition registry document has an unexpected shape.",
-  );
-  await assert.rejects(
-    () =>
-      readAllergy({
-        vaultRoot,
-        slug: "legacy-allergy",
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_INVALID_ALLERGY" &&
-      error.message === "Allergy registry document has an unexpected shape.",
+    () => row.read({ vaultRoot, ...row.selector }),
+    (error: unknown) => error instanceof VaultError &&
+      error.code === row.invalidCode && error.message === row.invalidMessage,
   );
 });
 

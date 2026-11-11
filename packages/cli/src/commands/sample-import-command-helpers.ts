@@ -18,7 +18,6 @@ interface ImportCsvSamplesRuntimeInput {
   gapSeconds?: number
   includeSummary?: boolean
   metadataColumns?: string[]
-  presetId?: string
   requestId?: string | null
   source?: string
   stream?: string
@@ -77,7 +76,6 @@ export interface ImportCsvSamplesOptions {
   gapSeconds?: number
   includeSummary?: boolean
   metadataColumns?: string[]
-  presetId?: string
   requestId?: string | null
   source?: string
   stream?: string
@@ -192,7 +190,6 @@ function createImportCsvSamplesRuntimeInput(
     gapSeconds: options.gapSeconds,
     includeSummary: options.includeSummary,
     metadataColumns: options.metadataColumns,
-    presetId: options.presetId,
     requestId: options.requestId,
     source: options.source,
     stream: options.stream,

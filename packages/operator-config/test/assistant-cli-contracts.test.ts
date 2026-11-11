@@ -12,11 +12,6 @@ import {
 } from '@murphai/contracts'
 
 import {
-  gatewayDeliveryTargetKindValues,
-  gatewayReplyRouteKindValues,
-} from '@murphai/gateway-core'
-
-import {
   ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT,
   assistantAskResultSchema,
   assistantCronAtScheduleSchema,
@@ -30,10 +25,8 @@ import {
   assistantCronScheduleSchema,
   assistantCronTargetSchema,
   assistantCronRunRecordSchema,
-  assistantBindingDeliveryKindValues,
   assistantChannelNameSchema,
   assistantChannelNameValues,
-  assistantChannelDeliveryTargetKindValues,
   assistantOutboxIntentSchema,
   assistantResponseMediaSchema,
   assistantSessionSecretsSchema,
@@ -86,6 +79,36 @@ const TELEGRAM_RICH_CONTENT_RESPONSE_CARD = {
   version: 1,
 } as const
 
+const LEGACY_OUTBOX_INTENT = {
+  schema: 'murph.assistant-outbox-intent.v1',
+  intentId: 'outbox_123',
+  sessionId: 'session_123',
+  turnId: 'turn_123',
+  createdAt: '2026-04-12T00:00:00.000Z',
+  updatedAt: '2026-04-12T00:00:00.000Z',
+  lastAttemptAt: null,
+  nextAttemptAt: null,
+  sentAt: null,
+  attemptCount: 0,
+  status: 'pending',
+  message: 'hello',
+  dedupeKey: 'dedupe',
+  targetFingerprint: 'target',
+  channel: null,
+  identityId: null,
+  actorId: null,
+  threadId: null,
+  threadIsDirect: null,
+  replyToMessageId: null,
+  bindingDelivery: null,
+  explicitTarget: null,
+  delivery: null,
+  deliveryConfirmationPending: false,
+  deliveryIdempotencyKey: null,
+  deliveryTransportIdempotent: false,
+  lastError: null,
+}
+
 describe('assistant CLI delivery contracts', () => {
   it('accepts hash-bound private vault images without a public URL', () => {
     const media = {
@@ -119,14 +142,6 @@ describe('assistant CLI delivery contracts', () => {
     expect(() => assistantChannelNameSchema.parse('whatsapp')).toThrow()
   })
 
-  it('reuses gateway-owned delivery target kinds', () => {
-    expect(assistantChannelDeliveryTargetKindValues).toEqual(gatewayDeliveryTargetKindValues)
-  })
-
-  it('reuses gateway-owned reply route kinds for bindings', () => {
-    expect(assistantBindingDeliveryKindValues).toEqual(gatewayReplyRouteKindValues)
-  })
-
   it('trims assistant session ids before returning them', () => {
     expect(assistantSessionIdSchema.parse('  session_123  ')).toBe('session_123')
   })
@@ -155,33 +170,10 @@ describe('assistant CLI delivery contracts', () => {
     expect(receipt.sessionId).toBe('session_123')
 
     const intent = assistantOutboxIntentSchema.parse({
-      schema: 'murph.assistant-outbox-intent.v1',
+      ...LEGACY_OUTBOX_INTENT,
       intentId: '  outbox_123  ',
       sessionId: '  session_123  ',
       turnId: '  turn_123  ',
-      createdAt: '2026-04-12T00:00:00.000Z',
-      updatedAt: '2026-04-12T00:00:00.000Z',
-      lastAttemptAt: null,
-      nextAttemptAt: null,
-      sentAt: null,
-      attemptCount: 0,
-      status: 'pending',
-      message: 'hello',
-      dedupeKey: 'dedupe',
-      targetFingerprint: 'target',
-      channel: null,
-      identityId: null,
-      actorId: null,
-      threadId: null,
-      threadIsDirect: null,
-      replyToMessageId: null,
-      bindingDelivery: null,
-      explicitTarget: null,
-      delivery: null,
-      deliveryConfirmationPending: false,
-      deliveryIdempotencyKey: null,
-      deliveryTransportIdempotent: false,
-      lastError: null,
     })
 
     expect(intent.intentId).toBe('outbox_123')
@@ -216,42 +208,24 @@ describe('assistant CLI delivery contracts', () => {
 
   it('defaults legacy outbox cards to null and enforces card boundaries', () => {
     const baseIntent = {
-      schema: 'murph.assistant-outbox-intent.v1',
-      intentId: 'outbox_card_contract',
-      sessionId: 'session_card_contract',
-      turnId: 'turn_card_contract',
+      ...LEGACY_OUTBOX_INTENT,
       createdAt: '2026-07-28T00:00:00.000Z',
       updatedAt: '2026-07-28T00:00:00.000Z',
-      lastAttemptAt: null,
-      nextAttemptAt: null,
-      sentAt: null,
-      attemptCount: 0,
-      status: 'pending',
       message: 'nutrition summary',
       media: [],
       operation: null,
       subject: null,
-      dedupeKey: 'dedupe-card-contract',
-      targetFingerprint: 'target-card-contract',
       channel: 'linq',
-      identityId: null,
       actorId: '+15550001',
       answeredMailboxItemIds: [],
       threadId: 'linq-thread-card-contract',
       threadIsDirect: true,
-      replyToMessageId: null,
       bindingDelivery: {
         kind: 'thread',
         target: 'linq-thread-card-contract',
       },
       deliverySource: null,
-      explicitTarget: null,
-      delivery: null,
-      deliveryConfirmationPending: false,
-      deliveryIdempotencyKey: null,
-      deliveryTransportIdempotent: false,
       preparedDispatchToken: null,
-      lastError: null,
     }
 
     expect(assistantOutboxIntentSchema.parse(baseIntent).card).toBeNull()
@@ -305,23 +279,8 @@ describe('assistant CLI delivery contracts', () => {
 
   it('accepts only valid true-only native reply message intents', () => {
     const legacyIntent = assistantOutboxIntentSchema.parse({
-      schema: 'murph.assistant-outbox-intent.v1',
-      intentId: 'outbox_native_reply',
-      sessionId: 'session_native_reply',
-      turnId: 'turn_native_reply',
-      createdAt: '2026-04-12T00:00:00.000Z',
-      updatedAt: '2026-04-12T00:00:00.000Z',
-      lastAttemptAt: null,
-      nextAttemptAt: null,
-      sentAt: null,
-      attemptCount: 0,
-      status: 'pending',
-      message: 'hello',
-      dedupeKey: 'dedupe-native-reply',
-      targetFingerprint: 'target-native-reply',
+      ...LEGACY_OUTBOX_INTENT,
       channel: 'linq',
-      identityId: null,
-      actorId: null,
       threadId: 'linq-thread',
       threadIsDirect: true,
       replyToMessageId: 'linq-message',
@@ -329,12 +288,6 @@ describe('assistant CLI delivery contracts', () => {
         kind: 'thread',
         target: 'linq-thread',
       },
-      explicitTarget: null,
-      delivery: null,
-      deliveryConfirmationPending: false,
-      deliveryIdempotencyKey: null,
-      deliveryTransportIdempotent: false,
-      lastError: null,
     })
 
     expect(legacyIntent).not.toHaveProperty('nativeReplyRequested')
@@ -403,47 +356,18 @@ describe('assistant CLI delivery contracts', () => {
   })
 
   it('bounds assistant outbox answered mailbox item ids above the hosted import default', () => {
-    const baseIntent = {
-      schema: 'murph.assistant-outbox-intent.v1',
-      intentId: 'outbox_123',
-      sessionId: 'session_123',
-      turnId: 'turn_123',
-      createdAt: '2026-04-12T00:00:00.000Z',
-      updatedAt: '2026-04-12T00:00:00.000Z',
-      lastAttemptAt: null,
-      nextAttemptAt: null,
-      sentAt: null,
-      attemptCount: 0,
-      status: 'pending',
-      message: 'hello',
-      dedupeKey: 'dedupe',
-      targetFingerprint: 'target',
-      channel: null,
-      identityId: null,
-      actorId: null,
-      threadId: null,
-      threadIsDirect: null,
-      replyToMessageId: null,
-      bindingDelivery: null,
-      explicitTarget: null,
-      delivery: null,
-      deliveryConfirmationPending: false,
-      deliveryIdempotencyKey: null,
-      deliveryTransportIdempotent: false,
-      lastError: null,
-    }
     const maxIds = Array.from(
       { length: ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT },
       (_, index) => `mailbox_item_${index}`,
     )
 
     expect(assistantOutboxIntentSchema.parse({
-      ...baseIntent,
+      ...LEGACY_OUTBOX_INTENT,
       answeredMailboxItemIds: maxIds,
     }).answeredMailboxItemIds).toEqual(maxIds)
     expect(() =>
       assistantOutboxIntentSchema.parse({
-        ...baseIntent,
+        ...LEGACY_OUTBOX_INTENT,
         answeredMailboxItemIds: [
           ...maxIds,
           'mailbox_item_over_limit',

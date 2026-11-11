@@ -126,7 +126,7 @@ export async function readVaultSourceStrict(
   const [baseEntitiesResult, healthEntitiesResult] = await Promise.allSettled([
     readBaseEntities(vaultRoot, metadata, "strict", options),
     collectCanonicalEntities(vaultRoot, {
-      mode: "strict-async",
+      mode: "strict",
       signal: options.signal,
     }),
   ]);
@@ -153,7 +153,7 @@ export async function readVaultSourceTolerant(
   const metadata = await readOptionalVaultMetadata(path.join(vaultRoot, VAULT_LAYOUT.metadata));
   const [baseEntities, healthEntities] = await Promise.all([
     readBaseEntities(vaultRoot, metadata, "tolerant", {}),
-    collectCanonicalEntities(vaultRoot, { mode: "tolerant-async" }),
+    collectCanonicalEntities(vaultRoot, { mode: "tolerant" }),
   ]);
 
   return {

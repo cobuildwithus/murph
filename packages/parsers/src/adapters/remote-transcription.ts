@@ -33,10 +33,7 @@ export function createRemoteTranscriptionProvider(
 
   return {
     id: "remote-transcription",
-    locality: "remote",
-    openness: "open_weights",
-    runtime: "remote_api",
-    priority: 800,
+
     async discover() {
       return {
         available: true,

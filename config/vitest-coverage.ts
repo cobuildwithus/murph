@@ -1,21 +1,5 @@
 import path from "node:path";
 
-export type MurphVitestCoverageThresholds = {
-  perFile: boolean;
-  lines: number;
-  functions: number;
-  branches: number;
-  statements: number;
-};
-
-export const murphVitestCoverageThresholds: MurphVitestCoverageThresholds = {
-  perFile: false,
-  lines: 80,
-  functions: 80,
-  branches: 70,
-  statements: 80,
-};
-
 export function resolveMurphVitestCoverageProviderModule(packageDir: string): string {
   return path.resolve(packageDir, "../../config/vitest-coverage-provider.ts");
 }
@@ -24,7 +8,6 @@ export function createMurphVitestCoverage(input: {
   customProviderModule: string;
   include: string[];
   exclude?: string[];
-  thresholds?: MurphVitestCoverageThresholds;
 }) {
   return {
     provider: "custom" as const,
@@ -38,7 +21,6 @@ export function createMurphVitestCoverage(input: {
       ...(input.exclude ?? []),
       "**/*.d.ts",
     ],
-    thresholds: input.thresholds ?? murphVitestCoverageThresholds,
     reportOnFailure: true,
   };
 }

@@ -64,15 +64,12 @@ afterEach(async () => {
 
 describe("buildClinicalImportPlanFromSnapshot", () => {
   it("keeps a hash-bound imported clinical observation valid under whole-vault validation", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
-      pages: { "Observation/page-1.json": {
-        resourceType: "Observation", id: "synthetic-pulse", status: "final",
-        effectiveDateTime: "2026-07-01T12:00:00.000Z",
-        code: { coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }] },
-        valueQuantity: { value: 70, unit: "bpm" },
-      } },
-    });
+    const vaultRoot = await writeObservationFixture({
+      resourceType: "Observation", id: "synthetic-pulse", status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      code: { coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }] },
+      valueQuantity: { value: 70, unit: "bpm" },
+    }, 1);
     await initializeVault({ vaultRoot });
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     const imported = await importEventBatch({ vaultRoot, apply: true, decisions: executableDecisions(plan) });
@@ -90,8 +87,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     const resource = { resourceType: "Observation", id: "source-assessment", status: "final",
       effectiveDateTime: "2026-07-01T12:05:00.000Z", bodySite: { text: "Source site" }, ...value };
     const makePlan = async (observation: object) => planFromFixture({ manifestPath: MANIFEST_PATH,
-      vaultRoot: await writeClinicalFixture({ resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
-        pages: { "Observation/page-1.json": [observation] } }) });
+      vaultRoot: await writeObservationFixture([observation], 1) });
     const plan = await makePlan(resource);
     expect(reviews(plan)).toEqual([]);
     expect(upserts(plan)).toEqual([expect.objectContaining({ kind: "note", noteType: "fhir_observation_source", occurredAt: resource.effectiveDateTime })]);
@@ -111,9 +107,8 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     { effectiveDateTime: "invalid" },
     { modifierExtension: [{ url: "https://example.test/unknown-modifier", valueBoolean: true }] },
   ])("keeps invalid dates or semantically uncertain observations held %#", async (override) => {
-    const vaultRoot = await writeClinicalFixture({ resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
-      pages: { "Observation/page-1.json": [{ resourceType: "Observation", id: "uncertain-assessment", status: "final",
-        effectiveDateTime: "2026-07-01T12:05:00.000Z", code: { text: "Example assessment" }, valueInteger: 3, ...override }] } });
+    const vaultRoot = await writeObservationFixture([{ resourceType: "Observation", id: "uncertain-assessment", status: "final",
+      effectiveDateTime: "2026-07-01T12:05:00.000Z", code: { text: "Example assessment" }, valueInteger: 3, ...override }], 1);
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toHaveLength(1);
@@ -417,17 +412,14 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   ] as const)("imports standard vital %s in %s without changing the value", async (
     code, sourceUnit, value, metric, unit,
   ) => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
-      pages: { "Observation/page-1.json": [{
-        resourceType: "Observation",
-        id: "standard-vital",
-        status: "final",
-        effectiveDateTime: "2010-04-02T12:00:00.000Z",
-        code: { coding: [{ system: "http://loinc.org", code }] },
-        valueQuantity: { value, system: "http://unitsofmeasure.org", code: sourceUnit },
-      }] },
-    });
+    const vaultRoot = await writeObservationFixture([{
+      resourceType: "Observation",
+      id: "standard-vital",
+      status: "final",
+      effectiveDateTime: "2010-04-02T12:00:00.000Z",
+      code: { coding: [{ system: "http://loinc.org", code }] },
+      valueQuantity: { value, system: "http://unitsofmeasure.org", code: sourceUnit },
+    }], 1);
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(reviews(plan)).toEqual([]);
     expect(upserts(plan)).toEqual([expect.objectContaining({
@@ -445,17 +437,14 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     ["2708-6", "mmHg"],
     ["8310-5", "K"],
   ])("retains vital %s with incompatible unit %s for review", async (code, unit) => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
-      pages: { "Observation/page-1.json": [{
-        resourceType: "Observation",
-        id: "incompatible-vital",
-        status: "final",
-        effectiveDateTime: "2026-07-01T12:00:00.000Z",
-        code: { coding: [{ system: "http://loinc.org", code }] },
-        valueQuantity: { value: 20, system: "http://unitsofmeasure.org", code: unit },
-      }] },
-    });
+    const vaultRoot = await writeObservationFixture([{
+      resourceType: "Observation",
+      id: "incompatible-vital",
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      code: { coding: [{ system: "http://loinc.org", code }] },
+      valueQuantity: { value: 20, system: "http://unitsofmeasure.org", code: unit },
+    }], 1);
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toEqual([expect.objectContaining({
@@ -470,56 +459,47 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
         code: "laboratory",
       }],
     }];
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
+    const vaultRoot = await writeObservationFixture([
+      {
         resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 2,
-      }],
-      pages: {
-        "Observation/page-1.json": [
-          {
-            resourceType: "Observation",
-            id: "glucose-with-reference-range",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:05:00.000Z",
-            category: laboratoryCategory,
-            code: { text: "Glucose" },
-            valueQuantity: {
-              value: 91,
-              system: "http://unitsofmeasure.org",
-              code: "mg/dL",
-            },
-            referenceRange: [{
-              low: {
-                value: 70,
-                system: "http://unitsofmeasure.org",
-                code: "mg/dL",
-              },
-              high: {
-                value: 99,
-                system: "http://unitsofmeasure.org",
-                code: "mg/dL",
-              },
-              text: "70-99",
-            }],
+        id: "glucose-with-reference-range",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:05:00.000Z",
+        category: laboratoryCategory,
+        code: { text: "Glucose" },
+        valueQuantity: {
+          value: 91,
+          system: "http://unitsofmeasure.org",
+          code: "mg/dL",
+        },
+        referenceRange: [{
+          low: {
+            value: 70,
+            system: "http://unitsofmeasure.org",
+            code: "mg/dL",
           },
-          {
-            resourceType: "Observation",
-            id: "qualitative-panel-with-reference-range",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:06:00.000Z",
-            category: laboratoryCategory,
-            code: { text: "Qualitative panel" },
-            component: [{
-              code: { text: "Ketones" },
-              valueString: "Negative",
-              referenceRange: [{ text: "Negative" }],
-            }],
+          high: {
+            value: 99,
+            system: "http://unitsofmeasure.org",
+            code: "mg/dL",
           },
-        ],
+          text: "70-99",
+        }],
       },
-    });
+      {
+        resourceType: "Observation",
+        id: "qualitative-panel-with-reference-range",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:06:00.000Z",
+        category: laboratoryCategory,
+        code: { text: "Qualitative panel" },
+        component: [{
+          code: { text: "Ketones" },
+          valueString: "Negative",
+          referenceRange: [{ text: "Negative" }],
+        }],
+      },
+    ], 2);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(reviews(plan)).toEqual([]);
@@ -541,16 +521,13 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("preserves qualitative results with numeric reference bounds as source text", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
-      pages: { "Observation/page-1.json": [{
-        resourceType: "Observation", id: "qualitative-with-numeric-bounds", status: "final",
-        effectiveDateTime: "2026-07-01T12:05:00.000Z",
-        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
-        code: { text: "Example assay" }, valueString: "Below detection",
-        referenceRange: [{ low: { value: 2, unit: "ng/mL" }, high: { value: 8, unit: "ng/mL" }, text: "Assay reference interval" }],
-      }] },
-    });
+    const vaultRoot = await writeObservationFixture([{
+      resourceType: "Observation", id: "qualitative-with-numeric-bounds", status: "final",
+      effectiveDateTime: "2026-07-01T12:05:00.000Z",
+      category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+      code: { text: "Example assay" }, valueString: "Below detection",
+      referenceRange: [{ low: { value: 2, unit: "ng/mL" }, high: { value: 8, unit: "ng/mL" }, text: "Assay reference interval" }],
+    }], 1);
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(reviews(plan)).toEqual([]);
     const record = upserts(plan)[0];
@@ -591,15 +568,12 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     { high: { value: 8 }, text: "x".repeat(160) },
     { high: { value: 8 }, type: { text: "Therapeutic" } },
   ])("keeps unsafe qualitative reference ranges held %#", async (range) => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
-      pages: { "Observation/page-1.json": [{
-        resourceType: "Observation", id: "qualitative-held", status: "final",
-        effectiveDateTime: "2026-07-01T12:05:00.000Z",
-        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
-        code: { text: "Example assay" }, valueString: "Below detection", referenceRange: [range],
-      }] },
-    });
+    const vaultRoot = await writeObservationFixture([{
+      resourceType: "Observation", id: "qualitative-held", status: "final",
+      effectiveDateTime: "2026-07-01T12:05:00.000Z",
+      category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+      code: { text: "Example assay" }, valueString: "Below detection", referenceRange: [range],
+    }], 1);
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(upserts(plan)).toEqual([]);
     expect(reviews(plan)).toHaveLength(1);
@@ -622,35 +596,26 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       valueQuantity: { value: 91, unit: "mg/dL" },
       referenceRange,
     });
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
-        resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 5,
-      }],
-      pages: {
-        "Observation/page-1.json": [
-          observation("lab-multiple-ranges", [
-            { low: { value: 70, unit: "mg/dL" } },
-            { high: { value: 99, unit: "mg/dL" } },
-          ]),
-          observation("lab-age-qualified-range", [{
-            low: { value: 70, unit: "mg/dL" },
-            age: { low: { value: 18, unit: "years" } },
-          }]),
-          observation("lab-unit-mismatched-range", [{
-            low: { value: 3.9, unit: "mmol/L" },
-          }]),
-          observation("lab-inverted-range", [{
-            low: { value: 100, unit: "mg/dL" },
-            high: { value: 70, unit: "mg/dL" },
-          }]),
-          observation("lab-malformed-range", [{
-            low: { value: "seventy", unit: "mg/dL" },
-          }]),
-        ],
-      },
-    });
+    const vaultRoot = await writeObservationFixture([
+      observation("lab-multiple-ranges", [
+        { low: { value: 70, unit: "mg/dL" } },
+        { high: { value: 99, unit: "mg/dL" } },
+      ]),
+      observation("lab-age-qualified-range", [{
+        low: { value: 70, unit: "mg/dL" },
+        age: { low: { value: 18, unit: "years" } },
+      }]),
+      observation("lab-unit-mismatched-range", [{
+        low: { value: 3.9, unit: "mmol/L" },
+      }]),
+      observation("lab-inverted-range", [{
+        low: { value: 100, unit: "mg/dL" },
+        high: { value: 70, unit: "mg/dL" },
+      }]),
+      observation("lab-malformed-range", [{
+        low: { value: "seventy", unit: "mg/dL" },
+      }]),
+    ], 5);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(upserts(plan)).toEqual([]);
@@ -661,47 +626,38 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("accepts UCUM per-minute codes for supported rate vitals", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
+    const vaultRoot = await writeObservationFixture([
+      {
         resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 2,
-      }],
-      pages: {
-        "Observation/page-1.json": [
-          {
-            resourceType: "Observation",
-            id: "heart-rate-ucum-per-minute",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:00:00.000Z",
-            code: {
-              coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
-            },
-            valueQuantity: {
-              value: 72,
-              system: "http://unitsofmeasure.org",
-              code: "/min",
-              unit: "beats/minute",
-            },
-          },
-          {
-            resourceType: "Observation",
-            id: "respiratory-rate-ucum-per-minute",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:05:00.000Z",
-            code: {
-              coding: [{ system: "http://loinc.org", code: "9279-1", display: "Respiratory rate" }],
-            },
-            valueQuantity: {
-              value: 16,
-              system: "http://unitsofmeasure.org",
-              code: "/min",
-              unit: "breaths/minute",
-            },
-          },
-        ],
+        id: "heart-rate-ucum-per-minute",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:00:00.000Z",
+        code: {
+          coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+        },
+        valueQuantity: {
+          value: 72,
+          system: "http://unitsofmeasure.org",
+          code: "/min",
+          unit: "beats/minute",
+        },
       },
-    });
+      {
+        resourceType: "Observation",
+        id: "respiratory-rate-ucum-per-minute",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:05:00.000Z",
+        code: {
+          coding: [{ system: "http://loinc.org", code: "9279-1", display: "Respiratory rate" }],
+        },
+        valueQuantity: {
+          value: 16,
+          system: "http://unitsofmeasure.org",
+          code: "/min",
+          unit: "breaths/minute",
+        },
+      },
+    ], 2);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     const vitals = upserts(plan).filter(
@@ -756,21 +712,30 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("rejects ambiguous vital CodeableConcepts", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [
-        {
-          resourceType: "Observation",
-          relativePath: "Observation/page-1.json",
-          count: 2,
+    const vaultRoot = await writeObservationFixture([
+      {
+        resourceType: "Observation",
+        id: "bp-ambiguous-top-level",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:00:00.000Z",
+        code: {
+          coding: [
+            { system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" },
+            { system: "http://loinc.org", code: "8462-4", display: "Diastolic blood pressure" },
+          ],
         },
-      ],
-      pages: {
-        "Observation/page-1.json": [
+        valueQuantity: { value: 128, unit: "mmHg" },
+      },
+      {
+        resourceType: "Observation",
+        id: "bp-ambiguous-component",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:01:00.000Z",
+        code: {
+          coding: [{ system: "http://loinc.org", code: "85354-9", display: "Blood pressure panel" }],
+        },
+        component: [
           {
-            resourceType: "Observation",
-            id: "bp-ambiguous-top-level",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:00:00.000Z",
             code: {
               coding: [
                 { system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" },
@@ -779,29 +744,9 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
             },
             valueQuantity: { value: 128, unit: "mmHg" },
           },
-          {
-            resourceType: "Observation",
-            id: "bp-ambiguous-component",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:01:00.000Z",
-            code: {
-              coding: [{ system: "http://loinc.org", code: "85354-9", display: "Blood pressure panel" }],
-            },
-            component: [
-              {
-                code: {
-                  coding: [
-                    { system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" },
-                    { system: "http://loinc.org", code: "8462-4", display: "Diastolic blood pressure" },
-                  ],
-                },
-                valueQuantity: { value: 128, unit: "mmHg" },
-              },
-            ],
-          },
         ],
       },
-    });
+    ], 2);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -819,38 +764,29 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("rejects mixed vital panels instead of dropping unsupported components", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
-        resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 1,
-      }],
-      pages: {
-        "Observation/page-1.json": [{
-          resourceType: "Observation",
-          id: "mixed-vital-panel",
-          status: "final",
-          effectiveDateTime: "2026-07-01T12:00:00.000Z",
-          code: {
-            coding: [{ system: "http://loinc.org", code: "85354-9", display: "Blood pressure panel" }],
-          },
-          component: [
-            {
-              code: {
-                coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
-              },
-              valueQuantity: { value: 128, unit: "mmHg" },
-            },
-            {
-              code: {
-                coding: [{ system: "http://loinc.org", code: "8887-2", display: "Heart rate device type" }],
-              },
-              valueCodeableConcept: { text: "Device type" },
-            },
-          ],
-        }],
+    const vaultRoot = await writeObservationFixture([{
+      resourceType: "Observation",
+      id: "mixed-vital-panel",
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      code: {
+        coding: [{ system: "http://loinc.org", code: "85354-9", display: "Blood pressure panel" }],
       },
-    });
+      component: [
+        {
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+          },
+          valueQuantity: { value: 128, unit: "mmHg" },
+        },
+        {
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8887-2", display: "Heart rate device type" }],
+          },
+          valueCodeableConcept: { text: "Device type" },
+        },
+      ],
+    }], 1);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -864,39 +800,30 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("rejects vital observations that mix component and top-level values", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
-        resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 1,
-      }],
-      pages: {
-        "Observation/page-1.json": {
-          resourceType: "Observation",
-          id: "mixed-top-level-vital",
-          status: "final",
-          effectiveDateTime: "2026-07-01T12:00:00.000Z",
-          code: {
-            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
-          },
-          valueQuantity: { value: 188, unit: "bpm" },
-          component: [
-            {
-              code: {
-                coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
-              },
-              valueQuantity: { value: 128, unit: "mmHg" },
-            },
-            {
-              code: {
-                coding: [{ system: "http://loinc.org", code: "8462-4", display: "Diastolic blood pressure" }],
-              },
-              valueQuantity: { value: 82, unit: "mmHg" },
-            },
-          ],
-        },
+    const vaultRoot = await writeObservationFixture({
+      resourceType: "Observation",
+      id: "mixed-top-level-vital",
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      code: {
+        coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
       },
-    });
+      valueQuantity: { value: 188, unit: "bpm" },
+      component: [
+        {
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8480-6", display: "Systolic blood pressure" }],
+          },
+          valueQuantity: { value: 128, unit: "mmHg" },
+        },
+        {
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8462-4", display: "Diastolic blood pressure" }],
+          },
+          valueQuantity: { value: 82, unit: "mmHg" },
+        },
+      ],
+    }, 1);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -910,60 +837,51 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("rejects observations with multiple value choices", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
+    const vaultRoot = await writeObservationFixture([
+      {
         resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 3,
-      }],
-      pages: {
-        "Observation/page-1.json": [
-          {
-            resourceType: "Observation",
-            id: "ambiguous-vital-value",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:00:00.000Z",
-            code: {
-              coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
-            },
-            valueQuantity: { value: 72, unit: "bpm" },
-            valueString: "critical",
-          },
-          {
-            resourceType: "Observation",
-            id: "ambiguous-vital-component-value",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:00:30.000Z",
-            code: { text: "Vital signs panel" },
-            component: [{
-              code: {
-                coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
-              },
-              valueQuantity: { value: 72, unit: "bpm" },
-              valueString: "critical",
-            }],
-          },
-          {
-            resourceType: "Observation",
-            id: "ambiguous-lab-component-value",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:01:00.000Z",
-            category: [{
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/observation-category",
-                code: "laboratory",
-              }],
-            }],
-            code: { text: "Metabolic panel" },
-            component: [{
-              code: { text: "Glucose" },
-              valueQuantity: { value: 91, unit: "mg/dL" },
-              valueString: "critical",
-            }],
-          },
-        ],
+        id: "ambiguous-vital-value",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:00:00.000Z",
+        code: {
+          coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+        },
+        valueQuantity: { value: 72, unit: "bpm" },
+        valueString: "critical",
       },
-    });
+      {
+        resourceType: "Observation",
+        id: "ambiguous-vital-component-value",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:00:30.000Z",
+        code: { text: "Vital signs panel" },
+        component: [{
+          code: {
+            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
+          },
+          valueQuantity: { value: 72, unit: "bpm" },
+          valueString: "critical",
+        }],
+      },
+      {
+        resourceType: "Observation",
+        id: "ambiguous-lab-component-value",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:01:00.000Z",
+        category: [{
+          coding: [{
+            system: "http://terminology.hl7.org/CodeSystem/observation-category",
+            code: "laboratory",
+          }],
+        }],
+        code: { text: "Metabolic panel" },
+        component: [{
+          code: { text: "Glucose" },
+          valueQuantity: { value: 91, unit: "mg/dL" },
+          valueString: "critical",
+        }],
+      },
+    ], 3);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -985,32 +903,23 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("rejects scalar vitals that have unhandled components", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
-        resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 1,
-      }],
-      pages: {
-        "Observation/page-1.json": [{
-          resourceType: "Observation",
-          id: "heart-rate-with-component",
-          status: "final",
-          effectiveDateTime: "2026-07-01T12:00:00.000Z",
-          code: {
-            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
-          },
-          valueQuantity: { value: 72, unit: "bpm" },
-          component: [{
-            code: {
-              coding: [{ system: "urn:ehr:observation-context", code: "body-position" }],
-              text: "Body position",
-            },
-            valueString: "sitting",
-          }],
-        }],
+    const vaultRoot = await writeObservationFixture([{
+      resourceType: "Observation",
+      id: "heart-rate-with-component",
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      code: {
+        coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
       },
-    });
+      valueQuantity: { value: 72, unit: "bpm" },
+      component: [{
+        code: {
+          coding: [{ system: "urn:ehr:observation-context", code: "body-position" }],
+          text: "Body position",
+        },
+        valueString: "sitting",
+      }],
+    }], 1);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -1122,43 +1031,32 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("preserves lab display units when quantity codes are local", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [
-        {
-          resourceType: "Observation",
-          relativePath: "Observation/page-1.json",
-          count: 1,
+    const vaultRoot = await writeObservationFixture([
+      {
+        resourceType: "Observation",
+        id: "lab-local-unit-code",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:05:00.000Z",
+        category: [{
+          coding: [{
+            system: "http://terminology.hl7.org/CodeSystem/observation-category",
+            code: "laboratory",
+          }],
+        }],
+        code: {
+          text: "Glucose",
+          coding: [{ system: "http://loinc.org", code: "2345-7", display: "Glucose" }],
         },
-      ],
-      pages: {
-        "Observation/page-1.json": [
-          {
-            resourceType: "Observation",
-            id: "lab-local-unit-code",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:05:00.000Z",
-            category: [{
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/observation-category",
-                code: "laboratory",
-              }],
-            }],
-            code: {
-              text: "Glucose",
-              coding: [{ system: "http://loinc.org", code: "2345-7", display: "Glucose" }],
-            },
-            interpretation: [{
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
-                code: "N",
-                display: "Normal",
-              }],
-            }],
-            valueQuantity: { value: 91, unit: "mg/dL", system: "urn:vendor:units", code: "M" },
-          },
-        ],
+        interpretation: [{
+          coding: [{
+            system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+            code: "N",
+            display: "Normal",
+          }],
+        }],
+        valueQuantity: { value: 91, unit: "mg/dL", system: "urn:vendor:units", code: "M" },
       },
-    });
+    ], 1);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -1687,40 +1585,29 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("plans complete laboratory panels atomically", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [
+    const vaultRoot = await writeObservationFixture({
+      resourceType: "Observation",
+      id: "lab-complete-panel",
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      category: [{
+        coding: [{
+          system: "http://terminology.hl7.org/CodeSystem/observation-category",
+          code: "laboratory",
+        }],
+      }],
+      code: { text: "Metabolic panel" },
+      component: [
         {
-          resourceType: "Observation",
-          relativePath: "Observation/page-1.json",
-          count: 1,
+          code: { text: "Glucose" },
+          valueQuantity: { value: 91, unit: "mg/dL" },
+        },
+        {
+          code: { text: "Albumin" },
+          valueString: "Normal",
         },
       ],
-      pages: {
-        "Observation/page-1.json": {
-          resourceType: "Observation",
-          id: "lab-complete-panel",
-          status: "final",
-          effectiveDateTime: "2026-07-01T12:00:00.000Z",
-          category: [{
-            coding: [{
-              system: "http://terminology.hl7.org/CodeSystem/observation-category",
-              code: "laboratory",
-            }],
-          }],
-          code: { text: "Metabolic panel" },
-          component: [
-            {
-              code: { text: "Glucose" },
-              valueQuantity: { value: 91, unit: "mg/dL" },
-            },
-            {
-              code: { text: "Albumin" },
-              valueString: "Normal",
-            },
-          ],
-        },
-      },
-    });
+    }, 1);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -1748,33 +1635,24 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("rejects a malformed top-level laboratory result instead of dropping it from a panel", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
-        resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 1,
+    const vaultRoot = await writeObservationFixture({
+      resourceType: "Observation",
+      id: "malformed-top-level-lab-result",
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      category: [{
+        coding: [{
+          system: "http://terminology.hl7.org/CodeSystem/observation-category",
+          code: "laboratory",
+        }],
       }],
-      pages: {
-        "Observation/page-1.json": {
-          resourceType: "Observation",
-          id: "malformed-top-level-lab-result",
-          status: "final",
-          effectiveDateTime: "2026-07-01T12:00:00.000Z",
-          category: [{
-            coding: [{
-              system: "http://terminology.hl7.org/CodeSystem/observation-category",
-              code: "laboratory",
-            }],
-          }],
-          code: { text: "Sodium" },
-          valueQuantity: { value: "142", unit: "mmol/L" },
-          component: [{
-            code: { text: "Potassium" },
-            valueQuantity: { value: 4.2, unit: "mmol/L" },
-          }],
-        },
-      },
-    });
+      code: { text: "Sodium" },
+      valueQuantity: { value: "142", unit: "mmol/L" },
+      component: [{
+        code: { text: "Potassium" },
+        valueQuantity: { value: 4.2, unit: "mmol/L" },
+      }],
+    }, 1);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -1797,38 +1675,29 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     const bodyWeightCode = {
       coding: [{ system: "http://loinc.org", code: "29463-7", display: "Body weight" }],
     };
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
+    const vaultRoot = await writeObservationFixture([
+      {
         resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 2,
-      }],
-      pages: {
-        "Observation/page-1.json": [
-          {
-            resourceType: "Observation",
-            id: "laboratory-weight-scalar",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:00:00.000Z",
-            category: laboratoryCategory,
-            code: bodyWeightCode,
-            valueQuantity: { value: 70, system: "http://unitsofmeasure.org", code: "kg" },
-          },
-          {
-            resourceType: "Observation",
-            id: "laboratory-weight-component",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:05:00.000Z",
-            category: laboratoryCategory,
-            code: { text: "Body composition panel" },
-            component: [{
-              code: bodyWeightCode,
-              valueQuantity: { value: 70, system: "http://unitsofmeasure.org", code: "kg" },
-            }],
-          },
-        ],
+        id: "laboratory-weight-scalar",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:00:00.000Z",
+        category: laboratoryCategory,
+        code: bodyWeightCode,
+        valueQuantity: { value: 70, system: "http://unitsofmeasure.org", code: "kg" },
       },
-    });
+      {
+        resourceType: "Observation",
+        id: "laboratory-weight-component",
+        status: "final",
+        effectiveDateTime: "2026-07-01T12:05:00.000Z",
+        category: laboratoryCategory,
+        code: { text: "Body composition panel" },
+        component: [{
+          code: bodyWeightCode,
+          valueQuantity: { value: 70, system: "http://unitsofmeasure.org", code: "kg" },
+        }],
+      },
+    ], 2);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -2014,31 +1883,20 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("preserves lab analytes that do not derive a slug", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [
-        {
-          resourceType: "Observation",
-          relativePath: "Observation/page-1.json",
-          count: 1,
-        },
-      ],
-      pages: {
-        "Observation/page-1.json": {
-          resourceType: "Observation",
-          id: "non-slug-analyte",
-          status: "final",
-          effectiveDateTime: "2026-07-01T12:00:00.000Z",
-          category: [{
-            coding: [{
-              system: "http://terminology.hl7.org/CodeSystem/observation-category",
-              code: "laboratory",
-            }],
-          }],
-          code: { text: "血糖" },
-          valueQuantity: { value: 91, unit: "mg/dL" },
-        },
-      },
-    });
+    const vaultRoot = await writeObservationFixture({
+      resourceType: "Observation",
+      id: "non-slug-analyte",
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.000Z",
+      category: [{
+        coding: [{
+          system: "http://terminology.hl7.org/CodeSystem/observation-category",
+          code: "laboratory",
+        }],
+      }],
+      code: { text: "血糖" },
+      valueQuantity: { value: 91, unit: "mg/dL" },
+    }, 1);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -2259,221 +2117,68 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("uses lab component interpretations without hiding abnormal results", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [
-        {
-          resourceType: "Observation",
-          relativePath: "Observation/page-1.json",
-          count: 7,
-        },
-      ],
-      pages: {
-        "Observation/page-1.json": [
-          {
-            resourceType: "Observation",
-            id: "component-abnormal-panel",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:00:00.000Z",
-            category: [{
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/observation-category",
-                code: "laboratory",
-              }],
-            }],
-            code: { text: "Metabolic panel" },
-            component: [
-              {
-                code: { text: "Glucose" },
-                interpretation: [{
-                  coding: [{
-                    system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
-                    code: "H",
-                  }],
-                }],
-                valueQuantity: { value: 191, unit: "mg/dL" },
-              },
-            ],
-          },
-          {
-            resourceType: "Observation",
-            id: "component-normal-panel",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:01:00.000Z",
-            category: [{
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/observation-category",
-                code: "laboratory",
-              }],
-            }],
-            code: { text: "Metabolic panel" },
-            component: [
-              {
-                code: { text: "Albumin" },
-                interpretation: [{
-                  coding: [{
-                    system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
-                    code: "N",
-                  }],
-                }],
-                valueString: "Normal",
-              },
-            ],
-          },
-          {
-            resourceType: "Observation",
-            id: "component-conflicting-panel",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:02:00.000Z",
-            category: [{
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/observation-category",
-                code: "laboratory",
-              }],
-            }],
-            code: { text: "Metabolic panel" },
-            component: [
-              {
-                code: { text: "Potassium" },
-                interpretation: [{
-                  coding: [
-                    {
-                      system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
-                      code: "N",
-                    },
-                    {
-                      system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
-                      code: "H",
-                    },
-                  ],
-                }],
-                valueQuantity: { value: 5.8, unit: "mmol/L" },
-              },
-            ],
-          },
-          {
-            resourceType: "Observation",
-            id: "component-partial-normal-panel",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:02:30.000Z",
-            category: [{
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/observation-category",
-                code: "laboratory",
-              }],
-            }],
-            code: { text: "Metabolic panel" },
-            component: [
-              {
-                code: { text: "Albumin" },
-                interpretation: [{
-                  coding: [{
-                    system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
-                    code: "N",
-                  }],
-                }],
-                valueString: "Normal",
-              },
-              {
-                code: { text: "Potassium" },
-                valueQuantity: { value: 4.2, unit: "mmol/L" },
-              },
-            ],
-          },
-          {
-            resourceType: "Observation",
-            id: "parent-component-conflict-panel",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:03:00.000Z",
-            category: [{
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/observation-category",
-                code: "laboratory",
-              }],
-            }],
-            code: { text: "Metabolic panel" },
-            interpretation: [{
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
-                code: "N",
-              }],
-            }],
-            component: [
-              {
-                code: { text: "Potassium" },
-                interpretation: [{
-                  coding: [{
-                    system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
-                    code: "H",
-                  }],
-                }],
-                valueQuantity: { value: 5.8, unit: "mmol/L" },
-              },
-            ],
-          },
-          {
-            resourceType: "Observation",
-            id: "parent-normal-partial-component-panel",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:04:00.000Z",
-            category: [{
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/observation-category",
-                code: "laboratory",
-              }],
-            }],
-            code: { text: "Metabolic panel" },
-            interpretation: [{
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
-                code: "N",
-              }],
-            }],
-            component: [
-              {
-                code: { text: "Albumin" },
-                interpretation: [{
-                  coding: [{
-                    system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
-                    code: "N",
-                  }],
-                }],
-                valueString: "Normal",
-              },
-              {
-                code: { text: "Potassium" },
-                valueQuantity: { value: 4.2, unit: "mmol/L" },
-              },
-            ],
-          },
-          {
-            resourceType: "Observation",
-            id: "parent-value-normal-component-panel",
-            status: "final",
-            effectiveDateTime: "2026-07-01T12:05:00.000Z",
-            category: [{
-              coding: [{
-                system: "http://terminology.hl7.org/CodeSystem/observation-category",
-                code: "laboratory",
-              }],
-            }],
-            code: { text: "Metabolic panel" },
-            valueQuantity: { value: 999, unit: "mg/dL" },
-            component: [
-              {
-                code: { text: "Albumin" },
-                interpretation: [{
-                  coding: [{
-                    system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
-                    code: "N",
-                  }],
-                }],
-                valueString: "Normal",
-              },
-            ],
-          },
-        ],
-      },
+    const interpretation = (...codes: string[]) => [{
+      coding: codes.map((code) => ({
+        system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+        code,
+      })),
+    }];
+    const panel = (id: string, effectiveDateTime: string, fields: Record<string, unknown>) => ({
+      resourceType: "Observation",
+      id,
+      status: "final",
+      effectiveDateTime,
+      category: [{ coding: [{
+        system: "http://terminology.hl7.org/CodeSystem/observation-category",
+        code: "laboratory",
+      }] }],
+      code: { text: "Metabolic panel" },
+      ...fields,
     });
+    const normalAlbumin = {
+      code: { text: "Albumin" },
+      interpretation: interpretation("N"),
+      valueString: "Normal",
+    };
+    const highPotassium = {
+      code: { text: "Potassium" },
+      interpretation: interpretation("H"),
+      valueQuantity: { value: 5.8, unit: "mmol/L" },
+    };
+    const unclassifiedPotassium = {
+      code: { text: "Potassium" },
+      valueQuantity: { value: 4.2, unit: "mmol/L" },
+    };
+    const vaultRoot = await writeObservationFixture([
+      panel("component-abnormal-panel", "2026-07-01T12:00:00.000Z", {
+        component: [{
+          code: { text: "Glucose" },
+          interpretation: interpretation("H"),
+          valueQuantity: { value: 191, unit: "mg/dL" },
+        }],
+      }),
+      panel("component-normal-panel", "2026-07-01T12:01:00.000Z", {
+        component: [normalAlbumin],
+      }),
+      panel("component-conflicting-panel", "2026-07-01T12:02:00.000Z", {
+        component: [{ ...highPotassium, interpretation: interpretation("N", "H") }],
+      }),
+      panel("component-partial-normal-panel", "2026-07-01T12:02:30.000Z", {
+        component: [normalAlbumin, unclassifiedPotassium],
+      }),
+      panel("parent-component-conflict-panel", "2026-07-01T12:03:00.000Z", {
+        interpretation: interpretation("N"),
+        component: [highPotassium],
+      }),
+      panel("parent-normal-partial-component-panel", "2026-07-01T12:04:00.000Z", {
+        interpretation: interpretation("N"),
+        component: [normalAlbumin, unclassifiedPotassium],
+      }),
+      panel("parent-value-normal-component-panel", "2026-07-01T12:05:00.000Z", {
+        valueQuantity: { value: 999, unit: "mg/dL" },
+        component: [normalAlbumin],
+      }),
+    ], 7);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -2509,49 +2214,29 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       },
     ]);
 
-    const partialNormalPanel = upserts(plan).find(
-      (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
-        candidate.kind === "test" && candidate.externalRef.resourceId === "component-partial-normal-panel",
-    );
-    expect(partialNormalPanel?.resultStatus).toBe("unknown");
-    expect(partialNormalPanel?.results).toEqual([
-      {
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        flag: "normal",
-        slug: "albumin",
-        textValue: "Normal",
-      },
-      {
-        analyte: "Potassium",
-        biomarkerSlug: "potassium",
-        slug: "potassium",
-        unit: "mmol/L",
-        value: 4.2,
-      },
-    ]);
-
-    const parentNormalPartialPanel = upserts(plan).find(
-      (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
-        candidate.kind === "test" && candidate.externalRef.resourceId === "parent-normal-partial-component-panel",
-    );
-    expect(parentNormalPartialPanel?.resultStatus).toBe("unknown");
-    expect(parentNormalPartialPanel?.results).toEqual([
-      {
-        analyte: "Albumin",
-        biomarkerSlug: "albumin",
-        flag: "normal",
-        slug: "albumin",
-        textValue: "Normal",
-      },
-      {
-        analyte: "Potassium",
-        biomarkerSlug: "potassium",
-        slug: "potassium",
-        unit: "mmol/L",
-        value: 4.2,
-      },
-    ]);
+    for (const resourceId of ["component-partial-normal-panel", "parent-normal-partial-component-panel"]) {
+      const partialPanel = upserts(plan).find(
+        (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
+          candidate.kind === "test" && candidate.externalRef.resourceId === resourceId,
+      );
+      expect(partialPanel?.resultStatus).toBe("unknown");
+      expect(partialPanel?.results).toEqual([
+        {
+          analyte: "Albumin",
+          biomarkerSlug: "albumin",
+          flag: "normal",
+          slug: "albumin",
+          textValue: "Normal",
+        },
+        {
+          analyte: "Potassium",
+          biomarkerSlug: "potassium",
+          slug: "potassium",
+          unit: "mmol/L",
+          value: 4.2,
+        },
+      ]);
+    }
 
     const parentValueNormalComponentPanel = upserts(plan).find(
       (candidate): candidate is ClinicalImportUpsertOfKind<"test"> =>
@@ -3760,16 +3445,9 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
 
   it("rejects missing, non-Patient, conflicting, and mixed patient references", async () => {
     const heartRate = (id: string, subject: unknown, patient?: unknown) => ({
-      resourceType: "Observation",
-      id,
+      ...heartRateResource(id),
       subject,
       ...(patient === undefined ? {} : { patient }),
-      status: "final",
-      effectiveDateTime: "2026-07-01T12:00:00.000Z",
-      code: {
-        coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
-      },
-      valueQuantity: { value: 70, unit: "bpm" },
     });
     const invalidPages = [
       heartRate("missing-patient", null),
@@ -3791,40 +3469,17 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     ];
 
     for (const [index, page] of invalidPages.entries()) {
-      const vaultRoot = await writeClinicalFixture({
-        resourceFiles: [{
-          resourceType: "Observation",
-          relativePath: "Observation/page-1.json",
-          count: index === invalidPages.length - 1 ? 2 : 1,
-        }],
-        pages: { "Observation/page-1.json": page },
-      });
+      const vaultRoot = await writeObservationFixture(page, index === invalidPages.length - 1 ? 2 : 1);
       await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
         .rejects.toThrow(/manifest patient/u);
     }
   });
 
   it("accepts same-base absolute Patient references and rejects foreign bases", async () => {
-    const writeAbsoluteReferenceFixture = (reference: string) => writeClinicalFixture({
-      resourceFiles: [{
-        resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 1,
-      }],
-      pages: {
-        "Observation/page-1.json": {
-          resourceType: "Observation",
-          id: "absolute-reference-heart-rate",
-          subject: { reference },
-          status: "final",
-          effectiveDateTime: "2026-07-01T12:00:00.000Z",
-          code: {
-            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
-          },
-          valueQuantity: { value: 70, unit: "bpm" },
-        },
-      },
-    });
+    const writeAbsoluteReferenceFixture = (reference: string) => writeObservationFixture({
+      ...heartRateResource("absolute-reference-heart-rate"),
+      subject: { reference },
+    }, 1);
 
     const matchingRoot = await writeAbsoluteReferenceFixture(`${FHIR_BASE_URL}/Patient/patient-1`);
     const matchingPlan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot: matchingRoot });
@@ -3866,29 +3521,20 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("counts but does not import a formally marked search outcome entry", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
-        resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 2,
-      }],
-      pages: {
-        "Observation/page-1.json": {
-          resourceType: "Bundle",
-          type: "searchset",
-          entry: [
-            { resource: heartRateResource("heart-rate-with-search-outcome") },
-            {
-              search: { mode: "outcome" },
-              resource: {
-                resourceType: "OperationOutcome",
-                issue: [{ severity: "warning", code: "informational" }],
-              },
-            },
-          ],
+    const vaultRoot = await writeObservationFixture({
+      resourceType: "Bundle",
+      type: "searchset",
+      entry: [
+        { resource: heartRateResource("heart-rate-with-search-outcome") },
+        {
+          search: { mode: "outcome" },
+          resource: {
+            resourceType: "OperationOutcome",
+            issue: [{ severity: "warning", code: "informational" }],
+          },
         },
-      },
-    });
+      ],
+    }, 2);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
     expect(upserts(plan).map((candidate) => candidate.externalRef.resourceId)).toEqual([
@@ -3926,25 +3572,16 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("rejects an unmarked outcome resource in an Observation family", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
-        resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 1,
-      }],
-      pages: {
-        "Observation/page-1.json": {
-          resourceType: "Bundle",
-          type: "searchset",
-          entry: [{
-            resource: {
-              resourceType: "OperationOutcome",
-              issue: [{ severity: "warning", code: "informational" }],
-            },
-          }],
+    const vaultRoot = await writeObservationFixture({
+      resourceType: "Bundle",
+      type: "searchset",
+      entry: [{
+        resource: {
+          resourceType: "OperationOutcome",
+          issue: [{ severity: "warning", code: "informational" }],
         },
-      },
-    });
+      }],
+    }, 1);
 
     await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("declared resource type");
@@ -3971,31 +3608,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
           resourceType: "Bundle",
           link: [{ relation: "next", url: nextPageUrl }],
           entry: [{
-            resource: {
-              resourceType: "AllergyIntolerance",
-              id: "incomplete-no-known-allergies",
-              recordedDate: "2026-07-02T09:00:00.000Z",
-              clinicalStatus: {
-                coding: [{
-                  system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
-                  code: "active",
-                }],
-              },
-              verificationStatus: {
-                coding: [{
-                  system: "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
-                  code: "confirmed",
-                }],
-              },
-              code: {
-                text: "No known allergies",
-                coding: [{
-                  system: "http://snomed.info/sct",
-                  code: "716186003",
-                  display: "No known allergies",
-                }],
-              },
-            },
+            resource: noKnownAllergyResource("incomplete-no-known-allergies"),
           }],
         },
         "Condition/page-1.json": [],
@@ -4054,13 +3667,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   it("accepts a FHIR pagination chain only when raw evidence matches the manifest hash", async () => {
     const nextPageUrl = "https://ehr.example.test/fhir/Observation?page=2";
     const observation = (id: string, value: number) => ({
-      resourceType: "Observation",
-      id,
-      status: "final",
-      effectiveDateTime: "2026-07-01T12:00:00.000Z",
-      code: {
-        coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
-      },
+      ...heartRateResource(id),
       valueQuantity: { value, unit: "bpm" },
     });
     const vaultRoot = await writeClinicalFixture({
@@ -4217,23 +3824,14 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("rejects ambiguous next links before validating their FHIR base", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
-        resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 1,
-      }],
-      pages: {
-        "Observation/page-1.json": {
-          resourceType: "Bundle",
-          link: [
-            { relation: "next", url: "https://foreign-a.example.test/fhir/Observation?page=2" },
-            { relation: "next", url: "https://foreign-b.example.test/fhir/Observation?page=2" },
-          ],
-          entry: [{ resource: heartRateResource("ambiguous-next-links") }],
-        },
-      },
-    });
+    const vaultRoot = await writeObservationFixture({
+      resourceType: "Bundle",
+      link: [
+        { relation: "next", url: "https://foreign-a.example.test/fhir/Observation?page=2" },
+        { relation: "next", url: "https://foreign-b.example.test/fhir/Observation?page=2" },
+      ],
+      entry: [{ resource: heartRateResource("ambiguous-next-links") }],
+    }, 1);
 
     await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
       .rejects.toThrow("ambiguous next links");
@@ -4859,26 +4457,17 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
   });
 
   it("normalizes high-precision FHIR event times while preserving source revision precision", async () => {
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
-        resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 1,
-      }],
-      pages: {
-        "Observation/page-1.json": {
-          resourceType: "Observation",
-          id: "high-precision-heart-rate",
-          meta: { lastUpdated: "2026-07-01T12:01:00.123456Z" },
-          status: "final",
-          effectiveDateTime: "2026-07-01T12:00:00.654321Z",
-          code: {
-            coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
-          },
-          valueQuantity: { value: 70, unit: "bpm" },
-        },
+    const vaultRoot = await writeObservationFixture({
+      resourceType: "Observation",
+      id: "high-precision-heart-rate",
+      meta: { lastUpdated: "2026-07-01T12:01:00.123456Z" },
+      status: "final",
+      effectiveDateTime: "2026-07-01T12:00:00.654321Z",
+      code: {
+        coding: [{ system: "http://loinc.org", code: "8867-4", display: "Heart rate" }],
       },
-    });
+      valueQuantity: { value: 70, unit: "bpm" },
+    }, 1);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -4897,44 +4486,35 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
       url: "https://ehr.example.test/fhir/StructureDefinition/negated",
       valueBoolean: true,
     };
-    const vaultRoot = await writeClinicalFixture({
-      resourceFiles: [{
-        resourceType: "Observation",
-        relativePath: "Observation/page-1.json",
-        count: 5,
-      }],
-      pages: {
-        "Observation/page-1.json": [
-          {
-            ...heartRateResource("implicit-rules-heart-rate"),
-            implicitRules: "https://ehr.example.test/fhir/rules/custom",
-          },
-          {
-            ...heartRateResource("root-modifier-heart-rate"),
-            modifierExtension: [rootModifier],
-          },
-          {
-            ...bloodPressurePanelObservation(9001),
-            id: "component-modifier-blood-pressure",
-            component: bloodPressurePanelObservation(9001).component.map((component, index) =>
-              index === 0 ? { ...component, modifierExtension: [rootModifier] } : component
-            ),
-          },
-          {
-            ...heartRateResource("ordinary-extension-heart-rate"),
-            extension: [{
-              url: "https://ehr.example.test/fhir/StructureDefinition/device-label",
-              valueString: "home cuff",
-            }],
-          },
-          {
-            ...heartRateResource("modified-retraction-heart-rate"),
-            status: "entered-in-error",
-            modifierExtension: [rootModifier],
-          },
-        ],
+    const vaultRoot = await writeObservationFixture([
+      {
+        ...heartRateResource("implicit-rules-heart-rate"),
+        implicitRules: "https://ehr.example.test/fhir/rules/custom",
       },
-    });
+      {
+        ...heartRateResource("root-modifier-heart-rate"),
+        modifierExtension: [rootModifier],
+      },
+      {
+        ...bloodPressurePanelObservation(9001),
+        id: "component-modifier-blood-pressure",
+        component: bloodPressurePanelObservation(9001).component.map((component, index) =>
+          index === 0 ? { ...component, modifierExtension: [rootModifier] } : component
+        ),
+      },
+      {
+        ...heartRateResource("ordinary-extension-heart-rate"),
+        extension: [{
+          url: "https://ehr.example.test/fhir/StructureDefinition/device-label",
+          valueString: "home cuff",
+        }],
+      },
+      {
+        ...heartRateResource("modified-retraction-heart-rate"),
+        status: "entered-in-error",
+        modifierExtension: [rootModifier],
+      },
+    ], 5);
 
     const plan = await planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot });
 
@@ -4983,14 +4563,7 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     ];
 
     for (const bundle of bundles) {
-      const vaultRoot = await writeClinicalFixture({
-        resourceFiles: [{
-          resourceType: "Observation",
-          relativePath: "Observation/page-1.json",
-          count: 1,
-        }],
-        pages: { "Observation/page-1.json": bundle },
-      });
+      const vaultRoot = await writeObservationFixture(bundle, 1);
       await expect(planFromFixture({ manifestPath: MANIFEST_PATH, vaultRoot }))
         .rejects.toThrow("unsupported modifier semantics");
     }
@@ -5337,6 +4910,17 @@ async function initializeCanonicalFixtureVault(): Promise<string> {
     timezone: "America/New_York",
   });
   return vaultRoot;
+}
+
+async function writeObservationFixture(page: unknown, count: number): Promise<string> {
+  return writeClinicalFixture({
+    resourceFiles: [{
+      resourceType: "Observation",
+      relativePath: "Observation/page-1.json",
+      count,
+    }],
+    pages: { "Observation/page-1.json": page },
+  });
 }
 
 async function writeClinicalFixture(input: {

@@ -8,6 +8,109 @@ import { createVaultCli } from "../src/vault-cli.js";
 import { localParallelCliTest as test } from "./local-parallel-test.js";
 import { requireData, runCli, runInProcessJsonCli } from "./cli-test-helpers.js";
 
+const registryReadCases = [
+  {
+    noun: "goal",
+    idField: "goalId",
+    payload: { title: "Sleep longer", status: "active", horizon: "long_term", domains: ["sleep"] },
+    expected: { status: "active", domains: ["sleep"] },
+    links: [],
+  },
+  {
+    noun: "condition",
+    idField: "conditionId",
+    payload: { title: "Seasonal allergies", clinicalStatus: "active", verificationStatus: "confirmed", assertedOn: "2026-03-12" },
+    expected: { clinicalStatus: "active" },
+    links: [],
+  },
+  {
+    noun: "allergy",
+    idField: "allergyId",
+    payload: { title: "Peanut allergy", substance: "Peanut", status: "active", reaction: "Hives" },
+    expected: { substance: "Peanut" },
+    links: [],
+  },
+  {
+    noun: "family",
+    idField: "familyMemberId",
+    payload: { title: "Mother", relationship: "mother", conditions: ["hypertension"] },
+    expected: { conditions: ["hypertension"] },
+    links: [],
+  },
+  {
+    noun: "genetics",
+    idField: "variantId",
+    payload: {
+      title: "MTHFR C677T",
+      gene: "MTHFR",
+      significance: "risk_factor",
+      sourceFamilyMemberIds: ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"],
+    },
+    expected: { gene: "MTHFR", significance: "risk_factor" },
+    links: ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"],
+  },
+];
+
+test("registry imports project canonical fields through noun and generic reads", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-registry-"));
+  const payloadPath = path.join(vaultRoot, "payload.json");
+  type Entity = {
+    id: string;
+    kind: string;
+    data: Record<string, unknown>;
+    links: Array<{ id: string }>;
+  };
+  try {
+    assert.equal((await runCli(["init", "--vault", vaultRoot])).ok, true);
+    const records: Array<{ id: string; scenario: typeof registryReadCases[number] }> = [];
+    for (const scenario of registryReadCases) {
+      await writeFile(payloadPath, JSON.stringify(scenario.payload), "utf8");
+      const imported = await runCli<Record<string, string>>([
+        scenario.noun, "import-json", "--input", `@${payloadPath}`, "--vault", vaultRoot,
+      ]);
+      assert.equal(imported.ok, true);
+      const id = requireData(imported)[scenario.idField];
+      assert.ok(id);
+      records.push({ id, scenario });
+    }
+
+    for (const { id, scenario } of records) {
+      for (const args of [[scenario.noun, "show", id], ["show", id]]) {
+        const result = await runCli<{ entity: Entity }>([...args, "--vault", vaultRoot]);
+        assert.equal(result.ok, true);
+        const entity = requireData(result).entity;
+        assert.equal(entity.id, id);
+        assert.equal(entity.kind, scenario.noun);
+        for (const [field, expected] of Object.entries(scenario.expected)) {
+          assert.deepEqual(entity.data[field], expected);
+        }
+        assert.deepEqual(entity.links.map(link => link.id), scenario.links);
+      }
+      for (const args of [[scenario.noun, "list"], ["list", "--kind", scenario.noun]]) {
+        const result = await runCli<{ count: number; items: Entity[] }>([
+          ...args, "--vault", vaultRoot,
+        ]);
+        assert.equal(result.ok, true);
+        const list = requireData(result);
+        assert.equal(list.count, 1);
+        assert.deepEqual(list.items.map(item => item.id), [id]);
+        assert.equal(list.items[0].kind, scenario.noun);
+        for (const [field, expected] of Object.entries(scenario.expected)) {
+          assert.deepEqual(list.items[0].data[field], expected);
+        }
+      }
+    }
+    const unfiltered = await runCli<{ items: Entity[] }>(["list", "--vault", vaultRoot]);
+    assert.equal(unfiltered.ok, true);
+    assert.deepEqual(
+      requireData(unfiltered).items.map(item => [item.id, item.kind]).sort(),
+      records.map(({ id, scenario }) => [id, scenario.noun]).sort(),
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("intake project preserves the canonical proposal through the CLI output contract", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-intake-project-"));
   try {
@@ -205,136 +308,6 @@ test("intake list rejects the removed assessment status filter", async () => {
     assert.equal(result.error.code, "VALIDATION_ERROR");
     assert.equal(result.error.message, "The command arguments are invalid.");
     assert.equal(result.error.fieldErrors?.[0]?.path, "arguments");
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
-test("goal descriptor wiring keeps noun-specific and generic reads aligned", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
-  const payloadPath = path.join(vaultRoot, "goal.json");
-
-  try {
-    await runCli(["init", "--vault", vaultRoot]);
-    await writeFile(
-      payloadPath,
-      JSON.stringify({
-        title: "Sleep longer",
-        status: "active",
-        horizon: "long_term",
-        domains: ["sleep"],
-      }),
-      "utf8",
-    );
-
-    const upsertResult = await runCli<{
-      goalId: string;
-    }>([
-      "goal",
-      "import-json",
-      "--input",
-      `@${payloadPath}`,
-      "--vault",
-      vaultRoot,
-    ]);
-    const goalId = requireData(upsertResult).goalId;
-
-    const nounShow = await runCli<{
-      entity: {
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-        links: Array<{ id: string }>;
-      };
-    }>([
-      "goal",
-      "show",
-      goalId,
-      "--vault",
-      vaultRoot,
-    ]);
-    const nounList = await runCli<{
-      count: number;
-      items: Array<{
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-      }>;
-    }>([
-      "goal",
-      "list",
-      "--vault",
-      vaultRoot,
-    ]);
-    const genericShow = await runCli<{
-      entity: {
-        id: string;
-        kind: string;
-      };
-    }>([
-      "show",
-      goalId,
-      "--vault",
-      vaultRoot,
-    ]);
-    const genericList = await runCli<{
-      items: Array<{
-        id: string;
-        kind: string;
-      }>;
-    }>([
-      "list",
-      "--kind",
-      "goal",
-      "--vault",
-      vaultRoot,
-    ]);
-    const genericUnfilteredList = await runCli<{
-      items: Array<{
-        id: string;
-        kind: string;
-      }>;
-    }>([
-      "list",
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(upsertResult.ok, true);
-    assert.equal(nounShow.ok, true);
-    assert.equal(nounList.ok, true);
-    assert.equal(genericShow.ok, true);
-    assert.equal(genericList.ok, true);
-    assert.equal(genericUnfilteredList.ok, true);
-    assert.equal(requireData(genericShow).entity.id, goalId);
-    assert.equal(requireData(genericShow).entity.kind, "goal");
-    assert.equal(requireData(nounShow).entity.id, goalId);
-    assert.equal(requireData(nounShow).entity.kind, "goal");
-    assert.equal(requireData(nounShow).entity.data.status, "active");
-    assert.deepEqual(requireData(nounShow).entity.data.domains, ["sleep"]);
-    assert.equal(requireData(nounShow).entity.links.length, 0);
-    assert.equal(requireData(nounList).count, 1);
-    assert.deepEqual(
-      requireData(nounList).items.map((item) => item.id),
-      [goalId],
-    );
-    assert.equal(requireData(nounList).items[0]?.data.status, "active");
-    assert.deepEqual(
-      requireData(genericList).items.map((item) => item.id),
-      [goalId],
-    );
-    assert.deepEqual(
-      requireData(genericList).items.map((item) => item.kind),
-      ["goal"],
-    );
-    assert.deepEqual(
-      requireData(genericUnfilteredList).items.map((item) => item.id),
-      [goalId],
-    );
-    assert.deepEqual(
-      requireData(genericUnfilteredList).items.map((item) => item.kind),
-      ["goal"],
-    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -884,140 +857,6 @@ test("goal import-json validates payloads through the shared goal schema", async
   }
 });
 
-test("condition and allergy commands keep noun-specific and generic reads aligned", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
-  const conditionPayloadPath = path.join(vaultRoot, "condition.json");
-  const allergyPayloadPath = path.join(vaultRoot, "allergy.json");
-
-  try {
-    await runCli(["init", "--vault", vaultRoot]);
-    await writeFile(
-      conditionPayloadPath,
-      JSON.stringify({
-        title: "Seasonal allergies",
-        clinicalStatus: "active",
-        verificationStatus: "confirmed",
-        assertedOn: "2026-03-12",
-      }),
-      "utf8",
-    );
-    await writeFile(
-      allergyPayloadPath,
-      JSON.stringify({
-        title: "Peanut allergy",
-        substance: "Peanut",
-        status: "active",
-        reaction: "Hives",
-      }),
-      "utf8",
-    );
-
-    const conditionUpsert = await runCli<{
-      conditionId: string;
-    }>([
-      "condition",
-      "import-json",
-      "--input",
-      `@${conditionPayloadPath}`,
-      "--vault",
-      vaultRoot,
-    ]);
-    const allergyUpsert = await runCli<{
-      allergyId: string;
-    }>([
-      "allergy",
-      "import-json",
-      "--input",
-      `@${allergyPayloadPath}`,
-      "--vault",
-      vaultRoot,
-    ]);
-
-    const conditionId = requireData(conditionUpsert).conditionId;
-    const allergyId = requireData(allergyUpsert).allergyId;
-
-    const conditionShow = await runCli<{
-      entity: {
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-      };
-    }>([
-      "condition",
-      "show",
-      conditionId,
-      "--vault",
-      vaultRoot,
-    ]);
-    const allergyShow = await runCli<{
-      entity: {
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-      };
-    }>([
-      "allergy",
-      "show",
-      allergyId,
-      "--vault",
-      vaultRoot,
-    ]);
-    const genericConditionList = await runCli<{
-      items: Array<{
-        id: string;
-        kind: string;
-      }>;
-    }>([
-      "list",
-      "--kind",
-      "condition",
-      "--vault",
-      vaultRoot,
-    ]);
-    const genericAllergyList = await runCli<{
-      items: Array<{
-        id: string;
-        kind: string;
-      }>;
-    }>([
-      "list",
-      "--kind",
-      "allergy",
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(conditionUpsert.ok, true);
-    assert.equal(allergyUpsert.ok, true);
-    assert.equal(conditionShow.ok, true);
-    assert.equal(allergyShow.ok, true);
-    assert.equal(requireData(conditionShow).entity.id, conditionId);
-    assert.equal(requireData(conditionShow).entity.kind, "condition");
-    assert.equal(requireData(conditionShow).entity.data.clinicalStatus, "active");
-    assert.equal(requireData(allergyShow).entity.id, allergyId);
-    assert.equal(requireData(allergyShow).entity.kind, "allergy");
-    assert.equal(requireData(allergyShow).entity.data.substance, "Peanut");
-    assert.deepEqual(
-      requireData(genericConditionList).items.map((item) => item.id),
-      [conditionId],
-    );
-    assert.deepEqual(
-      requireData(genericConditionList).items.map((item) => item.kind),
-      ["condition"],
-    );
-    assert.deepEqual(
-      requireData(genericAllergyList).items.map((item) => item.id),
-      [allergyId],
-    );
-    assert.deepEqual(
-      requireData(genericAllergyList).items.map((item) => item.kind),
-      ["allergy"],
-    );
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
 test("condition and allergy import-json validate payloads through the shared schemas", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const conditionPayloadPath = path.join(vaultRoot, "condition-invalid.json");
@@ -1278,113 +1117,6 @@ test("condition, allergy, and family patch upserts preserve omitted create-only 
   }
 });
 
-test("family descriptor wiring keeps member-specific commands aligned with generic health reads", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
-  const payloadPath = path.join(vaultRoot, "family.json");
-
-  try {
-    await runCli(["init", "--vault", vaultRoot]);
-    await writeFile(
-      payloadPath,
-      JSON.stringify({
-        title: "Mother",
-        relationship: "mother",
-        conditions: ["hypertension"],
-      }),
-      "utf8",
-    );
-
-    const upsertResult = await runCli<{
-      familyMemberId: string;
-    }>([
-      "family",
-      "import-json",
-      "--input",
-      `@${payloadPath}`,
-      "--vault",
-      vaultRoot,
-    ]);
-    const familyMemberId = requireData(upsertResult).familyMemberId;
-
-    const nounShow = await runCli<{
-      entity: {
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-      };
-    }>([
-      "family",
-      "show",
-      familyMemberId,
-      "--vault",
-      vaultRoot,
-    ]);
-    const nounList = await runCli<{
-      count: number;
-      items: Array<{
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-      }>;
-    }>([
-      "family",
-      "list",
-      "--vault",
-      vaultRoot,
-    ]);
-    const genericShow = await runCli<{
-      entity: {
-        id: string;
-        kind: string;
-      };
-    }>([
-      "show",
-      familyMemberId,
-      "--vault",
-      vaultRoot,
-    ]);
-    const genericList = await runCli<{
-      items: Array<{
-        id: string;
-        kind: string;
-      }>;
-    }>([
-      "list",
-      "--kind",
-      "family",
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(upsertResult.ok, true);
-    assert.equal(nounShow.ok, true);
-    assert.equal(nounList.ok, true);
-    assert.equal(genericShow.ok, true);
-    assert.equal(genericList.ok, true);
-    assert.equal(requireData(genericShow).entity.id, familyMemberId);
-    assert.equal(requireData(genericShow).entity.kind, "family");
-    assert.equal(requireData(nounShow).entity.id, familyMemberId);
-    assert.equal(requireData(nounShow).entity.kind, "family");
-    assert.deepEqual(requireData(nounShow).entity.data.conditions, ["hypertension"]);
-    assert.equal(requireData(nounList).count, 1);
-    assert.deepEqual(
-      requireData(nounList).items.map((item) => item.id),
-      [familyMemberId],
-    );
-    assert.deepEqual(requireData(nounList).items[0]?.data.conditions, ["hypertension"]);
-    assert.deepEqual(
-      requireData(genericList).items.map((item) => item.id),
-      [familyMemberId],
-    );
-    assert.deepEqual(
-      requireData(genericList).items.map((item) => item.kind),
-      ["family"],
-    );
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
 test("generic family show links ignore the removed familyMemberIds alias", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const familyMemberId = "fam_01JNY0B2W4VG5C2A0G9S8M7R6P";
@@ -1478,120 +1210,6 @@ test("family import-json validates payloads through the shared schema and does n
     assert.equal(listResult.error?.code, "VALIDATION_ERROR");
     assert.equal(listResult.error?.message, "The command arguments are invalid.");
     assert.equal(listResult.error?.fieldErrors?.[0]?.path, "arguments");
-  } finally {
-    await rm(vaultRoot, { recursive: true, force: true });
-  }
-});
-
-test("genetics descriptor wiring keeps variant-specific commands aligned with generic health reads", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
-  const payloadPath = path.join(vaultRoot, "genetics.json");
-
-  try {
-    await runCli(["init", "--vault", vaultRoot]);
-    await writeFile(
-      payloadPath,
-      JSON.stringify({
-        title: "MTHFR C677T",
-        gene: "MTHFR",
-        significance: "risk_factor",
-        sourceFamilyMemberIds: ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"],
-      }),
-      "utf8",
-    );
-
-    const upsertResult = await runCli<{
-      variantId: string;
-    }>([
-      "genetics",
-      "import-json",
-      "--input",
-      `@${payloadPath}`,
-      "--vault",
-      vaultRoot,
-    ]);
-    const variantId = requireData(upsertResult).variantId;
-
-    const nounShow = await runCli<{
-      entity: {
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-        links: Array<{ id: string }>;
-      };
-    }>([
-      "genetics",
-      "show",
-      variantId,
-      "--vault",
-      vaultRoot,
-    ]);
-    const nounList = await runCli<{
-      count: number;
-      items: Array<{
-        id: string;
-        kind: string;
-        data: Record<string, unknown>;
-      }>;
-    }>([
-      "genetics",
-      "list",
-      "--vault",
-      vaultRoot,
-    ]);
-    const genericShow = await runCli<{
-      entity: {
-        id: string;
-        kind: string;
-      };
-    }>([
-      "show",
-      variantId,
-      "--vault",
-      vaultRoot,
-    ]);
-    const genericList = await runCli<{
-      items: Array<{
-        id: string;
-        kind: string;
-      }>;
-    }>([
-      "list",
-      "--kind",
-      "genetics",
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(upsertResult.ok, true);
-    assert.equal(nounShow.ok, true);
-    assert.equal(nounList.ok, true);
-    assert.equal(genericShow.ok, true);
-    assert.equal(genericList.ok, true);
-    assert.equal(requireData(genericShow).entity.id, variantId);
-    assert.equal(requireData(genericShow).entity.kind, "genetics");
-    assert.equal(requireData(nounShow).entity.id, variantId);
-    assert.equal(requireData(nounShow).entity.kind, "genetics");
-    assert.equal(requireData(nounShow).entity.data.gene, "MTHFR");
-    assert.equal(requireData(nounShow).entity.data.significance, "risk_factor");
-    assert.deepEqual(
-      requireData(nounShow).entity.links.map((link) => link.id),
-      ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"],
-    );
-    assert.equal(requireData(nounList).count, 1);
-    assert.deepEqual(
-      requireData(nounList).items.map((item) => item.id),
-      [variantId],
-    );
-    assert.equal(requireData(nounList).items[0]?.data.gene, "MTHFR");
-    assert.deepEqual(
-      requireData(genericList).items.map((item) => item.id),
-      [variantId],
-    );
-    assert.deepEqual(
-      requireData(genericList).items.map((item) => item.kind),
-      ["genetics"],
-    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

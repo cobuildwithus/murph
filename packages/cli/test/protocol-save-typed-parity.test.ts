@@ -3,7 +3,7 @@ import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Cli } from "incur";
-import { test } from "vitest";
+import { onTestFinished, test } from "vitest";
 
 import { parseFrontmatterDocument } from "@murphai/core";
 import {
@@ -103,6 +103,24 @@ function createProtocolListCli(services: VaultServices) {
   cli.use(incurErrorBridge);
   registerProtocolCommands(cli, services);
   return cli;
+}
+
+async function createRegimenSaveVault() {
+  const context = await createTempVaultContext("murph-regimen-typed-");
+  onTestFinished(() => rm(context.parentRoot, { force: true, recursive: true }));
+  const cli = createRegimenSaveCli();
+  const initialized = await runInProcessJsonCli<{ created: boolean }>(cli, [
+    "init", "--vault", context.vaultRoot,
+  ]);
+  assert.equal(initialized.exitCode, null);
+  assert.equal(requireData(initialized.envelope).created, true);
+  return {
+    ...context,
+    cli,
+    regimen: <T = Record<string, unknown>>(args: string[]) => runInProcessJsonCli<T>(cli, [
+      "regimen", ...args, "--vault", context.vaultRoot,
+    ]),
+  };
 }
 
 async function runRawInProcessCli(
@@ -217,75 +235,52 @@ test("regimen save schema exposes typed product and primary ingredient fields", 
 });
 
 test("regimen save fails closed when the selected regimen is deleted after read", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-cli-regimen-save-deleted-after-read-",
-  );
+  const { vaultRoot, regimen } = await createRegimenSaveVault();
 
-  try {
-    const cli = createRegimenSaveCli();
-    const initialized = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      "init",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(initialized.exitCode, null);
+  const created = await regimen<SaveResult>([
+    "save",
+    "Durable behavior plan",
+    "--kind",
+    "habit",
+    "--status",
+    "active",
+  ]);
+  assert.equal(created.exitCode, null);
+  const saved = requireData(created.envelope);
+  const shown = await regimen<ShowResult>([
+    "show",
+    saved.regimenId,
+  ]);
+  assert.equal(shown.exitCode, null);
+  assert.equal(requireData(shown.envelope).entity.id, saved.regimenId);
 
-    const created = await runInProcessJsonCli<SaveResult>(cli, [
-      "regimen",
-      "save",
-      "Durable behavior plan",
-      "--kind",
-      "habit",
-      "--status",
-      "active",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(created.exitCode, null);
-    const saved = requireData(created.envelope);
-    const shown = await runInProcessJsonCli<ShowResult>(cli, [
-      "regimen",
-      "show",
-      saved.regimenId,
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(shown.exitCode, null);
-    assert.equal(requireData(shown.envelope).entity.id, saved.regimenId);
+  await rm(path.join(vaultRoot, requireSavedPath(saved)));
+  const filesAfterDeletion = await snapshotVaultFiles(vaultRoot);
 
-    await rm(path.join(vaultRoot, requireSavedPath(saved)));
-    const filesAfterDeletion = await snapshotVaultFiles(vaultRoot);
+  const update = await regimen<SaveResult>([
+    "save",
+    "Durable behavior plan",
+    "--id",
+    saved.regimenId,
+    "--kind",
+    "habit",
+    "--status",
+    "paused",
+  ]);
 
-    const update = await runInProcessJsonCli<SaveResult>(cli, [
-      "regimen",
-      "save",
-      "Durable behavior plan",
-      "--id",
-      saved.regimenId,
-      "--kind",
-      "habit",
-      "--status",
-      "paused",
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(update.exitCode, 1);
-    assert.equal(update.envelope.ok, false);
-    if (!update.envelope.ok) {
-      assert.equal(update.envelope.error.code, "not_found");
-      assert.equal(update.envelope.error.message, "Regimen was not found.");
-      assert.equal(update.envelope.error.retryable, false);
-      assert.equal(update.envelope.error.stage, "read");
-      assert.equal(
-        update.envelope.error.hint,
-        "After this error, run only regimen list once. Do not write again this turn. If a listed regimen matches, end with one question naming its exact regimen id and the requested change; retry only after the user confirms. If none is intended, stop and ask for a separate follow-up. Never offer creation here.",
-      );
-    }
-    assert.deepEqual(await snapshotVaultFiles(vaultRoot), filesAfterDeletion);
-  } finally {
-    await rm(parentRoot, { force: true, recursive: true });
+  assert.equal(update.exitCode, 1);
+  assert.equal(update.envelope.ok, false);
+  if (!update.envelope.ok) {
+    assert.equal(update.envelope.error.code, "not_found");
+    assert.equal(update.envelope.error.message, "Regimen was not found.");
+    assert.equal(update.envelope.error.retryable, false);
+    assert.equal(update.envelope.error.stage, "read");
+    assert.equal(
+      update.envelope.error.hint,
+      "After this error, run only regimen list once. Do not write again this turn. If a listed regimen matches, end with one question naming its exact regimen id and the requested change; retry only after the user confirms. If none is intended, stop and ask for a separate follow-up. Never offer creation here.",
+    );
   }
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), filesAfterDeletion);
 });
 
 test("protocol list forwards commons-protocol filtering to the query service before limiting", async () => {
@@ -334,269 +329,209 @@ test("protocol list forwards commons-protocol filtering to the query service bef
 });
 
 test("regimen save persists typed product metadata and primary ingredient fields", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-cli-regimen-save-parity-",
+  const { vaultRoot, regimen } = await createRegimenSaveVault();
+
+  const regimenResult = await regimen<SaveResult>([
+    "save",
+    "Liposomal Vitamin C",
+    "--slug",
+    "liposomal-vitamin-c",
+    "--kind",
+    "supplement",
+    "--status",
+    "active",
+    "--started-on",
+    "2026-03-01",
+    "--schedule",
+    "with breakfast",
+    "--substance",
+    "Liposomal vitamin C packet",
+    "--dose",
+    "1",
+    "--unit",
+    "packet",
+    "--brand",
+    "LivOn Labs",
+    "--manufacturer",
+    "LivOn Laboratories",
+    "--serving-size",
+    "1 packet",
+    "--ingredient-compound",
+    "Vitamin C",
+    "--ingredient-label",
+    "Ascorbic acid",
+    "--ingredient-amount",
+    "500",
+    "--ingredient-unit",
+    "mg",
+    "--ingredient-note",
+    "Use with breakfast.",
+    "--no-ingredient-active",
+    "--group",
+    "supplement",
+    "--related-goal-id",
+    "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
+    "--related-condition-id",
+    "cond_01JNY0B2W4VG5C2A0G9S8M7R6S",
+    "--related-regimen-id",
+    "reg_01JNY0B2W4VG5C2A0G9S8M7R6T",
+  ]);
+  assert.equal(regimenResult.exitCode, null);
+  const savedRegimen = requireData(regimenResult.envelope);
+  assert.equal(savedRegimen.vault, vaultRoot);
+  assert.equal(savedRegimen.created, true);
+  assert.equal(savedRegimen.lookupId, savedRegimen.regimenId);
+  const relativePath = requireSavedPath(savedRegimen);
+  assert.match(relativePath, /\/supplement\//u);
+  assert.equal(savedRegimen.entity.id, savedRegimen.regimenId);
+  assert.equal(savedRegimen.entity.kind, "regimen");
+  assert.equal(savedRegimen.entity.title, "Liposomal Vitamin C");
+  assert.equal(savedRegimen.entity.occurredAt, null);
+  assert.equal(savedRegimen.entity.path, relativePath);
+  assertCompactSavedEntity(savedRegimen.entity);
+  assert.equal(savedRegimen.entity.data.kind, "supplement");
+  assert.equal(savedRegimen.entity.data.brand, "LivOn Labs");
+  assert.equal(savedRegimen.entity.data.manufacturer, "LivOn Laboratories");
+  assert.equal(savedRegimen.entity.data.servingSize, "1 packet");
+  assert.equal(savedRegimen.entity.data.schedule, "with breakfast");
+  assert.equal(savedRegimen.entity.data.dose, 1);
+  assert.equal(savedRegimen.entity.data.unit, "packet");
+  assert.deepEqual(savedRegimen.entity.data.relatedGoalIds, [
+    "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
+  ]);
+  assert.deepEqual(savedRegimen.entity.data.relatedConditionIds, [
+    "cond_01JNY0B2W4VG5C2A0G9S8M7R6S",
+  ]);
+  assert.deepEqual(savedRegimen.entity.data.relatedRegimenIds, [
+    "reg_01JNY0B2W4VG5C2A0G9S8M7R6T",
+  ]);
+  assert.deepEqual(savedEntityLinkIds(savedRegimen.entity), [
+    "cond_01JNY0B2W4VG5C2A0G9S8M7R6S",
+    "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
+    "reg_01JNY0B2W4VG5C2A0G9S8M7R6T",
+  ]);
+  assert.deepEqual(savedRegimen.entity.data.ingredients, [
+    {
+      compound: "Vitamin C",
+      label: "Ascorbic acid",
+      amount: 500,
+      unit: "mg",
+      active: false,
+      note: "Use with breakfast.",
+    },
+  ]);
+
+  const regimenMarkdown = await readFile(
+    path.join(vaultRoot, relativePath),
+    "utf8",
   );
-
-  try {
-    const cli = createRegimenSaveCli();
-
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      "init",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(initResult.exitCode, null);
-    assert.equal(requireData(initResult.envelope).created, true);
-
-    const regimenResult = await runInProcessJsonCli<SaveResult>(cli, [
-      "regimen",
-      "save",
-      "Liposomal Vitamin C",
-      "--slug",
-      "liposomal-vitamin-c",
-      "--kind",
-      "supplement",
-      "--status",
-      "active",
-      "--started-on",
-      "2026-03-01",
-      "--schedule",
-      "with breakfast",
-      "--substance",
-      "Liposomal vitamin C packet",
-      "--dose",
-      "1",
-      "--unit",
-      "packet",
-      "--brand",
-      "LivOn Labs",
-      "--manufacturer",
-      "LivOn Laboratories",
-      "--serving-size",
-      "1 packet",
-      "--ingredient-compound",
-      "Vitamin C",
-      "--ingredient-label",
-      "Ascorbic acid",
-      "--ingredient-amount",
-      "500",
-      "--ingredient-unit",
-      "mg",
-      "--ingredient-note",
-      "Use with breakfast.",
-      "--no-ingredient-active",
-      "--group",
-      "supplement",
-      "--related-goal-id",
-      "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
-      "--related-condition-id",
-      "cond_01JNY0B2W4VG5C2A0G9S8M7R6S",
-      "--related-regimen-id",
-      "reg_01JNY0B2W4VG5C2A0G9S8M7R6T",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(regimenResult.exitCode, null);
-    const savedRegimen = requireData(regimenResult.envelope);
-    assert.equal(savedRegimen.vault, vaultRoot);
-    assert.equal(savedRegimen.created, true);
-    assert.equal(savedRegimen.lookupId, savedRegimen.regimenId);
-    const relativePath = requireSavedPath(savedRegimen);
-    assert.match(relativePath, /\/supplement\//u);
-    assert.equal(savedRegimen.entity.id, savedRegimen.regimenId);
-    assert.equal(savedRegimen.entity.kind, "regimen");
-    assert.equal(savedRegimen.entity.title, "Liposomal Vitamin C");
-    assert.equal(savedRegimen.entity.occurredAt, null);
-    assert.equal(savedRegimen.entity.path, relativePath);
-    assertCompactSavedEntity(savedRegimen.entity);
-    assert.equal(savedRegimen.entity.data.kind, "supplement");
-    assert.equal(savedRegimen.entity.data.brand, "LivOn Labs");
-    assert.equal(savedRegimen.entity.data.manufacturer, "LivOn Laboratories");
-    assert.equal(savedRegimen.entity.data.servingSize, "1 packet");
-    assert.equal(savedRegimen.entity.data.schedule, "with breakfast");
-    assert.equal(savedRegimen.entity.data.dose, 1);
-    assert.equal(savedRegimen.entity.data.unit, "packet");
-    assert.deepEqual(savedRegimen.entity.data.relatedGoalIds, [
-      "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
-    ]);
-    assert.deepEqual(savedRegimen.entity.data.relatedConditionIds, [
-      "cond_01JNY0B2W4VG5C2A0G9S8M7R6S",
-    ]);
-    assert.deepEqual(savedRegimen.entity.data.relatedRegimenIds, [
-      "reg_01JNY0B2W4VG5C2A0G9S8M7R6T",
-    ]);
-    assert.deepEqual(savedEntityLinkIds(savedRegimen.entity), [
-      "cond_01JNY0B2W4VG5C2A0G9S8M7R6S",
-      "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
-      "reg_01JNY0B2W4VG5C2A0G9S8M7R6T",
-    ]);
-    assert.deepEqual(savedRegimen.entity.data.ingredients, [
-      {
-        compound: "Vitamin C",
-        label: "Ascorbic acid",
-        amount: 500,
-        unit: "mg",
-        active: false,
-        note: "Use with breakfast.",
-      },
-    ]);
-
-    const regimenMarkdown = await readFile(
-      path.join(vaultRoot, relativePath),
-      "utf8",
-    );
-    const regimenDocument = parseFrontmatterDocument(regimenMarkdown);
-    assert.equal(regimenDocument.attributes.title, "Liposomal Vitamin C");
-    assert.equal(regimenDocument.attributes.kind, "supplement");
-    assert.equal(regimenDocument.attributes.status, "active");
-    assert.equal(regimenDocument.attributes.startedOn, "2026-03-01");
-    assert.equal(regimenDocument.attributes.schedule, "with breakfast");
-    assert.equal(regimenDocument.attributes.substance, "Liposomal vitamin C packet");
-    assert.equal(regimenDocument.attributes.dose, 1);
-    assert.equal(regimenDocument.attributes.unit, "packet");
-    assert.equal(regimenDocument.attributes.brand, "LivOn Labs");
-    assert.equal(regimenDocument.attributes.manufacturer, "LivOn Laboratories");
-    assert.equal(regimenDocument.attributes.servingSize, "1 packet");
-    assert.deepEqual(regimenDocument.attributes.ingredients, [
-      {
-        compound: "Vitamin C",
-        label: "Ascorbic acid",
-        amount: 500,
-        unit: "mg",
-        active: false,
-        note: "Use with breakfast.",
-      },
-    ]);
-  } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
-    });
-  }
+  const regimenDocument = parseFrontmatterDocument(regimenMarkdown);
+  assert.equal(regimenDocument.attributes.title, "Liposomal Vitamin C");
+  assert.equal(regimenDocument.attributes.kind, "supplement");
+  assert.equal(regimenDocument.attributes.status, "active");
+  assert.equal(regimenDocument.attributes.startedOn, "2026-03-01");
+  assert.equal(regimenDocument.attributes.schedule, "with breakfast");
+  assert.equal(regimenDocument.attributes.substance, "Liposomal vitamin C packet");
+  assert.equal(regimenDocument.attributes.dose, 1);
+  assert.equal(regimenDocument.attributes.unit, "packet");
+  assert.equal(regimenDocument.attributes.brand, "LivOn Labs");
+  assert.equal(regimenDocument.attributes.manufacturer, "LivOn Laboratories");
+  assert.equal(regimenDocument.attributes.servingSize, "1 packet");
+  assert.deepEqual(regimenDocument.attributes.ingredients, [
+    {
+      compound: "Vitamin C",
+      label: "Ascorbic acid",
+      amount: 500,
+      unit: "mg",
+      active: false,
+      note: "Use with breakfast.",
+    },
+  ]);
 });
 
 test("regimen import-json runtime output stays sparse without entity snapshots", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-cli-regimen-import-sparse-",
-  );
+  const { parentRoot, vaultRoot, regimen } = await createRegimenSaveVault();
   const regimenPayloadPath = path.join(parentRoot, "regimen.json");
 
-  try {
-    const cli = createRegimenSaveCli();
+  await writeFile(
+    regimenPayloadPath,
+    JSON.stringify(
+      {
+        title: "Morning light walk",
+        kind: "habit",
+        status: "active",
+        schedule: "10 minutes after waking",
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
 
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      "init",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(initResult.exitCode, null);
-    assert.equal(requireData(initResult.envelope).created, true);
+  const importResult = await regimen<ImportJsonResult>([
+    "import-json",
+    "--input",
+    `@${regimenPayloadPath}`,
+  ]);
 
-    await writeFile(
-      regimenPayloadPath,
-      JSON.stringify(
-        {
-          title: "Morning light walk",
-          kind: "habit",
-          status: "active",
-          schedule: "10 minutes after waking",
-        },
-        null,
-        2,
-      ),
-      "utf8",
-    );
-
-    const importResult = await runInProcessJsonCli<ImportJsonResult>(cli, [
-      "regimen",
-      "import-json",
-      "--input",
-      `@${regimenPayloadPath}`,
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(importResult.exitCode, null);
-    const imported = requireData(importResult.envelope);
-    assert.equal(imported.vault, vaultRoot);
-    assert.equal(imported.created, true);
-    assert.equal(imported.lookupId, imported.regimenId);
-    assert.equal(typeof imported.path, "string");
-    assert.equal("entity" in imported, false);
-  } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
-    });
-  }
+  assert.equal(importResult.exitCode, null);
+  const imported = requireData(importResult.envelope);
+  assert.equal(imported.vault, vaultRoot);
+  assert.equal(imported.created, true);
+  assert.equal(imported.lookupId, imported.regimenId);
+  assert.equal(typeof imported.path, "string");
+  assert.equal("entity" in imported, false);
 });
 
 test("protocol import maps core validation issues into a bounded repair envelope", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-cli-protocol-repair-",
-  );
+  const { parentRoot, vaultRoot, cli } = await createRegimenSaveVault();
   const payloadPath = path.join(parentRoot, "private-protocol-payload.json");
 
-  try {
-    const cli = createRegimenSaveCli();
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      "init",
-      "--vault",
-      vaultRoot,
-    ]);
-    assert.equal(initResult.exitCode, null);
+  await writeFile(
+    payloadPath,
+    JSON.stringify({
+      slug: "private-protocol-repair",
+      title: "Private Protocol Title",
+      effectiveSpec: "PrivateProtocolSpecSentinel",
+    }),
+    "utf8",
+  );
 
-    await writeFile(
-      payloadPath,
-      JSON.stringify({
-        slug: "private-protocol-repair",
-        title: "Private Protocol Title",
-        effectiveSpec: "PrivateProtocolSpecSentinel",
-      }),
-      "utf8",
+  const result = await runInProcessJsonCli(cli, [
+    "protocol",
+    "import-json",
+    "--input",
+    `@${payloadPath}`,
+    "--vault",
+    vaultRoot,
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.envelope.ok, false);
+  if (!result.envelope.ok) {
+    assert.equal(result.envelope.error.code, "contract_invalid");
+    assert.equal(result.envelope.error.retryable, false);
+    assert.equal(result.envelope.error.stage, "validation");
+    assert.equal(
+      result.envelope.error.fieldErrors?.some(
+        (field) => field.path === "effectiveSpec",
+      ),
+      true,
     );
-
-    const result = await runInProcessJsonCli(cli, [
-      "protocol",
-      "import-json",
-      "--input",
-      `@${payloadPath}`,
-      "--vault",
-      vaultRoot,
-    ]);
-
-    assert.equal(result.exitCode, 1);
-    assert.equal(result.envelope.ok, false);
-    if (!result.envelope.ok) {
-      assert.equal(result.envelope.error.code, "contract_invalid");
-      assert.equal(result.envelope.error.retryable, false);
-      assert.equal(result.envelope.error.stage, "validation");
-      assert.equal(
-        result.envelope.error.fieldErrors?.some(
-          (field) => field.path === "effectiveSpec",
-        ),
-        true,
-      );
-      assert.equal(result.envelope.error.hint, undefined);
-    }
-
-    const serialized = JSON.stringify(result.envelope);
-    assert.doesNotMatch(
-      serialized,
-      /Private Protocol Title|PrivateProtocolSpecSentinel/u,
-    );
-    assert.equal(serialized.includes(payloadPath), false);
-    assert.doesNotMatch(serialized, /bank\/protocols/u);
-  } finally {
-    await rm(parentRoot, { force: true, recursive: true });
+    assert.equal(result.envelope.error.hint, undefined);
   }
+
+  const serialized = JSON.stringify(result.envelope);
+  assert.doesNotMatch(
+    serialized,
+    /Private Protocol Title|PrivateProtocolSpecSentinel/u,
+  );
+  assert.equal(serialized.includes(payloadPath), false);
+  assert.doesNotMatch(serialized, /bank\/protocols/u);
 });
 
 test("protocol import preserves fixed input constraints without leaking submitted values or writing", async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    "murph-cli-protocol-input-constraints-",
-  );
+  const { parentRoot, vaultRoot, cli } = await createRegimenSaveVault();
   const payloadPath = path.join(parentRoot, "private-protocol-input.json");
   const oversizedTitle = "SubmittedOversizedTitleSentinel".repeat(8);
   const cases: Array<{
@@ -684,48 +619,37 @@ test("protocol import preserves fixed input constraints without leaking submitte
     },
   ];
 
-  try {
-    const cli = createRegimenSaveCli();
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      "init",
+  const initialVaultSnapshot = await snapshotVaultFiles(vaultRoot);
+
+  for (const testCase of cases) {
+    await writeFile(payloadPath, JSON.stringify(testCase.payload), "utf8");
+
+    const result = await runInProcessJsonCli(cli, [
+      "protocol",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
       "--vault",
       vaultRoot,
     ]);
-    assert.equal(initResult.exitCode, null);
-    const initialVaultSnapshot = await snapshotVaultFiles(vaultRoot);
 
-    for (const testCase of cases) {
-      await writeFile(payloadPath, JSON.stringify(testCase.payload), "utf8");
-
-      const result = await runInProcessJsonCli(cli, [
-        "protocol",
-        "import-json",
-        "--input",
-        `@${payloadPath}`,
-        "--vault",
-        vaultRoot,
-      ]);
-
-      assert.equal(result.exitCode, 1, testCase.name);
-      assert.equal(result.envelope.ok, false, testCase.name);
-      if (!result.envelope.ok) {
-        assert.equal(result.envelope.error.code, "contract_invalid", testCase.name);
-        assert.equal(result.envelope.error.message, testCase.expectedMessage, testCase.name);
-        assert.equal(result.envelope.error.retryable, false, testCase.name);
-        assert.equal(result.envelope.error.stage, undefined, testCase.name);
-        assert.equal(result.envelope.error.fieldErrors, undefined, testCase.name);
-        assert.equal(result.envelope.error.hint, undefined, testCase.name);
-      }
-
-      const serialized = JSON.stringify(result.envelope);
-      for (const sentinel of testCase.submittedSentinels) {
-        assert.equal(serialized.includes(sentinel), false, `${testCase.name}: ${sentinel}`);
-      }
-      assert.equal(serialized.includes(payloadPath), false, testCase.name);
-      assert.doesNotMatch(serialized, /bank\/protocols/u, testCase.name);
-      assert.deepEqual(await snapshotVaultFiles(vaultRoot), initialVaultSnapshot, testCase.name);
+    assert.equal(result.exitCode, 1, testCase.name);
+    assert.equal(result.envelope.ok, false, testCase.name);
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, "contract_invalid", testCase.name);
+      assert.equal(result.envelope.error.message, testCase.expectedMessage, testCase.name);
+      assert.equal(result.envelope.error.retryable, false, testCase.name);
+      assert.equal(result.envelope.error.stage, undefined, testCase.name);
+      assert.equal(result.envelope.error.fieldErrors, undefined, testCase.name);
+      assert.equal(result.envelope.error.hint, undefined, testCase.name);
     }
-  } finally {
-    await rm(parentRoot, { force: true, recursive: true });
+
+    const serialized = JSON.stringify(result.envelope);
+    for (const sentinel of testCase.submittedSentinels) {
+      assert.equal(serialized.includes(sentinel), false, `${testCase.name}: ${sentinel}`);
+    }
+    assert.equal(serialized.includes(payloadPath), false, testCase.name);
+    assert.doesNotMatch(serialized, /bank\/protocols/u, testCase.name);
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), initialVaultSnapshot, testCase.name);
   }
 });

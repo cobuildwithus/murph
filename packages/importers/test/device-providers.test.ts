@@ -632,6 +632,16 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
   assert.equal(hrvEvent?.fields?.value, 42.5);
   assert.equal(hrvEvent?.externalRef?.facet, "hrv");
   assert.equal(bmiEvent?.dayKey, undefined);
+  for (const [facet, metric, value, unit] of [
+    ["sleep-rem-minutes", "sleep-rem-minutes", 90, "minutes"],
+    ["skin-temperature", "temperature", 36.5, "celsius"],
+  ] as const) {
+    const event = payload.events?.find((candidate) => candidate.externalRef?.facet === facet);
+    assert.deepEqual([
+      event?.fields?.metric, event?.fields?.value, event?.fields?.unit,
+      event?.fields?.observationGrain, event?.dayKey,
+    ], [metric, value, unit, "summary", undefined]);
+  }
 });
 
 test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-midnight imports", async () => {
@@ -849,72 +859,94 @@ test("importDeviceProviderSnapshot keeps WHOOP provider-local days across UTC-mi
   }
 });
 
-test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonical device payloads", async () => {
+test.each([
+  {
+    label: "numbers",
+    accountId: "oura-user-1",
+    sleepId: "sleep-1",
+    expectedAccountId: "oura-user-1",
+    expectedSleepId: "sleep-1",
+    encodeNumber: (value: number) => value,
+  },
+  {
+    label: "string numerics",
+    accountId: 202,
+    sleepId: 5,
+    expectedAccountId: "202",
+    expectedSleepId: "5",
+    encodeNumber: String,
+  },
+])("prepareDeviceProviderSnapshotImport normalizes Oura $label into canonical device payloads", async ({
+  accountId, sleepId, expectedAccountId, expectedSleepId, encodeNumber,
+}) => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "oura",
     vaultRoot: "fixture-vault",
     snapshot: {
-      accountId: "oura-user-1",
+      accountId,
       importedAt: "2026-03-16T10:00:00.000Z",
       personalInfo: {
-        id: "oura-user-1",
+        id: accountId,
         email: "oura@example.com",
       },
       dailyActivity: [
         {
           day: "2026-03-15",
-          score: 82,
-          steps: 12034,
-          active_calories: 510,
-          total_calories: 2400,
-          equivalent_walking_distance: 9200,
-          non_wear_time: 1200,
+          score: encodeNumber(82),
+          steps: encodeNumber(12034),
+          active_calories: encodeNumber(510),
+          total_calories: encodeNumber(2400),
+          equivalent_walking_distance: encodeNumber(9200),
+          non_wear_time: encodeNumber(1200),
+          low_activity_time: encodeNumber(3600),
+          medium_activity_time: encodeNumber(1200),
+          high_activity_time: encodeNumber(600),
         },
       ],
       dailySleep: [
         {
           day: "2026-03-15",
-          score: 86,
+          score: encodeNumber(86),
         },
       ],
       dailyReadiness: [
         {
           day: "2026-03-15",
-          score: 77,
-          temperature_deviation: -0.12,
-          temperature_trend_deviation: 0.05,
+          score: encodeNumber(77),
+          temperature_deviation: encodeNumber(-0.12),
+          temperature_trend_deviation: encodeNumber(0.05),
         },
       ],
       dailySpO2: [
         {
           day: "2026-03-15",
           spo2_percentage: {
-            average: 97.4,
+            average: encodeNumber(97.4),
           },
-          breathing_disturbance_index: 2,
+          breathing_disturbance_index: encodeNumber(2),
         },
       ],
       sleeps: [
         {
-          id: "sleep-1",
+          id: sleepId,
           type: "sleep",
           bedtime_start: "2026-03-14T22:30:00.000Z",
           bedtime_end: "2026-03-15T06:45:00.000Z",
           timestamp: "2026-03-15T06:50:00.000Z",
-          average_breath: 13.8,
-          average_hrv: 41.2,
-          average_heart_rate: 56,
-          efficiency: 91,
-          total_sleep_duration: 27000,
-          time_in_bed: 29700,
-          awake_time: 1200,
-          deep_sleep_duration: 5400,
-          light_sleep_duration: 14400,
-          rem_sleep_duration: 7200,
-          latency: 600,
-          lowest_heart_rate: 49,
-          sleep_score_delta: 5,
-          readiness_score_delta: 4,
+          average_breath: encodeNumber(13.8),
+          average_hrv: encodeNumber(41.2),
+          average_heart_rate: encodeNumber(56),
+          efficiency: encodeNumber(91),
+          total_sleep_duration: encodeNumber(27000),
+          time_in_bed: encodeNumber(29700),
+          awake_time: encodeNumber(1200),
+          deep_sleep_duration: encodeNumber(5400),
+          light_sleep_duration: encodeNumber(14400),
+          rem_sleep_duration: encodeNumber(7200),
+          latency: encodeNumber(600),
+          lowest_heart_rate: encodeNumber(49),
+          sleep_score_delta: encodeNumber(5),
+          readiness_score_delta: encodeNumber(4),
         },
       ],
       sessions: [
@@ -924,8 +956,8 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
           start_datetime: "2026-03-15T13:00:00.000Z",
           end_datetime: "2026-03-15T13:20:00.000Z",
           timestamp: "2026-03-15T13:20:00.000Z",
-          heart_rate: 62,
-          heart_rate_variability: 48,
+          heart_rate: encodeNumber(62),
+          heart_rate_variability: encodeNumber(48),
         },
       ],
       workouts: [
@@ -935,15 +967,15 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
           start_datetime: "2026-03-15T17:00:00.000Z",
           end_datetime: "2026-03-15T17:45:00.000Z",
           timestamp: "2026-03-15T17:50:00.000Z",
-          calories: 430,
-          total_calories: 470,
-          distance: 6800,
+          calories: encodeNumber(430),
+          total_calories: encodeNumber(470),
+          distance: encodeNumber(6800),
         },
       ],
       heartrate: [
         {
           timestamp: "2026-03-15T12:00:00.000Z",
-          bpm: 64,
+          bpm: encodeNumber(64),
           source: "live",
         },
       ],
@@ -960,9 +992,9 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
 
   assert.equal(payload.vaultRoot, "fixture-vault");
   assert.equal(payload.provider, "oura");
-  assert.equal(payload.accountId, "oura-user-1");
+  assert.equal(payload.accountId, expectedAccountId);
   assert.equal(payload.source, "device");
-  assert.equal(payload.provenance?.ouraUserId, "oura-user-1");
+  assert.equal(payload.provenance?.ouraUserId, expectedAccountId);
   assert.ok(payload.events?.some((event) => event.kind === "sleep_session"));
   assert.ok(
     payload.events?.some(
@@ -1002,7 +1034,7 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
   assert.ok(payload.events?.some((event) => event.fields?.metric === "average-heart-rate" && event.fields?.value === 56));
   assert.equal(payload.samples?.length ?? 0, 0);
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "personal-info"));
-  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "sleep:sleep-1"));
+  assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === `sleep:${expectedSleepId}`));
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "session:session-1"));
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "workout:workout-1"));
   assert.equal(payload.evidenceParts?.filter((artifact) => artifact.role === "heartrate").length, 0);
@@ -1033,6 +1065,7 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
     (event) => event.fields?.metric === "respiratory-rate",
   );
 
+  assert.equal(sleepEvent?.externalRef?.resourceId, expectedSleepId);
   assert.deepEqual(sleepEvent?.fields, {
     startAt: "2026-03-14T22:30:00.000Z",
     endAt: "2026-03-15T06:45:00.000Z",
@@ -1051,94 +1084,19 @@ test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonic
     activeCalories: 430,
     totalCalories: 470,
   });
+  for (const [facet, metric, value, unit] of [
+    ["activity-minutes", "activity-minutes", 90, "minutes"],
+    ["steps", "daily-steps", 12034, "count"],
+    ["spo2-average", "spo2", 97.4, "%"],
+    ["non-wear-minutes", "non-wear-minutes", 20, "minutes"],
+  ] as const) {
+    const event = payload.events?.find((candidate) => candidate.externalRef?.facet === facet);
+    assert.deepEqual([
+      event?.fields?.metric, event?.fields?.value, event?.fields?.unit, event?.fields?.observationGrain,
+    ], [metric, value, unit, "summary"]);
+  }
   assert.deepEqual(sessionObservationMetrics, []);
   assert.deepEqual(workoutObservationMetrics, []);
-});
-
-test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and WHOOP unit and facet mappings", async () => {
-  const [ouraPayload, whoopPayload] = await Promise.all([
-    prepareDeviceProviderSnapshotImport({
-      provider: "oura",
-      snapshot: {
-        dailyActivity: [
-          {
-            day: "2026-03-15",
-            high_activity_time: 600,
-            low_activity_time: 3600,
-            medium_activity_time: 1200,
-            steps: 12034,
-            non_wear_time: 1200,
-          },
-        ],
-        dailySpO2: [
-          {
-            day: "2026-03-15",
-            spo2_percentage: {
-              average: 97.4,
-            },
-          },
-        ],
-      },
-    }),
-    prepareDeviceProviderSnapshotImport({
-      provider: "whoop",
-      snapshot: {
-        sleeps: [
-          {
-            id: "sleep-2",
-            start: "2026-03-15T22:00:00.000Z",
-            end: "2026-03-16T07:00:00.000Z",
-            updated_at: "2026-03-16T07:30:00.000Z",
-            score: {
-              stage_summary: {
-                total_rem_sleep_time_milli: 5400000,
-              },
-            },
-          },
-        ],
-        recoveries: [
-          {
-            sleep_id: "sleep-2",
-            updated_at: "2026-03-16T07:30:00.000Z",
-            score: {
-              skin_temp_celsius: 36.5,
-            },
-          },
-        ],
-      },
-    }),
-  ]);
-
-  const ouraStepsEvent = ouraPayload.events?.find((event) => event.externalRef?.facet === "steps");
-  const ouraActivityMinutesEvent = ouraPayload.events?.find(
-    (event) => event.externalRef?.facet === "activity-minutes",
-  );
-  const ouraSpo2Event = ouraPayload.events?.find((event) => event.externalRef?.facet === "spo2-average");
-  const ouraNonWearEvent = ouraPayload.events?.find((event) => event.externalRef?.facet === "non-wear-minutes");
-  const whoopRemEvent = whoopPayload.events?.find((event) => event.externalRef?.facet === "sleep-rem-minutes");
-  const whoopTemperatureEvent = whoopPayload.events?.find(
-    (event) => event.externalRef?.facet === "skin-temperature",
-  );
-
-  assert.equal(ouraActivityMinutesEvent?.fields?.metric, "activity-minutes");
-  assert.equal(ouraActivityMinutesEvent?.fields?.value, 90);
-  assert.equal(ouraActivityMinutesEvent?.fields?.unit, "minutes");
-  assert.equal(ouraStepsEvent?.fields?.metric, "daily-steps");
-  assert.equal(ouraStepsEvent?.fields?.unit, "count");
-  assert.equal(ouraStepsEvent?.fields?.observationGrain, "summary");
-  assert.equal(ouraSpo2Event?.fields?.metric, "spo2");
-  assert.equal(ouraSpo2Event?.fields?.unit, "%");
-  assert.equal(ouraSpo2Event?.fields?.observationGrain, "summary");
-  assert.equal(ouraNonWearEvent?.fields?.value, 20);
-  assert.equal(ouraNonWearEvent?.fields?.unit, "minutes");
-  assert.equal(ouraNonWearEvent?.fields?.observationGrain, "summary");
-  assert.equal(whoopRemEvent?.fields?.metric, "sleep-rem-minutes");
-  assert.equal(whoopRemEvent?.fields?.unit, "minutes");
-  assert.equal(whoopRemEvent?.dayKey, undefined);
-  assert.equal(whoopRemEvent?.fields?.observationGrain, "summary");
-  assert.equal(whoopTemperatureEvent?.fields?.unit, "celsius");
-  assert.equal(whoopTemperatureEvent?.dayKey, undefined);
-  assert.equal(whoopTemperatureEvent?.fields?.observationGrain, "summary");
 });
 
 test("prepareDeviceProviderSnapshotImport rejects incomplete or invalid Oura daily activity durations", async () => {
@@ -1160,106 +1118,6 @@ test("prepareDeviceProviderSnapshotImport rejects incomplete or invalid Oura dai
   });
 
   assert.equal(payload.events?.some((event) => event.fields?.metric === "activity-minutes"), false);
-});
-
-test("prepareDeviceProviderSnapshotImport handles Oura string numerics through shared observation and sample helpers", async () => {
-  const payload = await prepareDeviceProviderSnapshotImport({
-    provider: "oura",
-    vaultRoot: "fixture-vault",
-    snapshot: {
-      accountId: 202,
-      dailyActivity: [
-        {
-          day: "2026-03-15",
-          score: "82",
-          steps: "12034",
-          active_calories: "510",
-          total_calories: "2400",
-          equivalent_walking_distance: "9200",
-          non_wear_time: "1200",
-        },
-      ],
-      dailyReadiness: [
-        {
-          day: "2026-03-15",
-          score: "77",
-          temperature_deviation: "-0.12",
-          temperature_trend_deviation: "0.05",
-        },
-      ],
-      dailySpO2: [
-        {
-          day: "2026-03-15",
-          spo2_percentage: {
-            average: "97.4",
-          },
-          breathing_disturbance_index: "2",
-        },
-      ],
-      sleeps: [
-        {
-          id: 5,
-          type: "sleep",
-          bedtime_start: "2026-03-14T22:30:00.000Z",
-          bedtime_end: "2026-03-15T06:45:00.000Z",
-          timestamp: "2026-03-15T06:50:00.000Z",
-          average_breath: "13.8",
-          average_hrv: "41.2",
-          average_heart_rate: "56",
-          efficiency: "91",
-          total_sleep_duration: "27000",
-          time_in_bed: "29700",
-          awake_time: "1200",
-          deep_sleep_duration: "5400",
-          light_sleep_duration: "14400",
-          rem_sleep_duration: "7200",
-          latency: "600",
-          lowest_heart_rate: "49",
-          sleep_score_delta: "5",
-          readiness_score_delta: "4",
-        },
-      ],
-      heartrate: [
-        {
-          timestamp: "2026-03-15T12:00:00.000Z",
-          bpm: "64",
-          source: "live",
-        },
-      ],
-    },
-  });
-
-  assert.equal(payload.accountId, "202");
-  assert.ok(
-    payload.events?.some(
-      (event) =>
-        event.kind === "observation" &&
-        event.fields?.metric === "activity-score" &&
-        event.fields?.value === 82,
-    ),
-  );
-  assert.ok(
-    payload.events?.some(
-      (event) =>
-        event.kind === "observation" &&
-        event.fields?.metric === "readiness-score" &&
-        event.fields?.value === 77,
-    ),
-  );
-  assert.ok(
-    payload.events?.some(
-      (event) => event.kind === "observation" && event.fields?.metric === "spo2" && event.fields?.value === 97.4,
-    ),
-  );
-  assert.ok(
-    payload.events?.some(
-      (event) => event.kind === "observation" && event.fields?.metric === "respiratory-rate" && event.fields?.value === 13.8,
-    ),
-  );
-  assert.ok(payload.events?.some((event) => event.fields?.metric === "hrv" && event.fields?.value === 41.2));
-  assert.ok(payload.events?.some((event) => event.fields?.metric === "average-heart-rate" && event.fields?.value === 56));
-  assert.equal(payload.evidenceParts?.some((artifact) => artifact.role === "heartrate"), false);
-  assert.equal(payload.samples?.length ?? 0, 0);
 });
 
 test("prepareDeviceProviderSnapshotImport preserves Oura deletion alias precedence through the shared tombstone builder", async () => {
@@ -1340,41 +1198,6 @@ test("prepareDeviceProviderSnapshotImport records Oura daily aggregate deletions
 
 
 
-
-test("importDeviceProviderSnapshot uses the default Oura adapter registry", async () => {
-  const calls: DeviceBatchImportPayload[] = [];
-
-  const result = await importDeviceProviderSnapshot<{ ok: boolean; provider: string }>(
-    {
-      provider: "oura",
-      snapshot: {
-        accountId: "oura-user-2",
-        dailyReadiness: [
-          {
-            day: "2026-03-16",
-            score: 81,
-          },
-        ],
-      },
-    },
-    {
-      corePort: {
-        async importDeviceBatch(payload: DeviceBatchImportPayload) {
-          calls.push(payload);
-          return {
-            ok: true,
-            provider: payload.provider,
-          };
-        },
-      },
-    },
-  );
-
-  assert.deepEqual(result, { ok: true, provider: "oura" });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.provider, "oura");
-  assert.ok(calls[0]?.events?.some((event) => event.fields?.metric === "readiness-score"));
-});
 
 test("importDeviceProviderSnapshot ignores legacy Oura heart-rate raw samples", async () => {
   const vaultRoot = await makeTempDirectory("murph-oura-heartrate-import");

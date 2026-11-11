@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import { bloodTestImportPayloadSchema, immunizationImportPayloadSchema } from "@murphai/contracts";
 
 import {
@@ -1794,373 +1794,191 @@ test("history writes reject provider ids and raw refs that violate the canonical
   );
 });
 
-test("family members are stored as deterministic markdown registry entries", async () => {
-  const vaultRoot = await makeTempDirectory("murph-family");
-  await initializeVault({ vaultRoot });
-
-  const created = await upsertFamilyMember({
-    vaultRoot,
-    title: "Maternal Grandmother",
-    relationship: "grandmother",
-    conditions: ["Type 2 diabetes", "cardiometabolic risk"],
-    note: "Type 2 diabetes diagnosed in her 60s.",
-    relatedVariantIds: ["var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
-  });
-  const updated = await upsertFamilyMember({
-    vaultRoot,
-    familyMemberId: created.record.entity.familyMemberId,
-    slug: "changed-slug-that-should-not-rename",
-    note: "Updated summary.",
-  });
-
-  const listed = await listFamilyMembers(vaultRoot);
-  const read = await readFamilyMember({
-    vaultRoot,
-    slug: created.record.entity.slug,
-  });
-
-  assert.equal(created.created, true);
-  assert.equal(updated.created, false);
-  assert.equal(updated.record.document.relativePath, created.record.document.relativePath);
-  assert.equal(updated.record.entity.slug, created.record.entity.slug);
-  assert.equal(listed.length, 1);
-  assert.equal(read.entity.familyMemberId, created.record.entity.familyMemberId);
-  assert.match(read.document.markdown, /## Related Variants/);
-  assert.deepEqual(read.entity.relatedVariantIds, ["var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
-  assert.deepEqual(read.entity.links, [
-    {
-      type: "related_variant",
-      targetId: "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+test.each([
+  {
+    name: "family members",
+    upsert: upsertFamilyMember,
+    read: readFamilyMember,
+    list: listFamilyMembers,
+    selector: { familyMemberId: "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+    input: {
+      title: "Maternal Grandmother",
+      relationship: "grandmother",
+      conditions: ["Type 2 diabetes", "cardiometabolic risk"],
+      note: "Type 2 diabetes diagnosed in her 60s.",
+      relatedVariantIds: ["var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
     },
-  ]);
-  assert.doesNotMatch(read.document.markdown, /updatedAt:/);
-
-  const auditRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: updated.auditPath,
-  });
-
-  assert.equal(
-    auditRecords.filter((record) => (record as { action?: string }).action === "family_upsert").length,
-    2,
-  );
-
-  const familyOperations = (
-    await Promise.all(
-      (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
-        readObservedWriteOperation(vaultRoot, relativePath),
-      ),
-    )
-  ).filter((operation) => operation.operationType === "family_upsert");
-
-  assert.equal(familyOperations.length, 2);
-  assert.ok(familyOperations.every((operation) => operation.status === "committed"));
-});
-
-test("family registry upserts reject conflicting family member ids and slugs", async () => {
-  const vaultRoot = await makeTempDirectory("murph-family-conflict");
-  await initializeVault({ vaultRoot });
-
-  const first = await upsertFamilyMember({
-    vaultRoot,
-    title: "Mother",
-    relationship: "mother",
-  });
-  const second = await upsertFamilyMember({
-    vaultRoot,
-    title: "Father",
-    relationship: "father",
-  });
-
-  await assert.rejects(
-    () =>
-      upsertFamilyMember({
-        vaultRoot,
-        familyMemberId: first.record.entity.familyMemberId,
-        slug: second.record.entity.slug,
-        note: "This should fail.",
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_FAMILY_MEMBER_CONFLICT" &&
-      error.message === "familyMemberId and slug resolve to different family members.",
-  );
-});
-
-test("family registry listing preserves invalid document shape errors after shared loader extraction", async () => {
-  const vaultRoot = await makeTempDirectory("murph-family-invalid-shape");
-  await initializeVault({ vaultRoot });
-
-  const invalidMarkdown = stringifyFrontmatterDocument({
-    attributes: {
-      schemaVersion: "murph.family-member-frontmatter.v999",
-      docType: "murph.family_member",
-      familyMemberId: "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
-      slug: "invalid-family-member",
-      title: "Invalid Family Member",
-      relationship: "parent",
+    patch: { note: "Updated summary." },
+    expected: {
+      title: "Maternal Grandmother",
+      relationship: "grandmother",
+      conditions: ["cardiometabolic risk", "Type 2 diabetes"],
+      note: "Updated summary.",
+      relatedVariantIds: ["var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      links: [{ type: "related_variant", targetId: "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" }],
     },
-    body: "# Invalid Family Member\n",
-  });
-
-  await fs.writeFile(path.join(vaultRoot, "bank/family/invalid-family-member.md"), invalidMarkdown, "utf8");
-
-  await assert.rejects(
-    () => listFamilyMembers(vaultRoot),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_INVALID_FAMILY_MEMBER" &&
-      error.message === "Family registry document has an unexpected shape.",
-  );
-});
-
-test("genetic variants are stored in markdown registries and can link to family members", async () => {
-  const vaultRoot = await makeTempDirectory("murph-genetics");
-  await initializeVault({ vaultRoot });
-
-  const familyMember = await upsertFamilyMember({
-    vaultRoot,
-    title: "Father",
-    relationship: "father",
-  });
-  const created = await upsertGeneticVariant({
-    vaultRoot,
-    gene: "APOE",
-    title: "APOE e4 allele",
-    zygosity: "compound_heterozygous",
-    significance: "risk_factor",
-    inheritance: "maternal lineage",
-    sourceFamilyMemberIds: [familyMember.record.entity.familyMemberId],
-    note: "Family history and genotype raise late-life risk.",
-  });
-  const updated = await upsertGeneticVariant({
-    vaultRoot,
-    variantId: created.record.entity.variantId,
-    slug: "changed-slug-that-should-not-rename",
-    title: "APOE e4 allele updated",
-    significance: "risk_factor",
-    note: "Maintain aggressive cardiometabolic prevention.",
-    sourceFamilyMemberIds: [familyMember.record.entity.familyMemberId],
-  });
-
-  const listed = await listGeneticVariants(vaultRoot);
-  const read = await readGeneticVariant({
-    vaultRoot,
-    variantId: created.record.entity.variantId,
-  });
-
-  assert.equal(created.created, true);
-  assert.equal(updated.created, false);
-  assert.equal(updated.record.entity.slug, created.record.entity.slug);
-  assert.equal(updated.record.document.relativePath, created.record.document.relativePath);
-  assert.equal(listed.length, 1);
-  assert.equal(read.entity.variantId, created.record.entity.variantId);
-  assert.equal(read.entity.gene, "APOE");
-  assert.equal(read.entity.title, "APOE e4 allele updated");
-  assert.equal(read.entity.zygosity, "compound_heterozygous");
-  assert.equal(read.entity.inheritance, "maternal lineage");
-  assert.deepEqual(read.entity.sourceFamilyMemberIds, [familyMember.record.entity.familyMemberId]);
-  assert.deepEqual(read.entity.links, [
-    {
-      type: "source_family_member",
-      targetId: familyMember.record.entity.familyMemberId,
-    },
-  ]);
-  assert.match(read.document.markdown, /## Source Family Members/);
-  assert.doesNotMatch(read.document.markdown, /updatedAt:/);
-
-  const auditRecords = await readJsonlRecords({
-    vaultRoot,
-    relativePath: updated.auditPath,
-  });
-
-  const geneticsAuditRecords = auditRecords.filter(
-    (record) =>
-      (record as { action?: string; targetIds?: string[] }).action === "genetics_upsert" &&
-      (record as { targetIds?: string[] }).targetIds?.includes(created.record.entity.variantId),
-  ) as Array<{
-    changes?: Array<{ path?: string; op?: string }>;
-  }>;
-
-  assert.equal(geneticsAuditRecords.length, 2);
-  assert.deepEqual(
-    geneticsAuditRecords.map((record) => record.changes?.[0]),
-    [
-      { path: created.record.document.relativePath, op: "create" },
-      { path: created.record.document.relativePath, op: "update" },
-    ],
-  );
-
-  const geneticOperations = (
-    await Promise.all(
-      (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
-        readObservedWriteOperation(vaultRoot, relativePath),
-      ),
-    )
-  ).filter((operation) => operation.operationType === "genetics_upsert");
-
-  assert.equal(geneticOperations.length, 2);
-  assert.ok(geneticOperations.every((operation) => operation.status === "committed"));
-});
-
-test("family and genetics updates clear normalized links without breaking patch semantics", async () => {
-  const vaultRoot = await makeTempDirectory("murph-family-genetics-clear-links");
-  await initializeVault({ vaultRoot });
-
-  const relatedVariantId = "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8";
-  const familyMember = await upsertFamilyMember({
-    vaultRoot,
-    title: "Mother",
-    relationship: "mother",
-    relatedVariantIds: [relatedVariantId],
-  });
-  const variant = await upsertGeneticVariant({
-    vaultRoot,
-    gene: "APOE",
-    title: "APOE e4 allele",
-    sourceFamilyMemberIds: [familyMember.record.entity.familyMemberId],
-  });
-
-  const clearedFamilyMember = await upsertFamilyMember({
-    vaultRoot,
-    familyMemberId: familyMember.record.entity.familyMemberId,
-    relatedVariantIds: [],
-  });
-  const clearedVariant = await upsertGeneticVariant({
-    vaultRoot,
-    variantId: variant.record.entity.variantId,
-    sourceFamilyMemberIds: [],
-    note: "Cleared source links without resupplying gene.",
-  });
-  const readFamilyRecord = await readFamilyMember({
-    vaultRoot,
-    familyMemberId: familyMember.record.entity.familyMemberId,
-  });
-  const readVariantRecord = await readGeneticVariant({
-    vaultRoot,
-    variantId: variant.record.entity.variantId,
-  });
-
-  assert.equal(clearedFamilyMember.created, false);
-  assert.equal(clearedVariant.created, false);
-  assert.equal(readFamilyRecord.entity.relationship, "mother");
-  assert.equal(readFamilyRecord.entity.relatedVariantIds, undefined);
-  assert.deepEqual(readFamilyRecord.entity.links, []);
-  assert.match(readFamilyRecord.document.markdown, /## Related Variants[\s\S]*- none/);
-  assert.doesNotMatch(readFamilyRecord.document.markdown, new RegExp(relatedVariantId));
-  assert.equal(readVariantRecord.entity.gene, "APOE");
-  assert.equal(readVariantRecord.entity.sourceFamilyMemberIds, undefined);
-  assert.deepEqual(readVariantRecord.entity.links, []);
-  assert.equal(readVariantRecord.entity.note, "Cleared source links without resupplying gene.");
-  assert.match(readVariantRecord.document.markdown, /## Source Family Members[\s\S]*- none/);
-  assert.doesNotMatch(readVariantRecord.document.markdown, new RegExp(familyMember.record.entity.familyMemberId));
-});
-
-test("genetic registry upserts reject conflicting variant ids and slugs", async () => {
-  const vaultRoot = await makeTempDirectory("murph-genetics-conflict");
-  await initializeVault({ vaultRoot });
-
-  const first = await upsertGeneticVariant({
-    vaultRoot,
-    gene: "APOE",
-    title: "APOE e4 allele",
-  });
-  const second = await upsertGeneticVariant({
-    vaultRoot,
-    gene: "MTHFR",
-    title: "MTHFR C677T",
-  });
-
-  await assert.rejects(
-    () =>
-      upsertGeneticVariant({
-        vaultRoot,
-        variantId: first.record.entity.variantId,
-        slug: second.record.entity.slug,
-        gene: "APOE",
-        note: "This should fail.",
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_GENETIC_VARIANT_CONFLICT" &&
-      error.message === "variantId and slug resolve to different variants.",
-  );
-});
-
-test("genetic registry listing preserves invalid document shape errors after shared loader extraction", async () => {
-  const vaultRoot = await makeTempDirectory("murph-genetics-invalid-shape");
-  await initializeVault({ vaultRoot });
-
-  const invalidMarkdown = stringifyFrontmatterDocument({
-    attributes: {
-      schemaVersion: "murph.genetic-variant-frontmatter.v999",
-      docType: "murph.genetic_variant",
-      variantId: "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
-      slug: "invalid-genetic-variant",
+    clear: { relatedVariantIds: [] },
+    cleared: { relatedVariantIds: undefined, relationship: "grandmother" },
+    section: /## Related Variants/,
+    emptySection: /## Related Variants[\s\S]*- none/,
+    relatedId: "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+    slug: "maternal-grandmother",
+    relativePath: "bank/family/maternal-grandmother.md",
+    other: { title: "Father", relationship: "father" },
+    missing: { slug: "missing-family-member" },
+    missingCode: "VAULT_FAMILY_MEMBER_MISSING",
+    conflictCode: "VAULT_FAMILY_MEMBER_CONFLICT",
+    conflictMessage: "familyMemberId and slug resolve to different family members.",
+    invalidCode: "VAULT_INVALID_FAMILY_MEMBER",
+    invalidMessage: "Family registry document has an unexpected shape.",
+    invalidDocType: "murph.family_member",
+    extraFrontmatter: "lineage: maternal",
+    action: "family_upsert",
+  },
+  {
+    name: "genetic variants",
+    upsert: upsertGeneticVariant,
+    read: readGeneticVariant,
+    list: listGeneticVariants,
+    selector: { variantId: "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" },
+    input: {
       gene: "APOE",
-      title: "Invalid Genetic Variant",
-    },
-    body: "# Invalid Genetic Variant\n",
-  });
-
-  await fs.writeFile(path.join(vaultRoot, "bank/genetics/invalid-genetic-variant.md"), invalidMarkdown, "utf8");
-
-  await assert.rejects(
-    () => listGeneticVariants(vaultRoot),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_INVALID_GENETIC_VARIANT" &&
-      error.message === "Genetics registry document has an unexpected shape.",
-  );
-});
-
-test("family and genetics registry reads reject extra noncanonical frontmatter keys under the hard cut", async () => {
-  const vaultRoot = await makeTempDirectory("murph-family-genetics-hard-cut-frontmatter");
-  await initializeVault({ vaultRoot });
-
-  const familyMarkdown = stringifyFrontmatterDocument({
-    attributes: {
-      schemaVersion: "murph.frontmatter.family-member.v1",
-      docType: "family_member",
-      familyMemberId: "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
-      slug: "mother",
-      title: "Mother",
-      relationship: "mother",
-      lineage: "maternal",
-    },
-    body: "# Mother\n",
-  });
-  const geneticsMarkdown = stringifyFrontmatterDocument({
-    attributes: {
-      schemaVersion: "murph.frontmatter.genetic-variant.v1",
-      docType: "genetic_variant",
-      variantId: "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
-      slug: "apoe-e4",
       title: "APOE e4 allele",
-      gene: "APOE",
-      updatedAt: "2026-03-12T11:00:00Z",
+      zygosity: "compound_heterozygous",
+      significance: "risk_factor",
+      inheritance: "maternal lineage",
+      sourceFamilyMemberIds: ["fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      note: "Family history and genotype raise late-life risk.",
+    } satisfies Omit<Parameters<typeof upsertGeneticVariant>[0], "vaultRoot">,
+    patch: {
+      title: "APOE e4 allele updated",
+      note: "Maintain aggressive cardiometabolic prevention.",
     },
-    body: "# APOE e4 allele\n",
+    expected: {
+      gene: "APOE",
+      title: "APOE e4 allele updated",
+      zygosity: "compound_heterozygous",
+      significance: "risk_factor",
+      inheritance: "maternal lineage",
+      note: "Maintain aggressive cardiometabolic prevention.",
+      sourceFamilyMemberIds: ["fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      links: [{ type: "source_family_member", targetId: "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8" }],
+    },
+    clear: { sourceFamilyMemberIds: [], note: "Cleared source links without resupplying gene." },
+    cleared: {
+      sourceFamilyMemberIds: undefined,
+      gene: "APOE",
+      note: "Cleared source links without resupplying gene.",
+    },
+    section: /## Source Family Members/,
+    emptySection: /## Source Family Members[\s\S]*- none/,
+    relatedId: "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+    slug: "apoe-apoe-e4-allele",
+    relativePath: "bank/genetics/apoe-apoe-e4-allele.md",
+    other: { gene: "MTHFR", title: "MTHFR C677T" },
+    missing: { variantId: "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F9" },
+    missingCode: "VAULT_GENETIC_VARIANT_MISSING",
+    conflictCode: "VAULT_GENETIC_VARIANT_CONFLICT",
+    conflictMessage: "variantId and slug resolve to different variants.",
+    invalidCode: "VAULT_INVALID_GENETIC_VARIANT",
+    invalidMessage: "Genetics registry document has an unexpected shape.",
+    invalidDocType: "murph.genetic_variant",
+    extraFrontmatter: "updatedAt: 2026-03-12T11:00:00Z",
+    action: "genetics_upsert",
+  },
+])("$name preserve fields, links, selectors, and strict storage through the registry lifecycle", async (row) => {
+  const vaultRoot = await makeTempDirectory("murph-family-registry");
+  await initializeVault({ vaultRoot });
+  if (row.name === "genetic variants") {
+    await upsertFamilyMember({
+      vaultRoot,
+      familyMemberId: "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      title: "Father",
+      relationship: "father",
+    });
+  }
+
+  const created = await row.upsert({ vaultRoot, ...row.selector, ...row.input });
+  const updated = await row.upsert({
+    vaultRoot,
+    ...row.selector,
+    ...row.patch,
+    slug: "changed-slug-that-should-not-rename",
   });
+  assert.equal(created.created, true);
+  assert.equal(updated.created, false);
+  assert.equal(created.record.entity.slug, row.slug);
+  assert.equal(created.record.document.relativePath, row.relativePath);
+  assert.equal(updated.record.entity.slug, row.slug);
+  assert.equal(updated.record.document.relativePath, row.relativePath);
+  const listed = await row.list(vaultRoot);
+  assert.equal(listed.length, 1);
+  for (const record of [
+    listed[0]!,
+    await row.read({ vaultRoot, ...row.selector }),
+    await row.read({ vaultRoot, slug: row.slug }),
+  ]) {
+    expect(record.entity).toMatchObject({ ...row.selector, ...row.expected });
+    assert.deepEqual(record.entity.links, row.expected.links);
+    assert.match(record.document.markdown, row.section);
+    assert.doesNotMatch(record.document.markdown, /updatedAt:/);
+  }
 
-  await fs.writeFile(path.join(vaultRoot, "bank/family/mother.md"), familyMarkdown, "utf8");
-  await fs.writeFile(path.join(vaultRoot, "bank/genetics/apoe-e4.md"), geneticsMarkdown, "utf8");
-
-  await assert.rejects(
-    () => listFamilyMembers(vaultRoot),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_INVALID_FAMILY_MEMBER" &&
-      error.message === "Family registry document has an unexpected shape.",
+  const auditRecords = await readJsonlRecords({ vaultRoot, relativePath: updated.auditPath });
+  const registryAudits = auditRecords.filter(
+    (record) => (record as { action?: string }).action === row.action,
+  ) as Array<{ targetIds?: string[]; changes?: Array<{ path?: string; op?: string }> }>;
+  assert.deepEqual(registryAudits.map((record) => record.targetIds), [
+    Object.values(row.selector),
+    Object.values(row.selector),
+  ]);
+  assert.deepEqual(registryAudits.map((record) => record.changes?.[0]), [
+    { path: row.relativePath, op: "create" },
+    { path: row.relativePath, op: "update" },
+  ]);
+  const operations = await Promise.all(
+    (await listObservedWriteOperationPaths(vaultRoot)).map((relativePath) =>
+      readObservedWriteOperation(vaultRoot, relativePath),
+    ),
+  );
+  assert.deepEqual(
+    operations.filter((operation) => operation.operationType === row.action).map((operation) => operation.status),
+    ["committed", "committed"],
   );
 
+  const cleared = await row.upsert({ vaultRoot, ...row.selector, ...row.clear });
+  assert.equal(cleared.created, false);
+  const readCleared = await row.read({ vaultRoot, ...row.selector });
+  expect(readCleared.entity).toMatchObject(row.cleared);
+  assert.deepEqual(readCleared.entity.links, []);
+  assert.match(readCleared.document.markdown, row.emptySection);
+  assert.doesNotMatch(readCleared.document.markdown, new RegExp(row.relatedId));
+
+  const other = await row.upsert({ vaultRoot, ...row.other });
   await assert.rejects(
-    () => listGeneticVariants(vaultRoot),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_INVALID_GENETIC_VARIANT" &&
-      error.message === "Genetics registry document has an unexpected shape.",
+    () => row.upsert({ vaultRoot, ...row.selector, slug: other.record.entity.slug }),
+    (error: unknown) => error instanceof VaultError &&
+      error.code === row.conflictCode && error.message === row.conflictMessage,
   );
+  expect((await row.read({ vaultRoot, ...row.selector, slug: other.record.entity.slug })).entity)
+    .toMatchObject(row.selector);
+  await assert.rejects(
+    () => row.read({ vaultRoot, ...row.missing }),
+    (error: unknown) => error instanceof VaultError && error.code === row.missingCode,
+  );
+
+  for (const malformed of [
+    readCleared.document.markdown.replace(/^schemaVersion:.*$/m, "schemaVersion: unsupported.v999"),
+    readCleared.document.markdown.replace(/^docType:.*$/m, `docType: ${row.invalidDocType}`),
+    readCleared.document.markdown.replace("---\n", `---\n${row.extraFrontmatter}\n`),
+  ]) {
+    await fs.writeFile(path.join(vaultRoot, row.relativePath), malformed, "utf8");
+    await assert.rejects(
+      () => row.list(vaultRoot),
+      (error: unknown) => error instanceof VaultError &&
+        error.code === row.invalidCode && error.message === row.invalidMessage,
+    );
+  }
 });
 
 test("family and genetics registry writes enforce the frozen contract length boundaries", async () => {
@@ -2242,96 +2060,6 @@ test("family and genetics registry creation preserves caller-provided ids and ex
   assert.equal(variant.record.entity.variantId, variantId);
   assert.equal(variant.record.entity.slug, "apoe-e3");
   assert.equal(variant.record.document.relativePath, "bank/genetics/apoe-e3.md");
-});
-
-test("family and genetics registry id-or-slug resolution preserves conflict and missing errors", async () => {
-  const vaultRoot = await makeTempDirectory("murph-family-genetics-resolution");
-  await initializeVault({ vaultRoot });
-
-  const mother = await upsertFamilyMember({
-    vaultRoot,
-    title: "Mother",
-    relationship: "mother",
-  });
-  const father = await upsertFamilyMember({
-    vaultRoot,
-    title: "Father",
-    relationship: "father",
-  });
-
-  await assert.rejects(
-    () =>
-      upsertFamilyMember({
-        vaultRoot,
-        familyMemberId: mother.record.entity.familyMemberId,
-        slug: father.record.entity.slug,
-        note: "Should fail because id and slug resolve to different records.",
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_FAMILY_MEMBER_CONFLICT" &&
-      error.message === "familyMemberId and slug resolve to different family members.",
-  );
-
-  await assert.rejects(
-    () =>
-      readFamilyMember({
-        vaultRoot,
-        slug: "missing-family-member",
-      }),
-    (error: unknown) => error instanceof VaultError && error.code === "VAULT_FAMILY_MEMBER_MISSING",
-  );
-
-  const readFamilyByConflictingSelectors = await readFamilyMember({
-    vaultRoot,
-    familyMemberId: mother.record.entity.familyMemberId,
-    slug: father.record.entity.slug,
-  });
-
-  assert.equal(readFamilyByConflictingSelectors.entity.familyMemberId, mother.record.entity.familyMemberId);
-
-  const apoe = await upsertGeneticVariant({
-    vaultRoot,
-    gene: "APOE",
-    title: "APOE e4 allele",
-  });
-  const mthfr = await upsertGeneticVariant({
-    vaultRoot,
-    gene: "MTHFR",
-    title: "MTHFR C677T",
-  });
-
-  await assert.rejects(
-    () =>
-      upsertGeneticVariant({
-        vaultRoot,
-        variantId: apoe.record.entity.variantId,
-        slug: mthfr.record.entity.slug,
-        gene: "APOE",
-        title: "Conflicting selector",
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_GENETIC_VARIANT_CONFLICT" &&
-      error.message === "variantId and slug resolve to different variants.",
-  );
-
-  await assert.rejects(
-    () =>
-      readGeneticVariant({
-        vaultRoot,
-        variantId: "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
-      }),
-    (error: unknown) => error instanceof VaultError && error.code === "VAULT_GENETIC_VARIANT_MISSING",
-  );
-
-  const readVariantByConflictingSelectors = await readGeneticVariant({
-    vaultRoot,
-    variantId: apoe.record.entity.variantId,
-    slug: mthfr.record.entity.slug,
-  });
-
-  assert.equal(readVariantByConflictingSelectors.entity.variantId, apoe.record.entity.variantId);
 });
 
 test("family and genetics upserts require canonical title and familyMemberId fields", async () => {

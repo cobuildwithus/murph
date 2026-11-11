@@ -5,12 +5,10 @@ import { join } from "node:path";
 import { test } from "vitest";
 
 import {
-  defineSampleImportPreset,
   importAssessmentResponse,
   prepareAssessmentResponseImport,
   prepareDocumentImport,
   prepareMealImport,
-  resolveSampleImportConfig,
 } from "../src/index.ts";
 
 async function createTempFile(name: string, contents: string): Promise<string> {
@@ -19,67 +17,6 @@ async function createTempFile(name: string, contents: string): Promise<string> {
   await writeFile(filePath, contents);
   return filePath;
 }
-
-test("defineSampleImportPreset trims fields and applies defaults", () => {
-  const preset = defineSampleImportPreset({
-    id: "  vendor-watch  ",
-    label: "  Vendor Watch  ",
-    source: "  wearable  ",
-    stream: "  heart_rate  ",
-    tsColumn: "  timestamp  ",
-    valueColumn: "  bpm  ",
-    unit: "  bpm  ",
-    metadataColumns: [" device ", " context "],
-  });
-
-  assert.deepEqual(preset, {
-    id: "vendor-watch",
-    label: "Vendor Watch",
-    source: "wearable",
-    stream: "heart_rate",
-    tsColumn: "timestamp",
-    valueColumn: "bpm",
-    unit: "bpm",
-    delimiter: ",",
-    metadataColumns: ["device", "context"],
-  });
-  assert.equal(Object.isFrozen(preset), true);
-});
-
-test("resolveSampleImportConfig preserves preset metadata fallback until explicitly overridden", () => {
-  const config = resolveSampleImportConfig(
-    {
-      presetId: "  vendor-watch  ",
-      source: "  manual  ",
-    },
-    {
-      get(id) {
-        assert.equal(id, "vendor-watch");
-        return {
-          id,
-          stream: "heart_rate",
-          tsColumn: "timestamp",
-          valueColumn: "bpm",
-          unit: "bpm",
-          delimiter: ",",
-          metadataColumns: ["device", "context"],
-          source: "wearable",
-        };
-      },
-    },
-  );
-
-  assert.deepEqual(config, {
-    presetId: "vendor-watch",
-    source: "manual",
-    stream: "heart_rate",
-    tsColumn: "timestamp",
-    valueColumn: "bpm",
-    unit: "bpm",
-    delimiter: ",",
-    metadataColumns: ["device", "context"],
-  });
-});
 
 test("prepareDocumentImport parses and normalizes object input with zod", async () => {
   const filePath = await createTempFile("labs.pdf", "pdf-placeholder");

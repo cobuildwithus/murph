@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { initializeVault } from '@murphai/core'
 import type { WorkoutSession } from '@murphai/contracts'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
-import { test } from 'vitest'
+import { onTestFinished, test } from 'vitest'
 
 import { registerWorkoutCommands } from '../src/commands/workout.js'
 import { workoutOptionPublicPath } from '../src/commands/workout-typed-options.js'
@@ -130,6 +130,20 @@ test('workout public paths omit unallowlisted schema leaves', () => {
     ['workoutSet', 7],
   )
 })
+
+async function createWorkoutVault() {
+  const context = await createTempVaultContext('murph-workout-typed-')
+  onTestFinished(() => rm(context.parentRoot, { force: true, recursive: true }))
+  const cli = createWorkoutCli()
+  await initializeVault({ vaultRoot: context.vaultRoot })
+  return {
+    ...context,
+    cli,
+    workoutCommand: <T = Record<string, unknown>>(args: string[]) => runInProcessJsonCli<T>(cli, [
+      'workout', ...args, '--vault', context.vaultRoot,
+    ]),
+  }
+}
 
 async function runRawInProcessCli(
   cli: Cli.Cli,
@@ -324,12 +338,9 @@ test('workout add schema exposes typed fields without raw input fallback', async
 })
 
 test('workout add honors explicit titles with and without positional note text', async () => {
-  const cli = createWorkoutCli()
-  const { vaultRoot } = await createTempVaultContext('murph-workout-note-less-add-')
-  await initializeVault({ vaultRoot, title: 'Workout note-less add vault' })
+  const { vaultRoot, cli, workoutCommand } = await createWorkoutVault()
 
-  const noteLessCreated = await runInProcessJsonCli<WorkoutAddResult>(cli, [
-    'workout',
+  const noteLessCreated = await workoutCommand<WorkoutAddResult>([
     'add',
     '--title',
     'Morning track session',
@@ -339,8 +350,6 @@ test('workout add honors explicit titles with and without positional note text',
     '30',
     '--occurred-at',
     '2026-08-30T12:00:00.000Z',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(noteLessCreated.exitCode, null)
   assert.equal(noteLessCreated.envelope.ok, true)
@@ -361,8 +370,7 @@ test('workout add honors explicit titles with and without positional note text',
   assert.equal(noteLessShown.entity.data.durationMinutes, 30)
   assert.equal(noteLessShown.entity.data.workout?.sessionNote, undefined)
 
-  const notedCreated = await runInProcessJsonCli<WorkoutAddResult>(cli, [
-    'workout',
+  const notedCreated = await workoutCommand<WorkoutAddResult>([
     'add',
     'Easy neighborhood run.',
     '--title',
@@ -373,8 +381,6 @@ test('workout add honors explicit titles with and without positional note text',
     '25',
     '--occurred-at',
     '2026-08-30T13:00:00.000Z',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(notedCreated.exitCode, null)
   assert.equal(notedCreated.envelope.ok, true)
@@ -392,20 +398,15 @@ test('workout add honors explicit titles with and without positional note text',
 })
 
 test('workout add missing duration fails before writing a note-less typed capture', async () => {
-  const cli = createWorkoutCli()
-  const { vaultRoot } = await createTempVaultContext('murph-workout-note-less-invalid-')
-  await initializeVault({ vaultRoot, title: 'Workout note-less invalid vault' })
+  const { vaultRoot, workoutCommand } = await createWorkoutVault()
   const before = await snapshotVaultFiles(vaultRoot)
 
-  const result = await runInProcessJsonCli(cli, [
-    'workout',
+  const result = await workoutCommand([
     'add',
     '--title',
     'Missing duration',
     '--type',
     'running',
-    '--vault',
-    vaultRoot,
   ])
 
   assert.equal(result.exitCode, 1)
@@ -531,9 +532,7 @@ test('workout payload-schema emits the import file contract and compact example'
 })
 
 test('workout import-json accepts compact repeated strength exercises', async () => {
-  const cli = createWorkoutCli()
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-workout-compact-import-')
-  await initializeVault({ vaultRoot, title: 'Workout compact import vault' })
+  const { parentRoot, workoutCommand } = await createWorkoutVault()
 
   const payloadPath = path.join(parentRoot, 'workout.json')
   await writeFile(
@@ -560,8 +559,7 @@ test('workout import-json accepts compact repeated strength exercises', async ()
     'utf8',
   )
 
-  const created = await runInProcessJsonCli<WorkoutAddResult>(cli, [
-    'workout',
+  const created = await workoutCommand<WorkoutAddResult>([
     'import-json',
     '--input',
     `@${payloadPath}`,
@@ -569,8 +567,6 @@ test('workout import-json accepts compact repeated strength exercises', async ()
     '2026-06-17',
     '--source',
     'manual',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(created.exitCode, null)
   assert.equal(created.envelope.ok, true)
@@ -600,9 +596,7 @@ test('workout import-json accepts compact repeated strength exercises', async ()
 })
 
 test('workout add typed fields persist the same structured strength workout as JSON input', async () => {
-  const cli = createWorkoutCli()
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-workout-add-typed-')
-  await initializeVault({ vaultRoot, title: 'Workout add typed parity vault' })
+  const { parentRoot, vaultRoot, cli, workoutCommand } = await createWorkoutVault()
 
   const workout = workoutSessionFixture()
   const payload = {
@@ -618,19 +612,15 @@ test('workout add typed fields persist the same structured strength workout as J
   const payloadPath = path.join(parentRoot, 'workout.json')
   await writeFile(payloadPath, JSON.stringify(payload), 'utf8')
 
-  const jsonCreated = await runInProcessJsonCli<WorkoutAddResult>(cli, [
-    'workout',
+  const jsonCreated = await workoutCommand<WorkoutAddResult>([
     'import-json',
     '--input',
     `@${payloadPath}`,
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(jsonCreated.exitCode, null)
   assert.equal(jsonCreated.envelope.ok, true)
 
-  const typedCreated = await runInProcessJsonCli<WorkoutAddResult>(cli, [
-    'workout',
+  const typedCreated = await workoutCommand<WorkoutAddResult>([
     'add',
     '--note',
     'Garage strength session.',
@@ -672,8 +662,6 @@ test('workout add typed fields persist the same structured strength workout as J
     'order=2;name=Ring row;groupId=superset-a;mode=bodyweight',
     '--workout-set',
     'exercise=2;order=1;type=normal;reps=10;bodyweightKg=82',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(typedCreated.exitCode, null)
   assert.equal(typedCreated.envelope.ok, true)
@@ -698,9 +686,7 @@ test('workout add typed fields persist the same structured strength workout as J
 })
 
 test('workout add and edit reject incomplete or ambiguous typed workout input', async () => {
-  const cli = createWorkoutCli()
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-workout-add-invalid-')
-  await initializeVault({ vaultRoot, title: 'Workout add invalid typed vault' })
+  const { parentRoot, vaultRoot, cli, workoutCommand } = await createWorkoutVault()
   const addSchema = await readCommandSchema(cli, ['workout', 'add'])
   const editSchema = await readCommandSchema(cli, ['workout', 'edit'])
   for (const field of [
@@ -720,14 +706,11 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   }
   const beforeInvalidAdds = await snapshotVaultFiles(vaultRoot)
 
-  const duplicateNote = await runInProcessJsonCli(cli, [
-    'workout',
+  const duplicateNote = await workoutCommand([
     'add',
     '30 minute run.',
     '--note',
     '30 minute run.',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(duplicateNote.exitCode, 1)
   assert.equal(duplicateNote.envelope.ok, false)
@@ -735,8 +718,7 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   assert.equal(duplicateNote.envelope.error.fieldErrors?.[0]?.path, 'note')
   assert.equal('note' in addSchema.options.properties, true)
 
-  const missingExercise = await runInProcessJsonCli(cli, [
-    'workout',
+  const missingExercise = await workoutCommand([
     'add',
     '--note',
     'Garage strength session.',
@@ -746,8 +728,6 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
     'strength-training',
     '--workout-set',
     'exercise=1;order=1;reps=5',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(missingExercise.exitCode, 1)
   assert.equal(missingExercise.envelope.ok, false)
@@ -755,8 +735,7 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   assert.equal(missingExercise.envelope.error.fieldErrors?.[0]?.path, 'workoutSet')
   assert.equal('workoutSet' in addSchema.options.properties, true)
 
-  const missingSet = await runInProcessJsonCli(cli, [
-    'workout',
+  const missingSet = await workoutCommand([
     'add',
     '--note',
     'Garage strength session.',
@@ -766,8 +745,6 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
     'strength-training',
     '--workout-exercise',
     'order=1;name=PRIVATE_WORKOUT_SENTINEL',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(missingSet.exitCode, 1)
   assert.equal(missingSet.envelope.ok, false)
@@ -793,8 +770,7 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   )
 
   const privateWorkoutText = 'Private second workout option'
-  const repeatedOptionFailure = await runInProcessJsonCli(cli, [
-    'workout',
+  const repeatedOptionFailure = await workoutCommand([
     'add',
     '--note',
     'Repeated option validation.',
@@ -814,8 +790,6 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
     'exercise=2;order=1;reps=5;weightUnit=lb',
     '--workout-set',
     'exercise=1;order=1;reps=5;weightUnit=stone',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(repeatedOptionFailure.exitCode, 1)
   assert.equal(repeatedOptionFailure.envelope.ok, false)
@@ -836,8 +810,7 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
     [],
   )
 
-  const misspelledSetField = await runInProcessJsonCli(cli, [
-    'workout',
+  const misspelledSetField = await workoutCommand([
     'add',
     '--note',
     'Garage strength session.',
@@ -849,8 +822,6 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
     'order=1;name=Bench press',
     '--workout-set',
     'exercise=1;order=1;reps=5;weightUnt=lb',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(misspelledSetField.exitCode, 1)
   assert.equal(misspelledSetField.envelope.ok, false)
@@ -862,8 +833,7 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
     /Supported fields: exercise, order, type, weightUnit, note, reps, weight/u,
   )
 
-  const traversingMediaPath = await runInProcessJsonCli(cli, [
-    'workout',
+  const traversingMediaPath = await workoutCommand([
     'add',
     '--note',
     'Garage strength session.',
@@ -873,8 +843,6 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
     'strength-training',
     '--workout-media',
     'kind=photo;relativePath=raw/workouts/../../secrets.jpg',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(traversingMediaPath.exitCode, 1)
   assert.equal(traversingMediaPath.envelope.ok, false)
@@ -895,15 +863,12 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
     'utf8',
   )
 
-  const mixedInputAndNestedSessionFlag = await runInProcessJsonCli(cli, [
-    'workout',
+  const mixedInputAndNestedSessionFlag = await workoutCommand([
     'add',
     '--input',
     `@${payloadPath}`,
     '--workout-source-app',
     'strong',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(mixedInputAndNestedSessionFlag.exitCode, 1)
   assert.equal(mixedInputAndNestedSessionFlag.envelope.ok, false)
@@ -918,8 +883,7 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   )
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeInvalidAdds)
 
-  const editableWorkout = await runInProcessJsonCli<WorkoutAddResult>(cli, [
-    'workout',
+  const editableWorkout = await workoutCommand<WorkoutAddResult>([
     'add',
     '--note',
     'Editable strength session.',
@@ -927,8 +891,6 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
     '45',
     '--type',
     'strength-training',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(editableWorkout.exitCode, null)
   assert.equal(editableWorkout.envelope.ok, true)
@@ -936,14 +898,11 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   const beforeEdit = await showWorkout(cli, vaultRoot, editableWorkoutData.lookupId)
   const beforeInvalidEdits = await snapshotVaultFiles(vaultRoot)
 
-  const incompleteEdit = await runInProcessJsonCli(cli, [
-    'workout',
+  const incompleteEdit = await workoutCommand([
     'edit',
     editableWorkoutData.lookupId,
     '--workout-exercise',
     'order=1;name=PRIVATE_EDIT_SENTINEL',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(incompleteEdit.exitCode, 1)
   assert.equal(incompleteEdit.envelope.ok, false)
@@ -955,14 +914,11 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   assert.equal('workoutSet' in editSchema.options.properties, true)
   assert.doesNotMatch(JSON.stringify(incompleteEdit.envelope), /PRIVATE_EDIT_SENTINEL/u)
 
-  const unsupportedEditField = await runInProcessJsonCli(cli, [
-    'workout',
+  const unsupportedEditField = await workoutCommand([
     'edit',
     editableWorkoutData.lookupId,
     '--workout-exercise',
     'order=1;name=Bench press;tempo=slow',
-    '--vault',
-    vaultRoot,
   ])
   assert.equal(unsupportedEditField.exitCode, 1)
   assert.equal(unsupportedEditField.envelope.ok, false)

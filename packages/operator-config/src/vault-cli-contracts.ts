@@ -751,16 +751,6 @@ export const sampleWindowSummarySchema = z.object({
   thresholds: z.array(sampleThresholdSummarySchema),
   gaps: z.array(sampleWindowGapSchema),
   warnings: z.array(z.string().min(1)),
-  screen: z.object({
-    profile: z.literal('oxygen-night'),
-    level: z.enum([
-      'normal_oxygen_trace',
-      'borderline_oxygen_trace',
-      'concerning_oxygen_trace',
-    ]),
-    reasons: z.array(z.string().min(1)),
-    caveat: z.string().min(1),
-  }).optional(),
 })
 
 export const samplesSummarizeResultSchema = z.object({

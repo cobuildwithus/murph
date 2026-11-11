@@ -3,8 +3,6 @@ import {
   normalizeStrictIsoTimestamp,
 } from "@murphai/contracts";
 
-import { normalizeRequiredString } from "./shared.ts";
-
 const MONTH_NUMBERS = Object.freeze({
   apr: 4,
   april: 4,
@@ -218,9 +216,7 @@ function naiveTimestampPartsToIso(parts: NaiveTimestampParts, timeZone: string):
 }
 
 export function parseDelimitedRows(text: string, delimiter = ","): string[][] {
-  const normalizedDelimiter = normalizeRequiredString(delimiter, "delimiter");
-
-  if (normalizedDelimiter.length !== 1) {
+  if (typeof delimiter !== "string" || delimiter.length !== 1) {
     throw new TypeError("delimiter must be a single character");
   }
 
@@ -253,7 +249,7 @@ export function parseDelimitedRows(text: string, delimiter = ","): string[][] {
       continue;
     }
 
-    if (character === normalizedDelimiter) {
+    if (character === delimiter) {
       row.push(field);
       field = "";
       continue;

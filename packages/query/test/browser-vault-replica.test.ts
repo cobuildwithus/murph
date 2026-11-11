@@ -1040,3 +1040,138 @@ function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultE
       throw new Error(`Unsupported browser-vault test family: ${family}`);
   }
 }
+
+test("browser vault replica creation emits Junction blood oxygen aggregate rows", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-04-22T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("event", "evt_junction_spo2_mean", {
+          attributes: {
+            dataOrigin: { sourceProviderSlug: "garmin", sourceType: "watch" },
+            externalRef: {
+              facet: "spo2",
+              resourceId: "blood-oxygen-2026-04-22",
+              resourceType: "junction-garmin-blood-oxygen",
+              system: "junction",
+            },
+            metric: "spo2",
+            observationGrain: "daily_timeseries_aggregate",
+            sampleCount: 3,
+            unit: "%",
+            value: 95.9333,
+          },
+          date: "2026-04-22",
+          kind: "observation",
+          occurredAt: "2026-04-22T08:15:00.000Z",
+          title: "Junction blood oxygen average",
+        }),
+        createEntity("event", "evt_junction_spo2_min", {
+          attributes: {
+            dataOrigin: { sourceProviderSlug: "garmin", sourceType: "watch" },
+            externalRef: {
+              facet: "lowest-spo2",
+              resourceId: "blood-oxygen-2026-04-22",
+              resourceType: "junction-garmin-blood-oxygen",
+              system: "junction",
+            },
+            metric: "lowest-spo2",
+            minObservedAt: "2026-04-22T07:45:00.000Z",
+            observationGrain: "daily_timeseries_aggregate",
+            sampleCount: 3,
+            unit: "%",
+            value: 92.5,
+          },
+          date: "2026-04-22",
+          kind: "observation",
+          occurredAt: "2026-04-22T08:15:00.000Z",
+          title: "Junction blood oxygen minimum",
+        }),
+      ],
+      metadata: { title: "Junction blood oxygen browser vault" },
+      vaultRoot: "browser://junction-spo2",
+    }),
+  });
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+
+  assert.equal(replica.metricRows.some((row) =>
+    row.metricKey === "spo2"
+    && row.biomarkerKey === "biomarker:blood-oxygen-spo2"
+    && row.value === 95.9333
+  ), true);
+  assert.equal(replica.metricRows.some((row) =>
+    row.metricKey === "lowest-spo2"
+    && row.biomarkerKey === "biomarker:blood-oxygen-spo2"
+    && row.value === 92.5
+  ), true);
+  assert.equal(replica.metricSelectionRows.some((row) =>
+    row.metricKey === "spo2"
+    && row.biomarkerKey === "biomarker:blood-oxygen-spo2"
+    && row.value === 95.9333
+  ), true);
+  assert.equal(replica.metricSelectionRows.some((row) =>
+    row.metricKey === "lowest-spo2"
+    && row.biomarkerKey === "biomarker:blood-oxygen-spo2"
+    && row.value === 92.5
+  ), true);
+  assert.equal(client.metricSelections.getByBiomarker("biomarker:blood-oxygen-spo2")?.metricKey, "spo2");
+  assert.equal(client.metricSelections.get("lowest-spo2")?.metricKey, "lowest-spo2");
+});
+
+test("browser vault replica excludes dense provider observations but keeps display-grade facts", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-04-20T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("event", "evt_raw_device_point", {
+          attributes: {
+            metric: "heart-rate",
+            source: "device",
+            unit: "bpm",
+            value: 72,
+          },
+          kind: "observation",
+          title: "Raw heart-rate point",
+        }),
+        createEntity("event", "evt_raw_import_point", {
+          attributes: {
+            metric: "resting-heart-rate",
+            source: "import",
+            unit: "bpm",
+            value: 59,
+          },
+          kind: "observation",
+          title: "Raw imported resting heart-rate point",
+        }),
+        createEntity("event", "evt_display_device_fact", {
+          attributes: {
+            metric: "readiness-score",
+            queryVisibility: "default",
+            source: "device",
+            unit: "score",
+            value: 8,
+          },
+          kind: "observation",
+          title: "Readiness fact",
+        }),
+      ],
+      metadata: { title: "Browser dense observation vault" },
+      vaultRoot: "browser://dense-observations",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const observationSearchRows = client.search("observation");
+
+  assert.equal(client.entities.get("evt_raw_device_point"), null);
+  assert.equal(client.entities.get("evt_raw_import_point"), null);
+  assert.equal(client.entities.get("evt_display_device_fact")?.id, "evt_display_device_fact");
+  assert.equal(observationSearchRows.some((row) => row.entityId === "evt_raw_device_point"), false);
+  assert.equal(observationSearchRows.some((row) => row.entityId === "evt_raw_import_point"), false);
+  assert.equal(observationSearchRows.some((row) => row.entityId === "evt_display_device_fact"), true);
+  assert.equal(replica.timelineRows.some((row) => row.id === "evt_raw_device_point"), false);
+  assert.equal(replica.timelineRows.some((row) => row.id === "evt_raw_import_point"), false);
+  assert.equal(replica.timelineRows.some((row) => row.id === "evt_display_device_fact"), true);
+});

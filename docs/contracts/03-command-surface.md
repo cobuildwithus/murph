@@ -149,9 +149,9 @@ vault-cli intervention edit <id> --vault <path> [--title <title>] [--note <text>
 vault-cli meal manifest <id> --vault <path> [--request-id <id>]
 vault-cli samples add --vault <path> --stream <stream> --unit <unit> --recorded-at <ts> [--value <number>] [--source <source>] [--quality <quality>] [--stage <stage>] [--start-at <ts>] [--end-at <ts>] [--duration-minutes <n>] [--source-path <path>] [--batch-source-file-name <name>] [--batch-preset-id <id>] [--batch-delimiter <char>] [--batch-timestamp-column <name>] [--batch-value-column <name>] [--batch-metadata-columns <name> ...] [--request-id <id>]
 vault-cli samples import-json --vault <path> --input @file.json [--request-id <id>]
-vault-cli samples import-csv <file> --vault <path> [--preset <id>] [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--request-id <id>]
-vault-cli samples csv profile <file> --vault <path> [--preset <id>] [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--include-summary] [--summary-profile oxygen-night] [--threshold-below <n> ...] [--gap-seconds <n>] [--request-id <id>]
-vault-cli samples csv import <file> --vault <path> [--preset <id>] [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--request-id <id>]
+vault-cli samples import-csv <file> --vault <path> [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--request-id <id>]
+vault-cli samples csv profile <file> --vault <path> [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--include-summary] [--summary-profile oxygen-night] [--threshold-below <n> ...] [--gap-seconds <n>] [--request-id <id>]
+vault-cli samples csv import <file> --vault <path> [--stream <stream>] [--ts-column <name>] [--value-column <name>] [--unit <unit>] [--delimiter <char>] [--metadata-columns <name> ...] [--source <source>] [--request-id <id>]
 vault-cli samples summarize --vault <path> --stream <stream> [--from <ts>] [--to <ts>] [--profile oxygen-night] [--threshold-below <n> ...] [--gap-seconds <n>] [--request-id <id>]
 vault-cli samples show <id> --vault <path> [--request-id <id>]
 vault-cli samples list --vault <path> [--stream <stream>] [--from <date>] [--to <date>] [--quality <quality>] [--limit <n>] [--request-id <id>]
@@ -652,7 +652,7 @@ Experiment linking is conservative. If exactly one active experiment matches the
 
 `samples csv profile` is the non-mutating companion to CSV import. It returns the planner's view of the file: detected columns, row counts, blank rows, inferred timestamp column, vault timezone assumption, candidate streams, skipped-row reasons, source-shape hints, and optional pre-write summaries. It must not write canonical samples, raw sample manifests, or audit ledger entries.
 
-When `--include-summary` is supplied, the command summarizes the planned numeric samples before write. `--summary-profile oxygen-night` adds the generic SpO2 thresholds `92`, `90`, and `88`, run/cluster detection, gap detection, and a cautious oxygen-trace screen. The screen is a data summary only; it must not diagnose or rule out sleep apnea.
+When `--include-summary` is supplied, the command summarizes the planned numeric samples before write. `--summary-profile oxygen-night` adds the generic SpO2 thresholds `92`, `90`, and `88`, run/cluster detection, and gap detection. Results are numerical summaries; no categorical oxygen classification is emitted.
 
 ```json
 {
@@ -740,7 +740,7 @@ Source hints are advisory only. They may describe familiar export shapes, but du
 }
 ```
 
-For `--profile oxygen-night`, the summary defaults to SpO2 threshold burden below `92`, `90`, and `88`, reports longest runs and cluster counts, and may include a conservative `screen` field. The screen is intended for assistant grounding, not clinical diagnosis.
+For `--profile oxygen-night`, the summary defaults to SpO2 threshold burden below `92`, `90`, and `88`, and reports longest runs and cluster counts. Results remain numerical summaries; missing evidence is not assigned an oxygen category.
 
 ### `samples import-csv`
 

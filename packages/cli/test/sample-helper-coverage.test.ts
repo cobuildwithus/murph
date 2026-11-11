@@ -36,7 +36,7 @@ async function loadSampleQueryHelpers() {
 }
 
 async function writeSampleLedger(vaultRoot: string, records: readonly Record<string, unknown>[]) {
-  const ledgerPath = path.join(vaultRoot, 'ledger/samples/heart_rate/2026/2026-04.jsonl')
+  const ledgerPath = path.join(vaultRoot, 'ledger/samples', String(records[0]?.stream ?? 'heart_rate'), '2026/2026-04.jsonl')
   await mkdir(path.dirname(ledgerPath), { recursive: true })
   await writeFile(
     ledgerPath,
@@ -104,7 +104,6 @@ test('importCsvSamples normalizes runtime output and reuses the loaded importer 
   })
   const second = await importCsvSamples({
     file: '/tmp/samples-2.csv',
-    presetId: 'preset_hrv',
     stream: 'hrv',
     vault: '/vaults/main',
   })
@@ -640,4 +639,69 @@ test('summarizeSampleWindow summarizes explicit raw sample ledger records', asyn
   assert.equal(summary.unit, '%')
   assert.equal(summary.sampleCount, 2)
   assert.equal(summary.thresholds[0]?.below, 92)
+})
+
+test('sample queries skip unrelated streams and timestamp summaries skip unrelated months', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-sample-window-'))
+  cleanupPaths.push(vaultRoot)
+  await writeSampleLedger(vaultRoot, [{
+    id: 'smp_current', stream: 'heart_rate', recordedAt: '2026-04-15T10:00:00Z',
+    value: 70, unit: 'bpm',
+  }])
+  for (const suffix of ['spo2/2026/2026-04.jsonl', 'heart_rate/2025/2025-04.jsonl']) {
+    const target = path.join(vaultRoot, 'ledger/samples', suffix)
+    await mkdir(path.dirname(target), { recursive: true })
+    await writeFile(target, 'malformed unrelated ledger')
+  }
+  const { listSamples, summarizeSampleWindow } = await loadSampleQueryHelpers()
+  const window = { stream: 'heart_rate', from: '2026-04-10', to: '2026-04-20' }
+  assert.equal((await summarizeSampleWindow(vaultRoot, window)).averageValue, 70)
+  await assert.rejects(() => listSamples(vaultRoot, window), /not valid JSON/u)
+})
+
+test('local-date sample lists retain a neighboring UTC-month shard', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-sample-month-edge-'))
+  cleanupPaths.push(vaultRoot)
+  const target = path.join(vaultRoot, 'ledger/samples/heart_rate/2026/2026-03.jsonl')
+  await mkdir(path.dirname(target), { recursive: true })
+  await writeFile(target, JSON.stringify({
+    id: 'smp_month_edge', stream: 'heart_rate', recordedAt: '2026-03-31T22:30:00Z',
+    dayKey: '2026-04-01', value: 70, unit: 'bpm',
+  }) + '\n')
+  const { listSamples } = await loadSampleQueryHelpers()
+  assert.equal((await listSamples(vaultRoot, {
+    stream: 'heart_rate', from: '2026-04-01', to: '2026-04-01', limit: 1,
+  })).length, 1)
+})
+
+test('limited sample lists select the latest rows across several unsorted batches', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-sample-top-rows-'))
+  cleanupPaths.push(vaultRoot)
+  const records = Array.from({ length: 501 }, (_, index) => {
+    const order = index * 37 % 501
+    return {
+      id: `smp_order_${order}`, stream: 'heart_rate',
+      recordedAt: new Date(Date.UTC(2026, 3, 1) + order * 1000).toISOString(),
+      value: 70, unit: 'bpm',
+    }
+  })
+  await writeSampleLedger(vaultRoot, records)
+  const { listSamples } = await loadSampleQueryHelpers()
+  const result = await listSamples(vaultRoot, { stream: 'heart_rate', limit: 20 })
+  assert.deepEqual(result.map((row) => row.id), Array.from({ length: 20 }, (_, index) => `smp_order_${500 - index}`))
+})
+
+test('sample dayKey filtering retains records stored in a distant timestamp shard', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-sample-explicit-day-'))
+  cleanupPaths.push(vaultRoot)
+  const target = path.join(vaultRoot, 'ledger/samples/heart_rate/2024/2024-01.jsonl')
+  await mkdir(path.dirname(target), { recursive: true })
+  await writeFile(target, JSON.stringify({
+    id: 'smp_explicit_day', stream: 'heart_rate', recordedAt: '2024-01-01T00:00:00Z',
+    dayKey: '2026-04-01', value: 70, unit: 'bpm',
+  }) + '\n')
+  const { listSamples, summarizeSampleWindow } = await loadSampleQueryHelpers()
+  const window = { stream: 'heart_rate', from: '2026-04-01', to: '2026-04-01' }
+  assert.equal((await listSamples(vaultRoot, { ...window, limit: 1 }))[0]?.id, 'smp_explicit_day')
+  assert.equal((await summarizeSampleWindow(vaultRoot, window)).sampleCount, 0)
 })

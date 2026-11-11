@@ -7,9 +7,7 @@ import {
 import { projectAssessmentEntity } from "./projectors/assessment.ts";
 import {
   readJsonlRecordOutcomes,
-  readJsonlRecordOutcomesSync,
   readJsonlRecords,
-  readJsonlRecordsSync,
   type JsonlRecordOutcome,
   type ParseFailure,
 } from "./loaders.ts";
@@ -43,17 +41,6 @@ export async function readJsonlEntitiesStrict(
     .sort(compareCanonicalEntities);
 }
 
-export function readJsonlEntitiesStrictSync(
-  vaultRoot: string,
-  relativeRoot: string,
-  project: (value: unknown, relativePath: string) => CanonicalEntity | null,
-): CanonicalEntity[] {
-  return readJsonlRecordsSync(vaultRoot, relativeRoot)
-    .map((entry) => project(entry.value, entry.relativePath))
-    .filter((entity): entity is CanonicalEntity => entity !== null)
-    .sort(compareCanonicalEntities);
-}
-
 export async function readJsonlEntitiesTolerant(
   vaultRoot: string,
   relativeRoot: string,
@@ -64,14 +51,6 @@ export async function readJsonlEntitiesTolerant(
     await readJsonlRecordOutcomes(vaultRoot, relativeRoot, options),
     project,
   );
-}
-
-export function readJsonlEntitiesTolerantSync(
-  vaultRoot: string,
-  relativeRoot: string,
-  project: (value: unknown, relativePath: string) => CanonicalEntity | null,
-): EntityCollection {
-  return projectJsonlOutcomes(readJsonlRecordOutcomesSync(vaultRoot, relativeRoot), project);
 }
 
 function projectJsonlOutcomes(
