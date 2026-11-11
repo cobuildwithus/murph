@@ -1,6 +1,7 @@
 ---
 title: 'Device admission proof requires idle polling even when provider admission closes immediately'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4855'
 ---
 
 ## Expected Behavior
