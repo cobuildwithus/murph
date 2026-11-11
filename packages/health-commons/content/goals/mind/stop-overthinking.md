@@ -35,7 +35,6 @@ goal:
     kind: habit_plan
     ownerSkillIds:
       - stress-regulation
-      - cognitive-focus
   startPrompt: Hey Murph, help me stop overthinking.
   indexable: true
 safety:

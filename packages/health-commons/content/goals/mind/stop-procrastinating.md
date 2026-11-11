@@ -35,7 +35,7 @@ goal:
     kind: habit_plan
     ownerSkillIds:
       - behavior-followthrough
-      - cognitive-focus
+      - stress-regulation
   startPrompt: Hey Murph, help me stop procrastinating.
   indexable: true
 safety:

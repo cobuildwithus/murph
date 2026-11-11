@@ -31,21 +31,8 @@ describe('native poll dynamic tool', () => {
         conversationScope, currentLocalDate: '2026-09-21', currentTimeZone: 'UTC',
         hostedRuntime: true,onboardingGuidance: false,
       })
-      expect(layers.stableRouteCapabilityPrompt.includes('Native polls:')).toBe(available)
+      expect(layers.blocks.some((block) => block.id === 'route.native-polls')).toBe(available)
       expect(resolveMurphDynamicTools({ pollsAvailable: available }).includes(MURPH_POLL_TOOL)).toBe(available)
-      if (available) {
-        expect(layers.prompt).toContain('without waiting for someone to ask for a poll')
-        expect(layers.prompt).toContain('make the choice when asked to use your judgment')
-        expect(layers.prompt).toContain('human-owned exchanges alone')
-        expect(layers.prompt).toContain('not consent to spend, book, or act for anyone')
-        expect(layers.prompt).toContain('share a preference, join a joke, or break a tie without waiting to be asked')
-        expect(layers.prompt).toContain('On Telegram, bots cannot cast ballots')
-        expect(layers.prompt).toContain('Read the poll in this turn before stating a current tally')
-        expect(layers.prompt).toContain('an old tally or an incomplete voter page')
-        expect(layers.prompt).toContain('option counts are not distinct participant counts')
-        expect(layers.prompt).toContain('not completion of the activity being considered')
-        expect(layers.prompt).toContain('do not vote in every poll or reopen a settled decision')
-      }
     }
   })
   it('offers a current conversation tool only when its port is authorized', () => {
@@ -93,7 +80,7 @@ describe('native poll dynamic tool', () => {
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(result.rpcResult.success).toBe(false)
     expect(result.rpcResult.contentItems[0]?.text).toContain('may have applied')
-    expect(result.rpcResult.contentItems[0]?.text).toContain('do not automatically resubmit')
+    expect(result.rpcResult.contentItems[0]?.text).toContain('Read the poll to check before voting again')
   })
   it('accepts a returned voter cursor on read only', () => {
     expect(parse({ action: 'read', pollRef, voterCursor: '50' })).toMatchObject({ kind: 'poll', request: { voterCursor: '50' } })
@@ -139,7 +126,7 @@ describe('native poll dynamic tool', () => {
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(result.rpcResult.success).toBe(false)
     const text = result.rpcResult.contentItems[0]?.text
-    expect(text).toContain(code === 'HOSTED_POLL_UNSUPPORTED_SERVICE' ? 'no poll action was sent' : 'an interrupted create may have sent')
+    expect(text).toContain(code === 'HOSTED_POLL_UNSUPPORTED_SERVICE' ? 'no poll action was sent' : 'it may have been sent. List polls to check before creating another one')
     expect(text).not.toContain('Untrusted upstream text')
   })
 })

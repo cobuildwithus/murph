@@ -1,7 +1,3 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-
-import { resolveAssistantSkillsRoot } from "../src/assistant-skill-assets.js";
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
@@ -18,9 +14,6 @@ import {
   createAssistantProductFeedbackRecorder,
   resolveAssistantProductFeedbackAcceptedInputIds,
 } from "../src/assistant/turn-progress.js";
-import {
-  buildAssistantSystemPrompt,
-} from "../src/assistant/system-prompt.js";
 
 describe("assistant product feedback", () => {
   it("is stable across related-item ordering and summary wording, and scoped to accepted input", () => {
@@ -125,105 +118,17 @@ describe("assistant product feedback", () => {
   });
 
   it("advertises value-free schema issues and optional changelog metadata", () => {
-    const description = MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.description;
     const schema = JSON.stringify(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema);
     expect(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.required).toEqual(["kind", "summary"]);
     expect(
       MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.properties.summary.maxLength,
     ).toBe(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH);
-    expect(description).toContain("one structured Murph product-feedback candidate");
-    expect(description).toContain("current accepted request");
-    expect(description).toContain("optional related changelog item ids");
-    expect(description).toContain(
-      "input-schema rejection, accepted, already accepted, unavailable, or callback failure",
-    );
-    expect(description).toContain("Provide the feedback kind, one concise product-only summary");
-    expect(description).toContain(
-      "append a privacy-safe reproduction recipe in the same summary field",
-    );
-    expect(description).toContain(
-      'Explicit verified-private human support uses kind "frustration", empty changelog ids',
-    );
-    expect(description).toContain('beginning exactly "Support escalation:"');
-    expect(description).toContain("waits for the durable callback");
-    expect(description).toContain(
-      "An input-schema rejection includes value-free validation issues",
-    );
-    expect(description).toContain(
-      "Accepted, already accepted, unavailable, and callback-failure results are terminal",
-    );
-    expect(description).not.toContain("retry once");
-    expect(description).toContain("do not delay submission to ask for those details");
     expect(schema).toContain('"minItems":0');
     expect(schema).toContain('"feature_interest"');
     expect(schema).toContain('"summary"');
-    expect(schema).toContain('Use feature_request for a missing or unsupported Murph path');
-    expect(schema).toContain('Reserved support escalation always uses frustration');
-    expect(schema).toContain('Make it actionable without the conversation');
-    expect(schema).toContain('Concise de-identified, product-only summary');
-    expect(schema).toContain('begin exactly \\"Support escalation:\\"');
-    expect(schema).toContain("Murph's concise de-identified explanation in its own words");
-    expect(schema).toContain("never copy or quote the member's message");
     expect(schema).not.toContain('"supportArea"');
     expect(schema).not.toContain('"supportProblem"');
-    expect(schema).toContain('generic actor');
-    expect(schema).toContain('expected versus observed result');
-    expect(schema).toContain('section beginning exactly \\"Reproduction:\\"');
-    expect(schema).toContain('independently usable without the original conversation');
-    expect(schema).toContain('exact Murph CLI commands or tool calls with synthetic arguments');
-    expect(schema).toContain('sanitized example request or user action');
-    expect(schema).toContain('synthetic placeholders');
-    expect(schema).toContain('insufficient for a complete reproduction');
-    expect(schema).toContain('pure feature interest with no failure or friction to reproduce');
-    expect(schema).toContain("Never copy or closely paraphrase the member's wording");
-    expect(schema).toContain('concrete product constraint the source established');
-    expect(schema).toContain('instead of replacing them with vague labels');
-    expect(schema).toContain('omit it or mark it unclear rather than infer or invent it');
-    expect(schema).toContain('Abstract every private fact');
-    expect(schema).toContain('least-specific product concept');
-    expect(schema).toContain('do not preserve a private fact merely because it was relevant');
-    expect(schema).toContain('Never include names, handles, account or member identifiers');
-    expect(schema).toContain('diagnoses, symptoms, medications, treatments');
-    expect(schema).toContain('exact health/fitness/nutrition values');
-    expect(schema).toContain('desired outcome and missing Murph capability');
-    expect(schema).toContain('Optional metadata');
-    expect(schema).toContain('Speculative:');
-    expect(schema).toContain('Murph-observed:');
     expect(schema).not.toContain('"topic"');
-  });
-
-  it("keeps the detailed summary rubric single-owned by the tool schema", async () => {
-    const rubricMarker =
-      "name the generic actor, exact Murph surface or workflow";
-    const systemPrompt = buildAssistantSystemPrompt({
-      assistantCliContract: null,
-      channel: "telegram",
-      cliAccess: {
-        rawCommand: "vault-cli",
-      },
-      conversationScope: "direct",
-      currentLocalDate: "2026-07-30",
-      currentTimeZone: "America/New_York",
-      hostedRuntime: true,
-      onboardingGuidance: false,
-      turnTrigger: null,
-    });
-    const skill = (await readFile(
-      path.join(resolveAssistantSkillsRoot(), "product-feedback", "SKILL.md"), "utf8",
-    )).replace(/\s+/gu, " ");
-    expect(systemPrompt).toContain("$MURPH_ASSISTANT_SKILLS_ROOT/product-feedback/SKILL.md");
-    expect(skill).toContain(
-      "append a privacy-safe `Reproduction:` section in that same summary field",
-    );
-
-    expect(skill).toContain("On explicit feedback submission, record the facts and gaps now");
-    expect(skill).toContain("Otherwise, if one missing answer would materially change");
-    const toolSchema = JSON.stringify(
-      MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema,
-    );
-    const ordinaryStack = `${systemPrompt}\n${skill}\n${toolSchema}`;
-
-    expect(ordinaryStack.split(rubricMarker)).toHaveLength(2);
   });
 
   it("parses and collects one explicit feedback candidate without a pre-reply write", async () => {

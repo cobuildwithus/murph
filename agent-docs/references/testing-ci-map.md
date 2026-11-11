@@ -918,11 +918,8 @@ with `-- --test 'quick single edit'` or
 `-- --test 'several edits.*uses inspected versions'`. They use production prompts,
 the automation tool, and versioned fixture ports; assert one inspect/patch pair
 per record, no invalid calls or duplicate writes, and zero versus one early
-progress update. `MURPH_MEASURE_AUTOMATION_INPUT=1` enables the focused
-`automation edit: complete first provider input` tests for identical direct/group
-fixtures through real mixed-mode Codex conversion. They report complete decoded
-request bytes with only `prompt_cache_key` excluded and explicitly mark missing
-exact-tokenizer evidence.
+progress update. `instruction-budgets.test.ts` holds the size ceilings for the
+tool catalog and each prompt route.
 
 `packages/assistant-engine/test/assistant-codex-tool-input-contract.test.ts` is a
 default-on, credential-free regression gate under the existing package

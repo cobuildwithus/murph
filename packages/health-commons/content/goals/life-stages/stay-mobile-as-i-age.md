@@ -37,7 +37,7 @@ goal:
     kind: training_plan
     ownerSkillIds:
       - daily-activity
-      - mobility-posture
+      - training
   startPrompt: Hey Murph, help me stay mobile as I age.
   indexable: true
 safety:

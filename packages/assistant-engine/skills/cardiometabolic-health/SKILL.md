@@ -3,63 +3,30 @@ name: cardiometabolic-health
 description: Use for glucose A1c CGM insulin records ApoB LDL triglycerides blood pressure home measurement and lifestyle cardiometabolic marker questions.
 ---
 
-# Cardiometabolic Health
+# Cardiometabolic health
 
-Use this as Murph operating guidance, not as a consumer article. Ground the answer in the current conversation, vault context, and wearable data before recommending. Ask at most one missing question when the answer would materially change the next step.
+This skill covers lifestyle questions about glucose, A1c, continuous glucose monitors, ApoB, LDL cholesterol, triglycerides, HDL and blood pressure, including home measurement and when to retest. Health Commons supplies the evidence, and the required search already runs before health advice. This skill adds what to read first, Murph's positions, and which decisions belong to a clinician.
 
-## Owns
+Answer first. Ask at most one question, at the end of the reply, and only when the answer would change safety or the recommendation.
 
-- Lifestyle interpretation of glucose, A1c, CGM, ApoB, LDL-C, triglycerides, HDL, blood pressure, home BP technique, and retest intervals.
-- Mapping lifestyle levers to markers without prescribing or adjusting medication.
-- Explaining when lifestyle-first is reasonable and when a clinician medication conversation is owed.
+## Read first
 
-## Hand Off
+- Read the member's actual lab values with their dates and fasting status, their medications, weight or waist trend, and how blood pressure was measured.
+- For a question about connected insulin records, run one read over a single day or a short range: `vault-cli event list --kind intervention_session --from <date> --to <date> --limit 200 --format json`. Keep only items whose `data.source` is `device` and whose `data.interventionType` is `insulin-injection`. The dose is in `data.fields.dose-amount` and `data.fields.dose-unit`. Report the records this read returned and do not present them as a complete total. This read cannot signal that more records exist, so an empty result means only that this window returned none. Never turn a record read into advice to start, stop, re-time or change an insulin dose.
 
-- Use nutrition-strategy for day-to-day meal structure when labs are not the main frame.
-- Use body-composition when weight/fat-loss strategy is primary.
-- Use micronutrients-supplements for supplement or deficiency-specific questions.
-- Route diabetes, very high BP, symptoms, pregnancy, kidney disease, chest pain, statin/GLP-1/antihypertensive decisions, or medication changes to clinician support.
+## Murph's positions
 
-## Data First
+- For each marker, say what moves it most, how long a change takes to show, and when to retest. Lipids can change in 6 to 12 weeks. A1c reflects roughly the last 2 to 3 months. Blood pressure can change within days to weeks once it is measured reliably.
+- Check how blood pressure was measured before interpreting small differences: seated and rested, the right cuff size, arm supported, no caffeine, exercise or nicotine just before, two readings, over several days. One office reading does not classify anyone.
+- For a glucose monitor in a member without diabetes, look for repeated patterns around the same meals or situations. Do not react to single spikes, and say that normal variation can look alarming.
+- When ApoB and LDL cholesterol disagree, ApoB is usually the better guide to risk.
+- Keep lifestyle changes and medication conversations separate in the reply. Say when lifestyle first is reasonable and when the numbers warrant a conversation with a clinician about medication.
+- Other owners: `nutrition-strategy` for everyday meals, `body-composition` when weight loss is the main plan, and `micronutrients-supplements` for supplements.
 
-- For a connected insulin-record question, use one bounded day or short-range
-  read: `vault-cli event list --kind intervention_session --from <date> --to <date> --limit 200 --format json`.
-  Retain only items whose `data.source` is `device` and whose
-  `data.interventionType` is `insulin-injection`; read the stored dose from
-  `data.fields.dose-amount` and `data.fields.dose-unit`. Report the matching
-  records returned, not an exhaustive total. Because this read has no
-  continuation signal, no match means only that this bounded read found none;
-  it is not proof that no insulin was recorded. Never turn a record read into
-  advice to start, stop, retime, or change an insulin dose.
-- Check actual lab values with dates, fasting status, meds, weight/waist trend, BP measurement method, sleep, alcohol, activity, and family/history context if known.
-- For home BP, verify seated rest, cuff size, arm position, no caffeine/exercise/nicotine right before, two readings, and multiple days.
-- For CGM, look for repeated meal/context patterns rather than single spikes.
+## When a clinician owns the decision
 
-## If Context Is Thin
+- Blood pressure around 180/120 with symptoms, chest pain, neurological symptoms, severe shortness of breath or confusion needs urgent care.
+- Very high blood pressure readings without symptoms, and diabetic-range values that a clinician has not yet seen, need a medical appointment. Help the member prepare for it.
+- Decisions about statins, blood-pressure medicines, diabetes medicines and GLP-1 medicines belong to the prescriber.
 
-Ask: "Which marker are we trying to move first: blood pressure, ApoB/LDL, triglycerides, A1c/glucose, or CGM post-meal spikes?"
-
-## Practical Levers
-
-- BP: home measurement quality first, then sodium reduction, weight loss if relevant, aerobic activity, alcohol reduction, sleep apnea screening, and resistance training.
-- LDL/ApoB: reduce saturated fat for responders, increase soluble fiber, improve dietary pattern, weight loss if needed, and discuss medication when risk/levels warrant.
-- Triglycerides: reduce alcohol and refined carbs, improve weight/waist, add aerobic activity, and check fasting status.
-- A1c/glucose: post-meal walks, resistance training, weight loss if needed, sleep, meal composition, and clinician care for diabetic-range values.
-- Retest rough windows: lipids can change in 6-12 weeks; A1c reflects roughly 2-3 months; BP can change within days to weeks once measurement is reliable.
-
-## Interpretation Rules
-
-- ApoB is often the cleaner atherogenic particle marker; LDL-C can be discordant, especially with high triglycerides, insulin resistance, or very low/high LDL particle cholesterol content.
-- CGM in non-diabetics can teach meal/context patterns but can also create anxiety from normal variability.
-- One office BP reading is not enough to classify white-coat or masked hypertension.
-
-## Safety Boundaries
-
-- Urgent care for BP around 180/120 with symptoms, chest pain, neurologic symptoms, severe shortness of breath, or confusion.
-- Do not tell users to start, stop, or change statins, antihypertensives, diabetes meds, or GLP-1s.
-
-## Answer Shape
-
-- State the marker, what moves it most, expected timeline, and when to retest.
-- Separate lifestyle experiments from clinician medication conversations.
-- For BP and CGM, verify measurement protocol before interpreting fine differences.
+Diabetes, pregnancy and kidney disease change specific answers, such as targets and which changes are safe. Answer the question with the guidance that applies to that situation, and name the clinician for prescribing, dosing and managing a complication.

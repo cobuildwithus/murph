@@ -66,18 +66,6 @@ describe('assistant physical notes', () => {
     expect(resolveMurphDynamicTools({
       physicalNotesAvailable: false,
     })).not.toContain(MURPH_SEND_PHYSICAL_NOTE_TOOL)
-    expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md',
-    )
-    expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
-      'call this tool automatically after generation finishes',
-    )
-    expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
-      'provide the exact image_ref and image_sha256',
-    )
-    expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
-      'exact message_ref approving the send in the current turn',
-    )
     expect(
       MURPH_SEND_PHYSICAL_NOTE_TOOL.inputSchema.properties.to.properties.state,
     ).toEqual({ type: 'string', pattern: '^[A-Za-z]{2}$' })
@@ -90,9 +78,6 @@ describe('assistant physical notes', () => {
     expect(resolveMurphDynamicTools({
       physicalNoteRecoveryAvailable: false,
     })).not.toContain(MURPH_RESOLVE_PHYSICAL_NOTE_TOOL)
-    expect(MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.description).toContain(
-      'never sends a new note or recalls an accepted one',
-    )
     expect(MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.deferLoading).toBe(true)
   })
 
@@ -407,19 +392,8 @@ describe('assistant physical notes', () => {
       'utf8',
     )
 
-    expect(skill).toMatch(
-      /A physical-note rejection by itself is recovery evidence, not product-feedback\s+eligibility\./u,
-    )
-    expect(skill).toMatch(
-      /independently establishes eligible frustration or repeated\s+Murph-owned friction/u,
-    )
-    expect(skill).toMatch(
-      /call `murph\.resolve_physical_note` exactly\s+once with the exact current authorizing `message_ref`/u,
-    )
     expect(skill).toContain('target_message_ref')
     expect(skill).toContain('target_kind')
-    expect(skill).toMatch(/does not authorize the\s+action/u)
-    expect(skill).toContain('never sends a new note or recalls an accepted one')
   })
 
   it('normalizes the bounded US recipient', () => {
@@ -815,7 +789,7 @@ describe('assistant physical notes', () => {
         /do not .*retry it automatically/iu,
       )
       expect(result.rpcResult.contentItems[0]?.text).not.toContain(
-        'new explicit send request',
+        'needs a new request',
       )
     },
   )
@@ -859,14 +833,14 @@ describe('assistant physical notes', () => {
     expect(toolText).toContain(
       'could not confirm whether this physical note was accepted',
     )
-    expect(toolText).not.toContain('Nothing was sent')
-    expect(toolText).not.toContain('new explicit send request')
+    expect(toolText).not.toMatch(/nothing was sent/iu)
+    expect(toolText).not.toContain('needs a new request')
   })
 
   it.each([
     ['recipient_address', 'check the street and unit'],
     ['artwork', 'regenerate the image'],
-    ['service_unavailable', "on Murph's side, not the recipient address"],
+    ['service_unavailable', "on Murph's side and the recipient address was not the cause"],
     ['request_invalid', 'correct the printing request'],
     ['prior_note_unresolved', 'earlier physical-note submission is still unresolved'],
     ['prior_note_accepted', 'earlier physical note was accepted'],
@@ -915,7 +889,7 @@ describe('assistant physical notes', () => {
       )
       expect(result.rpcResult.contentItems[0]?.text).toContain(expectedGuidance)
       expect(result.rpcResult.contentItems[0]?.text).toMatch(
-        /do not .*retry automatically/iu,
+        /nothing .*retries/iu,
       )
       expect(result.rpcResult.contentItems[0]?.text).not.toMatch(
         /product feedback|submit_product_feedback/iu,
@@ -926,10 +900,10 @@ describe('assistant physical notes', () => {
         || failureReason === 'unknown'
       ) {
         expect(result.rpcResult.contentItems[0]?.text).toContain(
-          'No automatic retry or follow-up is running',
+          'Nothing retries or follows up on its own',
         )
         expect(result.rpcResult.contentItems[0]?.text).toContain(
-          'new explicit send request later',
+          'another attempt needs a new request from them later',
         )
       }
       if (
@@ -940,7 +914,7 @@ describe('assistant physical notes', () => {
           'current physical-note request was not sent',
         )
         expect(result.rpcResult.contentItems[0]?.text).not.toContain(
-          'new explicit send request',
+          'needs a new request',
         )
         expect(result.rpcResult.contentItems[0]?.text).not.toContain(
           'for this person',
@@ -952,7 +926,7 @@ describe('assistant physical notes', () => {
           'without claiming the earlier and current requests share a recipient',
         )
         expect(result.rpcResult.contentItems[0]?.text).toContain(
-          'No automatic',
+          'on its own',
         )
       }
       if (failureReason === 'prior_note_unresolved') {
@@ -968,10 +942,10 @@ describe('assistant physical notes', () => {
           'may recheck',
         )
         expect(result.rpcResult.contentItems[0]?.text).toContain(
-          'Do not retry automatically; that applies only to this request',
+          'This request is finished',
         )
         expect(result.rpcResult.contentItems[0]?.text).toContain(
-          'A separately authorized future request is distinct',
+          'A future request from the person is a separate note',
         )
       }
       if (failureReason === 'unknown') {

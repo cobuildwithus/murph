@@ -119,7 +119,7 @@ describe('canonical upcoming context', () => {
       })
       expect(disconnected.rpcResult.success).toBe(false)
       expect(JSON.stringify(disconnected.rpcResult)).toContain('The account was disconnected')
-      expect(JSON.stringify(disconnected.rpcResult)).toContain('before confirming that its saved plans are excluded')
+      expect(JSON.stringify(disconnected.rpcResult)).toContain('before telling the member its saved plans are excluded')
       expect((await readConnectedContextPolicy(vaultRoot))?.activeAccounts).toEqual(policy.activeAccounts)
     } finally { write.mockRestore() }
   })

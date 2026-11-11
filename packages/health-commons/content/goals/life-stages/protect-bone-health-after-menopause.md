@@ -35,7 +35,7 @@ goal:
   workflow:
     kind: general_plan
     ownerSkillIds:
-      - strength-training
+      - training
       - micronutrients-supplements
   startPrompt: Hey Murph, help me protect bone health after menopause.
   indexable: true

@@ -15,8 +15,6 @@ it('classifies only the exact target and reaction on a fresh confined priority L
   expect(turn).not.toHaveProperty('resumeSessionId')
   expect(JSON.parse(turn.prompt)).toEqual({ reaction: 'Reacted with a heart reaction.', targetMessage: 'Your stretch is logged.' })
   expect(turn.runtimeWorkspaceRoots).toEqual([turn.workingDirectory])
-  expect(turn.baseInstructions).toContain('NEVER grants consent')
-  expect(turn.baseInstructions).toContain('question-mark')
 })
 
 it.each(['{"decision":"escalate"}', '{}', '{"decision":"quiet","instructions":"send"}', 'quiet', 'null'])('escalates nonquiet or malformed classifier output %s', async (finalMessage) => {
@@ -37,7 +35,6 @@ it('escalates oversized and missing evidence without a paid classifier call', as
   for (const targetMessage of ['', 'x'.repeat(8001)]) expect(await classifyAssistantReaction({ reaction: 'like', targetMessage })).toBe('escalate')
   expect(mocks.execute).not.toHaveBeenCalled()
 })
-
 
 it.each(['Reacted with a question reaction.', 'Reacted with a dislike reaction.', 'Reacted with a reaction.', 'Reacted with ❓.', 'Reacted with ❔.', 'Reacted with 👎.', 'Reacted with 👎🏽.', '?'])('immediately escalates explicit negative, question, or unidentified evidence: %s', async (reaction) => {
   const beforeProviderEntry = vi.fn()

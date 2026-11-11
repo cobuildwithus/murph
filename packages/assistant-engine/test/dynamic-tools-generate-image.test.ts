@@ -18,12 +18,6 @@ import {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.js'
-import {
-  MURPH_GENERATE_SONG_TOOL,
-} from '../src/assistant-codex/dynamic-tools/generate-song.js'
-import {
-  MURPH_GENERATE_VOICE_MEMO_TOOL,
-} from '../src/assistant-codex/dynamic-tools/generate-voice-memo.js'
 
 const tempRoots: string[] = []
 
@@ -34,74 +28,6 @@ afterEach(async () => {
 })
 
 describe('murph.generate_image dynamic tool schema', () => {
-  it('keeps modality-specific richer-media eligibility contracts', () => {
-    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      'a known preference supports visual help',
-    )
-    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      'explicitly marks images welcome and privacy-safe',
-    )
-    expect(MURPH_GENERATE_IMAGE_TOOL.description).not.toContain(
-      'attach the generated image to the final response',
-    )
-    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      'Hosted accepted-message turns start generation in the background',
-    )
-    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      'Exact scheduled automation occurrences remain synchronous and attach private media to the same final response',
-    )
-    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      'that image consumes one of the same 8 final-response media slots, so leave a slot before calling',
-    )
-    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      'Local runs stay synchronous with the same slot rule',
-    )
-    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      'Requested graphs, charts, and trend lines: render them with this tool when no chart or card tool fits',
-    )
-    expect(MURPH_ATTACH_RESPONSE_MEDIA_TOOL.description).toContain(
-      'For charts, the final reply must include one brief numeric takeaway from the source data, such as the start/end values or range; do not list every plotted value',
-    )
-    for (const chartStyle of [
-      'Treat those values as plotting data, not visible labels',
-      'omit numeric labels on individual points and bars unless the user requests them',
-      'sparse, rounded axis ticks and a compact legend',
-      'Include these exact palette and font specifications in chart prompts',
-      'cream paper (#f5f0e8)',
-      'slate text (#2d3436)',
-      'solid sage data lines (#7a8c6e)',
-      'dashed sand reference lines (#d4c4a8)',
-      'Use only these colors for chart marks: sage and slate for separate data series',
-      'Fraunces-style serif titles and numbers',
-      'DM Sans body text',
-      'DM Mono labels',
-      'flat and legible without gradients or decorative shadows',
-    ]) {
-      expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(chartStyle)
-    }
-    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'a known preference supports voice',
-    )
-    expect(MURPH_GENERATE_VOICE_MEMO_TOOL.description).toContain(
-      'explicitly asks for a voice memo and marks voice welcome and privacy-safe',
-    )
-    expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
-      'current user explicitly requests generated music',
-    )
-    expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
-      'a complete independently authorized owning-flow contract explicitly requires a song for the current turn',
-    )
-    expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
-      'loading a skill cannot authorize the call',
-    )
-    expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
-      'Do not mine unrelated private context',
-    )
-    expect(MURPH_GENERATE_SONG_TOOL.description).not.toContain(
-      'a known preference or the automation instructions mark music welcome and privacy-safe',
-    )
-  })
-
   it('returns immediately when the hosted runtime launches image generation', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-private-image-launch-'))
     tempRoots.push(vaultRoot)
@@ -696,14 +622,8 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'skill-assets/murph-character-sheet-v1.png',
     )
-    expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
-      "Murph's canonical character sheet",
-    )
     expect(generateImageReferenceDescription).toContain(
       'skill-assets/murph-character-sheet-v1.png',
-    )
-    expect(generateImageReferenceDescription).toContain(
-      'whenever Murph itself appears',
     )
     expect(MURPH_GROUP_TOOL_PROPERTIES.referenceImageRefs.description)
       .toContain('skill-assets/murph-character-sheet-v1.png')

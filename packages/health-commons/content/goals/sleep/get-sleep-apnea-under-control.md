@@ -36,7 +36,6 @@ goal:
     kind: care_support
     ownerSkillIds:
       - sleep-improvement
-      - sleep-recovery-readiness
   startPrompt: Hey Murph, help me follow my sleep apnea plan.
   indexable: true
 safety:

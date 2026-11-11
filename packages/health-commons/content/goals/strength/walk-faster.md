@@ -35,7 +35,7 @@ goal:
     kind: training_plan
     ownerSkillIds:
       - daily-activity
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me walk faster.
   indexable: true
 safety:

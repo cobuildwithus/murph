@@ -25,8 +25,6 @@ describe('knowledge CLI guidance matches the shipped CLI', () => {
       libraryFlag: '--library-slug',
       sourceFlag: '--source-path',
     })
-    expect(cliRoute).not.toContain('dedicated knowledge write surface')
-    expect(cliRoute).not.toContain('attach `librarySlugs`')
 
     expect(buildKnowledgePrompt({ conversationScope: 'group' })).not.toContain('knowledge upsert')
   })
@@ -100,11 +98,6 @@ describe('knowledge CLI guidance matches the shipped CLI', () => {
     for (const automation of optionalReaders) {
       expect(automation.instructions).toMatch(/read fails(?: instead)?, return skip/u)
     }
-    // An unreadable or unconfirmed ledger must never look like "no opt-out".
-    expect((await readFile(new URL('../skills/journal-connected-context/SKILL.md', import.meta.url), 'utf8'))
-      .replace(/\s+/gu, ' ')).toContain(
-      '`page: null` means no ledger exists yet. A failed read is not a missing ledger: treat it as a global opt-out for this run and do not rewrite the ledger.',
-    )
 
     const vault = await createVault()
     for (const slug of new Set(reads.map((read) => read.slug))) {

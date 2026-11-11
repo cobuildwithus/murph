@@ -33,7 +33,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me build my upper-body strength.
   indexable: true
 safety:

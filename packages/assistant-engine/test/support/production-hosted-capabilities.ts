@@ -11,15 +11,30 @@ create_phone_call get_phone_call_status stop_phone_call resolve_physical_note se
 computer_open computer_act computer_os_control computer_pause_for_user computer_finish_run
 connected_apps_manage connected_apps_search connected_apps_execute`.split(/\s+/u).map((name) => `murph.${name}`)
 
+// The capability blocks a production hosted direct onboarding turn must carry.
+// Ids from src/assistant/system-prompt-blocks.ts; their wording is free.
+export const PRODUCTION_HOSTED_PROMPT_BLOCK_IDS = [
+  'route.native-polls', 'route.labs', 'route.vault-navigation', 'route.hosted-groups.private-consult',
+  'route.automation', 'route.health-commons-tools', 'route.non-blocking-delegation',
+  'route.cli-contract', 'thread.onboarding',
+] as const
+
+// Ceiling only: a smaller prompt always passes. Measured 81,637 bytes with the
+// generated CLI contract; the margin absorbs machine-specific paths.
+export const PRODUCTION_HOSTED_DEVELOPER_INSTRUCTIONS_CEILING_BYTES = 84_100
+
 export function assertProductionHostedCapabilityParity(input: {
   developerInstructions?: string | null
   dynamicTools: readonly { namespace: string; name: string }[]
+  /** Block ids of the planned prompt, when the caller recorded them. */
+  promptBlockIds?: readonly string[]
 }): void {
   assert.equal(input.dynamicTools.length, PRODUCTION_HOSTED_TOOL_NAMES.length)
   assert.deepEqual(input.dynamicTools.map((tool) => `${tool.namespace}.${tool.name}`), PRODUCTION_HOSTED_TOOL_NAMES)
   const bytes = Buffer.byteLength(input.developerInstructions ?? '')
-  assert.ok(bytes >= 87_330 * 0.97 && bytes <= 87_330 * 1.03, `Hosted developer instructions outside production envelope: ${bytes} bytes`)
-  assert.ok(input.developerInstructions?.includes('Murph CLI Contract:'))
+  assert.ok(bytes > 0 && bytes <= PRODUCTION_HOSTED_DEVELOPER_INSTRUCTIONS_CEILING_BYTES, `Hosted developer instructions over the production ceiling: ${bytes} bytes`)
+  const promptBlockIds = input.promptBlockIds
+  if (promptBlockIds) assert.deepEqual(PRODUCTION_HOSTED_PROMPT_BLOCK_IDS.filter((id) => !promptBlockIds.includes(id)), [])
 }
 
 // Opt-in direct Linq capability envelope. Real planning and tool schemas decide

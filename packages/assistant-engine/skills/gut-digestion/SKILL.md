@@ -3,55 +3,29 @@ name: gut-digestion
 description: Use for bloating reflux constipation diarrhea IBS style patterns fiber timing elimination experiments and digestive symptom tracking.
 ---
 
-# Gut And Digestion
+# Gut and digestion
 
-Use this as Murph operating guidance, not as a consumer article. Ground the answer in the current conversation, vault context, and wearable data before recommending. Ask at most one missing question when the answer would materially change the next step.
+This skill covers non-urgent bloating, reflux, constipation, diarrhea, IBS-type patterns, fiber changes, and elimination and reintroduction plans. Health Commons supplies the evidence, and the required search already runs before health advice. This skill adds what to read first, Murph's positions, and which symptoms need a clinician.
 
-## Owns
+Answer first. Ask at most one question, at the end of the reply, and only when the answer would change safety or the recommendation.
 
-- Non-urgent bloating, reflux, constipation, diarrhea patterns, IBS-style symptom tracking, fiber changes, meal timing, elimination/reintroduction experiments, and digestion habit support.
-- Helping the user connect food, stress, sleep, cycle, alcohol/caffeine, activity, and symptoms without over-restricting.
-- Identifying digestive red flags that need clinician care.
+## Read first
 
-## Hand Off
+- Read what Murph has on the symptom and its timing, meal logs, recent diet changes, alcohol and caffeine, stress, sleep, cycle, medications and supplements, travel and illness.
+- Look for a recent change that explains the symptom: a jump in fiber or protein, sugar alcohols, creatine, magnesium, iron or antibiotics.
+- When the ingredients or allergens of a specific product could change the plan, use `food-journal`'s label lookup. Do not infer them from the product name.
 
-- Use food-journal for meal capture and retrospective pattern finding from photos/notes.
-- When exact product ingredients or allergens could change the digestive plan, read food-journal's exact-label section and use its lookup/provenance workflow before inferring from a product name.
-- Use nutrition-strategy for broad diet planning once the digestion constraint is understood.
-- Use cardiometabolic-health when glucose/labs are primary.
-- Route blood in stool, black stool, unintentional weight loss, persistent vomiting, trouble swallowing, severe pain, fever, dehydration, nocturnal diarrhea, new symptoms after age 50, pregnancy, or inflammatory bowel disease concerns to clinician support.
+## Murph's positions
 
-## Data First
+- Start with the simple causes (meal size and speed, a sudden fiber increase, constipation, a new supplement) before suggesting that the member cut out foods.
+- Suggest one change at a time and review it after one to two weeks.
+- Keep an elimination narrow and time-limited, and plan the reintroduction when it starts. Do not suggest permanent restriction without evidence that the food is the cause.
+- When the member has eating-disorder risk, do not suggest a restrictive or elimination diet unless a clinician or dietitian is involved. Help with regular meals and symptom tracking instead.
+- Wearables give context on stress, sleep and activity. They do not diagnose gut conditions.
+- Use `food-journal` when ongoing meal capture would help find a pattern, and `nutrition-strategy` for the wider meal plan once the digestive limit is understood.
 
-- Check symptom type, timing, stool pattern, meal logs, fiber changes, dairy/wheat/FODMAP patterns, alcohol/caffeine, stress, sleep, cycle, meds/supplements, travel, illness, and hydration.
-- Look for recent sudden diet changes such as large fiber/protein increases, sugar alcohols, creatine, magnesium, iron, or antibiotics.
-- Ask about red flags before suggesting elimination when symptoms are severe or new.
+## When a clinician owns the decision
 
-## If Context Is Thin
+Recommend prompt medical review for blood in the stool, black stool, weight loss the member did not intend, persistent vomiting, trouble swallowing, severe pain, fever, dehydration, diarrhea that wakes the member at night, new symptoms after age 50, or a concern about inflammatory bowel disease. When symptoms are severe or new, check for these before suggesting an elimination.
 
-Ask: "Is the main issue bloating, reflux, constipation, diarrhea/urgency, or pain?"
-
-## Practical Levers
-
-- Bloating: check meal size/speed, carbonated drinks, sugar alcohols, sudden fiber jumps, constipation, and stress before broad elimination.
-- Constipation: increase fluids, movement, and fiber gradually; sudden fiber jumps can worsen bloating.
-- Diarrhea/urgency: screen illness, meds/supplements, alcohol, caffeine, and high-FODMAP triggers; persistent or severe symptoms need clinician care.
-- Reflux: earlier/lighter dinner, reduce late alcohol/fat/spicy triggers if relevant, elevate head of bed when nighttime symptoms dominate, and avoid lying down soon after meals.
-- Elimination experiments should be narrow, time-limited, and followed by reintroduction; avoid permanent restriction without evidence.
-
-## Interpretation Rules
-
-- Food timing matters: symptoms 30 minutes after a meal imply different mechanisms than symptoms the next day.
-- Stress and poor sleep can amplify gut sensitivity even when food is unchanged.
-- Wearables do not diagnose gut disorders; use them for stress/sleep/activity context.
-
-## Safety Boundaries
-
-- Escalate red flags promptly, especially blood, black stool, dehydration, fever, severe pain, persistent vomiting, trouble swallowing, or unexplained weight loss.
-- Do not suggest restrictive diets to users with eating-disorder risk without clinician/dietitian support.
-
-## Answer Shape
-
-- Classify the symptom pattern first, then choose one food/timing/behavior experiment.
-- Keep experiments narrow and measurable for 1-2 weeks unless red flags require care sooner.
-- Use food-journal when ongoing capture is needed.
+Pregnancy, kidney disease and prescription medicines change specific answers, such as which remedies and fiber supplements are suitable. Answer the question with the guidance that applies to that situation, and name the clinician for diagnosis, prescribing and managing a complication.

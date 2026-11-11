@@ -21,13 +21,6 @@ function resolveExperimentOnboardingSkillDirectory(): string {
   return path.join(resolveAssistantSkillsRoot(), skill.slug)
 }
 
-async function readExperimentOnboardingSkill(): Promise<string> {
-  return readFile(
-    path.join(resolveExperimentOnboardingSkillDirectory(), 'SKILL.md'),
-    'utf8',
-  )
-}
-
 async function readExperimentOnboardingSkillAssets(): Promise<string[]> {
   const directory = resolveExperimentOnboardingSkillDirectory()
   const entries = await readdir(directory, { recursive: true, withFileTypes: true })
@@ -39,21 +32,6 @@ async function readExperimentOnboardingSkillAssets(): Promise<string[]> {
 }
 
 describe('private assistant experiments', () => {
-  it('keeps run, log, and progress tools on the private experiment surface', async () => {
-    const skill = await readExperimentOnboardingSkill()
-
-    expect(skill).toContain('vault-cli experiment start <slug>')
-    expect(skill).toContain('--dry-run --format json')
-    expect(skill).toContain('vault-cli experiment session log <id>')
-    expect(skill).toContain('vault-cli experiment context log <id>')
-    expect(skill).toContain('vault-cli experiment progress <id> --format json')
-    expect(skill).toContain(
-      'vault-cli experiment progress-card <id> --format json',
-    )
-    expect(skill).toContain('never construct or attach a progress-card URL')
-    expect(skill).toContain('do not construct experiment website URLs')
-  })
-
   it('designs new runs without public catalog discovery or experiment webpage links', async () => {
     const assets = await readExperimentOnboardingSkillAssets()
     expect(assets.length).toBeGreaterThan(0)

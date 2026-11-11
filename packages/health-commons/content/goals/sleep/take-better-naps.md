@@ -34,7 +34,6 @@ goal:
   workflow:
     kind: habit_plan
     ownerSkillIds:
-      - sleep-recovery-readiness
       - sleep-improvement
   startPrompt: Hey Murph, help me take better naps.
   indexable: true

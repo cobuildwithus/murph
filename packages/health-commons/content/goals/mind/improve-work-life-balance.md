@@ -36,7 +36,7 @@ goal:
     ownerSkillIds:
       - stress-regulation
       - behavior-followthrough
-      - energy-fatigue
+      - sleep-improvement
   startPrompt: Hey Murph, help me improve my work-life balance.
   indexable: true
 safety:

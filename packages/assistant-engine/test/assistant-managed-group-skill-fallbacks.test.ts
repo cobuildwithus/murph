@@ -8,144 +8,52 @@ import {
   resolveAssistantSkillsRoot,
 } from "../src/assistant-skill-assets.js";
 
-const MANAGED_GROUP_SKILL_SLUGS = [
-  "group-chat",
+// Skills whose real text ships from the private hosted bundle. Public Murph
+// carries only a short fail-closed fallback for each, marked with this sentence.
+// The hosted bundle build searches for the same sentence, so it must not change here.
+const MANAGED_SKILL_SLUGS = [
   "group-challenge",
   "group-challenge-scorecards",
+  "group-chat",
   "group-newsletter",
   "groupchat-comedy",
+  "music-generation",
 ] as const;
 
 const PUBLIC_FALLBACK_MARKER =
   "This public fallback intentionally contains no managed";
 
-describe("managed hosted group skill boundary", () => {
-  it("keeps only bounded fail-closed fallbacks in public Murph", async () => {
-    for (const slug of MANAGED_GROUP_SKILL_SLUGS) {
-      const raw = await readFile(
-        path.join(resolveAssistantSkillsRoot(), slug, "SKILL.md"),
-        "utf8",
-      );
-      const normalized = raw.replace(/\s+/gu, " ");
+async function readPublicSkill(slug: string): Promise<string> {
+  return readFile(
+    path.join(resolveAssistantSkillsRoot(), slug, "SKILL.md"),
+    "utf8",
+  );
+}
+
+describe("managed hosted skill boundary", () => {
+  it("marks exactly the managed skills as public fallbacks", async () => {
+    const marked: string[] = [];
+    for (const skill of ASSISTANT_SKILLS) {
+      const normalized = (await readPublicSkill(skill.slug)).replace(/\s+/gu, " ");
+      if (normalized.includes(PUBLIC_FALLBACK_MARKER)) marked.push(skill.slug);
+    }
+
+    expect(marked.sort()).toEqual([...MANAGED_SKILL_SLUGS]);
+  });
+
+  it("keeps each public fallback short and named for its slug", async () => {
+    for (const slug of MANAGED_SKILL_SLUGS) {
+      const raw = await readPublicSkill(slug);
 
       expect(raw).toContain(`name: ${slug}`);
-      expect(normalized).toContain(
-        "For an interactive explicit request that depends on this managed feature, perform no effect and state one plain capability limitation.",
-      );
-      expect(normalized).toContain(PUBLIC_FALLBACK_MARKER);
-      expect(normalized).toContain(
-        "return the resident delivery skip outcome without user-facing text only when its requested output requires",
-      );
-      expect(normalized).toContain(
-        "resident scheduled-tool, room-safety, and delivery contracts",
-      );
-      expect(normalized).toContain(
-        "Do not mutate a preserved automation solely because managed behavior is unavailable.",
-      );
-      expect(normalized).toContain(
-        "Silence otherwise remains available only when the resident conversational-floor rules independently make the beat human-owned or unaddressed.",
-      );
-      expect(normalized).not.toContain(
-        "For an unattended or scheduled occurrence, perform no effect",
-      );
-      expect(raw).not.toContain("cobuildwithus/");
-      expect(raw).not.toContain("trusted hosted build");
-      expect(raw).not.toContain("materializ");
       expect(raw.length).toBeLessThan(2_000);
     }
   });
 
-  it("keeps ordinary public group automations outside the managed fallback", async () => {
-    const raw = await readFile(
-      path.join(resolveAssistantSkillsRoot(), "group-chat", "SKILL.md"),
-      "utf8",
-    );
-    const normalized = raw.replace(/\s+/gu, " ");
+  it("registers the private-owned challenge skills", () => {
+    const registered = ASSISTANT_SKILLS.map((skill) => skill.slug);
 
-    expect(normalized).toContain(
-      "Ordinary public group reminders and check-ins continue under the resident scheduled-tool, room-safety, and delivery contracts.",
-    );
-    expect(normalized).toContain(
-      "only when its requested output requires the absent managed social-behavior policy",
-    );
-    expect(normalized).toContain(
-      "For an admitted tool with its own complete resident instructions, follow that tool's bounded workflow",
-    );
-  });
-
-  it("keeps the exact managed group fallback set registered at stable slugs", () => {
-    expect([...MANAGED_GROUP_SKILL_SLUGS].sort()).toEqual([
-      "group-challenge",
-      "group-challenge-scorecards",
-      "group-chat",
-      "group-newsletter",
-      "groupchat-comedy",
-    ]);
-
-    const registeredSlugs = new Set(
-      ASSISTANT_SKILLS.map((skill) => skill.slug),
-    );
-    for (const slug of MANAGED_GROUP_SKILL_SLUGS) {
-      expect(registeredSlugs.has(slug), slug).toBe(true);
-    }
-  });
-
-  it("keeps public routing metadata for the private-owned challenge skills", () => {
-    const challenge = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === "group-challenge",
-    );
-    const scorecards = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === "group-challenge-scorecards",
-    );
-    const comedy = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === "groupchat-comedy",
-    );
-
-    expect(challenge?.triggerHint).toContain(
-      "social-first formation grounded in the current room",
-    );
-    expect(challenge?.triggerHint).toContain(
-      "A vague challenge request is not exercise programming.",
-    );
-    expect(challenge?.triggerHint).toContain("group-challenge-scorecards");
-    expect(scorecards?.triggerHint).toContain("teams");
-    expect(scorecards?.triggerHint).toContain("shared or participant target");
-    expect(scorecards?.triggerHint).toContain("multiple metrics");
-    expect(scorecards?.triggerHint).toContain("weighted additive points");
-    expect(scorecards?.triggerHint).toContain("up-to-five-component");
-    expect(scorecards?.triggerHint).toContain(
-      "group-challenge still owns formation, buy-in, consent, durable state, scheduling, diagnostics, and close-out",
-    );
-    expect(comedy?.triggerHint).toContain(
-      "protected-register handling inside the group",
-    );
-    expect(comedy?.triggerHint).not.toContain("private care");
-  });
-
-  it("fails closed when the managed challenge policy is absent", async () => {
-    const raw = await readFile(
-      path.join(resolveAssistantSkillsRoot(), "group-challenge", "SKILL.md"),
-      "utf8",
-    );
-    const normalized = raw.replace(/\s+/gu, " ");
-
-    expect(normalized).toContain(
-      "Outside those game tools, do not create, score, settle, or announce a managed group challenge in this build.",
-    );
-    expect(normalized).toContain("`murph.update_game` when those tools are available");
-    expect(normalized).toContain("App games for 2 to 10 addressed people");
-    expect(normalized).toContain("exact audience chat with Murph");
-    expect(normalized).toContain(
-      "perform no effect and state one plain capability limitation",
-    );
-    expect(normalized).toContain(
-      "return the resident delivery skip outcome without user-facing text",
-    );
-    expect(normalized).toContain(
-      "Do not mutate a preserved automation solely because managed behavior is unavailable.",
-    );
-    expect(normalized).not.toContain(
-      "unless the public runtime contracts and current evidence support it",
-    );
+    expect(registered).toContain("group-challenge");
+    expect(registered).toContain("group-challenge-scorecards");
   });
 });

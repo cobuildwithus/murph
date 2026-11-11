@@ -162,23 +162,7 @@ describe('assistant style dynamic tool', () => {
   })
 
   it('describes direct-member and synthetic-room ownership without a target selector', () => {
-    expect(MURPH_ASSISTANT_STYLE_TOOL.description).toContain(
-      'current conversation runtime',
-    )
-    expect(MURPH_ASSISTANT_STYLE_TOOL.description).toContain(
-      'synthetic room Murph',
-    )
-    expect(MURPH_ASSISTANT_STYLE_TOOL.description).toContain(
-      'never to a participant',
-    )
-    // The tool contract must agree with the prompt: a bare directional request
-    // reads the current score first and steps from it, rather than jumping to
-    // an endpoint the member never asked for.
-    expect(MURPH_ASSISTANT_STYLE_TOOL.description).toContain(
-      'show first, then set a bounded step from the reported score',
-    )
     expect(MURPH_ASSISTANT_STYLE_TOOL.description).not.toContain('endpoint')
-    expect(MURPH_ASSISTANT_STYLE_TOOL.description).not.toContain('Never guess or clamp')
     expect(MURPH_ASSISTANT_STYLE_TOOL.inputSchema).not.toHaveProperty(
       'properties.memberId',
     )

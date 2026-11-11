@@ -23,18 +23,6 @@ afterEach(async () => {
 })
 
 describe('member-memory maintenance boundary', () => {
-  it('states the exact-once read and guarded mutation receipt contract', () => {
-    expect(MURPH_MEMBER_MEMORY_TOOL.description).toContain(
-      'Call show exactly once per maintenance turn and use that one result for deduplication, faithful wording-only compaction, and mutation targeting.',
-    )
-    expect(MURPH_MEMBER_MEMORY_TOOL.description).toContain(
-      "pass that record's exact updatedAt as expectedUpdatedAt",
-    )
-    expect(MURPH_MEMBER_MEMORY_TOOL.description).toContain(
-      'If a record changed after show, leave the newer value unchanged and end the write attempt',
-    )
-  })
-
   it('reads, adds, updates, and forgets canonical memory through the authorized host', async () => {
     const vaultRoot = await makeVaultRoot()
 

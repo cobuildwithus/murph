@@ -785,7 +785,7 @@ async function generateRecapOrChatImageBytes(input: Parameters<typeof executeGen
 function imageCredentialFailure(fileRuntime: GeneratedMediaFileRuntime | null | undefined): GenerateImageToolResult {
   return {
     failureDiagnostic: toolFailureDiagnostic('unavailable'), rpcSuccess: false,
-    rpcText: 'OPENAI_API_KEY is required for image generation',
+    rpcText: 'image generation is not set up on this deployment, so no image was made',
   }
 }
 function imageExecutionFailure(error: unknown, fileRuntime: GeneratedMediaFileRuntime | null | undefined, label: string): GenerateImageToolResult {

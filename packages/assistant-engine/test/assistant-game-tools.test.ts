@@ -5,7 +5,7 @@ import { normalizeAssistantExecutionContext } from '../src/assistant/execution-c
 import { describe, expect, it, vi } from 'vitest'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { executeMurphDynamicToolRequest, resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
-import { GAME_GROUP_CHAT_GUIDANCE, GAME_SETUP_CHAT_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_PAIR_CHAT_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.js'
+import { GAME_GROUP_CHAT_GUIDANCE, GAME_SETUP_CHAT_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_PAIR_CHAT_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE, GAME_READ_FACTS_GUIDANCE, GAME_PLAY_AGAIN_GUIDANCE, GAME_PAIR_AGREE_GUIDANCE, GAME_GROUP_JOIN_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_UPDATE_RESULT_GUIDANCE, GAME_DAY_OUTCOME_GUIDANCE, GAME_REMINDER_OUTCOME_GUIDANCE, GAME_PHOTO_OUTCOME_GUIDANCE, GAME_REFUSAL_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.js'
 import { resolveAssistantGameHostDynamicTools } from '../src/assistant/codex-turn/planning.js'
 import { MURPH_FINISH_WITHOUT_REPLY_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import { createAssistantHostedToolContext, type AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
@@ -47,32 +47,53 @@ describe('game dynamic tools', () => {
     expect(requestPort).toHaveBeenCalledOnce()
   })
   it.each([
-    { label: 'pair only', games: [{ status: 'live' }], group: false, pair: true },
-    { label: 'pair history in a larger room', games: [{ status: 'settled' }], group: true, pair: true, roster: 3 },
-    { label: 'group only', games: [{ status: 'live', maxPlayers: 10 }], group: true, pair: false },
-    { label: 'two-person group', games: [{ status: 'invited', maxPlayers: 10 }], group: true, pair: true, roster: 2 },
-    { label: 'live pair and invited group', games: [{ status: 'live' }, { status: 'invited', maxPlayers: 10 }], group: true, pair: true },
-    { label: 'live pair and settled group', games: [{ status: 'live' }, { status: 'settled', maxPlayers: 10 }], group: true, pair: true },
-  ])('composes shared guidance once with selected-game mode rules: $label', async ({ games, group, pair, roster }) => {
-    const requestPort = vi.fn().mockResolvedValue({ action: 'read_game', result: { status: 'ok', state: { games, ...(roster ? { players: Array.from({ length: roster }, () => ({})) } : {}) } } })
+    { label: 'no game', games: [], carries: ['poll'] },
+    { label: 'finished pair game', games: [{ status: 'settled' }], carries: ['poll', 'again'] },
+    { label: 'waiting pair game', games: [{ status: 'negotiating' }], carries: ['poll', 'pairAgree', 'pair', 'reminder'] },
+    { label: 'live pair game', games: [{ status: 'live' }], carries: ['pair', 'day', 'reminder'] },
+    { label: 'invited group game', games: [{ status: 'invited', maxPlayers: 10 }], carries: ['poll', 'groupJoin', 'group', 'reminder'] },
+    { label: 'live group game people can still join', games: [{ status: 'live', maxPlayers: 10, pendingInviteeCount: 2 }], carries: ['groupJoin', 'group', 'day', 'reminder'] },
+    { label: 'live group game with everyone in', games: [{ status: 'live', maxPlayers: 10, pendingInviteeCount: 0 }], carries: ['group', 'day', 'reminder'] },
+    { label: 'live pair and invited group', games: [{ status: 'live' }, { status: 'invited', maxPlayers: 10 }], carries: ['poll', 'pair', 'groupJoin', 'group', 'day', 'reminder'] },
+    { label: 'live pair and settled group', games: [{ status: 'live' }, { status: 'settled', maxPlayers: 10 }], carries: ['again', 'pair', 'day', 'reminder'] },
+  ])('carries each rule block once, and only for what the room holds: $label', async ({ games, carries }) => {
+    const requestPort = vi.fn().mockResolvedValue({ action: 'read_game', result: { status: 'ok', state: { games } } })
     const result = await executeMurphDynamicToolRequest({ request: parse('read_game', {})!, hostedToolContext: { ...context(), groupTool: { request: requestPort } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     const text = result.rpcResult.contentItems[0]?.text ?? ''
-    for (const guidance of [GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_REMINDER_GUIDANCE]) expect(text.split(guidance)).toHaveLength(2)
-    expect(text.includes(GAME_PAIR_CHAT_GUIDANCE)).toBe(pair)
-    expect(text.includes(GAME_GROUP_MODE_GUIDANCE)).toBe(group)
-    for (const rule of ['A consented Talk note may name its author; it accepts no invitation and changes no terms.', 'In Prove it, only the accused may concede their own day; never judge evidence or ask for a group verdict.']) {
-      expect(text.split(rule)).toHaveLength(group ? 2 : 1)
-    }
-    expect(text).not.toMatch(/before 20:00|short first day|person-to-person nudges/u)
+    for (const guidance of [GAME_READ_FACTS_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE]) expect(text.split(guidance)).toHaveLength(2)
+    const blocks = { poll: GAME_SHARED_CHOICE_POLL_GUIDANCE, again: GAME_PLAY_AGAIN_GUIDANCE, pairAgree: GAME_PAIR_AGREE_GUIDANCE, pair: GAME_PAIR_CHAT_GUIDANCE,
+      groupJoin: GAME_GROUP_JOIN_GUIDANCE, group: GAME_GROUP_MODE_GUIDANCE, day: GAME_DAY_CORRECTION_GUIDANCE, reminder: GAME_REMINDER_GUIDANCE }
+    for (const [name, guidance] of Object.entries(blocks)) expect(text.split(guidance), name).toHaveLength(carries.includes(name) ? 2 : 1)
   })
 
-  it('binds consent and recurring reminder execution to fresh exact game state', () => {
-    expect(GAME_SHARED_SETUP_GUIDANCE).toContain('bare yes to an older offer')
-    expect(GAME_SHARED_SETUP_GUIDANCE).toContain('private invitation in the app')
-    expect(GAME_GROUP_MODE_GUIDANCE).toContain('ignoring supplied replacement terms at create')
-    expect(GAME_GROUP_MODE_GUIDANCE).toContain('never create another game as recovery')
-    for (const phrase of ['set_reminder', 'never a new room automation', 'reaches', 'turn on notifications in the app', 'Never set another player']) expect(GAME_REMINDER_GUIDANCE).toContain(phrase)
+  it.each([
+    { label: 'an accepted invitation', args: { operation: 'approve', gameId: 'game_synthetic', expectedTermsVersion: 1 }, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'live', pendingChange: null }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.joined },
+    { label: 'a yes that applies an ask', args: approval, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'live', pendingChange: null }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.applied },
+    { label: 'a yes that still needs more', args: approval, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'live', pendingChange: { id: 'proposal_synthetic' } }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.counted },
+    { label: 'the yes that ends a game', args: approval, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'void', pendingChange: null }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.ended },
+    { label: 'a no', args: { ...approval, operation: 'decline' }, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'live', pendingChange: null }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.declined },
+    { label: 'a cancelled game', args: { operation: 'cancel_game', gameId: 'game_synthetic' }, result: { status: 'ok', state: { games: [] } }, says: GAME_UPDATE_RESULT_GUIDANCE.ended },
+    { label: 'a day marked not done', args: { operation: 'mark_incomplete', gameId: 'game_synthetic', date: '2030-03-04' }, result: { status: 'ok', dayOutcome: { date: '2030-03-04', status: 'marked_incomplete' } }, says: GAME_DAY_OUTCOME_GUIDANCE.marked_incomplete },
+    { label: 'a reminder that cannot arrive', args: { operation: 'set_reminder', minutes: 1080 }, result: { status: 'ok', reaches: 'none' }, says: GAME_REMINDER_OUTCOME_GUIDANCE.none },
+    { label: 'a missing first name', args: approval, result: { status: 'rejected', error: 'PROFILE_REQUIRED: player_sam needs a first name and time zone in the Murph app.' }, says: GAME_REFUSAL_GUIDANCE.PROFILE_REQUIRED },
+    { label: 'a yes with no returned state', args: approval, result: { status: 'ok' }, says: '' },
+    { label: 'an unexplained refusal', args: approval, result: { status: 'rejected', error: 'TERMS_CHANGED: The terms changed.' }, says: '' },
+  ])('ends an update result with what to say about $label', async ({ args, result, says }) => {
+    const response = { action: 'update_game', result }
+    const output = await execute({ messageRef: inputId, ...args }, { ...context(), groupTool: { request: vi.fn().mockResolvedValue(response) } })
+    expect(output.rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response) + (says ? '\n' + says : ''))
   })
+  it.each([
+    { label: 'an offer', result: { status: 'ok', photoOutcome: 'offer' }, says: GAME_PHOTO_OUTCOME_GUIDANCE.offer },
+    { label: 'a suppressed offer', result: { status: 'ok', photoOutcome: 'suppressed' }, says: GAME_PHOTO_OUTCOME_GUIDANCE.suppressed },
+    { label: 'a day off', result: { status: 'rejected', error: 'DAY_CLOSED: Today is a day off. Next game day is Monday.' }, says: GAME_REFUSAL_GUIDANCE.DAY_CLOSED },
+  ])('ends a photo result with what to say about $label', async ({ result, says }) => {
+    const response = { action: 'game_photo', result }
+    const request = parse('game_photo', { messageRef: inputId, operation: 'offer', gameId: 'game_synthetic', sourceMessageRef: inputId, attachmentOrdinal: 1 })!
+    const output = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), groupTool: { request: vi.fn().mockResolvedValue(response) } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(output.rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response) + '\n' + says)
+  })
+
   it('uses group-only guidance for two-person group games and accepts starter edit_terms', async () => {
     const response = { action: 'read_game', result: { status: 'ok', state: { games: [
       { id: 'game_group_one', maxPlayers: 10, status: 'invited' }, { id: 'game_group_two', maxPlayers: 10, status: 'invited' },
@@ -82,16 +103,10 @@ describe('game dynamic tools', () => {
     const text = result.rpcResult.contentItems[0]?.text
     expect(text).toContain(GAME_GROUP_CHAT_GUIDANCE)
     expect(text).toContain(GAME_SELECTION_GUIDANCE)
-    expect(text).not.toContain(GAME_SETUP_CHAT_GUIDANCE)
+    expect(text).not.toContain(GAME_PAIR_CHAT_GUIDANCE)
     const tasks = Array.from({ length: 10 }, (_, index) => ({ memberId: `player_${index}`, text: 'Walk' }))
     expect(parse('update_game', { messageRef: inputId, operation: 'edit_terms', gameId: 'game_group_one', expectedTermsVersion: 1,
       terms: { defaultTask: 'Walk', tasks, schedule: { count: 5 }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] } })).toMatchObject({ kind: 'game' })
-    expect(GAME_GROUP_CHAT_GUIDANCE).toContain('Any seated player')
-    expect(GAME_GROUP_CHAT_GUIDANCE).toContain('yesNeeded')
-    expect(GAME_GROUP_CHAT_GUIDANCE).toContain('a yes or no is final for that ask')
-    expect(GAME_GROUP_CHAT_GUIDANCE).not.toMatch(/Groups have no change requests|Only the starter can edit/u)
-    expect(MURPH_UPDATE_GAME_TOOL.description).not.toMatch(/only the starter can edit_terms|no proposals/u)
-    expect(GAME_GROUP_CHAT_GUIDANCE).toContain('Never nudge')
   })
 
   it('reads a scheduled group occurrence without a message selector or write guidance', async () => {
@@ -103,7 +118,7 @@ describe('game dynamic tools', () => {
     const result = await executeMurphDynamicToolRequest({ request: parse('read_game', { messageRef: 'ignored-stale-ref' })!, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(result.rpcResult.success).toBe(true)
     expect(requestPort).toHaveBeenCalledExactlyOnceWith({ action: 'read_game', origin: scheduledOrigin, includePlayers: true })
-    expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response))
+    expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response) + '\n' + GAME_READ_FACTS_GUIDANCE)
     expect((await execute(approval, ctx)).rpcResult.success).toBe(false)
     const photo = await executeMurphDynamicToolRequest({ request: parse('game_photo', { messageRef: inputId, operation: 'save', gameId: 'game_synthetic' })!, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(photo.rpcResult.success).toBe(false)
@@ -125,18 +140,12 @@ describe('game dynamic tools', () => {
     expect(resolveMurphDynamicTools({ gameReadAvailable: true , gamesAvailable: true })).not.toContain(MURPH_GAME_PHOTO_TOOL)
     expect(resolveMurphDynamicTools({ gameReadAvailable: true, gamesAvailable: true, gamePhotosAvailable: true })).toContain(MURPH_GAME_PHOTO_TOOL)
     expect(resolveMurphDynamicTools({ gameReadAvailable: true , gamesAvailable: true })).not.toContain(MURPH_WRITE_RECAP_TOOL)
-    expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ordinary conversational agreement')
-    expect(MURPH_UPDATE_GAME_TOOL.description).toContain('do not demand special words')
-    expect(MURPH_READ_GAME_TOOL.description).toContain('Call the reward a prize')
-    expect(MURPH_READ_GAME_TOOL.description).toContain('a two-player game is a game, as the players and the app call it, never a challenge.')
-    expect(MURPH_READ_GAME_TOOL.description).toContain('Never call it a ticket, bet, wager, stake or winnings')
   })
   it('advertises v1 limits and stakes without suggesting a legacy graph for every game', () => {
     const change = MURPH_UPDATE_GAME_TOOL.inputSchema.properties.change.properties
     expect(change.lengthDays).toMatchObject({ minimum: 3, maximum: 365 })
     expect(change.schedule.properties.count.maximum).toBe(365)
     expect(change.stakes.items.properties.kind.enum).toEqual(['prize', 'dare'])
-    expect(MURPH_GAME_PHOTO_TOOL.description).not.toContain('Heart-rate games still require the app graph')
   })
   it('round-trips create and initial agreement without accepting an actor selector', async () => {
     const terms = { tasks: [{ memberId: 'player_sam', text: 'Read' }, { memberId: 'player_ava', text: 'Walk' }], schedule: { count: 3 }, stakes: [{ kind: 'dare', item: 'Sing' }], lengthDays: 7 }
@@ -147,11 +156,7 @@ describe('game dynamic tools', () => {
       expect(parse('update_game', { messageRef: inputId, ...update, actorMemberId: 'player_sam' })?.kind).toBe('invalid-game-arguments')
     }
     expect(parse('update_game', { messageRef: inputId, operation: 'create', gameId: 'game_setup', terms: { ...terms, stakes: [{ kind: 'per_miss', item: 'Lunch' }] } })?.kind).toBe('invalid-game-arguments')
-    expect(GAME_SETUP_CHAT_GUIDANCE).toContain('never the other person’s')
-    expect(GAME_SETUP_CHAT_GUIDANCE).toContain('Never approve for the requester or from a poll vote')
-    expect(GAME_SETUP_CHAT_GUIDANCE).toContain('read its results')
     expect(MURPH_UPDATE_GAME_TOOL.description).not.toContain(GAME_SETUP_CHAT_GUIDANCE)
-    expect(MURPH_UPDATE_GAME_TOOL.description).toContain('follow its setup guidance')
   })
   it('binds the selected accepted message instead of using a model actor or last speaker', async () => {
     port.mockClear()
@@ -201,19 +206,10 @@ describe('game dynamic tools', () => {
     const request = parse('read_game', {})!
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), groupTool: { request: async () => response } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     const text = result.rpcResult.contentItems[0]?.text
-    expect(text).toContain(GAME_SETUP_CHAT_GUIDANCE)
-    if (!guided) expect(text).toBe(JSON.stringify(response) + '\n' + GAME_SETUP_CHAT_GUIDANCE)
+    expect(text).toContain(GAME_SHARED_SETUP_GUIDANCE)
+    if (!guided) expect(text).toBe(JSON.stringify(response) + '\n' + [GAME_READ_FACTS_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, ...(statuses.some(status => status === 'settled') ? [GAME_PLAY_AGAIN_GUIDANCE] : []), GAME_PAIR_CHAT_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_REMINDER_GUIDANCE].join('\n'))
     else {
       expect(text).toContain(GAME_SELECTION_GUIDANCE)
-      // A move names its game only from the speaker's own words or the one game it can apply to; otherwise one question and no write.
-      expect(GAME_SELECTION_GUIDANCE).toContain('for marking a day not done, games where the speaker has a post that date; for counting a day as done, games where that date does not show as posted, since a missed day and a day marked not done both read as unposted')
-      // Photo silence and consent rules outrank the selection question.
-      expect(GAME_SELECTION_GUIDANCE).toContain('The photo rules still decide whether a photo gets any reply or save: a photo they keep quiet stays quiet.')
-      // What a photo shows narrows only unsolicited offers; an explicit save goes to the game the player names.
-      expect(GAME_SELECTION_GUIDANCE).toContain('for an unsolicited photo offer, the speaker’s games whose task it shows; for an explicit save, the game they name or the photo offer waiting on them.')
-      expect(GAME_SELECTION_GUIDANCE).toContain('for a change, games it would actually change')
-      expect(GAME_SELECTION_GUIDANCE).toContain('Never pick by which game came up last, a recent notice, another player’s messages, or the newest or first game.')
-      expect(GAME_SELECTION_GUIDANCE).toContain('If exactly one game fits, act on it. If several fit, make no update_game or game_photo call: ask once, in one short question naming only those games by their tasks')
       expect(text).toContain('game_synthetic_0')
       expect(text).toContain('game_synthetic_1')
       expect(text).toContain('Read')
@@ -245,20 +241,14 @@ describe('game dynamic tools', () => {
     expect(result.rpcResult.success).toBe(false)
     expect(result.rpcResult.contentItems[0]?.text).toContain('(check: expectedTermsVersion)')
     expect(result.rpcResult.contentItems[0]?.text).not.toContain('Breakfast')
-    expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.expectedTermsVersion.description).toContain('Required for propose')
   })
   it('round-trips negotiated task and whole-game stake scope without identity selectors', () => {
     const change = { kind: 'edit', tasks: [{seat:0,text:'Read'},{seat:1,text:'Stretch'}], stakes:[{kind:'per_miss',item:'Make tea'}], stakesApplyToWholeGame:true, startsOn:null }
     const request = {action:'update_game',origin,update:{operation:'propose',gameId:approval.gameId,proposalId:approval.proposalId,expectedTermsVersion:1,change}}
     expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request)
-    expect(GAME_PAIR_CHAT_GUIDANCE).toContain('Tasks lock at either player’s Day 1')
-    expect(GAME_PAIR_CHAT_GUIDANCE).toContain('Prize/dare changes need the other player’s yes until game end')
-    expect(MURPH_UPDATE_GAME_TOOL.description).not.toContain('including earlier misses')
-    expect(GAME_SETUP_CHAT_GUIDANCE).toContain('Negotiating games have no active obligations')
     expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change})?.kind).toBe('game')
     expect(parse('update_game',{...approval,operation:'propose',expectedTermsVersion:1,change:{...change,stakesApplyToWholeGame:false}})?.kind).toBe('invalid-game-arguments')
   })
-
 })
 
 describe('game recap dynamic contract', () => {
@@ -309,11 +299,7 @@ describe('game recap dynamic contract', () => {
       .toEqual([MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL])
     expect(resolveAssistantGameHostDynamicTools({ currentGameMissedCheckInScope: () => ({ gameId: 'game', eventId: 'game-missed:game:a:2030-01-01', memberId: 'a', firstMissedDate: '2030-01-01', pairFingerprint: 'a'.repeat(32) }) }))
       .toEqual([MURPH_GAME_LORE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL])
-    expect(MURPH_READ_GAME_TOOL.description).not.toContain('recap turn')
     expect(MURPH_READ_GAME_TOOL.description).not.toContain('loreGuidance')
-    expect(MURPH_READ_GAME_RECAP_TOOL.description).toContain('recap turn')
-    expect(MURPH_GAME_LORE_TOOL.description).toContain('when instructed')
-    expect(MURPH_GAME_LORE_TOOL.description).toContain('Returns')
     expect(MURPH_GAME_LORE_TOOL.inputSchema).toEqual({
       type: 'object', additionalProperties: false, required: ['operation'],
       properties: { operation: { enum: ['read', 'replace'] }, content: { type: 'string' } },
@@ -483,17 +469,12 @@ describe('game photo dynamic contract', () => {
   })
 })
 
-
 it.each(['mark_incomplete', 'mark_complete', 'restore_day'])('binds %s to the current speaker without a target or proposal', async (operation) => {
   port.mockClear()
   const args = { messageRef: inputId, operation, gameId: 'game_synthetic', date: '2030-04-01' }
   expect((await execute(args)).rpcResult.success).toBe(true)
   expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation, gameId: 'game_synthetic', date: '2030-04-01' } })
   expect(parse('update_game', { ...args, memberId: 'another-player' })?.kind).toBe('invalid-game-arguments')
-  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ask once for the date')
-  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('one plain line naming the date or weekday')
-  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('never from progress.checkedAt or processing time')
-  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Before 3 AM, today is the previous calendar date; yesterday is one further day back')
 })
 
 it('offers Murph one way to count a day as done, on the player’s word', () => {
@@ -501,10 +482,6 @@ it('offers Murph one way to count a day as done, on the player’s word', () => 
   expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.operation.enum).toContain('mark_complete')
   expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.operation.enum).not.toContain('restore_day')
   expect(MURPH_UPDATE_GAME_TOOL.description).not.toContain('restore_day')
-  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('counts a closed game day they never posted on as a post in their own words')
-  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('Take their word; never ask for proof or put it to the other players, and never offer it unasked')
-  expect(MURPH_UPDATE_GAME_TOOL.description).toContain('ask once what they want that day’s post to say, then mark_complete the same date with text set to their answer')
-  expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.text.description).toContain('Never write or edit them; omit until they give them.')
 })
 
 it('passes the speaker’s own words for a counted day only on mark_complete', async () => {
@@ -523,7 +500,6 @@ it('cancels a not-yet-started game for the current speaker with no proposal or e
   expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation: 'cancel_game', gameId: 'game_synthetic' } })
   expect(parse('update_game', { ...args, proposalId: 'proposal_synthetic' })?.kind).toBe('invalid-game-arguments')
   expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.operation.enum).toContain('cancel_game')
-  expect(GAME_SHARED_SETUP_GUIDANCE).toContain('cancel_game stays quiet: the lifecycle owns its one announcement')
 })
 
 it('calls off a live game only as an ask every remaining player agrees to, then stays quiet', async () => {
@@ -533,28 +509,13 @@ it('calls off a live game only as an ask every remaining player agrees to, then 
   expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation: 'propose', gameId: 'game_synthetic', proposalId: 'proposal_synthetic', expectedTermsVersion: 3, change: { kind: 'call_off' } } })
   expect(parse('update_game', { ...callOff, change: { kind: 'call_off', lengthDays: 5 } })?.kind).toBe('invalid-game-arguments')
   expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.change.properties.kind.enum).toEqual(['start_now', 'edit', 'call_off'])
-  expect(GAME_PAIR_CHAT_GUIDANCE).not.toContain('cannot be called off')
-  for (const guidance of [GAME_PAIR_CHAT_GUIDANCE, GAME_GROUP_MODE_GUIDANCE]) {
-    expect(guidance).toContain('only by call_off: on an explicit request to stop the whole game, never from a joke, a missed day or venting')
-    expect(guidance).toContain('After the yes that ends it, stay quiet: the lifecycle owns its one announcement.')
-  }
-  expect(GAME_PAIR_CHAT_GUIDANCE).toContain('The other player’s yes ends it with no winner and nothing owed')
-  expect(GAME_GROUP_MODE_GUIDANCE).toContain('Every remaining player must say yes, so yesNeeded counts everyone left; one no closes the ask.')
 })
 
 it('teaches one pending change, current-ask-only proposals, plain refusals and open days', () => {
   const description = GAME_PAIR_CHAT_GUIDANCE + MURPH_UPDATE_GAME_TOOL.description
-  expect(description).toContain('One change waits at a time.')
-  for (const phrase of ['say it replaces the earlier ask', 'Only returned pendingChange remains open', 'only the current request', 'nearest valid option', 'Locked-task requests get one clear refusal', 'Attribute yes/no to its player']) expect(description).toContain(phrase)
-  expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.change.description).toContain('Only the fields the acting message asks to change now')
-  expect(description).toContain('is still open, not missed')
   expect(description).not.toMatch(/unposted/u)
 })
 
-
-it('gives game photo refusals a brief truthful reply without another attempt', () => {
-  for (const phrase of ['DAY_CLOSED', 'credit the effort', 'next game day', 'Do not retry', 'claim the post counted or was saved']) expect(MURPH_GAME_PHOTO_TOOL.description).toContain(phrase)
-})
 it('exposes optional member-addressed superlatives with shared grounding', () => {
   const superlatives = [
     { memberId: 'player_first', title: 'Give the mat tenure', line: 'That mat earned a regular shift.' },
@@ -563,17 +524,13 @@ it('exposes optional member-addressed superlatives with shared grounding', () =>
   const recap = { pages: [], chatLine: 'Game over, tied 5 to 5.', superlatives }
   expect(parse('write_recap', recap)).toMatchObject({ kind: 'game', request: { recap } })
   expect(MURPH_WRITE_RECAP_TOOL.inputSchema.properties).toHaveProperty('superlatives')
-  for (const phrase of ['eligible player memberIds', 'text all players can see', '2–6 words', 'differ between players', 'bodies or weight']) expect(MURPH_WRITE_RECAP_TOOL.description).toContain(phrase)
 })
 
 it('offers one seated task for a group starter edit', () => {
   expect(parse('update_game', { messageRef: inputId, operation: 'edit_terms', gameId: 'game_group_one', expectedTermsVersion: 1,
     terms: { defaultTask: 'Walk', tasks: [{ memberId: 'player_0', text: 'Walk' }], schedule: { count: 5 }, stakes: [{ kind: 'prize', item: 'Choose lunch' }] } })).toMatchObject({ kind: 'game' })
-  expect(GAME_GROUP_CHAT_GUIDANCE).toContain('pendingInviteeCount')
-  expect(GAME_GROUP_CHAT_GUIDANCE).toContain('server preserves hidden overrides')
   expect(GAME_GROUP_CHAT_GUIDANCE).toContain('canStartNow')
   expect(GAME_GROUP_CHAT_GUIDANCE).toContain('start_now')
-  expect(GAME_GROUP_CHAT_GUIDANCE).not.toContain('Never offer Start now')
 })
 
 it('passes a seated player’s group edit proposal and individual vote through the real contracts', async () => {

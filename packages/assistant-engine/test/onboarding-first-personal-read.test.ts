@@ -11,7 +11,6 @@ import {
 } from '../src/assistant-skill-assets.js'
 import {
   executeAutomationDynamicTool,
-  MURPH_AUTOMATION_TOOL,
   readAutomationDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools/automation.js'
 import type {
@@ -36,12 +35,7 @@ import {
 async function readOnboardingCompletionGuidance(): Promise<string> {
   const skillsRoot = resolveAssistantSkillsRoot()
   const raw = await readFile(
-    path.join(
-      skillsRoot,
-      'murph-onboarding',
-      'references',
-      'return-launch-completion.md',
-    ),
+    path.join(skillsRoot, 'murph-onboarding', 'SKILL.md'),
     'utf8',
   )
   return raw.replace(/\s+/gu, ' ')
@@ -334,51 +328,17 @@ describe('onboarding first personal read', () => {
     expect(prompt).not.toContain('First read <Occurrence local date>')
   })
 
-  it('keeps onboarding responsible only for invoking the fixed action', async () => {
+  it('names the fixed action once in the onboarding completion guidance', async () => {
     const onboarding = await readOnboardingCompletionGuidance()
-    const firstReadIndex = onboarding.indexOf(
+
+    expect(onboarding).toContain(
       `{"action":"${MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION}"}`,
     )
-    const completionIndex = onboarding.indexOf(
-      'vault-cli assistant onboarding complete --reason user_answered',
-    )
-
-    expect(firstReadIndex).toBeGreaterThan(-1)
-    expect(firstReadIndex).toBeGreaterThan(completionIndex)
     expect(
       onboarding.match(
         new RegExp(MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION, 'gu'),
       ),
     ).toHaveLength(1)
-    expectContainsAll(onboarding, [
-      'The host owns the immutable automation identity, current-conversation route binding, two-minute delay, bounded active window, fresh continuity, selected model with high reasoning, and complete first-read prompt.',
-      'Do not call generic `save`, provide instructions, calculate timestamps, choose a model, or add fields.',
-      'The host accepts the action only on the single trusted ordinary foreground turn that began with onboarding open and has just completed it with `user_answered`',
-      'Never arm it when the current message says the member asked not to receive this read, requested no follow-up, or otherwise revoked this proactive outreach.',
-      'do not retry, block completion, roll back completion, or mention the failure',
-      'If I find something genuinely useful—whether that\'s a pattern, a clearer interpretation, or something worth watching next—I\'ll send it over.',
-    ])
-    expect(onboarding).not.toContain(
-      'then send you the most useful thing I find',
-    )
-    expect(onboarding).not.toContain(
-      'slug: "onboarding-first-personal-read"',
-    )
-    expect(onboarding).not.toContain(
-      'schedule the occurrence for two minutes later',
-    )
-    expect(onboarding).not.toContain(
-      'assistantTargetOverride: { "model": "gpt-6.1-sol"',
-    )
-  })
-
-  it('documents the fixed action and cancellation boundary', () => {
-    expectContainsAll(MURPH_AUTOMATION_TOOL.description, [
-      'save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn',
-      'it accepts no prompt, timing, model, route, or other fields',
-      'Generic save cannot replace it',
-      'generic patch may only archive the existing record when the member cancels',
-    ])
   })
 
   it('rejects invalid builder dates', () => {

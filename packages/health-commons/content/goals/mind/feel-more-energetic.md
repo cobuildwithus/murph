@@ -35,7 +35,7 @@ goal:
   workflow:
     kind: general_plan
     ownerSkillIds:
-      - energy-fatigue
+      - sleep-improvement
   startPrompt: Hey Murph, help me feel more energetic.
   indexable: true
 safety:

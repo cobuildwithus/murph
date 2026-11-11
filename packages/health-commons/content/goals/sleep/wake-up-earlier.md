@@ -34,7 +34,6 @@ goal:
   workflow:
     kind: habit_plan
     ownerSkillIds:
-      - circadian-rhythm
       - sleep-improvement
   startPrompt: Hey Murph, help me wake up earlier.
   indexable: true

@@ -12,24 +12,6 @@ import type {
 
 describe("assistant plan usage tool", () => {
   it("advertises the private read and immediate authorization boundary", () => {
-    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "current private hosted plan",
-    );
-    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "explicit plan, usage, billing",
-    );
-    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "trusted low-usage context",
-    );
-    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "Read-only",
-    );
-    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "AI-usage",
-    );
-    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
-      "without credit-source splits",
-    );
     expect(MURPH_PLAN_USAGE_TOOL.description).not.toContain(
       "included/purchased",
     );

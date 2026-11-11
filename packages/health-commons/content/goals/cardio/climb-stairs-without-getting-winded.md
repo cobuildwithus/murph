@@ -35,8 +35,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - running-cardio
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me climb stairs without getting winded.
   indexable: true
 safety:

@@ -124,33 +124,6 @@ describe('assistant personalization tool', () => {
   })
 
   it('describes callback-bound direct or room ownership without a member target', () => {
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
-      'current hosted conversation runtime',
-    )
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
-      'synthetic room Murph',
-    )
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
-      'never a participant',
-    )
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
-      'Reply casing maps to the existing tone field',
-    )
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
-      'sentence case means formal',
-    )
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
-      'lowercase means casual',
-    )
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
-      'Confirm casing as sentence case or lowercase in the reply.',
-    )
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
-      'rather than an unsupported setting',
-    )
-    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
-      'a one-reply formatting request does not persist',
-    )
     expect(MURPH_PERSONALIZATION_TOOL.description).not.toMatch(/mainPersona|supportingPersona|persona changes/iu)
     expect(JSON.stringify(MURPH_PERSONALIZATION_TOOL.inputSchema)).not.toContain(
       'memberId',

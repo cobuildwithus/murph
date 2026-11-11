@@ -33,7 +33,7 @@ goal:
     kind: care_support
     ownerSkillIds:
       - physical-therapy
-      - mobility-posture
+      - training
   startPrompt: Hey Murph, help me reduce my neck pain.
   indexable: true
 safety:

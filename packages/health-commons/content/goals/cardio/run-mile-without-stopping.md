@@ -35,7 +35,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - running-cardio
+      - training
   startPrompt: Hey Murph, help me run a mile without stopping.
   indexable: true
 safety:

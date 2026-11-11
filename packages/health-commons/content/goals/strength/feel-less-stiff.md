@@ -34,7 +34,7 @@ goal:
   workflow:
     kind: habit_plan
     ownerSkillIds:
-      - mobility-posture
+      - training
       - daily-activity
   startPrompt: Hey Murph, help me feel less stiff.
   indexable: true

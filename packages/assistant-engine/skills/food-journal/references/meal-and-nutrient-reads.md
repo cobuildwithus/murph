@@ -1,84 +1,96 @@
 # Saved meal and nutrient reads
 
-Read this for recent-meal recall, a saved-day review, or a connected or
-saved-meal nutrient question. New meal capture does not need it.
+Read this to recall recent meals, review a saved day, or answer a question
+about stored or connected nutrients. Logging a new meal does not need it. To
+estimate, correct or log a meal, or to attach a nutrition card, read
+`food-journal/SKILL.md`.
 
-Apply known numeric preferences before answering: do not surface calories or
-macros for intuitive-eating contexts, eating-disorder risk, or number-sensitive
-users. Keep symptom or digestion questions focused on that purpose. For a meal
-estimate, correction, capture or nutrition card, load `food-journal/SKILL.md`
-before proceeding; this read guide does not authorize estimates or writes.
+For members who should not see numbers (see `food-journal/SKILL.md`), leave
+calories and macros out of the answer. Keep a symptom or digestion question on
+that question.
 
 ## Counts, coverage and stored calorie or macro totals
 
 Use `vault-cli meal totals --from <date> --to <date> --format json` for meal
-counts, days with food logs, daily calorie/macronutrient totals, averages and
-comparisons. Its `days` array includes each logged date, its `mealCount`, and
-per-metric totals and contributing `mealCount`. Reuse this one bounded read;
-do not list individual meals unless the question needs food identities,
-provenance or other details the aggregate lacks.
+counts, days with food logs, daily calorie and macro totals, averages and
+comparisons. Its `days` array has each logged date, that day's `mealCount`, and
+each metric's total with the `mealCount` that contributed to it. One read
+usually answers the question. List individual meals only when the question
+needs food names, sources or other detail the totals lack.
 
-A missing date means no saved meals, not no food eaten. A null metric with
-zero contributing meals means unknown, not zero. Fewer contributing meals than
-the day's `mealCount` means a partial total. Equal counts cover the stored meals,
-not necessarily everything eaten. For averages, name the denominator (logged
-days or days with the requested field); do not count unknown days as zero or
-present partial-day averages as complete intake. Load `nutrition-strategy` for
-target-setting or advice, rather than inferring targets from these totals.
+How to read the result:
+
+- A date that is missing has no saved meals. The member may still have eaten.
+- A null metric with zero contributing meals is unknown. Never report it as
+  zero.
+- Fewer contributing meals than the day's `mealCount` means a partial total.
+- Equal counts mean every saved meal has that value. Meals the member never
+  logged are still missing.
+- For an average, say what you divided by: logged days, or days that have the
+  requested value. Do not count unknown days as zero or present a partial-day
+  average as complete intake.
+
+For target-setting or advice, read `nutrition-strategy`. Do not infer targets
+from these totals.
 
 ## Recent meals and saved days
 
-For private recent-meal recall, read canonical records before asking the member
-to repeat the meal or claiming it is unknown. For the latest saved meal, use
-`vault-cli timeline --entry-type event --kind meal --limit 1 --format json`:
-the timeline is newest first by occurrence/capture time. `meal list` is oldest
-first, so `meal list --limit 1` does not find the latest meal. Apply the member's
-date bounds when given. Inspect the returned meal with `meal show` and view its
-photo when identification requires it; an empty chat attachment list does not
-mean there are no imported meal photos. Distinguish an empty result, a failed
-read, and a photo whose food cannot be identified. Reuse relevant reads already
-completed this turn.
+Read the saved records before asking the member to repeat a meal or saying it
+is unknown.
 
-When the member asks to
-inspect a particular day's saved meals, use
-`vault-cli meal list --from <date> --to <same-date> --limit 50 --format json`
-and check for a truncated result before claiming complete coverage. `meal list`
-has no `--date` option.
+- The latest saved meal:
+  `vault-cli timeline --entry-type event --kind meal --limit 1 --format json`.
+  The timeline is newest first. `meal list` is oldest first, so
+  `meal list --limit 1` does not find the latest meal. Add the member's date
+  bounds when they give them.
+- One day's meals:
+  `vault-cli meal list --from <date> --to <same-date> --limit 50 --format json`.
+  `meal list` has no `--date` option. Check whether the result was cut off
+  before saying the list is complete.
+- Open a returned meal with `vault-cli meal show <meal-id> --format json`, and
+  look at its photo when you need it to identify the food. An empty attachment
+  list in the chat does not mean there are no imported meal photos.
 
-## Connected and saved-meal nutrients
+Tell the member which of three things happened: nothing was saved, the read
+failed, or a photo exists but the food cannot be identified. Reuse reads you
+already made this turn.
 
-For a connected carbohydrate-record question, use one bounded day or
-short-range read:
+## Connected carbohydrate records
+
+Use one day or a short range:
 `vault-cli measurement entry list --metric carbohydrates --from <date> --to <date> --limit 50 --format json`.
-Returned grams are partial intake evidence. Do not infer food identity, a
-complete meal, total daily carbohydrate, or eaten calories from them. With no
-returned entry, say none was recorded.
+The grams returned are partial intake evidence. Do not infer the food, a
+complete meal, the day's total carbohydrate, or calories from them. If no entry
+comes back, say none was recorded.
 
-For a connected or saved-meal vitamin, mineral, or water question, use one
-bounded day or short-range read:
+## Vitamins, minerals and water
+
+Use one day or a short range:
 `vault-cli meal nutrients --from <date> --to <date> --format json`.
-The response lists every supported nutrient field. A `null` total with zero
-contributing meals means no recorded value; never report it as zero. A `contributingMealCount` below
-the enclosing `mealCount` means the total is partial across the selected stored
-meals; do not extrapolate the missing meals. Equal counts mean every selected
-stored meal record supplied that field, not that every meal eaten that day was
-logged. The aggregate may combine connected and manually saved meals. Do not
-attribute its totals or coverage to one provider or claim that provider was
-complete unless separate provider-specific evidence establishes that.
+The response lists every supported nutrient.
 
-Treat this as a bounded sum of stored meal fields, not a copy of the source
-app's daily dashboard. Source-app targets, daily percentages, and completeness
-claims are not imported. When asked what is "low," report the observed total and
-coverage first. Do not call an intake low, adequate, deficient, or excessive
-unless a trustworthy target applies to this member and the stored unit and
-nutrient form are compatible with it; name the target basis and remaining
-uncertainty. If the member asks for a reference comparison, use a current
-authoritative source rather than a remembered target and obtain the age, sex,
-and pregnancy or lactation context needed for that source. Do not directly
-compare provider fields for folic acid, vitamin A, vitamin E, or niacin to DFE,
-RAE, alpha-tocopherol, or niacin-equivalent targets unless the imported form and
-conversion basis are known. One day of food records does not diagnose a
-deficiency. Use
-`nutrition-strategy` for food-first suggestions and
-`micronutrients-supplements` for labs, supplement dosing, or deficiency-risk
+- A `null` total with zero contributing meals means no recorded value. Never
+  report it as zero.
+- A `contributingMealCount` below the enclosing `mealCount` means the total is
+  partial. Do not extrapolate the missing meals.
+- Equal counts mean every saved meal supplied that value. Meals the member
+  never logged are still missing.
+- The totals can mix meals from a connected app with meals logged in Murph. Do
+  not credit them to one provider, or call that provider complete, without
+  separate evidence.
+- These are sums of stored meal values. The source app's own targets, daily
+  percentages and completeness claims are not imported.
+
+When the member asks what is "low", report the observed total and its coverage
+first. Call an intake low, adequate, deficient or excessive only when a
+trustworthy target applies to this member and the stored unit and nutrient form
+match it, and name the target and the remaining uncertainty. For a reference
+comparison, use a current authoritative source and get the age, sex, and
+pregnancy or lactation context that source needs. Do not compare stored folic
+acid, vitamin A, vitamin E or niacin values with DFE, RAE, alpha-tocopherol or
+niacin-equivalent targets unless the imported form and conversion basis are
+known. One day of food records does not diagnose a deficiency.
+
+Read `nutrition-strategy` for food-first suggestions and
+`micronutrients-supplements` for labs, supplement dosing or deficiency-risk
 questions.

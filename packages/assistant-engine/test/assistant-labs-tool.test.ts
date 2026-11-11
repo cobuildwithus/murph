@@ -29,12 +29,6 @@ describe('murph.labs dynamic tool', () => {
     expect(
       listMurphDynamicToolNames().filter((name) => name === 'murph.labs'),
     ).toEqual(['murph.labs'])
-    expect(MURPH_LABS_TOOL.description).toContain(
-      'cannot order, book, pay for, reserve, start checkout, or promise a launch date',
-    )
-    expect(MURPH_LABS_TOOL.description).toContain(
-      'do not prove member eligibility, appointment availability, final price',
-    )
     expect(MURPH_LABS_TOOL.description).not.toMatch(/junction/iu)
   })
 

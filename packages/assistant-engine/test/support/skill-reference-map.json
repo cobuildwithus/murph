@@ -1,0 +1,407 @@
+{
+  "appointment-scheduling": {
+    "skills": [
+      "computer-use",
+      "phone-calls",
+      "reminders"
+    ],
+    "tools": [
+      "murph.computer_os_control"
+    ]
+  },
+  "assistant-style": {
+    "skills": [],
+    "tools": [
+      "murph.assistant_style"
+    ]
+  },
+  "automatic-meal-capture": {
+    "skills": [
+      "food-journal"
+    ],
+    "tools": [
+      "murph.attach_response_card"
+    ]
+  },
+  "behavior-followthrough": {
+    "skills": [
+      "experiment-onboarding",
+      "goal-setup",
+      "physical-therapy",
+      "stress-regulation"
+    ],
+    "tools": [
+      "murph.automation"
+    ]
+  },
+  "bluetooth-device-help": {
+    "skills": [],
+    "tools": [
+      "murph.device"
+    ]
+  },
+  "body-composition": {
+    "skills": [
+      "behavior-followthrough",
+      "cardiometabolic-health",
+      "daily-activity",
+      "experiment-onboarding",
+      "food-journal",
+      "goal-setup",
+      "group-challenge",
+      "gut-digestion",
+      "nutrition-strategy",
+      "sleep-improvement",
+      "tracked-table",
+      "training"
+    ],
+    "tools": []
+  },
+  "cardiometabolic-health": {
+    "skills": [
+      "body-composition",
+      "micronutrients-supplements",
+      "nutrition-strategy"
+    ],
+    "tools": []
+  },
+  "chronic-illness-support": {
+    "skills": [
+      "behavior-followthrough",
+      "physical-therapy",
+      "self-management-experiments",
+      "sleep-improvement",
+      "stress-regulation"
+    ],
+    "tools": []
+  },
+  "computer-use": {
+    "skills": [
+      "appointment-scheduling",
+      "behavior-followthrough",
+      "connected-apps",
+      "experiment-onboarding"
+    ],
+    "tools": [
+      "murph.automation",
+      "murph.computer_act",
+      "murph.computer_finish_run",
+      "murph.computer_open",
+      "murph.computer_os_control",
+      "murph.computer_pause_for_user"
+    ]
+  },
+  "connected-apps": {
+    "skills": [
+      "appointment-scheduling",
+      "computer-use",
+      "journal-connected-context",
+      "phone-calls"
+    ],
+    "tools": [
+      "murph.connected_apps_execute",
+      "murph.connected_apps_manage",
+      "murph.connected_apps_search"
+    ]
+  },
+  "cycle-hormonal-health": {
+    "skills": [
+      "sleep-improvement",
+      "training"
+    ],
+    "tools": []
+  },
+  "daily-activity": {
+    "skills": [
+      "cardiometabolic-health",
+      "physical-therapy",
+      "training"
+    ],
+    "tools": []
+  },
+  "experiment-onboarding": {
+    "skills": [],
+    "tools": [
+      "murph.automation"
+    ]
+  },
+  "file-send": {
+    "skills": [],
+    "tools": [
+      "murph.pending_vault_files"
+    ]
+  },
+  "food-journal": {
+    "skills": [
+      "automatic-meal-capture",
+      "computer-use",
+      "micronutrients-supplements",
+      "nutrition-strategy"
+    ],
+    "tools": [
+      "murph.attach_response_card"
+    ]
+  },
+  "goal-setup": {
+    "skills": [
+      "behavior-followthrough",
+      "experiment-onboarding",
+      "self-management-experiments"
+    ],
+    "tools": [
+      "murph.automation"
+    ]
+  },
+  "group-challenge": {
+    "skills": [],
+    "tools": [
+      "murph.read_game",
+      "murph.update_game"
+    ]
+  },
+  "group-challenge-scorecards": {
+    "skills": [],
+    "tools": []
+  },
+  "group-chat": {
+    "skills": [],
+    "tools": []
+  },
+  "group-newsletter": {
+    "skills": [],
+    "tools": []
+  },
+  "groupchat-comedy": {
+    "skills": [],
+    "tools": []
+  },
+  "gut-digestion": {
+    "skills": [
+      "food-journal",
+      "nutrition-strategy"
+    ],
+    "tools": []
+  },
+  "habitat": {
+    "skills": [],
+    "tools": []
+  },
+  "health-records": {
+    "skills": [
+      "food-journal"
+    ],
+    "tools": []
+  },
+  "hosted-low-usage": {
+    "skills": [
+      "murph-family",
+      "signup-link"
+    ],
+    "tools": [
+      "murph.family_plan",
+      "murph.group_usage",
+      "murph.plan_usage",
+      "murph.subscription"
+    ]
+  },
+  "journal": {
+    "skills": [
+      "journal-connected-context"
+    ],
+    "tools": [
+      "murph.group_membership"
+    ]
+  },
+  "journal-connected-context": {
+    "skills": [
+      "connected-apps",
+      "training"
+    ],
+    "tools": [
+      "murph.automation"
+    ]
+  },
+  "lab-tests": {
+    "skills": [],
+    "tools": [
+      "murph.labs"
+    ]
+  },
+  "micronutrients-supplements": {
+    "skills": [
+      "cardiometabolic-health",
+      "computer-use",
+      "experiment-onboarding",
+      "food-journal",
+      "nutrition-strategy",
+      "sleep-improvement",
+      "substance-load"
+    ],
+    "tools": []
+  },
+  "murph-family": {
+    "skills": [],
+    "tools": [
+      "murph.family_plan",
+      "murph.group_usage"
+    ]
+  },
+  "murph-onboarding": {
+    "skills": [
+      "goal-setup",
+      "micronutrients-supplements"
+    ],
+    "tools": [
+      "murph.automation",
+      "murph.device",
+      "murph.send_progress_update"
+    ]
+  },
+  "music-generation": {
+    "skills": [],
+    "tools": [
+      "murph.generate_song"
+    ]
+  },
+  "nutrition-strategy": {
+    "skills": [
+      "behavior-followthrough",
+      "body-composition",
+      "cardiometabolic-health",
+      "chronic-illness-support",
+      "experiment-onboarding",
+      "food-journal",
+      "gut-digestion",
+      "micronutrients-supplements"
+    ],
+    "tools": []
+  },
+  "pdf": {
+    "skills": [],
+    "tools": [
+      "murph.send_vault_file"
+    ]
+  },
+  "phone-calls": {
+    "skills": [
+      "appointment-scheduling"
+    ],
+    "tools": [
+      "murph.automation",
+      "murph.create_phone_call",
+      "murph.get_phone_call_status",
+      "murph.get_sender_contact",
+      "murph.stop_phone_call"
+    ]
+  },
+  "physical-therapy": {
+    "skills": [
+      "behavior-followthrough",
+      "chronic-illness-support",
+      "stress-regulation",
+      "training"
+    ],
+    "tools": []
+  },
+  "private-group-access": {
+    "skills": [],
+    "tools": [
+      "murph.group_consult",
+      "murph.group_data",
+      "murph.group_membership"
+    ]
+  },
+  "product-feedback": {
+    "skills": [],
+    "tools": [
+      "murph.submit_product_feedback"
+    ]
+  },
+  "reminders": {
+    "skills": [
+      "appointment-scheduling",
+      "connected-apps"
+    ],
+    "tools": [
+      "murph.automation",
+      "murph.connected_apps_execute",
+      "murph.connected_apps_manage",
+      "murph.connected_apps_search"
+    ]
+  },
+  "self-management-experiments": {
+    "skills": [
+      "chronic-illness-support",
+      "experiment-onboarding",
+      "goal-setup",
+      "sleep-improvement"
+    ],
+    "tools": []
+  },
+  "signup-link": {
+    "skills": [
+      "group-chat"
+    ],
+    "tools": [
+      "murph.group_usage"
+    ]
+  },
+  "sleep-improvement": {
+    "skills": [
+      "behavior-followthrough",
+      "cardiometabolic-health",
+      "chronic-illness-support",
+      "cycle-hormonal-health",
+      "experiment-onboarding",
+      "micronutrients-supplements",
+      "physical-therapy",
+      "substance-load",
+      "training"
+    ],
+    "tools": [
+      "murph.attach_sleep_card"
+    ]
+  },
+  "stress-regulation": {
+    "skills": [
+      "behavior-followthrough",
+      "chronic-illness-support",
+      "physical-therapy",
+      "sleep-improvement",
+      "substance-load"
+    ],
+    "tools": []
+  },
+  "substance-load": {
+    "skills": [
+      "micronutrients-supplements",
+      "sleep-improvement",
+      "stress-regulation"
+    ],
+    "tools": []
+  },
+  "tracked-table": {
+    "skills": [],
+    "tools": [
+      "murph.attach_response_card",
+      "murph.automation"
+    ]
+  },
+  "training": {
+    "skills": [
+      "behavior-followthrough",
+      "chronic-illness-support",
+      "daily-activity",
+      "experiment-onboarding",
+      "physical-therapy",
+      "sleep-improvement",
+      "tracked-table",
+      "workout-csv-import"
+    ],
+    "tools": []
+  },
+  "workout-csv-import": {
+    "skills": [],
+    "tools": []
+  }
+}

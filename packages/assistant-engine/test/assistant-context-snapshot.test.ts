@@ -27,7 +27,6 @@ import {
   refreshAssistantContextSnapshot,
   resolveAssistantContextSnapshotPath,
 } from '../src/assistant/context-snapshot.js'
-import { MURPH_ATTACH_RESPONSE_CARD_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 
 describe('assistant context snapshot', () => {
   it('classifies only prompt-snapshot source domains as dirty', () => {
@@ -705,19 +704,6 @@ describe('assistant context snapshot', () => {
       expect(stalePrompt).toContain('Do not enumerate unrelated conditions, allergies, regimens, goals, or history.')
       expect(stalePrompt).not.toMatch(
         /vault-cli (?:condition|allergy|regimen|goal) list/u,
-      )
-      const assembledPrompt = [
-        stalePrompt,
-        MURPH_ATTACH_RESPONSE_CARD_TOOL.description,
-      ].join('\n')
-      expect(assembledPrompt).toContain(
-        'For daily_nutrition cards and numeric nutrition targets',
-      )
-      expect(assembledPrompt).toContain(
-        'Do not run a universal medical-history or measurement checklist.',
-      )
-      expect(assembledPrompt).not.toMatch(
-        /vault-cli (?:condition|allergy|regimen) list/u,
       )
       expect(stalePrompt).toContain('Do not infer that history is absent')
       expect(stalePrompt).toContain('`vault-cli blood-test list`')

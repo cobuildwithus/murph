@@ -36,7 +36,6 @@ goal:
     kind: habit_plan
     ownerSkillIds:
       - sleep-improvement
-      - sleep-recovery-readiness
   startPrompt: Hey Murph, help me sleep longer.
   indexable: true
 safety:

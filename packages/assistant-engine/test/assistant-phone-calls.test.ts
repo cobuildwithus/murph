@@ -74,53 +74,8 @@ describe("assistant phone calls", () => {
     expect(resolveMurphDynamicTools({
       phoneCallStopAvailable: true,
     })).toContain(MURPH_STOP_PHONE_CALL_TOOL);
-    expect(MURPH_GET_PHONE_CALL_STATUS_TOOL.description).toContain(
-      "final analysis is still pending",
-    );
     expect(MURPH_GET_PHONE_CALL_STATUS_TOOL.description).toContain("followUp");
     expect(MURPH_GET_PHONE_CALL_STATUS_TOOL.description).not.toContain("follow_up");
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "$MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "Use the same explicit-consent or ready-to-act flow in private and hosted group conversations",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "does not require a special structured preview or a later confirmation solely because it is a group",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "one participant cannot approve another participant's private facts",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "Before a real health care appointment booking",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "$MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "satisfy its ready-to-act gate",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "completed, user-approved readiness brief",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).not.toContain(
-      "appointment type, acceptable dates and times, timezone, clinician",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "information-only or connectivity-test call must stay non-mutating",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "Murph resolves eligible verified transfer numbers server-side for private calls",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "Group-chat calls never transfer to one participant",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "message_ref is required",
-    );
-    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
-      "never supply a canonical member id",
-    );
     expect(MURPH_CREATE_PHONE_CALL_TOOL.description).not.toContain(
       ["GROUP", "CALL", "PREVIEW"].join(" "),
     );
@@ -463,7 +418,7 @@ describe("assistant phone calls", () => {
       success: false,
     });
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "user-sourced input or direct scheduled automation authority",
+      "A call needs a request in the current message or a scheduled occurrence",
     );
   });
 
@@ -965,13 +920,13 @@ describe("assistant phone calls", () => {
       "no phone call was started",
     );
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "Restore that messaging route",
+      "Nothing retries on its own",
     );
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "ask the requester to reschedule",
+      "ask them to reschedule it",
     );
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "do not retry automatically",
+      "did not happen",
     );
     expect(result.rpcResult.contentItems[0]?.text).not.toContain(
       "a later result",

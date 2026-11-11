@@ -1,209 +1,171 @@
 # Manual provider data exports
 
-Read the top-level `../SKILL.md` first. This reference owns the fallback when a
-member wants data from a health or fitness service that has no proven direct
-Murph connection.
+Use this page when a member wants their existing data from a health or fitness
+service that Murph cannot connect to directly. Read
+`$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md` first.
 
-The routes below were checked against official provider documentation on
-2026-08-09. Provider menus and migrations can change, so use the exact official
-link in the matching entry and do not invent a replacement path from memory.
+The steps below were checked against each provider's official documentation on
+2026-08-09. Provider menus change, so use the exact official link in the
+matching section and never describe a menu path from memory.
 
-## Decision order
+## Which route to use
 
-1. Prefer a real, currently advertised Murph connection. The trusted live
-   provider list in the current prompt is authoritative. Do not call a provider
-   supported or connected because it appears in this file.
-2. If no direct connection is proven, use the matching official export route
-   below.
-3. If the provider is not listed here, do not guess a menu path or present a
-   third-party article as authority. Say Murph does not have a verified direct
-   route for it yet and offer to look for the provider's official export
-   instructions.
+1. If the list of supported wearable connections in your standing instructions
+   includes the service, use that connection. A service appearing on this page
+   does not make it supported or connected.
+2. Otherwise use the matching section below.
+3. If the service is not on this page, say Murph has no verified route for it
+   yet and offer to look for the provider's official export instructions. Do
+   not guess a menu path or present a third-party article as the authority.
 
-## Handoff contract
+## How to hand it off
 
-- Give only the instructions for the provider the member named. Keep the reply
-  short and put the official action URL on its own final line.
-- The member performs the export in their own account. Never ask them to send a
-  password, one-time code, recovery code, API key, or portal cookie.
-- Ask for the original downloaded file as-is. Prefer it over screenshots,
-  copied tables, or a reformatted spreadsheet because the original preserves
-  more provenance and structure.
-- Call this a manual export or one-time import, not a live sync. New readings or
-  workouts require another export until Murph has a real direct connection.
-- Do not promise a file type, date range, or complete-history guarantee that the
-  provider does not document. Murph can inspect the actual file after the
-  member sends it.
-- Once the file arrives, follow the global health-record ingestion invariant:
-  preserve the source and save recoverable facts to their canonical owners
-  rather than ending with only a chat summary.
-- In a group conversation, do not ask someone to upload private account data to
-  the room. Ask them to continue in their private Murph conversation.
+- Give only the steps for the service the member named. Keep the reply short
+  and put the official link alone on the last line.
+- The member does the export in their own account. Never ask for a password,
+  one-time code, recovery code, API key or cookie.
+- Ask for the original downloaded file, unchanged. It keeps more detail than a
+  screenshot, a copied table or a reformatted spreadsheet.
+- Call it a manual export or one-time import. Newer readings or workouts need
+  another export.
+- Promise no file type, date range or complete history that the provider does
+  not document. Murph can look at the real file once it arrives.
+- When the file arrives, keep the source file and save its facts to the records
+  that own them. A chat summary alone is not enough.
+- In a group, ask the member to continue in their private Murph chat and do not
+  ask anyone to upload account data to the room.
 
 ## Function Health
 
-Function Health is a lab-testing service. Members can download completed lab
-results as PDFs and send the PDFs to Murph.
+Function Health is a lab-testing service. Tell the member to open the Function
+documents page, download every relevant `Lab Results of Record` PDF, and send
+the original PDFs to Murph. Nothing is imported until a file arrives.
 
-Tell the member to open the Function documents page, download every relevant
-`Lab Results of Record` PDF, and send the original PDFs to Murph. Naming
-Function without supplying a file is not an import.
-
-Function Health must remain user-operated. The `computer-use` skill explicitly
-forbids automating Function login, portal navigation, record extraction,
-downloads, or account actions.
+The member has to do this themselves. Murph never signs in to Function, browses
+its portal, or downloads from it, even when asked.
 
 https://my.functionhealth.com/documents
 
 ## Livongo / Teladoc Condition Management
 
-Use this recipe only for Livongo or Teladoc `Condition Management` data such as
-connected blood pressure, weight, glucose, diabetes, hypertension, or
-weight-management history. A generic Teladoc request for virtual-visit notes,
-encounter records, billing records, or other medical records is not this export
-route.
+Use this section only for Livongo or Teladoc Condition Management data, such as
+connected blood pressure, weight or glucose readings and diabetes, hypertension
+or weight-management history. A member may see the program called Livongo,
+Teladoc Health or Condition Management. A request for Teladoc virtual-visit
+notes, encounter records, billing records or other medical records is a
+different thing and this section does not cover it.
 
-Teladoc Health is the broader virtual-care company. Livongo was the connected
-condition-management business; it became part of Teladoc Health in 2020. A
-member may therefore see `Livongo`, `Teladoc Health`, or `Condition Management`
-branding for the same condition-management program. Treat those names as
-aliases only when the requested data belongs to that program, not for every
-Teladoc record.
-
-The official legacy export instructions are:
+The official export steps:
 
 1. Sign in at `https://my.livongo.com`.
 2. Click the member name in the upper-right corner.
 3. Choose `Reports and Data`.
 4. Choose the relevant report and click `Export`.
-5. Send the downloaded original file to Murph without changing it.
+5. Send the downloaded file to Murph unchanged.
 
-For the normal legacy handoff, use the Livongo sign-in page as the user-facing
-action link and put it alone on the final line. Do not make the member open the
-help article first when the documented account flow is available.
+Give the Livongo sign-in page as the link, alone on the last line:
 
 https://my.livongo.com
 
-The official legacy export article says the download contains all of the
-member's data but does not state the file format, schema, timestamp semantics,
-or how migrated accounts are represented. Never call it a CSV or promise
-reading-level fields before inspecting the actual export. Use this article when
-the member asks for the official instructions or source; it is not the normal
-sign-in action link.
+The official article says the download contains all of the member's data. It
+does not state the file format, the fields, how times are recorded, or how
+migrated accounts appear, so never call it a CSV or promise particular fields
+before seeing the file. Give the article itself only when the member asks for
+the official instructions or the source:
 
 https://library.teladochealth.com/hc/en-us/articles/360044659034-How-to-Export-Your-Personal-Data-from-the-Secure-Livongo-Website
 
-Some members now access existing Livongo programs through the Teladoc Health app
-or website. The official migration FAQ tells members to sign in, choose
-`Condition Management`, then choose `Go to programs`; it does not document an
-equivalent export control for the newer experience. If the legacy `Reports and
-Data` path is unavailable, do not invent another menu. Explain that no verified
-new export path is documented, give the migration FAQ below as the fallback
-action link, and tell the member to use any first-party export their account
-shows or contact Livongo Member Support at `membersupport@livongo.com` or
-`800-945-4355`.
-
-Send exactly one action link: the Livongo sign-in page for the normal legacy
-flow, or the migration FAQ only when the legacy path is unavailable.
+Some members now reach their Livongo program through the Teladoc Health app or
+website. The official migration FAQ tells them to sign in, choose
+`Condition Management`, then `Go to programs`. It documents no export control
+there. When the `Reports and Data` path is missing, say that no verified export
+path is documented for the newer experience, give the FAQ below as the link,
+and suggest they use any export their account offers or contact Livongo Member
+Support at `membersupport@livongo.com` or `800-945-4355`.
 
 https://www.teladochealth.com/start/new-experience-faq
 
-This is a one-time snapshot, not continuous Teladoc sync. The member must export
-again to refresh later readings. When the file arrives, inspect its real format
-and use the narrowest existing measurement or health-record ingestion path; do
-not infer blood pressure, weight, or glucose rows from an unsupported summary.
+Send exactly one link: the sign-in page in the normal case, or the FAQ when the
+`Reports and Data` path is missing.
 
-## Workout CSV import contract
+When the file arrives, look at its real format and save readings through the
+measurement or health-record path that fits it. Do not build blood pressure,
+weight or glucose rows from a summary that does not contain them.
 
-For both Strong and Hevy workout exports, inspect the original CSV before any
-write. If inspection returns `requiresWeightUnit: true` or
-`requiresDistanceUnit: true`, ask one concise question covering every missing
-unit. Explain that the weight answer applies to every unitless load field in the
-export, including bodyweight, assistance, and added weight. Never infer units
-from locale, exercise names, or value size. Rerun inspection with the confirmed
-`--weight-unit lb|kg` and/or `--distance-unit m|km|mi` options.
-Inspection returns only fixed aggregate fields; it never returns source headers
-or row content. Do not open or quote the CSV to diagnose an unsupported export.
+## Workout CSV rules for Strong and Hevy
 
-If inspection returns `detectedSource: null` for headers shared by Strong and
-Hevy, ask which app produced the export and rerun with the matching
-`--source strong|hevy`. Never guess Strong from shared workout headers.
+Inspect the original CSV before writing anything. Inspection returns only fixed
+summary fields and never the file's headers or rows, so do not open or quote
+the CSV to diagnose a problem.
 
-Do not run the structured write while any unit requirement or unsafe skipped
-row remains. Claim completion only from the durable import result and its
-aggregate counts. `lookupIds` and `ledgerFiles` are intentionally capped, so use
-the count and truncation fields instead of requesting or repeating every
-imported id. A pure replay reports skipped existing workouts and stores no
-duplicate raw copy. These are historical snapshots, not continuous syncs.
-Treat each refreshed export as a complete snapshot. If Murph reports that a
-prior source session is missing or changed, stop and ask for a new complete
-export instead of importing the apparent replacement as another workout.
-If the member says a previously confirmed unit was wrong, rerun the exact
-original CSV with the corrected unit option and `--correct-units`. Use that
-flag only after explicit confirmation; it supersedes the same imported workout
-identities, requires the exact prior raw evidence, and preserves the original
-workout timezone and other non-unit fields, including context added after the
-import. If both the provider and units were previously wrong, correct the
-provider first by rerunning the exact CSV with only the confirmed `--source`;
-Murph reuses the prior manifest units for that narrow correction, so do not
-restate a known-wrong unit. Then rerun the exact CSV with the confirmed source,
-corrected unit, and `--correct-units`; do not combine the two recovery steps.
-If Murph reports overlapping exercise/set edits, stop instead of overwriting
-member changes.
+- **Units.** If inspection returns `requiresWeightUnit: true` or
+  `requiresDistanceUnit: true`, ask one short question covering every missing
+  unit. Explain that the weight answer applies to every unitless load in the
+  file, including bodyweight, assistance and added weight. Never infer units
+  from locale, exercise names or the size of the numbers. Inspect again with
+  `--weight-unit lb|kg` and `--distance-unit m|km|mi` as confirmed.
+- **Source.** If inspection returns `detectedSource: null`, ask which app made
+  the export and inspect again with `--source strong|hevy`. Never assume
+  Strong.
+- **Write.** Run the import only when no unit question and no unsafe skipped
+  row remains. Say it is done only from the import result and its counts.
+  `lookupIds` and `ledgerFiles` are capped on purpose, so use the count and
+  truncation fields and do not ask for every id. Importing the same file again
+  reports the existing workouts as skipped and stores nothing twice.
+- **Refreshed export.** Treat each new export as a complete snapshot. If Murph
+  reports that an earlier session is missing or changed, stop and ask for a new
+  complete export. Do not import the apparent replacement as another workout.
+- **Wrong unit.** If the member says a confirmed unit was wrong, run the exact
+  original CSV again with the corrected unit and `--correct-units`. Use that
+  flag only after they confirm. It replaces the same imported workouts, needs
+  the exact earlier file, and keeps the original timezone and everything that
+  is not a unit.
+- **Wrong source and wrong unit.** Fix the source first: run the exact CSV
+  again with only the confirmed `--source`, and leave the unit options out,
+  because Murph reuses the earlier units for that step. Then run it again with
+  the confirmed source, the corrected unit and `--correct-units`. Keep these as
+  two separate runs.
+- If Murph reports that the correction overlaps exercises or sets the member
+  has edited, stop and leave their edits in place.
 
 ## Strong
 
-Strong is a workout-tracking app. Its official export is a
-spreadsheet-friendly CSV containing workout data.
+Strong is a workout-tracking app whose official export is a CSV of workout
+data.
 
-- iPhone/iPad: open Strong, go to `Settings`, then choose
-  `Export Strong Data`.
-- Android: open Strong, go to `Settings`, then choose `Export Data`.
-- Ask the member to send the exported CSV to Murph. Strong says the CSV cannot
-  be imported back into Strong; do not imply that Murph changes their Strong
-  account.
+- iPhone or iPad: open Strong, go to `Settings`, then `Export Strong Data`.
+- Android: open Strong, go to `Settings`, then `Export Data`.
 
-After the original CSV arrives, use the existing structured importer rather
-than rebuilding workouts by hand:
+Ask the member to send the exported CSV. The export does not change anything in
+their Strong account. When it arrives, follow the workout CSV rules above with:
 
 ```text
 vault-cli workout import inspect <file> --vault "$VAULT" --source strong --format json
-```
-
-Run the write only when inspection says the file is importable:
-
-```text
 vault-cli workout import csv <file> --vault "$VAULT" --source strong --format json
 ```
-
-This imports historical workouts; it does not keep Strong continuously synced.
 
 https://help.strongapp.io/article/235-export-workout-data
 
 ## Hevy
 
-The product name is `Hevy`; members may type or dictate `Heavy`. Hevy can export
+The app is called Hevy. Members sometimes type or dictate "Heavy". It exports
 workout history and body-measurement history separately.
 
 Tell the member to open Hevy and go to:
 
 `Profile` → `Settings` → `Export & Import Data` → `Export Data`
 
-Then choose `Export Workouts` and, only when body measurements are relevant,
-`Export Measurements`. Ask them to send the original exported file or files to
-Murph. Do not make them export measurements when they only want workout
-history.
-
-For a workout CSV, inspect and import through the existing structured importer:
+Then choose `Export Workouts`, and `Export Measurements` only when they want
+body measurements too. Ask for the original file or files. When a workout CSV
+arrives, follow the workout CSV rules above with:
 
 ```text
 vault-cli workout import inspect <file> --vault "$VAULT" --source hevy --format json
 vault-cli workout import csv <file> --vault "$VAULT" --source hevy --format json
 ```
 
-Follow the shared workout CSV import contract above. A Hevy measurements export
-is not a workout CSV; do not send it through the workout
-importer. Inspect its actual format and use the canonical measurement ingestion
-path that fits it.
+A Hevy measurements export is a different format. Keep it out of the workout
+importer, look at what it contains, and save it through the measurement path
+that fits.
 
 https://help.hevyapp.com/hc/en-us/articles/38001424401943-How-to-Import-Strong-App-CSV-Files-and-Export-Your-Data-in-Hevy

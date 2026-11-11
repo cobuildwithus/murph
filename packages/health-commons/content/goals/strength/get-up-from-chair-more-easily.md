@@ -34,7 +34,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - strength-training
+      - training
       - daily-activity
   startPrompt: Hey Murph, help me get up from a chair more easily.
   indexable: true

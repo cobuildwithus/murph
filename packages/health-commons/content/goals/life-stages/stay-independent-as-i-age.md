@@ -36,7 +36,7 @@ goal:
     kind: general_plan
     ownerSkillIds:
       - daily-activity
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me stay independent as I age.
   indexable: true
 safety:

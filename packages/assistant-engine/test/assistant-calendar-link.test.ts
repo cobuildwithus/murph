@@ -30,21 +30,6 @@ describe('assistant calendar link tool', () => {
     expect(resolveMurphDynamicTools({ calendarLinkAvailable: true })).toContain(
       MURPH_CREATE_CALENDAR_LINK_TOOL,
     )
-    expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
-      'current private text conversation',
-    )
-    expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
-      'This does not add the event',
-    )
-    expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
-      'ask for every missing required detail together',
-    )
-    expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
-      'does not replace private appointment follow-through',
-    )
-    expect(MURPH_CREATE_CALENDAR_LINK_TOOL.description).toContain(
-      'exactly one one-shot reminder',
-    )
   })
 
   it('parses the ordinary dynamic-tool request into one event', () => {
@@ -59,11 +44,10 @@ describe('assistant calendar link tool', () => {
     expect(result.rpcResult.success).toBe(true)
     const url = result.requiredFinalResponseSuffix
     expect(url?.startsWith(CALENDAR_LINK_URL_PREFIX)).toBe(true)
-    expect(JSON.parse(result.rpcResult.contentItems[0]?.text ?? '')).toEqual({
-      instruction:
-        'Before ending, complete private appointment follow-through: use tool search for `murph automation` to load and call `murph.automation`, then ensure exactly one one-shot reminder unless the member declined it. Then write the rest of the truthful semantic reply without copying or repeating a URL. The runtime appends the exact calendar link.',
-      status: 'ready',
-    })
+    const readyResult = JSON.parse(result.rpcResult.contentItems[0]?.text ?? '')
+    expect(Object.keys(readyResult).sort()).toEqual(['instruction', 'status'])
+    expect(readyResult.status).toBe('ready')
+    expect(readyResult.instruction).not.toMatch(/https?:/u)
     const payload = url?.slice(CALENDAR_LINK_URL_PREFIX.length) ?? ''
     expect(parseCalendarEventPayload(payload)).toEqual(EVENT)
     expect(result.requiredFinalResponseFallback).toBe('The details are ready.')

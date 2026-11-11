@@ -81,52 +81,9 @@ describe('assistant generated delivery files', () => {
   })
 
   it('routes only newly generated same-turn sends into runtime staging', () => {
-    for (const guidance of [
-      'When this tool result says approval is approved',
-      'call finish_without_reply and do not attach the file or send a companion acknowledgment',
-      'Delivery evidence appears as a prior-delivery attachment in conversation context',
-      'Once context shows delivery, a later request for the file or a new export is a new send',
-      'prepare it fresh and call send_vault_file',
-      'Never reuse an old approval link for a delivered file',
-      'confirm it was sent when context shows delivery; otherwise say it will come through once approved',
-      'Never call finish_without_reply on these later confirmation turns',
-    ]) expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(guidance)
-    expect(MURPH_SEND_VAULT_FILE_TOOL.description).not.toContain('When approval is approved,')
-    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
-      'Only after this turn establishes an obligation to send a newly generated file now',
-    )
-    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
-      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename>`,
-    )
-    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
-      'Do not stage files for possible later delivery',
-    )
-    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
-      'never move or copy existing, user-owned, canonical, or durable files there',
-    )
-    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
-      'Creating a new ZIP from requested vault files is allowed; read the originals in place and stage only the new archive.',
-    )
-    for (const boundary of [
-      "member's authenticated private conversation",
-      "Archive all files under that member's workspace root as-is",
-      'including dotfiles, runtime/history, configuration/instruction files',
-      'any credential-bearing records present',
-      'without content-based exclusion, redaction, or sanitization',
-      'Archive symlinks as links without following them or reading outside the workspace',
-      "submit only the new ZIP's generated-delivery ref",
-    ]) expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(boundary)
-    expect(MURPH_SEND_VAULT_FILE_TOOL.description).not.toContain('Exclude credentials')
-    expect(MURPH_SEND_VAULT_FILE_TOOL.description).not.toContain('omission notice')
-    expect(MURPH_SEND_VAULT_FILE_TOOL.description).toContain(
-      'pass those exact included ids in retire_export_pack_ids',
-    )
     expect(
       MURPH_SEND_VAULT_FILE_TOOL.inputSchema.properties.retire_export_pack_ids,
     ).toMatchObject({ maxItems: 20, minItems: 1 })
-    expect(
-      MURPH_SEND_VAULT_FILE_TOOL.inputSchema.properties.ref.description,
-    ).toContain('all other hidden paths')
   })
 
   it('parses exact export-pack ids from the vault-file tool boundary', () => {

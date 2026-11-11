@@ -32,7 +32,7 @@ goal:
     ownerSkillIds:
       - nutrition-strategy
       - body-composition
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me gain weight healthily.
   indexable: true
 safety:

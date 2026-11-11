@@ -15,12 +15,6 @@ const RECIPIENT = {
 
 describe('physical-note return address ownership', () => {
   it('keeps the return address in trusted platform configuration', () => {
-    expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.description).toContain(
-      'Never ask the person for a return address',
-    )
-    expect(
-      MURPH_SEND_PHYSICAL_NOTE_TOOL.inputSchema.properties.to.description,
-    ).toContain("server code supplies Murph's fixed return address")
     expect(MURPH_SEND_PHYSICAL_NOTE_TOOL.inputSchema.properties)
       .not.toHaveProperty('from')
 

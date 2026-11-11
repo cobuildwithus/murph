@@ -1,7 +1,7 @@
 import { MURPH_GENERATE_SONG_TOOL } from '../../assistant-codex/dynamic-tools/generate-song.js'
 import { MURPH_GENERATE_IMAGE_TOOL } from '../../assistant-codex/dynamic-tool-catalog.js'
 import { MURPH_WRITE_RECAP_FILE_TOOL } from '../../assistant-codex/dynamic-tools/games.js'
-import { GAME_PHOTO_CHAT_GUIDANCE, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
+import { GAME_PHOTO_CHAT_GUIDANCE, GAME_RESIDENT_GROUP_POINTER, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
 import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
 import { supportsCodexTurnDeveloperInstructions } from '../../assistant-codex/config.js'
 import { resolveAssistantFollowUpTurnContext } from '../follow-ups.js'
@@ -531,6 +531,12 @@ function resolveAssistantSpecializedDynamicTools(input: {
 
 function gamePhotoContextPrompts(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): string[] {
   return input.input.channel === 'linq' && areConversationGamesAvailable(input, acceptedInputIds, scope) ? [GAME_PHOTO_CHAT_GUIDANCE] : []
+}
+
+// A group chat with the game tools gets one resident sentence saying where a
+// challenge or game request starts. The rules arrive with each read_game result.
+function gameGroupPointerPrompts(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): string[] {
+  return scope === 'group' && areConversationGamesAvailable(input, acceptedInputIds, scope) ? [GAME_RESIDENT_GROUP_POINTER] : []
 }
 
 function privateGameReminderAvailable(input: AssistantRouteTurnPlanInput, scope: string, acceptedInputIds: readonly string[]): boolean {
@@ -1110,6 +1116,7 @@ export async function resolveAssistantRouteTurnPlan(
   const assistantDynamicContextPrompts = [
     ...hostedDynamicContextPrompts,
     ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
+    ...gameGroupPointerPrompts(input, userActionAcceptedInputIds, conversationScope),
     ...gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope),
     ...privateGameReminderPrompts(input, conversationScope, userActionAcceptedInputIds),
   ]

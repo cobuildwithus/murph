@@ -35,9 +35,8 @@ goal:
   workflow:
     kind: habit_plan
     ownerSkillIds:
-      - cognitive-focus
-      - behavior-followthrough
       - stress-regulation
+      - behavior-followthrough
   startPrompt: Hey Murph, help me use social media less.
   indexable: true
 safety:

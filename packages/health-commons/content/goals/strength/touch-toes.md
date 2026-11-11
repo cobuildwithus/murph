@@ -35,8 +35,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - mobility-posture
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me touch my toes.
   indexable: true
 safety:

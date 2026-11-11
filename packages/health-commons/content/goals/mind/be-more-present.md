@@ -35,7 +35,6 @@ goal:
     kind: habit_plan
     ownerSkillIds:
       - stress-regulation
-      - cognitive-focus
       - behavior-followthrough
   startPrompt: Hey Murph, help me be more present.
   indexable: true

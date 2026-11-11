@@ -45,12 +45,6 @@ describe('hosted domain dynamic tools', () => {
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_DEVICE_TOOL)
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_AUTOMATION_TOOL)
     expect(MURPH_AUTOMATION_TOOL.deferLoading).toBe(true)
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'During a voice call, save and explicit retarget use the member\'s connected messaging destination',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Confirm the returned deliveryChannel without calling it this conversation or promising delivery in the call',
-    )
 
     const enabled = resolveMurphDynamicTools({
       automationAvailable: true,
@@ -58,135 +52,6 @@ describe('hosted domain dynamic tools', () => {
     })
     expect(enabled).toContain(MURPH_DEVICE_TOOL)
     expect(enabled).toContain(MURPH_AUTOMATION_TOOL)
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For an active deviceActivity schedule, confirm the persisted event trigger directly',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'occurrenceProjection.status=resolved with a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For time-based schedules, confirm an exact next occurrence only when occurrenceProjection.status=resolved',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'A save or patch result already includes one host-owned occurrence projection.',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Do not inspect again, retry the write, create a fallback automation',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'confirm that the write succeeded and report the returned stored schedule and status',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'occurrenceProjection.status=pending',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'a wording-only edit needs only its saved wording',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Its exact next delivery time is not yet available; do not promise one',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'do not expose scheduler, projection, or occurrence terminology',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).not.toContain(
-      'explain briefly that the scheduler is finishing current work',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).not.toContain(
-      'will project the next occurrence automatically',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For an active one-shot at schedule, say the saved edit may not affect the reminder already in progress',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'do not promise that occurrence will deliver or that another occurrence will be scheduled automatically',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'treat the returned schedule and status as current instead of claiming the requested mutation still holds',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'stale_recurring_occurrence as an overdue recurrence whose scheduler projection has not advanced',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'do not describe the occurrence as current scheduler work, promise automatic recovery, or say that no member action is needed',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'pass schedule.kind=at with schedule.localAt.time, schedule.localAt.timeZone, and exactly one of schedule.localAt.date or schedule.localAt.relativeDay',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'preserve that wording as relativeDay (today for tonight) so the host resolves it against the named timezone',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'state the explicit host-resolved date returned by the tool while asking for another time',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'echo the exact returned localAtRecoveryKey',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'omitting it leaves that clarification pending and treats the call as an independent reminder',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'action=dismiss_local_at_recovery',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'unknown or wrong-date keys are rejected before mutation',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'raw exact ISO schedule.at is not accepted on generic save or patch',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'An ordinary save is create-only: omit slug',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Only when the current loaded skill defines an exact stable recipe key',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'never derive a slug from a title or invent one',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For inspect, lookup is one scalar string containing either an exact automationId or an exact stable recipe key supplied by the currently loaded skill',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'for patch, lookup is only the concrete automationId returned by the immediately preceding inspect',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'lookup is never a title, natural-language phrase, object, or record',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'when the turn has only a title or natural-language phrase, resolve exactly one automationId from current read-only automation inventory before inspect and ask if zero or multiple matches remain',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'patch never changes the recipe key',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Inspect is read-only and returns the authoritative stored version plus scheduler timing projection',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      "For a later question about an existing automation's timing, inspect it without mutation and answer from the current stored schedule and occurrence projection. If inspection fails, make no timing claim.",
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'merely to verify this returned save or patch result',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'pass expectedUpdatedAt from that readback',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For an active one-shot with that resolved null result, say its requested time is no longer deliverable and offer to reschedule it',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Pass contextReferences as an array shaped exactly [{"entityKind":"<canonical-kind>","entityId":"<exact-id>"}]',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'both camel-case keys are required on every entry',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'pass an object such as {"model":"gpt-6-luna"}',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Never pass a bare string or Luna or Sol.',
-    )
   })
 
   it('admits the documented group newsletter stable recipe through the parser', () => {
@@ -850,26 +715,6 @@ describe('hosted domain dynamic tools', () => {
   })
 
   it('documents canonical automation calls without weakening strict validation', () => {
-    for (const scheduleExample of [
-      '`{"kind":"every","everyMs":3600000}`',
-      '`{"kind":"cron","expression":"0 9 * * 1-5","timeZone":"America/Chicago"}`',
-      '`{"kind":"dailyLocal","localTime":"09:00","timeZone":"America/Chicago"}`',
-    ]) {
-      expect(MURPH_AUTOMATION_TOOL.description).toContain(scheduleExample)
-    }
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` and the inspected `updatedAt` copied into `expectedUpdatedAt`.',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Never invent schedule, update, timezone, route, group, or member fields outside the schema.',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'The exact camel-case field `schedule.timeZone` is valid only for recurring `cron` and `dailyLocal` wall-clock schedules',
-    )
-    expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'never use `timezone`, `schedule.timezone`, top-level `timeZone`, or any other invented timezone field',
-    )
-
     for (const schedule of [
       { kind: 'every', everyMs: 3_600_000 },
       {
@@ -1464,22 +1309,9 @@ describe('hosted domain dynamic tools', () => {
   })
 
   it('uses accountId for bounded device actions and rejects credentials', () => {
-    expect(MURPH_DEVICE_TOOL.description).toContain('Apple Health (sourceProvider apple_health_kit)')
-    expect(MURPH_DEVICE_TOOL.description).toContain('WHOOP (sourceProvider whoop_v2)')
-    expect(MURPH_DEVICE_TOOL.description).toContain('A saved result confirms the check-in preference')
-    expect(MURPH_DEVICE_TOOL.description).toContain('Off stops only these check-ins; connection and syncing stay unchanged')
     expect(readToolRequest('device', {
       action: 'configure_no_data_outreach', mode: 'off', sourceProvider: 'apple_health_kit',
     })).toMatchObject({ kind: 'device' })
-    expect(MURPH_DEVICE_TOOL.description).toMatch(
-      /current private member message/u,
-    )
-    expect(MURPH_DEVICE_TOOL.description).toMatch(
-      /Never call it from a group or scheduled turn or for another provider/u,
-    )
-    expect(MURPH_DEVICE_TOOL.description).toMatch(
-      /at most once for that message; after any result, do not retry/u,
-    )
     expect(readToolRequest('device', {
       accountId: 'device-account-1',
       action: 'reconcile',

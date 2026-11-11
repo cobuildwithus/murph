@@ -35,7 +35,7 @@ goal:
   workflow:
     kind: care_support
     ownerSkillIds:
-      - strength-training
+      - training
       - micronutrients-supplements
   startPrompt: Hey Murph, help me understand my fracture risk.
   indexable: true

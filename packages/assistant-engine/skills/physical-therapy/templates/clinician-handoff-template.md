@@ -1,51 +1,35 @@
-# Clinician handoff template
+# Visit summary for a clinician
 
-Use this to help the user communicate with a physical therapist, physician, urgent-care clinician, or other appropriate professional. Keep it concise and distinguish user report, clinician information, observation, and Murph inference.
+Use this to help the member brief a physical therapist, doctor or urgent-care clinician. Keep it short. Mark what the member reported, what a clinician said, and what is Murph's own reading. Leave out unrelated health details.
 
 ```text
-Reason for assessment and urgency:
-- [routine / prompt / same-day / emergency recommendation]
-- [specific reason]
+Why I am coming in, and how soon I was advised to be seen:
 
-User's main goal:
-- [target activity and desired outcome]
+What I want to get back to:
 
-Symptom summary (user-reported):
-- strongest location/distribution:
-- onset date and mechanism:
-- trend:
-- quality and associated features:
-- aggravating task and dose threshold:
-- easing factors and recovery time:
-- later-day/next-morning behavior:
+Symptoms (my report):
+- where it is strongest and whether it spreads:
+- when and how it started, and whether it is improving or worsening:
+- what brings it on and at what amount:
+- what eases it and how long it takes to settle:
+- how it is later the same day and the next morning:
 
-Relevant safety screen:
-- positive findings:
-- relevant negative findings:
-- health/risk context:
+Findings that matter for safety:
+- present:
+- checked and absent:
+- relevant health background:
 
-Function and baseline:
-- [repeatable measure and conditions]
-- [current limitation]
+What I can do now (a measure I can repeat):
 
-Prior care and authoritative restrictions:
-- clinician diagnosis/source/date:
-- imaging/surgery/protocol:
-- medications or comorbidities relevant to assessment:
+Earlier care and current restrictions (who said it, and when):
 
-Self-management tried:
-- load change:
-- exercises/exposures and dose:
-- adherence:
-- during/later-day/next-morning response:
-- functional response:
+What I have tried:
+- change to activity:
+- exercises and amounts:
+- how consistently:
+- how it responded:
 
-Murph working pattern (not a diagnosis):
-- [pattern and confidence]
-- [important alternative/uncertainty]
+Murph's working explanation (this is not a diagnosis), and what else it could be:
 
-Questions the user wants answered:
-- ...
+Questions I want answered:
 ```
-
-Do not include unrelated sensitive details or present Murph's working pattern as a confirmed diagnosis.

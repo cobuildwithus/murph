@@ -34,7 +34,7 @@ goal:
   workflow:
     kind: habit_plan
     ownerSkillIds:
-      - cognitive-focus
+      - stress-regulation
       - behavior-followthrough
   startPrompt: Hey Murph, help me reduce my screen time.
   indexable: true

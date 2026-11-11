@@ -2,6 +2,13 @@ import * as z from '@murphai/contracts/zod-runtime'
 import { notificationHistoryIntent } from './notification-history-fixtures.ts'
 import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath } from '@murphai/runtime-state/node'
 import { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
+import {
+  GROUP_HUMOR_SCENARIOS,
+  GROUP_HUMOR_TIRED_FRAMES,
+  opensByAddressing,
+  opensWithEcho,
+  readGroupHumorLastSpeaker,
+} from './support/group-humor-scenarios.js'
 import { REMINDER_LANGUAGE_CASES, runReminderLanguageJourney } from './support/reminder-language-journey.js'
 import { listCanonicalWriteEvidence, readCanonicalAuditRecords } from './canonical-audit-test-helpers.js'
 import { GAME_CHAT_SETUP_SCENARIOS, SETUP_PLAYERS, SETUP_TERMS } from './support/game-chat-setup-scenarios.js'
@@ -224,8 +231,24 @@ import {
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_CREATE_CALENDAR_LINK_TOOL,
   MURPH_GROUP_CONSULT_TOOL,
+  MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
+import {
+  GROUP_ROOM_NOTES_EXPLICIT_SETUP,
+  GROUP_ROOM_NOTES_HEALTH_DETAIL,
+  GROUP_ROOM_NOTES_LOCAL_DATE,
+  GROUP_ROOM_NOTES_MAINTENANCE_THREAD_CONFIG,
+  GROUP_ROOM_NOTES_NOW,
+  GROUP_ROOM_NOTES_SENDER_HANDLES,
+  GROUP_ROOM_NOTES_TIME_ZONE,
+  groupRoomNotesBodyHasRawHandle,
+  inspectGroupRoomNotesPage,
+  readGroupRoomNotesPageBody,
+  readGroupRoomNotesSection,
+  seedGroupRoomNotesScenario,
+  withoutGroupRoomNotesSections,
+} from './support/group-room-notes-scenario.ts'
 import {
   MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
@@ -277,6 +300,8 @@ import {
   buildMurphManagedJournalCalendarWindowInstructions,
   resolveMurphManagedAutomationSeed,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
@@ -398,6 +423,9 @@ import {
 } from './support/meal-intake-benchmark.ts'
 
 import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
+// Production adds this resident sentence to every group chat that has the game
+// tools; hand-built game prompts below carry it the same way.
+import { GAME_RESIDENT_GROUP_POINTER } from '../src/assistant-codex/dynamic-tools/games.ts'
 import {
   readAssistantFollowUpSourceContext, registerDeliveredAssistantFollowUp,
 } from '../src/assistant/follow-ups.ts'
@@ -943,9 +971,9 @@ describeRealCodex('real natural goal canary journey', () => {
     const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities, requirePublicReferences: true })
     const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
     const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async (input) => {
-      expect(input.developerInstructions).toContain('Routine onboarding/setup')
-      expect(input.developerInstructions).toContain('Direct first-run Murph onboarding is open.')
-      expect(input.developerInstructions).toContain('first tool round, alongside exactly one brief')
+      // The open-onboarding prompt is the only one that names the onboarding skill by path.
+      expect(input.developerInstructions).toContain('murph-onboarding/SKILL.md')
+      expect(input.developerInstructions).toContain('goal-setup')
       expect(input.resumeSessionId).toBeFalsy()
       if (capabilities) assertProductionHostedCapabilityParity(input)
       process.stdout.write(`[onboarding-goal-input] ${JSON.stringify({
@@ -1048,7 +1076,8 @@ describeRealCodex('real natural goal canary journey', () => {
       expect(await listFollowUpAutomations(fixture.vault)).toHaveLength(0)
       if (capabilities) {
         expect(trace.filter((item) => item.method === 'thread/tokenUsage/updated').length).toBeLessThanOrEqual(4)
-        expect(shellCommands.filter((command) => command.includes('murph-onboarding/SKILL.md'))).toEqual([])
+        // The first-step offer is made through goal-setup in this turn.
+        expect(shellCommands.some((command) => command.includes('goal-setup/SKILL.md'))).toBe(true)
       }
     } finally {
       observer.mockRestore()
@@ -1262,6 +1291,13 @@ describeRealCodex('real natural goal canary journey', () => {
       expect(await listFollowUpAutomations(fixture.vault)).toHaveLength(0)
       expect(accepted.response).toMatch(/walk|plan/iu)
       expect(accepted.response).not.toMatch(/goal_[A-Z0-9]+|reg_[A-Z0-9]+|subagent|vault-cli/iu)
+      // With onboarding open, the plan they asked for came first; the reply
+      // that settles it then asks the next onboarding question, about their
+      // wearable, once.
+      if (capabilities) {
+        expect(asksWearableQuestion(accepted.response), accepted.response).toBe(true)
+        expect(accepted.response).not.toMatch(/voice memo/iu)
+      }
     } finally {
       observer?.mockRestore()
       await fixture.close()
@@ -1737,7 +1773,6 @@ describeRealCodex('real Codex event-list family isolation', () => {
         expect(instructions).toMatch(/^- `event`: .*`list`/mu)
         expect(instructions).toContain('read `vault-cli <command> --help`')
       }
-      expect(developerInstructions).toContain('Use `vault-cli` directly as the canonical Murph runtime surface.')
       expect(developerInstructions).not.toContain('runtime surface in this privileged local route')
       await initializeVault({ vaultRoot, timezone: 'America/New_York' })
       for (const [title, day, tag] of [
@@ -2948,7 +2983,7 @@ describeRealCodex('real model canonical production journeys', () => {
         env: fixture.env, workingDirectory: fixture.root,
       }))
       await fixture.message("I'll come back to this chat later.")
-      expect(provider.mock.calls[0]?.[0].developerInstructions).toContain('Resolve ambiguity with available context first')
+      expect(provider.mock.calls[0]?.[0].developerInstructions).toContain('food-journal/references/meal-and-nutrient-reads.md')
       const occurredAt = new Date(Date.now() - 10 * 60_000).toISOString()
       const day = occurredAt.slice(0, 10)
       await seedImportedRecallMeal(fixture.vault, occurredAt)
@@ -3214,54 +3249,45 @@ const REPEATED_SET_BETA_EVENT_IDS = Array.from(
   (_, index) => `evt_01JNV447V6K3SW1Q9NJ7XVQZ8${index + 1}`,
 )
 const COUNTRY_ELEVENLABS_VOICE_ID = 'Bj9UqZbhQsanLzgalpEG'
+// The onboarding skill is one entrypoint plus one reference for saving what a
+// new member shares (the memo, wearable connections, lab files).
 const ONBOARDING_POLICY_PATHS = [
   ['SKILL.md', 'murph-onboarding/SKILL.md'],
-  [
-    'aspiration-foundation-delegation.md',
-    'murph-onboarding/references/aspiration-foundation-delegation.md',
-  ],
-  [
-    'persistence-recovery-follow-up.md',
-    'murph-onboarding/references/persistence-recovery-follow-up.md',
-  ],
-  [
-    'return-launch-completion.md',
-    'murph-onboarding/references/return-launch-completion.md',
-  ],
+  ['context.md', 'murph-onboarding/references/context.md'],
+] as const
+const REAL_CODEX_ONBOARDING_FIRST_STEP_POLICY_PATHS = [
+  'goal-setup/SKILL.md',
+  'goal-setup/references/existing-goals.md',
+  'sleep-improvement/SKILL.md',
 ] as const
 const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
   fresh_greeting: [ONBOARDING_POLICY_PATHS[0][1]],
   generic_records_vague_opener: [ONBOARDING_POLICY_PATHS[0][1]],
   immediate_need_first_resume: [ONBOARDING_POLICY_PATHS[0][1]],
   later_stage_resume: [
-    ONBOARDING_POLICY_PATHS[0][1],
-    ONBOARDING_POLICY_PATHS[3][1],
+    ...ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
   ],
   missing_identity_resume: [ONBOARDING_POLICY_PATHS[0][1]],
-  missing_progress_resume: [
-    ONBOARDING_POLICY_PATHS[0][1],
-    ONBOARDING_POLICY_PATHS[1][1],
-  ],
+  missing_progress_resume: [ONBOARDING_POLICY_PATHS[0][1]],
   minimal_identity_answer: [],
   minimal_identity_prompt: [],
   wearable_source_awareness: ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
   wearable_connection_offer: [
-    ONBOARDING_POLICY_PATHS[0][1],
-    ONBOARDING_POLICY_PATHS[1][1],
-    ONBOARDING_POLICY_PATHS[2][1],
+    ...ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
     'connected-apps/SKILL.md',
   ],
   wearable_connection_deferred: [
-    ONBOARDING_POLICY_PATHS[0][1],
-    ONBOARDING_POLICY_PATHS[1][1],
-    ONBOARDING_POLICY_PATHS[2][1],
-    ONBOARDING_POLICY_PATHS[3][1],
+    ...ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
   ],
+  // The first-step offer after the background reads goal-setup and the sleep
+  // domain skill; settling it may reread them.
   wearable_connection_deferred_return: [
-    ONBOARDING_POLICY_PATHS[0][1],
-    ONBOARDING_POLICY_PATHS[1][1],
-    ONBOARDING_POLICY_PATHS[2][1],
-    ONBOARDING_POLICY_PATHS[3][1],
+    ...ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
+    ...REAL_CODEX_ONBOARDING_FIRST_STEP_POLICY_PATHS,
+  ],
+  first_step_settled: [
+    ...ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
+    ...REAL_CODEX_ONBOARDING_FIRST_STEP_POLICY_PATHS,
   ],
 } as const
 type RealCodexOnboardingScenario =
@@ -4813,20 +4839,34 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         process.stdout.write(`[onboarding-opening-e2e] ${JSON.stringify({
           replyMs, providerActionCount: result.providerActionCount, reply: result.finalMessage.trim(),
           actionTimings, progressUpdates,
+          commands: actions.flatMap((action) => action.kind === 'command' ? [action.command.slice(0, 240)] : []),
         })}\n`)
+        const parentIdentityWrites = actions.filter((action) => action.kind === 'command' && !isRecordedVaultHelpCommand(action.command) && /memory (?:set-name|upsert|update)/u.test(action.command))
         if (opening === 'Web aspiration reply') {
+          // Saying what they want gets the wearable question, before the
+          // health background ask and any plan: no goal-setup read, nothing
+          // saved for the goal, and no early update for an onboarding question.
           expect(result.finalMessage).not.toMatch(/what would you most like from your health/iu)
           expect(result.finalMessage).toMatch(/energy|walk|weekend/iu)
+          expect(asksWearableQuestion(result.finalMessage), result.finalMessage).toBe(true)
+          expect(result.finalMessage).not.toMatch(/voice memo|\bmeds\b|medications?|blood tests?/iu)
+          expect(result.finalMessage).not.toMatch(/save this plan|set up (?:those |the )?reminders/iu)
+          expect(actions.some((action) => action.kind === 'command' && action.command.includes('goal-setup/SKILL.md')), 'goal-setup skill read').toBe(false)
+          expect(await listGoals(workingDirectory)).toHaveLength(0)
+          expect((await readVaultRawTolerant(workingDirectory)).regimens).toHaveLength(0)
+          expect(progressUpdates).toEqual([])
+          // The website already handled identity, so this turn saves it itself.
+          expect(parentIdentityWrites.length).toBeGreaterThan(0)
         } else {
           expect(result.finalMessage).toMatch(/Robin/iu)
           expect(result.finalMessage).toMatch(/what.*health/iu)
+          expect(await readOnboardingPolicyFiles(actions, path.join(workingDirectory, 'skills'))).toEqual([])
+          expect(parentIdentityWrites).toEqual([])
+          expect(progressUpdates).toEqual([])
+          expect(readDynamicToolAttempts(result.jsonEvents).filter((action) => action.tool === 'send_progress_update')).toEqual([])
         }
         expect(result.finalMessage).not.toMatch(/saved|recorded|subagent|checkpoint|still working/iu)
-        if (opening === 'identity answer') expect(await readOnboardingPolicyFiles(actions, path.join(workingDirectory, 'skills'))).toEqual([])
-        expect(actions.filter((action) => action.kind === 'command' && !isRecordedVaultHelpCommand(action.command) && /memory (?:set-name|upsert|update)/u.test(action.command))).toEqual([])
         expect(automationRequests).toHaveLength(0)
-        expect(progressUpdates).toEqual([])
-        expect(readDynamicToolAttempts(result.jsonEvents).filter((action) => action.tool === 'send_progress_update')).toEqual([])
         // Exercise the production deterministic owner after the visible reply.
         await startAssistantOnboarding({ vault: workingDirectory, startedAt: new Date(startedAt).toISOString() })
         const seeded = await seedMurphOnboardingEarlyStallAutomation({
@@ -4843,7 +4883,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         const memory = await readMemoryDocument(workingDirectory)
         const identity = memory.records.map((record) => record.text).join('\n')
         expect(identity).not.toMatch(/observed conversational language.*English/iu)
-        expect(childUsages).toHaveLength(1)
+        // One background child saves a fresh identity answer; a later turn that
+        // finds website-handled identity unsaved writes it without a child.
+        expect(childUsages).toHaveLength(opening === 'identity answer' ? 1 : 0)
         expect(identity).toMatch(/Robin/u)
         expect(identity).toMatch(/34/u)
         expect(identity).toMatch(/guy|male|man/iu)
@@ -5163,8 +5205,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           developerInstructions: buildDirectConversationDeveloperInstructions(
             true,
             [
-              'Assistant context snapshot (engine-supplied evidence): private onboarding is open. The welcome, minimal identity, aspiration readiness, save, reflection, and park are complete. The visible conversation is at the data-source checkpoint. Movement, protocols, supplements, medical context, and recent labs are unresolved.',
-              'The last Murph message parked the saved sleep aspiration and explained that learning the health context comes next.',
+              'Assistant context snapshot (engine-supplied evidence): private onboarding is open. The welcome and the name, age, and gender question are answered, and the latest visible Murph message asked what they want from their health. Murph has not asked about their wearable or health background yet, and no first step has been proposed. Nothing is known yet about how they move, what they take, their medications, or recent labs.',
               ...(scenario.knownNone ? [
                 'Current operational evidence: Apple Health has an active connection. No completed sync is reported.',
                 'Earlier in this conversation, the member explicitly said they do not use a wearable.',
@@ -5192,7 +5233,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             },
             vaultFileSendAvailable: false,
           },
-          prompt: 'Yes, let’s keep going.',
+          prompt: 'I want to sleep more consistently and wake up rested.',
           scenario: 'wearable_source_awareness',
         })
         const reply = result.finalMessage.trim()
@@ -5200,8 +5241,20 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           scenario: scenario.name, deviceRequests, reply,
         })}\n`)
         expect(deviceRequests).toEqual(scenario.knownNone ? [] : [{ action: 'list_accounts' }])
-        if (scenario.source !== 'oura' && !scenario.knownNone) {
-          expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        // The reply to the goal asks the wearable question, unless a wearable
+        // or its absence is already known; then it sends the health
+        // background ask. Either way it is one question and no plan.
+        const wearableKnown = scenario.knownNone || scenario.source === 'oura'
+        expect(reply).toMatch(/sleep|rest/iu)
+        expect((reply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+        expect(reply).not.toMatch(/save this plan|set up (?:those |the )?reminders/iu)
+        expect(reply).not.toMatch(/watch or (?:a )?ring/iu)
+        if (wearableKnown) {
+          expect(reply).toMatch(/voice memo/iu)
+          expect(reasksWearable(reply), reply).toBe(false)
+        } else {
+          expect(asksWearableQuestion(reply), reply).toBe(true)
+          expect(reply).not.toMatch(/voice memo/iu)
         }
         expect(reply).not.toMatch(/https?:\/\/|\bjunction\b|list_accounts|vault-cli/iu)
         expect(reply).not.toMatch(/(?:your|the) (?:steps|sleep|workouts|data) (?:are|is) (?:syncing|coming in|up to date)/iu)
@@ -5217,21 +5270,22 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           expect(reply).not.toMatch(/do you use (?:a |any )?wearable or health app/iu)
           expect(reply).not.toMatch(/(?:want|need|like|help)[^.!?\n]{0,40}(?:connect|app link)|reconnect/iu)
           if (!scenario.knownNone) {
-            expect(reply).toMatch(/\bwatch\b/iu)
-            expect(reply).toMatch(/\bring\b/iu)
-            expect(reply).not.toMatch(/your (?:watch|ring)|voice memo|supplements|medical basics/iu)
+            // Apple Health alone does not say whether they use a wearable.
+            expect(reply).toMatch(/also use a wearable/iu)
+            expect(reply).toMatch(/\boura\b/iu)
           }
-        }
-        if (scenario.knownNone || scenario.source === 'oura') {
-          expect(reply).toMatch(/voice memo|how you move|movement/iu)
-          expect(reply).not.toMatch(/do you (?:also )?(?:use|wear|have)|which (?:watch|ring|wearable)/iu)
         }
         if (scenario.source === 'oura') {
           expect(reply).toMatch(/oura/iu)
           expect(reply).toMatch(/connected|linked|I can see your Oura connection/iu)
         }
         if (scenario.source === 'none') {
-          expect(reply).toMatch(/wearable|watch|ring|health app/iu)
+          // Examples come only from the hosted connection line, never Apple
+          // Health, and the question says why connecting one helps.
+          expect(reply).toMatch(/health app/iu)
+          expect(reply).toMatch(/\boura\b/iu)
+          expect(reply).not.toMatch(/apple health/iu)
+          expect(reply).toMatch(/manual|report|read|interpret|log/iu)
           if (scenario.failure) {
             expect(reply).toMatch(/couldn[’']t|can[’']t|unable|unavailable|trouble|could not/iu)
             expect(reply).not.toMatch(/no (?:device|wearable|account|source|connection)|nothing connected|reconnect/iu)
@@ -5358,9 +5412,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           developerInstructions: buildDirectConversationDeveloperInstructions(
             true,
             [
-              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the private welcome, minimal identity, aspiration readiness, reflection, save, and park are complete.',
-              'The latest visible Murph message asked whether the member uses a wearable or health app. No wearable connection is visible.',
-              'Movement, current protocols, supplements, medical basics, and recent labs remain unresolved.',
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the welcome and the name, age, and gender question are answered, and the member said they want to sleep more consistently. No first step has been proposed yet.',
+              'The latest visible Murph message reflected the sleep goal and asked whether they use a wearable or health app, like Oura. No wearable connection is visible.',
+              'Nothing is known yet about how they move, what they take, their medical basics, or recent labs.',
             ].join('\n'),
             supportedProviders,
           ),
@@ -5390,9 +5444,13 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         ).toHaveLength(0)
         expect(reply).toMatch(/oura|connect/iu)
         expect(hasWearableConnectionDeferralMeaning(reply), reply).toBe(true)
-        expect(reply).toMatch(
-          /voice memo|movement|move|training|supplements|meds|conditions|allergies|medical/iu,
-        )
+        // Naming Oura settles the wearable step; putting off the connection
+        // does not pause onboarding. The same reply sends the health
+        // background ask, never the wearable question again, and no plan yet.
+        expect(reply).toMatch(/voice memo/iu)
+        expect((reply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+        expect(reasksWearable(reply), reply).toBe(false)
+        expect(reply).not.toMatch(/save this plan|set up (?:those |the )?reminders/iu)
         expect(reply).not.toContain('https://')
         expect(reply).not.toMatch(
           /\b(?:oura(?:'s| is)|it(?:'s| is)|you(?:'re| are)|we(?:'re| are)) (?:now )?(?:connected|linked|syncing)\b|\bi (?:have )?(?:connected|linked) (?:your )?oura\b|\b(?:connected|linked) (?:to )?(?:your )?oura\b|\bi can (?:see|use|pull) (?:your )?oura\b|\b(?:oura )?data (?:is|are) (?:syncing|coming in|available)\b/iu,
@@ -5403,9 +5461,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           developerInstructions: buildDirectConversationDeveloperInstructions(
             true,
             [
-              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the private welcome, minimal identity, aspiration readiness, reflection, save, and park are complete.',
-              'The latest visible Murph message asked whether the member uses a wearable or health app. No wearable connection is visible.',
-              'Movement, current protocols, supplements, medical basics, and recent labs remain unresolved.',
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the welcome and the name, age, and gender question are answered, and the member said they want to sleep more consistently. No first step has been proposed yet.',
+              'The latest visible Murph message reflected the sleep goal and asked whether they use a wearable or health app, like Oura. No wearable connection is visible.',
+              'Nothing is known yet about how they move, what they take, their medical basics, or recent labs.',
             ].join('\n'),
             supportedProviders,
           ),
@@ -5424,6 +5482,11 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(linkOffer.finalMessage).toContain(
           'https://connect.example.test/oura',
         )
+        // The link goes in a short handoff of its own; the background ask
+        // waits for their reply.
+        process.stdout.write(`[onboarding-wearable-link-e2e] ${JSON.stringify({ reply: linkOffer.finalMessage.trim() })}\n`)
+        expect(linkOffer.finalMessage).not.toMatch(/voice memo|supplements|\bmeds\b|medications|blood tests?/iu)
+        expect((linkOffer.finalMessage.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
 
         const laterRequestOffset = deviceRequests.length
         const laterDeferral = await executeRealCodexOnboardingProbe({
@@ -5431,9 +5494,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           developerInstructions: buildDirectConversationDeveloperInstructions(
             true,
             [
-              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the private welcome, minimal identity, aspiration readiness, reflection, save, and park are complete.',
-              'The visible conversation identifies Oura as the data source and contains Murph\'s real connection-link handoff. No wearable connection is visible.',
-              'Movement, current protocols, supplements, medical basics, and recent labs remain unresolved.',
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; the welcome and the name, age, and gender question are answered, and the member said they want to sleep more consistently. No first step has been proposed yet.',
+              'The visible conversation contains the wearable question, identifies Oura as the data source, and contains Murph\'s real connection-link handoff. Murph has not sent the health background ask yet. No wearable connection is visible.',
+              'Nothing is known yet about how they move, what they take, their medical basics, or recent labs.',
             ].join('\n'),
             supportedProviders,
           ),
@@ -5451,13 +5514,17 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             .filter((request) => request.action !== 'list_accounts'),
           'later-turn connection writes',
         ).toHaveLength(0)
+        process.stdout.write(`[onboarding-wearable-later-e2e] ${JSON.stringify({ reply: laterReply })}\n`)
+        // A bare "I'll do that later" after the link may be accepted plainly,
+        // and this reply carries the health background ask.
         expect(
-          hasWearableConnectionDeferralMeaning(laterReply),
+          hasWearableConnectionDeferralMeaning(laterReply)
+            || /\b(?:that(?:'s| is) (?:totally )?fine|no problem|sounds good|of course)\b/iu.test(laterReply),
           laterReply,
         ).toBe(true)
-        expect(laterReply).toMatch(
-          /voice memo|movement|move|training|supplements|meds|conditions|allergies|medical/iu,
-        )
+        expect(laterReply).toMatch(/voice memo/iu)
+        expect((laterReply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+        expect(reasksWearable(laterReply), laterReply).toBe(false)
         expect(laterReply).not.toContain('https://')
         expect(laterReply).not.toMatch(
           /\b(?:oura(?:'s| is)|it(?:'s| is)|you(?:'re| are)|we(?:'re| are)) (?:now )?(?:connected|linked|syncing)\b|\bi (?:have )?(?:connected|linked) (?:your )?oura\b|\b(?:connected|linked) (?:to )?(?:your )?oura\b|\bi can (?:see|use|pull) (?:your )?oura\b|\b(?:oura )?data (?:is|are) (?:syncing|coming in|available)\b/iu,
@@ -5480,6 +5547,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           `${JSON.stringify({
             ...returnContext,
             deviceAccounts: emptySurface,
+            experiments: emptySurface,
             memory: {
               ...returnContext.memory,
               recordCount: returnMemoryRecords.length,
@@ -5488,6 +5556,8 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           })}\n`,
           { encoding: 'utf8', mode: 0o600 },
         )
+        const completionLogPath = path.join(workingDirectory, 'onboarding-complete.log')
+        const progressBeforeProposal = progressUpdates.length
         const returnRequestOffset = deviceRequests.length
         const contextualReturn = await executeRealCodexOnboardingProbe({
           ...turnInput,
@@ -5495,28 +5565,75 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             true,
             [
               'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; Oura is the identified data source and only its optional connection was deferred.',
-              'Movement, current protocols, supplements, medical basics, and recent labs are resolved. The saved sleep thread is aspiration-ready.',
-              'Return to the sleep thread without reopening an already resolved foundation checkpoint.',
+              'The member said they want to sleep more consistently, and every item of the health background ask is answered and saved: how they move, what they take, their medical basics, and recent labs.',
+              'No first step has been proposed yet.',
             ].join('\n'),
             supportedProviders,
           ),
           dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
           hostedToolContext,
           progressDelivery,
-          prompt: "That's everything for the foundation. What's next?",
-          resumeSessionId: laterDeferral.sessionId,
+          // A fresh thread, so the snapshot alone says the background is done.
+          prompt: "That's everything from me. What's next?",
           scenario: 'wearable_connection_deferred_return',
         })
+        const proposal = contextualReturn.finalMessage.trim()
+        process.stdout.write(`[onboarding-first-step-e2e] ${JSON.stringify({ reply: proposal })}\n`)
         expect(
           deviceRequests
             .slice(returnRequestOffset)
             .filter((request) => request.action !== 'list_accounts'),
           'return-stage connection writes',
         ).toHaveLength(0)
-        expect(contextualReturn.finalMessage).toMatch(/sleep|thread|start|work on/iu)
-        expect(contextualReturn.finalMessage).not.toMatch(
-          /wearable|oura|connect|health app/iu,
-        )
+        // With the background answered, the next step is the first-step offer
+        // for the sleep goal. The deferred connection and the answered
+        // background are not raised again, and nothing is settled yet.
+        expect(proposal).toMatch(/sleep|bed|wind|night/iu)
+        expect(proposal).not.toMatch(/wearable|oura|connect|health app/iu)
+        expect(reasksOnboardingBackground(proposal), proposal).toBe(false)
+        expect((proposal.match(/\?/gu) ?? []).length).toBe(1)
+        expect(contextualReturn.policyFiles).toContain('SKILL.md')
+        expect(contextualReturn.actions.some((action) => action.kind === 'command' && action.command.includes('goal-setup/SKILL.md')), 'goal-setup skill read').toBe(true)
+        expect(progressUpdates.length - progressBeforeProposal).toBeLessThanOrEqual(1)
+        expect(await readFile(completionLogPath, 'utf8').catch(() => '')).toBe('')
+
+        const settleRequestOffset = deviceRequests.length
+        const progressBeforeSettle = progressUpdates.length
+        const settled = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          developerInstructions: buildDirectConversationDeveloperInstructions(
+            true,
+            [
+              'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; Oura is the identified data source and only its optional connection was deferred.',
+              'The member said they want to sleep more consistently, and every item of the health background ask is answered and saved. The sleep goal is saved.',
+              'The latest visible Murph message is the first-step offer for the sleep goal.',
+            ].join('\n'),
+            supportedProviders,
+          ),
+          dynamicTools: [MURPH_DEVICE_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
+          hostedToolContext,
+          progressDelivery,
+          prompt: "Let's leave the plan for now, maybe later.",
+          resumeSessionId: contextualReturn.sessionId,
+          scenario: 'first_step_settled',
+        })
+        const settledReply = settled.finalMessage.trim()
+        process.stdout.write(`[onboarding-first-step-settled-e2e] ${JSON.stringify({ reply: settledReply })}\n`)
+        expect(
+          deviceRequests
+            .slice(settleRequestOffset)
+            .filter((request) => request.action !== 'list_accounts'),
+          'settle-turn connection writes',
+        ).toHaveLength(0)
+        // Leaving the plan for later settles the first step. Every step has
+        // now happened, so onboarding completes exactly once, in this turn.
+        expect(settledReply).not.toMatch(/wearable|oura|connect|health app/iu)
+        expect(reasksOnboardingBackground(settledReply), settledReply).toBe(false)
+        expect((settledReply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+        expect(progressUpdates.length - progressBeforeSettle).toBe(0)
+        const completionsBeforePause = await readFile(completionLogPath, 'utf8').catch(() => '')
+        expect(completionsBeforePause.match(/--reason[= ]user_answered/gu) ?? []).toHaveLength(1)
+        expect(completionsBeforePause).not.toMatch(/user_declined/u)
 
         await writeFile(
           path.join(workingDirectory, 'onboarding-resume-context.json'),
@@ -5530,7 +5647,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             true,
             [
               'Assistant context snapshot (engine-supplied evidence): direct onboarding remains open; Oura is the identified data source and no connection is visible.',
-              'Movement, current protocols, supplements, medical basics, and recent labs remain unresolved.',
+              'The member said they want to sleep more consistently. Murph has not asked about the rest of their health background yet, and no first step has been proposed.',
             ].join('\n'),
             supportedProviders,
           ),
@@ -5551,20 +5668,122 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           /voice memo|supplements|meds|conditions|allergies|blood tests|labs/iu,
         )
         expect(onboardingPause.finalMessage.match(/\?/gu) ?? []).toHaveLength(0)
+        // Asking to continue another time leaves onboarding open.
+        expect(await readFile(completionLogPath, 'utf8').catch(() => '')).toBe(completionsBeforePause)
+        // Only the goal-setup proposal may send an early update; ordinary
+        // onboarding questions and replies send none.
         const progressCalls = [
           result,
           linkOffer,
           laterDeferral,
-          contextualReturn,
+          settled,
           onboardingPause,
         ].flatMap((turn) => turn.actions.filter((action) =>
           action.kind === 'dynamic'
           && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
         ))
-        expect(progressUpdates).toEqual([])
         expect(progressCalls).toEqual([])
+        expect(progressUpdates.length).toBeLessThanOrEqual(1)
       } finally {
         await removeRealCodexTemporaryPaths(temporaryPaths)
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'proposes a first step that fits the health background the member just shared',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await prepareRealCodexOnboardingDirectory()
+      const progressUpdates: string[] = []
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      try {
+        await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+        await writeFile(path.join(workingDirectory, 'vault-cli'), [
+          '#!/bin/sh',
+          'set -eu',
+          'exec "$MURPH_ONBOARDING_TEST_NODE" --import "$MURPH_ONBOARDING_TEST_LOADER" "$MURPH_ONBOARDING_TEST_CLI" "$@" --vault "$MURPH_ONBOARDING_TEST_VAULT"',
+          '',
+        ].join('\n'), { mode: 0o700 })
+        const turnInput = buildRealCodexOnboardingTurnInput({ config, workingDirectory })
+        const now = new Date().toISOString()
+        const result = await executeRealCodexAppServerTurn({
+          ...turnInput,
+          configOverrides: [...CHILD_MODEL_SELECTION_CONFIG_OVERRIDES, ...await readHostedDelegationHintOverrides()],
+          developerInstructions: buildDirectConversationDeveloperInstructions(true, [
+            'Visible direct conversation:',
+            `Murph: ${ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE}`,
+            'Member: Yes, ready.',
+            `Murph: ${MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal}`,
+            "Member: I'm Sam, 38, a woman.",
+            'Murph: Good to meet you, Sam. What would you most like from your health: something you want to improve, understand, handle, or be able to do?',
+            'Member: I want to get stronger.',
+            "Murph: Stronger, love that. Before we decide where to start, I want to understand a bit more so the advice actually fits. Do you use a wearable or health app, like Oura? Connecting one cuts down on manual reporting and helps me read things later.",
+            "Member: I've got an Oura ring, but I'll connect it later.",
+            [
+              "Murph: No problem, we can leave Oura for later. Can you send me a voice memo covering a few things?",
+              'You can type it out instead. Either works just as well.',
+              "- how you move right now (gym, running, sports, mostly desk-bound) and whether you're training for anything specific",
+              '- anything you take regularly (supplements, protein, that stuff), with brands if you know them',
+              '- the medical basics: any meds, conditions, injuries, or allergies I should know for safety',
+              "- whether you've had blood tests in the last year or two",
+              '- anything else you reckon I should know',
+              "Ramble as long as you want, I'll sort it out.",
+            ].join('\n'),
+          ].join('\n\n'), [{ label: 'Oura', provider: 'oura' }], now, true),
+          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_SEND_PROGRESS_UPDATE_TOOL],
+          progressDelivery: { async send(text) {
+            progressUpdates.push(text)
+            return { kind: 'sent', source: 'model' }
+          } },
+          env: {
+            ...turnInput.env,
+            MURPH_ONBOARDING_TEST_NODE: process.execPath,
+            MURPH_ONBOARDING_TEST_LOADER: path.resolve(path.dirname(VAULT_E2E_TSX_BIN), '../tsx/dist/loader.mjs'),
+            MURPH_ONBOARDING_TEST_CLI: VAULT_E2E_CLI_ENTRYPOINT,
+            MURPH_ONBOARDING_TEST_VAULT: workingDirectory,
+            TSX_TSCONFIG_PATH: path.resolve(path.dirname(VAULT_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
+          },
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                automationRequests.push(request)
+                throw new Error('Nothing is scheduled before the first step is settled.')
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => { throw new Error('No file sends in onboarding proof.') },
+            vaultFileSendAvailable: false,
+          },
+          prompt: "Desk job, but I walk the dog every day. No gym. I take vitamin D most days. I hurt my lower back last year and it still flares up if I lift anything heavy off the floor. No meds, no allergies, nothing else medical. And I haven't had blood work in years.",
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const reply = result.finalMessage.trim()
+        process.stdout.write(`[onboarding-proposal-uses-background-e2e] ${JSON.stringify({ progressUpdates, reply })}\n`)
+        // Every background item is answered, so this reply is the first-step
+        // offer. It is shaped by the back injury and the dog walks, asks
+        // nothing already answered, leaves the deferred Oura connection alone,
+        // and saves no plan before a yes.
+        expect(reply).toMatch(/\bback\b/iu)
+        expect(reply).toMatch(/strong|strength/iu)
+        expect(reasksOnboardingBackground(reply), reply).toBe(false)
+        expect(reasksWearable(reply), reply).toBe(false)
+        expect(reply).not.toMatch(/blood (?:tests?|work)|\blabs?\b|\boura\b|wearable|vitamin d[^.?!\n]{0,40}\?/iu)
+        expect((reply.match(/\?/gu) ?? []).length).toBe(1)
+        expect(actions.some((action) => action.kind === 'command' && action.command.includes('goal-setup/SKILL.md')), 'goal-setup skill read').toBe(true)
+        expect(progressUpdates.length).toBeLessThanOrEqual(1)
+        expect(automationRequests).toHaveLength(0)
+        expect(actions.filter((action) => action.kind === 'command' && /assistant\s+onboarding\s+complete\b/u.test(action.command))).toEqual([])
+        // Background workers may save the routine they described, but no Goal
+        // exists until the member accepts the offer.
+        await waitForWarmCodexBackgroundWork()
+        expect(await listGoals(workingDirectory)).toHaveLength(0)
+      } finally {
+        await stopWarmCodexAppServer('onboarding-proposal-uses-background-e2e-complete')
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
       }
     },
     360_000,
@@ -5630,24 +5849,26 @@ describeRealCodex('real Codex email onboarding follow-up e2e', () => {
 describe('onboarding policy read detection', () => {
   it('attributes only substantive policy content surfaced in command output', async () => {
     const skillsRoot = resolveAssistantSkillsRoot()
-    const broadOutput = [
-      'Hosted onboarding must have capacity for at least three concurrent children.',
-      'Route useful answers to their existing canonical owner in the same turn. The',
-      'After the foundation is resolved, close it warmly before asking for anything',
-    ].join('\n')
+    // One substantive line from each shipped policy file, taken from the files
+    // themselves so a reworded skill cannot break the detector's own test.
+    const policies = await Promise.all(ONBOARDING_POLICY_PATHS.map(async ([, relativePath]) =>
+      readFile(path.join(skillsRoot, relativePath), 'utf8')))
+    const broadOutput = policies.map((content, index) => {
+      const marker = content.split('\n').map((line) => line.trim()).find((line) =>
+        line.length >= 48 && !line.startsWith('#') && !line.startsWith('```')
+        && policies.every((other, otherIndex) => otherIndex === index || !other.includes(line)))
+      if (!marker) throw new Error('Expected a distinctive line in every onboarding policy file.')
+      return marker
+    }).join('\n')
     expect(await readOnboardingPolicyFiles([{
-      command: "for f in ./skills/murph-onboarding/references/*; do sed -n '20,30p' \"$f\"; done",
+      command: "for f in ./skills/murph-onboarding/SKILL.md ./skills/murph-onboarding/references/*; do sed -n '20,30p' \"$f\"; done",
       eventIndex: 0,
       kind: 'command',
       ok: true,
       output: broadOutput,
-    }], skillsRoot)).toEqual([
-      'aspiration-foundation-delegation.md',
-      'persistence-recovery-follow-up.md',
-      'return-launch-completion.md',
-    ])
+    }], skillsRoot)).toEqual(ONBOARDING_POLICY_PATHS.map(([file]) => file))
     expect(await readOnboardingPolicyFiles([{
-      command: 'cat ./skills/murph-onboarding/references/return-launch-completion.md',
+      command: `cat ./skills/${ONBOARDING_POLICY_PATHS[1][1]}`,
       eventIndex: 0,
       kind: 'command',
       ok: false,
@@ -5763,7 +5984,6 @@ describe('real Codex live fixture contracts', () => {
     const prompt = buildDirectConversationDeveloperInstructions(true, null, [], '2030-01-15T14:00:00.000Z', true)
     expect(prompt).toContain('Scheduled automation changes for this conversation are available through `murph.automation`.')
     expect(prompt).not.toContain('Scheduled automation changes are unavailable in this turn.')
-    expect(prompt).toContain('Do not schedule a check-in during this opening exchange.')
   })
 
   it('aligns Journal automation instructions with its port and uses real canonical CLI writes', async () => {
@@ -7405,7 +7625,7 @@ describeRealCodex('real Codex coordinated workout exercise e2e', () => {
         const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'behavior-followthrough' }),
-          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
           materializeAssistantSkillAsset({
             relativePath: 'shared/exercise-catalog-runtime.md',
@@ -7757,7 +7977,7 @@ describeRealCodex('real Codex routine chat readiness e2e', () => {
       await initializeVault({ title: 'Synthetic routine proof', timezone: 'UTC', vaultRoot: workingDirectory })
       await writeFile(commandLogPath, '', 'utf8')
       await Promise.all([
-        materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+        materializeAssistantSkill({ skillsRoot, slug: 'training' }),
         materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
         materializeAssistantSkillAsset({ relativePath: 'shared/exercise-catalog-runtime.md', skillsRoot }),
         materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory }),
@@ -7878,7 +8098,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         })
         const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
         await Promise.all([
-          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
           materializeAssistantSkillAsset({
             relativePath: 'shared/exercise-catalog-runtime.md',
@@ -8147,7 +8367,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         })
         const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
         await Promise.all([
-          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
           materializeAssistantSkillAsset({
             relativePath: 'shared/exercise-catalog-runtime.md',
@@ -8340,7 +8560,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           vaultRoot: automationDirectory,
         })
         await Promise.all([
-          ...(['strength-training', 'tracked-table'] as const).map((slug) =>
+          ...(['training', 'tracked-table'] as const).map((slug) =>
             materializeAssistantSkill({ skillsRoot, slug }),
           ),
           materializeAssistantSkillAsset({
@@ -8532,7 +8752,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           vaultRoot: workingDirectory,
         })
         await Promise.all([
-          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
           materializeAssistantSkillAsset({
             relativePath: 'shared/exercise-catalog-runtime.md',
@@ -8723,7 +8943,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'behavior-followthrough' }),
           materializeAssistantSkill({ skillsRoot, slug: 'experiment-onboarding' }),
-          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
           materializeAssistantSkillAsset({
             relativePath: 'shared/exercise-catalog-runtime.md',
@@ -11418,6 +11638,111 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
     360_000,
   )
 
+  it.each(GROUP_HUMOR_SCENARIOS.map((scenario) => [scenario.id, scenario] as const))(
+    'group humor scenario: %s',
+    async (_id, scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-humor-scenario-e2e-'),
+      )
+      const generations: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await Promise.all(
+          (['group-chat', 'groupchat-comedy', 'group-challenge'] as const).map(async (slug) => {
+            await materializeAssistantSkill({ skillsRoot, slug })
+          }),
+        )
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [
+            MURPH_FINISH_WITHOUT_REPLY_TOOL,
+            MURPH_GENERATE_VOICE_MEMO_TOOL,
+            MURPH_GENERATE_SONG_TOOL,
+          ],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: ['Trusted group transcript:', ...scenario.transcript].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          voiceMemoRuntime: {
+            elevenLabs: {
+              apiKeyAvailable: true,
+              modelId: 'eleven_multilingual_v2',
+              voiceId: 'voice_murph',
+            },
+            generateAndUpload: async (input) => {
+              generations.push(input.generation)
+              return {
+                attachmentId: 'attachment_group_humor_scenario',
+                filename: 'group-humor-scenario.mp3',
+              }
+            },
+            kind: 'linq',
+          },
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const commands = actions.flatMap((action) => action.kind === 'command' ? [action.command] : [])
+        const reply = result.finalMessage.trim()
+        const media = generations.length + (result.responseMedia ?? []).length
+        process.stdout.write(
+          `[group-humor-scenario] ${JSON.stringify({
+            scenario: scenario.id,
+            reply,
+            media,
+            finished: actions.some((action) => action.kind === 'dynamic' && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name),
+            comedyRead: commands.some((command) => command.includes('groupchat-comedy')),
+            groupChatRead: commands.some((command) => command.includes('group-chat/')),
+          })}\n`,
+        )
+
+        // Whether the line is funny is read by a person. These checks only
+        // cover speaking when the room is not Murph's, and broken boundaries.
+        if (scenario.expect === 'no-text') {
+          expect(reply).toBe('')
+          expect(media).toBe(0)
+          return
+        }
+        if (scenario.expect === 'text') {
+          expect(reply.length + media).toBeGreaterThan(0)
+        }
+        expect(reply.length).toBeLessThanOrEqual(scenario.maxChars ?? 240)
+        expect(reply).not.toMatch(/\blol\b|\blmao\b|\bhaha\b|😂|🤣/iu)
+        if (reply && scenario.mustMatch) expect(reply).toMatch(scenario.mustMatch)
+        if (scenario.mustNotMatch) expect(reply).not.toMatch(scenario.mustNotMatch)
+        expect(reply).not.toMatch(GROUP_HUMOR_TIRED_FRAMES)
+        // Replying to whoever just spoke, their name is implied.
+        const lastSpeaker = readGroupHumorLastSpeaker(scenario.transcript)
+        if (reply && lastSpeaker && lastSpeaker !== 'Murph') {
+          expect(opensByAddressing(reply, lastSpeaker)).toBe(false)
+        }
+        // They know what they posted: no opening by repeating it back.
+        if (reply && !scenario.allowEcho) {
+          expect(opensWithEcho(reply, scenario.transcript)).toBe(false)
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it(
     'weighs native reply context when deciding group-floor ownership',
     async () => {
@@ -12229,7 +12554,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           materializeRoutinePresentationVaultCli(binDirectory),
           materializeAssistantSkill({
             skillsRoot,
-            slug: 'mobility-posture',
+            slug: 'training',
           }),
           materializeAssistantSkillAsset({
             relativePath: path.join(
@@ -12308,14 +12633,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         )
 
         expect(preparedInput.instructions).toContain(savedInstructions)
-        expect(preparedInput.instructions).toContain(
-          'read the matching movement skill and its shared exercise-catalog reference',
-        )
-        expect(preparedInput.instructions.indexOf(savedInstructions)).toBeLessThan(
-          preparedInput.instructions.indexOf(
-            'read the matching movement skill and its shared exercise-catalog reference',
-          ),
-        )
+        // The run wrapper carries facts only. The exercise rule lives in the
+        // scheduled prompt's execution context, and the movement-skill and
+        // catalog reads asserted below prove it reached the model.
+        expect(buildScheduledAutomationDeveloperInstructions()).toContain('Execution context:')
 
         const inheritedPath = normalizeEnvString(config.env.PATH)
         const result = await executeRealCodexAppServerTurn({
@@ -12352,7 +12673,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const actions = readCapabilityRoutingActions(result.jsonEvents)
         const movementSkillRead = actions.find((action) =>
           action.kind === 'command'
-          && action.command.includes('mobility-posture/SKILL.md')
+          && action.command.includes('training/SKILL.md')
         )
         const catalogReferenceRead = actions.find((action) =>
           action.kind === 'command'
@@ -15578,7 +15899,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       )
       expect(journey.finalMessage).not.toMatch(/\b(?:Avery|Jordan)\b/u)
       expect(journey.finalMessage).toMatch(
-        /(?:cannot (?:reliably )?(?:tell|say) who|can.t tell who|(?:duplicate|same)[^.!?\n]{0,100}(?:label|name)|(?:label|name|mapping|attribute)[^.!?\n]{0,100}(?:ambiguous|duplicate|same|cannot|can't|unable)|(?:cannot|can't|unable)[^.!?\n]{0,100}(?:label|name|mapping|attribute))/iu,
+        /(?:cannot (?:reliably )?(?:tell|say) who|can.t tell (?:you )?(?:who|which)|both[^.!?\n]{0,60}(?:labell?ed|named|called)|(?:duplicate|same)[^.!?\n]{0,100}(?:label|name)|(?:label|name|mapping|attribute)[^.!?\n]{0,100}(?:ambiguous|duplicate|same|cannot|can't|unable)|(?:cannot|can't|unable)[^.!?\n]{0,100}(?:label|name|mapping|attribute))/iu,
       )
     },
     360_000,
@@ -16497,7 +16818,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         }])
         expect(
           actions.filter((action) => action.kind === 'command'
-            && !/^\/bin\/zsh -c 'cat "\$MURPH_ASSISTANT_SKILLS_ROOT\/group-chat\/SKILL\.md"\s*'$/u.test(action.command)),
+            && !/^\/bin\/zsh -c 'cat "\$MURPH_ASSISTANT_SKILLS_ROOT\/group-chat\/(?:SKILL|references\/[a-z-]+)\.md"\s*'$/u.test(action.command)),
           'no current-sender group-turn private command calls or writes',
         ).toEqual([])
         expect(assistantReply).toBe(expectedProgressText)
@@ -16649,7 +16970,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(progressUpdates).toEqual([])
         expect(
           actions.filter((action) => action.kind === 'command'
-            && !/^\/bin\/zsh -c 'cat "\$MURPH_ASSISTANT_SKILLS_ROOT\/group-chat\/SKILL\.md"\s*'$/u.test(action.command)),
+            && !/^\/bin\/zsh -c 'cat "\$MURPH_ASSISTANT_SKILLS_ROOT\/group-chat\/(?:SKILL|references\/[a-z-]+)\.md"\s*'$/u.test(action.command)),
           'no current-sender private-turn private command calls or writes',
         ).toEqual([])
         expect(result.finalAction).toEqual({ kind: 'none' })
@@ -17129,7 +17450,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           }),
         ])
         expect(result.finalMessage).toMatch(
-          /one (?:new )?group|the next (?:iMessage )?group/iu,
+          /one (?:new )?group|the next (?:iMessage )?group|group you add me to next/iu,
         )
         expect(result.finalMessage).toMatch(/prepared|ready|set up/iu)
         expect(result.finalMessage).not.toMatch(
@@ -21737,7 +22058,7 @@ describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () =>
         })
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'daily-activity' }),
-          materializeAssistantSkill({ skillsRoot, slug: 'running-cardio' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'training' }),
           materializeWearableArrivalVaultCli({ binDirectory }),
         ])
 
@@ -22185,7 +22506,7 @@ describeRealCodex('real Codex legacy weekly digest prompt compatibility e2e', ()
           { automationId: null, contextReferences: [] },
         )
         expect(prompt).toContain(savedInstructions)
-        expect(prompt).not.toContain('Accepted support scope (engine-supplied')
+        expect(prompt).not.toContain('Persisted support kind:')
         expect(prompt).not.toContain('agreed weekly summary shape')
         const result = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
@@ -23313,7 +23634,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
         { sessionId: 'session-synthetic-first-reminder' },
       )
       expect(preparedInput.instructions).toContain(
-        'Otherwise send the current cue as scheduled with its requested wording.',
+        '- Recurring reminder',
       )
       expect(preparedInput.instructions).not.toContain(
         'Recent outputs from this automation',
@@ -23427,7 +23748,7 @@ describeRealCodex('real Codex recurring reminder conversation e2e', () => {
         expect(prepared.instructions).toContain(JSON.stringify(output.text))
       }
       expect(prepared.instructions).toContain(
-        'Otherwise send the current cue as scheduled with its requested wording.',
+        '- Recurring reminder',
       )
       expect(prepared.instructions).not.toContain('Confirmed-output reminder cadence policy')
       const result = await executeRealCodexAppServerTurn({
@@ -24429,11 +24750,13 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
         sandbox: 'workspace-write', workingDirectory,
       })
       const first = await runTurn()
-      const skillReads = readCapabilityRoutingActions(first.jsonEvents)
-        .filter(action => action.kind === 'command').map(action => action.output).join('\n')
-      expect(skillReads).toContain('# Connected-app reading and reminder location')
-      expect(skillReads).not.toContain('## Prefer connected email over webmail')
-      expect(skillReads).not.toContain('## Unsupported health and fitness sources')
+      // The pass reads the narrow reading reference, never the whole connected-apps skill.
+      const skillReadCommands = readCapabilityRoutingActions(first.jsonEvents)
+        .flatMap(action => action.kind === 'command' ? [action] : [])
+      expect(skillReadCommands.some(action => action.ok
+        && action.command.includes('connected-apps/references/reading.md'))).toBe(true)
+      expect(skillReadCommands.some(action => action.command.includes('connected-apps/SKILL.md')
+        || action.output.includes('name: connected-apps'))).toBe(false)
       expect(parseAssistantNotificationDecision(first.finalMessage).kind).toBe('skip')
       const firstInventoryCommands = expandRecordedVaultCommands((await readFile(path.join(workingDirectory, 'commands.log'), 'utf8')).split('\n').filter(Boolean))
         .filter(line => /^automation list\b/u.test(line) && !isRecordedVaultHelpCommand(line))
@@ -24860,6 +25183,94 @@ describeRealCodex('real Codex memory profile improvement e2e', () => {
   }, 540_000)
 })
 
+describeRealCodex('real Codex group room notes consolidation e2e', () => {
+  // The silent twice-weekly room-notes rewrite, on an older-layout page that
+  // saved Murph's own jokes, after a week where Murph wore one bit out and the
+  // members made their own material. Fixtures: support/group-room-notes-scenario.ts.
+  it("group room notes consolidation keeps member material and retires Murph's own bits", async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-group-room-notes-e2e-'))
+    try {
+      const seed = MURPH_MANAGED_AUTOMATIONS.find(entry => entry.automationId === MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID)
+      if (!seed) throw new Error('Expected the group room model consolidation seed.')
+      const before = await seedGroupRoomNotesScenario(workingDirectory)
+      const originalSetup = readGroupRoomNotesSection(before.body, 'Explicit setup')
+      expect(originalSetup).toBe(GROUP_ROOM_NOTES_EXPLICIT_SETUP)
+      const evidence = await readAssistantMaintenanceConversationEvidence({
+        now: GROUP_ROOM_NOTES_NOW, profile: 'group-room-model', vault: workingDirectory,
+      })
+      expect(evidence.status).toBe('available')
+      expect(evidence.prompt).toContain('- truncated: false')
+      expect(evidence.prompt).toContain('legal counsel')
+      for (const handle of Object.values(GROUP_ROOM_NOTES_SENDER_HANDLES)) expect(evidence.prompt).toContain(handle)
+
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantMaintenanceSystemPromptResult({
+          currentLocalDate: GROUP_ROOM_NOTES_LOCAL_DATE, currentTimeZone: GROUP_ROOM_NOTES_TIME_ZONE, profile: 'group-room-model',
+        }).prompt,
+        dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL], env: config.env, ephemeral: true,
+        groupRoomModelMaintenanceAuthorized: true, model: config.model, modelProvider: config.modelProvider,
+        processLifetime: 'one-shot', prompt: [seed.instructions, evidence.prompt].join('\n\n'),
+        reasoningEffort: seed.assistantTargetOverride?.reasoningEffort ?? 'high',
+        runtimeWorkspaceRoots: [workingDirectory], sandbox: 'read-only',
+        threadConfig: GROUP_ROOM_NOTES_MAINTENANCE_THREAD_CONFIG,
+        vaultRoot: workingDirectory, workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const calls = actions.filter(action => action.kind === 'dynamic')
+      const body = await readGroupRoomNotesPageBody(workingDirectory) ?? ''
+      // Printed before any assertion so a failed run still shows its page.
+      process.stdout.write(`[group-room-notes-consolidation] ${JSON.stringify({
+        calls: calls.map(call => ({ tool: call.tool, action: call.argumentsValue.action, success: call.success })),
+        finalMessage: result.finalMessage,
+        changed: body !== before.body,
+        checks: inspectGroupRoomNotesPage(body),
+      })}\n`)
+      process.stdout.write(`[group-room-notes-page]\n${body}\n[/group-room-notes-page]\n`)
+
+      expect(actions.filter(action => action.kind === 'command')).toEqual([])
+      expect(calls.every(call => call.tool === MURPH_GROUP_ROOM_MODEL_TOOL.name)).toBe(true)
+      expect(calls.filter(call => call.argumentsValue.action === 'delete')).toEqual([])
+      const firstShow = calls.find(call => call.argumentsValue.action === 'show' && call.success)
+      const upserts = calls.filter(call => call.argumentsValue.action === 'upsert' && call.success)
+      if (!firstShow) throw new Error('Expected a successful show before writing.')
+      expect(JSON.parse(firstShow.output)).toMatchObject({ body: before.body, digest: before.digest, status: 'active' })
+      expect(upserts).toHaveLength(1)
+      const [upsert] = upserts
+      expect(firstShow.eventIndex).toBeLessThan(upsert?.eventIndex ?? -1)
+      expect(upsert?.argumentsValue.expectedDigest).toBe(before.digest)
+      expect(body).toBe(normalizeKnowledgeBody(readString(upsert?.argumentsValue.body) ?? '').trim())
+
+      // Murph's worn-out bit is recorded once, as off the table, and nowhere else.
+      const wornOut = readGroupRoomNotesSection(body, 'Worn out')
+      expect(wornOut, 'page needs a ## Worn out section').not.toBeNull()
+      expect(wornOut).toMatch(/legal|official|counsel|court|lawyer|inquir|ruling|record|defendant|plea/iu)
+      const outsideWornOut = withoutGroupRoomNotesSections(body, ['Worn out'])
+      expect(outsideWornOut).not.toMatch(/legal[\s-]+counsel/iu)
+      expect(outsideWornOut).not.toMatch(/thoughts[\s-]*(?:and|&)[\s-]*prayers/iu)
+      expect(body).not.toMatch(/^#{1,6}\s*What tends to land/imu)
+      expect(outsideWornOut).not.toMatch(/mock rulings[^\n]*land|reuse (?:the |this )?(?:legal|counsel|bit|joke|line|format)/iu)
+      // The room's explicit request survives byte for byte.
+      expect(readGroupRoomNotesSection(body, 'Explicit setup')).toBe(originalSetup)
+      // Member material: Dario's promise, Priya's nickname, Marcus's stop request.
+      expect(body).toMatch(/15\s?k|15,000|fifteen thousand|every single day/iu)
+      expect(body).toMatch(/Captain Tomorrow/iu)
+      expect(readGroupRoomNotesSection(body, 'What to avoid') ?? '').toMatch(/accountant|Marcus/iu)
+      // Nothing private.
+      expect(body).not.toMatch(GROUP_ROOM_NOTES_HEALTH_DETAIL)
+      expect(groupRoomNotesBodyHasRawHandle(body)).toBe(false)
+      expect(JSON.parse(result.finalMessage.trim())).toEqual({
+        kind: 'skip', privateSummary: MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
+      })
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 600_000)
+})
+
 describeRealCodex('real Codex bounded current-state memory e2e', () => {
   it(
     'real Codex bounded current-state precedence and authority e2e',
@@ -25118,10 +25529,6 @@ describeRealCodex('real Codex public goal setup e2e', () => {
         await Promise.all([
           materializeAssistantSkill({ skillsRoot, slug: 'goal-setup' }),
           materializeAssistantSkill({ skillsRoot, slug: 'sleep-improvement' }),
-          materializeAssistantSkill({
-            skillsRoot,
-            slug: 'sleep-recovery-readiness',
-          }),
           materializePublicGoalSetupVaultCli({
             binDirectory,
             commandLogPath,
@@ -25514,7 +25921,6 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           await Promise.all([
             'goal-setup',
             'sleep-improvement',
-            'behavior-followthrough',
           ].map(async (slug) => {
             const skillPathSuffix = `${path.sep}${slug}${path.sep}SKILL.md`
             const actions = discoveryActions.filter(
@@ -25540,6 +25946,12 @@ describeRealCodex('real Codex public goal setup e2e', () => {
             return actions
           }))
         ).flat()
+        // goal-setup is enough to propose a new plan; the follow-through skill
+        // covers plans that already exist.
+        expect(discoveryActions.filter((action) =>
+          action.kind === 'command'
+          && action.command.includes(`${path.sep}behavior-followthrough${path.sep}`)
+        ), 'no behavior-followthrough read before a new proposal').toEqual([])
         const discoveryMemoryRead = discoveryActions.find(
           isSuccessfulCompactMemoryReadAction,
         )
@@ -25561,13 +25973,24 @@ describeRealCodex('real Codex public goal setup e2e', () => {
         expect(discoveryReply).not.toContain('goal_template:')
         expect(discoveryReply).not.toContain('sha256:')
         expect(automationRequests).toHaveLength(0)
+        // Saved context is enough to choose a first step here, so the first
+        // reply is already the offer: the plan, its reminders and review, and
+        // the one question that asks to save it. The reason is not asked first.
+        expect(discoveryReply, 'first reply offers to save a plan').toMatch(
+          /want me to|would you like me to|save (?:this|that)/iu,
+        )
+        expect(discoveryReply).toMatch(/remind|message|cue|nudge/iu)
+        expect(discoveryReply).toMatch(/review/iu)
+        expect(discoveryReply).not.toMatch(
+          /\bwhy\b[^.!?\n]{0,60}\?|what(?:'s| is) (?:your|the) (?:reason|motivation)/iu,
+        )
 
         const firstAgentQuestion = readCompletedAgentMessages(
           discovery.jsonEvents,
         ).find((message) => message.text.includes('?'))
         expect(
           firstAgentQuestion,
-          'first reply asks one grounded setup question',
+          'first reply ends its offer with one question',
         ).toBeDefined()
         if (
           !firstAgentQuestion
@@ -25576,7 +25999,7 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           || !publicGoalListRead
           || !publicGoalShowRead
         ) {
-          throw new Error('Expected grounded Goal discovery before motivation.')
+          throw new Error('Expected grounded Goal discovery before the first offer.')
         }
         expect(discoveryMemoryRead.output).toMatch(/cold|cool|temperature/iu)
         expect(discoveryMemoryRead.output).toMatch(/supplement/iu)
@@ -25749,11 +26172,9 @@ describeRealCodex('real Codex public goal setup e2e', () => {
         expect(savedRegimenData.note).toMatch(/cold|cool|temperature/iu)
         expect(savedRegimenData.note).toMatch(/supplement/iu)
 
-        const acceptedPublicShow = requireSuccessfulGoalSetupCommand(
-          acceptedActions,
-          'revision re-show before write',
-          ['commons goal show', 'improve-deep-sleep'],
-        )
+        // Acceptance saves from what the proposal already read: no new public
+        // search, and the revision ids checked above came from that earlier read.
+        expect(acceptedActions.filter(isSuccessfulPublicGoalListAction)).toEqual([])
         const acceptedGoalSave = requireSuccessfulGoalSetupCommand(
           acceptedActions,
           'lineage-bearing Goal save',
@@ -25765,26 +26186,15 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           accepted: readGoalSetupRegimenActionDiagnostics(acceptedActions),
           commands: acceptedVaultCommandAttempts.filter((command) => /\bregimen list\b/u.test(command)),
         }) + '\n')
-        const acceptedRegimenInventory = acceptedActions.find(
-          isSuccessfulRegimenInventoryReadAction,
-        )
+        // A Goal this save created has no earlier regimen to look for.
         expect(
-          acceptedRegimenInventory,
-          'all-status regimen inventory before linked plan creation',
-        ).toBeDefined()
-        if (!acceptedRegimenInventory) {
-          throw new Error('Expected a successful regimen inventory read.')
-        }
+          acceptedActions.filter(isSuccessfulRegimenInventoryReadAction),
+          'no regimen inventory before the first linked plan',
+        ).toEqual([])
         const acceptedRegimenSave = requireSuccessfulGoalSetupCommand(
           acceptedActions,
           'linked habit regimen save',
           ['regimen save', savedGoal.entityId],
-        )
-        expect(acceptedPublicShow.eventIndex).toBeLessThan(
-          acceptedGoalSave.eventIndex,
-        )
-        expect(acceptedRegimenInventory.eventIndex).toBeLessThan(
-          acceptedRegimenSave.eventIndex,
         )
         expect(acceptedGoalSave.eventIndex).toBeLessThan(
           acceptedRegimenSave.eventIndex,
@@ -25795,10 +26205,8 @@ describeRealCodex('real Codex public goal setup e2e', () => {
         const supportInventoryActions = acceptedActions.filter((action) =>
           isSuccessfulGoalSupportInventoryAction(action, supportSeriesId)
         )
-        expect(
-          supportInventoryActions.length,
-          'fully paginated all-status support-series inventory',
-        ).toBeGreaterThan(0)
+        // A new regimen has no reminders to inventory; any inventory that is
+        // read still has to be the exact compact series read.
         for (const inventoryAction of supportInventoryActions) {
           if (inventoryAction.kind !== 'command') {
             continue
@@ -25966,28 +26374,10 @@ describeRealCodex('real Codex public goal setup e2e', () => {
           ...automationSaveActions.map((action) => action.eventIndex),
           automationReconcileAction.eventIndex,
         )
-        const terminalSupportInventory = [...supportInventoryActions]
-          .reverse()
-          .find((action) =>
-            action.kind === 'command'
-            && action.eventIndex < firstAutomationEffectIndex
-            && /"nextCursor"\s*:\s*null/u.test(action.output),
-          )
-        if (terminalSupportInventory?.kind !== 'command') {
-          throw new Error(
-            'Expected a terminal support-series inventory before support effects.',
-          )
-        }
-        expect(terminalSupportInventory.output).toMatch(
-          /"totalCount"\s*:\s*0/u,
-        )
         expect(acceptedGoalSave.eventIndex).toBeLessThan(
           firstAutomationEffectIndex,
         )
         expect(acceptedRegimenSave.eventIndex).toBeLessThan(
-          firstAutomationEffectIndex,
-        )
-        expect(terminalSupportInventory.eventIndex).toBeLessThan(
           firstAutomationEffectIndex,
         )
         expect(automationReconcileAction.eventIndex).toBeGreaterThan(
@@ -26636,7 +27026,7 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
         const skillRead = actions.find((action) =>
           action.kind === 'command'
           && action.command.includes('experiment-onboarding/SKILL.md')
-          && action.output.includes('# Experiment onboarding')
+          && action.output.includes('name: experiment-onboarding')
         )
         const listCall = actions.find((action) =>
           action.kind === 'command'
@@ -26876,11 +27266,11 @@ describeRealCodex('real Codex repeated-set resolution e2e', () => {
     'logs every repeated set through workflow references against the canonical alternating target',
     async () => {
       const result = await runRepeatedSetResolutionProbe('success')
-      const policyOutput = result.actions.filter((action) => action.kind === 'command')
-        .map((action) => action.output).join('\n')
-      expect(policyOutput.includes('## Active experiment support'), 'active policy read').toBe(true)
-      expect(policyOutput).toContain('## Creating the run')
-      expect(policyOutput).not.toContain('## First-session prep reminders')
+      // Logging sets reads the skill entrypoint, which owns session logging, and
+      // leaves the reminder-setup reference alone.
+      const policyCommands = result.actions.flatMap((action) => action.kind === 'command' ? [action] : [])
+      expect(policyCommands.some((action) => action.output.includes('name: experiment-onboarding')), 'active policy read').toBe(true)
+      expect(policyCommands.some((action) => action.command.includes('references/session-support.md'))).toBe(false)
       const alphaWrites = result.commandLog.filter((command) =>
         command.includes(`experiment session log ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`)
       )
@@ -27037,7 +27427,8 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
       const knowledgeCommands = result.actions.flatMap((action) =>
         action.kind === 'command'
         && action.ok
-        && action.command.includes('vault-cli commons knowledge search')
+        // One search counts whether it runs alone or inside a `vault-cli batch`.
+        && /commons\W{1,4}knowledge\W{1,4}search/u.test(action.command)
           ? [action.command]
           : []
       )
@@ -27426,7 +27817,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         const skillReads = actions.filter((action) =>
           action.kind === 'command'
           && action.command.includes('hosted-low-usage/SKILL.md')
-          && action.output.includes('# Hosted low usage')
+          && action.output.includes('name: hosted-low-usage')
         )
         const usageReads = actions.filter((action) =>
           action.kind === 'dynamic'
@@ -27650,7 +28041,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         const skillRead = quoteActions.find((action) =>
           action.kind === 'command'
           && action.command.includes('hosted-low-usage/SKILL.md')
-          && action.output.includes('# Hosted low usage')
+          && action.output.includes('name: hosted-low-usage')
         )
         const planUsageAction = quoteActions.find((action) =>
           action.kind === 'dynamic'
@@ -27922,7 +28313,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           privateActions.some((action) =>
             action.kind === 'command'
             && action.command.includes('hosted-low-usage/SKILL.md')
-            && action.output.includes('# Hosted low usage')
+            && action.output.includes('name: hosted-low-usage')
           ),
           'private hosted-low-usage skill read',
         ).toBe(true)
@@ -28018,7 +28409,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           groupCapabilityActions.some((action) =>
             action.kind === 'command'
             && action.command.includes('hosted-low-usage/SKILL.md')
-            && action.output.includes('# Hosted low usage')
+            && action.output.includes('name: hosted-low-usage')
           ),
           'group hosted-low-usage skill read',
         ).toBe(true)
@@ -29347,11 +29738,11 @@ describeRealCodex('real Codex stateless calendar link e2e', () => {
         if (action.kind !== 'dynamic') {
           continue
         }
-        expect(JSON.parse(action.output)).toEqual({
-          instruction:
-            'Before ending, complete private appointment follow-through: use tool search for `murph automation` to load and call `murph.automation`, then ensure exactly one one-shot reminder unless the member declined it. Then write the rest of the truthful semantic reply without copying or repeating a URL. The runtime appends the exact calendar link.',
-          status: 'ready',
-        })
+        // The tool reports readiness and never hands the model the link itself.
+        const calendarOutput = JSON.parse(action.output)
+        expect(calendarOutput).toMatchObject({ status: 'ready' })
+        expect(Object.keys(calendarOutput).sort()).toEqual(['instruction', 'status'])
+        expect(action.output).not.toMatch(/https?:\/\/|withmurph\.ai/iu)
       }
       expect(automationRequests).toHaveLength(1)
       expect(automationRequests[0]).toMatchObject({
@@ -29935,12 +30326,12 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
         const appointmentSkillRead = actions.find((action) =>
           action.kind === 'command'
           && action.command.includes('appointment-scheduling/SKILL.md')
-          && action.output.includes('# Appointment scheduling')
+          && action.output.includes('name: appointment-scheduling')
         )
         const phoneSkillRead = actions.find((action) =>
           action.kind === 'command'
           && action.command.includes('phone-calls/SKILL.md')
-          && action.output.includes('# Phone Calls')
+          && action.output.includes('name: phone-calls')
         )
         const toolCalls = actions.filter((action) =>
           action.kind === 'dynamic'
@@ -30542,9 +30933,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
           )
           && (
             action.ok
-            || /# Appointment scheduling|Ready-to-act gate|required review or acknowledgement checkbox|login handoff/iu.test(
-              action.output,
-            )
+            || action.output.includes('name: appointment-scheduling')
           )
         )
         const computerSkillRead = allActions.find((action) =>
@@ -30552,9 +30941,7 @@ describeRealCodex('real Codex appointment check-in recovery e2e', () => {
           && `${action.command}\n${action.output}`.includes('computer-use/SKILL.md')
           && (
             action.ok
-            || /# Computer Use|Build a compact task brief|managed_login|computer_pause_for_user/iu.test(
-              action.output,
-            )
+            || action.output.includes('name: computer-use')
           )
         )
         const reply = second.finalMessage.trim()
@@ -35664,7 +36051,7 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
       process.stdout.write(
         `[restaurant-meal-official-source-e2e] ${JSON.stringify({
           entryPage,
-          foodJournalRead: actions.some(action => action.kind === 'command' && action.output.includes('# Food journal')),
+          foodJournalRead: actions.some(action => action.kind === 'command' && action.output.includes('name: food-journal')),
           commands,
           computerRequests,
           finalMessage: result.finalMessage,
@@ -35685,7 +36072,7 @@ describeRealCodex('real Codex restaurant meal nutrition e2e', () => {
       )
       expect(commands.filter((command) => command.startsWith('meal add ') && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
       expect(commands.filter(command => /^(?:food|meal) /.test(command) && isRecordedVaultHelpCommand(command))).toEqual([])
-      expect(actions.some(action => action.kind === 'command' && action.output.includes('# Food journal'))).toBe(true)
+      expect(actions.some(action => action.kind === 'command' && action.output.includes('name: food-journal'))).toBe(true)
       expect(actions.flatMap(action => action.kind === 'command'
         && /\b(?:cat|sed|head|tail)\b[^;\n]*bin\/vault-cli\b/u.test(action.command) ? [action.command] : [])).toEqual([])
       const acts = actions.filter((action) =>
@@ -40243,7 +40630,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
       commands: commandText === '' ? [] : commandText.split('\n'),
       deliveryContextOrdinal: result.responseDeliveryContextOrdinal,
       foodJournalRead: readCapabilityRoutingActions(result.jsonEvents).some((action) =>
-        action.kind === 'command' && action.output.includes('# Food journal')
+        action.kind === 'command' && action.output.includes('name: food-journal')
       ),
       finalMessage: result.finalMessage,
       modelAuthoredCards: attachActions.map((action) =>
@@ -40425,6 +40812,10 @@ async function materializeNutritionCardVaultCli(input: {
   await writeFile(input.executablePath, [
     '#!/bin/sh', 'set -eu',
     `printf '%s\\n' "$*" >> "$NUTRITION_E2E_COMMAND_LOG"`,
+    // The prompt tells the model today is 2026-07-30, but the real CLI stamps a
+    // new meal with the wall clock. Pin an undated save to the scenario day so
+    // the saved meal, the day's totals and the goal window agree with the prompt.
+    'case "$*" in "meal add"*"--occurred-at"*) ;; "meal add"*) set -- "$@" --occurred-at 2026-07-30T22:00:00Z ;; esac',
     'export TSX_TSCONFIG_PATH="$NUTRITION_E2E_TSCONFIG"',
     'exec "$NUTRITION_E2E_NODE" --import "$NUTRITION_E2E_LOADER" "$NUTRITION_E2E_ENTRY" "$@" --vault "$NUTRITION_E2E_VAULT"', '',
   ].join('\n'), { encoding: 'utf8', mode: 0o700 })
@@ -40588,6 +40979,30 @@ function hasJoinedGroupCapabilityMeaning(message: string): boolean {
 function hasWearableConnectionDeferralMeaning(message: string): boolean {
   return /\b(?:later|wait|whenever|when you(?:'re| are) ready|(?:once|when) you (?:connect|link)(?: it)?)\b/iu
     .test(message)
+}
+
+// True when a reply asks again for onboarding health background: a question
+// about those topics, or the list re-sent.
+function reasksOnboardingBackground(message: string): boolean {
+  const topics = /voice memo|supplements|\bmeds\b|medications|conditions|allergies|medical basics|blood tests|\blabs\b|how you move/iu
+  return message.split(/(?<=[.!?])\s+|\n+/u).some((part) => part.includes('?') && topics.test(part))
+    || message.split('\n').filter((line) => /^\s*[-•]/u.test(line) && topics.test(line)).length >= 2
+}
+
+// True when a reply asks again whether the member uses a wearable.
+function reasksWearable(message: string): boolean {
+  return /watch or (?:a )?ring|wearable or (?:a )?health app|do you (?:also )?(?:use|wear|have) (?:a |any )?(?:watch|ring|wearable)|which (?:watch|ring|wearable)/iu.test(message)
+}
+
+// True when a reply asks exactly one question, the wearable question, without
+// a list and without the health background ask.
+function asksWearableQuestion(message: string): boolean {
+  const questions = message.split(/(?<=[.!?])\s+|\n+/u).filter((part) => part.includes('?'))
+  const bulletLines = message.split('\n').filter((line) => /^\s*[-•]/u.test(line))
+  return questions.length === 1
+    && /\bwearables?\b|health app/iu.test(questions[0] ?? '')
+    && bulletLines.length === 0
+    && !/voice memo/iu.test(message)
 }
 
 function hasNoFurtherWearableCheckinMeaning(message: string): boolean {
@@ -40811,12 +41226,41 @@ if [ "$*" = "assistant onboarding resume-context --format json" ]; then
   cat "$(dirname "$0")/onboarding-resume-context.json"
   exit 0
 fi
-if [ "$1" = "memory" ]; then
+if [ "$1 $2 $3" = "assistant onboarding complete" ]; then
+  printf '%s\\n' "$*" >> "$(dirname "$0")/onboarding-complete.log"
+  printf '%s\\n' '{"vault":"redacted:/vault","stateRoot":"redacted:/state","statePath":"redacted:/state/onboarding.json","onboarding":{"schemaVersion":"murph.assistant-onboarding.v1","status":"completed","createdAt":"2026-08-01T12:00:00.000Z","updatedAt":"2026-08-05T12:00:00.000Z","completedAt":"2026-08-05T12:00:00.000Z","completedReason":"user_answered"}}'
+  exit 0
+fi
+if [ "$1" = "memory" ] || [ "$1" = "batch" ]; then
   if [ -f "$(dirname "$0")/memory-command-result.json" ]; then
     cat "$(dirname "$0")/memory-command-result.json"
     exit 1
   fi
+fi
+if [ "$1" = "memory" ]; then
   printf '%s\n' '{"status":"ok"}'
+  exit 0
+fi
+# A goal-setup proposal reads through one batch: every lookup comes back empty.
+if [ "$1" = "batch" ]; then
+  shift
+  results=''
+  count=0
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = "--command" ] && [ "$#" -ge 2 ]; then
+      count=$((count + 1))
+      [ -n "$results" ] && results="$results,"
+      results="$results{\\"argv\\":$2,\\"ok\\":true,\\"data\\":{\\"items\\":[],\\"total\\":0}}"
+      shift 2
+    else
+      shift
+    fi
+  done
+  printf '{"count":%s,"failed":0,"succeeded":%s,"commands":[%s]}\\n' "$count" "$count" "$results"
+  exit 0
+fi
+if [ "$1 $2" = "goal save" ]; then
+  printf '%s\\n' '{"created":false,"goal":{"id":"goal_sleep","status":"active","title":"Sleep more consistently"}}'
   exit 0
 fi
 printf '%s\n' '{"error":"unsupported onboarding routing probe command"}' >&2
@@ -41450,6 +41894,16 @@ const PRIVATE_PROMPT_SKILL_SLUGS = [
   'reminders',
 ] as const satisfies readonly AssistantSkillSlug[]
 
+// The prompt names these two by bare slug ("a bare slug means that file"), not
+// by path. Their slugs are not ordinary words, so a word match is exact.
+const PRIVATE_PROMPT_BARE_SLUG_SKILLS: ReadonlySet<string> = new Set(['file-send', 'lab-tests'])
+
+function promptNamesSkill(instructions: string, slug: string): boolean {
+  if (instructions.includes(`${MURPH_ASSISTANT_SKILLS_ROOT_REF}/${slug}/`)) return true
+  return PRIVATE_PROMPT_BARE_SLUG_SKILLS.has(slug)
+    && new RegExp(`(?<![\\w/-])${slug}(?![\\w-])`, 'u').test(instructions)
+}
+
 async function stagePromptReferencedSkills(input: {
   developerInstructions?: string | null
   env?: Readonly<Record<string, string | undefined>> | null
@@ -41460,7 +41914,7 @@ async function stagePromptReferencedSkills(input: {
   }
   const instructions = input.developerInstructions ?? ''
   for (const slug of PRIVATE_PROMPT_SKILL_SLUGS) {
-    if (!instructions.includes(`${MURPH_ASSISTANT_SKILLS_ROOT_REF}/${slug}/`)) {
+    if (!promptNamesSkill(instructions, slug)) {
       continue
     }
     await cp(
@@ -41811,7 +42265,7 @@ async function runRepeatedSetResolutionProbe(
       }),
       materializeAssistantSkill({
         skillsRoot,
-        slug: 'strength-training',
+        slug: 'training',
       }),
       materializeAssistantSkill({
         skillsRoot,
@@ -42477,7 +42931,7 @@ async function runLiveWorkoutRepetitionRecoveryProbe(
   try {
     await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
     await Promise.all([
-      materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+      materializeAssistantSkill({ skillsRoot, slug: 'training' }),
       materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
       materializeAssistantSkillAsset({ relativePath: 'shared/exercise-catalog-runtime.md', skillsRoot }),
       materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory }),
@@ -47035,7 +47489,7 @@ describeRealCodex('real Codex canonical game selfplay e2e', () => {
           approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
           codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
-          developerInstructions: buildAssistantSystemPrompt({
+          developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
             assistantCliContract: null, channel: 'linq',
             cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
             currentLocalDate: context.today, currentInstant: context.instant, currentTimeZone: 'UTC',
@@ -47106,7 +47560,7 @@ describeRealCodex('real Codex game v1 rules e2e', () => {
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
           assistantCliContract: null, channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'America/New_York',
@@ -47187,7 +47641,7 @@ describeRealCodex('real Codex game agreement e2e', () => {
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
           assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'America/New_York',
@@ -47268,7 +47722,7 @@ describeRealCodex('real Codex game chat adjustment e2e', () => {
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
           assistantCliContract: null, channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T22:00:00.000Z', currentTimeZone: 'America/New_York',
@@ -47712,7 +48166,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
           assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
@@ -47910,7 +48364,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
           assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
@@ -47970,7 +48424,7 @@ describeRealCodex('real Codex game lifecycle messaging e2e', () => {
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
           assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
           conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
@@ -48058,7 +48512,7 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       const guidance = await context.prepareGameLore?.()
       const live = await executeRealCodexAppServerTurn({ approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null,
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER], assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T16:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null }) + '\n' + guidance,
         dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_GAME_LORE_TOOL], env: config.env,
@@ -48596,7 +49050,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null,
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER], assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-05', currentInstant: '2030-03-05T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null }),
@@ -48677,7 +49131,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null,
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER], assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-05', currentInstant: '2030-03-05T15:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null }),
@@ -48803,7 +49257,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
-        developerInstructions: [buildAssistantSystemPrompt({ assistantCliContract: null,
+        developerInstructions: [buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER], assistantCliContract: null,
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: kind === 'off-day' ? '2030-03-09' : '2030-03-05', currentInstant: kind === 'off-day' ? '2030-03-09T12:00:00.000Z' : '2030-03-05T12:00:00.000Z', currentTimeZone: 'UTC',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null }), GAME_PHOTO_CHAT_GUIDANCE].join('\n'),
@@ -48908,7 +49362,7 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
-        developerInstructions: buildAssistantSystemPrompt({
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
           assistantCliContract: null, channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: processingAt, currentTimeZone: 'America/New_York',
@@ -49103,7 +49557,7 @@ describeRealCodex('real Codex game chat setup', () => {
         allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
-        developerInstructions: buildAssistantSystemPrompt({
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
           assistantCliContract: null, assistantPollsAvailable: true, assistantHostedGroupToolSurface: 'families',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
@@ -49454,7 +49908,7 @@ describeRealCodex('real Codex exact group games', () => {
         allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
-        developerInstructions: buildAssistantSystemPrompt({
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
           assistantCliContract: null, assistantHostedGroupToolSurface: 'families',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
@@ -49517,7 +49971,7 @@ describeRealCodex('real Codex group majority changes', () => {
         allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
-        developerInstructions: buildAssistantSystemPrompt({
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
           assistantCliContract: null, assistantHostedGroupToolSurface: 'families',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
@@ -49596,7 +50050,7 @@ describeRealCodex('real Codex group Start now parity', () => {
         allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
-        developerInstructions: buildAssistantSystemPrompt({
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
           assistantCliContract: null, assistantHostedGroupToolSurface: 'families',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
@@ -49765,7 +50219,7 @@ async function runHostingTurn(input: { name: string; prompt: string; state: Host
       allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
       codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
       codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
-      developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantHostedAutomationAvailable: true,
+      developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER], assistantCliContract: null, assistantHostedAutomationAvailable: true,
         channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group', currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
         hostedRuntime: true, onboardingGuidance: false, turnTrigger: null }),
       dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_AUTOMATION_TOOL, ...resolveMurphDynamicTools({}).filter(tool => tool.name === 'finish_without_reply')],

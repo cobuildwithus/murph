@@ -34,9 +34,8 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - hrv-resting-heart-rate
-      - aerobic-fitness
-      - running-cardio
+      - sleep-improvement
+      - training
   startPrompt: Hey Murph, help me improve my heart rate recovery.
   indexable: true
 safety:

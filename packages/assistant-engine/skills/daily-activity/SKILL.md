@@ -1,106 +1,52 @@
 ---
 name: daily-activity
-description: Use for steps NEAT sedentary time activity snacks walking breaks and daily movement pattern interpretation.
+description: Use for steps, everyday movement, sitting time and walking breaks, and for factual questions about a day's wearable activity or workouts (which workouts, how long, how far, splits).
 ---
 
-# Daily Activity
+# Daily activity
 
-Use this as Murph operating guidance, not as a consumer article. Ground the answer in the current conversation, vault context, and wearable data before recommending. Ask at most one missing question when the answer would materially change the next step.
+This skill answers factual questions about a day's activity and workouts, and helps a member move more in ordinary life without formal training. Answer from the data first. Ask one question at the end only when the answer would change the recommendation.
 
-## Owns
+Read `training` for structured cardio or strength plans, `physical-therapy` when pain or an injury limits movement, and `cardiometabolic-health` when the real question is glucose, blood pressure or lipids.
 
-- Steps, NEAT, sedentary time, walking breaks, activity snacks, everyday movement targets, and daily movement trend interpretation.
-- Factual wearable day and workout reads, including every workout on a date,
-  activity types, workout count, and total workout duration.
-- Helping users add movement without turning it into formal training.
-- Explaining how small daily movement affects glucose, energy, mood, sleep pressure, and cardiovascular health.
+## Reading a day's activity or workouts
 
-## Hand Off
+Decide what the question needs before the first read, then make one activity read at that level. Do not start with a smaller read and retry, and do not run `wearables day` first for a workout question.
 
-- Use running-cardio for structured cardio workouts or Zone 2 plans.
-- Use strength-training for resistance programming.
-- Use physical-therapy for pain, injury, function loss, or return-to-activity constraints.
-- Use cardiometabolic-health when the main question is glucose, BP, lipids, or labs.
+| The question needs | Read |
+|---|---|
+| Day totals: how many sessions, total minutes, which activity types | `vault-cli wearables activity list --date <date> --format json` |
+| Individual workouts: selecting, comparing, ordering or attributing them | the same command with `--include-workout-summaries` |
+| Lap or split rows | the same command with `--include-workout-details` |
+| Another fact about a specific date | `vault-cli wearables day <date> --format json` |
+| Basal calories | `vault-cli measurement entry list --metric calories_basal --from <date> --to <date> --limit 50 --format json` |
 
-## Data First
+Workout summaries keep each workout's type, duration, distance, start time, provider, heart rate, cadence, power and speed. `splitsOmitted: true` means the splits were left out of that read. It does not mean the workout had none. With workout details, an empty `splits` array means no split rows were kept for that workout.
 
-- For a simple time-based walking plan, use the person's stated current activity, available window, and
-  chosen duration plus relevant saved context. Do not collect step counts, labs, body measurements, or
-  unrelated event history unless symptoms, a known condition, or the requested target makes them
-  decision-changing. Missing wearable coverage alone does not require more data reads or a step target.
-- When the user specifically asks for basal calories, go directly to
-  `vault-cli measurement entry list --metric calories_basal --from <date> --to <date> --limit 50 --format json`.
-  Do not run `wearables day` first; basal calories are query-only and absent
-  from that summary.
-- For workout activity questions, choose the required output from the user's
-  question before the first and only activity-list data read; never probe with
-  smaller output and retry. Do not run `wearables day` first.
-  For day-level `sessionCount`, `sessionMinutes`, and distinct `activityTypes`,
-  use `vault-cli wearables activity list --date <date> --format json`.
-  For selecting, comparing, grouping, ordering, or attributing individual
-  workouts, use `--include-workout-summaries`: it preserves each workout's
-  type, duration, distance, start time, provider, heart rate, cadence, power,
-  and speed without lap/split rows. `splitsOmitted: true` means omitted evidence,
-  never proof there were no splits. Only when the question needs lap/split rows,
-  use `--include-workout-details` instead; full detail wins if both flags are set.
-  Its canonical workout-day rollup owns the answer, and
-  `workoutFeatures` associates the bounded detail with each workout by provider
-  and start time. Use that association for multiple workouts on the same date;
-  do not stop at one selected activity or rebuild the rollup from provider
-  records. Power fields ending in `Watts` are watts, and speed fields ending in
-  `Mps` are meters per second; include those units when answering.
-- For other date-specific wearable facts, first run
-  `vault-cli wearables day <date> --format json`.
-- When the day or activity summary omits the specific signal the user asked
-  about, use the lossless global observation read
-  `vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json`.
-  Use the requested date or a short bounded trend window and the matching
-  public metric name: `daylight_exposure`, `fall`, `floors_climbed`,
-  `handwashing`, `stand_duration`, `stand_hour`, `uv_exposure`,
-  `wheelchair_push`, `workout_distance`, `workout_duration`, or
-  `workout_swimming_stroke`. These resource aliases belong to the global
-  metric index, not the narrower `wearables metric` summary catalog. Use the
-  returned source and event ID as provenance; imported device observations may
-  be query-only and unavailable through `vault-cli show`. With no returned
-  entries, say none was recorded for that date; never report a zero.
-- Check steps, sedentary time, active minutes, workout days, work schedule, commute, sleep, fatigue, and pain flags.
-- Use the user's baseline; a 2,000-step jump can be easy for one user and too much for another.
-- Look for long unbroken sitting blocks, not just daily step total.
+The workout-day rollup in the result is the answer for counts and totals. Use `workoutFeatures`, which matches detail to each workout by provider and start time, when a date has several workouts. Answer about all of them, and do not rebuild totals from provider records. Fields ending in `Watts` are watts and fields ending in `Mps` are meters per second. Say the unit.
 
-## If Context Is Thin
+When the day or activity summary lacks the signal the member asked about, read it from the measurement index:
 
-Ask: "Do you want more total steps, fewer long sitting blocks, or a simple movement target that will not feel like a workout?"
+```
+vault-cli measurement entry list --metric <metric> --from <date> --to <date> --limit 50 --format json
+```
 
-## Practical Levers
+The metric names are `daylight_exposure`, `fall`, `floors_climbed`, `handwashing`, `stand_duration`, `stand_hour`, `uv_exposure`, `wheelchair_push`, `workout_distance`, `workout_duration` and `workout_swimming_stroke`. These names work only with this command. `wearables metric` does not know them. Cite the returned source. When nothing comes back, say none was recorded for that date. Never report a zero.
 
-- Increase steps gradually, often by 1,000-2,000 per day above baseline before chasing a universal 10,000-step target.
-- Break long sitting with 2-5 minute movement snacks, especially after meals or long desk blocks.
-- Post-meal walks can help glucose and digestion without requiring a workout.
-- Use environment design: walking calls, farther parking, stairs, default short loop, or calendar anchors.
+Totals for the current local day can still change, so say "so far". A finished workout does not make the day's totals final. When the day summary and the workout list disagree, report what each shows and do not invent a cause such as a failed sync.
 
-## Interpretation Rules
+For a factual request, give the count and total, then only the activity types or workout details the result contains. Do not add coaching or a session label the result does not have.
 
-- Step count misses cycling, lifting, swimming, carrying, and intensity; do not overvalue it alone.
-- Active minutes algorithms vary by device; use trends rather than cross-device comparisons.
-- Daily movement can improve health even when formal workouts stay unchanged.
-- Treat changeable current-local-day totals as provisional and say "so far."
-  A completed workout does not make the day's combined totals final.
-- When the day summary and workout list disagree, report what each shows
-  without inventing a cause such as a failed sync or import.
+## Helping someone move more
 
-## Safety Boundaries
+For a simple walking plan, use what the member said about their current activity, their free time and the duration they chose, plus saved context. Do not collect step counts, labs or body measurements unless a symptom, a known condition or the target they asked for makes them matter. Missing wearable data is no reason to read more or to set a step target.
 
-- Escalate pain, swelling, chest pain, fainting, severe breathlessness, or sudden activity intolerance.
-- Do not push step targets during acute illness, injury flares, or severe fatigue.
+- Set the target from the member's own baseline. A starting step is 1,000 to 2,000 more steps a day than they do now. Do not open with 10,000.
+- Break up long sitting with 2 to 5 minutes of movement, especially after meals and long desk stretches. Look for long unbroken sitting as well as the daily total.
+- Make it easy to repeat: walking calls, a default short loop, stairs, a calendar anchor.
+- Step counts miss cycling, lifting, swimming and carrying, and devices count active minutes differently. Read trends on one device.
+- Do not push a step target during an acute illness, an injury flare or severe fatigue.
 
-## Answer Shape
+Give one target relative to their baseline and one way to make it easier, and say you will look again in 1 to 2 weeks.
 
-- For a factual day or workout request, answer the question directly from the
-  normalized result: give the canonical count and total, then list only the
-  activity types or workout details that result actually exposes. Treat an
-  empty `splits` array as no retained split facets for that workout, including
-  after a provider correction. Do not force coaching or invent a session label
-  that the normalized surface omits.
-- For a coaching request, give one baseline-relative target and one
-  friction-reduction tactic. Prefer movement the user can repeat daily over a
-  heroic one-day goal, and say how to reassess after 1-2 weeks.
+Chest pain, fainting, severe breathlessness, or a sudden drop in what the member can do needs medical attention before any activity plan. Say so first.

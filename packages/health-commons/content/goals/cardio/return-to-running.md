@@ -35,7 +35,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - running-cardio
+      - training
       - physical-therapy
   startPrompt: Hey Murph, help me return to running after a break.
   indexable: true

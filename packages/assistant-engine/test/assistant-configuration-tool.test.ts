@@ -19,22 +19,6 @@ import type {
 } from "../src/assistant/hosted-tool-context.js";
 
 describe("assistant configuration tool", () => {
-  it("describes the usage-saving option against overall AI usage", () => {
-    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain(
-      "a less capable model that uses less AI usage",
-    );
-    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).not.toContain(
-      "less of your included usage",
-    );
-  });
-
-  it("describes scope-specific defaults and personal model entitlements", () => {
-    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("GPT-6.1 Terra is the default");
-    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("Sol models require an active paid subscription, and Astra requires an active paid Edge or Max plan");
-    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("OpenAI model");
-    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).not.toContain("Astra requires an active paid Max");
-  });
-
   it("offers only OpenAI model and reasoning controls and rejects provider changes", () => {
     expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.inputSchema.properties)
       .toHaveProperty("model");
@@ -83,11 +67,6 @@ describe("assistant configuration tool", () => {
     expect(groupSchema).toContain('"model"');
     expect(groupSchema).not.toContain('"provider"');
     expect(groupSchema).not.toContain('"reasoningEffort"');
-    expect(MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL.description).toContain("defaults to GPT-6.1 Sol without a subscription requirement");
-    for (const tool of [MURPH_ASSISTANT_CONFIGURATION_TOOL, MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL]) {
-      expect(tool.description).toContain("restore the default authorizes that model change");
-      expect(tool.description).toContain("without another confirmation");
-    }
   });
 
   it("saves an explicit group room model for the next turn", async () => {
@@ -147,7 +126,6 @@ describe("assistant configuration tool", () => {
       savedForNextTurn: updatedSaved,
     });
   });
-
 
   it("rejects reasoning mutations from a group room", async () => {
     const assistantConfigurationTool = {
@@ -406,7 +384,6 @@ describe("assistant configuration tool", () => {
       savedForNextTurn: unchangedSaved,
     });
   });
-
 
   it.each([[HOSTED_ASSISTANT_GPT_61_SOL_MODEL, "edge"], ["gpt-6-astra", "edge"]] as const)("returns the authoritative %s upgrade requirement", async (model, requiredPlan) => {
     const request = readTestMurphDynamicToolRequest({

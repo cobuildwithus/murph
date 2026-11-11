@@ -44,7 +44,7 @@ describe('hosted image completion', () => {
     const context = buildTrustedHostedImageCompletionTurnContext([{
       inputId: `ain_${'c'.repeat(32)}`, trustedHostedImageCompletion: completion,
     }])
-    expect(context).toContain('start Pulse or, if eligible, Group')
+    expect(context).toContain('start Pulse or, if eligible, Core')
     expect(context).toContain('https://www.withmurph.ai/settings#subscription')
     expect(context).toContain('Do not call `murph.generate_image` during this completion turn')
     expect(context).toContain('do not offer card-only setup, promise no charge, start checkout automatically')

@@ -36,7 +36,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - mobility-posture
+      - training
       - physical-therapy
   startPrompt: Hey Murph, help me improve balance as I age.
   indexable: true

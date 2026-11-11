@@ -35,8 +35,7 @@ goal:
   workflow:
     kind: general_plan
     ownerSkillIds:
-      - circadian-rhythm
-      - sleep-recovery-readiness
+      - sleep-improvement
   startPrompt: Hey Murph, help me adjust to daylight saving time.
   indexable: true
 safety:

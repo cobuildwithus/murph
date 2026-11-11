@@ -97,7 +97,7 @@ describe('common dynamic-tool failure boundary', () => {
     ['pending_vault_files', { action: 'list' }, 'pending-vault-files-list', 'authority_rejected', 'admission',
       'pending vault-file management requires current user input in a direct conversation'],
     ['ask_grok', { question: sentinel }, 'ask-grok', 'unavailable', 'execution',
-      'X search is not configured (XAI_API_KEY is missing); no search ran'],
+      'X search is not set up on this deployment, so no search ran'],
     ['generate_voice_memo', { text: sentinel }, 'generate-voice-memo', 'unavailable', 'execution',
       'voice memo generation is only available for deliverable iMessage or Telegram replies'],
     ['plan_usage', {}, 'plan-usage', 'unavailable', 'execution',
@@ -179,7 +179,7 @@ describe('common dynamic-tool failure boundary', () => {
       notes: '界'.repeat(600),
     }))
     expect(result.rpcResult).toEqual({ success: false, contentItems: [{ type: 'inputText',
-      text: 'The event details are too long for a reliable calendar link. Ask the member to shorten the notes or location.' }] })
+      text: 'The event details are too long for a calendar link, so no link was made. Shorten the notes or location and call again.' }] })
     expect(result.failureDiagnostic).toEqual({ failureStage: 'result', failureReason: 'oversized_result' })
     expectPrivateClassification(result)
   })

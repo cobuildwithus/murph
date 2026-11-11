@@ -40,8 +40,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - running-cardio
-      - aerobic-fitness
+      - training
   startPrompt: Hey Murph, help me improve my cardio endurance.
   indexable: true
 safety:

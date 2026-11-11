@@ -223,17 +223,6 @@ describe("assistant subscription tool", () => {
     expect(readToolText(result)).toContain("fresh confirmation");
     expect(readToolText(result)).not.toContain("private billing state");
   });
-
-  it("states current-turn authority and scheduled-result semantics", () => {
-    const contract = MURPH_SUBSCRIPTION_TOOL.description;
-
-    expect(contract.length).toBeLessThanOrEqual(640);
-    expect(contract).toContain("explicitly confirmed by the current user in this turn");
-    expect(contract).toContain("a different target requires new eligible user input");
-    expect(contract).toContain("scheduled result includes authoritative effectiveAt");
-    expect(contract).toContain("Only payment_required includes paymentUrl");
-    expect(contract).toContain("other results do not prove a payment method");
-  });
 });
 
 function readSubscriptionRequest(

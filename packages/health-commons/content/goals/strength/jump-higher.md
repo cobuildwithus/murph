@@ -33,8 +33,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - strength-training
-      - competition-training
+      - training
   startPrompt: Hey Murph, help me jump higher.
   indexable: true
 safety:

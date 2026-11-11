@@ -178,7 +178,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send a brief user-visible update to the current conversation before reply-critical work likely to keep the member waiting, then continue immediately. A successful call means this update was sent. This is not a final answer.',
+    `Send the member a short message now, before work that will keep them waiting, then continue working. A successful call means the message was sent. It does not end the turn.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -187,7 +187,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
         type: 'string',
         minLength: 1,
         description:
-          'One short natural sentence orienting the member to the work and immediate next step; no final conclusions or unverified result claims.',
+          `One or two plain sentences about what you are doing for them and what comes next. Leave out conclusions and results you have not verified.`,
       },
     },
     required: ['text'],
@@ -197,14 +197,14 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
 const MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL = {
   ...MURPH_SEND_PROGRESS_UPDATE_TOOL,
   description:
-    'Send at most one brief user-visible progress update to the current group. Call only before a real reply-critical wait, then continue work immediately. Success means the update was sent; do not repeat or use it as a final answer.',
+    `Send the group one short message now, before work that will keep the room waiting, then continue working. Send at most one per turn. A successful call means the message was sent. It does not end the turn.`,
 } as const
 
 export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
   namespace: 'murph',
   name: 'attach_response_media',
   description:
-    `Attach up to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly. When the final reply uses \`---\` bubbles, set each image's bubble to the bubble it illustrates; each bubble is sent with its own images. Images without a bubble follow the final bubble. For charts, the final reply must include one brief numeric takeaway from the source data, such as the start/end values or range; do not list every plotted value.`,
+    `Set the images sent with this turn's final reply, at most ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS}. Each call replaces the previous set, and an empty array clears it. Nothing is sent until the turn ends. Use a public HTTPS URL only for a static catalog image. For anything private, generated, health-related, or sent by the member, pass the vault_image descriptor exactly as a Murph command returned it. When the reply uses \`---\` bubbles, set bubble to the bubble an image belongs to; images without one go with the last bubble. When you attach a chart, state one number from its data in the reply text, such as the start and end values.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -212,8 +212,6 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
       media: {
         type: 'array',
         maxItems: ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
-        description:
-          `The complete image batch for the final assistant reply, limited to ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} images. Passing an empty array clears the current reply media batch.`,
         items: {
           oneOf: [
             {
@@ -227,7 +225,7 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
                 url: {
                   type: 'string',
                   description:
-                    'Deliberately public HTTPS image-file URL for static catalog assets only. Never use this for user-sent, vault-backed, generated, health, or otherwise private media.',
+                    'Public HTTPS image URL, for static catalog images only.',
                 },
                 alt: {
                   anyOf: [
@@ -246,7 +244,7 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
                   minimum: 1,
                   maximum: MAX_ASSISTANT_REPLY_BUBBLES,
                   description:
-                    '1-based `---` reply bubble this image follows. Omit to send it with the final bubble.',
+                    '1-based number of the `---` bubble this image goes with.',
                 },
               },
               required: ['url'],
@@ -288,7 +286,7 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
                   minimum: 1,
                   maximum: MAX_ASSISTANT_REPLY_BUBBLES,
                   description:
-                    '1-based `---` reply bubble this image follows. Omit to send it with the final bubble.',
+                    '1-based number of the `---` bubble this image goes with.',
                 },
               },
               required: [
@@ -312,7 +310,8 @@ export const MURPH_ATTACH_SLEEP_CARD_TOOL = {
   deferLoading: true,
   namespace: 'murph',
   name: 'attach_sleep_card',
-  description: "Attach a host-built sleep summary for a general nightly request such as how did I sleep or sleep recap. Pass the local wake date. The card alone is the default: after successful attachment, send no final text. If the member's request or the saved instructions for that exact scheduled occurrence also ask for a short note, add one or two evidence-based sentences after successful attachment about what the card does not show, such as how the night compares with the past week or anything notable, without restating the card's numbers or adding generic caveats, using ordinary final text in attended turns or send_message.text in scheduled turns. Attach no media. Specific metric questions, other compound questions, and advice requests use verified text. On no_sleep_for_date, answer truthfully in text.",
+  description:
+    `Attach the sleep summary card for one night to the final reply, for a general request such as "how did I sleep" or "sleep recap". Pass the local wake date. The host reads the night and builds the card. The card is the whole reply: send no final text and attach no media. The one exception is when the member, or the saved instructions of this scheduled occurrence, also ask for a note. Then add one or two sentences about what the card does not show, such as how the night compares with the past week, without repeating the card's numbers. Write the note as the final text in a conversation turn or as the send_message text in a scheduled run. For a question about one metric, a question with several parts, or a request for advice, answer in text. If the result is no_sleep_for_date, say so in text.`,
   inputSchema: {
     type: 'object', additionalProperties: false,
     properties: { date: { type: 'string', format: 'date', description: 'Local wake date, YYYY-MM-DD.' } },
@@ -325,15 +324,7 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_response_card',
   description:
-    'For daily_nutrition cards and numeric nutrition targets, use the member request plus context already known in the conversation or vault. Do not run a universal medical-history or measurement checklist. A routine totals-only card or a card with complete accepted goals needs no repeated screening unless new context raises a concern. Before treating suitability as unresolved, asking, or proposing or changing targets, inspect the current conversation and run vault-cli memory show --compact --format json once for the canonical Identity, Preferences, Instructions, and Context record. Do not re-ask or recite established categories. Treat this known-context suitability check as workflow eligibility, not public health Q&A: never search Health Commons to decide or merely restate it. If suitability is clear, proceed and state only the request-relevant outcome. For explicit target-setting only, ask one compact question about concrete unresolved concerns that could materially change the advice. Do not screen a totals-only card for missing target-derivation inputs. Relevant concerns include: age under 18; pregnancy or breastfeeding; eating-disorder or number-sensitive tracking; underweight, frailty, or malnutrition; glucose-lowering or other nutrition-target-changing medication; kidney disease, advanced liver disease, significant heart disease, or relevant endocrine disease; post-bariatric care; or clinician-managed constraints that materially change calorie or macro targets. Apply safety at the narrowest relevant scope: a health-context fact blocks only the numeric target or advice it materially affects, not benign totals, logging, education, or unrelated low-risk work. An allergy, intolerance, dietary restriction, or clinician-directed diet is not by itself a reason to suppress the five totals or an accepted compatible target bundle. If known current context makes self-directed numeric guidance unsuitable—including underage, pregnancy or breastfeeding, eating-disorder or number-sensitive tracking context, underweight, frailty or malnutrition, glucose-lowering medication, kidney disease, advanced liver disease, significant heart disease, relevant endocrine disease, post-bariatric care, or documented clinician-managed constraints that materially change or conflict with the card targets—use helpful non-numeric text for the affected guidance, make no Goal mutation, and attach no card. Totals-only never bypasses a known numeric-suppression decision. Read another clinical record family only when the conversation or canonical memory raises one concrete concern. A missing unrelated fact or failed unrelated read does not block a routine card. A scheduled occurrence with unresolved suitability uses ordinary non-numeric closeout with no proposal, Goal mutation, question, or card. A scheduled occurrence never activates provisional targets. Treat a calorie target below 1,200 kcal/day as unsuitable; do not floor it upward. That target floor is never an intake minimum for a logged-so-far totals-only card. ' +
-    'For the first suitable complete totals-only card, include this exact brief final text after attachment: Here’s your nutrition card. If you’d like, we can set up goals too. Use it only when canonical memory/instructions and conversation show no prior decline, number sensitivity, sent invitation or pending invitation. When those conditions hold, include the introduction; goal setup is optional for the member, not a prerequisite for the card. Otherwise return the card alone. Never write an offered/delivered marker while staging; the outbox records sent evidence in canonical memory after confirmation. Never add other companion prose, duplicate analysis, a target proposal or a second send. Silence and meal replies never accept goals. Later cards need no invitation; do not reoffer unless the member engages. ' +
-    'Workout footers span native and static cards; never promise native-only taps. ' +
-    'For a clear request-relevant suitability outcome, explicitly name the requested target or metric. For a tracked workout, attempt the complete verified card and let input validation decide whether its actual encoded envelope fits; never refuse from an estimated exercise or set count or ask the member to simplify saved workout data. If validation rejects the complete envelope, use the full deterministic text recovery. ' +
-    `For generic compact_table only (rowHeader/columns/rows, not structured workouts): card.rows has at most ${compactTableCardV1Bounds.rows} rows, card.columns at most ${compactTableCardV1Bounds.columns} columns, and each card.rows[].values[] string at most ${compactTableCardV1Bounds.cellValue} characters. Before calling, use concise labels and cells only when they preserve all meaning; if required rows or exact wording cannot fit, give complete ordinary text and no card. Never omit or invent rows, merge explicitly separate items, or truncate meaning to fit. After a validation error, retry only with a fixable field corrected; never repeat identical invalid arguments. If content cannot fit, use complete text. Never claim attachment without success. ` +
-    'Attach one private-direct response card when the current accepted member message or the saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent, after a verified private meal mutation (including an ordinary reply to a scheduled meal check-in), during managed meal closeout, for the verified initial card after starting or exact-reading one canonical workout, or for an unambiguous update to its established workout card, including the just-completed final snapshot. Occurrence authority alone is not card intent. Except for the fixed first totals-only introduction described above, the card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. For routine daily_nutrition, including an authorized meal estimate or explicit manual app submission, use one workflow and end with one card or concise fallback. Never narrate safety, totals, estimation, or target resolution. ' +
-    'Before every daily_nutrition card or explicit target-proposal decision, obtain fresh canonical totals with vault-cli meal totals --from <date> --to <same-date> --resolve-goals --format json, or reuse dailyTotals.data from a successful same-date meal add/import-json --with-daily-totals when dailyTotals.status is available. The combined save performs this exact read after writing; no separate show or totals confirmation is needed. Its non-null dailyTotals.totalsOnlyCard is the complete no-goals card for that day; attach it unchanged. Use the exact requested localDate interactively or the engine-supplied occurrence local date for scheduled closeout, never wall-clock today. This fresh canonical read owns complete active-target discovery, dates, identity, units, comparators, conflicts, the calorie floor, and legacy display compatibility. Copy exact totals { total, mealCount } and resolved goalContext.targets.*.target values; never calculate totals, reinterpret raw Goal bounds, or repeat goal list/show to resolve the active bundle. goalContext.status ready permits the unchanged all-five accepted goal card; missing permits totals-only with all five goals null, even with a subset of compatible targets. Both require suitability, intent and completeness. A meal reply (including a reply to an ordinary scheduled check-in), daily summary or numeric-card request never derives, proposes, accepts, activates or mutates targets; conflict, incompatible, or capacity means ordinary text, no card, and no Goal or measurement mutation. Never derive from or replace unresolved targets. A historical compatibility bundle is read-only display authority, never authority to derive or mutate targets. Keep the all-status managed-proposal lookup separate; it cannot substitute for this read. Rerun this same-date read after any meal or Goal mutation and before the card. Otherwise one successful read in this turn is sufficient: do not repeat it after read-only suitability checks or skill reads. During private meal logging or estimation, including an explicit manual app submission, and daily-card or daily-summary requests, if any metric mealCount is below the top-level mealCount, follow food-journal selected-date incomplete-meal recovery before finishing. Inspect and estimate the existing meals from supported evidence or ask one focused follow-up for essential missing identity or amount; no separate daily-card request is required. Never stop at a missing-estimate refusal before trying recovery. Use accepted current equivalence or matching saved ingredient and portion evidence, not an informal name alone. If recovery still needs identity or amount, ask one compact question and stop without a card; after the answer, edit and read back the exact existing meal and rerun fresh totals. Do not ask merely to enable numbers when numeric presentation is suppressed. A partial card is only for an explicit request to see the currently available partial data after the limitation is clear, not the normal interactive closeout. Scheduled closeout keeps automatic-meal-capture\'s existing question authority. New authoring uses V2 with fiber and either all five goals null (totals-only) or all five accepted snapshots (goal-aware); mixed authoring is invalid. Historical nullable V2 and V1 replay remain supported. Totals-only text gives the date and the logged totals so far with the meal count, such as "3 meals so far", without target judgments. ' +
-    'A historical automatic capture cannot authorize a scheduled card. Author only dietary-calories. If a daily_nutrition call is rejected for malformed arguments, use the returned validation paths to correct only invalid fields and retry this tool once with the same verified totals and targets; if that retry fails, use the truthful text fallback without narrating tool or schema mechanics. Only explicit target-setting authorizes the existing paused canonical proposal, not activation or use. Neither card requests nor scheduled work authorize proposals. For explicit target-setting with a missing target, follow nutrition-strategy/references/daily-nutrition-card-goals.md: hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write; an infeasible bundle means ordinary text and no mutation. Save one paused canonical proposal, explain its values, reasoning, and effective date in ordinary text with no card, and activate it only after member acceptance. On first creation, set Goal window.startAt explicitly: use a member-requested effective date when present, otherwise the selected card localDate for a dated card request, otherwise the engine-supplied current vault-local date; never rely on the write-day default. Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date. Any derived target addition or change atomically pauses the complete managed bundle until acceptance. A scheduled closeout never asks for target inputs or creates, changes, repeats or activates provisional targets. ' +
-    'When explicit target-setting included a card request, its next unambiguous acceptance may complete that pending request only after reapplying suitability, activation/readback and fresh same-date totals; corrections, declines, ambiguous replies, target-setting-only requests and compound requests remain text-only. An ordinary summary leaves paused/abandoned Goals unchanged and never repeats a proposal. Explicit active targets win metric by metric; conflicts, thresholds, ranges or unsafe target numbers remain ordinary text, never substitute target authority. Freeze each exact point target; the host derives each goal status. Use compact_table for an explicit table or structured-tracker request, a structured plan or schedule that the table alone can fully represent within its bounds, that verified initial live-workout card, or an unambiguous update to the same exact open or just-finished workout; with multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update or resolve the canonical workout and re-read it successfully. A structured workout card has exactly kind compact_table, version 1, title, subtitle null, footer, tracking with kind workout plus the exact evt_<ULID> entityId, and workout; never add rowHeader, columns, or rows. The runtime records tracking snapshotAt. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
+    `Attach one card to this turn's final reply in a private conversation. The card is the whole reply. Use it only when the card alone answers the request, send no final text after it (the first-card introduction below is the one exception), and attach no response media with it. The card is sent when the turn ends, and the runtime writes its text fallback, so do not repeat its values in text. Use it when the member, or the saved instructions of this scheduled occurrence, ask for something a card can show in full; after a verified meal save or edit; and to show a tracked workout. A request with several parts gets ordinary text and no card.\n\ndaily_nutrition card. Copy each metric's total and mealCount exactly from one source and never calculate totals yourself. When the last meal save of this turn used --with-daily-totals, returned dailyTotals data, and nothing changed after it, that result is the source: attach a non-null dailyTotals.totalsOnlyCard unchanged, or build the card from dailyTotals.data. Otherwise run \`vault-cli meal totals --from <date> --to <same-date> --resolve-goals --format json\` once, after the last meal or goal change of this turn, for the date the member asked about or for this scheduled occurrence's local date. When goalContext.status is ready, give each of the five goals { target: goalContext.targets.<metric>.target, status: "on_target" }. The schema requires a status and the host replaces it with the real one. When goalContext.status is missing, set all five goals to null. For any other status, reply in text with no card. A card has all five goals or none. If any metric's mealCount is lower than the day's mealCount, the day is incomplete: follow "When the card is not ready" in the food-journal skill first, and attach a partial card only when the member asked to see partial data.\n\nAsking for a card or logging a meal never sets, proposes, accepts, or changes nutrition targets. Targets change only when the member asks to set them, which follows the daily-nutrition-card-goals reference in the nutrition-strategy skill and is answered in text. A scheduled run never asks about targets and never proposes or activates them.\n\nCalorie and macro numbers are unsuitable for some members. Judge this from the conversation and one \`vault-cli memory show --compact --format json\` read. Do not run a medical checklist, search Health Commons to decide, or ask again about things already known. The conditions that matter are: under 18; pregnant or breastfeeding; an eating disorder or a preference to avoid numbers; underweight, frail, or malnourished; glucose-lowering medication; kidney, advanced liver, significant heart, or relevant endocrine disease; post-bariatric care; and clinician-set limits that conflict with the numbers. A known condition blocks only the numbers it affects. An allergy, intolerance, or dietary restriction alone blocks nothing. When numbers are unsuitable, reply helpfully without them and attach no card. In a scheduled run with unclear suitability, close out in text without numbers and without a question.\n\nThe first totals-only card a member ever receives is followed by this exact final text: "Here’s your nutrition card. If you’d like, we can set up goals too." Leave it out when memory or the conversation shows they declined goals, avoid numbers, or were already invited. Add nothing else around it.\n\nGeneric compact_table card (rowHeader, columns, rows). Use it for a table, tracker, plan, or schedule the member asked for that fits within ${compactTableCardV1Bounds.rows} rows, ${compactTableCardV1Bounds.columns} columns, and ${compactTableCardV1Bounds.cellValue} characters per cell. Shorten labels only when the meaning is unchanged. Never drop, merge, or invent rows. If the content does not fit, reply with the full content in text.\n\nWorkout compact_table card. Update or resolve the workout and read it back successfully first. Send kind compact_table, version 1, title, subtitle null, footer, tracking with kind workout and the exact evt_ entityId, and workout. Leave out rowHeader, columns, and rows. Send the whole workout and let validation decide whether it fits. Do not refuse because it looks long, and do not ask the member to simplify it. Write footers that still make sense on a card that cannot be tapped. Use it for the first card after starting or reading one workout and for updates to that same workout, including its final snapshot. If more than one workout could be meant, ask which.\n\nWhen validation rejects the card, fix only the fields it names and retry once with the same verified values. If the retry fails, give the full content as text without mentioning the card or its format. Never say a card was attached unless the call succeeded.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -349,7 +340,7 @@ export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_exercise_routine_card',
   description:
-    'Attach one complete Telegram exercise routine Rich Message when this tool is available and its exercise layout, optional catalog images, or both make the answer clearer. Use it for current movement instruction, an exact scheduled occurrence that teaches the saved routine now, or a request to repeat or improve an earlier routine. This card is one useful presentation option, not the only valid rich layout. Use attach_telegram_rich_content when a custom or mixed layout is clearer. The card must completely answer the request and replaces final text. Represent every named movement as its own card.exercises item, even when the routine groups movements under phases. A phase is not an exercise. Example: Mobility (ankle circles, trunk rotations) plus Balance (tandem stance, weight shifts) becomes four exercise items in one card, not two. An exercise list result is not enough: run vault-cli exercise show for every named movement before attaching the card. Include useful returned catalog images when they are available and help explain the movement; images are recommended, not required. In a multi-movement routine, put each useful returned image on its matching movement item. Keep the card at eight images or fewer. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Use at most three concrete, short instructions per movement. Safety is required: write one scenario-specific stop condition in at most 160 characters. Omit subtitle or footer when it adds nothing; the runtime records null. Never promise images for an exercise that has none. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. If validation rejects the card, correct the reported fields and retry this tool once. On that retry, preserve every valid movement, instruction, and image; change only the reported invalid fields. Do not switch to separate response media on Telegram. If the corrected retry is also rejected, use one complete attach_telegram_rich_content card without images and keep every named movement separate. After either card tool succeeds, stop and send no final text. The successful fallback is the answer; do not apologize, report the rejected card, or add a second safety recap. Do not combine this card with response media.',
+    `Attach one Telegram exercise routine card as the whole final reply. Use it to teach movements now, for a scheduled occurrence that teaches a saved routine, or to repeat or improve an earlier routine. Send no final text and no response media with it. Use attach_telegram_rich_content when a different layout is clearer. Every named movement is its own card.exercises item, including movements grouped under a phase: Mobility (ankle circles, trunk rotations) plus Balance (tandem stance, weight shifts) is four items. Run vault-cli exercise show for every movement before attaching; an exercise list result is not enough. Give at most three short instructions per movement and one stop condition for this routine, at most 160 characters. Add catalog images where they help, eight at most, each on its own movement. Copy each image's url, alt, and step exactly, and set its source to exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>. Do not promise images for a movement that has none. Make the stated total time match the content. When validation rejects the card, fix the named fields, keep every valid movement, instruction, and image, and retry once. If that fails, send one attach_telegram_rich_content card without images that still lists every movement. After either card succeeds, stop: add no apology, no report of the rejected card, and no second safety recap.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -365,7 +356,7 @@ export const MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL = {
   namespace: 'murph',
   name: 'attach_telegram_rich_content',
   description:
-    'Attach one complete Rich Message in a direct or group Telegram conversation. Prefer it when structure makes the answer easier to read or use, such as steps, lists, plans, schedules, comparisons, multi-part instructions, exercise guidance, or summaries. Normal conversation can remain ordinary text, even when it needs several paragraphs. Existing card tools are useful presentation examples, not exclusive content owners. Choose one when it fits, adapt the structure, or compose this card when a custom or mixed layout is clearer. For exercise guidance, attach_exercise_routine_card is useful when catalog images improve the answer; this generic card is also valid when another layout is clearer or images are not needed. Do not use presentation to invent or bypass canonical reads, writes, or safety workflows for nutrition totals, nutrition targets, or tracked-workout state. The card replaces the entire final response, so send no duplicate final text and attach no response media. Keep it compact: usually one h2, two to six sections or steps, and under 1,500 visible characters. Add more only when the complete answer needs it. Do not repeat the same facts in a summary, table, and details. Use short labels instead of sentence-shaped table cells. Put optional detail in details, but keep safety limits and stop conditions visible. Use a table only when it improves comprehension, with at most five columns. Supported tags: h2, h3, p, footer, hr, ul, ol, li, blockquote, cite, aside, details, summary, table, caption, tr, th, td, b, strong, i, em, u, ins, code, mark, and br. Tables allow bordered and striped. Cells allow align="left", "center", or "right". Details allow open. Escape text with &amp;, &lt;, &gt;, &quot;, or &apos;. Do not use links, visible URLs, images, media, maps, custom emoji, scripts, styles, unsupported attributes, or Markdown. Example: <h2>Mobility session</h2><p>Easy pace · about 8 min</p><ol><li>Move through a comfortable range.</li><li>Pause between sides.</li></ol><details><summary>Exercise notes</summary><p>Keep each repetition controlled.</p></details><blockquote>Stop if pain increases.</blockquote>.',
+    `Attach one Telegram Rich Message as the whole final reply, in a direct or group Telegram conversation. Use it when structure makes the answer easier to use: steps, lists, plans, schedules, comparisons, exercise guidance, or summaries. Ordinary conversation stays plain text. Send no final text and no response media with it. The card only presents an answer. Nutrition totals, nutrition targets, and tracked workouts still need their own reads, writes, and safety rules. Keep it short: usually one h2, two to six sections or steps, and under 1,500 visible characters. Say each fact once. Use a table only when it helps, with at most five columns and short cells. Put optional detail in details, and keep safety limits and stop conditions visible. Supported tags: h2, h3, p, footer, hr, ul, ol, li, blockquote, cite, aside, details, summary, table, caption, tr, th, td, b, strong, i, em, u, ins, code, mark, and br. Tables allow bordered and striped. Cells allow align="left", "center", or "right". Details allow open. Escape text with &amp;, &lt;, &gt;, &quot;, or &apos;. Do not use links, visible URLs, images, media, maps, custom emoji, scripts, styles, unsupported attributes, or Markdown. Example: <h2>Mobility session</h2><p>Easy pace · about 8 min</p><ol><li>Move through a comfortable range.</li><li>Pause between sides.</li></ol><details><summary>Exercise notes</summary><p>Keep each repetition controlled.</p></details><blockquote>Stop if pain increases.</blockquote>.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -381,7 +372,7 @@ export const MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_response_card',
   description:
-    'Attach one challenge_standings card for the current authenticated Linq group only when the current accepted room message or the saved instructions for this exact scheduled occurrence explicitly request a current shared-challenge snapshot. Read the existing canonical challenge page with vault-cli knowledge show and every required bounded read first. The page must already have pageType challenge and exactly one closed murph:group-challenge-definition:v1 section; never create or repair that definition during attachment. Copy the exact pageRevisionDigest from that knowledge show result, then pass it with the challenge slug and one normalized component observation for every page-owned participant whose participation state is in. The page revision digest is only a consistency precondition: the trusted host still validates the embedded definition digest; derives participant order, format, objective, teams, scorecard rules, rates, caps, units, component scopes, and rules revision from the current page; and rejects observations when any canonical page content changed after normalization. Room membership or a sharing grant never creates challenge buy-in. It requires one complete stable room-member and authorized-label roster, every page-owned participant to be present in that roster, exact observation coverage, and every definition scope to be backed by those reads. Additional current room members remain nonparticipants. It derives individual labels from the trusted read, runs the deterministic scorer, and compare-and-set persists the exact page-derived input and result on that same page before attaching. Any unavailable, empty, failed, capacity-omitted, roster-inconsistent, page-revision-mismatched, missing-or-extra-observation, unbacked-scope, generic-or-malformed-page, missing-definition, or conflicting-persistence path cannot attach and must finish with a truthful ordinary-text update. The tool owns points, target, order, coverage, counts, ranks, and ties. For individual or team snapshots, attach only when the entire canonical ranked result contains at most eight entries; never truncate the ranking or omit a waiting challenge participant. Collective cards have no row cap. Partial scores are verified lower bounds and unscored scores stay null. The card replaces the entire final response, does not send by itself, and cannot combine with response media.',
+    `Attach a challenge_standings card as the whole final reply in this group. Use it when the room, or the saved instructions of this scheduled occurrence, ask for the current standings of a shared challenge. First read the challenge page with vault-cli knowledge show and make every shared-data read its scoring needs. Pass the challenge slug, the pageRevisionDigest copied from that knowledge show result, and one observation for every participant on the page whose participation state is in. The host does the rest: it checks that the page is unchanged, takes participants, teams, rules, caps, and units from the page, scores and ranks, saves the result to the page, and attaches the card. Being in the room or sharing data does not make someone a participant. When the tool refuses for any reason, say in ordinary text what could not be read or confirmed, and do not create or repair the challenge definition here. Individual and team standings attach only when the full ranking has at most eight entries. Collective cards have no limit. Partial scores are lower bounds, and unscored entries stay empty. Send no final text and no response media with the card.`,
   inputSchema: groupChallengeResponseCardToolInputJsonSchema,
 } as const
 
@@ -390,7 +381,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   name: 'generate_image',
   deferLoading: true,
   description:
-    `For an authorized recap, output=file returns a local file path and attaches nothing; use authorized reference IDs. Generate one GPT Image 2 image when requested, a known preference supports visual help, or a skill/product flow explicitly marks images welcome and privacy-safe. Use ordered vault refs and explain their roles; include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, when Murph appears. Vault outputs persist under raw/captures/**. Hosted accepted-message turns start generation in the background and finish through trusted private media. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response; that image consumes one of the same ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} final-response media slots, so leave a slot before calling. Local runs stay synchronous with the same slot rule and save under CODEX_HOME/generated_images. Requested graphs, charts, and trend lines: render them with this tool when no chart or card tool fits; put the chart type, labeled axes, and the plotted values in the prompt. Treat those values as plotting data, not visible labels. Explicitly ask the renderer to omit numeric labels on individual points and bars unless the user requests them. Use sparse, rounded axis ticks and a compact legend; keep annotations rare and round any displayed values to useful precision. Include these exact palette and font specifications in chart prompts for Murph's warm lab-notebook style: cream paper (#f5f0e8), slate text (#2d3436), solid sage data lines (#7a8c6e), dashed sand reference lines (#d4c4a8). Use only these colors for chart marks: sage and slate for separate data series, distinguished by markers. Use Fraunces-style serif titles and numbers, DM Sans body text, and DM Mono labels; keep charts flat and legible without gradients or decorative shadows.`,
+    `Generate one image. Use it when the member asks for an image, when a saved preference says visuals help them, or when a skill says an image is welcome and privacy-safe here. Describe the image in prompt. Pass member photos or earlier generated images as referenceImageRefs and say in the prompt what each one is for. Include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's character sheet, whenever Murph appears. In a conversation turn the image is generated in the background and delivered when it is ready. In a scheduled run it is attached to this run's reply and uses one of its ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} image slots, so leave one free before calling. For a graph, chart, or trend line that no card or chart tool can show, put the chart type, the axis labels, and the values in the prompt, and ask for this style: cream paper (#f5f0e8), slate text (#2d3436), solid sage data lines (#7a8c6e), dashed sand reference lines (#d4c4a8), a second series in slate told apart by markers, Fraunces-style serif titles and numbers, DM Sans body text, DM Mono labels, flat with no gradients or shadows, sparse rounded axis ticks, a compact legend, and no number labels on points or bars unless the member asked for them. In an authorized recap, output=file writes the image to a local file and returns its path; nothing is attached. Use the recap's reference IDs.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -450,7 +441,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   name: 'submit_product_feedback',
   deferLoading: true,
   description:
-    `Submit one structured Murph product-feedback candidate for the current accepted request or the exact authorized weekly usage audit. A weekly usage audit uses kind feature_request, no changelog ids, and the prefix "Usage optimization audit:"; report rounded product cost metadata and coverage without private source text or identifiers, and omit a reproduction recipe when the evidence supports only an aggregate optimization observation. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. When explicitly asked to record feedback, submit the established product facts and mark missing reproduction details unknown; do not delay submission to ask for those details. When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports an input-schema rejection, accepted, already accepted, unavailable, or callback failure. An input-schema rejection includes value-free validation issues. Accepted, already accepted, unavailable, and callback-failure results are terminal.`,
+    `Record one piece of feedback about Murph for the team. The member is not told unless they ask. Give the kind, a product-only summary, and any related changelog item ids. When the member asks you to record feedback, submit what is known and mark missing details unknown; do not hold the submission to ask for them. Ordinary feedback is saved after the reply on a best-effort basis. A weekly usage audit uses kind feature_request, no changelog ids, and a summary starting "Usage optimization audit:" that reports rounded cost figures and coverage only. When a member in a private conversation explicitly asks for human support, use kind frustration, no changelog ids, and a summary starting "Support escalation:"; that call waits for confirmation. The result is accepted, already accepted, unavailable, callback failure, or a validation error that lists the fields to fix. Fix a validation error and retry once. Every other result is final.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -459,14 +450,14 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         type: 'string',
         enum: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
         description:
-          'Use feature_request for a missing or unsupported Murph path, frustration for a negative product experience without a clear requested capability, and feature_interest for interest in an available or shipped capability. Reserved support escalation always uses frustration.',
+          `feature_request: Murph could not do something the member wanted. frustration: a bad experience with no specific capability requested, and every support escalation. feature_interest: interest in something Murph already does.`,
       },
       summary: {
         type: 'string',
         minLength: 1,
         maxLength: HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
         description:
-          'Concise de-identified, product-only summary of the feedback. Make it actionable without the conversation: name the generic actor, exact Murph surface or workflow, requested or attempted action, expected versus observed result, and any concrete product constraint the source established. Preserve those distinctions instead of replacing them with vague labels. If a detail is not established, omit it or mark it unclear rather than infer or invent it. For any failure, frustration, workaround, degraded or manual workflow, or assistant-observed issue, write the general product problem first, then append a section beginning exactly "Reproduction:". Make that section independently usable without the original conversation: describe the smallest established generic preconditions and synthetic data shape; list the exact Murph CLI commands or tool calls with synthetic arguments when known and applicable; and give a sanitized example request or user action that triggers the issue, plus expected versus observed behavior when not already clear. Replace private inputs with synthetic placeholders or the least-specific product concept that preserves the failure. Never copy or closely paraphrase the member\'s wording. If the evidence is insufficient for a complete reproduction, state the known generic setup and trigger and identify the non-private condition that remains unknown instead of inventing steps. Omit the Reproduction section only for pure feature interest with no failure or friction to reproduce, or an authorized weekly usage audit whose evidence supports only aggregate optimization observations. Abstract every private fact to the least-specific product concept that still explains the issue, such as "a health metric", "a connected source", or "a scheduled item"; do not preserve a private fact merely because it was relevant in the conversation. When a path is missing, name the desired outcome and missing Murph capability rather than summarizing the conversation. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Never include names, handles, account or member identifiers, raw user wording, quoted conversation or voice-memo content, diagnoses, symptoms, medications, treatments, lab results, biometrics, exact health/fitness/nutrition values, reproductive details, locations, relationships, contact details, secrets, provider payloads, tags, or topics. For explicit verified-private human support, begin exactly "Support escalation:", then provide Murph\'s concise de-identified explanation in its own words using the same general-problem-plus-reproduction format; never copy or quote the member\'s message.',
+          `What happened, in product terms a teammate can act on without the conversation: who (in generic terms), which Murph surface or workflow, what they tried, what they expected, and what happened. When a capability is missing, name the outcome they wanted and what Murph lacks. For any failure, friction, workaround, or manual workflow, add a section starting "Reproduction:" with the smallest setup, the Murph commands or tool calls with made-up arguments when known, an example request with made-up content, and expected versus observed behavior. Leave that section out only for pure feature interest or a usage audit with aggregate evidence. Say what is unknown and never invent steps. Write in your own words and keep the member out of it: no names, handles, identifiers, quotes or close paraphrases, diagnoses, symptoms, medications, results, health or fitness values, locations, relationships, contact details, secrets, or provider data. Use the least specific wording that still explains the problem, such as "a health metric" or "a connected source". Start with "Speculative:" when you are inferring friction the member did not state, or "Murph-observed:" for repeated tool friction you ran into yourself. A support escalation starts with "Support escalation:" and follows the same format.`,
       },
       relatedChangelogItemIds: {
         type: 'array',
@@ -474,7 +465,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         maxItems: 7,
         default: [],
         description:
-          'Optional metadata for known shipped changelog item ids. Leave empty for general product interest, feature requests, frustrations, inferred workflow friction, or assistant-observed product/tool friction.',
+          `Ids of shipped changelog items this feedback is about. Leave it empty unless the feedback concerns a specific shipped item.`,
         items: {
           type: 'string',
           maxLength: 120,
@@ -491,7 +482,7 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   name: 'family_plan',
   deferLoading: true,
   description:
-    'Read Family status, start checkout, or invite. Allow `read_status` for an explicit Family request or trusted private low-usage Family context. Checkout and invite actions require the current member\'s explicit request. Treat results as exact; never claim activation, invitation, payment, or usage completion.',
+    `Read the member's Family plan status, start Family checkout, or create an invite. Use read_status when the member asks about Family or when this turn's context says their usage is low. Start checkout or create an invite only when the member asks for it in this turn. Report only what the result says. It never proves that a plan is active, an invite was accepted, or a payment went through.`,
   inputSchema: {
     oneOf: [
       {
@@ -585,7 +576,7 @@ export const MURPH_USAGE_DIAGNOSTICS_TOOL = {
   name: 'usage_diagnostics',
   deferLoading: true,
   description:
-    'Read private recent usage costs by model/workflow, expensive turns, and tool output sizes for this member. Read-only; defaults to 7 days and 10 turns. Costs are usage allowance, not card charges. Tool bytes are size evidence, not exact tokens or costs. Includes rough model rates.',
+    `Read this member's recent AI usage: cost by model and workflow, the most expensive turns, and tool output sizes. It is read-only and covers 7 days and 10 turns unless you pass days or limit. Costs are amounts of usage allowance and say nothing about card charges. Tool sizes are in bytes and only approximate tokens and cost. The result includes rough model rates.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -600,7 +591,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    'Read current private hosted plan, AI-usage, recommendation, signed quote for explicit plan, usage, billing or trusted low-usage context. Omit target for recommendation. For exact user-named plan, pass target; use only matching quote. availablePlans is the current eligible plan list. Read-only; percentages and forecasts cover all available usage without credit-source splits.',
+    `Read the member's plan, how much AI usage is left, and a signed quote for a plan change. It is read-only. Use it for questions about plan, usage, or billing, or when this turn's context says usage is low. Without targetPlanCode it quotes the recommended plan. With targetPlanCode it quotes the plan the member named, and only that matching quote may be used. availablePlans lists the plans they can switch to. Percentages and forecasts cover all available usage, with no split by credit source.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -609,7 +600,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
         type: 'string',
         enum: [...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES],
         description:
-          'Optional exact user-named plan to quote instead of the server recommendation.',
+          `The plan the member named. Leave it out to get the recommended plan.`,
       },
     },
   },
@@ -619,7 +610,7 @@ export const MURPH_IMESSAGE_CONTACT_TOOL = {
   namespace: 'murph',
   name: 'imessage_contact',
   description:
-    'Get or atomically assign the current member\'s Murph iMessage number. Call only for their explicit current request; repeated requests return the same number.',
+    `Get the member's Murph iMessage number, assigning one if they have none. Call it only when the member asks for it in this turn. Asking again returns the same number.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -631,7 +622,7 @@ export const MURPH_SUBSCRIPTION_TOOL = {
   namespace: 'murph',
   name: 'subscription',
   description:
-    'Apply one signed private plan change explicitly confirmed by the current user in this turn. Use only action=change_plan with exact targetPlanCode and quoteId from a current matching plan_usage quote. Exact replay of the same input and action is idempotent; a different target requires new eligible user input. A scheduled result includes authoritative effectiveAt; keep current and future plans distinct. Only payment_required includes paymentUrl; other results do not prove a payment method.',
+    `Change the member's plan. Call it only after plan_usage returned a quote for this exact plan and the member confirmed that price and timing in this turn. Pass that quote's quoteId and targetPlanCode. Repeating the same call is safe, and a different plan needs a new request from the member. A scheduled change returns effectiveAt; keep the current plan and the future plan distinct when you report it. A payment_required result includes a paymentUrl for the member. No other result says anything about a payment method.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -661,7 +652,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
   name: 'personalization',
   deferLoading: true,
   description:
-    'For a conversation update, pass message_ref from the accepted message requesting these changes; never borrow a later message\'s ref. Split changes requested by different messages into separate calls. Omit it for scheduled actions. For updates, send only the fields the user wants changed; omit unchanged fields. For an exact tone-only or voice-only request, call update once without read; its result reports the saved value. Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update those fields. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Confirm casing as sentence case or lowercase in the reply. Treat a request about how Murph should keep writing or show up as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
+    `Read or change how Murph writes and sounds in this conversation: tone and voice. In a private conversation these are the member's settings. In a group they belong to the room and never touch anyone's private settings. For update, send only the fields being changed, with message_ref from the message that asked for the change. Changes asked for in different messages go in separate calls. Leave message_ref out in a scheduled run. The result reports what is now saved, so a tone-only or voice-only change needs no read first. A request about how Murph should write from now on is an update. A request about one reply is not saved. Tone also sets capitalization: formal means sentence case and casual means lowercase, so a request for capitals or sentence case is formal and a request for lowercase is casual. Confirm with the words sentence case or lowercase. Model, provider, and reasoning changes belong to murph.assistant_configuration when that tool is available.`,
   inputSchema: {
     oneOf: [
       {
@@ -696,7 +687,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
             enum: assistantVoiceOptionIdValues,
             description: assistantVoiceOptions
               .map((option) => `${option.label}=${option.id}`)
-              .join(', '),
+              .join('; '),
           },
         },
         required: ['action'],
@@ -715,7 +706,7 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   name: 'assistant_configuration',
   deferLoading: true,
   description:
-    'Read the current hosted turn OpenAI model and reasoning effort plus the choices available for the next turn, or directly save an explicit user-requested change. Internally, Luna is the most usage-efficient model and GPT-6.1 Terra is the default; Sol models require an active paid subscription, and Astra requires an active paid Edge or Max plan. Do not assume the member knows model names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; Murph does not offer none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. An explicit request to restore the default authorizes that model change: read availability and apply the default without another confirmation. Never switch models or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+    `Read or change the model and reasoning effort for this member's future turns. read returns the current values and the choices open to this member. update saves a change the member asked for in this turn, and it takes effect on the next turn. Asking for the default is enough to restore it: read the choices, then update, with no further confirmation. Never change either setting because usage is low. Luna uses the least usage, GPT-6.1 Terra is the default, Sol models need an active paid subscription, and Astra needs an active paid Edge or Max plan. Use model names only when the member does. Otherwise describe the cheaper option as “a less capable model that uses less AI usage.” The lowest reasoning effort is low; there is no none. Say a change is saved only when the result says updated or unchanged.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -727,12 +718,14 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
       model: {
         type: 'string',
         enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-        description: 'Optional next-turn model for action="update".',
+        description:
+          `The model for future turns. Only with update.`,
       },
       reasoningEffort: {
         type: 'string',
         enum: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
-        description: 'Optional next-turn reasoning effort for action="update".',
+        description:
+          `The reasoning effort for future turns. Only with update.`,
       },
     },
     required: ['action'],
@@ -741,9 +734,10 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
 
 export const MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
+  deferLoading: true,
   name: 'assistant_configuration',
   description:
-    'Read the current group room model and the choices available for the next turn, or save an explicit current-room request to change it. This changes only the synthetic Murph instance for this room; it never reads or changes any participant\'s private model, reasoning, account, or billing settings. Every group room defaults to GPT-6.1 Sol without a subscription requirement. Terra and Luna may also be selected for the room. Use only the returned availableModels. Use action="read" whenever model facts are needed. Use action="update" only when the current user-sourced group turn explicitly asks for the exact model. An explicit request to restore the default authorizes that model change: read availability and apply the default without another confirmation. Never switch models automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+    `Read or change the model this room's Murph uses on future turns. It never reads or changes anyone's private model, reasoning, account, or billing settings. read returns the current model and availableModels. update saves a model from availableModels that someone in the room asked for in this turn, and it takes effect on the next turn. Rooms default to GPT-6.1 Sol and need no subscription; Terra and Luna can also be chosen. Asking for the default is enough to restore it: read the choices, then update, with no further confirmation. Never change the model because usage is low. Say a change is saved only when the result says updated or unchanged.`,
   inputSchema: {
     oneOf: [
       {
@@ -768,7 +762,8 @@ export const MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL = {
           model: {
             type: 'string',
             enum: HOSTED_ASSISTANT_PRODUCT_MODELS.filter((model) => model !== 'gpt-6-astra'),
-            description: 'Required next-turn group room model.',
+            description:
+              `The room's model for future turns.`,
           },
         },
         required: ['action', 'model'],
@@ -882,7 +877,8 @@ const GROUP_SHARED_HISTORY_READ_PROPERTIES = {
       fromDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
       throughDate: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
     },
-    description: 'read_shared only: at most 90 member-local civil dates, one current participant and one existing health metric scope; no freshness or group_email. Follow dateCoverage.nextFromDate with the same throughDate until exhausted. Every page retains complete source/date observations. For requested history, use the existing metric scope: every active metric grant already covers this window. No history permission or settings visit is needed. not_granted means the metric itself is unshared and ordinary metric consent is required. This reads available canonical data, never provider backfill. Let trend counts carry date coverage, such as "62 of 90 days"; absent dates are never zeros or missing permission.' },
+    description:
+      `read_shared only. A date range of up to 90 member-local dates for one current participant and one health metric scope, with no freshness and no group_email audience. Use it only when someone asks for a longer trend; ordinary reads, weekly standings, and newsletters keep their own dates. Every shared metric already covers this range, so never ask for a history permission or send anyone to settings. not_granted means the metric itself is unshared and needs the ordinary consent for that metric. When dateCoverage.nextFromDate is returned, call again from that date with the same throughDate until it is exhausted. The read returns what Murph already has and does not fetch more from a provider. Dates with no data are simply absent; they are never zeros and never a sign of missing permission. Let counts carry coverage, such as "62 of 90 days". To chart a trend, pass the observed values to generate_image and do not save a copy of the history.` },
 } as const
 
 /**
@@ -894,7 +890,7 @@ export const MURPH_GROUP_SHARED_READ_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read 1–3 host-bound scopes (7 days; history: participantId, ≤90 dates, one metric). status="partial" means omittedParticipantIds were not loaded; infer nothing else about them. companionLastContactAt is only the last app-contact time, possibly background.',
+    `Read what members of this group have shared. Pass action read_shared with one to three projectionScopes. A read covers the last seven days, and history reads up to 90 dates for one participant and one metric. A result with status partial did not load the members listed in omittedParticipantIds; conclude nothing else about them. companionLastContactAt is only when a member's app last made contact, possibly in the background.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -921,7 +917,8 @@ const GROUP_SHARED_FRESHNESS_SCHEMA = {
   minItems: 1,
   maxItems: 21,
   uniqueItems: true,
-  description: 'Optional only for ordinary read_shared. For a dated wearable update, supply only requested wearable projectionScopeKeys from projectionScopes, paired with each required YYYY-MM-DD calendar date. Missing consented dates trigger a bounded sync request and fresh consent-aware reread. checkedAt is the last shared-data check time.',
+  description:
+    `read_shared only, and optional. For a dated wearable update, list each wearable projectionScopeKey you will report with each YYYY-MM-DD date. The host requests a sync for consented dates that are missing and then reads again. checkedAt in the result is when shared data was last checked.`,
   items: {
     type: 'object',
     additionalProperties: false,
@@ -946,7 +943,7 @@ export const MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read consent-aware shared projections or offer access in the current authorized scheduled group turn. The trusted host binds group and route and uses only the first-party link path; unavailable proves no consent surface. Supply exact projectionScopes. Existing membership and other grants stay unchanged. A partial read is incomplete.',
+    `Read what members of this group have shared, or offer them a way to share, in this scheduled group run. Pass the exact projectionScopes. The host chooses the group and the destination, and an offer here is always a link. A result of unavailable means no consent prompt could be shown. An offer never changes existing membership or permissions. A partial read is incomplete.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -973,7 +970,14 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, record_current_sender_journal_fact, set_current_sender_journal_capture, and revoke_own_email_share. For offer_access, include it when the person requests or accepts an offer to enable sharing or repost consent; the host binds a fresh exact-scope consent message to this request, even when its scopes differ from earlier offers. It is otherwise optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
+    `The Message ref shown beside the accepted message that asked for this action, copied exactly. It is required for every current-sender action, for record_current_sender_daily_metric, record_current_sender_journal_fact, set_current_sender_journal_capture, and revoke_own_email_share. For offer_access, pass it when someone asks for or accepts sharing, so the host can tie a fresh consent prompt to that request. It is optional for create_signup_referral_link and read_usage_referral. It is not a provider message id.`,
+} as const
+
+const ASSISTANT_MESSAGE_TARGET_REF_SCHEMA = {
+  type: 'string',
+  pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
+  description:
+    `The Message ref shown beside the accepted message to act on, copied exactly.`,
 } as const
 
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
@@ -1238,7 +1242,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'Ordinary read_shared returns one to three seven-day consent-aware group projections; weekly standings and newsletters still use their requested dates, not a 90-day average. For longer trends, use one existing health metric scope with participantId and history dates, consume every dateCoverage page, and pass exact observed values to generate_image without storing a group history copy. All active health grants cover 90 rolling member-local dates, including existing grants; never ask to expand history permission. not_granted means the metric is unshared and requires ordinary metric consent. Let reported counts carry date coverage; sparse or pending history is not missing permission. For read_shared, including additive exact-grant activation time when available. For read_shared with audience="group_email", the exact bounded projections allowed into this email composition; the trusted host intersects them with live recipient grants. For offer_access, supply only the exact permissions requested by the person; existing sleep timing or connection-status permission does not include sleep duration. Show the consent surface immediately for a direct request or accepted offer, with no preliminary confirmation. Omitting projectionScopes requests every selectable permission and is not appropriate for adding one missing scope. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
+          `The kinds of shared data to read or to ask permission for. For read_shared, pass one to three; each covers the last seven days. With audience group_email, pass the scopes the email will use; the host keeps only what each recipient currently shares. For offer_access, pass only the permissions the person asked for. Leaving it out asks for every permission, which is wrong when adding one missing permission. Permissions are separate: sleep timing or connection status does not include sleep duration. An offer never changes existing membership or other permissions, and the host writes the consent prompt and decides whether it is shown in the chat or as a link.`,
       },
       freshness: GROUP_SHARED_FRESHNESS_SCHEMA,
       audience: {
@@ -1320,12 +1324,12 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         minLength: 1,
         maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
         description:
-          'High: use the same consent question for every fact and name all clear facts. The host asks the first. Medium: ask only to clarify.',
+          `The question the host sends the sender privately. With confidence high, ask for consent to save and name every clear fact; pass the same question with each fact, and the host sends it once. With confidence medium, ask only what is needed to clarify the fact.`,
       },
       enabled: {
         type: 'boolean',
         description:
-          'set_journal_capture: true accepts capture, false disables all. After true, save all named facts. set_current_sender_journal_capture uses scope.',
+          `For set_journal_capture: true turns Journal capture on for the member and false turns it off everywhere. After turning it on, save every fact the member named. set_current_sender_journal_capture also takes scope.`,
       },
       scope: {
         type: 'string',
@@ -1489,14 +1493,14 @@ export const MURPH_GROUP_CONSULT_TOOL = {
   name: 'group_consult',
   deferLoading: true,
   description:
-    'ask=group answer; handoff=tell/post/share via exact ID after exhausting list_memberships pages; clarify; hide IDs. ask_current_sender=group; ask_current_sender_privately=private; clarify=destination only; resume continuations. Handoff identity-neutral; host labels. accepted=queued/pending, never sent/shared.',
+    `Pass a question or a message between a member's private Murph and a group. From a private conversation: ask gets an answer from a group the member has joined, and handoff gives that group facts to tell, post, or share. Both need the exact ID of that membership, found only after exhausting list_memberships pages, and you never show IDs to the member. From a group: ask_current_sender has the sender's private Murph answer in the group, ask_current_sender_privately has it answer them privately, and clarify_current_sender is for when they have not said where the answer should go. After they answer that one question, use continue_current_sender_in_group or continue_current_sender_privately. ask_member asks one member's private Murph under a disclosure grant. Write handoff context without naming the member; the host adds attribution. A result of accepted means queued and pending. It is never proof that anything was sent or shared.`,
   inputSchema: buildMurphGroupConsultInputSchema(),
 } as const
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
   name: 'group_data',
   description:
-    'Read shared data, record sender metrics, or manage disclosure/access. read_shared may include companionLastContactAt for members sharing wearable data with an active Apple Health source. It means last app contact, including opportunistic background contact; never infer app closure, Health permission denial, sync success, or the cause of missing steps from its age. If absent, omit app state.',
+    `Shared health data and sharing permissions for this group. read_shared reads what members have shared. offer_access shows the consent prompt. record_current_sender_daily_metric and record_current_sender_journal_fact save something the sender reported. post_disclosure_request and revoke_disclosure_grant manage what a member's private Murph may tell this group. revoke_own_email_share stops the sender's email sharing. In a read_shared result, companionLastContactAt is only when a member's app last made contact, possibly in the background. Its age says nothing about whether the app is closed, Health permission was denied, a sync worked, or why steps are missing. When it is absent, say nothing about the app.`,
 })
 
 const MURPH_GROUP_DATA_EAGER_TOOL = {
@@ -1507,25 +1511,25 @@ const MURPH_GROUP_DATA_EAGER_TOOL = {
 export const MURPH_GROUP_MEMBERSHIP_TOOL = buildMurphGroupFamilyTool({
   name: 'group_membership',
   description:
-    'Read/change membership or next-group setup. On a direct answer to private group Journal consent, call set_journal_capture before saving every named fact.',
+    `Read or change group membership, Journal capture, and setup for the member's next group. read_current and list_memberships read. leave_membership leaves a group. prepare_next_group, read_next_group, and cancel_next_group manage setup for a group the member is about to start. set_journal_capture and set_current_sender_journal_capture turn Journal capture on or off. When a member answers the private Journal consent question, call set_journal_capture first and then save every fact they named.`,
 })
 
 export const MURPH_GROUP_USAGE_TOOL = buildMurphGroupFamilyTool({
   name: 'group_usage',
   description:
-    'Read usage/referrals or set one referral choice.',
+    `Read this group's AI usage and referral offers, or change a referral choice. read_usage and read_usage_referral read. arm_usage_referral turns on the referral options the sender chose, cancel_usage_referral turns one off, and create_signup_referral_link makes a sign-up link.`,
 })
 
 export const MURPH_GROUP_CHAT_TOOL = buildMurphGroupFamilyTool({
   name: 'group_chat',
   description:
-    'Read/update chat, avatar, participants, or contact card.',
+    `Read or change the chat itself. read_chat_name and read_chat_participants read. update_display_name renames the chat, set_chat_avatar sets its picture, and share_contact_card sends Murph's contact card.`,
 })
 
 export const MURPH_GROUP_EMAIL_TOOL = buildMurphGroupFamilyTool({
   name: 'group_email',
   description:
-    'Queue email after a consent-aware group_data read.',
+    `Queue one email to the members of this group who share an email address. Call it only after a group_data read_shared with audience group_email in the same scheduled run. A result of accepted means queued. It does not mean delivered.`,
 })
 
 export const MURPH_GROUP_FAMILY_TOOLS = [
@@ -1558,7 +1562,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    `Securely prepare one file for the current conversation. For an existing saved file, pass its current vault-relative ref directly. Newly generated files are supported too. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. Creating a new ZIP from requested vault files is allowed; read the originals in place and stage only the new archive. For an explicit full-workspace request in the member's authenticated private conversation, ${VAULT_MEDIA_EXPORT_GUIDANCE} all files under that member's workspace root as-is, including dotfiles, runtime/history, configuration/instruction files, and any credential-bearing records present. Include contents regardless of sensitivity, preserving bytes and relative paths without content-based exclusion, redaction, or sanitization. Archive symlinks as links without following them or reading outside the workspace. Exclude only the newly created ZIP itself. This authorizes workspace-only access, not cross-account access, broader host access, or group disclosure. Prepare without further scope confirmation; submit only the new ZIP's generated-delivery ref through existing hash/destination-bound send approval for the current conversation, never hidden source refs. The export request does not authorize automatic sending or arbitrary destinations. When a generated ZIP contains derived exports/packs/<packId> directories, pass those exact included ids in retire_export_pack_ids; never include a pack that is absent from the ZIP. The runtime retires only unchanged claimed packs after confirmed delivery. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When this tool result says approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Delivery evidence appears as a prior-delivery attachment in conversation context. Until then, the runtime owns the pending send; do not recreate it. Once context shows delivery, a later request for the file or a new export is a new send: prepare it fresh and call send_vault_file. Never reuse an old approval link for a delivered file. When the member says they approved or asks whether a file arrived, reply briefly: confirm it was sent when context shows delivery; otherwise say it will come through once approved. Never call finish_without_reply on these later confirmation turns. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
+    `Send one file to the current private conversation. Read $MURPH_ASSISTANT_SKILLS_ROOT/file-send/SKILL.md before calling it. The skill owns which ref to pass, files and ZIPs made for a request, full-workspace exports, and what to say for each result. For a full-workspace export, ${VAULT_MEDIA_EXPORT_GUIDANCE} Every send needs the member's approval, bound to this file and this conversation. When the result says approval is pending, the runtime adds the approval link to your reply, so never write one yourself. When it says approved, the runtime delivers the file: send no text about it and call finish_without_reply. The tool never shows you the file's contents and cannot send to anyone else.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1568,7 +1572,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
         minLength: 1,
         maxLength: 1024,
         description:
-          `Normalized vault-relative path, for example documents/report.pdf. The exact flat ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> runtime ref is also accepted; all other hidden paths, traversal, absolute paths, and unsupported file types are rejected.`,
+          `Vault-relative path such as documents/report.pdf, or ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> for a file made for this send. Other hidden paths, absolute paths, traversal, and unsupported file types are rejected.`,
       },
       retire_export_pack_ids: {
         type: 'array',
@@ -1579,7 +1583,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
           pattern: '^[A-Za-z0-9_-]+$',
         },
         description:
-          'Exact derived export-pack ids included in this generated ZIP. Omit for every other file.',
+          `Only for a ZIP you generated that contains derived exports/packs/<packId> directories: exactly the pack ids included in that ZIP. The runtime retires those packs after the file is delivered. Leave it out for every other file.`,
       },
     },
     required: ['ref'],
@@ -1590,7 +1594,7 @@ export const MURPH_FINISH_WITHOUT_REPLY_TOOL = {
   namespace: 'murph',
   name: 'finish_without_reply',
   description:
-    'Finish the current response without adding a new text reply. This does not withdraw a reply you already completed earlier in the turn.',
+    `End the turn without sending text. Use it when the response is already complete without text: a reaction that says everything, a file the runtime is delivering, a consent prompt the host posted, or a message that needs no answer. After attaching a card, end the turn with no text and do not call this tool. Anything already sent in this turn stays sent.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1602,12 +1606,12 @@ export const MURPH_SELECT_REPLY_TARGET_TOOL = {
   namespace: 'murph',
   name: 'select_reply_target',
   description:
-    'Select one accepted inbound message as the native reply target for the current normal response. Use this only when anchoring the response to a specific message improves clarity; ordinary responses stay flat. This does not send text and does not finish the turn.',
+    `Make the final reply a threaded reply to one accepted message. Use it only when it would otherwise be unclear which message the reply answers. It sends nothing and does not end the turn.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+      message_ref: ASSISTANT_MESSAGE_TARGET_REF_SCHEMA,
     },
     required: ['message_ref'],
   },
@@ -1617,12 +1621,12 @@ export const MURPH_REACT_TO_MESSAGE_TOOL = {
   namespace: 'murph',
   name: 'react_to_message',
   description:
-    'React to one accepted inbound message identified by its Message ref when the active channel supports reactions. This does not send text and does not finish the turn.',
+    `Add a reaction to one accepted message. It sends no text and does not end the turn.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+      message_ref: ASSISTANT_MESSAGE_TARGET_REF_SCHEMA,
       reaction: {
         type: 'string',
         enum: ['heart', 'thumbs_up', 'laugh'],
@@ -1636,7 +1640,7 @@ export const MURPH_COMPUTER_OPEN_TOOL = {
   namespace: 'murph',
   name: 'computer_open',
   description:
-    'Open/reuse authorized browser; reopen after handoff/uncertainty. Returns runId, URL, title, text; prior outcome stays unknown.',
+    `Open the browser for an authorized computer run, or reopen the current run. Call it first, again after a handoff to the member, and whenever the outcome of the last action is uncertain. It returns the runId, URL, title, and page text. Reopening does not tell you whether the last action took effect. The other computer tools (computer_act, computer_os_control, computer_pause_for_user, computer_finish_run) load only when you search for them by name.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1710,22 +1714,25 @@ function addRunIdToActionSchema(schema: unknown): JsonSchemaObject {
 
 export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
+  deferLoading: true,
   name: 'computer_act',
   description:
-    'Bounded Playwright macro-step in current authorized run; returns state. Allows specifically authorized non-credential identity/health input and approved final terms. Never invent data, enter credentials/OTP/payment, bypass CAPTCHA, accept material consent, or retry unknown effects. After failure, call computer_open.',
+    `Run one bounded Playwright step in the current authorized run and return the resulting state. The computer-use skill says which details you may enter and when the final step needs the member's yes. Never invent data, type a password, one-time code, or full card number, get past a CAPTCHA, or retry an action whose effect is unknown. After a failure, call computer_open before anything else.`,
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
 export const MURPH_COMPUTER_OS_CONTROL_TOOL = {
   namespace: 'murph',
+  deferLoading: true,
   name: 'computer_os_control',
   description:
-    'Fallback: perform one bounded mouse or keyboard action in the current authorized run only when Playwright cannot operate the verified control. Never enter sensitive data. After a possible effect or failure, the outcome may be unknown; call computer_open before any retry or next action.',
+    `Fallback for the current authorized run: one mouse or keyboard action, for a control Playwright cannot operate. Never type credentials, one-time codes, payment details, or other sensitive data. After any action that may have taken effect, and after any failure, call computer_open before a retry or the next action.`,
   inputSchema: MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA,
 } as const
 
 export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
   namespace: 'murph',
+  deferLoading: true,
   name: 'computer_pause_for_user',
   description:
     'Pause the current authorized run, persist a checkpoint, and optionally return a secure handoffUrl. Call only when missing user input, takeover, inspection, or final confirmation is required. This does not message the user, and a returned URL does not prove handoff completion.',
@@ -1766,6 +1773,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
 
 export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
   namespace: 'murph',
+  deferLoading: true,
   name: 'computer_finish_run',
   description:
     'Finish the current authorized computer run with the stated outcome and close its browser. On success, do not reuse the runId.',

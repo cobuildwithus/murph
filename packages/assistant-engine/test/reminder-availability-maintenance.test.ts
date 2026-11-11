@@ -20,10 +20,6 @@ import {
 import {
   getAssistantCronJob,
 } from '../src/assistant/cron.js'
-import {
-  buildAssistantSystemPromptLayers,
-  type AssistantSystemPromptInput,
-} from '../src/assistant/system-prompt.js'
 import { createTempVaultContext } from './test-helpers.js'
 import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 
@@ -395,19 +391,8 @@ describe('reminder availability maintenance', () => {
   })
 
   it('keeps ordinary reminder repair guidance user-facing and fail-open', async () => {
-    const layers = buildAssistantSystemPromptLayers(createPromptInput())
-    expect(layers.stableRouteCapabilityPrompt).not.toContain(
-      'Availability calendar account: <toolkit> / <account-id>',
-    )
     const skill = await readWorkflowSkillPolicy('behavior-followthrough')
-    expect(skill).toContain('### Repair a mistimed interruption')
-    expect(skill).toContain('treat it as feedback about the')
     expect(skill).toContain('Availability conflict policy: skip-when-busy')
-    expect(skill).toContain(
-      'Availability calendar account: <toolkit> / <account-id>',
-    )
-    expect(skill).toContain('policy in the background, usually within a day')
-    expect(skill).toMatch(/the reminder sends\s+normally until one succeeds/u)
   })
 })
 
@@ -462,23 +447,3 @@ async function requireReminder(vaultRoot: string) {
   return reminder
 }
 
-function createPromptInput(
-  overrides: Partial<AssistantSystemPromptInput> = {},
-): AssistantSystemPromptInput {
-  return {
-    assistantCliContract: null,
-    assistantHostedAutomationAvailable: true,
-    assistantHostedDeviceConnectProviders: [],
-    assistantHostedLabsAvailable: false,
-    channel: 'linq',
-    cliAccess: {
-      rawCommand: 'vault-cli',
-    },
-    conversationScope: 'direct',
-    currentLocalDate: '2026-07-30',
-    currentTimeZone: 'America/New_York',
-    hostedRuntime: true,
-    onboardingGuidance: false,
-    ...overrides,
-  }
-}

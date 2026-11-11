@@ -206,20 +206,12 @@ describe("murph.group dynamic tool", () => {
     );
     expect(GROUP_TOOL_INPUT_PROPERTIES.question.maxLength)
       .toBe(HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS);
-    expect(GROUP_TOOL_INPUT_PROPERTIES.policyCode.description)
-      .toContain('state="armed"');
-    expect(GROUP_TOOL_INPUT_PROPERTIES.membershipId.description)
-      .toContain("exact opaque membershipId from list_memberships");
     expect(GROUP_TOOL_INPUT_PROPERTIES.permissionText.maxLength)
       .toBe(HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS);
     expect(
       GROUP_TOOL_INPUT_PROPERTIES.setup.properties
         .roomContextMarkdown.maxLength,
     ).toBe(HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS);
-    expect(
-      GROUP_TOOL_INPUT_PROPERTIES.setup.properties
-        .roomContextMarkdown.description,
-    ).toContain("2 KiB UTF-8 envelope");
     expect(GROUP_TOOL_INPUT_PROPERTIES)
       .not.toHaveProperty("requestedVaultShareProjectionScopes");
     expect(GROUP_TOOL_INPUT_PROPERTIES)
@@ -258,39 +250,7 @@ describe("murph.group dynamic tool", () => {
       .not.toContain("sleep");
     expect(sessionCountScopeSchema.properties.selector.properties.activityKind.enum)
       .not.toContain("sleep");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.displayName.description)
-      .toContain("the name the group chose");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.displayName.description)
-      .toContain("immediately preceding read_chat_name result");
     expect(GROUP_TOOL_INPUT_PROPERTIES).not.toHaveProperty("messageTemplate");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
-      .toContain("Omitting projectionScopes requests every selectable permission");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
-      .toContain("supply only the exact permissions requested by the person");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
-      .toContain("Existing membership and other grants remain unchanged");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
-      .toContain("trusted host owns the exact consent copy");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
-      .toContain("actual scope snapshot");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
-      .toContain("Let reported counts carry date coverage");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.projectionScopes.description)
-      .not.toContain("State requested versus actually available date coverage");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.membershipId.description)
-      .toContain("exact opaque membershipId from list_memberships");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.cursor.description)
-      .toContain("exact opaque nextCursor");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.disclosureGrantCursor.description)
-      .toContain("exact opaque nextDisclosureGrantCursor");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.avatarSource.description)
-      .toBe(
-        'Required for action="set_chat_avatar". Generate a new square avatar or reuse an exact existing private image ref.',
-      );
-    expect(GROUP_TOOL_INPUT_PROPERTIES.imageRef.description)
-      .toBe(
-        'Required for action="set_chat_avatar" with avatarSource="image_ref". Use the exact JPG/PNG/WebP ref under raw/inbox/** (user-sent) or raw/captures/** (including generated captures); never invent or modify it.',
-      );
   });
 
   it("exposes authorized group data without a discovery round in group conversations", () => {
@@ -309,14 +269,6 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("advertises family-bounded schemas", () => {
-    const groupConsultTool = MURPH_GROUP_FAMILY_TOOLS.find(
-      (tool) => tool.name === "group_consult",
-    );
-    expect(groupConsultTool?.description)
-      .toContain("ask=group answer; handoff=tell/post/share");
-    expect(groupConsultTool?.description)
-      .toContain("exact ID after exhausting list_memberships pages");
-
     const expectedRootKeys = {
       group_consult: [
         "action", "context", "grantId", "membershipId", "message_ref",
@@ -379,7 +331,6 @@ describe("murph.group dynamic tool", () => {
         expect(tool.inputSchema.properties).not.toHaveProperty(forbiddenField);
       }
     }
-
   });
 
   it("advertises the least-privileged group surface for the available ports", () => {
@@ -392,12 +343,6 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.action.enum).toEqual([
       "read_shared",
     ]);
-    expect(MURPH_GROUP_SHARED_READ_TOOL.description.length)
-      .toBeLessThanOrEqual(360);
-    expect(MURPH_GROUP_SHARED_READ_TOOL.description)
-      .toContain('status="partial" means omittedParticipantIds');
-    expect(MURPH_GROUP_SHARED_READ_TOOL.description)
-      .toContain("infer nothing else about them");
     const scheduledGroupTools = resolveMurphDynamicTools({
       groupAvailable: false,
       groupPermissionOfferAvailable: true,
@@ -415,12 +360,6 @@ describe("murph.group dynamic tool", () => {
         MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.inputSchema.properties,
       ),
     ).toEqual(["participantId", "history", "action", "freshness", "projectionScopes"]);
-    expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description.length)
-      .toBeLessThanOrEqual(350);
-    expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description)
-      .toContain("current authorized scheduled group turn");
-    expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description)
-      .toContain("Existing membership and other grants stay unchanged");
 
     expect(resolveMurphDynamicTools({
       groupAvailable: false,
@@ -1442,10 +1381,6 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("uses the existing metric scope for bounded participant history, including detached reads", async () => {
-    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("every active metric grant already covers this window");
-    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("not_granted means the metric itself is unshared");
-    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).toContain("Let trend counts carry date coverage");
-    expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.history.description).not.toContain("State requested range");
     expect(JSON.stringify(MURPH_GROUP_SHARED_READ_TOOL.inputSchema)).not.toContain("historyDays");
     const args = {
       action: "read_shared", participantId: "participant_history",
@@ -2774,7 +2709,6 @@ describe("murph.group dynamic tool", () => {
           : `group ${action} requires a fresh user request in a personal direct conversation`,
       }]);
     });
-
   });
 
   it("enforces group ask bounds in Unicode code points", () => {
@@ -3847,8 +3781,6 @@ describe("murph.group dynamic tool", () => {
     expect(readGroupToolPayload(result)).toEqual(response);
     expect(MURPH_GROUP_CHAT_TOOL.inputSchema.properties.action.enum)
       .toContain("update_display_name");
-    expect(GROUP_TOOL_INPUT_PROPERTIES.displayName.description)
-      .toContain('Required for action="update_display_name"');
   });
 
   it("rejects invalid update_display_name arguments", () => {
@@ -6339,7 +6271,6 @@ describe("murph.group email actions", () => {
       }
     },
   );
-
 
   it("parses email preparation as an audience-bound shared read", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({

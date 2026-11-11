@@ -58,8 +58,19 @@ export const MURPH_DEVICE_TOOL = {
   namespace: 'murph',
   name: 'device',
   deferLoading: true,
-  description:
-    'Work with the current authenticated member’s wearable and health-device accounts. companion_status reports lastContactAt (foreground or opportunistic background contact) and lastForegroundAt; use it alongside list_accounts when debugging Apple Health. recently_active is contact evidence only, never proof of successful Health sync, granted Health permissions, or continuous background execution. unknown includes older apps without heartbeat support. list_accounts returns matching accountId, provider, status, last sync, and safe error context. connect returns a short-lived connectUrl for a supported provider. reconcile queues a refresh for one returned accountId; queued does not mean completed. configure_no_data_outreach changes Garmin (sourceProvider garmin), Apple Health (sourceProvider apple_health_kit), or WHOOP (sourceProvider whoop_v2) check-in timing: use after_days with 5–30 days, off, or default only when the current private member message states that preference. Call configure_no_data_outreach at most once for that message; after any result, do not retry. A saved result confirms the check-in preference: acknowledge it once and finish. Off stops only these check-ins; connection and syncing stay unchanged. Never call it from a group or scheduled turn or for another provider. No data is not proof of disconnection or app closure; reserve reconnect guidance for explicit authentication failure. Never ask for or pass provider credentials, tokens, delivery routes, or generic commands.',
+  description: [
+    "Manage the member's wearable and health-device connections.",
+    "list_accounts returns each account's accountId, provider, status, last sync, and error code.",
+    'connect returns a short-lived connectUrl for a supported provider. Send only that returned URL.',
+    'reconcile queues a refresh for one accountId. A queued refresh has not finished yet.',
+    "companion_status reports the iPhone app's lastContactAt and lastForegroundAt. Use it with list_accounts when debugging Apple Health.",
+    'recently_active means only that the app made contact. It does not show that Health synced, that Health permissions are granted, or that the app keeps running in the background. unknown includes older app versions that do not report.',
+    'configure_no_data_outreach sets when Murph checks in after a source goes quiet, for sourceProvider garmin, apple_health_kit, or whoop_v2. Use mode after_days with afterDays from 5 to 30, or mode off, or mode default.',
+    "Call it once, and only when the member's current private message asks for or agrees to that change.",
+    'off stops only these check-ins and leaves the connection and syncing unchanged.',
+    'Missing data does not show that a source is disconnected or that the app is closed, so suggest reconnecting only after an authentication failure.',
+    'Never ask for provider passwords or tokens.',
+  ].join(' '),
   inputSchema: z.toJSONSchema(deviceArgumentsSchema, { io: 'input' }),
 } as const
 

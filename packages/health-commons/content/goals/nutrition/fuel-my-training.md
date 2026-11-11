@@ -33,8 +33,7 @@ goal:
     kind: training_plan
     ownerSkillIds:
       - nutrition-strategy
-      - competition-training
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me fuel my training.
   indexable: true
 safety:

@@ -36,7 +36,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - strength-training
+      - training
       - behavior-followthrough
   startPrompt: Hey Murph, help me stay strong as I age.
   indexable: true

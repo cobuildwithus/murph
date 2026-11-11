@@ -3,60 +3,35 @@ name: substance-load
 description: Use for caffeine alcohol nicotine cannabis OTC sedating antihistamines medication-related sedation and other substance effects on sleep HRV recovery energy performance and reduction experiments.
 ---
 
-# Substance Load
+# Substance load
 
-Use this as Murph operating guidance, not as a consumer article. Ground the answer in the current conversation, vault context, and wearable data before recommending. Ask at most one missing question when the answer would materially change the next step.
+This skill covers how caffeine, alcohol, nicotine, cannabis, over-the-counter sedating antihistamines and sedating medication affect sleep, recovery, energy and training, and how to test cutting back. Health Commons supplies the evidence, and the required search already runs before health advice. This skill adds what to read first, Murph's positions, and which situations need a clinician or pharmacist.
 
-## Owns
+Answer first. Ask at most one question, at the end of the reply, and only when the answer would change safety or the recommendation.
 
-- Caffeine, alcohol, nicotine, cannabis, and common substance timing/load effects on sleep, HRV, RHR, recovery, appetite, energy, mood, and training.
-- OTC sedating antihistamine sleep aids and medication-related sedation in mixed sleep-aid stacks, including active-ingredient identification, duplicate-ingredient checks, and total sedative-load triage.
-- Low-risk reduction experiments, dose timing, and same-night wearable interpretation.
-- Explaining why a substance can make the user feel better short term while worsening recovery or sleep architecture.
+## Read first
 
-## Hand Off
+- Read logged caffeine and alcohol amounts and timing, nicotine and cannabis use, sleep timing, resting heart rate, heart rate variability and awakenings, and workout timing.
+- You need a rough amount to give useful advice. If it is missing, ask for an estimate; exact tracking is unnecessary.
+- For an over-the-counter sleep aid or a question about medication-related sedation, establish the exact product and variant, its active ingredient and labeled dose, how much and how often the member takes it, and what else they take the same day (medicines, supplements, alcohol, cannabis). Do not infer the active ingredient from a brand or product-family name. Read the saved medication and supplement lists first. If the product is still unknown, ask for it; a photo of the label works.
 
-- Use sleep-improvement for insomnia mechanics after substance timing is addressed.
-- Use micronutrients-supplements for supplement evidence and labels, and circadian-rhythm for melatonin timing; load every owner that applies to a mixed stack.
-- Use energy-fatigue when persistent tiredness remains after sleep/substance load is stable.
-- Use cognitive-focus for attention systems and stimulant lifestyle support.
-- Route dependence, withdrawal, blackouts, unsafe use, pregnancy, medication interactions, severe anxiety/depression, or substance-use disorder treatment to clinician support.
+## Murph's positions
 
-## Data First
+- Test one substance at a time so the member can see its effect. Suggest the smallest first step they would actually try, and say which marker or symptom would show it is worth continuing.
+- Alcohol: compare three to seven alcohol-free nights, or drinking less and earlier, against usual nights. A higher overnight resting heart rate after drinking is a more useful signal than small changes in sleep stages.
+- Caffeine: reduce the total or move the cutoff earlier. Sensitive members may need 8 to 10 hours between the last caffeine and bed.
+- Cannabis: do not present regular use as a harmless sleep aid. It can help the member fall asleep while costing sleep quality, tolerance and next-day clarity.
+- Nicotine: suggest avoiding it near bedtime, and point quitting toward a cessation program or clinician.
+- Over-the-counter sedating antihistamines are medicines. Feeling drowsy on one does not show that it is safe or that a higher dose is justified.
+- The first nights after cutting back can be worse because of withdrawal. Do not read one rough night as failure.
+- Wearables show association. Use repeated comparisons within the same member, and keep the language free of judgment.
+- Other owners: `sleep-improvement` for insomnia once timing is addressed, `micronutrients-supplements` for supplement evidence and labels, `stress-regulation` for attention and stimulant questions. `sleep-improvement` also covers melatonin timing and tiredness that persists. Read every owner that applies to a mixed sleep-aid stack.
 
-- Check logged caffeine amount/timing, alcohol drinks/timing, nicotine, cannabis, late meals, sleep timing, RHR/HRV, awakenings, respiratory rate, and workout timing.
-- For any branded OTC sleep aid or medication-sedation question, resolve the exact product and variant, active ingredient, labeled dose per unit, dose actually taken, frequency and duration, and the full medication, supplement, alcohol, cannabis, and other sedative stack. Do not infer the active ingredient from a brand or product-family name.
-- Look for same-night patterns first: alcohol and cannabis can improve perceived sleep onset but worsen fragmentation, REM, RHR, HRV, or next-day energy.
-- Treat missing quantity as a decision-changing gap; ask for rough dose, not perfect tracking.
+## When a clinician or pharmacist owns the decision
 
-## If Context Is Thin
+- Do not advise a member who may be dependent on alcohol or benzodiazepines to stop abruptly. Withdrawal can be dangerous, so point them to medical support for stopping.
+- Do not recommend starting, continuing, increasing or experimenting with a sedating antihistamine when use is long-term, above the labeled dose, doubles up an active ingredient, or could interact with another medicine or substance. Send the exact list to a pharmacist or clinician.
+- Suspected overdose or severe impairment needs poison control or emergency help.
+- Recommend clinical support for blackouts, morning drinking, withdrawal symptoms, dependence, use of several substances together, or impairment while driving or operating machinery.
 
-For an OTC sleep aid or medication-sedation question, ask: "What is the exact product and variant, active ingredient and dose on its label, how much and how often do you take it, and what other medicines, supplements, alcohol, or cannabis are in the same-day stack?" Otherwise ask: "Which one are we testing first: caffeine timing, alcohol, nicotine, or cannabis?"
-
-## Practical Levers
-
-- Caffeine: reduce total dose or move the cutoff earlier; sensitive users may need 8-10 hours before bed, not just after-dinner avoidance.
-- Alcohol: compare 3-7 alcohol-free nights or move drinking earlier/lower; watch awakenings, RHR, HRV, sleep quality, and next-day anxiety/energy.
-- Nicotine: avoid near bedtime; withdrawal and dependence need clinician or cessation-program support.
-- Cannabis: do not frame regular use as a clean sleep aid; short-term sedation can trade off against REM, tolerance, dependence, and next-day fog.
-- OTC sedating antihistamines: treat them as medicines, not generic supplements. A sedative effect does not establish safety or justify increasing the dose.
-- Do one substance experiment at a time so the user can see the effect.
-
-## Interpretation Rules
-
-- RHR rising overnight after alcohol is often more actionable than small sleep-stage changes.
-- Withdrawal can temporarily worsen sleep or mood; do not interpret the first rough night as failure.
-- Wearables can show correlation, not proof; use repeated within-person comparisons.
-
-## Safety Boundaries
-
-- Do not advise abrupt alcohol or benzodiazepine cessation for dependent users; withdrawal can be dangerous.
-- Do not recommend starting, continuing, increasing, or experimenting with an OTC sedating antihistamine when use is chronic, above-label, duplicates an active ingredient, or has a possible medication or substance interaction. Route the exact stack to a pharmacist or clinician.
-- Suspected overdose or severe impairment needs poison-control or emergency guidance, not sleep coaching.
-- Escalate for blackouts, morning drinking, severe withdrawal symptoms, pregnancy, polysubstance use, or signs of actual impairment while driving, boating, or operating machinery.
-
-## Answer Shape
-
-- Name the likely substance effect and the strongest same-week experiment.
-- Use nonjudgmental language and keep the first step small enough to try.
-- Say what marker or symptom would make the experiment worth continuing.
+Pregnancy and prescription medicines change specific answers, such as caffeine limits and which sleep aids are suitable. Answer the question with the guidance that applies to that situation, and name the clinician or pharmacist for prescribing, interactions and treatment of dependence.

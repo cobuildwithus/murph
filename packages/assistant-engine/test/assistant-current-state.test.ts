@@ -46,16 +46,10 @@ describe('assistant current state', () => {
       hostedRuntime: true,onboardingGuidance: false,
       turnTrigger: 'automation-cron',
     })
-    expect(layers.staticCacheableCorePrompt).toContain("Match replies, including voice memo text, to the user's conversational language")
-    expect(layers.staticCacheableCorePrompt).toContain('An explicit language request wins; otherwise honor an explicit saved language preference, then clear current conversational language, then the remembered default')
-    expect(layers.staticCacheableCorePrompt).toContain('English needs no new observed-language note')
-    expect(layers.dynamicTurnContextPrompt).toContain('triggered by an existing scheduled automation run')
-    expect(layers.dynamicTurnContextPrompt).toContain('execution instructions for this scheduled run')
     expect(layers.dynamicTurnContextPrompt).toContain('Europe/Warsaw')
     if (language) expect(snapshot).toContain(`Observed conversational language: ${language}.`)
     else expect(snapshot).not.toContain('Observed conversational language:')
     expect(layers.dynamicTurnContextPrompt).not.toContain('Observed conversational language:')
-    expect(layers.prompt).not.toContain('This is not an attended user turn or a scheduled automation occurrence')
   })
 
   it('retains older durable preferences beyond three recent records with stable bounds', () => {

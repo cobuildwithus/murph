@@ -35,8 +35,7 @@ goal:
   workflow:
     kind: training_plan
     ownerSkillIds:
-      - running-cardio
-      - strength-training
+      - training
   startPrompt: Hey Murph, help me hike longer without getting tired.
   indexable: true
 safety:

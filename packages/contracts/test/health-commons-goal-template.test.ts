@@ -34,7 +34,7 @@ const validGoalTemplate = {
     evidenceSourceKeys: ["source_artifact:resting-heart-rate-guidance"],
     workflow: {
       kind: "training_plan",
-      ownerSkillIds: ["aerobic-fitness", "hrv-resting-heart-rate"],
+      ownerSkillIds: ["training", "sleep-improvement"],
     },
     startPrompt: "Hey Murph, help me lower my resting heart rate.",
     indexable: true,

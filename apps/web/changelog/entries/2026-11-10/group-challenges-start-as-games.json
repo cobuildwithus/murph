@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 100,
+  "item": {
+    "id": "group-challenges-start-as-games",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Group challenges start as games",
+    "summary": "A new challenge in a group chat now starts as a Murph game: each player takes a daily task, the group plays for one prize, and everyone checks in.",
+    "details": "A game counts check-ins, not steps or sleep. A challenge your group is already running on shared data keeps going until the end you agreed.",
+    "relevanceTags": [
+      "groups",
+      "games"
+    ],
+    "sourcePullRequests": [
+      4817
+    ]
+  }
+}

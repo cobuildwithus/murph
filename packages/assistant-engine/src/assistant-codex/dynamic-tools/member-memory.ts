@@ -42,9 +42,12 @@ export const MURPH_MEMBER_MEMORY_TOOL = {
   namespace: 'murph',
   name: 'member_memory',
   description: [
-    'Read, add, update, or forget canonical saved memory during engine-authorized silent member-memory consolidation.',
-    'Call show exactly once per maintenance turn and use that one result for deduplication, faithful wording-only compaction, and mutation targeting. Upsert one concise supported fact at a time. Update or forget only by an id returned by show, and pass that record\'s exact updatedAt as expectedUpdatedAt.',
-    'A successful mutation result is authoritative. If a record changed after show, leave the newer value unchanged and end the write attempt; never call show again in the same turn merely to retry or verify.',
+    'Read, add, update, or forget saved member memory during silent memory consolidation.',
+    'show returns every record with its id, section, text, and updatedAt.',
+    'upsert adds one fact.',
+    "update and forget take a memoryId from show and that record's updatedAt as expectedUpdatedAt.",
+    'A successful write result is final and needs no second show.',
+    'A conflict means the record changed after show. Leave the newer value and stop.',
   ].join(' '),
   inputSchema: z.toJSONSchema(memberMemoryArgumentsSchema, { io: 'input' }),
 } as const

@@ -441,7 +441,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
     description:
       'Log or correct one exact set. Values may be omitted only when the exercise has a stored member repetition count.',
     hint:
-      'Exact-read the workout before logging. If memberRepsPerSet is omitted, restore an applicable saved every-set instruction with workout exercise set-reps before logging; its scope must identify this exact workout exercise. A null value is an explicit withdrawal: ask for repetitions and do not restore a historical instruction.',
+      'Without values, this fills in the stored count. When the exercise has no stored count, the command is rejected: if a saved instruction from the member clearly gives an every-set count for this exact workout exercise, store it with workout exercise set-reps and log again, and otherwise ask for the repetitions. A null memberRepsPerSet means the member withdrew the count, so ask for this set\'s repetitions and do not restore an older instruction.',
     args: z.object({
       exercise: z
         .string()

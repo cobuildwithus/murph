@@ -1,84 +1,83 @@
 ---
 name: health-records
-description: Use in a private conversation before saving clinical documents and health files the member sends, such as lab reports, visit or discharge summaries, imaging reports, medication lists, allergy statements, PDFs, CSV or wearable exports, audio or video, and photos kept to track a body change over time. Meals use food-journal; blood type uses vault-cli profile.
+description: Where clinical documents and health files a member sends are saved, how to read them, and how to keep photos that track a body change. Meals use food-journal.
 ---
 
 # Health records the member sends
 
-The resident saving rules decide whether to save. This skill says where each
-kind of record goes and how to read the source.
+Recover as much structure as the source supports, mark what is uncertain, and
+record where each fact came from when the command has a field for it. A lab
+value belongs in a lab record, never only in memory or a note.
 
-## Where it goes
+## Where each kind goes
 
-- Labs and panels: `blood-test`. Vitals and body values: `measurement`.
-- Visits, assessments, plans, diagnoses, procedures, orders, imaging reports
-  and test summaries: `encounter scaffold`, then `encounter import-json`.
-- Current medicines and supplements: `regimen save` with the right kind,
-  status and dates. Completed historical courses: `vault-cli medication
-  history add`. One dose taken at a known time: `event medication-intake add`.
-- Workouts: workout surfaces. Symptoms and body notes: symptom, event or
-  Journal note surfaces.
-- Raw evidence that cannot be structured yet: an existing document, capture,
-  attachment, manifest or import surface, with the remaining parse state clear.
-- Negative allergy statements such as NKDA, NKFA, "no known drug allergies",
-  "no known food allergies" or "no known allergies": a
-  `kind: "clinical_assertion"` event through `vault-cli event import-json` with
-  `occurredAt`, `assertion`, `assertedOn`, and source context. Never create an
-  allergy record for the absence of allergies or keep it only in memory.
-- Recover the useful structure, mark uncertainty, and include provenance and
-  confidence when the surface supports it. Lab values never live only in
-  freeform memory when a structured path fits.
+| What the member sent | Command |
+| --- | --- |
+| Lab results and panels | `vault-cli blood-test` (`scaffold` shows the payload for `import-json`) |
+| Vitals and body values | `vault-cli measurement add` |
+| Visits, assessments, plans, diagnoses, procedures, orders, imaging reports, test summaries | `vault-cli encounter scaffold`, then `vault-cli encounter import-json` |
+| A medicine or supplement they take now | `vault-cli regimen save` with its kind, status and dates |
+| A course of medicine that has ended | `vault-cli medication history add` |
+| One dose taken at a known time | `vault-cli event medication-intake add` |
+| An allergy | `vault-cli allergy save "<title>" --substance "<substance>" [--reaction "<reaction>"] [--criticality <low, high or unable_to_assess>] [--recorded-on <YYYY-MM-DD>]` |
+| A statement of no known allergies (NKDA, NKFA, "no known drug allergies") | `vault-cli assertion save --assertion no_known_drug_allergies --domain allergy --asserted-on <YYYY-MM-DD> --source-label "<where it was stated>" --format json`. Also `no_known_food_allergies` and `no_known_allergies`. |
+| A vaccination | `vault-cli immunization save "<vaccine name>" --occurred-at <date>` |
+| Blood type | `vault-cli profile set --blood-type <type>` |
+| Workouts | the workout commands |
+| Symptoms and notes about the body | the symptom, event or Journal note commands |
+
+Never create an allergy record for the absence of allergies.
+
+When a source cannot be structured yet, keep the original through an existing
+document, capture, attachment or import command, and tell the member which
+parts are still unread.
 
 ## Reading the source
 
-- PDFs: use available local paths, extracted text, or rendered page evidence.
-  As needed, use MIME checks, `pdfinfo`, `pdftotext -enc UTF-8 -nopgbrk`, and
-  bounded `pdftoppm` rendering for only the pages needed. If no usable path,
-  text or rendered page is available, say the PDF was not available rather
-  than implying it was read.
-- Voice memos, audio and video: use transcript fragments from ingestion. When
-  they are missing and the task truly needs the media, use bounded local tools
-  such as `ffmpeg` and Whisper (`whisper-cli`) if available.
-- For substantial inspection or several parse and import steps, follow the
-  progress-update rules before the long work. Skip progress for one-shot
-  saves.
+- **PDFs.** Use the local path, extracted text or rendered pages you have. As
+  needed, check the file type and use `pdfinfo`,
+  `pdftotext -enc UTF-8 -nopgbrk`, and `pdftoppm` for only the pages you need.
+  If you have no usable path, text or page, say the PDF was not available. Do
+  not imply you read it.
+- **Voice memos, audio and video.** Use the transcript that came with the
+  message. When there is none and the task needs the recording, use local
+  tools such as `ffmpeg` and Whisper (`whisper-cli`) if they are installed.
 
-## Photos kept to track change
+## Photos kept to track a change
 
-- A request to track progress photos, body composition, skin, acne or
-  tretinoin, posture or form, or a wound or lesion over time is intent to keep
-  the relevant images. Durable means canonical capture records with immutable
-  `raw/captures/**` media and manifests; `raw/inbox/**` media is transient and
-  may expire after 14 days.
-- One observation or timepoint: `vault-cli capture add --media
-  <readable-file-path> --collection <stable-series-slug> --format json` (repeat
-  `--media` for several views of the same observation). Batches of distinct
-  observations, body sites or timepoints: `vault-cli capture import-json
-  --input @<payload.json> --format json`; run `vault-cli capture
-  payload-schema --format json` first for the exact payload contract. Include
-  stable labels, body sites, tags, notes and related ids when they help later
-  retrieval.
-- Pass real readable filesystem paths. If attachment metadata only exposes a
-  vault-relative `raw/inbox/**` storedPath, resolve it under the active vault
-  root first. If the media is missing, expired or unreadable, do not claim it
-  was saved.
-- Never use `mkdir`, `cp`, ad hoc experiment folders, memory, notes or
-  experiment checkpoints as media storage. For an experiment, save captures
-  first, then optionally append a checkpoint citing the returned capture event
-  ids. Confirm a durable image save only from successful JSON that includes the
-  capture ids, media and manifest fields.
+When a member asks to track progress photos, body composition, skin, acne or
+tretinoin, posture or form, or a wound or lesion over time, they are asking
+you to keep the images. Photos in `raw/inbox/**` are temporary and can expire
+after 14 days. A capture record keeps the image permanently.
 
-## Large or mixed bundles
+- One observation or point in time:
+  `vault-cli capture add --media <readable-file-path> --collection <stable-series-slug> --format json`.
+  Repeat `--media` for several views of the same observation.
+- Several separate observations, body sites or dates:
+  `vault-cli capture import-json --input @<payload.json> --format json`. Run
+  `vault-cli capture payload-schema --format json` first for the payload.
+- Add labels, body sites, tags, notes and related ids when they will help find
+  the photos later.
+- Pass a real, readable file path. If the attachment only gives a
+  vault-relative `raw/inbox/**` path, resolve it under the active vault root
+  first. If the file is missing, expired or unreadable, do not say it was
+  saved.
+- Confirm a save only from successful JSON that includes the capture ids,
+  media and manifest fields.
+- The capture commands are the only place these photos are stored. Do not use
+  `mkdir`, `cp`, an experiment folder, memory, notes or an experiment
+  checkpoint to hold them. For an experiment, save the captures first, and
+  then a checkpoint can cite the returned capture event ids.
 
-- Finish small, reply-needed extraction and saves yourself. A loaded skill may
-  explicitly split independent canonical persistence from the durably accepted
-  current input across bounded children. For a large or mixed bundle, preserve
-  the source durably before replying. A child may write
-  only its named family from that exact source, or enrich exact returned
-  record ids, with idempotent, provenance-aware writes and dedupe.
-- A spawn is not durable parse state. A short plain mention of the background
-  work in the spawning reply is fine, but never promise completion. On later
-  turns, do not call it pending, processing or in progress unless a durable
-  owner proves that state. Claim child extraction only after canonical
-  readback; otherwise say plainly which details you do not have yet, without
-  bookkeeping words such as "unconfirmed" or "user-reported".
+## Large or mixed uploads
+
+Do small extractions and saves yourself. For a large or mixed upload, save the
+original file first, so nothing depends on work that happens after your reply.
+You may then hand separate record types to helper agents. Each helper writes
+only the record type it was given, from that exact source, or adds detail to
+record ids it was handed, and checks for existing records before writing.
+
+You may mention the background work briefly in the same reply, without
+promising when it will finish. Say a helper's records exist only after you
+have read them back. Until then, tell the member plainly which details you do
+not have yet, in ordinary words.
