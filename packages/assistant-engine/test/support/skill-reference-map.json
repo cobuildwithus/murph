@@ -127,7 +127,9 @@
   },
   "file-send": {
     "skills": [],
-    "tools": []
+    "tools": [
+      "murph.pending_vault_files"
+    ]
   },
   "food-journal": {
     "skills": [
@@ -206,7 +208,9 @@
     "skills": [
       "journal-connected-context"
     ],
-    "tools": []
+    "tools": [
+      "murph.group_membership"
+    ]
   },
   "journal-connected-context": {
     "skills": [

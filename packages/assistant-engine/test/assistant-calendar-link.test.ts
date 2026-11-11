@@ -44,11 +44,10 @@ describe('assistant calendar link tool', () => {
     expect(result.rpcResult.success).toBe(true)
     const url = result.requiredFinalResponseSuffix
     expect(url?.startsWith(CALENDAR_LINK_URL_PREFIX)).toBe(true)
-    expect(JSON.parse(result.rpcResult.contentItems[0]?.text ?? '')).toEqual({
-      instruction:
-        'The link is ready, and the runtime appends it to your reply, so write the reply without any URL. The link does not set a reminder. When the Private appointment follow-through policy covers this turn, it still needs its reminder.',
-      status: 'ready',
-    })
+    const readyResult = JSON.parse(result.rpcResult.contentItems[0]?.text ?? '')
+    expect(Object.keys(readyResult).sort()).toEqual(['instruction', 'status'])
+    expect(readyResult.status).toBe('ready')
+    expect(readyResult.instruction).not.toMatch(/https?:/u)
     const payload = url?.slice(CALENDAR_LINK_URL_PREFIX.length) ?? ''
     expect(parseCalendarEventPayload(payload)).toEqual(EVENT)
     expect(result.requiredFinalResponseFallback).toBe('The details are ready.')

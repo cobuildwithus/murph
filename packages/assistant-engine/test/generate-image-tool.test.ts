@@ -39,7 +39,7 @@ describe('executeGenerateImageTool reference images', () => {
     expect(result.rpcSuccess).toBe(false)
     expect(result.rpcText).toContain('requires a subscription')
     expect(result.rpcText).toContain('Pulse')
-    expect(result.rpcText).toContain('Group')
+    expect(result.rpcText).toContain('Core')
     expect(result.rpcText).not.toMatch(/does not charge|without a subscription/iu)
     expect(result.rpcText).toContain('text chat still works')
     expect(result.usageDraft).toBeUndefined()

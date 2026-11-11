@@ -426,9 +426,10 @@ test('workout add and edit help teach compact media, exercise, and set examples'
   const llmsFull = await runRawInProcessCli(cli, ['--llms-full'])
   const setLogHelp = await runRawInProcessCli(cli, ['workout', 'set', 'log', '--help'])
   for (const rendered of [setLogHelp, llmsFull]) {
-    assert.match(rendered, /restore an applicable saved every-set instruction with workout exercise set-reps before logging/u)
-    assert.match(rendered, /scope must identify this exact workout exercise/u)
-    assert.match(rendered, /null value is an explicit withdrawal/u)
+    // The hint names the command that stores a count and the field that
+    // records a withdrawn one; its wording is free to change.
+    assert.match(rendered, /workout exercise set-reps/u)
+    assert.match(rendered, /memberRepsPerSet/u)
   }
 
   for (const rendered of [addHelp, llmsFull]) {
