@@ -74,6 +74,20 @@ describe("game evening check-in contract", () => {
     { batch: [{ ...evening.batch[0], termsVersion: 0 }] }])("rejects invalid witness fields: %j", change => {
     expect(() => gameEveningCheckInPolicySchema.parse({ ...evening, ...change })).toThrow();
   });
+  it("keeps each open task scoped to its player across two evening games", () => {
+    const input = { date: evening.date, transcript: [], players: [
+      { memberId: "one", playerName: "Ava", tasks: [{ gameId: "cycle", task: "a bike ride" }] },
+      { memberId: "two", playerName: "Bea", tasks: [{ gameId: "cycle", task: "a bike ride" }, { gameId: "read", task: "read a chapter" }] },
+    ] };
+    const batch = [
+      { gameId: "cycle", termsVersion: 1, memberIds: ["one", "two"], dayIndex: 3 },
+      { gameId: "read", termsVersion: 1, memberIds: ["two"], dayIndex: 1 },
+    ];
+    expect(gameEveningCheckInPolicySchema.parse({ ...evening, batch }).batch).toEqual(batch);
+    const prompt = buildGameEveningCheckInInstructions(input);
+    expect(JSON.parse(prompt.split("\n").at(-1)!)).toEqual(input);
+    expect(prompt).toContain("everyone still open");
+  });
   it("builds one question with data-only names and tasks and an explicit skip", () => {
     const input = { date: evening.date, transcript: [{ memberId: "one", playerName: "Ava", text: "I'll do it" }],
       players: [{ memberId: "one", playerName: "Ava", tasks: [{ gameId: "game", task: "pushups" }] }] };
