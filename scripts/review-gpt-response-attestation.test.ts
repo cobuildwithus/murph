@@ -24,23 +24,16 @@ const snapshot = {
 function temporaryRoot(): string {
   const sharedRoot = process.env.MURPH_VITEST_TEMP_ROOT;
   if (!sharedRoot) throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
-  const root = mkdtempSync(path.join(sharedRoot, "review-duration-"));
+  const root = mkdtempSync(path.join(sharedRoot, "review-attestation-"));
   roots.push(root);
   return root;
-}
-
-function durationFailure(responseElapsedMs: number, hasConcreteModelEvidence: boolean) {
-  return review.markedResponseDurationFailure({
-    targetModel: "gpt-6-pro", responseMarker: "REVIEW_COMPLETE",
-    minimumResponseMs: 180_000, responseElapsedMs, hasConcreteModelEvidence,
-  });
 }
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-describe("installed ReviewGPT marked-response minimum", () => {
+describe("installed ReviewGPT response attestation", () => {
   it.each([false, true])("preserves truncated signature whitespace with changed signature=%s", (changed) => {
     const signature = `${"s".repeat(319)} `;
     const user = { ...committedUserTurn, signature };
@@ -103,45 +96,15 @@ describe("installed ReviewGPT marked-response minimum", () => {
     expect(prompt).not.toMatch(/MODEL_CONFIRMATION|confirm.*model/i);
   });
 
-  it.each([false, true])("enforces elapsed time with model evidence=%s", (evidence) => {
-    for (const elapsed of [0, 175_650, 179_999, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(durationFailure(elapsed, evidence)).toContain("response is untrusted");
-    }
-    expect(durationFailure(180_000, evidence)).toBe("");
-    expect(durationFailure(180_001, evidence)).toBe("");
-  });
-
-  it("preserves unmarked and current-selection behavior", () => {
-    const options = { responseElapsedMs: 0, minimumResponseMs: 180_000 };
-    expect(review.markedResponseDurationFailure({ ...options,
-      targetModel: "gpt-6-pro", responseMarker: "" })).toBe("");
-    expect(review.markedResponseDurationFailure({ ...options,
-      targetModel: "current", responseMarker: "REVIEW_COMPLETE" })).toBe("");
-  });
-
-  it("rejects a fast verified response with diagnostic bytes only", () => {
-    const root = temporaryRoot();
-    const responseFile = path.join(root, "response.md");
+  it("accepts an attested response without a duration floor and keeps exact-turn and digest checks", () => {
     const attestation = review.modelAttestationForSnapshot(
       "gpt-6-pro", snapshot, true, committedUserTurn.signature,
     );
     expect(attestation.failure).toBe("");
-    expect(attestation.evidence.responseModelSlug).toBe("gpt-6-pro");
-    const failure = durationFailure(179_999, Boolean(attestation.evidence));
-    expect(failure).not.toBe("");
-    expect(() => review.assertMarkedResponseDurationTrusted({
-      status: "response-too-fast", responseText, responseDurationFailure: failure,
-    }, responseFile)).toThrow("response is untrusted");
-    expect(readFileSync(responseFile, "utf8")).toBe(`${responseText}\n`);
-    expect(readdirSync(root)).toEqual(["response.md"]);
-  });
-
-  it("keeps model, exact-turn and capture-digest enforcement after the floor", () => {
-    expect(durationFailure(180_000, true)).toBe("");
-    const attestation = review.modelAttestationForSnapshot(
-      "gpt-6-pro", snapshot, true, committedUserTurn.signature,
-    );
-    expect(attestation.failure).toBe("");
+    expect(review.markedResponseDurationFailure({
+      targetModel: "gpt-6-pro", responseMarker: "REVIEW_COMPLETE",
+      responseElapsedMs: 0, hasConcreteModelEvidence: Boolean(attestation.evidence),
+    })).toBe("");
     expect(review.modelAttestationForSnapshot("gpt-6-pro", {
       ...snapshot, modelSlug: "gpt-6-mini",
     }, true, committedUserTurn.signature).failure).toContain("expected gpt-6-pro");

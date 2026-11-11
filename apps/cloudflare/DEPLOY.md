@@ -1731,43 +1731,20 @@ identity compatibility floor described in the migration section.
 
 The production smoke also runs one real `gpt-6-luna` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-6-luna` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: each enabled behavioral smoke phase runs one bounded model turn per attempt, and a retried attempt (a container that never started, or a pre-rollout container) can run it again; an image release checks the isolated artifact before serving replacement and retains the existing post-rollout checks; the flag remains disabled in per-PR CI and hosted-local E2E.
 
-## Twelve-hour prompt cache rollout
+## Native prompt-cache defaults
 
-The pinned native Codex request builder sets `prompt_cache_options.ttl: "12h"`
-for supported product models only when `MURPH_HOSTED_RUNTIME_PROCESS=1` and the
-provider uses `OPENAI_API_KEY`. This covers native HTTP, WebSocket continuations,
-prewarm, and Responses-based compaction. Implicit caching, prompt keys, model
-selection, and `store: false` remain unchanged. Subscription auth and non-hosted
-runs retain provider defaults. The Worker continues opaque socket forwarding;
-HTTP diagnostics recognize the finite `12h` TTL without logging request content.
+Codex requests use the provider's default prompt-cache policy for every turn and
+compaction. No custom lifetime selection or scheduling label is sent. Supported
+current models default to thirty-minute cache writes; implicit caching and native
+cache keys remain unchanged. This removes the optional twelve-hour write premium
+and the native lifetime-accounting extension.
 
-Scheduled turns and compaction are the exception. The engine sends
-`turnTrigger: "automation-cron"` on a scheduled `turn/start`, and the same
-request builder then sets `ttl: "30m"` for every request of that turn and for
-every compaction request. The label is per turn, so a reply on the same thread
-returns to twelve hours. What a scheduled turn or a compaction writes is rarely
-read again between thirty minutes and twelve hours later, so the longer
-retention only doubled its write rate. The provider lets a thirty-minute request
-read twelve-hour entries but not the reverse: a twelve-hour request re-writes a
-prefix that exists only at thirty minutes. Compaction therefore must stay at
-thirty minutes to read what a scheduled turn just wrote, and a reply after a
-scheduled turn re-writes that turn's addition once. After a runner deploy,
-`automation_cron` allowance snapshots should carry no `tokens.cacheWrite12h`
-while replies still do.
-
-Deploy Web's allowance consumer before the new runner image. Native usage carries
-the provider-reported twelve-hour write subset through cumulative totals,
-per-turn deltas, and measured idle compaction into sanitized `rawUsageJson`.
-Web prices those tokens at twice the thirty-minute write rate, then applies the
-existing service-tier and long-context rules. Old runners and records lacking
-the subset retain thirty-minute accounting. No database migration or backfill is
-needed. Rolling back the runner restores default requests; retain the new Web
-consumer while twelve-hour usage can still arrive or be replayed.
-
-After deployment, check HTTP `cacheTtlKind`, successful ordinary replies, and
-allowance snapshots with `tokens.cacheWrite12h` and its corresponding rate.
-Cache hits remain provider-dependent. Twelve hours is minimum cache coverage,
-not a deletion deadline; it does not alter OpenAI's maximum data-retention policy.
+Keep the existing Web and TypeScript twelve-hour usage readers: older runners and
+persisted usage records can still carry that subset during convergence or replay.
+No migration or historical repricing is needed. Stock native aggregate cache-write
+counts price new default-lifetime requests correctly. Deploy the matching runner
+image and verify the request diagnostics no longer contain an explicit cache TTL.
+Long-gap cache hits may change; no cache-hit or latency guarantee is made.
 See the [OpenAI cache lifetime contract](https://developers.openai.com/api/docs/guides/prompt-caching#cache-lifetime).
 
 ## OpenAI-only inference cutover
@@ -2498,44 +2475,28 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.22.1-codex0.166.0-live1`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.22.1-codex0.167.1-runtime1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-The base Dockerfile builds the CLI from the checksum-pinned Codex 0.166.0 source
-with `patches/codex-public-live.patch`. It keeps the same release's bundled
-Code Mode host and sandbox resources. The patch adds public API-key Live
-compatibility, owned-session shutdown, opt-in app-server input ownership, and a
-15-second bound on a Responses websocket request that receives no provider frame.
-Existing callers retain native routing by default. No separate package registry
-or release workflow is required.
-Both the Dockerfile and patch enter the source fingerprint, so a patch-only
-change cannot reuse an older published base. The package records its upstream
-revision and patch digest in `/usr/local/lib/murph-codex/murph-source-revision`.
-The permission-sandbox CI lane extracts this package from the built image and
-runs synthetic native voice and existing provider conformance checks against
-that exact binary before its final-image sandbox proof.
+The base Dockerfile builds the CLI from checksum-pinned Codex 0.167.1 source
+with `patches/codex-websocket-ack.patch`, preserving the matching release's Code Mode
+host and sandbox resources. The sole patch adds a 15-second first-frame
+WebSocket timeout; subsequent frames retain the native stream idle timeout. Browser live voice and its native adapter
+are retired. The Web page, public and internal call admission, invocation media
+retention and Worker Live forwarding are removed; historical mailbox/usage
+readers remain. Roll out Web retirement before the new runner so old browser
+clients cannot start calls against the retired native interface.
 
-To update the patch, retain the pinned release as its base, run the affected
-upstream tests, and run `pnpm --dir apps/cloudflare verify:codex-upstream-source`
-to verify applicability. Codex 0.166.0 supplies the policy-aware websocket transport;
-the patch preserves upstream response-interruption acknowledgements and native
-transcript-tail history recording, retains that transport, and only adds the public Live wire adapter,
-client-managed input ownership, owned-session finalization, and the request
-acknowledgement bound. That bound fails a silently dropped reused socket so
-native fallback replays the request over HTTPS; acknowledged responses keep the
-provider stream idle timeout. It does not restore a separate model catalog or
-websocket stack. Update the source revision and archive checksum
-together when upgrading Codex, keep the npm helper version aligned, and rerun
-the exact-image compatibility and sandbox lane. Remove the patch and build
-stage once a verified upstream release provides this behavior. Cold native
-builds take longer. A persistent trusted BuildKit cache lets application-only
-changes reuse the compiled layer while preserving production's source-build
-rule. The protected deployment workflow must provide that cache before this
-patch is considered operationally ready; its current fresh-runner forced
-build would otherwise recompile Codex for each deployment.
+Both Dockerfile and patch enter the source fingerprint. The native package records
+the upstream revision and patch digest in `murph-source-revision`. Regenerate the
+patch against the exact source tag, run affected upstream
+Rust tests and `pnpm --dir apps/cloudflare verify:codex-upstream-source`, and keep
+the npm helper checksum aligned. The permission-sandbox lane verifies the image's
+websocket fallback, provider conformance and sandbox boundaries. Cold builds need
+the existing trusted BuildKit cache; application-only changes reuse compilation.
 
-Codex CLI 0.166.0 supplies native Sol, Luna and Astra entries. Its bundled
+Codex CLI 0.167.1 supplies native Sol, Luna and Astra entries. Its bundled
 Sol/Luna entries match the former pinned launch supplement, which is removed
 along with its bundle staging and fingerprint input. The native bundled catalog
 is the sole model-entry source.
@@ -2549,7 +2510,7 @@ transport failures, timeouts, throttling, and server failures. The new
 classifications use Murph's existing five-minute capacity retry; none triggers
 connection recovery or a higher-priced service-tier fallback. `modelNotFound`
 remains terminal even when provider prose contains a retry or rate-limit hint.
-Codex 0.166.0 defaults fresh native memory profiles to v2, but the shared hosted
+Codex 0.167.1 defaults fresh native memory profiles to v2, but the shared hosted
 config still disables the memory feature, generation, and use. Its newly stable
 reasoning-effort override remains enabled by the upstream default, as intended
 by the 0.165.0 release; Murph still sends its selected effort on each turn.

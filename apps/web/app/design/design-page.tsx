@@ -2,13 +2,11 @@ import Link from "next/link";
 import { BrandContent } from "./brand-content";
 import { ComponentsContent } from "./components-content";
 import { ConsentContent } from "./consent-content";
-import { VoiceOrbStudy } from "./voice-orb-study";
 
 const TABS = [
   { id: "brand", label: "Brand" },
   { id: "components", label: "Components" },
   { id: "consent", label: "Consent" },
-  { id: "voice-orb", label: "Voice orb" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -41,17 +39,12 @@ export function DesignPage({ activeTab = "brand" }: { activeTab?: string }) {
         </div>
       </div>
 
-      {selectedTab === "voice-orb" ? (
-        <VoiceOrbStudy />
-      ) : selectedTab === "brand" ? (
+      {selectedTab === "brand" ? (
         <BrandContent />
       ) : selectedTab === "consent" ? (
         <ConsentContent />
       ) : (
-        <>
-          <VoiceOrbStudy />
-          <ComponentsContent />
-        </>
+        <ComponentsContent />
       )}
     </main>
   );

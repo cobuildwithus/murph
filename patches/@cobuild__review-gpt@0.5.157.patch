@@ -170,37 +170,6 @@ diff --git a/src/chatgpt-thread-snapshot-lib.mts b/src/chatgpt-thread-snapshot-l
          candidate.precedingUserTurnIndex === committedUserTurn.turnIndex &&
          matchesStoredUserSignature(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature, candidate.precedingUserLegacyZipAttachmentSignature),
      );
-diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
---- a/src/prepare-chatgpt-draft.js
-+++ b/src/prepare-chatgpt-draft.js
-@@ -1392,9 +1392,8 @@
-   responseMarker: requiredMarker,
-   responseElapsedMs,
-   minimumResponseMs = 5 * 60 * 1000,
--  hasConcreteModelEvidence = false,
- }) {
--  if (!requiredMarker || isCurrentSelectionTarget(targetModel) || hasConcreteModelEvidence) {
-+  if (!requiredMarker || isCurrentSelectionTarget(targetModel)) {
-     return '';
-   }
- 
-@@ -1415,7 +1414,7 @@
-   const minimumLabel = Number.isSafeInteger(requiredMinimumMs) && requiredMinimumMs > 0
-     ? formatDurationMs(requiredMinimumMs)
-     : 'invalid configured duration';
--  return `Assistant response reached the required completion marker after ${elapsedSeconds}s, below the ${minimumLabel} minimum for a marked concrete-model review without compatible response-model metadata. The response is untrusted and was not attested.`;
-+  return `Assistant response reached the required completion marker after ${elapsedSeconds}s, below the ${minimumLabel} minimum for a marked concrete-model review. The response is untrusted and was not attested.`;
- }
- 
- function formatDurationMs(durationMs) {
-@@ -5985,7 +5984,6 @@
-           responseMarker,
-           responseElapsedMs: Date.now() - responseWaitStartedAt,
-           minimumResponseMs: minimumMarkedResponseMs,
--          hasConcreteModelEvidence: Boolean(modelAttestation.evidence),
-         });
-         if (responseDurationFailure) {
-           return {
 diff --git a/src/review-gpt-lib.mts b/src/review-gpt-lib.mts
 --- a/src/review-gpt-lib.mts
 +++ b/src/review-gpt-lib.mts

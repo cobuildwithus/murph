@@ -75,33 +75,6 @@ afterEach(() => {
 });
 
 describe("repo-tools scoped committer staging", () => {
-  it("amends an unpublished task commit with its message, trailer, and unrelated staging intact", () => {
-    const repository = createRepository();
-    runGit(repository, ["checkout", "-qb", "task"]);
-    writeFileSync(path.join(repository, "selected.txt"), "before\n");
-    runGit(repository, ["add", "."]);
-    runGit(repository, ["commit", "-qm", "fix(test): original\n\nEvidence: synthetic"]);
-    const message = runGit(repository, ["show", "-s", "--format=%B"]);
-    const author = runGit(repository, ["show", "-s", "--format=%an <%ae> %aI"]);
-    writeFileSync(path.join(repository, "selected.txt"), "after\n");
-    writeFileSync(path.join(repository, "other.txt"), "unrelated\n");
-    runGit(repository, ["add", "other.txt"]);
-    const result = spawnSync("bash", [committerPath, "--skip-hooks", "--amend", "--no-edit", "selected.txt"],
-      { cwd: repository, encoding: "utf8" });
-    expect(result.status, result.stderr).toBe(0);
-    expect(runGit(repository, ["rev-list", "--count", "HEAD"])).toBe("1");
-    expect(runGit(repository, ["show", "-s", "--format=%B"])).toBe(message);
-    expect(runGit(repository, ["show", "-s", "--format=%an <%ae> %aI"])).toBe(author);
-    expect(runGit(repository, ["show", "HEAD:selected.txt"])).toBe("after");
-    expect(runGit(repository, ["diff", "--cached", "--name-only"])).toBe("other.txt");
-    runGit(repository, ["update-ref", "refs/remotes/origin/task", "HEAD"]);
-    writeFileSync(path.join(repository, "selected.txt"), "third\n");
-    const published = spawnSync("bash", [committerPath, "--skip-hooks", "--amend", "--no-edit", "selected.txt"],
-      { cwd: repository, encoding: "utf8" });
-    expect(published.status).not.toBe(0);
-    expect(published.stderr).toContain("reachable from a remote-tracking ref");
-  });
-
   it("consumes both selected sides of an edited staged rename", () => {
     const repository = createRepository();
     writeFileSync(path.join(repository, "old.txt"), "original\n");

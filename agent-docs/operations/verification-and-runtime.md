@@ -127,8 +127,8 @@ enables Git deployment only for `main`.
 For changes to the shared Playwright Chromium install wrapper or any workflow
 that calls it, run `bash -n scripts/install-playwright-chromium.sh` and the
 focused `scripts/install-playwright-chromium.test.ts` Vitest file. The test owns
-the loaded APT policy (including preserved key casing and rejected wrong numeric
-values), one-shot Playwright status, Ubuntu caller inventory, and
+the APT retry/timeout policy, browser-download and runtime-probe failure status,
+Ubuntu caller inventory, and
 overall step-timeout contract; exact-head Actions then prove the wrapper on the
 GitHub-hosted Ubuntu runner.
 
@@ -247,7 +247,11 @@ pnpm test:assistant:live -- --test "<unique test-name pattern>"
 The helper requires a name pattern so it cannot accidentally fan out across
 the paid suite. It defaults to `gpt-6.1-sol` through the authenticated local
 ChatGPT/Codex subscription without copying auth material; `--auth provider`
-keeps the existing isolated provider-key route. Read every printed synthetic
+keeps the existing isolated provider-key route for canonical release evidence.
+Subscription runs retain unspecified personal configuration and global AGENTS
+instructions; classify them as developer-local evidence. They do not establish
+configuration isolation. Do not switch auth modes or copy credentials to make a
+local run appear isolated. Read every printed synthetic
 reply and record a `Ready` or `Hold` UX verdict covering correctness, action
 count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.
