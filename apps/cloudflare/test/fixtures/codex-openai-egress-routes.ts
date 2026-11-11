@@ -221,6 +221,24 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
   ],
   nonProviderBinaryCandidates: [
     {
+      candidate: "/v1/analytics/codex/turn-costsinclude_settled_response_idsskipping",
+      disposition: "binary_false_positive",
+      owner: "codex-backend",
+      reason: "The 0.167.1 Linux release joins the exact turn-costs path from backend-client/src/client/turn_usage.rs to the include_settled_response_ids JSON field in chatgpt_turn_cost.rs and adjacent skipping log text. Only /v1/analytics/codex/turn-costs is sent to the separate analytics origin.",
+    },
+    {
+      candidate: "/v1/decisionssandbox_permissionstools/listmissing",
+      disposition: "binary_false_positive",
+      owner: "codex-guardian",
+      reason: "The 0.167.1 Linux release joins the exact Decisions URL in ext/guardian-v2/src/async_scorer/decisions.rs to the sandbox_permissions field read by the adjacent guardian owners and MCP discovery text. The real /v1/decisions route remains blocked.",
+    },
+    {
+      candidate: "/v1/rowscols-gnu.tmpsocksteplinerootcwdslastargvenumused",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "The 0.167.1 Linux release joins the rtc_avas/v1/ dependency literal to rows, cols, platform and field labels. The reviewed provider sources contain no such endpoint.",
+    },
+    {
       candidate: "/v1/analytics/codex/turn-costsskipping",
       disposition: "binary_false_positive",
       owner: "codex-backend",
