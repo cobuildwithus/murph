@@ -2,7 +2,7 @@
 
 Status: completed
 Created: 2026-11-10
-Updated: 2026-11-10
+Updated: 2026-11-11
 
 ## Goal
 
@@ -101,8 +101,10 @@ behaving well. The defaults that were proposed now stand:
 
 1. New challenges are app games. A data-scored challenge already running in a
    room keeps working from a reference file.
-2. Group humor: the least-qualified friend who keeps the count.
+2. Group humor: the least-qualified friend who keeps the count. Superseded
+   by the owner's review (below).
 3. Onboarding proposes a starting setup after two or three questions.
+   Rejected by the owner (below).
 4. Booking may type identity facts the member already saved into the
    practice's own form. Payment and the final submit still need a yes.
 5. Text stored in member vaults is a follow-up, not this pass.
@@ -112,6 +114,25 @@ behaving well. The defaults that were proposed now stand:
 
 Do not make the declared tool set depend on room or turn state: a changed
 declaration restarts the hosted thread.
+
+## Owner corrections after review (2026-11-10 and 11-11)
+
+- Onboarding: collecting health context is required and comes right after
+  the member says what they want, before any proposal, so Murph never
+  recommends something that clashes with a medication, condition or injury.
+  Shorter than the old flow is fine; skipping the context is not. Now one
+  voice-memo-or-text ask, then one short question per missing item.
+- Group humor: funnier and less cautious, never about bodies or the other
+  protected subjects, and well timed rather than constant. Murph is a guy in
+  the chat, not a narrator: it plays along, names what someone just did,
+  under-reacts, and hits back once when someone takes a shot at it. Lines land
+  in one read, built from what is on screen; setups come from the last few
+  messages or lore everyone knows; no name on a reply to whoever just spoke;
+  no repeating their message back.
+- Room lore is the biggest part: accepted nicknames, past events and open
+  promises are used whenever today connects to them, and Murph adds to the
+  room's story. Murph's own jokes are spent once used; room notes keep a
+  "Worn out" list so a bit that landed once does not become a tic.
 
 ## Progress
 
@@ -151,6 +172,12 @@ declaration restarts the hosted thread.
   note. Group humor: 75 of 75 scenario runs.
 - 2026-11-10: final sizes. Private chat 81.1 to 69.2 KB, group 80.9 to 70.3 KB,
   private scheduled turn 81.4 to 46.2 KB, group scheduled turn to 55.2 KB.
+- 2026-11-11: owner corrections applied. Onboarding health ask: 65 of 68 live
+  onboarding journeys on gpt-6.1-terra. Group humor and lore, four review
+  rounds on gpt-6.1-sol: 88 of 90 on 30 scenarios, then 32 of 34 on the
+  targeted rerun. Room notes consolidation: 2 of 2. Sizes against main at
+  this date: private chat 81.3 to 69.2 KB, onboarding turn 88.2 to 74.9 KB,
+  group 81.1 to 74.3 KB, private scheduled turn 81.6 to 46.2 KB.
 
 ## Follow-ups (not in this change)
 
