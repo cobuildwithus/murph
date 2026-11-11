@@ -36,7 +36,6 @@ type MockComputerUseStore = ComputerUseStore & {
   completeHandoff: MockStoreMethod<"completeHandoff">;
   completeManagedLoginHandoff: MockStoreMethod<"completeManagedLoginHandoff">;
   convertManagedLoginHandoffToLogin: MockStoreMethod<"convertManagedLoginHandoffToLogin">;
-  createHandoff: MockStoreMethod<"createHandoff">;
   findActiveRunForMember: MockStoreMethod<"findActiveRunForMember">;
   listMemberRuns: MockStoreMethod<"listMemberRuns">;
   markHandoffExpired: MockStoreMethod<"markHandoffExpired">;
@@ -455,7 +454,6 @@ describe("Kernel managed-login handoffs", () => {
     })).resolves.toEqual({ kind: "checkpointing" });
     expect(kernel.findManagedAuthConnection).toHaveBeenCalledTimes(2);
     expect(kernel.createBrowser).not.toHaveBeenCalled();
-    expect(store.createHandoff).not.toHaveBeenCalled();
     expect(store.replaceAwaitingRunHandoff).not.toHaveBeenCalled();
     expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
   });
@@ -555,7 +553,6 @@ describe("Kernel managed-login handoffs", () => {
     expect(kernel.startManagedAuthLogin).toHaveBeenCalledTimes(1);
     expect(findManagedAuthConnection).toHaveBeenCalledTimes(2);
     expect(kernel.createBrowser).not.toHaveBeenCalled();
-    expect(store.createHandoff).not.toHaveBeenCalled();
     expect(store.replaceAwaitingRunHandoff).not.toHaveBeenCalled();
     expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
   });
@@ -596,7 +593,6 @@ describe("Kernel managed-login handoffs", () => {
     expect(store.clearRunBrowser).toHaveBeenCalledTimes(1);
     expect(store.requireOwnedRun).toHaveBeenCalledTimes(2);
     expect(kernel.createBrowser).not.toHaveBeenCalled();
-    expect(store.createHandoff).not.toHaveBeenCalled();
     expect(store.replaceAwaitingRunHandoff).not.toHaveBeenCalled();
     expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
   });
@@ -1288,7 +1284,6 @@ describe("Kernel managed-login handoffs", () => {
       now: NOW,
       runId: run.id,
     });
-    expect(store.createHandoff).not.toHaveBeenCalled();
     expect(store.replaceAwaitingRunHandoff).not.toHaveBeenCalled();
     expect(store.markHandoffExpired).not.toHaveBeenCalled();
     expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
@@ -1504,7 +1499,6 @@ describe("Kernel managed-login handoffs", () => {
     expect(store.convertManagedLoginHandoffToLogin).not.toHaveBeenCalled();
     expect(store.replaceRunBrowser).not.toHaveBeenCalled();
     expect(store.releaseHandoffClaim).not.toHaveBeenCalled();
-    expect(store.createHandoff).not.toHaveBeenCalled();
     expect(store.replaceAwaitingRunHandoff).not.toHaveBeenCalled();
   });
 
@@ -2062,7 +2056,6 @@ function createRun(
   overrides: Partial<ComputerRunRecord> = {},
 ): ComputerRunRecord {
   return {
-    awaitingMessage: null,
     awaitingReason: "login_needed",
     checkpointContext: null,
     completedAt: null,
@@ -2185,7 +2178,7 @@ function createStore(input: {
     attachAwaitingRunHandoff: vi.fn(async (attachInput) => ({
       ...input.run,
       pausedAt: attachInput.now,
-      pendingHandoffId: attachInput.newPendingHandoffId,
+      pendingHandoffId: attachInput.handoff.id,
       resumeAfterMailboxLaneSeq: null,
     })),
     async attachRunBrowser() {
@@ -2246,16 +2239,6 @@ function createStore(input: {
         resumeAfterMailboxLaneSeq: 1n,
       },
     })),
-    createHandoff: vi.fn(async (handoffInput) => createHandoff({
-      expiresAt: handoffInput.expiresAt,
-      id: "hch_fallback",
-      memberId: handoffInput.memberId,
-      purpose: handoffInput.purpose,
-      returnContactKind: handoffInput.returnContactKind,
-      runId: handoffInput.runId,
-      suggestedReply: handoffInput.suggestedReply,
-      tokenHash: handoffInput.tokenHash,
-    })),
     async createRun() {
       throw new Error("createRun should not be called.");
     },
@@ -2300,7 +2283,7 @@ function createStore(input: {
     replaceAwaitingRunHandoff: vi.fn(async (replaceInput) => ({
       ...input.run,
       pausedAt: replaceInput.now,
-      pendingHandoffId: replaceInput.newPendingHandoffId,
+      pendingHandoffId: replaceInput.handoff.id,
       resumeAfterMailboxLaneSeq: null,
     })),
     replaceRunBrowser: vi.fn(async () => input.run),

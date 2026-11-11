@@ -1379,6 +1379,20 @@ Member-scoped hosted runner operations validate the existing active runtime writ
 
 ## Hosted Computer Authentication
 
+Computer handoff publication is one database-only transition at the Web store:
+pause, first attachment and replacement acquire the existing member owner lock,
+conditionally bind the run, insert its capability, and expire any displaced open
+link in the same transaction. Provider inspection and token preparation stay
+outside the transaction. A losing conditional write or failed insertion leaves
+no new link and preserves the previous run/link pair. Checkpoint claims retain
+their existing generation and stale-owner recovery rules.
+The unused awaiting-message field is removed from the client schema and runtime;
+its nullable physical column remains compatible with older deployed Web readers
+until post-drain contract migration
+`20261110231500_drop_computer_awaiting_message` removes it. This Web deployment
+is the rollback floor after that cleanup; older Web requires re-expanding the
+nullable column before it can read computer runs.
+
 `apps/web` owns both Kernel login transports behind the existing durable
 computer handoff. Managed-login continuation checks current AI usage before
 claiming the handoff or starting new Kernel work. The agent selects `managed_login` for Kernel Hosted UI and a
