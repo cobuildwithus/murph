@@ -291,6 +291,7 @@ export function buildHostedWebNextConfig(
       webpackMemoryOptimizations: true,
     },
     outputFileTracingIncludes: {
+      "/api/internal/hosted-execution/groups/tool": ["../../agent-docs/assets/murph-character-sheet-v1.png"],
       "/measurement-methods/[measurementMethodId]": [
         "../../packages/health-commons/generated/web/routes/index.json",
         "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",

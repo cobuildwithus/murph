@@ -16,6 +16,7 @@ const digest = (value: string | Uint8Array) => createHash("sha256").update(value
 /** Only a fresh authorized material read may supply this witness and roster. */
 export async function readRecapSourceReferences(material: Material, eventId: string): Promise<RecapSourceReference[]> {
   if (!material.validation.show || material.validation.group) return [];
+  if (typeof material.game.id !== "string") throw new TypeError("Recap game identity is missing.");
   const db = getPrisma();
   const memberIds = material.validation.playerNamesByMemberId.map(player => player.memberId);
   const entryIds = material.entries.filter(entry => entry.kind === "photo").map(entry => entry.entryId);

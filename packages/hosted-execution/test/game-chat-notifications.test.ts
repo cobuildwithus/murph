@@ -346,3 +346,15 @@ describe("group Talk notice", () => {
     expect(text).not.toMatch(/recipient|currentTerms|defaultTask/);
   });
 });
+
+
+it("activates show policy only for an explicitly capable pair", () => {
+  const show = buildGameRecapInstructions([], undefined, false, true);
+  expect(show).toContain("scene.murph");
+  expect(show).toContain("fewer than 3 distinct permitted real-photo entries");
+  expect(show).toContain("whole image visible");
+  expect(show).not.toContain("give the best single shot of the week a full-bleed page");
+  expect(show).not.toContain('or filling the page ("fullBleed")');
+  expect(buildGameRecapInstructions([], undefined, true, true)).toBe(buildGameRecapInstructions([], undefined, true));
+  expect(buildGameRecapInstructions([])).not.toContain("scene.murph");
+});

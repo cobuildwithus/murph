@@ -20,6 +20,7 @@ export async function previewRecap(input: {
   photo: (entryId: string) => Promise<Uint8Array | null>;
 }) {
   const draft = await readRecapDraftFile(input)
+  if (draft.story.pages.length > 7) throw new Error('A show has at most seven authored pages.')
   const usages = readRecapUsages(input.lore)
   const errors = validateGameRecap({ recap: draft.story, players: input.material.players, entries: input.material.entries,
     result: input.material.result, chatMessages: input.chat.filter(message => message.source === 'player'),

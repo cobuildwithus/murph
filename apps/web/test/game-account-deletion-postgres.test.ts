@@ -1,4 +1,5 @@
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
+import { registerRecapAssetsTx } from "@/src/lib/game/recap-retirement";
 import { randomUUID } from "node:crypto";
 
 import { afterAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
@@ -174,6 +175,8 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     await words(leo, gameId, "Leo day one");
     await words(ava, gameId, "Ava day one");
     await getPrisma().game.update({ where: { id: gameId }, data: { recapEncrypted: "synthetic-must-clear" } });
+    await getPrisma().$transaction(tx => registerRecapAssetsTx(tx, { gameId, generationId: "a".repeat(32), ownerMemberId: leo,
+      storageKeys: [`recap/${"a".repeat(32)}/scene-0.jpg`], acceptedAt: new Date(), mediaDeadline: new Date(Date.now() + 600_000) }));
     const [gone, stays] = leaver === "creator" ? [leo, ava] : [ava, leo];
     expect(await deleteAccount(gone)).toEqual({ calledOff: 2, deleted: 0, kept: 2 });
     expect(await readGame(secondGame, stays)).toMatchObject({ status: "void" });
@@ -181,6 +184,10 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     const view = (await readGame(gameId, stays))!;
     expect(view).toMatchObject({ status: "void", result: null, tickets: [], settlesAt: null });
     expect((await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).recapEncrypted).toBeNull();
+    const receipt = await getPrisma().hostedRuntimeOrphan.findFirstOrThrow({ where: { kind: "game_recap", resourceId: { startsWith: `${gameId}|` } } });
+    expect(receipt.retiredAt).not.toBeNull();
+    expect(receipt.userId).toBe(leo);
+    await getPrisma().hostedRuntimeOrphan.deleteMany({ where: { userId: leo, kind: "game_recap" } });
     const left = view.players.find((player) => player.left);
     // The name the remaining player knew them by: Leo's own label for Ava, or Leo's own name.
     expect(left).toMatchObject({ memberId: null, firstName: leaver === "creator" ? "Leo" : "Bestie", seat: leaver === "creator" ? 0 : 1, avatarUrl: null });

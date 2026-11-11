@@ -835,7 +835,7 @@ function gameRecapHostedScope(
   }
   return {
     gameRecapScope: { gameId: policy.gameId, eventId: policy.eventId, pairFingerprint: policy.pairFingerprint,
-      ...(policy.loreAccess ? { loreAccess: policy.loreAccess } : {}) },
+      ...(policy.loreAccess ? { loreAccess: policy.loreAccess } : {}), ...(policy.show ? { show: true as const } : {}) },
     groupTool: groupToolPort,
   };
 }
@@ -954,7 +954,15 @@ function buildAssistantNotificationInput(
     vault,
     wake,
   });
+  withPairShowTarget(notificationInput, wake, executionContext);
   return withOperatorTaskExecution(notificationInput, operatorTask, executionContext);
+}
+
+function withPairShowTarget(notificationInput: AssistantNotificationInput, wake: HostedExecutionAssistantNotificationRequestedWake, executionContext: AssistantExecutionContext): void {
+  if (wake.notification.responsePolicy?.kind === "require_game_recap" && wake.notification.responsePolicy.show) {
+    notificationInput.assistantTargetOverride = { model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+      modelProvider: resolveHostedOperatorModelProvider(executionContext.hosted?.defaultTarget?.modelProvider) };
+  }
 }
 
 function withOperatorTaskExecution(

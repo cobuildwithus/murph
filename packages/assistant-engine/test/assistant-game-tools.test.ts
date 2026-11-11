@@ -345,6 +345,22 @@ describe('game recap dynamic contract', () => {
     for (const request of requests) expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request)
     expect(savedChatLines).toEqual([`${recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_bound`])
   })
+  it('records accepted delivery even when trusted lore append fails', async () => {
+    const delivery = 'The game ended.\nWatch the recap: https://www.withmurph.ai/recap/game_bound'
+    const saved = vi.fn()
+    const append = vi.fn().mockRejectedValue(new Error('Synthetic file failure'))
+    const parsed = parse('write_recap', recap)
+    if (!parsed) throw new Error('Expected recap request')
+    const result = await executeMurphDynamicToolRequest({ request: parsed, hostedToolContext: { ...context(),
+      groupTool: { request: async () => ({ action: 'write_recap', result: { status: 'ok', recap, chatLine: delivery, recapOutcome: 'ok' } }) },
+      currentGameRecapScope: () => ({ gameId: 'game_bound', eventId: 'game-recap:game_bound', pairFingerprint: 'a'.repeat(32), loreAccess: 'read' }),
+      readGameLore: async () => '', recordSavedGameRecapChatLine: saved, appendGameRecapChatLine: append,
+    }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.rpcResult.success).toBe(true)
+    expect(saved).toHaveBeenCalledExactlyOnceWith(delivery)
+    expect(append).toHaveBeenCalledExactlyOnceWith(recap.chatLine)
+    expect(saved.mock.invocationCallOrder[0]).toBeLessThan(append.mock.invocationCallOrder[0]!)
+  })
   it.each([undefined, 'read' as const])('preserves recap lore authority and records only the canonical bare line; access=%s', async loreAccess => {
     const vault = await mkdtemp(path.join(tmpdir(), 'game-lore-'))
     try {

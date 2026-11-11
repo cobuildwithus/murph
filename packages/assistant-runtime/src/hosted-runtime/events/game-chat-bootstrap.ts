@@ -63,7 +63,7 @@ function assertBootstrapNotificationMode(notification: HostedExecutionAssistantN
 }
 
 export function assertHostedConversationalControlAction(action: string): void {
-  if (action === "game_chat_bootstrap") throw new TypeError("Game bootstrap control is unavailable to conversational tools.");
+  if ((action === "game_chat_bootstrap" || action === "recap_assets")) throw new TypeError("Game bootstrap control is unavailable to conversational tools.");
 }
 
 export function isHostedGameBootstrapUnavailable(error: unknown): boolean {

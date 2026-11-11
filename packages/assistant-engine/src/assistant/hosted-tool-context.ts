@@ -1,4 +1,6 @@
-import { previewRecap } from './recap-preview.js'
+import type { RecapFileReceipt } from '@murphai/contracts/recap-show'
+import { readRecapFile } from './recap-files.js'
+import { previewRecap, readRecapDraftFile } from './recap-preview.js'
 import { createRecapMediaRuntime } from './recap-media-runtime.js'
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
 import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
@@ -216,6 +218,8 @@ export interface AssistantHostedToolContext {
   currentGameRecapScope?(): NonNullable<AssistantHostedExecutionContext['gameRecapScope']> | null
   prepareRecapMedia?(request: { kind: 'image'; args: GenerateImageToolArgs } | { kind: 'song'; args: GenerateSongToolArgs }, fetchImpl: typeof fetch): Promise<GeneratedMediaFileRuntime>
   prepareGameRecapInputs?(material: unknown): Promise<unknown>
+  readGameRecapDraft?(draftPath: string): Promise<unknown>
+  readGameRecapMedia?(receipt: RecapFileReceipt): Promise<string>
   previewGameRecap?(draftPath: string): Promise<unknown>
   materializeGameRecapReferences?(ids: readonly string[]): Promise<unknown>
   readGameRecapWorkspace?(): Awaited<ReturnType<typeof materializeRecapWorkspace>> | null
@@ -643,6 +647,16 @@ export function createAssistantHostedToolContext(input: {
     currentUserActionScope: readCurrentUserActionScope,
     currentGameRecapScope: () => executionContext?.gameRecapScope ?? null,
     readGameRecapWorkspace: () => recapWorkspace,
+    readGameRecapDraft: async draftPath => {
+      if (!executionContext?.gameRecapScope?.show || !recapWorkspace) throw new Error('Read recap material first.')
+      return readRecapDraftFile({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, recapWorkspace.root), draftPath })
+    },
+    readGameRecapMedia: async receipt => {
+      if (!executionContext?.gameRecapScope?.show || !recapWorkspace) throw new Error('Read recap material first.')
+      const bytes = await readRecapFile({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, recapWorkspace.root), file: receipt.path, maxBytes: 2 * 1024 * 1024 })
+      if (bytes.length !== receipt.byteLength || createHash('sha256').update(bytes).digest('hex') !== receipt.hash) throw new Error('Selected recap media changed.')
+      return bytes.toString('base64')
+    },
     materializeGameRecapReferences: async ids => {
       const scope = executionContext?.gameRecapScope
       const workspace = recapWorkspace

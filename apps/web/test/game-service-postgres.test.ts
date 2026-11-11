@@ -1,3 +1,4 @@
+import { readPendingRecapUsages } from "@/src/lib/game/recap-lore";
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -45,6 +46,7 @@ const lifecycleDelivery = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 const proposalDelivery = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 vi.mock("@/src/lib/game/chat-lifecycle", () => ({ deliverGameChatLifecycle: lifecycleDelivery }));
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: proposalDelivery }));
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@/src/lib/apple-push/send", async (original) => ({
   ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: push,
 }));
@@ -484,6 +486,11 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await devSettleNow(gameId, a);
     expect(await errorCode(a, command)).toBe("OK");
     expect(await db.gameEvent.count({ where: { gameId, type: "challenged" } })).toBe(2);
+    // The recap writer sees who doubted the post that stands, and nothing on undoubted posts.
+    const recapDays = (await readGameRecapMaterial(gameId, room, [a, b]))!.game.days as Array<{ posts: Record<string, unknown> }>;
+    expect(recapDays[0].posts.Sam).toMatchObject({ entryId: replacement.entryId, proveIt: { by: "Maya" } });
+    expect(recapDays[0].posts.Maya).not.toHaveProperty("proveIt");
+    expect(recapDays[1].posts.Sam).not.toHaveProperty("proveIt");
   });
 
   it("returns Prove it after withdrawal and keeps the original retry a no-op", async () => {
@@ -562,6 +569,88 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(recap.days[0].others[0]).toMatchObject({ status: "posted", blurHash: "synthetic-blur" });
     expect(recap.days[0].others[0].postedAt).toBe(stored.receivedAt.toISOString());
     expect(await authorizeMediaRead(viewer, command.mediaKeys[0])).toBe(true);
+  });
+  it("retains accepted recap lore repair pointers until a trusted checkpoint acknowledgment", async () => {
+    const a = await member("PlayerA", "UTC"), b = await member("PlayerB", "UTC");
+    const room = `hbm_gametest_room_${randomUUID().slice(0, 8)}`; memberIds.push(room);
+    await getPrisma().hostedMember.create({ data: { id: room, billingStatus: "active" } });
+    const { gameId } = await startGame(a, b);
+    await getPrisma().game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await devStartNow(gameId, a); await devSettleNow(gameId, a);
+    const eventId = gameChatLifecycleEventId(gameId, "recap");
+    await markGameChatGenerationQueuedTx(eventId, getPrisma(), room);
+    const scope = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [a, b] };
+    const recap = { treatment: "Courtroom drama", pages: [{ background: "paper" as const, blocks: [{ kind: "headline" as const, text: "A synthetic week" }] }], chatLine: "The mat entered evidence." };
+    expect(await sealGameRecap({ ...scope, recap })).toEqual(recap);
+    expect(await sealGameRecap({ ...scope, recap: { ...recap, treatment: "Rejected candidate" } })).toEqual(recap);
+    expect(await readPendingRecapUsages(scope)).toEqual([{ generationId: eventId, treatment: recap.treatment, chatLine: recap.chatLine }]);
+  });
+  it("atomically accepts a show envelope, cleanup identities and one durable asset wake", async () => {
+    const a = await member("PlayerA", "UTC", true), b = await member("PlayerB", "UTC");
+    const room = await member("Room", "UTC", true);
+    const db = getPrisma();
+    const { gameId } = await startGame(a, b);
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await devStartNow(gameId, a); await devSettleNow(gameId, a);
+    const eventId = gameChatLifecycleEventId(gameId, "recap");
+    await markGameChatGenerationQueuedTx(eventId, db, room);
+    await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: `game/${a}/${"a".repeat(64)}.jpg` } });
+    await db.gameProfile.update({ where: { memberId: b }, data: { photoKey: `game/${b}/${"b".repeat(64)}.jpg` } });
+    const recap = { treatment: "Courtroom drama", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
+      scene: { cast: ["PlayerA", "PlayerB"], murph: true as const, prompt: "A synthetic courtroom with both players and the approved robot inspecting a mat on the witness stand." } }] }], chatLine: "The mat entered evidence." };
+    const scope = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [a, b] };
+    vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
+    vi.stubEnv("MURPH_GAME_RECAP_MEDIA_DIR", path.join(mediaDir, "recap"));
+    const ownerModule = await import("@/src/lib/hosted-execution/runtime-owner");
+    const accessModule = await import("@/src/lib/hosted-mailbox/runtime-access");
+    const runtimeOwner = await db.hostedRuntimeOwner.upsert({ where: { userId: room }, create: { userId: room }, update: {} });
+    const fence = vi.spyOn(ownerModule, "requireHostedRuntimeCallbackTx").mockResolvedValue(runtimeOwner);
+    const active = vi.spyOn(accessModule, "requireHostedRuntimeActiveAccessForUpdateTx").mockResolvedValue();
+    try {
+      expect(await sealGameRecap({ ...scope, recap })).toEqual(recap);
+      expect(await sealGameRecap({ ...scope, recap: null })).toEqual(recap);
+      const { readRecapEnvelope, recapReferencesCurrent } = await import("@/src/lib/game/recap-asset-access");
+      const accepted = (await readRecapEnvelope(gameId))!;
+      expect(accepted.envelope.assets).toHaveLength(1);
+      expect(accepted.envelope.assets[0]).toMatchObject({ status: "pending", references: [{ kind: "profile", memberId: a }, { kind: "profile", memberId: b }, { kind: "murph" }] });
+      expect(await db.hostedRuntimeOrphan.count({ where: { kind: "game_recap", resourceId: { startsWith: `${gameId}|` } } })).toBe(1);
+      expect(await db.hostedMailboxItem.count({ where: { userId: room, kind: "game.recap-assets-requested" } })).toBe(1);
+      expect((await readGame(gameId, a, false))?.recap?.show?.pages[0]?.media?.status).toBe("pending");
+      expect((await readGame(gameId, a))?.recap?.show).toBeUndefined();
+      expect(await recapReferencesCurrent(db, gameId, accepted.envelope.assets)).toBe(true);
+      const { handleRecapAssets } = await import("@/src/lib/game/recap-asset-task");
+      const control = (command: import("@murphai/hosted-execution/runtime-control").RecapAssetsRequest["command"]) => handleRecapAssets({ memberId: room, runtimeIdentity: null,
+        request: { action: "recap_assets", gameId, eventId, generationId: accepted.envelope.generationId, command } });
+      const claims = await Promise.all([control({ operation: "claim", slot: "scene-0" }), control({ operation: "claim", slot: "scene-0" })]);
+      expect(claims.filter(result => result.result.claimed)).toHaveLength(1);
+      const sharp = (await import("sharp")).default;
+      const bytes = await sharp({ create: { width: 2, height: 2, channels: 3, background: { r: 0, g: 0, b: 0 } } }).jpeg().toBuffer();
+      await control({ operation: "stage", slot: "scene-0", recipeId: accepted.envelope.assets[0]!.recipeId, bytes: bytes.toString("base64") });
+      expect((await readRecapEnvelope(gameId))!.envelope.assets[0]!.status).toBe("ready");
+      expect(fence).toHaveBeenCalled();
+      const { readAuthorizedRecapAsset } = await import("@/src/lib/game/recap-asset-access");
+      const assetInput = { gameId, generationId: accepted.envelope.generationId, slot: "scene-0", memberId: a };
+      expect((await readAuthorizedRecapAsset(assetInput))?.bytes.length).toBe(bytes.length);
+      expect(await readAuthorizedRecapAsset({ ...assetInput, memberId: room })).toBeNull();
+      expect(await readAuthorizedRecapAsset({ ...assetInput, generationId: "f".repeat(32) })).toBeNull();
+      const { readRecapCoverPreview } = await import("@/src/lib/game/recap-preview");
+      expect((await readRecapCoverPreview(gameId, accepted.envelope.preview.token))?.length).toBe(bytes.length);
+      expect((await control({ operation: "delivery_gate" })).result.deferUntil).toBeUndefined();
+      expect(await readPendingRecapUsages(scope)).toHaveLength(1);
+      await control({ operation: "lore_checkpointed" });
+      await control({ operation: "lore_checkpointed" });
+      expect(await readPendingRecapUsages(scope)).toEqual([]);
+      await db.gameProfile.update({ where: { memberId: b }, data: { photoKey: null } });
+      expect(await recapReferencesCurrent(db, gameId, accepted.envelope.assets)).toBe(false);
+      expect(await readAuthorizedRecapAsset(assetInput)).toBeNull();
+      expect(await readRecapCoverPreview(gameId, accepted.envelope.preview.token)).toBeNull();
+      expect((await control({ operation: "stage", slot: "scene-0", recipeId: accepted.envelope.assets[0]!.recipeId, bytes: bytes.toString("base64") })).result.status).toBe("unavailable");
+    } finally {
+      fence.mockRestore(); active.mockRestore();
+      await db.hostedRuntimeOwner.deleteMany({ where: { userId: room } });
+      vi.unstubAllEnvs();
+      await db.hostedRuntimeOrphan.deleteMany({ where: { kind: "game_recap", resourceId: { startsWith: `${gameId}|` } } });
+    }
   });
   it("seals an authorized recap on the settled game and exposes it to both players", async () => {
     const ava = await member("RecapAva", "UTC"), leo = await member("RecapLeo", "UTC");

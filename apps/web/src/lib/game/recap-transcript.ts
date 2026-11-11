@@ -57,6 +57,7 @@ export async function readRecapTranscriptPage(input: {
     if (!payload) { incomplete = true; continue; }
     const wake = parseHostedExecutionWake(payload);
     if (wake.kind !== "conversation.message") continue;
+    if (!isHostedLinqConversationMessageWake(wake) && !isHostedTelegramConversationMessageWake(wake)) continue;
     const route = wake.message.routeAuthority;
     if (!route || route.containerMemberId !== input.containerMemberId) continue;
     let sender: string;

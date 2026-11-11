@@ -45,6 +45,19 @@ beforeEach(() => {
 });
 
 describe("hosted game recap notification", () => {
+  it("uses Sol only for the trusted pair-show capability", async () => {
+    for (const show of [false, true]) {
+      const wake = recapWake();
+      if (wake.notification.responsePolicy?.kind !== "require_game_recap") throw new Error("Expected recap policy");
+      if (show) wake.notification.responsePolicy.show = true;
+      mocks.sendAssistantNotification.mockResolvedValue({ decision: { kind: "skip", privateSummary: "Synthetic recap." }, deliveryOutcome: null, response: "", session: { sessionId: "synthetic" } });
+      await executeHostedAssistantNotificationWake({ executionContext: { hosted: { memberId: wake.userId, userEnvKeys: [] } },
+        groupToolPort: { request: async () => ({ action: "read_game", result: { status: "ok", recapGame: {} } }) }, vaultRoot: "/synthetic-vault", wake });
+      const input = mocks.sendAssistantNotification.mock.lastCall?.[0] as AssistantNotificationInput;
+      expect(input.assistantTargetOverride?.model).toBe(show ? "gpt-6.1-sol" : undefined);
+      expect(input.executionContext?.hosted?.gameRecapScope?.show).toBe(show ? true : undefined);
+    }
+  });
   it("binds group missed-day scope to the room with writable lore and no group control port", async () => {
     const wake = recapWake();
     const policy = { kind: "game_group_missed_check_in" as const, roomId: wake.userId, eventId: `game-missed:${wake.userId}:group:2030-03-04`,

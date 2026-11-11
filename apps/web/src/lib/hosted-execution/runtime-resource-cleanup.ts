@@ -91,6 +91,7 @@ export async function claimHostedRuntimeResourceCleanup(input: { prisma: PrismaC
     SELECT resource.user_id AS "userId", resource.kind, resource.resource_id AS "resourceId"
     FROM hosted_runtime_orphan AS resource
     WHERE resource.purged_at IS NULL AND resource.cleanup_at <= ${input.now}
+      AND (resource.kind <> 'game_recap' OR resource.retired_at IS NOT NULL OR resource.recovery_until <= ${input.now})
     ORDER BY resource.cleanup_at, resource.user_id, resource.kind, resource.resource_id
     LIMIT ${RESOURCE_CLEANUP_BATCH_SIZE}
   `;
@@ -102,6 +103,13 @@ export async function claimHostedRuntimeResourceCleanup(input: { prisma: PrismaC
       const where = { userId_kind_resourceId: candidate };
       const current = await tx.hostedRuntimeOrphan.findUnique({ where });
       if (!current || current.purgedAt || current.cleanupAt > input.now) return null;
+      if (current.kind === "game_recap") {
+        if (current.retiredAt) return current;
+        if (!current.recoveryUntil || current.recoveryUntil > input.now) return null;
+        const changed = await tx.hostedRuntimeOrphan.updateMany({ where: { ...candidate, revision: current.revision, retiredAt: null, recoveryUntil: { lte: input.now } },
+          data: { retiredAt: input.now, revision: { increment: 1 } } });
+        return changed.count ? tx.hostedRuntimeOrphan.findUnique({ where }) : null;
+      }
       const workspace = await tx.hostedWorkspace.findUnique({ where: { userId: candidate.userId }, select: { snapshotRef: true, browserVaultReplicaRef: true } });
       const canonical = snapshotOrphanCandidates(parseHostedExecutionSnapshotRef(workspace?.snapshotRef ?? null));
       const replica = parseHostedBrowserVaultReplicaRef(workspace?.browserVaultReplicaRef ?? null);

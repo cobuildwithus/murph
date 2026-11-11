@@ -1,3 +1,4 @@
+import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { createHash } from "node:crypto";
 import path from "node:path";
 
@@ -1466,7 +1467,18 @@ function parseHostedSystemMailboxStatus(value: unknown): "pending" | "recording"
   throw new TypeError("hosted system mailbox status is invalid.");
 }
 
-function parseHostedSystemMailboxRecordRequest(
+function parseHostedSystemMailboxRecordRequest(value: unknown): HostedSystemMailboxPostCheckpointRecord {
+  if (typeof value !== "object" || value === null) return parseHostedSystemMailboxRecordRequestLegacy(value);
+  const record = value as Record<string, unknown>;
+  if (record.kind === "game.recap-lore-checkpointed") {
+    assertHostedSystemMailboxRecordKeys(record, ["kind", "gameId", "eventId"], "Recap lore checkpoint");
+    if (typeof record.gameId !== "string" || typeof record.eventId !== "string" || parseGameRecapEventId(record.eventId)?.gameId !== record.gameId) throw new TypeError("Invalid recap checkpoint identity.");
+    return { kind: "game.recap-lore-checkpointed", gameId: record.gameId, eventId: record.eventId };
+  }
+  return parseHostedSystemMailboxRecordRequestLegacy(value);
+}
+
+function parseHostedSystemMailboxRecordRequestLegacy(
   value: unknown,
 ): HostedSystemMailboxPostCheckpointRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

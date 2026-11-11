@@ -1745,6 +1745,22 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
   vaultRoot: string | null;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
+  if (input.record.kind !== "game.recap-lore-checkpointed") return recordHostedSystemMailboxPostCheckpointRecordLegacy({ ...input, record: input.record });
+  const port = input.runtime.platform.groupToolPort;
+  if (!port) throw new Error("Recap checkpoint control is unavailable.");
+  const acknowledged = await port.request({ action: "read_game", origin: { kind: "game_recap", gameId: input.record.gameId, eventId: input.record.eventId }, recapRead: { kind: "lore_checkpointed" } }, { signal: input.signal });
+  if (acknowledged.result.status !== "ok") throw new Error("Recap lore checkpoint was not acknowledged.");
+  return { newerRevisionPending: false, nextWakeAt: null, recorded: 1, stillDirty: false };
+}
+
+async function recordHostedSystemMailboxPostCheckpointRecordLegacy(input: {
+  operatorHomeRoot: string | null;
+  record: Exclude<HostedSystemMailboxPostCheckpointRecord, { kind: "game.recap-lore-checkpointed" }>;
+  runtime: HostedSystemMailboxRuntime;
+  signal?: AbortSignal | null;
+  vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
+  vaultRoot: string | null;
+}): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
   switch (input.record.kind) {
     case "vault-share.projection": {
       if (!input.vaultRoot) {

@@ -1,5 +1,5 @@
 import { recapProviderRequestSchema } from "@murphai/contracts/recap-admission";
-import { recapFileReceiptSchema } from "@murphai/contracts/recap-show";
+import { recapFileReceiptSchema, gameRecapDraftSchema } from "@murphai/contracts/recap-show";
 import * as z from "@murphai/contracts/zod-runtime";
 
 // A new value of the existing error field: this generation is durably finished and must end without sending.
@@ -61,6 +61,7 @@ export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
     everyDay: z.boolean().optional(), text: z.boolean().optional(), push: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin, automationOccurrenceOrigin]), includePlayers: z.literal(true).optional(),
     recapRead: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("stage"), receipt: recapFileReceiptSchema, bytes: z.string().max(2_800_000) }).strict(),
       z.object({ kind: z.literal("admit"), runId: z.string().uuid() }).strict(),
       z.object({ kind: z.literal("reserve"), runId: z.string().uuid(), operationId: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u), providerRequest: recapProviderRequestSchema, referenceIds: z.array(z.string().regex(/^[a-f0-9]{64}$/u)).max(3).optional() }).strict(),
       z.object({ kind: z.literal("finished"), operationId: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u), token: z.string().regex(/^[a-f0-9]{64}$/u), receipt: recapFileReceiptSchema.optional() }).strict(),
@@ -72,6 +73,7 @@ export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("game_photo"), origin: acceptedInputOrigin, photo: hostedGamePhotoSchema }).strict(),
   z.object({ action: z.literal("update_game"), origin: acceptedInputOrigin, update: hostedGameUpdateSchema }).strict(),
   z.object({ action: z.literal("write_recap"), origin: gameRecapOrigin, recap: gameRecapWriterSchema,
+    files: gameRecapDraftSchema.shape.files.optional(), phase: z.enum(["prepare", "accept"]).optional(),
     usedTreatments: z.array(z.string().min(1).max(60)).max(1000).optional(),
     priorChatLines: z.array(z.string().max(160)).max(100) }).strict(),
 ]);

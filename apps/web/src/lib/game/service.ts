@@ -1,3 +1,9 @@
+import { prepareRecapGeneration } from "./recap-generation";
+import { canAcceptRecapUsageTx, reserveRecapUsageTx } from "./recap-lore";
+import { recapPostedAt } from "./time";
+import { isPairRecapShowEnabled, isRecapMediaVisible } from "./access";
+import { presentGameRecap, storedGameRecapSchema, readGameRecapStory } from "@murphai/contracts/recap-show";
+import { retireGameRecapAssetsTx } from "./recap-retirement";
 import "server-only";
 import { clearGameRecapQuotingEntryTx, gameRecapStoryMayQuoteEntry, readLatestGameRecapEventIdTx, settleGameRecapGenerationTx, readGameRecapStoryWitnesses, readPermittedGameRecapEntryIds } from "./recap-witness";
 import { compareGroupRematch, rematchSeat } from "./rematch";
@@ -2667,6 +2673,7 @@ export type GameRecapMaterial = {
   entries: Array<{ entryId: string; kind: string; playerName: string; text: string | null; visibleToBoth: boolean }>;
   validation: {
     group?: boolean;
+    show?: boolean;
     startedAt: Date;
     settledAt: Date | null;
     playerNamesByMemberId: Array<{ memberId: string; name: string }>;
@@ -2714,6 +2721,7 @@ export async function readGameRecapMaterial(gameId: string, containerMemberId: s
   const state = toRuleState(row, rowEntries);
   const result = parseStoredResult(row.result);
   const scores = result.scores.filter(score => row.maxPlayers !== 10 || memberIds.includes(score.memberId));
+  const doubtedBy = await readRecapDoubters(prisma, gameId, names, row.maxPlayers === 10);
   const anyDays = row.maxPlayers === 2 && "count" in currentTerms(state.game.terms).schedule;
   const playedDays = anyDays && row.settledAt ? Math.min(row.lengthDays,
     Math.max(...state.players.map(player => (dayIndexAt(player, gameNow(row.settledAt!, row)) ?? -1) + 1))) : row.lengthDays;
@@ -2726,17 +2734,23 @@ export async function readGameRecapMaterial(gameId: string, containerMemberId: s
       if (!isScheduledDay(state, dayIndex)) return [name, "off"];
       if (!entry) return [name, row.maxPlayers === 10 ? "unavailable" : anyDays ? "off" : "missed"];
       const projected = entries.find((candidate) => candidate.entryId === entry.id)!;
-      return [name, { entryId: entry.id, kind: projected.kind, text: projected.text, data: parseStoredGameEntryData(toEntryKind(entry.kind), plain[entryOffset + shownEntries.indexOf(entry) * 2 + 1] ?? null), ...(entry.incomplete ? { incomplete: true } : {}) }];
+      return [name, { entryId: entry.id, ...(row.maxPlayers === 2 ? { postedAt: recapPostedAt(entry.receivedAt, player.timeZone) } : {}), ...(doubtedBy.get(entry.id) ? { proveIt: { by: doubtedBy.get(entry.id) } } : {}), kind: projected.kind, text: projected.text, data: parseStoredGameEntryData(toEntryKind(entry.kind), plain[entryOffset + shownEntries.indexOf(entry) * 2 + 1] ?? null), ...(entry.incomplete ? { incomplete: true } : {}) }];
     })),
   }));
   return {
     players: recapPlayers.map((player) => names.get(player.memberId) ?? ""), entries,
-    validation: { group: row.maxPlayers === 10, startedAt: row.startedAt ?? row.createdAt, settledAt: row.settledAt,
+    validation: { group: row.maxPlayers === 10, show: isPairRecapShowEnabled(row.maxPlayers), startedAt: row.startedAt ?? row.createdAt, settledAt: row.settledAt,
       playerNamesByMemberId: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "" })),
       result: scores.filter(score => score.eligible !== false).map((score) => ({ memberId: score.memberId, name: names.get(score.memberId) ?? "", score: score.score })) },
-    game: { id: row.id, ...(row.maxPlayers === 10 ? { maxPlayers: 10 } : {}), players: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
+    game: { id: row.id, ...(isPairRecapShowEnabled(row.maxPlayers) ? { recapShow: true } : {}), ...(row.maxPlayers === 10 ? { maxPlayers: 10 } : {}), players: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
       lengthDays: row.lengthDays, schedule: terms.schedule, stakes: terms.stakes, score: scores.map((score) => ({ name: names.get(score.memberId) ?? "", score: score.score })), days: postsByDay },
   };
+}
+
+async function readRecapDoubters(db: Db, gameId: string, names: ReadonlyMap<string, string>, group: boolean): Promise<Map<string, string | undefined>> {
+  if (group) return new Map();
+  const cases = (await readGameChallenges(db, [gameId])).get(gameId) ?? [];
+  return new Map(cases.map(item => [item.entryId, names.get(item.actor)]));
 }
 
 export async function sealGameRecap(input: {
@@ -2746,14 +2760,16 @@ export async function sealGameRecap(input: {
   gameId: string;
   playerMemberIds: readonly string[];
   recap: HostedGameRecap | null;
+  files?: import("@murphai/contracts/recap-show").GameRecapDraft["files"];
 }): Promise<HostedGameRecap | null> {
   const prisma = getPrisma();
   const row = await prisma.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled" } });
   if (!row || row.maxPlayers !== 10 && !sameGamePlayers(input.playerMemberIds, input.playerMemberIds)) return null;
   const audience = await readGameChatAudience(input.containerMemberId);
+  const generation = input.recap ? await prepareRecapGeneration({ row, story: input.recap, eventId: input.eventId, playerMemberIds: input.playerMemberIds, files: input.files, beforeMutationTx: input.beforeMutationTx }) : null;
   const recapEncrypted = input.recap === null
     ? null
-    : await seal(gameTarget(row, "recap"), JSON.stringify(input.recap));
+    : await seal(gameTarget(row, "recap"), JSON.stringify(generation?.envelope ?? input.recap));
   const scope = parseGameRecapEventId(input.eventId);
   if (scope?.gameId !== input.gameId) return null;
   const sourceRef = scope.regenerationId ? `${input.gameId}:${scope.regenerationId}` : input.gameId;
@@ -2772,17 +2788,31 @@ export async function sealGameRecap(input: {
       : !sameGamePlayers(current.players.map(player => player.memberId), input.playerMemberIds))
       || !await readGameChatAuthority(current, input.containerMemberId, audience, tx)) return null;
     if (!await settleGameRecapGenerationTx(tx, current, input.eventId)) return null;
-    if (scope.regenerationId) {
+    return acceptGameRecapTx(tx, input, current, recapEncrypted, scope.regenerationId, generation);
+
+  });
+  if (!stored) return null;
+  const [plain] = await openGameTexts([{ ...gameTarget(row, "recap"), value: stored }]);
+  return readGameRecapStory(JSON.parse(plain ?? "null"));
+}
+
+async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: Parameters<typeof sealGameRecap>[0], current: Game, recapEncrypted: string | null, regenerationId?: string, generation?: Awaited<ReturnType<typeof prepareRecapGeneration>>): Promise<string | null> {
+  const show = input.recap?.treatment !== undefined;
+    if (regenerationId) {
       const requested = await tx.gameEvent.findUnique({ where: { commandKey: input.eventId }, select: { gameId: true, type: true } });
       if (requested?.gameId !== input.gameId || requested.type !== "recap_regeneration_requested") return null;
       const acceptedKey = `${input.eventId}:accepted`;
       const accepted = await tx.gameEvent.findUnique({ where: { commandKey: acceptedKey }, select: { id: true } });
       if (accepted) return current.recapEncrypted;
       if (!recapEncrypted) return null;
+      if (show && !await canAcceptRecapUsageTx(tx, input)) return null;
       // Keep the old story until validation accepts this replacement. The row
       // lock makes replacement and its once-only acceptance one atomic change.
+      await retireGameRecapAssetsTx(tx, input.gameId, current.wordsOwnerMemberId, new Date(), generation?.envelope.generationId);
       await tx.game.update({ where: { id: input.gameId }, data: { recapEncrypted } });
       await tx.gameEvent.create({ data: { gameId: input.gameId, actor: "system", type: "recap_regeneration_accepted", commandKey: acceptedKey, payload: {} } });
+      if (show) await reserveRecapUsageTx(tx, input.gameId, input.eventId);
+      await generation?.publish(tx);
       return recapEncrypted;
     }
     // A rematch cannot invalidate a finished game's first recap. The pair lock
@@ -2790,12 +2820,13 @@ export async function sealGameRecap(input: {
     // the settled game's first seal, even if a newer game committed first.
     if (current.recapEncrypted) return current.recapEncrypted;
     if (!recapEncrypted) return null;
+    if (show && !await canAcceptRecapUsageTx(tx, input)) return null;
     const changed = await tx.game.updateMany({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled", recapEncrypted: null }, data: { recapEncrypted } });
+    if (changed.count === 1) {
+      if (show) await reserveRecapUsageTx(tx, input.gameId, input.eventId);
+      await generation?.publish(tx);
+    }
     return changed.count === 1 ? recapEncrypted : null;
-  });
-  if (!stored) return null;
-  const [plain] = await openGameTexts([{ ...gameTarget(row, "recap"), value: stored }]);
-  return hostedGameRecapSchema.parse(JSON.parse(plain ?? "null"));
 }
 
 /** The caller already holds member/runtime authority; locks follow member before game. */
@@ -3800,7 +3831,12 @@ async function buildViewInputs(
       hiddenMemberIds,
       now: gameNow(clock, game.row),
       result,
-      recap: recapAt[index] === null ? null : hostedGameRecapSchema.parse(JSON.parse(plain[recapAt[index]!] ?? "null")),
+      recap: recapAt[index] === null ? null : presentGameRecap({
+        stored: storedGameRecapSchema.parse(JSON.parse(plain[recapAt[index]!] ?? "null")),
+        now: clock, mediaVisible: isRecapMediaVisible(),
+        permittedPhotoIds: new Set(game.entries.filter(entry => entry.kind === "photo" && !hiddenEntryIds.has(entry.id) && !hiddenMemberIds.has(entry.memberId)).map(entry => entry.id)),
+        mediaUrl: (slot, generationId) => `/api/game/v1/games/${encodeURIComponent(game.row.id)}/recap-assets/${encodeURIComponent(slot)}?generation=${encodeURIComponent(generationId)}`,
+      }),
       round: game.row.round,
       previousGameId: game.row.previousGameId,
       startedAt: game.row.startedAt,

@@ -49,13 +49,14 @@ export const POST = withJsonError(async (request: Request) => {
   // charged to the operation that has to finish inside it.
   const requestStartedAtMs = Date.now();
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
-    maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
+    maxBodyBytes: new URL(request.url).searchParams.get("recapMedia") === "1" ? 3 * 1024 * 1024 : HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   });
   const runtimeAuthority = readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers);
   const currentSenderWire = readHostedCurrentSenderWire(payload);
   const body = parseHostedRuntimeGroupToolRequest(currentSenderWire.payload, {
     privateMediaDeliveryOrigin: readHostedExecutionControlOrigin(),
   });
+  if (new URL(request.url).searchParams.get("recapMedia") === "1" && !(body.action === "read_game" && body.origin.kind === "game_recap" && body.recapRead?.kind === "stage")) throw new TypeError("Recap protocol requires its own command.");
   const supportedProjectionScopeKeys =
     readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
   const membershipInventoryProtocol = new URL(request.url).searchParams.get(
@@ -73,7 +74,7 @@ export const POST = withJsonError(async (request: Request) => {
         || membershipInventoryProtocol
           === HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE,
       memberId,
-      ...(body.action === "read_game" || body.action === "update_game" || body.action === "game_photo" || body.action === "write_recap" || body.action === "game_chat_bootstrap" || body.action === "my_game_reminders"
+      ...(body.action === "recap_assets" || body.action === "read_game" || body.action === "update_game" || body.action === "game_photo" || body.action === "write_recap" || body.action === "game_chat_bootstrap" || body.action === "my_game_reminders"
         ? { runtimeIdentity: runtimeAuthority ? { ...runtimeAuthority, userId: memberId } : null }
         : {}),
       request: body,

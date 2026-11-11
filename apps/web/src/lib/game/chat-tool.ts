@@ -1,3 +1,4 @@
+import { prepareRecapSubmission, stageRecapSubmissionFile } from "./recap-submission";
 import { handleRecapAdmission } from "./recap-admission";
 import { readPendingRecapUsages } from "./recap-lore";
 import { readRecapTranscriptPage, readRecapTranscriptForValidation } from "./recap-transcript";
@@ -227,6 +228,11 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
   };
+  if (input.request.action === "read_game" && input.request.recapRead?.kind === "stage") {
+    if (!material.validation.show) return unavailable();
+    return { action: "read_game", result: { status: "ok", recapGame: await stageRecapSubmissionFile({ memberId: input.memberId,
+      runtimeIdentity: input.runtimeIdentity, gameId, eventId, receipt: input.request.recapRead.receipt, bytes: input.request.recapRead.bytes }) } };
+  }
   if (input.request.action === "read_game" && input.request.recapRead && !["transcript", "reference"].includes(input.request.recapRead.kind)) {
     if (!material.validation.show) return unavailable();
     return { action: "read_game", result: { status: "ok", recapGame: await handleRecapAdmission({ memberId: input.memberId,
@@ -241,8 +247,13 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
   const errors = validateGameRecap({ recap: input.request.recap, players: material.players, entries: material.entries,
     chatMessages, priorChatLines: input.request.priorChatLines, result: material.validation.result, group: material.validation.group, show: material.validation.show, usedTreatments: input.request.usedTreatments });
   if (errors.length > 0) return { action: "write_recap", result: { status: "rejected", recapOutcome: gameRecapToolResult(errors) } };
+  if (material.validation.show) {
+    if (!input.request.files || !input.request.phase) return { action: "write_recap", result: { status: "rejected", recapOutcome: "Submit a local {story, files} draft through write_recap." } };
+    if (input.request.phase === "prepare") return { action: "write_recap", result: { status: "ok", recapGame: await prepareRecapSubmission({ memberId: input.memberId,
+      runtimeIdentity: input.runtimeIdentity, gameId, eventId, draft: { story: input.request.recap, files: input.request.files } }) } };
+  }
   if (!await refreshGameChatAudience({ ...input, audience }, players)) return { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
-  const saved = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, recap: withValidGameSuperlatives(input.request.recap, material.validation.result.map(player => player.memberId), material.validation.group) });
+  const saved = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, files: input.request.files, recap: withValidGameSuperlatives(input.request.recap, material.validation.result.map(player => player.memberId), material.validation.group) });
   return saved
     ? { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(saved, input.request.recap), chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, saved.chatLine) : gameRecapMessage(gameId, saved.chatLine) } }
     : unavailable();
