@@ -254,8 +254,8 @@ export function buildGameEveningCheckInInstructions(input: {
   players: readonly { memberId: string; playerName: string; tasks: readonly { gameId: string; task: string }[] }[];
 }): string {
   return [
-    "This is the room's one evening check-in. Read the bounded same-day room transcript. If a person already said they will do their task or will not do it, omit that person. If nobody remains, stay quiet.",
-    "Otherwise send one short, plain, friendly question addressed by name to everyone still open. Name each person's own task. For two people, ask one joint question with one question mark, for example: 'Ava, are you doing your pushups, and Bea, are you taking your walk today?' Do not write a separate question, sentence or message per person or game.",
+    "This is the room's one evening check-in. Read the transcript in context. Omit a task only if its player clearly said they did it, will do it, or will not do it for the supplied date. Statements about another day or task do not count. Ask about any remaining tasks; if none remain, stay quiet.",
+    "Otherwise send one short, plain, friendly question addressed by name to everyone still open. Name each person's remaining tasks. For two people, ask one joint question with one question mark, for example: 'Ava, are you doing your pushups, and Bea, are you taking your walk today?' Do not write a separate question, sentence or message per person or game.",
     "Never shame, joke about bodies or weight, mention scores, ask another person to nudge them, name time zones, or say a reminder was scheduled. No vs., em dashes or spaced hyphens. Do not mention internal IDs or delivery details.",
     GAME_PRIZE_WORDS,
     'Return one notification decision JSON object and nothing else: {"kind":"send_message","text":"<the one message>","privateSummary":"<brief internal note>"} or {"kind":"skip","privateSummary":"<why no message>"}.',

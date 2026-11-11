@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 100,
+  "item": {
+    "id": "evening-game-check-in-dates",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Game check-ins stay on today's tasks",
+    "summary": "Discussing a past game day no longer causes Murph's evening check-in to skip a task that is still open today.",
+    "details": "When you have several tasks, answering about one leaves the others eligible. Murph stays quiet about tasks you have already said you completed, plan to do or will skip today.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": []
+  }
+}

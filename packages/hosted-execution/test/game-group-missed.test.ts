@@ -87,6 +87,10 @@ describe("game evening check-in contract", () => {
     const prompt = buildGameEveningCheckInInstructions(input);
     expect(JSON.parse(prompt.split("\n").at(-1)!)).toEqual(input);
     expect(prompt).toContain("everyone still open");
+    expect(prompt).toContain("Omit a task only");
+    expect(prompt).toContain("for the supplied date");
+    expect(prompt).toContain("another day or task do not count");
+    expect(prompt).not.toContain("omit that person");
   });
   it("builds one question with data-only names and tasks and an explicit skip", () => {
     const input = { date: evening.date, transcript: [{ memberId: "one", playerName: "Ava", text: "I'll do it" }],
