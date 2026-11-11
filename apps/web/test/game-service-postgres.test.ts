@@ -657,6 +657,59 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(recap.days[0].others[0].postedAt).toBe(stored.receivedAt.toISOString());
     expect(await authorizeMediaRead(viewer, command.mediaKeys[0])).toBe(true);
   });
+  it("scopes recap contact references to the pair and revokes changed or removed photos", async () => {
+    const a = await member("PhotoA", "UTC"), b = await member("PhotoB", "UTC"), outsider = await member("Outside", "UTC");
+    const room = await member("Room", "UTC"), db = getPrisma();
+    const { gameId } = await startGame(a, b);
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await devStartNow(gameId, a); await devSettleNow(gameId, a);
+    const eventId = gameChatLifecycleEventId(gameId, "recap");
+    await markGameChatGenerationQueuedTx(eventId, db, room);
+    const labels = [
+      { ownerMemberId: a, subjectMemberId: b, photoKey: "synthetic-contact-b" },
+      { ownerMemberId: b, subjectMemberId: a, photoKey: "synthetic-contact-a" },
+      { ownerMemberId: outsider, subjectMemberId: b, photoKey: "synthetic-contact-b" },
+      { ownerMemberId: a, subjectMemberId: outsider, photoKey: "synthetic-outsider" },
+      { ownerMemberId: a, subjectMemberId: a, photoKey: "synthetic-self-label" },
+    ];
+    for (const label of labels) await db.gameContactLabel.upsert({
+      where: { ownerMemberId_subjectMemberId: { ownerMemberId: label.ownerMemberId, subjectMemberId: label.subjectMemberId } },
+      create: label, update: { photoKey: label.photoKey },
+    });
+    vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
+    try {
+      const material = (await readGameRecapMaterial(gameId, room, [a, b], eventId))!;
+      const { readRecapSourceReferences, publicRecapReferences } = await import("@/src/lib/game/recap-inputs");
+      const { recapReferencesCurrent } = await import("@/src/lib/game/recap-asset-access");
+      const read = async () => (await readRecapSourceReferences(material, eventId)).filter(ref => ref.kind === "contact");
+      const references = await read();
+      expect(references).toHaveLength(2);
+      expect(publicRecapReferences(references)).toEqual(expect.arrayContaining([
+        { id: expect.any(String), kind: "contact", memberId: b },
+        { id: expect.any(String), kind: "contact", memberId: a },
+      ]));
+      expect(await read()).toEqual(references);
+      expect(await readRecapSourceReferences({ ...material, validation: { ...material.validation, group: true } }, eventId)).toEqual([]);
+      const reference = references.find(ref => ref.memberId === b)!;
+      expect(reference.key).toBe("synthetic-contact-b");
+      const current = () => recapReferencesCurrent(db, gameId, [{ references: [reference] }]);
+      expect(await current()).toBe(true);
+      const where = { ownerMemberId_subjectMemberId: { ownerMemberId: a, subjectMemberId: b } };
+      for (const photoKey of ["synthetic-replacement", null]) {
+        await db.gameContactLabel.update({ where, data: { photoKey } });
+        expect(await current()).toBe(false); // The outsider's identical key grants nothing.
+        expect((await read()).some(ref => ref.id === reference.id)).toBe(false);
+      }
+      await db.gameContactLabel.update({ where, data: { photoKey: reference.key } });
+      expect(await current()).toBe(true);
+      await db.gameBlock.create({ data: { blockerMemberId: a, blockedMemberId: b } });
+      expect(await current()).toBe(false);
+      await db.gameBlock.delete({ where: { blockerMemberId_blockedMemberId: { blockerMemberId: a, blockedMemberId: b } } });
+      await db.gameContactLabel.delete({ where });
+      expect(await current()).toBe(false);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it.each([0, 1, 2])("uploads once and accepts %i cards with canonical retries", async cardCount => {
     const a = await member("PlayerA", "UTC", true), b = await member("PlayerB", "UTC", true);
     const room = await member("Room", "UTC", true), db = getPrisma();
@@ -691,11 +744,14 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
         const key = await putGameMedia({ bytes: largePhoto, contentType: "image/jpeg", prefix: mediaKeyPrefixFor(player) });
         await db.gameProfile.update({ where: { memberId: player }, data: { photoKey: key } });
       }
+      const contactKey = await putGameMedia({ bytes: largePhoto, contentType: "image/jpeg", prefix: mediaKeyPrefixFor(a) });
+      const contactWhere = { ownerMemberId_subjectMemberId: { ownerMemberId: a, subjectMemberId: b } };
+      await db.gameContactLabel.upsert({ where: contactWhere, create: { ownerMemberId: a, subjectMemberId: b, photoKey: contactKey }, update: { photoKey: contactKey } });
       const material = (await readGameRecapMaterial(gameId, room, [a, b], eventId))!;
       const { readRecapSourceReferences, readRecapReferenceBytes } = await import("@/src/lib/game/recap-inputs");
-      const references = (await readRecapSourceReferences(material, eventId)).filter(ref => ref.kind === 'profile');
+      const references = (await readRecapSourceReferences(material, eventId)).filter(ref => ref.kind === 'profile' || ref.kind === 'contact');
       const normalized = await Promise.all(references.map(async ref => (await readRecapReferenceBytes(ref))!));
-      expect(normalized.map(ref => [ref.width, ref.height])).toEqual([[768, 1024], [768, 1024]]);
+      expect(normalized.map(ref => [ref.width, ref.height])).toEqual([[768, 1024], [768, 1024], [768, 1024]]);
       const file = { kind: "upload" as const, slot: "scene-0", mediaType: "image/jpeg" as const,
         referenceIds: references.map(ref => ref.id), bytes: bytes.toString("base64") };
       const upload = () => uploadRecapMedia({ memberId: room, gameId, eventId, material, beforeMutationTx: async () => {}, file });
@@ -703,7 +759,11 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: null } });
       await expect(upload()).rejects.toThrow();
       await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: profile.photoKey } });
+      await db.gameContactLabel.update({ where: contactWhere, data: { photoKey: null } });
+      await expect(upload()).rejects.toThrow();
+      await db.gameContactLabel.update({ where: contactWhere, data: { photoKey: contactKey } });
       const asset = await upload();
+      expect(asset.references).toContainEqual({ kind: "contact", memberId: b, key: contactKey });
       await expect(uploadRecapMedia({ memberId: room, gameId, eventId, material, beforeMutationTx: async () => {},
         file: { ...file, bytes: Buffer.from("not media").toString("base64") } })).rejects.toThrow();
       const assets = [asset];
@@ -723,6 +783,13 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(await readAuthorizedRecapAsset({ ...assetInput, memberId: room })).toBeNull();
       const { readRecapCoverPreview } = await import("@/src/lib/game/recap-preview");
       expect((await readRecapCoverPreview(gameId, accepted.envelope.preview.token))?.length).toBe(bytes.length);
+      for (const photoKey of ["synthetic-contact-replacement", null]) {
+        await db.gameContactLabel.update({ where: contactWhere, data: { photoKey } });
+        expect(await readAuthorizedRecapAsset(assetInput)).toBeNull();
+        expect(await readRecapCoverPreview(gameId, accepted.envelope.preview.token)).toBeNull();
+      }
+      await db.gameContactLabel.update({ where: contactWhere, data: { photoKey: contactKey } });
+      expect((await readAuthorizedRecapAsset(assetInput))?.bytes.length).toBe(bytes.length);
       await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: null } });
       expect(await readAuthorizedRecapAsset(assetInput)).toBeNull();
       expect(await readRecapCoverPreview(gameId, accepted.envelope.preview.token)).toBeNull();

@@ -20,12 +20,17 @@ export async function recapReferencesCurrent(db: Prisma.TransactionClient, gameI
   const entryIds = references.flatMap(ref => ref.kind === "entry" && ref.entryId ? [ref.entryId] : []);
   const reports = await db.gameReport.count({ where: { OR: [{ about: "player", reportedMemberId: { in: memberIds }, reporterMemberId: { in: memberIds } }, { entryId: { in: entryIds } }] } });
   if (reports) return false;
-  const [profiles, entries] = await Promise.all([
+  const [profiles, contacts, entries] = await Promise.all([
     db.gameProfile.findMany({ where: { memberId: { in: memberIds } }, select: { memberId: true, photoKey: true } }),
+    references.some(ref => ref.kind === "contact") ? db.gameContactLabel.findMany({ where: { OR: [
+      { ownerMemberId: memberIds[0], subjectMemberId: memberIds[1] },
+      { ownerMemberId: memberIds[1], subjectMemberId: memberIds[0] },
+    ], photoKey: { not: null } }, select: { subjectMemberId: true, photoKey: true } }) : [],
     db.gameEntry.findMany({ where: { id: { in: entryIds }, gameId, memberId: { in: memberIds }, withdrawnAt: null, attempt: { gt: 0 } }, select: { id: true, memberId: true, mediaKeys: true } }),
   ]);
   return references.every(ref => ref.kind === "murph" ? ref.key === "murph-character-sheet-v1"
     : ref.kind === "profile" ? profiles.some(profile => profile.memberId === ref.memberId && profile.photoKey === ref.key)
+    : ref.kind === "contact" ? contacts.some(contact => contact.subjectMemberId === ref.memberId && contact.photoKey === ref.key)
     : entries.some(entry => entry.id === ref.entryId && entry.memberId === ref.memberId && entry.mediaKeys.includes(ref.key)));
 }
 

@@ -66,7 +66,7 @@ export const recapAssetSchema = z.object({
   recipeId: ref,
   storageKey: z.string().min(1).max(512),
   references: z.array(z.object({
-    kind: z.enum(["profile", "entry", "murph"]),
+    kind: z.enum(["profile", "contact", "entry", "murph"]),
     memberId: ref.optional(), entryId: ref.optional(), key: z.string().min(1).max(512),
   }).strict()).max(16),
   hash: z.string().regex(/^[a-f0-9]{64}$/u),

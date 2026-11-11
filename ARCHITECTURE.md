@@ -5755,6 +5755,10 @@ The runtime-orphan kind constraint is unchanged.
 Pair shows use the existing recap notification on GPT-6.1 Sol with the normal
 hosted group turn sandbox, cwd and tool surface. `read_game` returns scoped game
 material, shared chat and lore directly; the host resolves reference-photo IDs.
+Pair recap identity references include each player's own profile photo and the
+contact photo saved by the other player, attributed only to the pictured subject.
+Contact photos follow the same current-key revocation and game-wide retirement
+as profiles; private label words and the owner are never exposed.
 Available player reference photos are materialized in the recap task directory
 with vault-relative paths so native `view_image` can inform casting. Failed
 reference fetches omit the path without blocking the recap.

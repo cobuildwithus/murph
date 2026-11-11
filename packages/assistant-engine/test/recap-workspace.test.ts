@@ -22,6 +22,7 @@ describe('recap workspace material', () => {
     const references = [
       { id: '1'.repeat(64), kind: 'profile', memberId: 'player-a' },
       { id: '2'.repeat(64), kind: 'entry', memberId: 'player-a', entryId: 'entry-a' },
+      { id: '6'.repeat(64), kind: 'contact', memberId: 'player-b' },
       { id: '3'.repeat(64), kind: 'profile', memberId: 'player-b' },
       { id: '4'.repeat(64), kind: 'murph' },
       { id: '5'.repeat(64), kind: 'entry', memberId: 'player-b', entryId: 'entry-b' },
@@ -37,19 +38,19 @@ describe('recap workspace material', () => {
         if (request.recapRead?.kind !== 'reference') throw new Error('Unexpected tool request')
         const id = request.recapRead.id
         requested.push(id)
-        if (id === references[2].id) throw new Error('Synthetic unavailable photo')
+        if (id === references[3].id) throw new Error('Synthetic unavailable photo')
         return { action: 'read_game', result: { status: 'ok', recapGame: {
           id, bytes: bytes.toString('base64'), byteLength: bytes.length, mediaType: 'image/jpeg', width: 2, height: 3,
-          hash: id === references[4].id ? '0'.repeat(64) : createHash('sha256').update(bytes).digest('hex'),
+          hash: id === references[5].id ? '0'.repeat(64) : createHash('sha256').update(bytes).digest('hex'),
         } } }
       } } })
     const manifest = z.object({ directory: z.string(), material: z.object({ references: z.array(z.object({ id: z.string(), path: z.string().optional() })) }) }).parse(exported.manifest)
-    for (const reference of manifest.material.references.slice(0, 2)) {
+    for (const reference of manifest.material.references.slice(0, 3)) {
       expect(reference.path).toBe(`${manifest.directory}/refs/${reference.id}.jpg`)
       expect(await readFile(path.join(vault, reference.path!))).toEqual(bytes)
     }
-    expect(manifest.material.references.slice(2).every(reference => reference.path === undefined)).toBe(true)
-    expect(requested).toEqual([references[0].id, references[1].id, references[2].id, references[4].id])
+    expect(manifest.material.references.slice(3).every(reference => reference.path === undefined)).toBe(true)
+    expect(requested).toEqual([references[0].id, references[1].id, references[2].id, references[3].id, references[5].id])
     expect(exported.material.references).toEqual(references)
     expect(JSON.stringify(exported.manifest)).not.toContain(vault)
   })

@@ -1911,7 +1911,11 @@ individual agreement; private task review stays in the addressed app invitation.
 Final lifecycle egress repeats the authority check and verifies the provider target. Lifecycle notices and recap links contain text only. Any group
 report withholds the shared recap, including media and quotes. Recaps may read
 only the authorized room-audience game lore, never private memory or contact
-labels. Group lore keys derive from the stored original audience, not the room
+label words. Pair show identity references may include the contact photo saved
+by one current player for the other, with only the pictured subject exposed.
+This does not expose its owner, name or relationship, or grant direct media
+access; replacement, removal, departure and blocks invalidate the reference.
+Group lore keys derive from the stored original audience, not the room
 ID or current seats; a changed audience cannot inherit its notebook. Live lore
 contains only room conversation and shared game state, never app-only captions
 or photo details. Person notes retain memberIds beside names, but messages omit
