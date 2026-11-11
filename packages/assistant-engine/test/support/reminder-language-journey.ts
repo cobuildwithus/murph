@@ -109,7 +109,6 @@ export async function runReminderLanguageJourney(config: CanonicalLiveConfig, sc
     expect(scheduledInputs.length).toBeGreaterThan(0)
     for (const input of scheduledInputs) {
       const full = [input.baseInstructions, input.developerInstructions, input.prompt].join('\n')
-      expect(full).toContain("Match replies, including voice memo text, to the user's conversational language")
       expect(full).toContain(reminder.instructions)
       if (input.resumeSessionId === null) {
         expect(input.prompt).toContain(scenario.opening)
