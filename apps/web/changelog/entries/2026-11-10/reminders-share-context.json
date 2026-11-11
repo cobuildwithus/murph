@@ -8,7 +8,12 @@
     "title": "Fewer repeated reminders",
     "summary": "Murph checks recent messages it has sent in the same conversation before asking you about the same task again.",
     "details": "This works across scheduled reminders and game check-ins. Other tasks and reminders you explicitly ask to repeat can still come through. Sending a reminder never marks your task complete.",
-    "relevanceTags": ["reminders", "games"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "reminders",
+      "games"
+    ],
+    "sourcePullRequests": [
+      4818
+    ]
   }
 }

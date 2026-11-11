@@ -49,8 +49,8 @@ people/tasks/dates, requested repeats, safety cues, failed/pending sends,
 rotated sessions and private/group isolation. Verify a queued first send reaches
 existing dispatch before the next background decision; preserve foreground
 preemption. Real-model proof supplements deterministic acceptance/route checks.
-Current verdict: Hold for real-model proof; deterministic route, acceptance,
-policy and checkpoint ordering checks pass.
+Current verdict: Ready. Deterministic boundaries and eight full real-model
+journeys pass; actual replies and quiet outcomes were reviewed.
 
 ## Failure and release
 
@@ -68,24 +68,43 @@ runtimes may still repeat reminders until updated; no migration or rollback floo
   dispatch before a newly due cron decision, causal delivery and pending input.
 - Hosted execution: game-chat-notifications suite passes (24 tests).
 - Typechecks pass for assistant-engine, assistant-runtime and hosted-execution.
-- Changelog generation and changelog-page suite pass (4 tests). The source PR
-  list remains empty because this is a local candidate, not a published PR.
+- Changelog generation and changelog-page suite pass (4 tests). The changelog fragment is linked to PR 4818.
 - `pnpm complexity:diff` and `git diff --check` pass. Candidate review retained
   the existing state owners, bounded reads and foreground admission. Existing
   large owners were not broadened into a new reminder coordinator.
-- Real-model journey added for both producer orders, partial coverage, requested
-  repeats, pending output, another date and safety cues. Attempted
-  `pnpm test:assistant:live -- --test "shared reminder awareness: 'evening after ordinary reminder'"`
-  with the default and available native binaries. Both fail capability preflight:
-  `Live journeys require the Murph native patch.` Neither supports
-  `app-server --ignore-user-config`; no provider request ran. The existing
-  local-live-runner Frog entry covers this prerequisite. Do not infer behavioral
-  success from compilation or deterministic prompt assertions.
+- Eight production-derived real-Codex journeys pass with GPT-6.1 Sol and local
+  subscription authentication: both producer orders, private ordinary reminders,
+  partial task coverage, requested repeats, pending output, another date and
+  safety cues. Each makes exactly one provider request and creates no automation.
+  Covered questions produce no outbox intent; useful reminders produce exactly
+  one queued intent. Detached paths call no tools. Actual replies: Ready.
+- Command: `pnpm test:assistant:live -- --test "<one exact shared reminder awareness scenario>" --codex-command <patched-native-binary>`.
+  Initial native capability preflight was unavailable. A task-owned build of the
+  pinned upstream source plus the exact production patch resolved it. No auth
+  material was copied, and no messaging provider was called. The fixture's
+  evening event key was corrected to the canonical schema before model entry.
+- Complete first-provider-request capture uses the real native server with a
+  credential-free local Responses stub, identical synthetic base/head inputs,
+  and production notification preparation. Base: `9ff8b4a421`.
+  Direct/group detached: 31,059 -> 32,293 UTF-8 bytes (+1,234; +3.97%).
+  Direct scheduled: 115,398 -> 116,509 (+1,111; +0.96%).
+  Group scheduled: 101,349 -> 102,460 (+1,111; +1.10%).
+  Captures include instructions, schemas/guidance and history; only transport
+  cache identity is excluded and fixture paths normalized. The exact target
+  tokenizer is unavailable; byte counts are not token or billing estimates.
 
 ## Remaining completion gate
 
-Run each uniquely named live journey with the production-patched native Codex
-binary through `--codex-command <patched-native-binary>`, inspect its actual reply
-and effects, and only then mark Product UX Ready. Keep this plan active until
-that proof is available. An eventual PR requires exact-head CI and the routed
-final review. This local change does not authorize publication or deployment.
+PR 4818 requires final ReviewGPT and green exact-head required CI before merge.
+The user authorized PR creation and shipping. Production delivery remains a
+separate release outcome from local queued-send proof.
+
+## Shipping follow-up
+
+PR 4818 owns this branch. Reconciled current main's task/date-specific evening
+check-in correction, retaining both completed-task handling and prior accepted
+reminder coverage. Focused engine boundary tests (121) and game contract tests
+(47 passed, one existing skip), plus both affected typechecks, pass after the
+merge. The task-owned native build uses the pinned upstream source and exact
+production patch and resolves the live-harness capability prerequisite without
+modifying another checkout.

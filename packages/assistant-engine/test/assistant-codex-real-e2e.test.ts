@@ -50236,6 +50236,7 @@ describeRealCodex('ordinary input replay reminder journeys', () => {
 
 describeRealCodex('shared reminder awareness', () => {
   it.each([
+    { name: 'private ordinary reminder shares sent context', evening: false, prior: 'sent', task: 'walk', skip: true, direct: true },
     { name: 'evening after ordinary reminder', evening: true, prior: 'sent', task: 'walk', skip: true },
     { name: 'ordinary after evening reminder', evening: false, prior: 'sent', task: 'walk', skip: true },
     { name: 'partial coverage keeps another task', evening: true, prior: 'sent', task: 'walk and stretch', skip: false },
@@ -50250,7 +50251,8 @@ describeRealCodex('shared reminder awareness', () => {
     const { buildGameEveningCheckInInstructions, gameEveningCheckInPolicySchema } = await import('@murphai/hosted-execution/runtime-control')
     try {
       await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
-      const prior = notificationHistoryIntent({ status: scenario.prior })
+      const threadIsDirect = 'direct' in scenario && scenario.direct
+      const prior = notificationHistoryIntent({ status: scenario.prior, threadIsDirect })
       await saveAssistantOutboxIntent(workingDirectory, prior)
       const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never',
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
@@ -50259,7 +50261,7 @@ describeRealCodex('shared reminder awareness', () => {
       const date = '2030-03-04'
       const tasks = [{ gameId: 'game_walk', task: 'a walk' },
         ...(scenario.task === 'walk and stretch' ? [{ gameId: 'game_stretch', task: 'five minutes of stretching' }] : [])]
-      const eventId = `synthetic-awareness:${scenario.name}`
+      const eventId = `game-evening:synthetic-group:${date}`
       const policy = gameEveningCheckInPolicySchema.parse({ kind: 'game_evening_check_in', roomId: 'synthetic-group',
         eventId, date, expiresAt: '2030-03-04T20:30:00.000Z', conversationLaneSeq: '0',
         batch: tasks.map(task => ({ gameId: task.gameId, termsVersion: 1, memberIds: ['player_ava'], dayIndex: 0 })) })
@@ -50273,18 +50275,22 @@ describeRealCodex('shared reminder awareness', () => {
               ? 'It is March 4, 2030 at 20:05 UTC. The air-quality alert for the group area now advises avoiding outdoor exercise. Send one useful safety message to keep today’s walk indoors.'
               : 'It is March 4, 2030 at 20:05 UTC. Ask Ava whether she is taking her walk today.'
       const events: unknown[] = []
+      let providerRequests = 0
       const result = await sendAssistantNotificationLocal({
         actorId: null, bindingDeliveryTarget: 'synthetic-room', channel: 'linq', identityId: null,
-        deliveryTarget: 'synthetic-room', threadId: 'synthetic-room', threadIsDirect: false,
+        deliveryTarget: 'synthetic-room', threadId: 'synthetic-room', threadIsDirect,
         deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
         executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
         instructions, responsePolicy: scenario.evening ? policy : { kind: 'allow_send_or_skip' },
         ...(!scenario.evening ? { scheduledOccurrenceAt: scenario.task === 'tomorrow' ? '2030-03-05T20:00:00.000Z' : '2030-03-04T20:05:00.000Z' } : {}),
         onTraceEvent: event => events.push(event.rawEvent),
+        onProviderRequestStarted: () => { providerRequests += 1 },
         turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
         turnTrigger: scenario.evening ? 'manual-deliver' : 'automation-cron', vault: workingDirectory, workingDirectory,
       })
       const newIntents = (await listAssistantOutboxIntents(workingDirectory)).filter(intent => intent.intentId !== prior.intentId)
+      expect(providerRequests).toBe(1)
+      expect((await listAutomations({ vaultRoot: workingDirectory })).items).toEqual([])
       expect(result.decision.kind).toBe(scenario.skip ? 'skip' : 'send_message')
       expect(newIntents).toHaveLength(scenario.skip ? 0 : 1)
       if (scenario.skip) expect(result.response).toBeNull()
@@ -50295,7 +50301,7 @@ describeRealCodex('shared reminder awareness', () => {
         if (scenario.task === 'walk and stretch') expect(result.response).not.toMatch(/walk/iu)
       }
       if (scenario.evening) expect(readCapabilityRoutingActions(events)).toEqual([])
-      process.stdout.write(`[reminder-awareness] ${JSON.stringify({ scenario: scenario.name, decision: result.decision.kind, reply: result.response, sends: newIntents.length })}\n`)
+      process.stdout.write(`[reminder-awareness] ${JSON.stringify({ scenario: scenario.name, decision: result.decision.kind, reply: result.response, sends: newIntents.length, providerRequests })}\n`)
     } finally {
       await stopWarmCodexAppServer('reminder-awareness-complete')
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
