@@ -68,7 +68,7 @@ export function assertModelVisibleToolContract(
   // Code mode may prepend native namespace context. Require the unchanged
   // original description exactly once at its canonical-contract boundary,
   // without stripping prefixes or accepting a detached copy elsewhere.
-  const descriptionBoundary = `${expected.description}\n\nCanonical input contract:`
+  const descriptionBoundary = `${expected.description}\n\nComplete input schema.`
   assert.equal(
     observed.description.split(descriptionBoundary).length,
     2,

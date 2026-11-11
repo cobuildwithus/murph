@@ -38,28 +38,31 @@ if (!groupProgressTool) {
   throw new Error("Expected the group progress tool.");
 }
 
+// Budgets were raised on 2026-11-10 when these descriptions were rewritten as
+// full sentences. The earlier caps had pushed rules into parameter
+// descriptions, which Codex repeats in the schema copy and the code signature.
 const TARGET_TOOL_DESCRIPTION_BUDGETS = [
   ["send_progress_update", MURPH_SEND_PROGRESS_UPDATE_TOOL, 260],
   ["group send_progress_update", groupProgressTool, 240],
-  ["family_plan", MURPH_FAMILY_PLAN_TOOL, 330],
-  ["plan_usage", MURPH_PLAN_USAGE_TOOL, 380],
-  ["imessage_contact", MURPH_IMESSAGE_CONTACT_TOOL, 160],
-  ["subscription", MURPH_SUBSCRIPTION_TOOL, 520],
-  ["group shared read", MURPH_GROUP_SHARED_READ_TOOL, 360],
+  ["family_plan", MURPH_FAMILY_PLAN_TOOL, 400],
+  ["plan_usage", MURPH_PLAN_USAGE_TOOL, 500],
+  ["imessage_contact", MURPH_IMESSAGE_CONTACT_TOOL, 170],
+  ["subscription", MURPH_SUBSCRIPTION_TOOL, 530],
+  ["group shared read", MURPH_GROUP_SHARED_READ_TOOL, 440],
   [
     "group shared read and permission offer",
     MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
-    350,
+    380,
   ],
-  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 320],
-  ["group_data", MURPH_GROUP_DATA_TOOL, 410],
-  ["group_membership", MURPH_GROUP_MEMBERSHIP_TOOL, 350],
+  ["group_consult", MURPH_GROUP_CONSULT_TOOL, 950],
+  ["group_data", MURPH_GROUP_DATA_TOOL, 720],
+  ["group_membership", MURPH_GROUP_MEMBERSHIP_TOOL, 500],
   ["group_usage", MURPH_GROUP_USAGE_TOOL, 360],
   ["group_chat", MURPH_GROUP_CHAT_TOOL, 390],
   ["group_email", MURPH_GROUP_EMAIL_TOOL, 310],
-  ["computer_open", MURPH_COMPUTER_OPEN_TOOL, 250],
-  ["computer_act", MURPH_COMPUTER_ACT_TOOL, 320],
-  ["computer_os_control", MURPH_COMPUTER_OS_CONTROL_TOOL, 310],
+  ["computer_open", MURPH_COMPUTER_OPEN_TOOL, 460],
+  ["computer_act", MURPH_COMPUTER_ACT_TOOL, 450],
+  ["computer_os_control", MURPH_COMPUTER_OS_CONTROL_TOOL, 320],
   ["computer_pause_for_user", MURPH_COMPUTER_PAUSE_FOR_USER_TOOL, 300],
   ["computer_finish_run", MURPH_COMPUTER_FINISH_RUN_TOOL, 150],
   ["connected_apps_manage", MURPH_CONNECTED_APPS_MANAGE_TOOL, 260],
@@ -84,7 +87,7 @@ describe("assistant tool description call contracts", () => {
       0,
     );
 
-    expect(total).toBeLessThanOrEqual(6_700);
+    expect(total).toBeLessThanOrEqual(8_200);
   });
 
   it("keeps group_consult discovery, audience choice, and pending-state semantics explicit", () => {

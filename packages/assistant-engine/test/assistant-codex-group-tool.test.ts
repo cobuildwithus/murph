@@ -393,7 +393,7 @@ describe("murph.group dynamic tool", () => {
       "read_shared",
     ]);
     expect(MURPH_GROUP_SHARED_READ_TOOL.description.length)
-      .toBeLessThanOrEqual(360);
+      .toBeLessThanOrEqual(440);
     expect(MURPH_GROUP_SHARED_READ_TOOL.description)
       .toContain('status="partial" means omittedParticipantIds');
     expect(MURPH_GROUP_SHARED_READ_TOOL.description)
@@ -416,7 +416,7 @@ describe("murph.group dynamic tool", () => {
       ),
     ).toEqual(["participantId", "history", "action", "freshness", "projectionScopes"]);
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description.length)
-      .toBeLessThanOrEqual(350);
+      .toBeLessThanOrEqual(380);
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description)
       .toContain("current authorized scheduled group turn");
     expect(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL.description)

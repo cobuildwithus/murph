@@ -96,7 +96,7 @@ describe("murph computer dynamic tools", () => {
     const osControlDescription = osControlTool?.description ?? "";
     const pauseDescription = pauseTool?.description ?? "";
 
-    expect(actDescription.length).toBeLessThanOrEqual(320);
+    expect(actDescription.length).toBeLessThanOrEqual(450);
     expect(actDescription).toMatch(/macro-step/iu);
     expect(actDescription).toContain("current authorized run");
     expect(actDescription).toContain(
@@ -110,14 +110,14 @@ describe("murph computer dynamic tools", () => {
     expect(actDescription).toContain("retry unknown effects");
     expect(actDescription).toContain("After failure, call computer_open");
 
-    expect(openDescription.length).toBeLessThanOrEqual(250);
+    expect(openDescription.length).toBeLessThanOrEqual(460);
     expect(openDescription).toContain("authorized browser");
     expect(openDescription).toContain("Returns runId, URL, title, text");
     expect(openDescription).toContain("reopen after handoff/uncertainty");
     expect(openDescription).toContain("prior outcome stays unknown");
     expect(openDescription).not.toContain("send_progress_update");
 
-    expect(osControlDescription.length).toBeLessThanOrEqual(310);
+    expect(osControlDescription.length).toBeLessThanOrEqual(320);
     expect(osControlDescription).toContain("only when Playwright cannot operate");
     expect(osControlDescription).toContain("Never enter sensitive data");
     expect(osControlDescription).toContain("outcome may be unknown");

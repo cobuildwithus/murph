@@ -4058,7 +4058,7 @@ describe('assistant Codex turn planning', () => {
         },
       },
     })
-    expect(groupTools[0]?.description.length).toBeLessThanOrEqual(350)
+    expect(groupTools[0]?.description.length).toBeLessThanOrEqual(380)
     expect(groupTools[0]?.description).toContain(
       'current authorized scheduled group turn',
     )

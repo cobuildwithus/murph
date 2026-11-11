@@ -10,7 +10,7 @@ describe("assistant plan usage call contracts", () => {
   it("keeps plan usage a concise private read contract", () => {
     const contract = MURPH_PLAN_USAGE_TOOL.description;
 
-    expect(contract.length).toBeLessThanOrEqual(380);
+    expect(contract.length).toBeLessThanOrEqual(500);
     expect(contract).toContain("current private hosted plan");
     expect(contract).toContain("AI-usage");
     expect(contract).toContain("explicit plan, usage, billing");
@@ -50,7 +50,7 @@ describe("assistant plan usage call contracts", () => {
     const contract = MURPH_FAMILY_PLAN_TOOL.description;
     const actionSchemas = MURPH_FAMILY_PLAN_TOOL.inputSchema.oneOf;
 
-    expect(contract.length).toBeLessThanOrEqual(330);
+    expect(contract.length).toBeLessThanOrEqual(400);
     expect(actionSchemas.map((schema) => schema.properties.action.enum[0])).toEqual([
       "read_status",
       "start_checkout",
