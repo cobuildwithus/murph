@@ -1311,7 +1311,7 @@ describe("Clinical Records status page", () => {
           importedCount: 0,
           reviewCount: 0,
           runId: "crr_1",
-          status: "importing",
+          status: "retrieving",
         },
       }],
       initialLoadError: false,
@@ -1328,7 +1328,7 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     expect(rendered.container.textContent).toContain(
-      "Murph is saving the records into your private vault.",
+      "Getting records from your patient portal. You can leave this page.",
     );
     expect(rendered.container.querySelector('[role="status"]')?.textContent).toContain("Loading");
     await act(async () => {
@@ -1365,7 +1365,7 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     expect(rendered.container.textContent).not.toContain(
-      "Murph is saving the records into your private vault.",
+      "Getting records from your patient portal. You can leave this page.",
     );
     expect(rendered.container.querySelector('[role="status"]')?.textContent).not.toContain("Loading");
 
@@ -1384,7 +1384,7 @@ describe("Clinical Records status page", () => {
       createElement(RecordsPageClient, {
         authenticated: true,
         initialCallback: null,
-        initialConnections: [makeImportingConnection()],
+        initialConnections: [makeRetrievingConnection()],
         initialLoadError: false,
       }),
       { location: makeRecordsLocation(), requireButton: false },
@@ -1421,7 +1421,7 @@ describe("Clinical Records status page", () => {
       createElement(RecordsPageClient, {
         authenticated: true,
         initialCallback: null,
-        initialConnections: [makeImportingConnection()],
+        initialConnections: [makeRetrievingConnection()],
         initialLoadError: false,
       }),
       { location: makeRecordsLocation(), requireButton: false },
@@ -1462,7 +1462,7 @@ describe("Clinical Records status page", () => {
         initialLoadError: false,
       });
     const rendered = await renderClientComponent(
-      renderWithConnection(makeImportingConnection()),
+      renderWithConnection(makeRetrievingConnection()),
       { location: makeRecordsLocation(), requireButton: false },
     );
     cleanup = rendered.cleanup;
@@ -1484,7 +1484,7 @@ describe("Clinical Records status page", () => {
     }));
 
     expect(rendered.container.textContent).not.toContain(
-      "Murph is saving the records into your private vault.",
+      "Getting records from your patient portal. You can leave this page.",
     );
     expect(rendered.container.querySelector('[role="status"]')?.textContent).not.toContain("Loading");
     await act(async () => {
@@ -1502,7 +1502,7 @@ describe("Clinical Records status page", () => {
       createElement(RecordsPageClient, {
         authenticated: true,
         initialCallback: null,
-        initialConnections: [makeImportingConnection()],
+        initialConnections: [makeRetrievingConnection()],
         initialLoadError: false,
       }),
       { location: makeRecordsLocation(), requireButton: false },
@@ -1582,7 +1582,7 @@ function setInputValue(
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
 }
 
-function makeImportingConnection(): ClinicalRecordConnectionContract {
+function makeRetrievingConnection(): ClinicalRecordConnectionContract {
   return {
     ...makeConnection(),
     lastSyncCompletedAt: null,
@@ -1591,7 +1591,7 @@ function makeImportingConnection(): ClinicalRecordConnectionContract {
       importedCount: 0,
       reviewCount: 0,
       runId: "crr_1",
-      status: "importing",
+      status: "retrieving",
     },
   };
 }

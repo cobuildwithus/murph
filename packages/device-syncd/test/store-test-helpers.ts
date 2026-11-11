@@ -1,6 +1,43 @@
+import assert from "node:assert/strict";
 import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
 
 import type { SqliteDeviceSyncStore } from "../src/store.ts";
+
+type HostedAccountHydration = Parameters<SqliteDeviceSyncStore["hydrateHostedAccount"]>[0];
+type SeedStoredAccountInput = Pick<HostedAccountHydration["connection"], "provider" | "externalAccountId" | "connectedAt">
+  & Partial<Omit<HostedAccountHydration["connection"], "provider" | "externalAccountId" | "connectedAt">>
+  & Pick<HostedAccountHydration, "credential" | "tokens">
+  & { nextReconcileAt?: string | null };
+
+// Seed through hydration without claiming a prior hosted observation.
+export function seedStoredAccount(store: SqliteDeviceSyncStore, input: SeedStoredAccountInput) {
+  const { credential, tokens, nextReconcileAt, ...connection } = input;
+  const account = store.hydrateHostedAccount({
+    connection: {
+      displayName: null,
+      metadata: {},
+      scopes: [],
+      status: "active",
+      updatedAt: input.connectedAt,
+      ...connection,
+    },
+    credential,
+    tokens,
+    hostedObservedUpdatedAt: null,
+    hostedObservedTokenVersion: null,
+    localState: {
+      lastWebhookAt: null,
+      lastSyncStartedAt: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      nextReconcileAt: nextReconcileAt ?? null,
+    },
+  });
+  assert.ok(account);
+  return account;
+}
 
 export interface DeviceSyncJobRowForTesting {
   attempts: number;
@@ -30,30 +67,6 @@ export interface DeviceSyncObservationStateRowForTesting {
   local_connection_revision: number;
   local_token_revision: number;
   next_reconcile_at: string | null;
-}
-
-export interface DeviceSyncWebhookTraceLifecycleRowForTesting {
-  processing_expires_at: string | null;
-  status: string;
-  trace_id: string;
-}
-
-export interface DeviceSyncWebhookTraceRowForTesting {
-  external_account_id: string;
-  payload_json: string;
-  processing_expires_at: string | null;
-  status: string;
-}
-
-interface InsertWebhookTraceRowForTestingInput {
-  eventType: string;
-  externalAccountId: string;
-  payloadJson?: string;
-  processingExpiresAt?: string | null;
-  provider: string;
-  receivedAt: string;
-  status?: string;
-  traceId: string;
 }
 
 function withStoreDatabase<T>(
@@ -291,74 +304,4 @@ export function readObservationStateForTesting(
       from device_observation_state
       where account_id = ?
     `).get(accountId) as DeviceSyncObservationStateRowForTesting | undefined) ?? null);
-}
-
-export function insertWebhookTraceRowForTesting(
-  store: SqliteDeviceSyncStore,
-  input: InsertWebhookTraceRowForTestingInput,
-): void {
-  withStoreDatabase(store, (database) => {
-    database.prepare(`
-      insert into webhook_trace (
-        provider,
-        trace_id,
-        external_account_id,
-        event_type,
-        received_at,
-        payload_json,
-        status,
-        processing_expires_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      input.provider,
-      input.traceId,
-      input.externalAccountId,
-      input.eventType,
-      input.receivedAt,
-      input.payloadJson ?? "{}",
-      input.status ?? "processed",
-      input.processingExpiresAt ?? null,
-    );
-  });
-}
-
-export function readWebhookTraceRowForTesting(
-  store: SqliteDeviceSyncStore,
-  provider: string,
-  traceId: string,
-): DeviceSyncWebhookTraceRowForTesting | null {
-  return withStoreDatabase(store, (database) =>
-    (database.prepare(`
-      select external_account_id, payload_json, processing_expires_at, status
-      from webhook_trace
-      where provider = ?
-        and trace_id = ?
-    `).get(provider, traceId) as DeviceSyncWebhookTraceRowForTesting | undefined) ?? null);
-}
-
-export function readWebhookTraceStatusForTesting(
-  store: SqliteDeviceSyncStore,
-  provider: string,
-  traceId: string,
-): string | null {
-  return readWebhookTraceRowForTesting(store, provider, traceId)?.status ?? null;
-}
-
-export function readWebhookTraceLifecycleRowsForTesting(
-  store: SqliteDeviceSyncStore,
-  provider: string,
-): DeviceSyncWebhookTraceLifecycleRowForTesting[] {
-  return withStoreDatabase(store, (database) =>
-    (database.prepare(`
-      select trace_id, status, processing_expires_at
-      from webhook_trace
-      where provider = ?
-      order by trace_id asc
-    `).all(provider) as Array<Record<string, unknown>>).map((row) => ({
-      processing_expires_at: row.processing_expires_at === null || typeof row.processing_expires_at === "string"
-        ? row.processing_expires_at
-        : String(row.processing_expires_at),
-      status: String(row.status ?? ""),
-      trace_id: String(row.trace_id ?? ""),
-    })));
 }

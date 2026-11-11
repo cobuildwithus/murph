@@ -218,29 +218,14 @@ describe("device-sync hosted runtime helpers", () => {
     }, "user-123")).toThrow(/displayName is not supported/u);
   });
 
-  it("redacts secret-bearing hosted runtime error text across heartbeat, apply, and durable account helpers", async () => {
+  it("redacts secret-bearing hosted runtime error text across apply and durable account helpers", async () => {
     const {
       buildHostedPublicDeviceSyncAccount,
     } = await import(
       "@/src/lib/device-sync/internal-runtime"
     );
-    const {
-      parseHostedLocalHeartbeatPatch,
-    } = await import(
-      "@/src/lib/device-sync/local-heartbeat"
-    );
-
     const errorText =
       "authorization=Bearer secret-token refresh_token=refresh-secret eyJhbGciOiJIUzI1NiJ9.payload.signature";
-
-    expect(parseHostedLocalHeartbeatPatch({
-      lastErrorCode: "access_token=top-secret",
-      lastErrorMessage: errorText,
-      lastSyncErrorAt: "2026-03-26T12:00:00.000Z",
-    })).toMatchObject({
-      lastErrorCode: "access_token=[redacted]",
-      lastErrorMessage: "authorization=[redacted] refresh_token=[redacted] [redacted.jwt]",
-    });
 
     expect(parseHostedExecutionDeviceSyncRuntimeApplyRequest({
       updates: [

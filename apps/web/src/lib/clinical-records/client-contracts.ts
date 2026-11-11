@@ -13,7 +13,6 @@ export type ClinicalRecordConnectionStatus =
 export const CLINICAL_RECORD_RUN_STATUSES = [
   "queued",
   "retrieving",
-  "importing",
   "complete",
   "partial",
   "needs_reauth",

@@ -255,7 +255,7 @@ test("Junction summary continuations preserve imports and progress with one inve
 });
 
 
-test("Junction pass keeps bounded inventory separate and refreshes after history or full work", async () => {
+test("Junction pass shares bounded inventory regardless of yielding and isolates history or continuation reads", async () => {
   let inventoryReads = 0;
   const provider = createJunctionProvider(async (input) => {
     const pathname = new URL(readUrl(input)).pathname;
@@ -288,17 +288,18 @@ test("Junction pass keeps bounded inventory separate and refreshes after history
   await pass.executeJob(context, resource);
   assert.equal(inventoryReads, 2);
   await pass.executeJob({ ...context, shouldYield: undefined }, reconcile);
-  assert.equal(inventoryReads, 3);
+  assert.equal(inventoryReads, 2);
   await pass.executeJob(context, reconcile);
+  assert.equal(inventoryReads, 2);
+  await pass.executeJob(context, createJob("backfill", window));
+  await pass.executeJob(context, createJob("backfill", window));
   assert.equal(inventoryReads, 4);
-  await pass.executeJob(context, createJob("backfill", window));
-  await pass.executeJob(context, createJob("backfill", window));
-  assert.equal(inventoryReads, 6);
   await pass.executeJob(context, reconcile);
-  assert.equal(inventoryReads, 7);
+  assert.equal(inventoryReads, 5);
   await pass.executeJob(context, createJob("reconcile", {
     ...window, timeseriesCursor: window.windowStart, timeseriesResourceCursor: "blood_oxygen",
   }));
+  assert.equal(inventoryReads, 5); // Unscoped continuation clears the cache without reading inventory.
   await pass.executeJob(context, reconcile);
-  assert.equal(inventoryReads, 8);
+  assert.equal(inventoryReads, 6);
 });

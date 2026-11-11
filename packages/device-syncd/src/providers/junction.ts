@@ -1232,20 +1232,6 @@ export function createJunctionDeviceSyncProvider(
     return current ? resolveCurrentSummaryWindow(now, reconcileDays) : window;
   }
 
-  function appendUnboundedReconcileSummaries(
-    proof: JunctionReconcileProof | null, summaryPhaseComplete: boolean,
-    summaries: Record<string, unknown[]>,
-  ): JunctionReconcileProof | null {
-    if (!proof || summaryPhaseComplete) return proof;
-    for (const unit of buildReconcileSummaryResourceUnits(summaryResources)) {
-      proof = appendReconcileSnapshots(proof, "summary", Object.fromEntries(
-        unit.filter((resource) => resource !== JUNCTION_PROFILE_SUMMARY_RESOURCE)
-          .map((resource) => [resource, summaries[resource] ?? []]),
-      ));
-    }
-    return proof;
-  }
-
   function buildReconcileProofMetadata(
     proof: JunctionReconcileProof | null, skipped: readonly JunctionSkippedOptionalResource[],
   ): Record<string, unknown> {
@@ -1844,7 +1830,6 @@ export function createJunctionDeviceSyncProvider(
     let boundedProfileMetadataPatch: Record<string, unknown> = {};
     if (
       job.kind === "reconcile"
-      && context.shouldYield
       && job.payload.summaryPhaseComplete !== true
     ) {
       const boundedSummaryResult = await executeBoundedSummaryReconcile({
@@ -1954,7 +1939,6 @@ export function createJunctionDeviceSyncProvider(
         context.now,
       );
     }
-    reconcileProof = appendUnboundedReconcileSummaries(reconcileProof, summaryPhaseComplete, summaries);
     const historicalProviderRecordsSeen = sourceProviderSlug !== null
       && (
         job.payload.historicalProviderRecordsSeen === true
@@ -2719,7 +2703,7 @@ export function createJunctionDeviceSyncProvider(
     job: DeviceSyncJobRecord,
     passInventories?: Map<string, readonly JunctionProviderConnection[]>,
   ) {
-    const boundedReconcile = job.kind === "reconcile" && Boolean(context.shouldYield);
+    const boundedReconcile = job.kind === "reconcile";
     // Historical attempts and calendar repair require their own inventory read.
     const inventoryKey = passInventories
       && (job.kind === "resource" || boundedReconcile)

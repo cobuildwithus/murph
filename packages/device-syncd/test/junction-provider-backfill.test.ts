@@ -1389,7 +1389,7 @@ test("Junction retrying historical backfill without attempts uses the first retr
   assert.equal(due?.nextReconcileAt, "2026-04-04T06:16:00.000Z");
 });
 
-test.each([false, true])("Junction summary reconcile keeps complete units in one job and yields the exact suffix (yield: %s)", async (yieldAfterActivity) => {
+test.each([undefined, false, true])("Junction summary reconcile keeps complete units with or without a yield callback (yield: %s)", async (yieldAfterActivity) => {
   const requestsByPass: string[][] = [];
   const importedSnapshots: unknown[] = [];
   let activePass = 0;
@@ -1434,7 +1434,9 @@ test.each([false, true])("Junction summary reconcile keeps complete units in one
       importedSnapshots.push(snapshot);
       return { imported: true };
     },
-    shouldYield: () => yieldAfterActivity && importedSnapshots.length >= 1 && activePass === 0,
+    shouldYield: yieldAfterActivity === undefined
+      ? undefined
+      : () => yieldAfterActivity && importedSnapshots.length >= 1 && activePass === 0,
   });
   let job = createJob("reconcile", {
     windowEnd: "2026-04-03T00:00:00.000Z",

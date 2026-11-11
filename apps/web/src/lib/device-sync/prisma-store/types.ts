@@ -101,12 +101,6 @@ export interface HostedDeviceSyncDueReconcileConnectionRecord {
   nextReconcileAt: string;
 }
 
-export type HostedConnectionRefreshLeaseClaimResult =
-  | { status: "claimed" }
-  | { status: "in_progress"; leaseExpiresAt: string }
-  | { status: "stale" }
-  | { status: "version_changed" };
-
 export interface UpsertHostedDeviceSyncDirtyConnectionInput {
   connectionId: string;
   userId: string;
@@ -122,48 +116,6 @@ export interface UpsertHostedDeviceSyncDirtyConnectionInput {
 export interface UpsertHostedDeviceSyncDirtyConnectionResult {
   dirty: HostedDeviceSyncDirtyConnectionRecord;
   shouldRequestWake: boolean;
-}
-
-export type HostedTokenAuditAction = "token_exported" | "token_refreshed";
-
-export type HostedTokenAuditChannel = "agent_export" | "agent_refresh";
-export type HostedTokenAuditRefreshOutcome =
-  | "performed"
-  | "skipped_fresh"
-  | "skipped_version_mismatch";
-
-export interface HostedTokenAuditRecord {
-  id: number;
-  userId: string;
-  connectionId: string;
-  provider: string;
-  action: HostedTokenAuditAction;
-  channel: HostedTokenAuditChannel;
-  sessionId: string | null;
-  tokenVersion: number;
-  keyVersion: string;
-  expectedTokenVersion: number | null;
-  forceRefresh: boolean | null;
-  refreshOutcome: HostedTokenAuditRefreshOutcome | null;
-  tokenVersionChanged: boolean | null;
-  createdAt: string;
-}
-
-export interface CreateHostedTokenAuditInput {
-  userId: string;
-  connectionId: string;
-  provider: string;
-  action: HostedTokenAuditAction;
-  channel: HostedTokenAuditChannel;
-  sessionId?: string | null;
-  tokenVersion: number;
-  keyVersion: string;
-  expectedTokenVersion?: number | null;
-  forceRefresh?: boolean | null;
-  refreshOutcome?: HostedTokenAuditRefreshOutcome | null;
-  tokenVersionChanged?: boolean | null;
-  createdAt?: string;
-  tx?: HostedPrismaTransactionClient;
 }
 
 export interface CreateHostedSignalInput {

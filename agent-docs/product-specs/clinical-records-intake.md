@@ -352,7 +352,11 @@ source-note identity or content on replay.
 Preemption requeues the same run without discarding or replaying completed page
 progress. Web current-run authority is checked immediately before raw evidence
 persistence and immediately before canonical mutation. Final
-outcomes are idempotent under JSON key reordering. Runtime checkpoints use v4;
+outcomes are idempotent under JSON key reordering. The outcome receipt is the
+only persisted owner of imported and review counts; connection responses derive
+those counts from the receipt. Active work uses `queued` and `retrieving` through
+canonical import; `importing` is a retired, never-produced phase normalized to
+`retrieving` before reader deployment. Runtime checkpoints use v4;
 only the external snapshot importer retains local v2/v3 manifest compatibility.
 The hosted writer emits v3 manifests and derives outgoing pagination edges
 from raw Bundles, preserving root/reachability/cycle/family/base validation.

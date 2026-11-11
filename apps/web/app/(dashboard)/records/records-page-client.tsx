@@ -458,8 +458,6 @@ function describeRun(run: ClinicalRecordConnectionContract["latestRun"]): {
       return { badgeVariant: "secondary", detail: "Murph is waiting to copy records from your patient portal.", label: "Waiting to start" };
     case "retrieving":
       return { badgeVariant: "secondary", detail: "Getting records from your patient portal. You can leave this page.", label: "Getting records" };
-    case "importing":
-      return { badgeVariant: "secondary", detail: "Murph is saving the records into your private vault.", label: "Saving records" };
     case "complete":
       return importedCount > 0
         ? { badgeVariant: "default", detail: "Your records are saved and ready for conversations with Murph.", label: "Imported" }
@@ -525,8 +523,7 @@ function isImportInProgress(connection: ClinicalRecordConnectionContract): boole
   const status = connection.latestRun?.status;
   return status === undefined
     || status === "queued"
-    || status === "retrieving"
-    || status === "importing";
+    || status === "retrieving";
 }
 
 function formatDate(value: string): string {

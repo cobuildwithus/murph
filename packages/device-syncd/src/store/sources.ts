@@ -856,62 +856,6 @@ export function upsertPreparedConnectionSourceInTransaction(
   )!;
 }
 
-/**
- * Records that an inbound payload carried data for this source. Matching is by
- * provider slug because that is what the webhook envelope names; a connection
- * can hold more than one instance of the same provider, and every one of them
- * is fed by the same upstream carrier.
- *
- * This never creates a source row. A payload that arrives before the connect
- * projection has recorded the source leaves nothing to stamp, and staleness
- * evaluation falls back to `first_seen_at` for a source that has never
- * delivered.
- */
-export function markConnectionSourceDataReceived(
-  database: DatabaseSync,
-  input: {
-    connectionId: string;
-    now: string;
-    sourceProviderSlug: string;
-  },
-): number {
-  const connectionId = normalizeRequiredBoundedString(
-    input.connectionId,
-    "connectionId",
-    SOURCE_INSTANCE_KEY_MAX_LENGTH,
-  );
-  const requestedSourceProviderSlug = normalizeRequiredSourceSlug(
-    input.sourceProviderSlug,
-    "sourceProviderSlug",
-    SOURCE_PROVIDER_SLUG_MAX_LENGTH,
-  );
-  const isJunctionConnection = readConnectionProvider(database, connectionId) === "junction";
-  const canonicalProviderSlug = isJunctionConnection
-    ? canonicalizeJunctionProviderSlug(requestedSourceProviderSlug) ?? requestedSourceProviderSlug
-    : requestedSourceProviderSlug;
-  const junctionSlugs = isJunctionConnection
-    ? listJunctionSourceIdentitySlugs(canonicalProviderSlug)
-    : null;
-  const sourcePredicate = junctionSlugs
-    ? `source_provider_slug in (${junctionSlugs.map(() => "?").join(", ")})`
-    : "source_provider_slug = ?";
-  const sourceParams = junctionSlugs
-    ? junctionSlugs
-    : [canonicalProviderSlug];
-  const now = toIsoTimestamp(input.now);
-
-  const result = database.prepare(`
-    update device_connection_source
-    set last_data_at = ?,
-        updated_at = ?
-    where connection_id = ?
-      and ${sourcePredicate}
-      and (last_data_at is null or last_data_at < ?)
-  `).run(now, now, connectionId, ...sourceParams, now);
-
-  return Number(result.changes ?? 0);
-}
-
 export function listConnectionSources(
   database: DatabaseSync,
   input: ListDeviceConnectionSourcesInput,

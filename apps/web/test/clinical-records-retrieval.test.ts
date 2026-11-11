@@ -302,7 +302,7 @@ describe("Clinical Records retrieval control plane", () => {
       errorCode: "authorization-required", counts: { ...outcomeCounts(), createdCount: 1, fetchedPageCount: 1 } };
     await recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request });
     await recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request });
-    expect(harness.state.run.importedCount).toBe(1);
+    expect(harness.state.run.outcomeCountsJson).toMatchObject({ createdCount: 1 });
     expect(harness.state.run.connection.status).toBe("needs_reauth");
     await expect(recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request: { ...request, counts: { ...request.counts, createdCount: 2 } } }))
       .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
@@ -1759,7 +1759,6 @@ function buildRun(
     generation: 1,
     grantedScopesJson: ["patient/Patient.rs", "patient/Observation.rs"],
     id: RUN_ID,
-    importedCount: 0,
     lastErrorCode: null as string | null,
     memberId: MEMBER_ID,
     outcomeCountsJson: null as Record<string, unknown> | null,
@@ -1773,7 +1772,6 @@ function buildRun(
         })
       : null as Record<string, unknown> | null,
     retrievalProtocol,
-    reviewCount: 0,
     status: "queued",
   };
 }

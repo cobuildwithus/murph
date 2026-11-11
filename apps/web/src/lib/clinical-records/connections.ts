@@ -43,9 +43,7 @@ export async function listClinicalRecordConnectionsForMember(
         select: {
           completedAt: true,
           id: true,
-          importedCount: true,
           outcomeCountsJson: true,
-          reviewCount: true,
           status: true,
         },
         take: 1,
@@ -73,10 +71,10 @@ export async function listClinicalRecordConnectionsForMember(
       latestRun: latestRun
         ? {
             completedAt: latestRun.completedAt?.toISOString() ?? null,
-            importedCount: latestRun.importedCount,
+            importedCount: outcomeCount(latestRun.outcomeCountsJson, "createdCount"),
             labResultCount: outcomeCount(latestRun.outcomeCountsJson, "labResultCount"),
             skippedExistingCount: outcomeCount(latestRun.outcomeCountsJson, "skippedExistingCount"),
-            reviewCount: latestRun.reviewCount,
+            reviewCount: outcomeCount(latestRun.outcomeCountsJson, "reviewDecisionCount"),
             runId: latestRun.id,
             status: requireKnownStatus(latestRun.status, CLINICAL_RECORD_RUN_STATUSES, "run"),
           }
@@ -134,7 +132,7 @@ export async function disconnectClinicalRecordConnection(input: {
         connectionId: input.connectionId,
         memberId: auth.member.id,
         OR: [
-          { completedAt: null, status: { in: ["queued", "retrieving", "importing"] } },
+          { completedAt: null, status: { in: ["queued", "retrieving"] } },
           { status: "needs_reauth", outcomeCountsJson: { equals: Prisma.DbNull } },
         ],
       },

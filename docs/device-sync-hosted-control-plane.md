@@ -1,21 +1,22 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-08-16
+Last verified against repo layout: 2026-11-10
 
 ## Current split
 
 Murph's hosted device-sync stack is now split this way:
 
-- `apps/web` is the canonical hosted control plane. It owns durable hosted device-sync facts in Postgres, including connection ownership, OAuth/session state, short-lived hosted connect intents, token-audit history, sparse sync signals, per-connection dirty state for webhook freshness, local-agent sessions, and the web-owned internal runtime snapshot/apply/connect-link/reconcile/dirty-state/pending/ack routes.
+- `apps/web` is the canonical hosted control plane. It owns durable hosted device-sync facts in Postgres, including connection ownership, OAuth/session state, short-lived hosted connect intents, token-audit history, sparse sync signals, per-connection dirty state for webhook freshness, hosted agent sessions, and the web-owned internal runtime snapshot/apply/connect-link/reconcile/dirty-state/pending/ack routes.
 - `apps/cloudflare` is the hosted execution plane only. During a hosted job it may call narrow signed web callbacks to fetch the current device-sync runtime snapshot, apply runtime updates, or start a provider connect link, but it is not a second durable device-sync control plane.
 - `apps/cloudflare` also owns encrypted, non-canonical Queue transport for provider webhook bursts. Queue and its encrypted DLQ are delivery buffers only; they own no connection, trace, dirty, consent, lifecycle, or health fact.
-- local `device-syncd` remains the data plane that talks to provider APIs, normalizes provider payloads through `@murphai/importers`, and writes canonical health records into the local vault.
+- hosted `device-syncd` remains the data plane that talks to provider APIs, normalizes provider payloads through `@murphai/importers`, and writes canonical health records into the local vault.
 
 This is the live repo shape, not a future rollout plan.
 
 ## Shared ingress seam
 
-`@murphai/device-syncd/public-ingress` remains the reusable callback and webhook core shared across local and hosted surfaces. It owns:
+`@murphai/device-syncd/public-ingress` is the callback and webhook core composed
+only by the hosted Web control plane. It owns:
 
 - provider connect URL creation
 - OAuth state validation
@@ -24,10 +25,9 @@ This is the live repo shape, not a future rollout plan.
 - duplicate webhook trace suppression
 - dispatch into store-specific side effects
 
-That seam is reused by:
-
-- local `device-syncd` when operators expose or tunnel callback and webhook routes
-- the hosted Next.js control plane in `apps/web`
+The hosted Next.js control plane in `apps/web` supplies its Prisma adapter.
+The worker does not expose connection callbacks, webhook ingress, or public
+disconnect methods and does not maintain SQLite OAuth states or webhook traces.
 
 It does not own canonical health-data import, token authority, or canonical hosted control facts.
 
@@ -42,7 +42,6 @@ It does not own canonical health-data import, token authority, or canonical host
 - public webhook routes
 - provider-account ownership mapping through blind indexes plus opaque connection ids
 - durable Postgres-owned connection summaries, webhook traces, token-audit history, sparse wake signals, per-connection dirty aggregates, and agent-session state
-- token export and refresh flows for the local agent
 - disconnect, pairing, and other hosted operational control flows
 - the signed internal runtime snapshot, runtime apply, dirty-state fetch/pending/ack, and connect-target link routes consumed by hosted execution
 - validation and durable mailbox handoff for hosted manual reconcile requests
@@ -71,13 +70,13 @@ It does not own canonical health-data import, token authority, or canonical host
 - maintain a second canonical runtime snapshot store for device sync
 - replace `apps/web` as the device-sync control plane
 
-### Local `device-syncd`
+### Hosted `device-syncd` worker
 
-Local `device-syncd` remains responsible for:
+The worker is responsible for:
 
 - local token cache and reconcile state
 - scheduled reconcile and backfill execution
-- direct provider API fetches for configured direct providers such as WHOOP, Oura, and Strava, plus Junction-backed targets such as Garmin when configured
+- Junction API fetches for configured source targets
 - normalization and import through `@murphai/importers`
 - all canonical vault writes for wearable data
 
@@ -119,7 +118,9 @@ The local boundary may hold:
 - local sync schedules
 - the vault path and canonical write capability
 
-Local agents authenticate to hosted APIs with a server-to-server credential tied to one Murph user account and never shared with the browser runtime.
+The hosted runner authenticates to Web runtime routes with signed server-to-server
+requests bound to the current member. Companion bearer sessions use the shared
+hosted agent-session owner.
 
 ## Durable state placement
 
@@ -132,7 +133,7 @@ Postgres remains required for hosted device sync because Vercel does not provide
 - public connection metadata and token-audit history
 - webhook dedupe and device-sync dirty coalescing
 - sparse wake signals
-- local-agent pairing and session records
+- hosted agent pairing and session records
 
 Recommended durable tables remain:
 
@@ -435,14 +436,14 @@ above. The derived route accepts only the closed overnight summary contract,
 reuses one active member-owned Junction connection, and never establishes or
 reactivates a lane from data ingress.
 
-### Hosted local-agent routes
+### Hosted agent sessions
 
-- `POST /api/device-sync/agent/connections/:connectionId/export-token-bundle`
-- `POST /api/device-sync/agent/connections/:connectionId/refresh-token-bundle`
+- `POST /api/device-sync/agents/pair`
 - `POST /api/device-sync/agent/session/revoke`
-- `POST /api/device-sync/agent/connections/:connectionId/local-heartbeat`
 
-These are authenticated by local-agent credentials, not browser cookies.
+Pairing and revocation use the shared hosted agent-session owner. Companion
+authentication remains supported. Token export, token refresh and local heartbeat
+routes retired with local wearable execution; provider credentials stay hosted.
 
 ### Hosted internal runtime/control routes
 
@@ -536,8 +537,7 @@ The current hosted runtime strategy is:
 3. The hosted runner fetches pending dirty device-sync rows from web-owned Postgres as a normal work source; webhook freshness does not depend on immutable per-webhook mailbox payloads.
 4. The hosted job sends narrow runtime updates back through the signed internal web apply route.
 5. Dirty revisions are acknowledged through the dirty-ack route only after the dirty state has been converted into local runtime work and that local work has crossed the checkpoint boundary. Exact payload rows stay hosted while their machine-local jobs are queued so a cold restore can reconstruct them, but the checkpoint result carries the local scheduler's future wake instead of immediately replaying retained work. A source-scoped resource job carries a bounded canonical-import receipt through that same checkpoint only when the committed importer result contains that exact normalized source and resource and the job then completes; generic job success or an import for another identity is not freshness evidence. Scheduled verification, reconciliation, and broad backfill children never inherit the original payload's freshness authority. Web records the receipt only when the named payload row still exists, in the same short transaction that deletes the row, so exact callback replay cannot create duplicate freshness evidence. Generic rows acknowledge on executed local success or terminal failure. Work marked complete only because of a machine-local disconnect remains hosted until the next authoritative control-plane snapshot either restores the active account and replays it or explicitly terminally dispositions it. A verified companion overnight PRV row acknowledges only after canonical import success; canonical-owner failures and expired worker leases retain that same job beyond the ordinary attempt fence and follow the local scheduler's bounded future retry instead of creating dead replacement rows. A structurally invalid companion payload is different: its exact terminal code promotes the hosted payload acknowledgement after one dead local job so it cannot replay into unbounded replacement rows.
-6. Local-agent token export and refresh flows stay on the hosted web boundary.
-7. Cloudflare does not keep a second durable token-escrow source of truth for device sync.
+6. Cloudflare does not keep a second durable token-escrow source of truth for device sync.
 
 This keeps control-plane truth in web while still allowing hosted execution to consume the runtime state it needs during a job.
 
@@ -569,21 +569,39 @@ recovery changes otherwise use the existing wake and checkpoint contracts;
 older runtimes can process the recovery wake, but can still lose ownership in
 the acknowledgement race. No schema change or new rollback floor is introduced.
 
-The local device-sync SQLite schema is version 11. Its bounded
+The local device-sync SQLite schema is version 12; it drops the retired local
+OAuth-state and webhook-trace tables. Their Web-owned counterparts remain.
+Its bounded
 `device_job.canonical_import_receipts_json` column is written atomically with
 job success from the exact normalized source/resource identities already
 derived from committed canonical events. No continuation relation or wake-hint
-ownership state exists. A Cloudflare/runtime rollback below schema v11 cannot
+ownership state exists. A Cloudflare/runtime rollback below schema v12 cannot
 open a workspace that has already advanced; recover with a forward deployment
 rather than a binary downgrade.
 
 Disconnect intent is also web-owned control-plane truth. Once the connection
 mutation lock commits `DISCONNECT_IN_PROGRESS`, the signed runtime apply route
 rejects every connection, local-state, credential, and source write for that
-connection until the provider revoke finalizes; authenticated local heartbeats
-receive the same retryable conflict without persisting sync timestamps. Dirty-payload acknowledgement
+connection until the provider revoke finalizes. Dirty-payload acknowledgement
 remains a separate path, so a companion import that already reached canonical
 success may still acknowledge its exact hosted payload.
+
+### Junction reconciliation and retained progress
+
+Every reconciliation uses bounded summary resource units and bounded provider
+inventory reads, whether or not the caller provides a yield callback. Yielding
+changes when the existing continuation is emitted; it does not select a second
+fetch/import algorithm. Coupled sleep summaries and sleep cycles remain one
+canonical import unit. Backfill retains its separate historical-window policy.
+
+New full-job timeseries continuations write a scalar resource cursor. The reader
+still accepts the previous canonical `{v,a,i}` cursor envelope, and the job
+manifest still accepts the obsolete `temporalAuthorityDayKey` hint. Neither
+format may be removed based on age: queued work and cold runner checkpoints can
+retain them. Retirement requires evidence that all supported stored checkpoints
+and retained hints have drained or been upgraded, plus a cold-restore scenario
+using the oldest supported checkpoint. No such production drain is established
+by this code cleanup. Keep the reader until that gate is met.
 
 ### Companion overnight deployment compatibility
 
@@ -628,7 +646,7 @@ webhook endpoints. Generic routes reject providers absent from the registry.
 Hosted responsibilities:
 
 - Junction connect-target link generation with Garmin carried as the Junction source provider
-- hosted web token refresh and agent export flows through the Junction provider manifest
+- hosted provider-config credential ownership through the Junction provider manifest
 - execution-time runtime snapshot/apply access when a hosted job needs it
 
 Local responsibilities:

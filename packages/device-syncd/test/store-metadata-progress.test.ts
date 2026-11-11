@@ -1,3 +1,4 @@
+import { seedStoredAccount } from "./store-test-helpers.ts";
 import { describe, expect, it } from "vitest";
 
 import { SqliteDeviceSyncStore } from "../src/store.ts";
@@ -23,7 +24,7 @@ describe("bounded sync-result metadata", () => {
         ...progress,
       };
       try {
-        const account = store.upsertAccount({
+        const account = seedStoredAccount(store, {
           provider: "junction",
           externalAccountId: "synthetic-progress-account",
           credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },

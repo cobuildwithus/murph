@@ -2683,7 +2683,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(connection.refreshLeaseOwner).toBe("agent-refresh:active");
   });
 
-  it("claims, classifies, and clears refresh leases by owner", async () => {
+  it("clears historical malformed refresh leases without deleting credentials", async () => {
     let connection = createConnection({
       provider: "oura",
       refreshLeaseExpiresAt: null,
@@ -2699,29 +2699,6 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       where: Record<string, unknown>;
     }) => {
       if (input.where.id !== connection.id) {
-        return { count: 0 };
-      }
-
-      if (typeof input.data.refreshLeaseOwner === "string") {
-        if (
-          input.where.userId === connection.userId
-          && input.where.tokenVersion === connection.tokenVersion
-          && input.where.refreshLeaseExpiresAt === null
-          && input.where.refreshLeaseOwner === null
-          && input.where.refreshLeaseTokenVersion === null
-          && connection.refreshLeaseExpiresAt === null
-          && connection.refreshLeaseOwner === null
-          && connection.refreshLeaseTokenVersion === null
-        ) {
-          connection = {
-            ...connection,
-            refreshLeaseExpiresAt: input.data.refreshLeaseExpiresAt ?? null,
-            refreshLeaseOwner: input.data.refreshLeaseOwner,
-            refreshLeaseTokenVersion: input.data.refreshLeaseTokenVersion ?? null,
-          };
-          return { count: 1 };
-        }
-
         return { count: 0 };
       }
 
@@ -2761,76 +2738,6 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
-
-    await expect(store.claimConnectionRefreshLease({
-      connectionId: "dsc_123",
-      userId: "user-123",
-      tokenVersion: 2,
-      leaseOwner: "agent-refresh:owner-1",
-      leaseExpiresAt: "2026-03-26T03:05:00.000Z",
-      now: "2026-03-26T03:00:00.000Z",
-    })).resolves.toEqual({ status: "claimed" });
-    expect(connection.refreshLeaseOwner).toBe("agent-refresh:owner-1");
-
-    await expect(store.claimConnectionRefreshLease({
-      connectionId: "dsc_123",
-      userId: "user-123",
-      tokenVersion: 2,
-      leaseOwner: "agent-refresh:owner-2",
-      leaseExpiresAt: "2026-03-26T03:06:00.000Z",
-      now: "2026-03-26T03:01:00.000Z",
-    })).resolves.toEqual({
-      status: "in_progress",
-      leaseExpiresAt: "2026-03-26T03:05:00.000Z",
-    });
-
-    connection = {
-      ...connection,
-      refreshLeaseExpiresAt: new Date("2026-03-26T02:59:00.000Z"),
-    };
-    await expect(store.claimConnectionRefreshLease({
-      connectionId: "dsc_123",
-      userId: "user-123",
-      tokenVersion: 2,
-      leaseOwner: "agent-refresh:owner-3",
-      leaseExpiresAt: "2026-03-26T03:06:00.000Z",
-      now: "2026-03-26T03:00:00.000Z",
-    })).resolves.toEqual({ status: "stale" });
-
-    connection = {
-      ...connection,
-      refreshLeaseExpiresAt: null,
-      refreshLeaseOwner: null,
-      refreshLeaseTokenVersion: null,
-      tokenVersion: 3,
-    };
-    await expect(store.claimConnectionRefreshLease({
-      connectionId: "dsc_123",
-      userId: "user-123",
-      tokenVersion: 2,
-      leaseOwner: "agent-refresh:owner-4",
-      leaseExpiresAt: "2026-03-26T03:06:00.000Z",
-      now: "2026-03-26T03:00:00.000Z",
-    })).resolves.toEqual({ status: "version_changed" });
-
-    connection = {
-      ...connection,
-      refreshLeaseExpiresAt: new Date("2026-03-26T03:06:00.000Z"),
-      refreshLeaseOwner: "agent-refresh:clear",
-      refreshLeaseTokenVersion: 3,
-    };
-    await expect(store.clearConnectionRefreshLease({
-      connectionId: "dsc_123",
-      leaseOwner: "agent-refresh:wrong",
-    })).resolves.toBe(false);
-    expect(connection.refreshLeaseOwner).toBe("agent-refresh:clear");
-    await expect(store.clearConnectionRefreshLease({
-      connectionId: "dsc_123",
-      leaseOwner: "agent-refresh:clear",
-    })).resolves.toBe(true);
-    expect(connection.refreshLeaseOwner).toBeNull();
-    expect(connection.refreshLeaseExpiresAt).toBeNull();
-    expect(connection.refreshLeaseTokenVersion).toBeNull();
 
     connection = {
       ...connection,

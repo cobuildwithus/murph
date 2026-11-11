@@ -46,7 +46,6 @@ test("hosted runtime device-sync helper closes the store when service creation t
     createHostedRuntimeDeviceSyncService({
       secret: "secret-for-tests",
       config: {
-        publicBaseUrl: "https://sync.example.test/device-sync",
         vaultRoot: "/tmp/vault-root",
       },
       providers: [],
@@ -176,7 +175,6 @@ function captureHostedDeviceSyncImporter(
   createHostedRuntimeDeviceSyncService({
     secret: "secret-for-tests",
     config: {
-      publicBaseUrl: "https://sync.example.test/device-sync",
       vaultRoot: "/tmp/vault-root",
     },
     importer,

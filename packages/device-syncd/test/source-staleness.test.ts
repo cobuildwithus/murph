@@ -1,3 +1,4 @@
+import { seedStoredAccount } from "./store-test-helpers.ts";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -195,12 +196,12 @@ test("recovery notices require prior delivery, a connected source, and explicit 
   }
 });
 
-test("device sync store records source data arrival without letting reconcile move it", async () => {
+test("device sync store preserves hydrated source data arrival through reconcile", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-source-arrival");
   const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
 
   try {
-    const connection = store.upsertAccount({
+    const connection = seedStoredAccount(store, {
       provider: "aggregator",
       externalAccountId: "aggregator-account",
       displayName: "Aggregator",
@@ -219,14 +220,11 @@ test("device sync store records source data arrival without letting reconcile mo
     });
     assert.equal(created.lastDataAt, null, "a new source has not delivered yet");
 
-    assert.equal(
-      store.markConnectionSourceDataReceived({
-        connectionId: connection.id,
-        now: "2026-07-02T00:00:00.000Z",
-        sourceProviderSlug: "garmin",
-      }),
-      1,
-    );
+    store.upsertConnectionSource({
+      ...created,
+      lastDataAt: "2026-07-02T00:00:00.000Z",
+      lastSeenAt: "2026-07-02T00:00:00.000Z",
+    });
 
     const [afterArrival] = store.listConnectionSources({ connectionId: connection.id });
     assert.equal(afterArrival?.lastDataAt, "2026-07-02T00:00:00.000Z");
@@ -253,69 +251,6 @@ test("device sync store records source data arrival without letting reconcile mo
       }).map((entry) => entry.reason),
       ["stopped_delivering"],
     );
-  } finally {
-    store.close();
-    await rm(tempDir, { force: true, recursive: true });
-  }
-});
-
-test("source data arrival only moves forward and only for the delivering source", async () => {
-  const tempDir = await makeTempDirectory("murph-device-syncd-source-arrival-scope");
-  const store = new SqliteDeviceSyncStore(path.join(tempDir, "state.sqlite"));
-
-  try {
-    const connection = store.upsertAccount({
-      provider: "aggregator",
-      externalAccountId: "aggregator-account",
-      displayName: "Aggregator",
-      scopes: [],
-      credential: { kind: "none" },
-      metadata: {},
-      connectedAt: "2026-07-01T00:00:00.000Z",
-    });
-
-    for (const sourceProviderSlug of ["garmin", "oura"]) {
-      store.upsertConnectionSource({
-        connectionId: connection.id,
-        sourceInstanceKey: `src_${sourceProviderSlug}`,
-        sourceProviderSlug,
-        status: "connected",
-        lastSeenAt: "2026-07-01T00:00:00.000Z",
-      });
-    }
-
-    store.markConnectionSourceDataReceived({
-      connectionId: connection.id,
-      now: "2026-07-05T00:00:00.000Z",
-      sourceProviderSlug: "oura",
-    });
-
-    const bySlug = new Map(
-      store
-        .listConnectionSources({ connectionId: connection.id })
-        .map((source) => [source.sourceProviderSlug, source]),
-    );
-    assert.equal(bySlug.get("oura")?.lastDataAt, "2026-07-05T00:00:00.000Z");
-    assert.equal(
-      bySlug.get("garmin")?.lastDataAt,
-      null,
-      "a live sibling source must not mask a silent one",
-    );
-
-    // Out-of-order redelivery must not rewind the signal.
-    assert.equal(
-      store.markConnectionSourceDataReceived({
-        connectionId: connection.id,
-        now: "2026-07-03T00:00:00.000Z",
-        sourceProviderSlug: "oura",
-      }),
-      0,
-    );
-    const [oura] = store.listConnectionSources({
-      connectionId: connection.id,
-      sourceProviderSlug: "oura",
-    });
-    assert.equal(oura?.lastDataAt, "2026-07-05T00:00:00.000Z");
   } finally {
     store.close();
     await rm(tempDir, { force: true, recursive: true });

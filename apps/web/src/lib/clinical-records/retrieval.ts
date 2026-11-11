@@ -93,7 +93,7 @@ const TERMINAL_RUN_STATUSES = new Set([
   "failed",
   "canceled",
 ]);
-const ACTIVE_RUN_STATUSES = new Set(["queued", "retrieving", "importing"]);
+const ACTIVE_RUN_STATUSES = new Set(["queued", "retrieving"]);
 
 type ClinicalRetrievalTx = Prisma.TransactionClient;
 
@@ -582,8 +582,6 @@ export async function recordClinicalRetrievalOutcome(input: {
       await tx.clinicalRecordRetrievalRun.update({
         where: { id: run.id },
         data: {
-          importedCount: input.request.counts.createdCount,
-          reviewCount: input.request.counts.reviewDecisionCount,
           outcomeCountsJson: { ...input.request.counts },
         },
       });
@@ -634,10 +632,8 @@ export async function recordClinicalRetrievalOutcome(input: {
     const updatedRun = await tx.clinicalRecordRetrievalRun.updateMany({
       data: {
         completedAt: now,
-        importedCount: input.request.counts.createdCount,
         lastErrorCode: input.request.errorCode ?? null,
         outcomeCountsJson: { ...input.request.counts },
-        reviewCount: input.request.counts.reviewDecisionCount,
         status: storedStatus,
       },
       where: {

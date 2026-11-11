@@ -102,8 +102,7 @@ describe("Clinical Records connection lifecycle", () => {
       retrievalRuns: [{
         completedAt: new Date("2026-07-10T18:05:00.000Z"),
         id: "crr_1",
-        importedCount: 4,
-        reviewCount: 1,
+        outcomeCountsJson: { createdCount: 4, reviewDecisionCount: 1 },
         status: "complete",
       }],
       sourceSystem: "epic-fhir",
@@ -122,9 +121,7 @@ describe("Clinical Records connection lifecycle", () => {
           select: {
             completedAt: true,
             id: true,
-            importedCount: true,
             outcomeCountsJson: true,
-            reviewCount: true,
             status: true,
           },
           take: 1,
@@ -137,7 +134,9 @@ describe("Clinical Records connection lifecycle", () => {
     expect(connections).toEqual([expect.objectContaining({
       connectionId: "crc_1",
       lastErrorCode: null,
-      latestRun: expect.objectContaining({ runId: "crr_1", status: "complete" }),
+      latestRun: expect.objectContaining({
+        importedCount: 4, reviewCount: 1, runId: "crr_1", status: "complete",
+      }),
       status: "active",
     })]);
     expect(JSON.stringify(connections)).not.toContain("sealed-");

@@ -1906,18 +1906,30 @@ describe("resolveHostedDeviceSyncNextWakeAt", () => {
     );
 
     try {
-      const account = store.upsertAccount({
-        provider: "junction",
-        externalAccountId: "junction-account",
-        displayName: "Junction Account",
-        scopes: ["offline"],
+      const account = store.hydrateHostedAccount({
+        connection: {
+          provider: "junction",
+          externalAccountId: "junction-account",
+          connectedAt: "2026-04-08T00:00:00.000Z",
+          displayName: "Junction Account",
+          scopes: ["offline"],
+          metadata: {},
+          status: "active",
+          updatedAt: "2026-04-08T00:00:00.000Z",
+        },
         tokens: {
           accessToken: "access-token",
           accessTokenEncrypted: "enc:access-token",
         },
-        connectedAt: "2026-04-08T00:00:00.000Z",
-        nextReconcileAt: "2026-04-08T01:00:00.000Z",
+        hostedObservedUpdatedAt: null,
+        hostedObservedTokenVersion: null,
+        localState: {
+          lastErrorCode: null, lastErrorMessage: null, lastSyncCompletedAt: null,
+          lastSyncErrorAt: null, lastSyncStartedAt: null, lastWebhookAt: null,
+          nextReconcileAt: "2026-04-08T01:00:00.000Z",
+        },
       });
+      assert.ok(account);
 
       const deviceSyncConfig: NonNullable<
         Parameters<typeof resolveHostedDeviceSyncNextWakeAt>[0]["deviceSyncConfig"]

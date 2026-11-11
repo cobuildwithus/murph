@@ -32,7 +32,6 @@ import {
 import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import { resolveHostedJunctionConnectionSource } from "./connection-source-lifecycle";
-import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import type {
   HostedDeviceSyncSecretTestCodec,
   HostedRuntimeConnectionSecretMaterial,
@@ -47,7 +46,6 @@ import {
   type HostedMemberDeviceConnectionStatus,
   type HostedStoredDeviceSyncAccount,
 } from "./prisma-store/connections";
-import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
 import { PrismaHostedDirtyConnectionStore } from "./prisma-store/dirty-connections";
 import type {
   CompanionHrvNightReceiptInspection,
@@ -65,22 +63,18 @@ import {
 } from "./prisma-store/sources";
 import type {
   CreateHostedSignalInput,
-  CreateHostedTokenAuditInput,
   HostedDeviceSyncDirtyConnectionAckRecord,
   HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDirtyResource,
   HostedDeviceSyncDueReconcileConnectionRecord,
-  HostedConnectionRefreshLeaseClaimResult,
   HostedAgentSessionAuthResult,
   HostedAgentSessionRecord,
   HostedPrismaTransactionClient,
   HostedSignalRecord,
-  HostedTokenAuditRecord,
   UpsertHostedDeviceSyncDirtyConnectionInput,
   UpsertHostedDeviceSyncDirtyConnectionResult,
 } from "./prisma-store/types";
 import { PrismaHostedSignalStore } from "./prisma-store/signals";
-import { PrismaHostedTokenAuditStore } from "./prisma-store/token-audits";
 import { PrismaHostedWebhookTraceStore } from "./prisma-store/webhook-traces";
 
 export {
@@ -123,18 +117,15 @@ export {
 } from "./prisma-store/sources";
 export type {
   CreateHostedSignalInput,
-  CreateHostedTokenAuditInput,
   HostedDeviceSyncDirtyConnectionAckRecord,
   HostedDeviceSyncDirtyConnectionRecord,
   HostedDeviceSyncDueReconcileConnectionRecord,
   HostedDeviceSyncDirtyResource,
-  HostedConnectionRefreshLeaseClaimResult,
   HostedAgentSessionAuthResult,
   HostedAgentSessionAuthStatus,
   HostedAgentSessionRecord,
   HostedPrismaTransactionClient,
   HostedSignalRecord,
-  HostedTokenAuditRecord,
   UpsertHostedDeviceSyncDirtyConnectionInput,
   UpsertHostedDeviceSyncDirtyConnectionResult,
 } from "./prisma-store/types";
@@ -151,8 +142,6 @@ export class PrismaDeviceSyncControlPlaneStore
   private readonly sources: PrismaHostedConnectionSourceStore;
   private readonly browserAssertionNonces: PrismaHostedBrowserAssertionNonceStore;
   private readonly agentSessions: PrismaHostedAgentSessionStore;
-  private readonly localHeartbeats: PrismaHostedLocalHeartbeatStore;
-  private readonly tokenAudits: PrismaHostedTokenAuditStore;
 
   constructor(input: {
     prisma: PrismaClient;
@@ -175,11 +164,6 @@ export class PrismaDeviceSyncControlPlaneStore
     this.sources = new PrismaHostedConnectionSourceStore(this.prisma);
     this.browserAssertionNonces = new PrismaHostedBrowserAssertionNonceStore(this.prisma);
     this.agentSessions = new PrismaHostedAgentSessionStore(this.prisma);
-    this.localHeartbeats = new PrismaHostedLocalHeartbeatStore({
-      prisma: this.prisma,
-      connections: this.connections,
-    });
-    this.tokenAudits = new PrismaHostedTokenAuditStore(this.prisma);
   }
 
   async deleteExpiredOAuthStates(now?: string): Promise<number> {
@@ -439,26 +423,6 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.clearStoredProviderConfigCredential(input);
   }
 
-  async claimConnectionRefreshLease(input: {
-    connectionId: string;
-    userId: string;
-    tokenVersion: number;
-    leaseOwner: string;
-    leaseExpiresAt: string;
-    now: string;
-    tx?: HostedPrismaTransactionClient;
-  }): Promise<HostedConnectionRefreshLeaseClaimResult> {
-    return this.connections.claimConnectionRefreshLease(input);
-  }
-
-  async clearConnectionRefreshLease(input: {
-    connectionId: string;
-    leaseOwner: string;
-    tx?: HostedPrismaTransactionClient;
-  }): Promise<boolean> {
-    return this.connections.clearConnectionRefreshLease(input);
-  }
-
   async clearStaleConnectionRefreshLease(input: {
     connectionId: string;
     tx?: HostedPrismaTransactionClient;
@@ -609,10 +573,6 @@ export class PrismaDeviceSyncControlPlaneStore
     tx?: HostedPrismaTransactionClient;
   }): Promise<HostedDeviceSyncDirtyConnectionAckRecord | null> {
     return this.dirtyConnections.markDirtyConnectionProcessed(input);
-  }
-
-  async createTokenAudit(input: CreateHostedTokenAuditInput): Promise<HostedTokenAuditRecord> {
-    return this.tokenAudits.createTokenAudit(input);
   }
 
   async upsertConnectionSource(
@@ -766,17 +726,6 @@ export class PrismaDeviceSyncControlPlaneStore
     replacedBySessionId?: string | null;
   }): Promise<HostedAgentSessionRecord | null> {
     return this.agentSessions.revokeAgentSession(input);
-  }
-
-  async updateConnectionFromLocalHeartbeat(
-    userId: string,
-    connectionId: string,
-    patch: HostedLocalHeartbeatPatch,
-  ): Promise<PublicDeviceSyncAccount | null> {
-    return this.withConnectionMutationLock(
-      connectionId,
-      async (tx) => this.localHeartbeats.updateConnectionFromLocalHeartbeat(userId, connectionId, patch, tx),
-    );
   }
 
   async withConnectionMutationLock<TResult>(

@@ -2643,7 +2643,6 @@ function createHostedDeviceSyncRuntime(input: {
     deviceSyncPort: input.deviceSyncPort,
     secret: input.deviceSyncConfig.secret,
     config: {
-      publicBaseUrl: input.deviceSyncConfig.publicBaseUrl,
       shouldYieldImportPreparation: input.shouldYieldImportPreparation,
       shouldYieldJobExecution: input.shouldYield ?? null,
       vaultRoot: input.vaultRoot,

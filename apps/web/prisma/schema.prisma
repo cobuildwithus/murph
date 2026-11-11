@@ -369,8 +369,6 @@ model ClinicalRecordRetrievalRun {
   fetchedBytes         Int                              @default(0) @map("fetched_bytes")
   egressBytes          Int                              @default(0) @map("egress_bytes")
   providerRequestCount Int                              @default(0) @map("provider_request_count")
-  importedCount        Int                              @default(0) @map("imported_count")
-  reviewCount          Int                              @default(0) @map("review_count")
   lastErrorCode        String?                          @map("last_error_code")
   outcomeCountsJson    Json?                            @map("outcome_counts_json")
   createdAt            DateTime                         @default(now()) @map("created_at")

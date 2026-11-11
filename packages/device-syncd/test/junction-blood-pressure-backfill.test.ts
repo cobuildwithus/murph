@@ -1,3 +1,4 @@
+import { seedStoredAccount } from "./store-test-helpers.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
@@ -1743,7 +1744,7 @@ test("stable dead coordinates cannot starve any ordinary history coordinate", as
   );
 
   try {
-    const storedAccount = store.upsertAccount({
+    const storedAccount = seedStoredAccount(store, {
       connectedAt: NOW,
       credential: {
         credentialMetadata: {},
@@ -3298,7 +3299,7 @@ test("not_pulled skips frozen history but catches a queued migration up to curre
   const delayedNow = "2026-07-11T12:00:00.000Z";
 
   try {
-    const storedAccount = store.upsertAccount({
+    const storedAccount = seedStoredAccount(store, {
       connectedAt: NOW,
       credential: {
         credentialMetadata: {},
@@ -4365,7 +4366,7 @@ test.each(["local", "hosted"] as const)(
         const databasePath = path.join(tempDir, "state.sqlite");
         let store = new SqliteDeviceSyncStore(databasePath);
         try {
-          const account = store.upsertAccount({
+          const account = seedStoredAccount(store, {
             connectedAt: NOW,
             credential: {
               credentialMetadata: {},
