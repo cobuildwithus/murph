@@ -1,6 +1,7 @@
-import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { describe, expect, it } from "vitest";
+import { createPrismaClient } from "../src/lib/prisma";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const databaseUrl = process.env.DATABASE_URL ?? "";
@@ -14,40 +15,30 @@ if (enabled) {
 }
 
 describe.skipIf(!enabled)("retired invite phone-code state", () => {
-  it("drops only the old delivery attempt while retaining canonical identity, including on replay", async () => {
+  it("retains the old full identity projection for deployment-pinned Stripe Workflows", async () => {
     const client = new pg.Client({ connectionString: databaseUrl });
+    const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
     await client.connect();
     try {
-      await client.query(`CREATE TEMP TABLE hosted_member_identity (
-        member_id text PRIMARY KEY, phone_number_encrypted text,
-        signup_phone_number_encrypted text, phone_number_verified_at timestamp,
-        signup_phone_code_sent_at timestamp, signup_phone_code_send_attempt_id text,
-        signup_phone_code_send_attempt_started_at timestamp
-      )`);
-      await client.query(`INSERT INTO hosted_member_identity VALUES (
-        'synthetic-member', 'synthetic-ciphertext', 'synthetic-signup-ciphertext',
-        '2026-11-10 00:00:00', '2026-11-10 00:00:00', 'retired-attempt', '2026-11-10 00:00:00'
-      )`);
-      const sql = await readFile(new URL(
-        "../prisma/contract-migrations/20261110180000_drop_invite_phone_code_state/migration.sql",
-        import.meta.url,
-      ), "utf8");
-      await client.query(sql);
-      await client.query(sql);
-      const result = await client.query(`SELECT member_id, phone_number_encrypted,
-        signup_phone_number_encrypted, phone_number_verified_at::text FROM hosted_member_identity`);
-      expect(result.rows).toEqual([{
-        member_id: "synthetic-member", phone_number_encrypted: "synthetic-ciphertext",
-        signup_phone_number_encrypted: "synthetic-signup-ciphertext",
-        phone_number_verified_at: "2026-11-10 00:00:00",
-      }]);
-      const columns = await client.query(`SELECT attname FROM pg_attribute
-        WHERE attrelid = 'pg_temp.hosted_member_identity'::regclass AND attnum > 0 AND NOT attisdropped`);
-      expect(columns.rows.map(({ attname }) => attname)).toEqual([
-        "member_id", "phone_number_encrypted", "signup_phone_number_encrypted", "phone_number_verified_at",
-      ]);
+      // Match the old generated client's full projection. These nullable columns
+      // outlive the ordinary function drain because Stripe Workflows can retry later.
+      const oldRead = await client.query(`SELECT member_id, linq_email_handle_lookup_key,
+        linq_email_handle_encrypted, masked_phone_number_hint, phone_lookup_key,
+        phone_number_encrypted, phone_number_verified_at, signup_phone_number_encrypted,
+        signup_phone_code_sent_at, signup_phone_code_send_attempt_id,
+        signup_phone_code_send_attempt_started_at, created_at, updated_at
+        FROM hosted_member_identity WHERE member_id = $1`, [`synthetic-${randomUUID()}`]);
+      expect(oldRead.rows).toEqual([]);
+      expect(oldRead.fields.map(({ name }) => name)).toEqual(expect.arrayContaining([
+        "signup_phone_code_sent_at", "signup_phone_code_send_attempt_id",
+        "signup_phone_code_send_attempt_started_at",
+      ]));
+      await expect(prisma.hostedMemberIdentity.findUnique({
+        where: { memberId: `synthetic-${randomUUID()}` },
+      })).resolves.toBeNull();
     } finally {
       await client.end();
+      await prisma.$disconnect();
     }
   });
 });

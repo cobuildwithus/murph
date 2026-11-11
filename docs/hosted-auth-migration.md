@@ -10,10 +10,16 @@ attempt/cooldown state are retired; old SDK clients must refresh or update.
 Canonical saved signup-phone identity remains available to current invite and
 identity readers. Better Auth verification and rate-limit records own code delivery.
 
-Contract migration `20261110180000_drop_invite_phone_code_state` drops only the
-three old code-send columns after this Web version is live and earlier functions
-have drained through the ordinary production-alias gate. This version becomes the
-rollback floor after contraction; an older Web requires re-expansion or a forward fix.
+The three nullable code-send columns remain in the physical database for older
+deployment-pinned Stripe Workflows. Their generated Prisma clients select every
+identity column during paid activation, including these retired fields. An ordinary
+Web function drain does not prove those workflows have settled; dropping the columns
+could turn a delayed payment retry into a permanently poisoned receipt.
+
+The application and current Prisma model no longer use the fields. Do not add their
+DROP to automatic contract migrations until all older Stripe Workflow executions
+capable of that full identity read have settled. A later cleanup must establish that
+evidence and a compatible rollback floor; this release makes no physical schema change.
 
 ## Target and boundaries
 

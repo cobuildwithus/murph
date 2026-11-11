@@ -86,8 +86,8 @@ table, and the runner never accesses it directly. #4615 is the rollback floor af
 cleanup; older Web writes this table, so restoring it requires re-expanding the
 table first.
 
-The `20261110180000_drop_invite_phone_code_state` cleanup removes the three retired
-invite code-send attempt/cooldown columns after Web no longer selects or writes
-them and prior functions have drained. Current first-party OTP verification and
-rate limits use their existing auth records. The deployed Web without these fields
-is the rollback floor after contraction; older Web requires re-expansion first.
+The retired invite code-send attempt/cooldown columns are deliberately absent from
+this lane. Older deployment-pinned Stripe Workflows still select them during paid
+activation. Retain the physical nullable columns until every older execution capable
+of that read has settled; the ordinary function drain and production-alias check do
+not establish this. See `docs/hosted-auth-migration.md` for the contraction gate.
