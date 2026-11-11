@@ -15,6 +15,7 @@ import {
   createExperiment,
   initializeVault,
   parseFrontmatterDocument,
+  readReferencedExperimentOutcome,
   updateExperiment,
   VaultError,
   writeExperimentOutcome,
@@ -139,6 +140,57 @@ test("experiment outcome closeout rejects a stale frontmatter revision without o
       typeof error === "object" &&
       Reflect.get(error, "code") === "ENOENT",
   );
+});
+
+test.each(["absent", "stale"] as const)("saved experiment outcome uses its immutable reference when tracking is %s", async (tracking) => {
+  const vaultRoot = await makeVault("murph-experiment-outcome-tracking");
+  const created = await createExperiment({
+    vaultRoot,
+    slug: "outcome-tracking",
+    title: "Outcome Tracking",
+    startedOn: "2026-06-01",
+    status: "active",
+    runPlan: {
+      interventionStart: "2026-06-01",
+      interventionEnd: "2026-06-07",
+    },
+  });
+  const relativePath = created.experiment.relativePath;
+  const active = await readExperiment({ vaultRoot, relativePath });
+  const first = await writeExperimentOutcome({
+    vaultRoot,
+    relativePath,
+    expectedFrontmatter: active.frontmatter,
+    outcome: buildOutcome(active.frontmatter),
+  });
+  const outcomeFile = path.join(vaultRoot, first.outcomePath);
+  const originalArtifact = await fs.readFile(outcomeFile, "utf8");
+  await updateExperiment({
+    vaultRoot,
+    relativePath,
+    outcome: tracking === "absent" ? null : {
+      latestOutcomeId: "old-outcome",
+      finalAnalysisStatus: "not_ready",
+    },
+  });
+  const current = await readExperiment({ vaultRoot, relativePath });
+  const read = await readReferencedExperimentOutcome({
+    vaultRoot,
+    relativePath,
+    expectedFrontmatter: current.frontmatter,
+  });
+  const retry = await writeExperimentOutcome({
+    vaultRoot,
+    relativePath,
+    expectedFrontmatter: current.frontmatter,
+    outcome: buildOutcome(current.frontmatter),
+  });
+
+  assert.deepEqual(read?.outcome, first.outcome);
+  assert.deepEqual(retry.outcome, first.outcome);
+  assert.equal(retry.updatedExperiment, false);
+  assert.equal(await fs.readFile(outcomeFile, "utf8"), originalArtifact);
+  assert.deepEqual((await readExperiment({ vaultRoot, relativePath })).frontmatter, current.frontmatter);
 });
 
 test("experiment outcome closeout fails closed when a referenced artifact is missing", async () => {

@@ -2089,10 +2089,19 @@ App image sizing and native decoding proof: [image sizing plan](exec-plans/compl
 
 Frog backlog resolution and verification: [execution record](exec-plans/completed/2026-11-10-frog-backlog.md).
 
+Canonical outcome authority, runtime loader reduction and retired inbox configuration
+are recorded in [the simplification plan](exec-plans/completed/2026-11-10-simplify-canonical-state.md).
+Current compatibility gates remain in `../packages/core/README.md` and
+`../packages/inbox-services/README.md`; loader boundaries remain in
+`../packages/vault-usecases/README.md`.
+
+Downstream canonical type composition and existing group-room audit value support
+are recorded in [the correction proof](exec-plans/completed/2026-11-10-canonical-type-composition.md).
+
 Browser live voice retirement is tracked in [the retirement plan](exec-plans/completed/2026-11-10-retire-live-voice.md); `../apps/web/README.md` owns the website boundary.
 
 Dependency patch reduction is tracked in [the cleanup plan](exec-plans/completed/2026-11-10-dependency-patch-cleanup.md).
 
-Invite phone-code lifecycle retirement is owned by [hosted authentication migration](../docs/hosted-auth-migration.md#retired-invite-phone-code-lifecycle); the [execution plan](exec-plans/active/2026-11-10-simplify-auth-lifecycle.md) records validation and remaining audit dispositions.
+Invite phone-code lifecycle retirement is owned by [hosted authentication migration](../docs/hosted-auth-migration.md#retired-invite-phone-code-lifecycle); the [execution plan](exec-plans/completed/2026-11-10-simplify-auth-lifecycle.md) records validation and remaining audit dispositions.
 
 Game delivery timing and row conversion use the [weekly game contract](product-specs/weekly-game.md) and [architecture](../ARCHITECTURE.md#weekly-game). The simplification decisions and verification are recorded in the [execution record](exec-plans/completed/2026-11-10-simplify-game-state.md).

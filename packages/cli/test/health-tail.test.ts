@@ -2,9 +2,38 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { importAssessmentResponse, initializeVault } from "@murphai/core";
+import type { AssessmentResponseProposal } from "@murphai/core";
 import { createVaultCli } from "../src/vault-cli.js";
 import { localParallelCliTest as test } from "./local-parallel-test.js";
 import { requireData, runCli, runInProcessJsonCli } from "./cli-test-helpers.js";
+
+test("intake project preserves the canonical proposal through the CLI output contract", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-intake-project-"));
+  try {
+    await initializeVault({ vaultRoot });
+    const sourcePath = path.join(vaultRoot, "intake-source.json");
+    const goal = { title: "Walk each day", tags: ["movement"], note: "Start with ten minutes." };
+    await writeFile(sourcePath, JSON.stringify({ goals: [goal] }), "utf8");
+    const imported = await importAssessmentResponse({ vaultRoot, sourcePath, assessmentType: "synthetic" });
+    const { envelope, exitCode } = await runInProcessJsonCli<{
+      vault: string;
+      assessmentId: string;
+      proposal: AssessmentResponseProposal;
+    }>(createVaultCli(), ["intake", "project", imported.assessment.id, "--vault", vaultRoot]);
+    assert.equal(exitCode, null);
+    assert.equal(envelope.ok, true);
+    const result = requireData(envelope);
+    assert.equal(result.assessmentId, imported.assessment.id);
+    assert.equal(result.proposal.assessmentId, imported.assessment.id);
+    assert.equal(result.proposal.sourcePath, imported.assessment.rawPath);
+    assert.equal(result.proposal.goals[0]?.title, goal.title);
+    assert.deepEqual(result.proposal.goals[0]?.raw, goal);
+    assert.deepEqual(result.proposal.geneticVariants, []);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
 
 test("intake show and intake list route assessment reads through the noun-specific commands", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));

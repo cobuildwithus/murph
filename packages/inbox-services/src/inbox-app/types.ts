@@ -20,7 +20,6 @@ import type {
   InboxAttachmentListResult,
   InboxAttachmentShowResult,
   InboxAttachmentStatusResult,
-  InboxConnectorConfig,
   InboxEnvelopeRepairResult,
   InboxInitResult,
   InboxListResult,
@@ -32,14 +31,8 @@ import type {
   InboxPreservedDocument,
   InboxPreserveDocumentAttachmentsResult,
   InboxPromotionEntry,
-  InboxRuntimeConfig,
   InboxSearchResult,
   InboxShowResult,
-} from '@murphai/operator-config/inbox-cli-contracts'
-
-export type {
-  InboxConnectorConfig,
-  InboxRuntimeConfig,
 } from '@murphai/operator-config/inbox-cli-contracts'
 
 export type RuntimeAttachmentRecord = SharedIndexedAttachment
@@ -113,7 +106,7 @@ export interface InboxRuntimeModule {
     enqueueParserJobs: boolean
     vaultRoot: string
     runtime: RuntimeStore
-  }): Promise<void>
+  }): Promise<number>
   runInboxEnvelopeMigration(input: {
     apply?: boolean
     maxFiles?: number
@@ -306,7 +299,6 @@ export interface ListInput extends CommandContext {
   afterCreatedAt?: string | null
   afterOccurredAt?: string | null
   oldestFirst?: boolean
-  sourceId?: string | null
   limit?: number
 }
 

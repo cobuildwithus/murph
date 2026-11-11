@@ -8,9 +8,7 @@ import { afterEach, test, vi } from 'vitest'
 
 import type {
   InboxAppEnvironment,
-  InboxConnectorConfig,
   InboxPaths,
-  InboxRuntimeConfig,
   PersistedCapture,
   RuntimeAttachmentParseJobRecord,
   RuntimeAttachmentRecord,
@@ -21,8 +19,6 @@ import type {
 
 const stateMocks = vi.hoisted(() => ({
   ensureInitialized: vi.fn(),
-  readConfig: vi.fn(),
-  requireConnector: vi.fn(),
   withInitializedInboxRuntime: vi.fn(),
 }))
 
@@ -37,8 +33,6 @@ vi.mock('../src/inbox-services/state.js', async () => {
   return {
     ...actual,
     ensureInitialized: stateMocks.ensureInitialized,
-    readConfig: stateMocks.readConfig,
-    requireConnector: stateMocks.requireConnector,
     withInitializedInboxRuntime: stateMocks.withInitializedInboxRuntime,
   }
 })
@@ -283,23 +277,6 @@ function createEnv(
   }
 }
 
-function createConnectorConfig(
-  overrides: Partial<InboxConnectorConfig> & Pick<InboxConnectorConfig, 'id' | 'source'>,
-): InboxConnectorConfig {
-  return {
-    accountId: null,
-    enabled: true,
-    options: {},
-    ...overrides,
-  }
-}
-
-function createConfig(
-  connectors: InboxConnectorConfig[],
-): InboxRuntimeConfig {
-  return { connectors }
-}
-
 test('read ops cover list, attachment status, show, and search flows', async () => {
   const paths = await createTempPaths()
   const audioAttachment = createAttachment({
@@ -355,13 +332,6 @@ test('read ops cover list, attachment status, show, and search flows', async () 
         runtime,
       }),
   )
-  const sourceConnector = createConnectorConfig({
-    accountId: 'bot',
-    id: 'telegram-main',
-    source: 'telegram',
-  })
-  stateMocks.readConfig.mockResolvedValue(createConfig([sourceConnector]))
-  stateMocks.requireConnector.mockReturnValue(sourceConnector)
   promotionMocks.readPromotionsByCapture.mockResolvedValue(
     new Map([[capture.captureId, [promotion]]]),
   )
@@ -370,12 +340,10 @@ test('read ops cover list, attachment status, show, and search flows', async () 
 
   const listed = await ops.list({
     requestId: null,
-    sourceId: 'telegram-main',
     vault: paths.absoluteVaultRoot,
   })
   assert.equal(listed.items.length, 1)
   assert.equal(listed.items[0]?.promotions[0]?.relatedId, 'doc-1')
-  assert.equal(listed.filters.sourceId, 'telegram-main')
 
   const listedAttachments = await ops.listAttachments({
     captureId: capture.captureId,
@@ -421,7 +389,6 @@ test('read ops cover list, attachment status, show, and search flows', async () 
   const searched = await ops.search({
     limit: 1,
     requestId: null,
-    sourceId: 'telegram-main',
     text: 'hello',
     vault: paths.absoluteVaultRoot,
   })
@@ -495,7 +462,6 @@ test('read ops report empty parse-status state when no parse jobs exist yet', as
         runtime,
       }),
   )
-  stateMocks.readConfig.mockResolvedValue(createConfig([]))
   promotionMocks.readPromotionsByCapture.mockResolvedValue(new Map())
 
   const ops = createInboxReadOps(env)
@@ -517,7 +483,7 @@ test('read ops report empty parse-status state when no parse jobs exist yet', as
   )
 })
 
-test('read ops cover missing source filters and empty promotions', async () => {
+test('read ops cover empty promotions and nullable capture details', async () => {
   const paths = await createTempPaths()
   const parseableAttachment = createAttachment({
     attachmentId: 'attachment-audio',
@@ -547,10 +513,6 @@ test('read ops cover missing source filters and empty promotions', async () => {
         runtime,
       }),
   )
-  stateMocks.readConfig.mockResolvedValue(createConfig([]))
-  stateMocks.requireConnector.mockImplementation(() => {
-    throw new Error('source lookup should not run when sourceId is absent')
-  })
   promotionMocks.readPromotionsByCapture.mockResolvedValue(new Map())
 
   const ops = createInboxReadOps(createEnv())
@@ -562,7 +524,6 @@ test('read ops cover missing source filters and empty promotions', async () => {
     requestId: null,
     vault: paths.absoluteVaultRoot,
   })
-  assert.equal(listed.filters.sourceId, null)
   assert.equal(listed.filters.afterCaptureId, null)
   assert.equal(listed.items[0]?.promotions.length, 0)
 
@@ -578,7 +539,6 @@ test('read ops cover missing source filters and empty promotions', async () => {
     text: 'unused',
     vault: paths.absoluteVaultRoot,
   })
-  assert.equal(searched.filters.sourceId, null)
   assert.equal(searched.hits[0]?.accountId, null)
   assert.equal(searched.hits[0]?.threadTitle, null)
   assert.equal(searched.hits[0]?.promotions.length, 0)

@@ -12,7 +12,6 @@ import {
   detailCapture,
   requireAttachmentRecord,
   requireCapture,
-  resolveSourceFilter,
   summarizeCapture,
   toCliAttachment,
 } from '../inbox-services/query.js'
@@ -20,7 +19,6 @@ import {
   readPromotionsByCapture,
 } from '../inbox-services/promotions.js'
 import {
-  readConfig,
   withInitializedInboxRuntime,
 } from '../inbox-services/state.js'
 import {
@@ -63,29 +61,6 @@ export function createInboxReadOps(
       }),
     )
 
-  const withInboxRuntimeConfigPromotions = async <TResult>(
-    input: { vault: string },
-    fn: (input: {
-      paths: InboxPaths
-      runtime: RuntimeStore
-      config: Awaited<ReturnType<typeof readConfig>>
-      promotionsByCapture: Awaited<ReturnType<typeof readPromotionsByCapture>>
-    }) => Promise<TResult>,
-  ): Promise<TResult> =>
-    withInboxRuntime(input, async ({ paths, runtime }) => {
-      const [config, promotionsByCapture] = await Promise.all([
-        readConfig(paths),
-        readPromotionsByCapture(paths),
-      ])
-
-      return fn({
-        paths,
-        runtime,
-        config,
-        promotionsByCapture,
-      })
-    })
-
   const requireInboxAttachmentMatch = (
     runtime: RuntimeStore,
     attachmentId: string,
@@ -112,18 +87,15 @@ export function createInboxReadOps(
 
   return {
     async list(input) {
-      return withInboxRuntimeConfigPromotions(
+      return withInboxRuntimePromotions(
         input,
-        async ({ paths, runtime, config, promotionsByCapture }) => {
-          const sourceFilter = resolveSourceFilter(config, input.sourceId ?? null)
+        async ({ paths, runtime, promotionsByCapture }) => {
           const limit = normalizeLimit(input.limit, 50, 200)
           const afterCreatedAt = input.afterCreatedAt?.trim() || null
           const afterOccurredAt = input.afterOccurredAt?.trim() || null
           const afterCaptureId = input.afterCaptureId?.trim() || null
           const oldestFirst = input.oldestFirst ?? false
           const items = runtime.listCaptures({
-            source: sourceFilter?.source,
-            accountId: sourceFilter?.accountId,
             limit,
             afterCreatedAt,
             afterOccurredAt,
@@ -134,7 +106,6 @@ export function createInboxReadOps(
           return {
             vault: paths.absoluteVaultRoot,
             filters: {
-              sourceId: input.sourceId ?? null,
               limit,
               afterCreatedAt,
               afterOccurredAt,
@@ -210,15 +181,12 @@ export function createInboxReadOps(
     },
 
     async search(input) {
-      return withInboxRuntimeConfigPromotions(
+      return withInboxRuntimePromotions(
         input,
-        async ({ paths, runtime, config, promotionsByCapture }) => {
-          const sourceFilter = resolveSourceFilter(config, input.sourceId ?? null)
+        async ({ paths, runtime, promotionsByCapture }) => {
           const limit = normalizeLimit(input.limit, 20, 200)
           const hits = runtime.searchCaptures({
             text: input.text,
-            source: sourceFilter?.source,
-            accountId: sourceFilter?.accountId,
             limit,
           })
 
@@ -226,7 +194,6 @@ export function createInboxReadOps(
             vault: paths.absoluteVaultRoot,
             filters: {
               text: input.text,
-              sourceId: input.sourceId ?? null,
               limit,
             },
             hits: hits.map((hit) => ({

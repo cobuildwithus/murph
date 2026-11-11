@@ -44,18 +44,7 @@ const intakeManifestResultSchema = z.object({
   manifest: rawImportManifestSchema,
 })
 
-interface IntakeServices extends VaultServices {
-  core: VaultServices['core'] & {
-    projectAssessment(input: {
-      assessmentId: string
-      vault: string
-      requestId: string | null
-    }): Promise<z.infer<typeof intakeProjectResultSchema>>
-  }
-}
-
 export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
-  const healthServices = services as IntakeServices
   const intake = Cli.create('intake', {
     description: 'Assessment intake commands for health extension workflows.',
   })
@@ -139,7 +128,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
       options: withBaseOptions(),
       output: showResultSchema,
       async run({ args, options }) {
-        return healthServices.query.show({
+        return services.query.show({
           id: args.id,
           vault: options.vault,
           requestId: requestIdFromOptions(options),
@@ -161,7 +150,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
       output: listResultSchema,
       async run({ options }) {
         assertOrderedDateRange(options.from, options.to)
-        return healthServices.query.list({
+        return services.query.list({
           kind: 'assessment',
           from: options.from,
           to: options.to,
@@ -201,7 +190,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
       options: withBaseOptions(),
       output: intakeProjectResultSchema,
       async run({ args, options }) {
-        return healthServices.core.projectAssessment({
+        return services.core.projectAssessment({
           assessmentId: args.id,
           vault: options.vault,
           requestId: requestIdFromOptions(options),

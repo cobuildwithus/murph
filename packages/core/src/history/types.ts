@@ -13,6 +13,8 @@ import {
 
 import type {
   BloodTestResultRecord,
+  BloodTestImportPayload,
+  ImmunizationImportPayload,
   ClinicalAssertionEventRecord,
   EncounterDiagnosis,
   EncounterEventRecord,
@@ -112,45 +114,35 @@ export interface AppendProcedureHistoryEventInput extends HistoryEventDraftBase 
   procedureName?: string;
 }
 
-export interface AppendImmunizationHistoryEventInput extends HistoryEventDraftBase {
+export type AppendImmunizationInput = Pick<ImmunizationImportPayload, "title" | "vaccineName"> & Partial<Omit<
+  ImmunizationImportPayload,
+  "title" | "vaccineName" | "occurredAt" | "recordedAt"
+>> & {
+  vaultRoot: string;
+  occurredAt: DateInput;
+  recordedAt?: DateInput | null;
+};
+
+export interface AppendImmunizationHistoryEventInput extends AppendImmunizationInput {
   kind: "immunization";
-  vaccineName: string;
-  manufacturer?: string;
-  lotNumber?: string;
-  route?: string;
-  site?: string;
-  series?: string;
-  targetDiseases?: string[];
 }
 
-export interface AppendImmunizationInput extends Omit<AppendImmunizationHistoryEventInput, "kind"> {}
+export type AppendBloodTestInput = Pick<BloodTestImportPayload, "title" | "testName"> & Partial<Omit<
+  BloodTestImportPayload,
+  "title" | "testName" | "occurredAt" | "recordedAt" | "collectedAt" | "reportedAt" | "results"
+>> & {
+  vaultRoot: string;
+  occurredAt: DateInput;
+  recordedAt?: DateInput | null;
+  collectedAt?: DateInput | null;
+  reportedAt?: DateInput | null;
+  results?: BloodTestImportPayload["results"] | BloodTestResultRecord[];
+  evidence?: EventRecord["evidence"];
+};
 
-export interface AppendTestHistoryEventInput extends HistoryEventDraftBase {
+export interface AppendTestHistoryEventInput extends AppendBloodTestInput {
   kind: "test";
-  testName: string;
-  resultStatus?: TestResultStatus;
-  summary?: string;
   testCategory?: string;
-  specimenType?: string;
-  labName?: string;
-  labPanelId?: string;
-  collectedAt?: DateInput;
-  reportedAt?: DateInput;
-  fastingStatus?: BloodTestFastingStatus;
-  results?: BloodTestResultRecord[];
-}
-
-export interface AppendBloodTestInput extends HistoryEventDraftBase {
-  testName: string;
-  resultStatus?: TestResultStatus;
-  summary?: string;
-  specimenType?: BloodTestSpecimenType | string;
-  labName?: string;
-  labPanelId?: string;
-  collectedAt?: DateInput;
-  reportedAt?: DateInput;
-  fastingStatus?: BloodTestFastingStatus;
-  results?: BloodTestResultRecord[];
 }
 
 export interface AppendAdverseEffectHistoryEventInput extends HistoryEventDraftBase {

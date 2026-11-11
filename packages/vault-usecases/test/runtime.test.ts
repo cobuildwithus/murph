@@ -87,6 +87,7 @@ function createQueryRuntimeStub() {
 }
 
 afterEach(() => {
+  vi.doUnmock("@murphai/core");
   vi.doUnmock("../src/runtime-import.ts");
   vi.doUnmock("../src/usecases/runtime.js");
   vi.restoreAllMocks();
@@ -312,29 +313,20 @@ test("repairWearableStorage apply surfaces dense raw byte metrics", async () => 
   });
 });
 
-test("loadCoreRuntime validates module shape and caches the successful runtime", async () => {
-  const coreRuntime = createCoreRuntimeStub();
-  const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
-    if (specifier === "@murphai/core") {
-      return coreRuntime;
-    }
-    throw new Error(`Unexpected specifier: ${specifier}`);
-  });
-
+test("loadCoreRuntime uses the package module cache without requiring unrelated repair exports", async () => {
+  const initializeVault = vi.fn(async () => undefined);
+  const coreFactory = vi.fn(() => ({ initializeVault }));
   const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
     "../src/usecases/runtime.ts",
-    {
-      "../src/runtime-import.ts": () => ({
-        loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
-      }),
-    },
+    { "@murphai/core": coreFactory },
   );
   const firstRuntime = await runtimeModule.loadCoreRuntime();
   const secondRuntime = await runtimeModule.loadCoreRuntime();
 
-  assert.equal(firstRuntime, coreRuntime);
+  assert.equal(firstRuntime.initializeVault, initializeVault);
   assert.equal(secondRuntime, firstRuntime);
-  assert.deepEqual(loadRuntimeModuleMock.mock.calls, [["@murphai/core"]]);
+  assert.equal(await runtimeModule.loadCoreRuntime(), firstRuntime);
+  assert.equal(coreFactory.mock.calls.length, 1);
 });
 
 test("loadQueryRuntime clears the cache after a shape mismatch and retries cleanly", async () => {
@@ -557,27 +549,24 @@ for (const lookupKind of ["exact", "owner"] as const) {
   });
 }
 
-test("loadIntegratedRuntime composes cached owner loaders and retries only the failed owner", async () => {
+test("loadIntegratedRuntime retries a failed owner while reusing loaded modules", async () => {
   const coreRuntime = createCoreRuntimeStub();
   const queryRuntime = createQueryRuntimeStub();
   let coreAttempts = 0;
   const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
-    if (specifier === "@murphai/core") {
-      coreAttempts += 1;
-      return coreAttempts === 1 ? {} : coreRuntime;
-    }
-    if (specifier === "@murphai/query") {
-      return queryRuntime;
-    }
-    throw new Error(`Unexpected specifier: ${specifier}`);
+    assert.equal(specifier, "@murphai/query");
+    return queryRuntime;
   });
 
   const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
     "../src/usecases/runtime.ts",
     {
-      "../src/runtime-import.ts": () => ({
-        loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
-      }),
+      "@murphai/core": () => {
+        coreAttempts += 1;
+        if (coreAttempts === 1) throw new Error("synthetic core import failure");
+        return coreRuntime;
+      },
+      "../src/runtime-import.ts": () => ({ loadRuntimeModule: loadRuntimeModuleMock }),
     },
   );
 
@@ -589,13 +578,13 @@ test("loadIntegratedRuntime composes cached owner loaders and retries only the f
   });
 
   const recoveredRuntime = await runtimeModule.loadIntegratedRuntime();
-  assert.equal(recoveredRuntime.core, coreRuntime);
+  assert.equal(recoveredRuntime.core.initializeVault, coreRuntime.initializeVault);
   assert.equal(recoveredRuntime.query, queryRuntime);
-  assert.deepEqual(loadRuntimeModuleMock.mock.calls, [
-    ["@murphai/core"],
-    ["@murphai/query"],
-    ["@murphai/core"],
-  ]);
+  const nextRuntime = await runtimeModule.loadIntegratedRuntime();
+  assert.equal(nextRuntime.core, recoveredRuntime.core);
+  assert.equal(nextRuntime.query, recoveredRuntime.query);
+  assert.equal(coreAttempts, 2);
+  assert.deepEqual(loadRuntimeModuleMock.mock.calls, [["@murphai/query"]]);
 });
 
 test("loadImporterRuntime creates importers from core without loading query", async () => {
@@ -603,9 +592,6 @@ test("loadImporterRuntime creates importers from core without loading query", as
   const importersRuntime = { importer: true };
   const createImporters = vi.fn(() => importersRuntime);
   const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
-    if (specifier === "@murphai/core") {
-      return coreRuntime;
-    }
     if (specifier === "@murphai/importers") {
       return {
         createImporters,
@@ -617,6 +603,7 @@ test("loadImporterRuntime creates importers from core without loading query", as
   const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
     "../src/usecases/runtime.ts",
     {
+      "@murphai/core": () => coreRuntime,
       "../src/runtime-import.ts": () => ({
         loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
       }),
@@ -625,9 +612,8 @@ test("loadImporterRuntime creates importers from core without loading query", as
   const result = await runtimeModule.loadImporterRuntime();
 
   assert.equal(result, importersRuntime);
-  assert.deepEqual(createImporters.mock.calls, [[{ corePort: coreRuntime }]]);
+  assert.deepEqual(createImporters.mock.calls, [[{ corePort: await runtimeModule.loadCoreRuntime() }]]);
   assert.deepEqual(loadRuntimeModuleMock.mock.calls, [
-    ["@murphai/core"],
     ["@murphai/importers"],
   ]);
 });
@@ -635,9 +621,6 @@ test("loadImporterRuntime creates importers from core without loading query", as
 test("loadImporterRuntime reports invalid importer factory shapes through the shared runtime error", async () => {
   const coreRuntime = createCoreRuntimeStub();
   const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
-    if (specifier === "@murphai/core") {
-      return coreRuntime;
-    }
     if (specifier === "@murphai/importers") {
       return {};
     }
@@ -647,6 +630,7 @@ test("loadImporterRuntime reports invalid importer factory shapes through the sh
   const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
     "../src/usecases/runtime.ts",
     {
+      "@murphai/core": () => coreRuntime,
       "../src/runtime-import.ts": () => ({
         loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
       }),
@@ -663,9 +647,6 @@ test("loadImporterRuntime reports invalid importer factory shapes through the sh
 
 test("loadImporterRuntime preserves the importer-backed error label when core loading fails", async () => {
   const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
-    if (specifier === "@murphai/core") {
-      return {};
-    }
     if (specifier === "@murphai/importers") {
       return {
         createImporters: vi.fn(),
@@ -677,6 +658,7 @@ test("loadImporterRuntime preserves the importer-backed error label when core lo
   const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
     "../src/usecases/runtime.ts",
     {
+      "@murphai/core": () => { throw new Error("synthetic core import failure"); },
       "../src/runtime-import.ts": () => ({
         loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
       }),
@@ -698,9 +680,6 @@ test("loadImporterRuntime preserves importer factory construction errors", async
     throw createImportersError;
   });
   const loadRuntimeModuleMock = vi.fn(async (specifier: string) => {
-    if (specifier === "@murphai/core") {
-      return coreRuntime;
-    }
     if (specifier === "@murphai/importers") {
       return {
         createImporters,
@@ -712,6 +691,7 @@ test("loadImporterRuntime preserves importer factory construction errors", async
   const runtimeModule = await importWithMocks<typeof import("../src/usecases/runtime.ts")>(
     "../src/usecases/runtime.ts",
     {
+      "@murphai/core": () => coreRuntime,
       "../src/runtime-import.ts": () => ({
         loadRuntimeModule: vi.fn(loadRuntimeModuleMock),
       }),
@@ -725,5 +705,5 @@ test("loadImporterRuntime preserves importer factory construction errors", async
       return true;
     },
   );
-  assert.deepEqual(createImporters.mock.calls, [[{ corePort: coreRuntime }]]);
+  assert.deepEqual(createImporters.mock.calls, [[{ corePort: await runtimeModule.loadCoreRuntime() }]]);
 });

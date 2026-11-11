@@ -291,6 +291,8 @@ export const AUDIT_ACTIONS = Object.freeze([
   "family_upsert",
   "genetics_upsert",
   "goal_upsert",
+  "group_room_model_replace",
+  "group_room_model_delete",
   "habitat_upsert",
   "food_delete",
   "food_upsert",

@@ -103,6 +103,13 @@ import { sanitizePathSegment } from "./path-safety.ts";
 import type { DateInput, ValidationIssue } from "./types.ts";
 
 export {
+  validateSampleImportInternal as validateSampleImport,
+  updateVaultSummaryInternal as updateVaultSummary,
+  importAssessmentResponseInternal as importAssessmentResponse,
+  updateWorkoutUnitPreferencesInternal as updateWorkoutUnitPreferences,
+  updateWorkoutCapturePreferencesInternal as updateWorkoutCapturePreferences,
+  updateWearablePreferencesInternal as updateWearablePreferences,
+  updateAssistantPreferencesInternal as updateAssistantPreferences,
   deleteEventInternal as deleteEvent,
   removeAutomaticMealPhotoInternal as removeAutomaticMealPhoto,
   upsertEventInternal as upsertEvent,
@@ -577,12 +584,6 @@ export async function importSamples(
   return withCanonicalInputWriteLock(input, importSamplesInternal);
 }
 
-export async function validateSampleImport(
-  input: Parameters<typeof validateSampleImportInternal>[0],
-): ReturnType<typeof validateSampleImportInternal> {
-  return validateSampleImportInternal(input);
-}
-
 export async function upsertProvider(
   input: Parameters<typeof upsertProviderInternal>[0],
 ): ReturnType<typeof upsertProviderInternal> {
@@ -599,12 +600,6 @@ export async function deleteProvider(
   input: Parameters<typeof deleteProviderInternal>[0],
 ): ReturnType<typeof deleteProviderInternal> {
   return withCanonicalInputWriteLock(input, deleteProviderInternal);
-}
-
-export async function updateVaultSummary(
-  input: Parameters<typeof updateVaultSummaryInternal>[0],
-): ReturnType<typeof updateVaultSummaryInternal> {
-  return updateVaultSummaryInternal(input);
 }
 
 export async function repairVault(
@@ -657,36 +652,6 @@ export async function importEventBatch(
   input: Parameters<typeof importEventBatchInternal>[0],
 ): ReturnType<typeof importEventBatchInternal> {
   return withCanonicalInputWriteLock(input, importEventBatchInternal);
-}
-
-export async function importAssessmentResponse(
-  input: Parameters<typeof importAssessmentResponseInternal>[0],
-): ReturnType<typeof importAssessmentResponseInternal> {
-  return importAssessmentResponseInternal(input);
-}
-
-export async function updateWorkoutUnitPreferences(
-  input: Parameters<typeof updateWorkoutUnitPreferencesInternal>[0],
-): ReturnType<typeof updateWorkoutUnitPreferencesInternal> {
-  return updateWorkoutUnitPreferencesInternal(input);
-}
-
-export async function updateWorkoutCapturePreferences(
-  input: Parameters<typeof updateWorkoutCapturePreferencesInternal>[0],
-): ReturnType<typeof updateWorkoutCapturePreferencesInternal> {
-  return updateWorkoutCapturePreferencesInternal(input);
-}
-
-export async function updateWearablePreferences(
-  input: Parameters<typeof updateWearablePreferencesInternal>[0],
-): ReturnType<typeof updateWearablePreferencesInternal> {
-  return updateWearablePreferencesInternal(input);
-}
-
-export async function updateAssistantPreferences(
-  input: Parameters<typeof updateAssistantPreferencesInternal>[0],
-): ReturnType<typeof updateAssistantPreferencesInternal> {
-  return updateAssistantPreferencesInternal(input);
 }
 
 export async function appendHistoryEvent(

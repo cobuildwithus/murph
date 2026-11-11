@@ -383,7 +383,7 @@ function assertNoBloodTestValueTextAlias(payload: JsonObject): void {
   }
 }
 
-function parseBloodTestImportPayload(payload: JsonObject): JsonObject {
+function parseBloodTestImportPayload(payload: JsonObject) {
   assertNoBloodTestValueTextAlias(payload);
   const result = bloodTestImportPayloadSchema.safeParse(payload);
   if (!result.success) {
@@ -393,10 +393,10 @@ function parseBloodTestImportPayload(payload: JsonObject): JsonObject {
     });
   }
 
-  return result.data as JsonObject;
+  return result.data;
 }
 
-function parseImmunizationImportPayload(payload: JsonObject): JsonObject {
+function parseImmunizationImportPayload(payload: JsonObject) {
   const result = immunizationImportPayloadSchema.safeParse(payload);
   if (!result.success) {
     throw new VaultCliError("invalid_payload", "immunization payload failed validation.", {
@@ -405,7 +405,7 @@ function parseImmunizationImportPayload(payload: JsonObject): JsonObject {
     });
   }
 
-  return result.data as JsonObject;
+  return result.data;
 }
 
 function callRegistryRuntimeUpsert(

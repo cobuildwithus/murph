@@ -991,9 +991,7 @@ async function resolveReferencedExperimentOutcome(input: {
     !isDeepStrictEqual(
       outcome.effectiveProtocolSnapshot ?? null,
       input.attributes.effectiveProtocolSnapshot ?? null,
-    ) ||
-    input.attributes.outcome?.latestOutcomeId !== reference.outcomeId ||
-    input.attributes.outcome?.finalAnalysisStatus !== "generated"
+    )
   ) {
     throw new VaultError(
       "EXPERIMENT_OUTCOME_REFERENCE_INVALID",

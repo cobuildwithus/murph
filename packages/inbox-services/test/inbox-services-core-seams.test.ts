@@ -25,7 +25,6 @@ import {
   isStoredImageAttachment,
   requireAttachmentRecord,
   requireCapture,
-  resolveSourceFilter,
   summarizeCapture,
   toCliAttachment,
 } from '../src/inbox-services/query.ts'
@@ -36,21 +35,14 @@ import {
   occurredDayFromCapture,
   relativeToVault,
   resolveAttachmentParseState,
-  runtimeNamespaceAccountId,
 } from '../src/inbox-services/shared.ts'
 import {
-  ensureConfigFile,
   ensureDirectory,
-  ensureInitialized,
   ensureInitializedWithInbox,
-  findConnector,
-  readConfig,
   rebuildRuntime,
-  requireConnector,
   withInitializedInboxRuntime,
 } from '../src/inbox-services/state.ts'
 import type {
-  InboxRuntimeConfig,
   InboxRuntimeModule,
   RuntimeAttachmentParseJobRecord,
   RuntimeAttachmentRecord,
@@ -155,10 +147,7 @@ function createRuntimeStore(captures: RuntimeCaptureRecord[]): RuntimeStore {
 }
 
 test('shared utility helpers normalize inbox metadata and paths', async () => {
-  assert.equal(
-    runtimeNamespaceAccountId({ source: 'telegram', accountId: null }),
-    'bot',
-  )
+
   assert.equal(normalizeLimit(undefined, 20, 50), 20)
   assert.equal(normalizeLimit(10, 20, 50), 10)
   assert.throws(
@@ -326,140 +315,13 @@ test('parser status helpers preserve attachment job evidence', async () => {
   })
 })
 
-test('state helpers initialize config and resolve stored connector identities', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'inbox-services-state-'))
-  try {
-    const paths = resolveRuntimePaths(tempDir)
-    const createdPaths: string[] = []
-    const inboxd = {
-      async ensureInboxVault() {},
-      async openInboxRuntime() {
-        throw new Error('unexpected runtime open')
-      },
-    }
-    await ensureDirectory(paths.runtimeRoot, createdPaths, paths.absoluteVaultRoot)
-    await ensureConfigFile(paths, createdPaths)
-    const config = await readConfig(paths)
-    assert.deepEqual(config, { connectors: [] })
-    await ensureConfigFile(paths, createdPaths)
-    assert.deepEqual(createdPaths, [
-      path.relative(paths.absoluteVaultRoot, paths.runtimeRoot),
-      '.runtime/operations/inbox/config.json',
-    ])
-
-    const updatedConfig: InboxRuntimeConfig = {
-      connectors: [
-        {
-          id: 'telegram:bot',
-          source: 'telegram',
-          enabled: true,
-          accountId: 'bot',
-          options: {},
-        },
-        {
-          id: 'linq:primary',
-          source: 'linq',
-          enabled: true,
-          accountId: 'line-1',
-          options: {},
-        },
-      ],
-    }
-    assert.equal(findConnector(updatedConfig, 'linq:primary')?.source, 'linq')
-    assert.equal(requireConnector(updatedConfig, 'telegram:bot').accountId, 'bot')
-    assert.throws(
-      () => requireConnector(updatedConfig, 'missing'),
-      (error: unknown) => error instanceof VaultCliError && error.code === 'INBOX_SOURCE_NOT_FOUND',
-    )
-
-    const ensured = await ensureInitialized(async () => inboxd as never, tempDir)
-    assert.equal(ensured.absoluteVaultRoot, paths.absoluteVaultRoot)
-  } finally {
-    await rm(tempDir, { recursive: true, force: true })
-  }
-})
-
-test('readConfig rejects unsupported connector sources in the stored config', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'inbox-services-state-invalid-'))
-  try {
-    const paths = resolveRuntimePaths(tempDir)
-    await ensureDirectory(
-      path.dirname(paths.inboxConfigPath),
-      [],
-      paths.absoluteVaultRoot,
-    )
-    await writeFile(
-      paths.inboxConfigPath,
-      JSON.stringify({
-        schema: 'murph.inbox-runtime-config.v1',
-        schemaVersion: 1,
-        value: {
-          connectors: [
-            {
-              id: 'legacy:self',
-              source: 'legacy',
-              enabled: true,
-              accountId: 'self',
-              options: {},
-            },
-            {
-              id: 'telegram:bot',
-              source: 'telegram',
-              enabled: true,
-              accountId: 'bot',
-              options: {},
-            },
-          ],
-        },
-      }),
-      'utf8',
-    )
-
-    await assert.rejects(
-      () => readConfig(paths),
-      (error: unknown) =>
-        error instanceof VaultCliError &&
-        error.code === 'INBOX_CONFIG_INVALID' &&
-        typeof error.context?.error === 'string' &&
-        error.context.error.includes(
-          'Invalid option: expected one of \\"telegram\\"|\\"linq\\"',
-        ),
-    )
-  } finally {
-    await rm(tempDir, { recursive: true, force: true })
-  }
-})
-
 test('initialized inbox helpers open runtime, rebuild captures, and normalize filters', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'inbox-services-runtime-'))
   try {
     const paths = resolveRuntimePaths(tempDir)
-    await ensureDirectory(path.dirname(paths.inboxConfigPath), [], paths.absoluteVaultRoot)
-    await writeFile(
-      paths.inboxConfigPath,
-      JSON.stringify({
-        schema: 'murph.inbox-runtime-config.v1',
-        schemaVersion: 1,
-        value: {
-          connectors: [
-            {
-              id: 'telegram:bot',
-              source: 'telegram',
-              enabled: true,
-              accountId: null,
-              options: {},
-            },
-          ],
-        },
-      }),
-      'utf8',
-    )
-
     let closed = 0
     let rebuildCalls = 0
     let rebuildEnqueueParserJobs: boolean | null = null
-    const normalizedConfig = await readConfig(paths)
-    assert.equal(normalizedConfig.connectors[0]?.accountId, 'bot')
     const runtime = createRuntimeStore([createCapture(), createCapture({ captureId: 'capture-2' })])
     runtime.close = () => {
       closed += 1
@@ -472,6 +334,7 @@ test('initialized inbox helpers open runtime, rebuild captures, and normalize fi
       async rebuildRuntimeFromVault(input: Parameters<InboxRuntimeModule['rebuildRuntimeFromVault']>[0]) {
         rebuildCalls += 1
         rebuildEnqueueParserJobs = input.enqueueParserJobs
+        return 2
       },
     } as never
 
@@ -489,66 +352,6 @@ test('initialized inbox helpers open runtime, rebuild captures, and normalize fi
     assert.equal(rebuildEnqueueParserJobs, true)
     assert.ok(closed >= 2)
 
-    assert.deepEqual(
-      resolveSourceFilter(
-        {
-          connectors: [
-            {
-              id: 'telegram:bot',
-              source: 'telegram',
-              enabled: true,
-              accountId: null,
-              options: {},
-            },
-          ],
-        },
-        'telegram:bot',
-      ),
-      {
-        source: 'telegram',
-        accountId: 'bot',
-      },
-    )
-    assert.equal(resolveSourceFilter({ connectors: [] }, null), null)
-  } finally {
-    await rm(tempDir, { recursive: true, force: true })
-  }
-})
-
-test('state helpers fail cleanly for missing and invalid config files', async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'inbox-services-state-errors-'))
-  try {
-    const paths = resolveRuntimePaths(tempDir)
-    const inboxd = {
-      async ensureInboxVault() {},
-      async openInboxRuntime() {
-        throw new Error('unexpected runtime open')
-      },
-    }
-
-    await assert.rejects(
-      () => ensureInitializedWithInbox(inboxd as never, tempDir),
-      (error: unknown) =>
-        error instanceof VaultCliError && error.code === 'INBOX_NOT_INITIALIZED',
-    )
-
-    await ensureDirectory(path.dirname(paths.inboxConfigPath), [], paths.absoluteVaultRoot)
-    await writeFile(
-      paths.inboxConfigPath,
-      JSON.stringify({
-        schema: 'murph.inbox-runtime-config.v1',
-        schemaVersion: 1,
-        value: {
-          connectors: [{ id: 'broken' }],
-        },
-      }),
-      'utf8',
-    )
-    await assert.rejects(
-      () => readConfig(paths),
-      (error: unknown) =>
-        error instanceof VaultCliError && error.code === 'INBOX_CONFIG_INVALID',
-    )
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }

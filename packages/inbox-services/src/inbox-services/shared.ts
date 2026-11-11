@@ -1,8 +1,4 @@
 import { extractIsoDatePrefix } from '@murphai/contracts'
-import {
-  normalizeInboxConnectorAccountId,
-  type InboxConnectorConfig,
-} from '@murphai/operator-config/inbox-cli-contracts'
 import { access } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -22,15 +18,6 @@ export async function fileExists(absolutePath: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-export function runtimeNamespaceAccountId(
-  connector: Pick<InboxConnectorConfig, 'source' | 'accountId'>,
-): string | null {
-  return normalizeInboxConnectorAccountId(
-    connector.source,
-    connector.accountId,
-  )
 }
 
 export function normalizeLimit(

@@ -452,7 +452,6 @@ function createListResult(
   return inboxListResultSchema.parse({
     vault: '/tmp/assistant-automation-vault',
     filters: {
-      sourceId: null,
       limit: overrides.limit ?? 50,
       afterOccurredAt: overrides.afterOccurredAt ?? null,
       afterCaptureId: overrides.afterCaptureId ?? null,
