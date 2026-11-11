@@ -58,7 +58,9 @@ existing recap and silently retires its delivery receipt.
   Full typecheck, focused egress tests and complete input measurements pass again.
 
 CI found one obsolete craft-guide assertion for the deleted photo quota; removed
-it while preserving the explicit-pair policy test. The live bridge initializes
+it while preserving the explicit-pair policy test. Updated the old-writer replay
+assertion to expect the canonical cards, matching the authorized deletion of
+rolling writer projection; current group authoring/validation remains unchanged. The live bridge initializes
 its artifact directory, and its repeatable invocation is in the testing map.
 
 Candidate PR: #4837. Status: active; implementation complete, live/native proof
