@@ -9,7 +9,6 @@ import {
   HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
-  HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "../src/runtime-control.ts";
 
 import {
@@ -2323,8 +2322,6 @@ describe("parseHostedRuntimeGroupTool", () => {
       ),
       projectionScopes,
     };
-    expect(new TextEncoder().encode(JSON.stringify(maximallyEscapedRequest)).byteLength)
-      .toBeLessThanOrEqual(HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES);
     expect(parseHostedRuntimeGroupToolRequest(maximallyEscapedRequest))
       .toEqual(maximallyEscapedRequest);
 

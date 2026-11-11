@@ -47,7 +47,7 @@ import {
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  HOSTED_RUNTIME_RECAP_UPLOAD_REQUEST_MAX_BYTES,
+  HOSTED_WEB_REQUEST_MAX_BYTES,
   isHostedRuntimePrivateImageDeliveryUrl,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceReadResponse,
@@ -1812,55 +1812,34 @@ describe("handleRunnerOutboundRequest", () => {
     expect(await port.request(payload)).toEqual({ action: "read_game", result: { status: "ok", recapGame: {} } });
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(new URL(String(url)).searchParams.get("recapMedia")).toBe("1");
+    expect(new URL(String(url)).searchParams.has("recapMedia")).toBe(false);
     expect(init?.body).toBe(body);
     expect(new Headers(init?.headers).get("x-hosted-execution-signature")).toBeTruthy();
   });
 
-  it("rejects groups/tool bodies above the recap allowance before proxying", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const response = await handleRunnerOutboundRequest(
-      new Request(`http://web-control.worker${HOSTED_RUNTIME_GROUP_TOOL_PATH}?recapMedia=1`, {
-        method: "POST",
-        headers: createRunnerWriteFenceProxyHeaders({ "content-type": "application/json" }),
-        body: "x".repeat(HOSTED_RUNTIME_RECAP_UPLOAD_REQUEST_MAX_BYTES + 1),
-      }),
-      createRunnerOutboundEnv({ HOSTED_WEB_BASE_URL: "https://web.example.test" }),
-      "member_123",
-    );
-    expect(response.status).toBe(413);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it.each(["", "?recapMedia=1"])("rejects oversized non-group web-control bodies before proxying (%s)", async query => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await handleRunnerOutboundRequest(
-      new Request(`http://web-control.worker${HOSTED_RUNTIME_USAGE_RECORD_PATH}${query}`, {
-        body: JSON.stringify({
-          usage: {
-            payload: "x".repeat((256 * 1024) + 1),
-          },
-        }),
-        headers: createRunnerWriteFenceProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-        }),
-        method: "POST",
-      }),
-      createRunnerOutboundEnv({
-        HOSTED_WEB_BASE_URL: "https://web.example.test",
-      }),
-      "member_123" ,
-    );
-
-    expect(response.status).toBe(413);
-    await expect(response.json()).resolves.toEqual({
-      error: "Request body too large.",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
+  it.each([HOSTED_RUNTIME_GROUP_TOOL_PATH, HOSTED_RUNTIME_LATENCY_TRACE_PATH])(
+    "uses the platform cap for %s",
+    async path => {
+      const fetchMock = vi.fn<typeof fetch>(async () => Response.json({ ok: true }));
+      vi.stubGlobal("fetch", fetchMock);
+      for (const extraByte of [0, 1]) {
+        fetchMock.mockClear();
+        const body = "{}".padEnd(HOSTED_WEB_REQUEST_MAX_BYTES + extraByte, " ");
+        const response = await handleRunnerOutboundRequest(
+          new Request(`http://web-control.worker${path}`, {
+            method: "POST",
+            headers: createRunnerWriteFenceProxyHeaders({ "content-type": "application/json" }),
+            body,
+          }),
+          createRunnerOutboundEnv({ HOSTED_WEB_BASE_URL: "https://web.example.test" }),
+          "member_123",
+        );
+        expect(response.status).toBe(extraByte ? 413 : 200);
+        expect(fetchMock).toHaveBeenCalledTimes(extraByte ? 0 : 1);
+        if (!extraByte) expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(body);
+      }
+    },
+  );
 
   it("proxies workspace checkpoints with signed runtime authority", async () => {
     const bindUser = vi.fn(async (userId: string) => ({ userId }));
