@@ -118,11 +118,7 @@ describe.skipIf(!enabled)("signed runtime callback SQL load", () => {
         [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
       } });
     };
-    let previousPhase: string | undefined;
     try {
-      previousPhase = (await client.hostedRuntimeCutover.findUnique({ where: { id: "runtime" } }))?.phase;
-      await client.hostedRuntimeCutover.upsert({ where: { id: "runtime" },
-        create: { id: "runtime", phase: "postgres" }, update: { phase: "postgres" } });
       await client.hostedMember.createMany({ data: ids.map(id => ({ id,
         billingStatus: id === owner ? "active" : "not_started" })) });
       await client.hostedMemberBillingRef.create({ data: { memberId: owner, currentBillingPlanCode: "launch_monthly",
@@ -132,7 +128,7 @@ describe.skipIf(!enabled)("signed runtime callback SQL load", () => {
         groupId: group, memberId: member, role: "member" } });
       await client.hostedThreadContainer.create({ data: { memberId: container, ownerMemberId: owner } });
       await client.hostedRuntimeOwner.createMany({ data: ids.map(userId => ({ userId, attemptId, generation: 1n,
-        migrationPhase: "postgres", phase: "active", workspaceVersion: 1n, processingMode: "default",
+        phase: "active", workspaceVersion: 1n, processingMode: "default",
         allocationId: `callback_allocation_${userId}`, runnerContainerName: `callback_runner_${userId}` })) });
       const sample = async (prisma: PrismaClient) => {
         database.current = prisma;
@@ -198,11 +194,6 @@ describe.skipIf(!enabled)("signed runtime callback SQL load", () => {
       await client.hostedThreadContainer.deleteMany({ where: { memberId: container } });
       await client.hostedAccountGroup.deleteMany({ where: { id: group } });
       await client.hostedMember.deleteMany({ where: { id: { in: ids } } });
-      if (previousPhase !== undefined) {
-        await client.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: previousPhase } });
-      } else {
-        await client.hostedRuntimeCutover.deleteMany({ where: { id: "runtime" } });
-      }
       await client.$disconnect();
     }
   });

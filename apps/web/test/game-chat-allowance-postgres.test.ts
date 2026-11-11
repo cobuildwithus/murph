@@ -28,8 +28,6 @@ describe.skipIf(!enabled)("shared game allowance PostgreSQL", () => {
     const ids = [primary, alternate, first, second];
     const gameId = `funding_game_${suffix}`;
     const now = new Date();
-    const previous = await prisma.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } });
-    await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "postgres" } });
     try {
       await prisma.hostedMember.createMany({ data: ids.map(id => ({ id, billingStatus: "canceled" })) });
       for (const memberId of [primary, alternate]) {
@@ -110,7 +108,6 @@ describe.skipIf(!enabled)("shared game allowance PostgreSQL", () => {
       await prisma.hostedRuntimeOwner.deleteMany({ where: { userId: { in: ids } } });
       await prisma.hostedThreadContainer.deleteMany({ where: { memberId: { in: ids } } });
       await prisma.hostedMember.deleteMany({ where: { id: { in: ids } } });
-      await prisma.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: previous.phase } });
       await prisma.$disconnect();
       vi.unstubAllEnvs();
     }

@@ -65,15 +65,12 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
   let observer: PrismaClient;
   let blockerClient: PrismaClient;
   const members: string[] = [];
-  let previousPhase: string;
 
   beforeAll(async () => {
     first = createPrismaClient({ databaseUrl, poolMax: 1 });
     second = createPrismaClient({ databaseUrl, poolMax: 1 });
     observer = createPrismaClient({ databaseUrl, poolMax: 1 });
     blockerClient = createPrismaClient({ databaseUrl, poolMax: 1 });
-    previousPhase = (await observer.hostedRuntimeCutover.findUniqueOrThrow({ where: { id: "runtime" } })).phase;
-    await observer.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: "postgres" } });
   });
 
   afterAll(async () => {
@@ -85,8 +82,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       await observer.hostedRuntimeOwner.deleteMany({ where: { userId: { in: members } } });
       await observer.hostedThreadContainer.deleteMany({ where: { memberId: { in: members } } });
       await observer.game.deleteMany({ where: { wordsOwnerMemberId: { in: members } } });
-    await observer.hostedMember.deleteMany({ where: { id: { in: members } } });
-      await observer.hostedRuntimeCutover.update({ where: { id: "runtime" }, data: { phase: previousPhase } });
+      await observer.hostedMember.deleteMany({ where: { id: { in: members } } });
     }
     await Promise.all([first?.$disconnect(), second?.$disconnect(), observer?.$disconnect(), blockerClient?.$disconnect()]);
   });
@@ -154,7 +150,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const userId = await member();
     if (retainedTarget) {
       await observer.hostedRuntimeOwner.create({ data: {
-        userId, migrationPhase: "postgres", phase: "idle", generation: 1n,
+        userId, phase: "idle", generation: 1n,
         allocationId: "standby-claim-11111111-1111-4111-8111-111111111111",
         runnerContainerName: "synthetic-retained-runner",
       } });
@@ -189,12 +185,11 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       platformAiUsageAllowed: true,
     });
     const expected = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
-    const { migrationPhase: _migrationPhase, migrationId: _migrationId, ...liveExpected } = expected;
     await first.$executeRawUnsafe("SET default_transaction_read_only = on");
     try {
       const operations: PrismaOperationTiming[] = [];
       expect(await runWithPrismaOperationTimings(operations,
-        () => readHostedRuntimeDirectWakeOwner({ prisma: first, userId }))).toEqual(liveExpected);
+        () => readHostedRuntimeDirectWakeOwner({ prisma: first, userId }))).toEqual(expected);
       expect(operations).toHaveLength(2);
     } finally {
       await first.$executeRawUnsafe("SET default_transaction_read_only = off");
@@ -227,7 +222,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
   it("reads callback authority in the two lock queries without fetching either row twice", async () => {
     const userId = await member();
     const claimed = (await claim(userId)).owner;
-    const { migrationPhase: _migrationPhase, migrationId: _migrationId, ...expected } = await observer.hostedRuntimeOwner.update({ where: { userId }, data: {
+    const expected = await observer.hostedRuntimeOwner.update({ where: { userId }, data: {
       generation: 9007199254740993n,
       runnerContainerName: "synthetic-locked-owner",
       workspaceVersion: 9007199254740995n,
@@ -362,7 +357,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
   it("authorizes both provider identities with one fresh statement and no transaction", async () => {
     const userId = await member();
     await claim(userId);
-    const { migrationPhase: _migrationPhase, migrationId: _migrationId, ...expected } = await observer.hostedRuntimeOwner.update({ where: { userId }, data: {
+    const expected = await observer.hostedRuntimeOwner.update({ where: { userId }, data: {
       generation: 9007199254740993n, workspaceVersion: 9007199254740995n,
       runnerContainerName: "synthetic-provider-slot", providerEgressTokenHash: "a".repeat(64),
       platformAiUsageAllowed: true,
@@ -490,7 +485,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const userId = await member();
     if (state === "retained") {
       await observer.hostedRuntimeOwner.create({ data: {
-        userId, migrationPhase: "postgres", runnerContainerName: "synthetic-retained-query-count",
+        userId, runnerContainerName: "synthetic-retained-query-count",
         allocationId: "synthetic-retained-allocation",
       } });
     } else if (state === "existing") {
