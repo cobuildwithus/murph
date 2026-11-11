@@ -31,3 +31,13 @@ cache for read-only reuse. The existing permission workflow now requires the
 Cargo build vertex to remain cached after changing runtime-only Node pins. This
 addresses repeated compilation without changing Cargo concurrency, sandbox
 assertions, or benchmark limits; cache-hit timing remains an actual CI receipt.
+
+## Local prebuild discoverability
+
+The existing `runner:docker:base -- --push` command can publish the complete
+native image and intermediate compiler cache from an authorized operator's
+machine, but the owner docs described only the protected CI publisher.
+The Cloudflare README now documents that existing local path, GHCR write
+authentication, cache-capable builders, shared-tag coordination, and keeping
+Cargo settings aligned with CI. It distinguishes prewarming the cache before
+CI from speeding up compilation under AMD64 emulation.
