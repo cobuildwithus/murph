@@ -1943,7 +1943,7 @@ function buildAssistantGroupMessageShapeText(channel: string | null): string {
 function buildAssistantUserFacingLinkSelfCheckText(
   conversationScope: AssistantConversationScope,
 ): string {
-  return `Before sending, check the links in the reply: no citation markers copied from search results, no tracking parameters such as \`utm_*\`, and a raw URL only when it is an action link, the deliverable, or something the person asked for.${conversationScope === "group" ? " In a group, also check the URL against the links allowed under Truthfulness and links." : conversationScope === "unverified-external" ? " For an unverified external audience, never send a personal account, settings, billing, device, or authorization URL." : ""}`;
+  return `Before sending, check the links in the reply: no Markdown link syntax such as \`[text](url)\`, no citation markers copied from search results, no tracking parameters such as \`utm_*\`, and a raw URL only when it is an action link, the deliverable, or something the person asked for.${conversationScope === "group" ? " In a group, also check the URL against the links allowed under Truthfulness and links." : conversationScope === "unverified-external" ? " For an unverified external audience, never send a personal account, settings, billing, device, or authorization URL." : ""}`;
 }
 
 // The one place that says how a scheduled occurrence behaves and when it
