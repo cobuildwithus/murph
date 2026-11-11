@@ -2,6 +2,7 @@ import "server-only";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { HOSTED_OUTBOX_QUIESCENT_SNAPSHOT_STATUS_KEY } from "@murphai/hosted-execution/runtime-control";
 import { isHostedWorkspaceSnapshotV2Ref, parseHostedExecutionSnapshotRef } from "@murphai/hosted-execution/parsers";
+import { GAME_MISSED_CHECK_IN_MAX_LATENESS_MS } from "../game/missed-check-in";
 import { lockHostedRuntimeOwnerRowTx } from "../hosted-execution/runtime-owner";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates, createHostedLinqChatLookupKeyReadCandidates, createHostedPhoneLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
@@ -134,7 +135,7 @@ export async function assertGroupMoveQuiet(input: { containerMemberId: string; c
     status: { in: ["attempted", "provider_dispatch_started", "accepted", "awaiting_generation", "generation_queued"] },
     // Accepted sends also persist as deduplication history. An uncorrelated
     // dispatch fence can still own a runtime outbox retry, regardless of age.
-    NOT: {
+    NOT: { OR: [{
       payloadCiphertext: null, payloadOwnerMemberId: null, payloadSchema: null,
       attemptedAt: { lt: drainedBefore }, updatedAt: { lt: drainedBefore },
       OR: [
@@ -145,7 +146,19 @@ export async function assertGroupMoveQuiet(input: { containerMemberId: string; c
           acceptedAt: null, deliveredAt: null, skippedAt: null, messageLookupKey: null,
           failedAt: null, failureCode: null, lastReceiptAt: null, retryAfterAt: null }] : []),
       ],
-    },
+    }, ...(settledBefore ? [{
+      // Published missed-check-ins retain their generation receipt after expiry.
+      // Egress rejects them using this same deadline; the current snapshot also
+      // proves that the runtime has no remaining outbox obligation.
+      source: "game_lifecycle", status: "generation_queued",
+      template: { in: ["game_missed", "game_group_missed"] },
+      createdAt: { lt: new Date(Date.now() - GAME_MISSED_CHECK_IN_MAX_LATENESS_MS) },
+      attemptedAt: { lt: new Date(Math.min(drainedBefore.getTime(), settledBefore.getTime())) },
+      updatedAt: { lt: new Date(Math.min(drainedBefore.getTime(), settledBefore.getTime())) },
+      payloadOwnerMemberId: containerMemberId, payloadCiphertext: null, payloadSchema: null,
+      acceptedAt: null, deliveredAt: null, skippedAt: null, messageLookupKey: null,
+      failedAt: null, failureCode: null, lastReceiptAt: null, retryAfterAt: null,
+    }] : [])] },
   }, select: { id: true } });
   if (pending || recentConversation || (runtime && runtime.phase !== "idle") || delivery) groupMoveError("WORK_PENDING");
 }

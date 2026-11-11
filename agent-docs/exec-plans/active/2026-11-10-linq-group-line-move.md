@@ -4,6 +4,26 @@ Status: active
 Created: 2026-11-10
 Updated: 2026-11-11
 
+## Expired missed-check-in follow-up
+
+The game lifecycle owner deliberately retains published generation receipts
+when a missed-check-in expires or mailbox consumption transfers retry ownership
+to the runtime. Operator admission incorrectly treats all such history as live
+work. Derive eligibility from the existing two-hour egress deadline and current
+quiescent snapshot; keep the receipt unchanged. Require the exact container,
+cleared retry, no payload or outcome, drained timestamps preceding the snapshot,
+and the existing consumed-mailbox and locked-idle-owner checks. No new state,
+queries, external calls, foreground work or runtime producer is added.
+
+Proof uses migrated PostgreSQL: expired pair/group receipts must allow silent
+start; missing proof, pending mailbox, fresh/boundary timestamps, payloads,
+retry, provider evidence, foreign ownership and other templates must block.
+The same expired identity must still fail the canonical game egress authority.
+Web-only rollout uses the already deployed snapshot writer; old Web remains
+conservatively blocking. Final review and exact-head CI precede deployment and
+the authorized silent canary. Product UX: preserve games, history and ordinary
+handoff speech with no migration announcement. The broader plan remains active.
+
 ## Historical delivery settlement follow-up
 
 Outcome: existing groups can move past historical delivery metadata while every

@@ -3865,8 +3865,14 @@ is active or awaiting delivery confirmation; failed or untrusted inventory
 clears it. Missing, stale, foreign or future snapshot evidence retains the veto.
 Both fence timestamps must precede that snapshot and the drain cutoff, with no
 acceptance, message, failure or receipt evidence. Age alone cannot exclude a
-retryable runtime obligation. Other sources, generation work and saved payloads
-retain the veto regardless of age.
+retryable runtime obligation. Published `game_missed` and `game_group_missed`
+receipts are another historical case: their owner deliberately retains
+`generation_queued` after the shared two-hour egress deadline. They cease to veto
+only with that same current quiescent snapshot, expired creation time, attempt
+and update times before both snapshot and drain, the exact container owner,
+cleared retry, no payload ciphertext/schema, and no provider outcome or receipt.
+Mailbox work must still be consumed. Other generation work, sources and saved
+payloads retain the veto regardless of age.
 Start locks the runtime owner through reservation, serializing with runtime
 claims and checkpoints, and adds one indexed workspace metadata read when idle.
 Snapshot construction reuses its existing inventory without another scan or
