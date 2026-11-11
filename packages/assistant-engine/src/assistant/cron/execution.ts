@@ -117,7 +117,6 @@ import {
   removeAssistantCronCanonicalRuntimeRecord,
   upsertAssistantCronCanonicalRuntimeRecord,
   type AssistantCronCanonicalRuntimeRecord,
-  type AssistantCronCanonicalRuntimeState,
   type AssistantCronCanonicalRuntimeStore,
 } from './runtime-state.js'
 import { runScheduledLogCronJob } from './scheduled-log.js'
@@ -1215,10 +1214,6 @@ export async function executeClaimedAssistantCronJob(
     trigger: input.trigger,
     outcome,
     reason: normalizeAssistantCronRunReason(reason),
-    status: legacyAssistantCronRunStatusForOutcome({
-      outcome,
-      reason: normalizeAssistantCronRunReason(reason),
-    }),
     startedAt,
     finishedAt,
     sessionId,
@@ -2371,122 +2366,80 @@ function finalizeAssistantCronJobAfterRun(input: {
   responseSessionId: string | null
   run: AssistantCronRunRecord
 }): AssistantCronJob {
-  const runningClearedState = {
-    ...input.job.state,
-    runningAt: null,
-    runningPid: null,
-    lastRunAt: input.finishedAt,
-  }
-  const shouldAutoBindSession =
-    input.responseSessionId !== null && !assistantCronJobHasStableSessionLocator(input.job)
-
+  const consumedOccurrence = assistantCronRunConsumedOccurrence(
+    input.run,
+    input.pendingDeliveryIntentId,
+    input.failureConsumesOccurrence,
+  )
+  const pendingDelivery = input.run.outcome === 'delivery_pending'
+    && input.pendingDeliveryIntentId !== null
+  const shouldAutoBindSession = !input.foregroundYielded
+    && (consumedOccurrence || pendingDelivery)
+    && input.responseSessionId !== null
+    && !assistantCronJobHasStableSessionLocator(input.job)
+  let nextRunAt = input.job.state.nextRunAt
   if (input.foregroundYielded) {
-    return assistantCronJobSchema.parse({
-      ...input.job,
-      updatedAt: input.finishedAt,
-      state: {
-        ...runningClearedState,
-        nextRunAt: computeAssistantCronForegroundYieldRetryAt(input.finishedAt),
-      },
-    })
+    nextRunAt = computeAssistantCronForegroundYieldRetryAt(input.finishedAt)
+  } else if (consumedOccurrence) {
+    nextRunAt = resolveAssistantCronNextRunAfterSuccess(input.job, new Date(input.finishedAt))
+  } else if (pendingDelivery) {
+    nextRunAt = null
+  } else if (input.job.enabled) {
+    nextRunAt = new Date(Date.parse(input.finishedAt)
+      + resolveAssistantCronFailureBackoffMs(input.job.state.consecutiveFailures + 1)).toISOString()
   }
-
-  if (
-    assistantCronRunConsumedOccurrence(
-      input.run,
-      input.pendingDeliveryIntentId,
-      input.failureConsumesOccurrence,
-    )
-  ) {
-    const nextRunAt = resolveAssistantCronNextRunAfterSuccess(
-      input.job,
-      new Date(input.finishedAt),
-    )
-
-    if (input.run.outcome === 'failed' || input.run.outcome === 'expired') {
-      return assistantCronJobSchema.parse({
-        ...input.job,
-        enabled:
-          input.job.schedule.kind === 'at' && input.job.keepAfterRun
-            ? false
-            : input.job.enabled,
-        target: shouldAutoBindSession
-          ? {
-              ...input.job.target,
-              sessionId: input.responseSessionId,
-            }
-          : input.job.target,
-        updatedAt: input.finishedAt,
-        state: {
-          ...runningClearedState,
-          nextRunAt,
-          lastFailedAt: input.finishedAt,
-          lastError: input.run.error,
-          consecutiveFailures: 0,
-        },
-      })
-    }
-
-    return assistantCronJobSchema.parse({
-      ...input.job,
-      enabled:
-        input.job.schedule.kind === 'at' && input.job.keepAfterRun
-          ? false
-          : input.job.enabled,
-      target: shouldAutoBindSession
-        ? {
-            ...input.job.target,
-            sessionId: input.responseSessionId,
-          }
-        : input.job.target,
-      updatedAt: input.finishedAt,
-      state: {
-        ...runningClearedState,
-        nextRunAt,
-        lastSucceededAt: input.finishedAt,
-        lastError: null,
-        consecutiveFailures: 0,
-      },
-    })
-  }
-
-  if (input.run.outcome === 'delivery_pending' && input.pendingDeliveryIntentId !== null) {
-    return assistantCronJobSchema.parse({
-      ...input.job,
-      target: shouldAutoBindSession
-        ? {
-            ...input.job.target,
-            sessionId: input.responseSessionId,
-          }
-        : input.job.target,
-      updatedAt: input.finishedAt,
-      state: {
-        ...runningClearedState,
-        nextRunAt: null,
-        lastError: null,
-        pendingDeliveryIntentId: input.pendingDeliveryIntentId,
-      },
-    })
-  }
-
-  const failureCount = input.job.state.consecutiveFailures + 1
-  const nextRunAt = input.job.enabled
-    ? new Date(
-        Date.parse(input.finishedAt) + resolveAssistantCronFailureBackoffMs(failureCount),
-      ).toISOString()
-    : input.job.state.nextRunAt
 
   return assistantCronJobSchema.parse({
     ...input.job,
+    enabled: !input.foregroundYielded && consumedOccurrence
+      && input.job.schedule.kind === 'at' && input.job.keepAfterRun
+      ? false
+      : input.job.enabled,
+    target: shouldAutoBindSession
+      ? { ...input.job.target, sessionId: input.responseSessionId }
+      : input.job.target,
     updatedAt: input.finishedAt,
     state: {
-      ...runningClearedState,
+      ...input.job.state,
+      ...finalizeAssistantCronOccurrenceState({
+        ...input, consumedOccurrence,
+        consecutiveFailures: input.job.state.consecutiveFailures,
+      }),
       nextRunAt,
-      lastFailedAt: input.finishedAt,
-      lastError: input.run.error,
-      consecutiveFailures: failureCount,
     },
   })
+}
+
+// Both persistence representations use the same execution-result transition.
+// Each owner supplies its own occurrence cursor, schedule and session policy.
+function finalizeAssistantCronOccurrenceState(input: {
+  consecutiveFailures: number
+  consumedOccurrence: boolean
+  finishedAt: string
+  foregroundYielded: boolean
+  pendingDeliveryIntentId: string | null
+  run: AssistantCronRunRecord
+}) {
+  const state = { runningAt: null, runningPid: null, lastRunAt: input.finishedAt }
+  if (input.foregroundYielded) return state
+  if (input.consumedOccurrence) {
+    return {
+      ...state,
+      ...(input.run.outcome === 'failed' || input.run.outcome === 'expired'
+        ? { lastFailedAt: input.finishedAt, lastError: input.run.error }
+        : { lastSucceededAt: input.finishedAt, lastError: null }),
+      consecutiveFailures: 0,
+    }
+  }
+  if (input.run.outcome === 'delivery_pending' && input.pendingDeliveryIntentId !== null) {
+    return { ...state, lastError: null, pendingDeliveryIntentId: input.pendingDeliveryIntentId }
+  }
+  return {
+    ...state,
+    lastFailedAt: input.finishedAt,
+    lastError: input.run.error,
+    consecutiveFailures: input.consecutiveFailures + 1,
+  }
 }
 
 function shouldRemoveAssistantCronJobAfterRun(
@@ -2597,100 +2550,43 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
   runtimeState: AssistantCronCanonicalRuntimeRecord
   source: CanonicalAssistantCronJobRecord
 }): AssistantCronCanonicalRuntimeRecord {
-  const runningClearedState: AssistantCronCanonicalRuntimeState = {
-    ...input.runtimeState.state,
-    runningAt: null,
-    runningClaimId: null,
-    runningPid: null,
-    lastRunAt: input.finishedAt,
-  }
-
+  const consumedOccurrence = assistantCronRunConsumedOccurrence(
+    input.run,
+    input.pendingDeliveryIntentId,
+    input.failureConsumesOccurrence,
+  )
+  const pendingDelivery = input.run.outcome === 'delivery_pending'
+    && input.pendingDeliveryIntentId !== null
+  let pendingOccurrenceAt = input.runtimeState.state.pendingOccurrenceAt
+  let retryAfterAt: string | null = null
   if (input.foregroundYielded) {
-    return {
-      ...input.runtimeState,
-      updatedAt: input.finishedAt,
-      state: {
-        ...runningClearedState,
-        pendingOccurrenceAt:
-          input.runtimeState.state.pendingOccurrenceAt ??
-          resolveCanonicalAssistantCronOccurrenceAt(input.source, input.runtimeState),
-        retryAfterAt: computeAssistantCronForegroundYieldRetryAt(input.finishedAt),
-      },
+    pendingOccurrenceAt ??= resolveCanonicalAssistantCronOccurrenceAt(input.source, input.runtimeState)
+    retryAfterAt = computeAssistantCronForegroundYieldRetryAt(input.finishedAt)
+  } else if (consumedOccurrence) {
+    pendingOccurrenceAt = null
+  } else if (!pendingDelivery) {
+    pendingOccurrenceAt ??= resolveCanonicalAssistantCronOccurrenceAt(input.source, input.runtimeState)
+    if (isCanonicalAssistantCronSourceEnabled(input.source)) {
+      retryAfterAt = new Date(Date.parse(input.finishedAt)
+        + resolveAssistantCronFailureBackoffMs(input.runtimeState.state.consecutiveFailures + 1)).toISOString()
     }
   }
-
-  if (
-    assistantCronRunConsumedOccurrence(
-      input.run,
-      input.pendingDeliveryIntentId,
-      input.failureConsumesOccurrence,
-    )
-  ) {
-    if (input.run.outcome === 'failed' || input.run.outcome === 'expired') {
-      return {
-        ...input.runtimeState,
-        sessionId: input.responseSessionId ?? input.runtimeState.sessionId,
-        updatedAt: input.finishedAt,
-        state: {
-          ...runningClearedState,
-          pendingOccurrenceAt: null,
-          retryAfterAt: null,
-          lastFailedAt: input.finishedAt,
-          lastError: input.run.error,
-          consecutiveFailures: 0,
-        },
-      }
-    }
-
-    return {
-      ...input.runtimeState,
-      sessionId: input.responseSessionId ?? input.runtimeState.sessionId,
-      updatedAt: input.finishedAt,
-      state: {
-        ...runningClearedState,
-        pendingOccurrenceAt: null,
-        retryAfterAt: null,
-        lastSucceededAt: input.finishedAt,
-        lastError: null,
-        consecutiveFailures: 0,
-      },
-    }
-  }
-
-  if (input.run.outcome === 'delivery_pending' && input.pendingDeliveryIntentId !== null) {
-    return {
-      ...input.runtimeState,
-      sessionId: input.responseSessionId ?? input.runtimeState.sessionId,
-      updatedAt: input.finishedAt,
-      state: {
-        ...runningClearedState,
-        retryAfterAt: null,
-        lastError: null,
-        pendingDeliveryIntentId: input.pendingDeliveryIntentId,
-      },
-    }
-  }
-
-  const failureCount = input.runtimeState.state.consecutiveFailures + 1
-  const retryAfterAt = isCanonicalAssistantCronSourceEnabled(input.source)
-    ? new Date(
-        Date.parse(input.finishedAt) +
-          resolveAssistantCronFailureBackoffMs(failureCount),
-      ).toISOString()
-    : null
 
   return {
     ...input.runtimeState,
+    sessionId: !input.foregroundYielded && (consumedOccurrence || pendingDelivery)
+      ? input.responseSessionId ?? input.runtimeState.sessionId
+      : input.runtimeState.sessionId,
     updatedAt: input.finishedAt,
     state: {
-      ...runningClearedState,
-      pendingOccurrenceAt:
-        input.runtimeState.state.pendingOccurrenceAt ??
-        resolveCanonicalAssistantCronOccurrenceAt(input.source, input.runtimeState),
+      ...input.runtimeState.state,
+      ...finalizeAssistantCronOccurrenceState({
+        ...input, consumedOccurrence,
+        consecutiveFailures: input.runtimeState.state.consecutiveFailures,
+      }),
+      runningClaimId: null,
+      pendingOccurrenceAt,
       retryAfterAt,
-      lastFailedAt: input.finishedAt,
-      lastError: input.run.error,
-      consecutiveFailures: failureCount,
     },
   }
 }
@@ -2804,26 +2700,6 @@ function truncateAssistantCronResponse(response: string | null): string | null {
   }
 
   return response.slice(0, ASSISTANT_CRON_MAX_RESPONSE_LENGTH)
-}
-
-function legacyAssistantCronRunStatusForOutcome(input: {
-  outcome: AssistantCronRunOutcome
-  reason: string
-}): string {
-  switch (input.outcome) {
-    case 'delivered':
-      return 'succeeded'
-    case 'no_op':
-      return input.reason === 'background_maintenance_non_replayable_work'
-        ? 'skipped'
-        : 'succeeded'
-    case 'delivery_pending':
-    case 'expired':
-    case 'skipped_gate':
-      return 'skipped'
-    case 'failed':
-      return 'failed'
-  }
 }
 
 function normalizeAssistantCronRunReason(reason: string): string {

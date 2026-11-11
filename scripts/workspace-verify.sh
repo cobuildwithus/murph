@@ -1327,7 +1327,7 @@ run_test_diff_package_tests() {
   # Diff selection can reach CLI command tests through a changed source
   # dependency without selecting the dedicated verify:cli lane. Prepare the
   # shared runtime once before package fanout so individual
-  # Vitest workers never contend on the fallback repair lock.
+  # Vitest workers validate artifacts without rebuilding them.
   if [[ "$cli_selected" == "1" ]]; then
     run_timed_step \
       "Prepared CLI runtime artifacts for affected package tests" \

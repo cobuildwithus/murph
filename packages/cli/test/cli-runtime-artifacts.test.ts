@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { mkdtemp, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, test, vi } from 'vitest'
 
-const fixture = vi.hoisted(() => ({ root: '', builds: 0, failBuild: false }))
+const fixture = vi.hoisted(() => ({ root: '', builds: 0 }))
 const commandSuffix = '/packages/cli/'
 
 function fixturePath(value: string): string | undefined {
@@ -46,18 +46,8 @@ vi.mock('node:child_process', async (importOriginal) => {
     ...actual,
     execFile(command: string, args: string[], options: { cwd: string }, callback: (error: Error | null) => void) {
       if (command === 'pnpm') {
-        if (args[0] === 'build:test-runtime:prepared') {
-          fixture.builds += 1
-          if (fixture.failBuild) {
-            callback(new Error('Synthetic compiler failure'))
-            return
-          }
-          writeFileSync(path.join(fixture.root, 'dist/commands/assistant-onboarding.js'), readFileSync(path.join(fixture.root, 'src/commands/assistant-onboarding.ts')))
-          writeFileSync(path.join(fixture.root, 'dist/commands/assistant-onboarding.d.ts'), 'export declare const result: string\n')
-        } else {
-          assert.deepEqual(args, ['exec', 'node', '--import=tsx', 'packages/cli/scripts/verify-runtime-artifacts.ts'])
-        }
-        callback(null)
+        fixture.builds += 1
+        callback(new Error('Test workers must not build artifacts'))
         return
       }
       const mapped = fixturePath(options.cwd)
@@ -92,7 +82,6 @@ describe.sequential('built assistant command artifacts', () => {
     vi.stubEnv('MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS', '')
     fixture.root = await mkdtemp(path.join(tmpdir(), 'murph-cli-artifact-'))
     fixture.builds = 0
-    fixture.failBuild = false
     await writeCommand('current', 'stale')
   })
 
@@ -103,12 +92,11 @@ describe.sequential('built assistant command artifacts', () => {
     await actual.rm(fixture.root, { recursive: true, force: true })
   })
 
-  test('rebuilds an importable stale assistant command before executing its built result', async () => {
+  test('rejects stale output without building inside the test worker', async () => {
     const { ensureCliRuntimeArtifacts } = await import('./cli-test-helpers.js')
+    await assert.rejects(ensureCliRuntimeArtifacts(), /pnpm build:test-runtime:prepared/u)
     assert.equal(builtResult(), 'stale')
-    await ensureCliRuntimeArtifacts()
-    assert.equal(builtResult(), 'current')
-    assert.equal(fixture.builds, 1)
+    assert.equal(fixture.builds, 0)
   })
 
   test('reuses an importable current command without rebuilding', async () => {
@@ -121,43 +109,31 @@ describe.sequential('built assistant command artifacts', () => {
     assert.equal(fixture.builds, 0)
   })
 
-  test.each(['assistant-onboarding.js', 'assistant-onboarding.d.ts'])('repairs missing %s even in a prepared runtime', async (file) => {
+  test.each(['assistant-onboarding.js', 'assistant-onboarding.d.ts'])('rejects missing %s even in a prepared runtime', async (file) => {
     vi.stubEnv('MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS', '1')
     const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
     await actual.rm(path.join(fixture.root, 'dist/commands', file))
     const { ensureCliRuntimeArtifacts } = await import('./cli-test-helpers.js')
-    await ensureCliRuntimeArtifacts()
-    assert.equal(builtResult(), 'current')
-    assert.equal(fixture.builds, 1)
+    await assert.rejects(ensureCliRuntimeArtifacts(), /pnpm build:test-runtime:prepared/u)
+    assert.equal(fixture.builds, 0)
   })
 
-  test('trusts explicit prepared builds but force revalidation repairs stale output', async () => {
+  test('trusts explicit prepared builds but force revalidation rejects stale output', async () => {
     vi.stubEnv('MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS', '1')
     const { ensureCliRuntimeArtifactsWithOptions } = await import('./cli-test-helpers.js')
     await ensureCliRuntimeArtifactsWithOptions()
     assert.equal(fixture.builds, 0)
-    await ensureCliRuntimeArtifactsWithOptions({ forceReverify: true })
-    assert.equal(builtResult(), 'current')
-    assert.equal(fixture.builds, 1)
+    await assert.rejects(ensureCliRuntimeArtifactsWithOptions({ forceReverify: true }), /pnpm build:test-runtime:prepared/u)
+    assert.equal(fixture.builds, 0)
   })
 
-  test('rechecks an edited command after this process has verified the runtime', async () => {
+  test('rejects a later source edit after this process verified the runtime', async () => {
+    await writeCommand('current', 'current')
+    await utimes(path.join(fixture.root, 'dist/commands/assistant-onboarding.js'), 300, 300)
     const { ensureCliRuntimeArtifacts } = await import('./cli-test-helpers.js')
     await ensureCliRuntimeArtifacts()
     await writeCommand('edited', 'current')
-    await ensureCliRuntimeArtifacts()
-    assert.equal(builtResult(), 'edited')
-    assert.equal(fixture.builds, 2)
-  })
-
-  test('propagates build failure and releases its repair lock for the next attempt', async () => {
-    fixture.failBuild = true
-    const { ensureCliRuntimeArtifacts } = await import('./cli-test-helpers.js')
-    await assert.rejects(ensureCliRuntimeArtifacts(), /Synthetic compiler failure/u)
-    const actual = await vi.importActual<typeof import('node:fs')>('node:fs')
-    assert.equal(actual.existsSync(path.join(fixture.root, 'lock/cli-runtime-artifacts.lock')), false)
-    fixture.failBuild = false
-    await ensureCliRuntimeArtifacts()
-    assert.equal(builtResult(), 'current')
+    await assert.rejects(ensureCliRuntimeArtifacts(), /pnpm build:test-runtime:prepared/u)
+    assert.equal(fixture.builds, 0)
   })
 })

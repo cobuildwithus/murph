@@ -37,8 +37,8 @@ alone does not authorize a narrower product or another state owner.
    files and rejects directory targets; `scripts/finish-task` expands directories
    and closes the plan for the final commit. A PR with known edits still needed
    stays draft. Before every subsequent push to an existing owned PR, follow
-   the verification guide's Draft-before-push sequence; do not wait for the
-   delayed controller to establish Draft.
+   the verification guide's Draft-before-push sequence. The author owns
+   Draft/Ready and no background controller changes that state.
 5. Once focused proof and parent candidate review pass and the pushed head is
    the intended candidate, mark the PR Ready. Start final ReviewGPT immediately
    when eligible, concurrently with CI. Follow the review loop's exact-head

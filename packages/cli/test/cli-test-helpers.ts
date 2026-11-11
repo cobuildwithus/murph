@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { tmpdir } from 'node:os'
@@ -67,10 +67,6 @@ export const repoRoot = path.resolve(packageDir, '../..')
 export const binPath = path.join(packageDir, 'dist/bin.js')
 const cliIndexPath = path.join(packageDir, 'dist/index.js')
 const CLI_MAX_OUTPUT_BUFFER_BYTES = 8 * 1024 * 1024
-const CLI_RUNTIME_ARTIFACT_WAIT_TIMEOUT_MS = 15_000
-const CLI_RUNTIME_ARTIFACT_WAIT_INTERVAL_MS = 100
-const CLI_RUNTIME_ARTIFACT_REPAIR_LOCK_WAIT_TIMEOUT_MS = 60_000
-const CLI_RUNTIME_ARTIFACT_REPAIR_LOCK_STALE_MS = 10 * 60_000
 const forwardedCliEnvKeys = [
   'CI',
   'COLORTERM',
@@ -146,13 +142,6 @@ const requiredRuntimeArtifactPaths = [
 const importSmokeArtifactPaths = [
   ...requiredRuntimeArtifactPaths.filter((artifactPath) => artifactPath.endsWith('.js') && artifactPath !== binPath),
 ]
-const cliRuntimeArtifactRepairLockPath = path.join(
-  repoRoot,
-  'node_modules',
-  '.cache',
-  'murph',
-  'cli-runtime-artifacts.lock',
-)
 const PREPARED_CLI_RUNTIME_ARTIFACTS_ENV = 'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS' as const
 let cliRuntimeArtifactsVerified = false
 const strippedTestRunnerEnvKeys = ['NODE_OPTIONS', 'VITEST'] as const
@@ -316,31 +305,13 @@ export async function runCli<TData = Record<string, unknown>>(
     stdin?: string
   },
 ): Promise<CliEnvelope<TData>> {
-  return runCliAttempt(args, options, true)
-}
-
-async function runCliAttempt<TData = Record<string, unknown>>(
-  args: string[],
-  options: {
-    env?: NodeJS.ProcessEnv
-    stdin?: string
-  } | undefined,
-  allowRetry: boolean,
-): Promise<CliEnvelope<TData>> {
   try {
     const { stdout } = await execCli(withMachineOutput(args), options)
     const result = JSON.parse(stdout) as CliEnvelope<TData>
 
-    if (allowRetry && shouldRetryCliEnvelope(result) && (await waitForCliRuntimeArtifacts())) {
-      return runCliAttempt(args, options, false)
-    }
-
     return result
   } catch (error) {
     const output = commandOutputFromError(error)
-    if (allowRetry && shouldRetryCliExecution(error) && (await waitForCliRuntimeArtifacts())) {
-      return runCliAttempt(args, options, false)
-    }
     if (output !== null) {
       try {
         return JSON.parse(output) as CliEnvelope<TData>
@@ -360,26 +331,11 @@ export async function runRawCli(
     stdin?: string
   },
 ): Promise<string> {
-  return runRawCliAttempt(args, options, true)
-}
-
-async function runRawCliAttempt(
-  args: string[],
-  options: {
-    env?: NodeJS.ProcessEnv
-    stdin?: string
-  } | undefined,
-  allowRetry: boolean,
-): Promise<string> {
   try {
     const { stdout } = await execCli(args, options)
 
     return stdout.trim()
   } catch (error) {
-    if (allowRetry && shouldRetryCliExecution(error) && (await waitForCliRuntimeArtifacts())) {
-      return runRawCliAttempt(args, options, false)
-    }
-
     const output = commandOutputFromError(error)
     if (output !== null) {
       return output
@@ -438,26 +394,6 @@ export function commandOutputFromError(error: unknown): string | null {
   return decodeCommandOutput(maybeOutput.stdout) ?? decodeCommandOutput(maybeOutput.stderr)
 }
 
-export function retryableCliRuntimeArtifactOutputFromError(
-  error: unknown,
-): string | null {
-  const output = commandOutputFromError(error)
-  if (output !== null) {
-    return output
-  }
-
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  if (!error || typeof error !== 'object' || !('message' in error)) {
-    return null
-  }
-
-  const message = (error as { message?: unknown }).message
-  return typeof message === 'string' ? message : null
-}
-
 export async function ensureCliRuntimeArtifacts(): Promise<void> {
   return ensureCliRuntimeArtifactsWithOptions()
 }
@@ -487,31 +423,10 @@ export async function ensureCliRuntimeArtifactsWithOptions(options?: {
     return
   }
 
-  await withCliRuntimeArtifactRepairLock(async () => {
-    if (await verifyCliRuntimeArtifacts()) {
-      return
-    }
-
-    await rebuildCliRuntimeArtifacts()
-
-    if (await verifyCliRuntimeArtifacts()) {
-      return
-    }
-
-    throw createMissingRuntimeArtifactsError()
-  })
+  throw createMissingRuntimeArtifactsError()
 }
 
-export async function rebuildCliRuntimeArtifacts(): Promise<void> {
-  await execWorkspaceCommand(['build:test-runtime:prepared'], { retryOnce: true })
 
-  await execWorkspaceCommand([
-    'exec',
-    'node',
-    '--import=tsx',
-    'packages/cli/scripts/verify-runtime-artifacts.ts',
-  ])
-}
 
 function decodeCommandOutput(output: Buffer | string | undefined): string | null {
   if (typeof output === 'string') {
@@ -549,15 +464,7 @@ async function execCli(
 ) {
   await ensureCliRuntimeArtifacts()
 
-  try {
-    return await execCliProcess(args, options)
-  } catch (error) {
-    if (shouldRetryCliExecution(error) && (await waitForCliRuntimeArtifacts())) {
-      return await execCliProcess(args, options)
-    }
-
-    throw error
-  }
+  return execCliProcess(args, options)
 }
 
 async function execCliProcess(
@@ -571,16 +478,7 @@ async function execCliProcess(
   const executionMode = resolveCliProcessExecutionMode(options)
 
   if (executionMode === 'harness') {
-    try {
-      return await execCliProcessThroughHarness(args, commandEnv)
-    } catch (error) {
-      if (shouldRetryCliExecution(error) && (await waitForCliRuntimeArtifacts())) {
-        resetCliCommandHarnessPool()
-        return await execCliProcessThroughHarness(args, commandEnv)
-      }
-
-      throw error
-    }
+    return execCliProcessThroughHarness(args, commandEnv)
   }
 
   return execCliProcessIsolated(args, {
@@ -854,10 +752,6 @@ function installCliCommandHarnessProcessExitCleanup(): void {
   process.once('exit', cleanup)
 }
 
-function resetCliCommandHarnessPool(): void {
-  cliCommandHarnessPoolPromise = null
-}
-
 function registerCliCommandHarnessChild(
   child: ReturnType<typeof spawn>,
 ): () => void {
@@ -926,62 +820,6 @@ async function verifyAssistantCommandFreshness(): Promise<boolean> {
   }
 }
 
-async function waitForCliRuntimeArtifacts(): Promise<boolean> {
-  const deadline = Date.now() + CLI_RUNTIME_ARTIFACT_WAIT_TIMEOUT_MS
-
-  while (Date.now() < deadline) {
-    await sleep(CLI_RUNTIME_ARTIFACT_WAIT_INTERVAL_MS)
-
-    if (await verifyCliRuntimeArtifacts()) {
-      return true
-    }
-  }
-
-  return false
-}
-
-function shouldRetryCliExecution(error: unknown): boolean {
-  return isRetryableCliRuntimeArtifactError(
-    retryableCliRuntimeArtifactOutputFromError(error),
-  )
-}
-
-function shouldRetryCliEnvelope(result: CliEnvelope<unknown>): boolean {
-  if (result.ok) {
-    return false
-  }
-
-  return isRetryableCliRuntimeArtifactError(result.error.message ?? result.error.code ?? null)
-}
-
-export function isRetryableCliRuntimeArtifactError(output: string | null): boolean {
-  return shouldRetryCliOutput(output)
-}
-
-function shouldRetryCliOutput(output: string | null): boolean {
-  if (output === null) {
-    return false
-  }
-
-  const referencesBuiltWorkspaceArtifact =
-    output.includes('/dist/') &&
-    (output.includes('/packages/') || output.includes('/node_modules/@murphai/'))
-  const isMissingModuleError =
-    output.includes('ERR_MODULE_NOT_FOUND') ||
-    output.includes('Cannot find module') ||
-    output.includes('Cannot find package') ||
-    output.includes('ENOENT: no such file or directory')
-  const isDistStartupFailure =
-    referencesBuiltWorkspaceArtifact &&
-    (output.includes('file://') ||
-      output.includes('lstat ') ||
-      output.includes('does not provide an export named') ||
-      output.includes('SyntaxError:') ||
-      output.includes('ReferenceError:'))
-
-  return referencesBuiltWorkspaceArtifact && (isMissingModuleError || isDistStartupFailure)
-}
-
 function createMissingRuntimeArtifactsError(): Error {
   const missingArtifacts = requiredRuntimeArtifactPaths.filter(
     (artifactPath) => !existsSync(artifactPath),
@@ -997,83 +835,6 @@ function createMissingRuntimeArtifactsError(): Error {
   return new Error(
     `Built CLI runtime artifacts are unavailable.${detail} Run \`pnpm build:test-runtime:prepared\` before invoking CLI integration tests.`,
   )
-}
-
-async function withCliRuntimeArtifactRepairLock(action: () => Promise<void>): Promise<void> {
-  const deadline = Date.now() + CLI_RUNTIME_ARTIFACT_REPAIR_LOCK_WAIT_TIMEOUT_MS
-
-  await mkdir(path.dirname(cliRuntimeArtifactRepairLockPath), { recursive: true })
-
-  while (true) {
-    try {
-      await mkdir(cliRuntimeArtifactRepairLockPath)
-    } catch (error) {
-      if (!isDirectoryAlreadyExistsError(error)) {
-        throw error
-      }
-
-      if (await verifyCliRuntimeArtifacts()) {
-        return
-      }
-
-      if (await cleanupStaleCliRuntimeArtifactRepairLock()) {
-        continue
-      }
-
-      if (Date.now() >= deadline) {
-        throw new Error(
-          'Timed out waiting for the CLI runtime artifact repair lock to clear.',
-        )
-      }
-
-      await sleep(CLI_RUNTIME_ARTIFACT_WAIT_INTERVAL_MS)
-      continue
-    }
-
-    try {
-      await action()
-      return
-    } finally {
-      await rm(cliRuntimeArtifactRepairLockPath, { recursive: true, force: true })
-    }
-  }
-}
-
-async function cleanupStaleCliRuntimeArtifactRepairLock(): Promise<boolean> {
-  try {
-    const lockStats = await stat(cliRuntimeArtifactRepairLockPath)
-
-    if (Date.now() - lockStats.mtimeMs < CLI_RUNTIME_ARTIFACT_REPAIR_LOCK_STALE_MS) {
-      return false
-    }
-
-    await rm(cliRuntimeArtifactRepairLockPath, { recursive: true, force: true })
-    return true
-  } catch (error) {
-    if (
-      error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      (error as { code?: unknown }).code === 'ENOENT'
-    ) {
-      return false
-    }
-
-    throw error
-  }
-}
-
-function isDirectoryAlreadyExistsError(error: unknown): boolean {
-  return (
-    error !== null &&
-    typeof error === 'object' &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 'EEXIST'
-  )
-}
-
-async function sleep(delayMs: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, delayMs))
 }
 
 async function canImportArtifact(artifactPath: string): Promise<boolean> {
@@ -1114,41 +875,4 @@ async function canImportArtifact(artifactPath: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-async function execWorkspaceCommand(
-  args: string[],
-  options?: {
-    retryOnce?: boolean
-  },
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const run = (allowRetry: boolean) => {
-      execFile(
-        'pnpm',
-        args,
-        {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          env: withoutNodeV8Coverage(selectCliBaseEnv()),
-          maxBuffer: CLI_MAX_OUTPUT_BUFFER_BYTES,
-        },
-        (error) => {
-          if (error) {
-            if (allowRetry) {
-              run(false)
-              return
-            }
-
-            reject(error)
-            return
-          }
-
-          resolve()
-        },
-      )
-    }
-
-    run(options?.retryOnce === true)
-  })
 }

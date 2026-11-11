@@ -7,7 +7,6 @@ import { test } from 'vitest'
 
 import {
   resolveCliProcessExecutionMode,
-  retryableCliRuntimeArtifactOutputFromError,
   runCli,
   runRawCli,
 } from './cli-test-helpers.js'
@@ -72,17 +71,6 @@ test('cli test helpers preserve non-zero exit behavior through the persistent ha
 
   assert.match(output, /command_not_found/iu)
   assert.match(output, /--wat/u)
-})
-
-test('cli test helpers treat harness error messages as retryable artifact failures', () => {
-  const error = new Error(
-    'ERR_MODULE_NOT_FOUND: Cannot find module packages/contracts/dist/index.js imported from packages/assistant-engine/dist/assistant-cli-tools/definitions/inbox-promotion.js',
-  )
-
-  assert.equal(
-    retryableCliRuntimeArtifactOutputFromError(error),
-    error.message,
-  )
 })
 
 test('local parallel CLI test helper keeps suite concurrency opt-in by default', () => {

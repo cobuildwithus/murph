@@ -23,6 +23,7 @@ import {
   appendAssistantCronRun,
   assertAssistantCronJobNameIsAvailable,
   buildAssistantCronTarget,
+  finalizeAssistantCronPendingRunDelivery,
   isAssistantCronJobDue,
   pruneAssistantCronRunHistory,
   readAssistantCronRuns,
@@ -646,6 +647,46 @@ describe('assistant cron store filesystem edges', () => {
     await expect(readAssistantCronRuns(paths, older.jobId)).resolves.toEqual([
       newer,
       older,
+    ])
+  })
+
+  it.each([
+    ['delivered', 'delivery_sent', 'succeeded'],
+    ['failed', 'provider_unavailable', 'failed'],
+    ['delivery_pending', 'delivery_queued', 'skipped'],
+    ['expired', 'occurrence_expired', 'skipped'],
+    ['skipped_gate', 'onboarding_open', 'skipped'],
+    ['no_op', 'provider_skip', 'succeeded'],
+    ['no_op', 'background_maintenance_non_replayable_work', 'skipped'],
+    ['no_op', 'legacy_no_op', 'skipped'],
+  ] as const)('stores %s/%s without a duplicate status and derives %s on read', async (outcome, reason, status) => {
+    const paths = await createAssistantPaths('assistant-cron-derived-status-')
+    const run = { ...createCronRun({ runId: 'cronrun_status', startedAt: '2026-04-08T10:00:00.000Z' }), outcome, reason, status }
+    await appendAssistantCronRun(paths, run)
+    const persisted = JSON.parse(await readFile(
+      path.join(paths.cronRunsDirectory, `${run.jobId}.jsonl`), 'utf8',
+    ))
+    expect(persisted).toMatchObject({ outcome, reason })
+    expect(persisted).not.toHaveProperty('status')
+    await expect(readAssistantCronRuns(paths, run.jobId)).resolves.toEqual([run])
+  })
+
+  it('reconciles a status-free pending run and keeps terminal status derived', async () => {
+    const paths = await createAssistantPaths('assistant-cron-derived-terminal-status-')
+    const run: AssistantCronRunRecord = { ...createCronRun({ runId: 'cronrun_status', startedAt: '2026-04-08T10:00:00.000Z' }),
+      outcome: 'delivery_pending', reason: 'delivery_queued', status: 'skipped' }
+    await appendAssistantCronRun(paths, run)
+    await finalizeAssistantCronPendingRunDelivery({
+      error: null, jobId: run.jobId, outcome: 'delivered', paths,
+      reason: 'delivery_sent', terminalAt: '2026-04-08T10:02:00.000Z',
+    })
+    const persisted = JSON.parse(await readFile(
+      path.join(paths.cronRunsDirectory, `${run.jobId}.jsonl`), 'utf8',
+    ))
+    expect(persisted).toMatchObject({ outcome: 'delivered', reason: 'delivery_sent' })
+    expect(persisted).not.toHaveProperty('status')
+    await expect(readAssistantCronRuns(paths, run.jobId)).resolves.toEqual([
+      expect.objectContaining({ outcome: 'delivered', status: 'succeeded' }),
     ])
   })
 

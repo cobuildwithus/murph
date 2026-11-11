@@ -22,6 +22,12 @@ The existing provider-start callback emits
 `automationPromptPreparationMs` when available. These describe preparation
 before reply-started, add no awaits, and also remain in the latency trace.
 
+Assistant/system phase composition constructs shared progress and wake fields
+once, retaining the existing distinction between an omitted wake and explicit
+wake clearing. Checkpoint callbacks stay ordered at their existing publication
+barriers; foreground ownership and autonomous wake classification remain attached
+to the same results. This changes no persisted format or additional wake source.
+
 Current responsibilities:
 
 - skip retired member ChatGPT-linking mailbox work before payload loading and

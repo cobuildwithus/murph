@@ -1,4 +1,8 @@
-[Pair recap simplification](exec-plans/completed/2026-11-11-recap-show-simplify.md) tracks the normal group turn, single publication and silent regeneration failure.
+Repository tooling uses installed registry dependencies, one prepared-runtime
+build owner, author-controlled PR readiness, and structural documentation checks.
+The [verification owner](operations/verification-and-runtime.md),
+[plan lifecycle](PLANS.md), and [CI proof map](references/testing-ci-map.md)
+describe these contracts.
 
 Home restoration and Training retirement are recorded in the
 [follow-up plan](exec-plans/completed/2026-11-11-restore-home-after-training-retirement.md);
@@ -7,6 +11,13 @@ Home restoration and Training retirement are recorded in the
 [Recap real-provider recovery](exec-plans/completed/2026-11-11-recap-show-real-providers.md) tracks media validation, safe failure diagnostics and submission recovery.
 
 Shared reminder awareness is owned by the [assistant engine](../packages/assistant-engine/README.md) and [assistant runtime](../packages/assistant-runtime/README.md); the [execution plan](exec-plans/completed/2026-11-10-reminder-awareness.md) records the implementation and proof.
+
+Assistant cron history stores outcomes once and derives compatibility status;
+shared occurrence bookkeeping and phase-result composition stay at their existing
+owners. [Execution plan](exec-plans/completed/2026-11-10-simplify-assistant-state.md),
+[engine contract](../packages/assistant-engine/README.md#cron-occurrence-and-history-ownership)
+and [runtime owner](../packages/assistant-runtime/README.md) record the scope and
+remaining snapshot retirement gates.
 
 [Hosted Linux recap file access](exec-plans/completed/2026-11-11-recap-show-hosted-files.md) records the restricted mount fix, host-only song credentials and native container proof.
 

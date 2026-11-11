@@ -1,7 +1,177 @@
+diff --git a/src/check-agent-docs-drift.sh b/src/check-agent-docs-drift.sh
+index 392445fd95466142281c684e77fb97064759b2c8..2b02c84f16749ad9abb18b4409daec7cb2b6a540 100755
+--- a/src/check-agent-docs-drift.sh
++++ b/src/check-agent-docs-drift.sh
+@@ -73,162 +73,10 @@ has_change() {
+   grep -Eq "$pattern" <<< "$changed_files"
+ }
+
+-package_json_version_only_in_range() {
+-  local compare_range="$1"
+-  local diff_lines relevant line
+-
+-  diff_lines="$(git diff --unified=0 --no-color "$compare_range" -- package.json 2>/dev/null || true)"
+-  relevant="$(printf '%s\n' "$diff_lines" | grep -E '^[+-]' | grep -Ev '^\+\+\+|^---' || true)"
+-  if [[ -z "$relevant" ]]; then
+-    return 1
+-  fi
+-
+-  while IFS= read -r line; do
+-    line="${line:1}"
+-    line="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//')"
+-    if [[ ! "$line" =~ ^\"version\"[[:space:]]*:[[:space:]]*\"[^\"]+\"[[:space:]]*,?[[:space:]]*$ ]]; then
+-      return 1
+-    fi
+-  done <<< "$relevant"
+-
+-  return 0
+-}
+-
+-package_json_metadata_only() {
+-  local before_file after_file status
+-
+-  before_file="$(mktemp)"
+-  after_file="$(mktemp)"
+-  trap 'rm -f "$before_file" "$after_file"' RETURN
+-
+-  case "$compare_source" in
+-    staged)
+-      git show HEAD:package.json >"$before_file" 2>/dev/null || printf '{}\n' >"$before_file"
+-      git show :package.json >"$after_file" 2>/dev/null || printf '{}\n' >"$after_file"
+-      ;;
+-    working-tree)
+-      git show HEAD:package.json >"$before_file" 2>/dev/null || printf '{}\n' >"$before_file"
+-      cat package.json >"$after_file" 2>/dev/null || printf '{}\n' >"$after_file"
+-      ;;
+-    range)
+-      git show "$(git merge-base "${compare_range%...HEAD}" HEAD)":package.json >"$before_file" 2>/dev/null || printf '{}\n' >"$before_file"
+-      git show HEAD:package.json >"$after_file" 2>/dev/null || printf '{}\n' >"$after_file"
+-      ;;
+-    *)
+-      rm -f "$before_file" "$after_file"
+-      trap - RETURN
+-      return 1
+-      ;;
+-  esac
+-
+-  node - "$before_file" "$after_file" <<'NODE'
+-const fs = require("node:fs");
+-const [beforePath, afterPath] = process.argv.slice(2);
+-const allowed = new Set([
+-  "version",
+-  "packageManager",
+-  "dependencies",
+-  "devDependencies",
+-  "peerDependencies",
+-  "optionalDependencies",
+-  "peerDependenciesMeta",
+-  "overrides",
+-  "resolutions",
+-  "engines",
+-  "pnpm",
+-]);
+-
+-const before = JSON.parse(fs.readFileSync(beforePath, "utf8"));
+-const after = JSON.parse(fs.readFileSync(afterPath, "utf8"));
+-const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+-const changed = [...keys].filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+-
+-if (changed.length === 0 || changed.some((key) => !allowed.has(key))) {
+-  process.exit(1);
+-}
+-NODE
+-  status=$?
+-
+-  rm -f "$before_file" "$after_file"
+-  trap - RETURN
+-  return "$status"
+-}
+-
+-code_change_pattern="${COBUILD_DRIFT_CODE_CHANGE_PATTERN:-^(src/|scripts/|package\.json$|README\.md$|ARCHITECTURE\.md$|AGENTS\.md$)}"
+-code_change_label="${COBUILD_DRIFT_CODE_CHANGE_LABEL:-Architecture-sensitive code/process}"
+-large_change_threshold="${COBUILD_DRIFT_LARGE_CHANGE_THRESHOLD:-10}"
+-changed_count_exclude_pattern="${COBUILD_DRIFT_CHANGED_COUNT_EXCLUDE_PATTERN:-^agent-docs/generated/|^agent-docs/exec-plans/(active|completed)/|^pnpm-lock\.yaml$}"
+-docs_requiring_index_exclude_pattern='^agent-docs/exec-plans/(active|completed)/'
+-exec_plan_support_pattern='^agent-docs/exec-plans/(active/COORDINATION_LEDGER\.md|(active|completed)/README\.md)$'
+-allow_release_artifacts_only="${COBUILD_DRIFT_ALLOW_RELEASE_ARTIFACTS_ONLY:-0}"
+-release_artifacts_pattern='^(package\.json|CHANGELOG\.md|release-notes/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\.md)$'
+-release_notes_file_pattern='^release-notes/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\.md$'
+-
+-active_plan_changes="$(echo "$changed_files" | grep '^agent-docs/exec-plans/active/' | grep -Ev "$exec_plan_support_pattern" || true)"
+-plan_changes="$(echo "$changed_files" | grep -E '^agent-docs/exec-plans/(active|completed)/' | grep -Ev "$exec_plan_support_pattern" || true)"
+-
+-code_changed=0
+-index_changed=0
+-active_plan_changed=0
+-plan_changed=0
+-release_artifacts_only=0
+-package_metadata_only_changed=0
+-package_version_only_changed=0
+-
+-if has_change "$code_change_pattern"; then
+-  code_changed=1
+-fi
+-if has_change '^agent-docs/index\.md$'; then
+-  index_changed=1
+-fi
+-if [[ -n "$active_plan_changes" ]]; then
+-  active_plan_changed=1
+-fi
+-if [[ -n "$plan_changes" ]]; then
+-  plan_changed=1
+-fi
+-
+-docs_changed_non_generated="$(echo "$changed_files" | grep '^agent-docs/' | grep -Ev '^agent-docs/generated/' || true)"
+-docs_changed_requiring_index="$(echo "$docs_changed_non_generated" | grep -Ev "$docs_requiring_index_exclude_pattern" || true)"
+-
+-if has_change '^package\.json$' && [[ "$compare_source" == "range" ]] && package_json_version_only_in_range "$range"; then
+-  package_version_only_changed=1
+-fi
+-
+-if has_change '^package\.json$'; then
+-  non_package_metadata_changes="$(echo "$changed_files" | grep -Ev '^(package\.json|pnpm-lock\.yaml)$' || true)"
+-  if [[ -z "$non_package_metadata_changes" ]] && package_json_metadata_only; then
+-    package_metadata_only_changed=1
+-  fi
+-fi
+-
+-if [[ "$allow_release_artifacts_only" == "1" ]] \
+-  && has_change '^package\.json$' \
+-  && has_change '^CHANGELOG\.md$' \
+-  && has_change "$release_notes_file_pattern" \
+-  && (( package_version_only_changed == 1 )); then
+-  non_release_changes="$(echo "$changed_files" | grep -Ev "$release_artifacts_pattern" || true)"
+-  if [[ -z "$non_release_changes" ]]; then
+-    release_artifacts_only=1
+-  fi
+-fi
+-
+-if (( code_changed == 1 )) && [[ -z "$docs_changed_non_generated" ]] && (( active_plan_changed == 0 )) && (( package_metadata_only_changed == 0 )) && (( release_artifacts_only == 0 )); then
+-  echo "::error::${code_change_label} changed without matching non-generated docs updates or an active execution plan."
+-  echo "Update relevant docs in agent-docs/ and/or add an active plan in agent-docs/exec-plans/active/."
+-  exit 1
+-fi
+-
+-if [[ -n "$docs_changed_requiring_index" ]] && (( index_changed == 0 )); then
++docs_changed_requiring_index="$(echo "$changed_files" | grep '^agent-docs/' | grep -Ev '^agent-docs/(generated/|exec-plans/(active|completed)/)' || true)"
++if [[ -n "$docs_changed_requiring_index" ]] && ! has_change '^agent-docs/index\.md$'; then
+   echo "::error::agent-docs changed (outside generated artifacts) without updating agent-docs/index.md."
+   exit 1
+ fi
+
+-changed_count="$(printf '%s\n' "$changed_files" | awk -v exclude="$changed_count_exclude_pattern" 'NF && $0 !~ exclude { count++ } END { print count + 0 }')"
+-if (( changed_count >= large_change_threshold && plan_changed == 0 )); then
+-  echo "::error::Large change set ($changed_count files) without an active execution plan."
+-  echo "Add a plan under agent-docs/exec-plans/active/."
+-  exit 1
+-fi
+-
+ echo "Agent docs drift checks passed."
 diff --git a/src/committer.sh b/src/committer.sh
+index 1f1a8fa458dcd1d1c267610c3737f014c474af9b..16456babd05907a24b02745ef31a6f2e4c5f8bf4 100755
 --- a/src/committer.sh
 +++ b/src/committer.sh
-@@ -409,7 +409,28 @@
+@@ -409,7 +409,28 @@ else
    GIT_INDEX_FILE="$tmp_index" git read-tree --empty
    comparison_tree="$(GIT_INDEX_FILE="$tmp_index" git write-tree)"
  fi
@@ -28,13 +198,13 @@ diff --git a/src/committer.sh b/src/committer.sh
 +if [ "${#untracked_files[@]}" -gt 0 ]; then
 +  GIT_INDEX_FILE="$tmp_index" git -C "$repo_root" --literal-pathspecs add -A -- "${untracked_files[@]}"
 +fi
- 
+
  initial_changed_files=()
  while IFS= read -r -d '' changed_path; do
-@@ -515,9 +536,22 @@
+@@ -515,9 +536,22 @@ else
    new_commit="$(GIT_INDEX_FILE="$tmp_index" git commit-tree -F <(printf '%s\n' "$commit_message") "$(GIT_INDEX_FILE="$tmp_index" git write-tree)")"
  fi
- 
+
 +# Consume both selected sides of a staged rename; the destination may have
 +# changed again after git mv. Unrelated partial staging remains untouched.
 +selected_rename_paths=()
@@ -55,10 +225,10 @@ diff --git a/src/committer.sh b/src/committer.sh
      reconcile_files+=("$committed_file")
    fi
  done
-@@ -534,9 +568,15 @@
+@@ -534,9 +568,15 @@ if [ "${#reconcile_files[@]}" -gt 0 ]; then
    fi
    real_index_lock_acquired=true
- 
+
 +  index_semantics() {
 +    GIT_INDEX_FILE="$1" git ls-files --stage -v -z
 +    # Cached diff distinguishes intent-to-add from an actually staged empty blob.
@@ -72,3 +242,52 @@ diff --git a/src/committer.sh b/src/committer.sh
        index_changed=true
      fi
    elif [ -e "$real_index_path" ]; then
+diff --git a/src/consumer-shell.sh b/src/consumer-shell.sh
+index d198302766d80dd91118a409925aa9c203227d21..88ef195fe1fe18e3cf2dfb33ae848bc05b482fc0 100644
+--- a/src/consumer-shell.sh
++++ b/src/consumer-shell.sh
+@@ -16,19 +16,12 @@ repo_tools_join_lines() {
+ cobuild_repo_tool_path() {
+   local relative_path="$1"
+   local local_path="$COBUILD_REPO_ROOT/node_modules/@cobuild/repo-tools/$relative_path"
+-  local sibling_path="$COBUILD_REPO_ROOT/../repo-tools/$relative_path"
+
+   if [ -f "$local_path" ]; then
+     printf '%s\n' "$local_path"
+     return 0
+   fi
+
+-  # Allow local workspace testing of unreleased repo-tools files before the next package publish.
+-  if [ -f "$sibling_path" ]; then
+-    printf '%s\n' "$sibling_path"
+-    return 0
+-  fi
+-
+   echo "Error: missing repo-tools file '$relative_path'. Install dependencies first." >&2
+   return 1
+ }
+@@ -36,24 +29,12 @@ cobuild_repo_tool_path() {
+ cobuild_repo_tool_bin() {
+   local bin_name="$1"
+   local local_bin="$COBUILD_REPO_ROOT/node_modules/.bin/$bin_name"
+-  local sibling_bin="$COBUILD_REPO_ROOT/../repo-tools/bin/$bin_name"
+
+   if [ -x "$local_bin" ]; then
+     printf '%s\n' "$local_bin"
+     return 0
+   fi
+
+-  # Allow local workspace testing of unreleased repo-tools bins before the next package publish.
+-  if [ -x "$sibling_bin" ]; then
+-    printf '%s\n' "$sibling_bin"
+-    return 0
+-  fi
+-
+-  if command -v "$bin_name" >/dev/null 2>&1; then
+-    command -v "$bin_name"
+-    return 0
+-  fi
+-
+   echo "Error: missing repo-tools executable '$bin_name'. Install dependencies first." >&2
+   return 1
+ }
