@@ -59,8 +59,10 @@ describe('assistant session resume state normalization', () => {
   })
 
   it('normalizes complete legacy resumable state into Codex resume state', () => {
+    const record = createPersistedSessionRecord()
     const session = parseAssistantSessionRecord(
       createPersistedSessionRecord({
+        target: { ...record.target, modelProvider: 'openai' },
         resumeState: {
           codexRolloutRelativePath: ` ${codexRolloutRelativePath} `,
           providerSessionId,
@@ -75,6 +77,12 @@ describe('assistant session resume state normalization', () => {
       threadId: providerSessionId,
     })
     expect(session.codexResume).toEqual(session.resumeState)
+    expect(session.providerOptions).toMatchObject({
+      executionDriver: 'codex-app-server',
+      modelProvider: 'openai',
+      provider: 'codex-cli',
+      resumeKind: 'codex-thread',
+    })
   })
 
   it('preserves Codex assistant contract fingerprints when present', () => {

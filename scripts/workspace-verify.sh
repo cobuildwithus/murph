@@ -87,32 +87,6 @@ readonly node_syntax_check_scripts=(
   "scripts/rm-paths.mjs"
 )
 
-readonly typecheck_package_dirs=(
-  "packages/contracts"
-  "packages/clinical-records"
-  "packages/hosted-execution"
-  "packages/runtime-state"
-  "packages/cloudflare-hosted-control"
-  "packages/operator-config"
-  "packages/assistant-engine"
-  "packages/core"
-  "packages/importers"
-  "packages/device-syncd"
-  "packages/exercise-library"
-  "packages/health-metrics"
-  "packages/query"
-  "packages/inbox-services"
-  "packages/inboxd"
-  "packages/parsers"
-  "packages/messaging-ingress"
-  "packages/gateway-core"
-  "packages/cli"
-  "packages/assistant-runtime"
-  "packages/vault-usecases"
-  "apps/web"
-  "apps/cloudflare"
-)
-
 normalize_positive_integer() {
   local value="${1:-}"
   local fallback="$2"
@@ -488,16 +462,13 @@ run_timed_step() {
   local label="$1"
   shift
   local started_at="$SECONDS"
-  local step_status=0
-
   verify_log "start ${label}"
-  if "$@"; then
+  "$@"
+  local step_status=$?
+  if [[ "$step_status" -eq 0 ]]; then
     verify_log "done ${label} ($((SECONDS - started_at))s step, ${SECONDS}s since command start)"
-    return 0
-  else
-    step_status=$?
-    return "$step_status"
   fi
+  return "$step_status"
 }
 
 register_background_pid() {
@@ -601,12 +572,16 @@ load_diff_scope() {
 }
 
 check_shell_syntax() {
-  bash -n "${shell_syntax_check_scripts[@]}"
+  local script_path
+  for script_path in "${shell_syntax_check_scripts[@]}"; do
+    bash -n "$script_path" || return $?
+  done
 }
 
 check_node_syntax() {
+  local script_path
   for script_path in "${node_syntax_check_scripts[@]}"; do
-    node --check "$script_path"
+    node --check "$script_path" || return $?
   done
 }
 
@@ -630,11 +605,30 @@ run_typecheck_packages() {
   fi
 
   local package_dirs=("$@")
+  local package_dir
   if [[ "$use_default_package_dirs" == "1" ]]; then
-    package_dirs=("${typecheck_package_dirs[@]}")
+    local workspace_dirs
+    workspace_dirs="$(node --input-type=module <<'NODE'
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { loadWorkspacePackages } from "./scripts/check-workspace-package-cycles.mjs";
+  for (const workspace of await loadWorkspacePackages()) {
+    const manifest = JSON.parse(await readFile(workspace.packageJsonPath, "utf8"));
+    if (typeof manifest.scripts?.typecheck === "string") {
+      console.log(path.relative(process.cwd(), path.dirname(workspace.packageJsonPath)));
+    }
+  }
+NODE
+)" || return $?
+    if [[ -z "$workspace_dirs" ]]; then
+      verify_log "ERROR: no workspace typecheck scripts were discovered"
+      return 1
+    fi
+    while IFS= read -r package_dir; do
+      [[ -n "$package_dir" ]] && package_dirs+=("$package_dir")
+    done <<<"$workspace_dirs"
   fi
 
-  local package_dir
   local contracts_prerequisite_required=0
 
   if [[ "$use_default_package_dirs" == "0" ]]; then
@@ -678,10 +672,8 @@ run_typecheck_packages() {
     return 0
   fi
 
-  # The package/app typecheck scripts are no-emit: they read sibling sources or
-  # already-built dist and produce nothing another package's typecheck consumes.
-  # The contracts build and Web-owned Prisma client are sequenced explicitly
-  # before this fanout, so topological ordering would only serialize the lane.
+  # Prepare shared contracts and Prisma inputs before running each workspace
+  # owner's declared typecheck command.
   run_command_with_retry \
     "Workspace package typecheck" \
     pnpm -r --no-sort --workspace-concurrency="$typecheck_workspace_concurrency" "${filter_args[@]}" typecheck
@@ -1277,15 +1269,15 @@ run_package_boundary_verification() {
   local artifacts_prepared="${1:-0}"
 
   if [[ "$artifacts_prepared" == "1" ]]; then
-    run_timed_step "Messaging ingress built package boundary" pnpm --dir "packages/messaging-ingress" verify:package-boundary:prepared
-    run_timed_step "Inboxd built package boundary" pnpm --dir "packages/inboxd" verify:package-boundary:prepared
-    run_timed_step "Hosted local harness package boundary" pnpm --dir "packages/hosted-local-harness" verify:package-boundary
+    run_timed_step "Messaging ingress built package boundary" pnpm --dir "packages/messaging-ingress" verify:package-boundary:prepared || return $?
+    run_timed_step "Inboxd built package boundary" pnpm --dir "packages/inboxd" verify:package-boundary:prepared || return $?
+    run_timed_step "Hosted local harness package boundary" pnpm --dir "packages/hosted-local-harness" verify:package-boundary || return $?
     return
   fi
 
-  run_timed_step "Messaging ingress built package boundary" pnpm --dir "packages/messaging-ingress" verify:package-boundary
-  run_timed_step "Inboxd built package boundary" pnpm --dir "packages/inboxd" verify:package-boundary
-  run_timed_step "Hosted local harness package boundary" pnpm --dir "packages/hosted-local-harness" verify:package-boundary
+  run_timed_step "Messaging ingress built package boundary" pnpm --dir "packages/messaging-ingress" verify:package-boundary || return $?
+  run_timed_step "Inboxd built package boundary" pnpm --dir "packages/inboxd" verify:package-boundary || return $?
+  run_timed_step "Hosted local harness package boundary" pnpm --dir "packages/hosted-local-harness" verify:package-boundary || return $?
 }
 
 run_diff_package_boundary_verification() {
@@ -1502,8 +1494,8 @@ run_test_packages() {
 run_package_coverage_cleanup_and_hygiene() {
   run_timed_step \
     "Coverage cleanup" \
-    node "scripts/rm-paths.mjs" "coverage" "packages/*/coverage"
-  run_timed_step "Tracked artifact hygiene" pnpm no-js
+    node "scripts/rm-paths.mjs" "coverage" "packages/*/coverage" || return $?
+  run_timed_step "Tracked artifact hygiene" pnpm no-js || return $?
 }
 
 run_test_packages_coverage_after_hygiene() {

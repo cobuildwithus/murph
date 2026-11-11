@@ -408,7 +408,11 @@ test('deleteTelegramMessages batches ids and uses deleteBusinessMessages for bus
   expect(seenRequests[1]?.body).not.toHaveProperty('chat_id')
 })
 
-test('setTelegramMessageReaction posts a single emoji reaction to the target message', async () => {
+test.each([
+  { reaction: 'thumbs_up', emoji: '\u{1F44D}', target: '-1001234567890:topic:42' },
+  { reaction: 'heart', emoji: '\u2764', target: '-1001234567890' },
+  { reaction: 'laugh', emoji: '\u{1F601}', target: '-1001234567890' },
+] as const)('setTelegramMessageReaction sends the exact $reaction emoji', async ({ reaction, emoji, target }) => {
   const seenRequests: Array<{
     body: Record<string, unknown> | null
     url: string
@@ -430,8 +434,8 @@ test('setTelegramMessageReaction posts a single emoji reaction to the target mes
 
   const delivery = await setTelegramMessageReaction(
     {
-      reaction: 'thumbs_up',
-      target: '-1001234567890:topic:42',
+      reaction,
+      target,
       targetMessageId: '77',
     },
     {
@@ -444,8 +448,8 @@ test('setTelegramMessageReaction posts a single emoji reaction to the target mes
   )
 
   expect(delivery).toEqual({
-    reaction: 'thumbs_up',
-    target: '-1001234567890:topic:42',
+    reaction,
+    target,
     targetMessageId: '77',
   })
   expect(fetchImplementation).toHaveBeenCalledTimes(1)
@@ -458,7 +462,7 @@ test('setTelegramMessageReaction posts a single emoji reaction to the target mes
     reaction: [
       {
         type: 'emoji',
-        emoji: '\u{1F44D}',
+        emoji,
       },
     ],
   })
@@ -528,84 +532,6 @@ test('setLinqMessageReaction posts standard tapback reactions to the target mess
     })
     expect(seenRequests[0]?.headers?.authorization).toBe('Bearer linq-token')
   }
-})
-
-test('setTelegramMessageReaction posts the Telegram heart reaction emoji without a variation selector', async () => {
-  const seenRequests: Array<{ body: Record<string, unknown> | null }> = []
-  const fetchImplementation = vi.fn(async (_url: string, init: {
-    body?: string | Blob | FormData
-    headers?: Record<string, string>
-    method: string
-    signal?: AbortSignal
-  }) => {
-    seenRequests.push({
-      body: typeof init.body === 'string'
-        ? JSON.parse(init.body) as Record<string, unknown>
-        : null,
-    })
-    return createTelegramResponse({ ok: true, result: true })
-  })
-
-  await setTelegramMessageReaction(
-    {
-      reaction: 'heart',
-      target: '-1001234567890',
-      targetMessageId: '77',
-    },
-    {
-      env: {
-        TELEGRAM_API_BASE_URL: 'https://api.telegram.example',
-        TELEGRAM_BOT_TOKEN: 'bot-token',
-      },
-      fetchImplementation,
-    },
-  )
-
-  expect(seenRequests[0]?.body?.reaction).toEqual([
-    {
-      type: 'emoji',
-      emoji: '\u2764',
-    },
-  ])
-})
-
-test('setTelegramMessageReaction posts the Telegram laugh reaction emoji', async () => {
-  const seenRequests: Array<{ body: Record<string, unknown> | null }> = []
-  const fetchImplementation = vi.fn(async (_url: string, init: {
-    body?: string | Blob | FormData
-    headers?: Record<string, string>
-    method: string
-    signal?: AbortSignal
-  }) => {
-    seenRequests.push({
-      body: typeof init.body === 'string'
-        ? JSON.parse(init.body) as Record<string, unknown>
-        : null,
-    })
-    return createTelegramResponse({ ok: true, result: true })
-  })
-
-  await setTelegramMessageReaction(
-    {
-      reaction: 'laugh',
-      target: '-1001234567890',
-      targetMessageId: '77',
-    },
-    {
-      env: {
-        TELEGRAM_API_BASE_URL: 'https://api.telegram.example',
-        TELEGRAM_BOT_TOKEN: 'bot-token',
-      },
-      fetchImplementation,
-    },
-  )
-
-  expect(seenRequests[0]?.body?.reaction).toEqual([
-    {
-      type: 'emoji',
-      emoji: '\u{1F601}',
-    },
-  ])
 })
 
 test('setTelegramMessageReaction retries once with a migrated chat id', async () => {

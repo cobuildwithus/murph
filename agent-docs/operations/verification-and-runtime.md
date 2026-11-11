@@ -26,7 +26,7 @@ The delivery path decides who owns broad verification:
 - **Direct shared-default push:** after fetching and reconciling the exact
   candidate for `main` or another shared default branch, run
   `pnpm verify:acceptance` once for that direct-push attempt. This rule overrides
-  the PR-focused and docs-only fast paths because there is no PR feedback loop
+  the focused local PR path because there is no PR feedback loop
   before the shared branch changes. If the remote advances while acceptance
   runs or rejects an ordinary push, fetch it and reconcile through a normal
   merge or an authorized rebase. Inspect the intervening base diff and any
@@ -80,49 +80,10 @@ merging another commit cannot cancel a candidate's tests. PR proof continues to
 supersede by PR number. The separate Web admission group finishes its active run
 and retains only the newest pending candidate.
 
-Eligible Markdown-only pull requests keep the same protected PR and required
-context owners while replacing runtime-heavy proof with narrowly scoped positive
-receipts across the required owners and two optional expensive checks.
-Each owning workflow independently checks out
-`scripts/ci-markdown-docs-scope.mjs` from the event's exact base SHA and grants
-it read-only contents and pull-request inventory access. The classifier compares
-the event base, head, merge ref, and repository identity with the current open
-PR, traverses and count-checks the complete GitHub file inventory up to 3,000
-files, revalidates that the live PR identity is still exact after pagination,
-validates both sides of every rename, and then admits only flat, dated release
-note records matching `docs/release-notes/YYYY-MM-DD-<lowercase-slug>.md`.
-The release-note directory's `README.md`, incident and research records,
-operational and proof-consumed Markdown such as `AGENTS.md`, architecture and
-contract docs, app/package READMEs, deploy guides, skills, runtime prompts, and
-changelog sources retain full CI. Workflow files, scripts, config, generated
-docs, mixed diffs, unsafe statuses or paths, stale refs, partial inventories,
-and classifier failures also retain full CI.
-The existing `Release checks (ubuntu)`, both platform-specific `CLI host matrix`
-contexts, required Stripe boundary, Repo Hygiene, foreground-cardinality, and
-viewport owners run the receipt; optional heavy jobs skip. Repo Hygiene still completes normally so the existing trusted
-Temporal controller can publish its sole no-owner status. The classifier never
-executes candidate code, creates no duplicate required check, uses no
-`pull_request_target` or workflow path filter, and does not change `main` push
-or non-PR manual behavior. The introducing PR necessarily uses full CI when its
-exact base does not yet contain the classifier.
-
-An affirmative classification also starts one `Markdown documentation proof`
-job in Host Support. It checks out the event's exact synthetic merge SHA,
-verifies that SHA against the pull-request payload, fetches only the immutable
-event base when needed, and runs `git diff --check` over the event base and
-merge candidate. Using the merge candidate prevents later base-only commits
-from appearing as reversed pull-request changes. The job then installs the
-frozen repository tooling and runs `pnpm docs:drift` plus `pnpm docs:gardening`.
-`Release checks (ubuntu)` accepts documentation mode only when that job succeeds
-and the dependency-free release-plan job plus every runtime-heavy shard remain
-skipped; full mode requires the plan and every runtime-heavy shard to succeed
-while the documentation job remains skipped.
-
-The Markdown-only classifier is a pull-request CI optimization only. Production
-Web does not reuse it: every `main` commit must create a managed Vercel
-production candidate so the exact-candidate Deployment Check always has a matching
-artifact to admit. `apps/web/vercel.json` therefore has no ignore command and
-enables Git deployment only for `main`.
+Required CI runs the same verification jobs for documentation and code candidates.
+Every `main` commit creates a managed Vercel production candidate for the
+exact-candidate Deployment Check. `apps/web/vercel.json` enables Git deployment
+only for `main` and has no ignore command.
 
 For changes to the shared Playwright Chromium install wrapper or any workflow
 that calls it, run `bash -n scripts/install-playwright-chromium.sh` and the
@@ -346,15 +307,14 @@ pnpm hosted-local e2e stripe-billing-browser-matrix
 pnpm hosted-billing:live:cleanup
 ```
 
-Never run PR-controlled fork code with writable Stripe authority and never use
-`pull_request_target` to work around GitHub's secret boundary. The Actions
-classifier admits only same-repository heads (excluding dependency-bot heads)
-whose pull-request author and triggering actor are both non-Dependabot. Every
-eligible trusted head enters the live lane; absent or malformed sandbox
-configuration fails closed. Fork and dependency-bot pull requests run only the
-credential-free hermetic lane. The always-present
-`Required hosted Stripe billing boundary` job checks the applicable result so
-branch protection has one stable required context. The live job exposes the
+Pull requests run only the credential-free hermetic lane, including trusted and
+fork heads. The live Actions lane runs twice weekly on protected `main`, after
+hermetic proof succeeds, through the protected sandbox environment. Never use
+`pull_request_target` to work around this boundary. Absent or malformed sandbox
+configuration fails closed. The always-present
+`Required hosted Stripe billing boundary` requires hermetic success and a skipped
+live job for admitted PRs and `main` pushes; scheduled runs require both to succeed.
+The live job exposes the
 existing pinned `@openai/codex` workspace binary for hosted-local model-catalog
 preparation without adding another CLI dependency. Keep the key on
 preflight/matrix/cleanup steps only; within the scenario it reaches the web
@@ -540,7 +500,7 @@ through `scripts/verification-dispatch.mjs`:
   execution is already local.
 
 Remote execution preserves the exact underlying `workspace-verify.sh` command,
-including diff scope, reverse dependents, coverage thresholds, app verification,
+including diff scope, reverse dependents, coverage reporting, app verification,
 and acceptance semantics. The remote bootstrap reconciles the synced lockfile
 with `pnpm install --frozen-lockfile --prefer-offline` before verification.
 
@@ -667,8 +627,10 @@ offering the Mac by disabling Remote Login or removing its authorized key.
 ### Ten-minute local admission fallback
 
 Measure time spent waiting for the exclusive local shared-host slot separately
-from active verification time. If a required canonical command has waited 10
-continuous minutes without acquiring that slot, stop only the exact waiting
+from active verification time. An existing recovery claim that exceeds the
+metadata grace period fails with a diagnostic instead of waiting indefinitely;
+confirm its owner has exited before removing abandoned slot state. If a required
+canonical command has waited 10 continuous minutes without acquiring that slot, stop only the exact waiting
 process tree owned by the current task and rerun the same command on a free
 executor first. Prefer the dedicated SSH worker when it is configured and idle,
 because it runs the same canonical command without creating spend:
@@ -794,7 +756,7 @@ a redundant root `pnpm typecheck`.
 | --- | --- | --- |
 | Vault-only data changes under `vault/**` | No repo-wide commands by default. | Read back the touched vault records plus any audit artifacts written by the mutation path. |
 | Review-only repo inspection with no file edits | No repo-wide commands by default. | Applies when the user asks for code review, architectural review, or repo inspection only and the task does not modify repo or vault files. Use direct file references and static analysis by default. Run tests, typecheck, or other commands only when the user explicitly asks for runtime proof or when a material review conclusion cannot be supported from static inspection alone. |
-| Text-only docs/process-only (`*.md` edits or deletions only) | No repo-wide commands by default. | Allowed locally only when the diff is limited to Markdown text changes or deletions in repo docs/process files and does not touch scripts, config, tests, generated docs, tracked artifacts, or workflow-enforcement files. Read back the touched docs, confirm intended deletions, and check references for removed or renamed docs. On a PR, the exact-base classifier above may replace runtime-heavy required proof only when the complete current inventory matches its narrower allowlist; otherwise normal exact-head CI runs. A direct shared-default push always uses acceptance. |
+| Text-only docs/process-only (`*.md` edits or deletions only) | No repo-wide commands by default. | Allowed locally only when the diff is limited to Markdown text changes or deletions in repo docs/process files and does not touch scripts, config, tests, generated docs, tracked artifacts, or workflow-enforcement files. Read back the touched docs, confirm intended deletions, and check references for removed or renamed docs. On a PR, normal exact-head CI runs. A direct shared-default push always uses acceptance. |
 | Low-risk repo-internal workflow/tooling changes | `pnpm test:diff <path ...>` plus direct checks for the touched tooling files | Applies when the diff stays limited to repo-internal docs/process/verification tooling such as `agent-docs/**`, `docs/**`, `scripts/**`, `config/**`, `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, `vitest.config.ts`, and root `tsconfig*.json`, without touching app/package runtime code, product behavior, persisted-state logic, or deploy/auth surfaces. The diff lane runs shell/Node syntax, architecture/privacy guards, repo-tools TypeScript, dependency policy, and focused repo-tool tests for `scripts/**` or `config/**` changes. Add direct checks such as `bash -n`, `node --check`, focused Vitest, or doc readback for the touched files. Do not precede it with root `pnpm typecheck` or add acceptance lanes unless the change broadens beyond this fast path. |
 | Docs/process-only with mechanics beyond text-only Markdown | `pnpm verify:acceptance` | Applies when docs/process work touches anything beyond text-only `.md` edits/deletions and does not qualify for the low-risk repo-internal workflow/tooling fast path above, including broader scripts, config, tests, generated docs, tracked artifact inventories, or workflow-enforcement files. `pnpm verify:acceptance` is the canonical repo acceptance entrypoint and runs `pnpm typecheck` plus the explicit coverage-heavy acceptance lane. When those repo-wide commands are already known red for unrelated reasons, the scoped verification mode below may be used instead. |
 | Fixture/e2e/package-doc changes | `pnpm verify:acceptance` | Verifies fixture corpus integrity, scenario-manifest wiring, package-runtime health, built CLI checks, command-surface coverage, and the source-artifact guard for handwritten JS-like files plus tracked `.env` / `.env.*` private files and generated residue such as `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, and `*.tsbuildinfo`. |
@@ -1110,7 +1072,7 @@ the advisory budget.
 - `pnpm deps:ignored-builds`: shows dependency install scripts that pnpm blocked so dependency updates can be reviewed instead of silently executing new lifecycle code.
 - `pnpm deps:approve-builds`: records reviewed install-script approvals into `pnpm-workspace.yaml` after a trusted-machine dependency refresh.
 - `pnpm --dir apps/web lint`: runs pinned Oxlint using `apps/web/.oxlintrc.json` in local development and the existing hosted CI verification lane. Native Next, React, accessibility, import and TypeScript rules preserve the former recommended configuration. The pinned Next navigation rules, React deprecation/render-return rules and React Compiler rules run through Oxlint JS plugins because native implementations are missing or differ on existing valid server/test code. ESLint is no longer the lint runner; it may remain a transitive peer of those plugins. Existing ESLint suppression comments remain supported. The explicit unused-variable options preserve warnings for underscore-prefixed bindings. Generated Next, workflow and build directories remain ignored. New source fixtures in `scripts/web-lint.test.ts` exercise both native and retained plugin rules. Do not remove the plugin rules merely to improve benchmark numbers.
-- `pnpm typecheck`: validates shell syntax, syntax-checks the root `.mjs` release helpers, runs `pnpm deps:guard`, the workspace-boundary and package-cycle audits, hosted architecture/privacy guards, repo-owned TS tools typecheck, the contracts build, and every package/app no-emit typecheck. Package-local `tsconfig.typecheck.json` deliberately widens `rootDir` to the repository root so it can source-check sibling workspace owners without requiring prebuilt artifacts; the TypeScript runner labels that lane `package-boundary=unchecked`. Therefore typecheck does not replace the edited package's `build` when a change adds or changes a static or type-only sibling public-entrypoint import, workspace dependency, project reference, public export, or build `rootDir`: the emitted build remains the canonical TS6059/TS6307 boundary. The shared compiler runner uses pinned tsrs for the `check`, `web`, and `watch` no-emit lanes on Linux x64/arm64 and macOS arm64, including CI. The `package` and `workspace-build` emission lanes retain stable TypeScript 7. Unsupported tsrs hosts, including Intel Macs, use TypeScript 7 for checks; `MURPH_TYPECHECK_COMPILER=typescript` explicitly selects that fallback, while `MURPH_TYPECHECK_COMPILER=tsrs` fails on an unsupported host. Missing tsrs binaries on supported hosts fail rather than silently falling back. The existing `MURPH_TSC_*` budgets apply to both compilers; tsrs receives four checkers outside the shared profile when no override is set. Checks explicitly force `--noEmit`. Incremental caches are rebuildable and version-invalidated; regression tests exercise an error and repair across compiler switches. The hosted web keeps a local TypeScript 5 dependency only for Next, Workflow, and Solana tools that still require the legacy JavaScript compiler API or peer range. Repo-owned source-analysis checks use Babel's parser and do not depend on a TypeScript compiler API, so the web-local TypeScript 5 boundary can be deleted independently once its framework/tooling consumers support TypeScript 7. Tsconfig path-map discovery now reads root tsconfigs non-recursively and scans only `packages/**` plus `apps/**`; it no longer walks unrelated local residue. The repo-tools pass keeps an ignored `tsconfig.tools.tsbuildinfo` cache for warm runs. Independent preflight checks overlap the contracts prerequisite, then the package/app fanout runs with `MURPH_TYPECHECK_WORKSPACE_CONCURRENCY=min(logical CPUs, 8)` on an ordinary local host, `2` on CI or a local shared host, and no unnecessary topological ordering. The capable-host acceptance composition may use the wider local fanout inside its exclusive verification slot. The command retains the per-worktree artifact lock and clean contracts proof used by full acceptance.
+- `pnpm typecheck`: validates shell syntax, syntax-checks the root `.mjs` release helpers, runs `pnpm deps:guard`, the workspace-boundary and package-cycle audits, hosted architecture/privacy guards, repo-owned TS tools typecheck, the contracts build, and each workspace manifest's declared typecheck script, including any generated-input preparation before its compiler pass. Package-local `tsconfig.typecheck.json` deliberately widens `rootDir` to the repository root so it can source-check sibling workspace owners without requiring prebuilt artifacts; the TypeScript runner labels that lane `package-boundary=unchecked`. Therefore typecheck does not replace the edited package's `build` when a change adds or changes a static or type-only sibling public-entrypoint import, workspace dependency, project reference, public export, or build `rootDir`: the emitted build remains the canonical TS6059/TS6307 boundary. The shared compiler runner uses pinned tsrs for the `check`, `web`, and `watch` no-emit lanes on Linux x64/arm64 and macOS arm64, including CI. The `package` and `workspace-build` emission lanes retain stable TypeScript 7. Unsupported tsrs hosts, including Intel Macs, use TypeScript 7 for checks; `MURPH_TYPECHECK_COMPILER=typescript` explicitly selects that fallback, while `MURPH_TYPECHECK_COMPILER=tsrs` fails on an unsupported host. Missing tsrs binaries on supported hosts fail rather than silently falling back. The existing `MURPH_TSC_*` budgets apply to both compilers; tsrs receives four checkers outside the shared profile when no override is set. Checks explicitly force `--noEmit`. Incremental caches are rebuildable and version-invalidated; regression tests exercise an error and repair across compiler switches. The hosted web keeps a local TypeScript 5 dependency only for Next, Workflow, and Solana tools that still require the legacy JavaScript compiler API or peer range. Repo-owned source-analysis checks use Babel's parser and do not depend on a TypeScript compiler API, so the web-local TypeScript 5 boundary can be deleted independently once its framework/tooling consumers support TypeScript 7. Tsconfig path-map discovery now reads root tsconfigs non-recursively and scans only `packages/**` plus `apps/**`; it no longer walks unrelated local residue. The repo-tools pass keeps an ignored `tsconfig.tools.tsbuildinfo` cache for warm runs. Independent preflight checks overlap the contracts prerequisite, then the package/app fanout runs with `MURPH_TYPECHECK_WORKSPACE_CONCURRENCY=min(logical CPUs, 8)` on an ordinary local host, `2` on CI or a local shared host, and no unnecessary topological ordering. The capable-host acceptance composition may use the wider local fanout inside its exclusive verification slot. The command retains the per-worktree artifact lock and clean contracts proof used by full acceptance.
 - `pnpm test:diff`: the self-contained optional local lane for a diff-aware
   scoped check or CI diagnosis. It maps the requested worktree paths to
   workspace owners and reverse dependents, runs the relevant global guards,
@@ -1207,8 +1169,8 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
 - `vault-cli device ...` targets the local device control plane, defaults to `DEVICE_SYNC_BASE_URL` or `http://localhost:8788`, authenticates with `DEVICE_SYNC_CONTROL_TOKEN`, rejects non-loopback base URLs whenever that bearer path is used, and can now start or reuse a Murph-managed local daemon for the selected vault when no explicit control-plane target is provided. `vault-cli device daemon start|status|stop` is the explicit lifecycle surface for that managed process, and managed bearer reuse comes from the separate local secret file rather than persisted launcher JSON.
 - The built `vault-cli` binary can be exercised locally with `node packages/cli/dist/bin.js ...` when a change requires an end-to-end runtime check beyond the standard repo scripts.
 - The built CLI exposes only `vault-cli` for hosted runtime use. All workspace packages are private; npm publishing is retired. Runtime bundle packing retains explicit dependency closure and file inventory checks.
-- GitHub Actions host-support CI runs `.github/workflows/host-support.yml`, which exercises the focused CLI setup/inbox host-support suite on both `ubuntu-24.04` and `macos-latest`. Its Ubuntu release gate preserves the hosted verification surface and the stable `Release checks (ubuntu)` required owner. In full mode, a lightweight exact-candidate job executes `scripts/release-verification-plan.mjs` without installing dependencies and publishes the validated six-shard package and four-shard Web-test matrices. Its package discovery ignores `packages/*` folders without a `package.json`, such as ignored build output left behind by a deleted package, matching pnpm workspace resolution; documentation mode requires that job to remain skipped. Package coverage remains exhaustive and unique: CLI, Assistant Engine, and Assistant Runtime are singleton jobs, the remaining measured platform owners (including Health Commons) are divided across two jobs, and Hosted Local Harness remains a singleton job. Commands are unchanged and serial within each two-core runner, generated Health Commons preparation remains per checkout, CLI runtime/package-shape proof remains CLI-only, and release build/typecheck owns the prepared Messaging Ingress, Inboxd, and Hosted Local Harness package-boundary checks exactly once. This bounds runner fanout while allowing the measured long package owners to proceed independently; organization-level GitHub concurrency can still queue jobs.
-- Ubuntu app verification is split only at existing ownership seams. A Web build lane retains legal-PDF generation, Prisma and Health Commons preparation, lint, measured production Next build, dev smoke, and output-dependent tests. Four release-plan-owned Web test lanes retain the complete Vitest surface and each provision loopback PostgreSQL 17 with `MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL`, preserving the transactional supplement-search corpus. Cloudflare retains one complete verification lane plus pinned Codex upstream-source proof. Web and Cloudflare never execute in the same job or runner, avoiding the memory contention and indefinite stalls documented by Frog #2656; each lane retains a 45-minute bound and frozen install. The final aggregator requires the plan and every app/package/build/fixture/bundle result in full mode, while documentation mode still requires its exact-candidate docs proof and requires the plan plus every runtime-heavy branch to remain skipped. Focused policy mutations reject missing or duplicate owners, same-runner Web/Cloudflare recombination, incorrect Web lanes, package-boundary duplication, and any omitted aggregator dependency.
+- GitHub Actions host-support CI runs `.github/workflows/host-support.yml`, which exercises the focused CLI setup/inbox host-support suite on both `ubuntu-24.04` and `macos-latest`. Its Ubuntu release gate preserves the `Release checks (ubuntu)` required owner. `scripts/release-verification-plan.mjs` derives package coverage and Web test matrices from the exact candidate without installing dependencies. Package coverage includes every workspace with a coverage command exactly once. Release build/typecheck owns the prepared Messaging Ingress, Inboxd, and Hosted Local Harness package-boundary checks.
+- Separate Ubuntu jobs own Web build/lint/smoke, Web test shards, PostgreSQL test shards, Cloudflare verification, fixture coverage, and the production runner bundle budget. Web and Cloudflare run on separate runners. The final release aggregate requires the plan and every build, package, app, fixture, and bundle result to succeed. Executable policy tests reject failed, skipped, cancelled, or missing results.
 - Consent ledger proof runs in those hosted-Web test shards against the separate
   local `murph_consent_test` database selected by `MURPH_CONSENT_TEST_DB_URL`.
   Each shard prepares the current Prisma schema with `prisma db push`; the normal

@@ -31,7 +31,6 @@ jobs:
           node --test
           scripts/check-frontend-design-proof.test.mjs
           scripts/check-pr-changelog.test.mjs
-          scripts/check-pr-deployment-concerns.test.mjs
           scripts/check-pr-migration-history.test.mjs
 
       - name: Protect merged migration history
@@ -47,12 +46,6 @@ jobs:
           MURPH_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           MURPH_PR_BODY: ${{ github.event.pull_request.body }}
           MURPH_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-
-      - name: Require deployment concerns
-        run: node scripts/check-pr-deployment-concerns.mjs
-        env:
-          MURPH_GITHUB_TOKEN: ${{ github.token }}
-          MURPH_PR_BODY: ${{ github.event.pull_request.body }}
 
       - name: Require structured frontend design proof
         run: node scripts/check-frontend-design-proof.mjs

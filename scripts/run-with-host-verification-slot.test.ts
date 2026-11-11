@@ -155,6 +155,23 @@ describe("shared-host verification slots", () => {
     expect(readdirSync(stateRoot)).toEqual([]);
   });
 
+  it("fails instead of waiting forever on an abandoned recovery claim", () => {
+    const stateRoot = makeTempRoot();
+    const reaperPath = path.join(stateRoot, "slot-1", ".reaper");
+    mkdirSync(reaperPath, { recursive: true });
+    writeFileSync(path.join(reaperPath, "abandoned-claim"), "");
+    const result = runSync(
+      "abandoned recovery",
+      [process.execPath, "-e", "process.stdout.write('unexpected start')"],
+      stateRoot,
+      { MURPH_VERIFY_SHARED_HOST_STALE_METADATA_GRACE_MS: "0" },
+    );
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain("existing recovery claim");
+    expect(result.stdout).toBe("");
+    expect(readdirSync(reaperPath)).toEqual(["abandoned-claim"]);
+  });
+
   it("does not expose absolute working paths in owner metadata", async () => {
     const stateRoot = makeTempRoot();
     const holder = startHolder(repoRoot, stateRoot);

@@ -1,3 +1,5 @@
+The local architecture and test cleanup checkpoint is recorded in [radical simplicity](exec-plans/completed/2026-11-11-radical-simplicity.md), with findings and retained-proof mappings in the [codebase audit](references/codebase-simplicity-audit-2026-11-11.md). The [PR and release plan](exec-plans/active/2026-11-11-simplicity-pr-release.md) tracks review, component merges and the single final Cloudflare deployment. Live game editing remains supported; categorical oxygen screening is retired in favor of numerical summaries.
+
 Repository tooling uses installed registry dependencies, one prepared-runtime
 build owner, author-controlled PR readiness, and structural documentation checks.
 The [verification owner](operations/verification-and-runtime.md),

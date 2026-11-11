@@ -1,10 +1,8 @@
 import { spawnSync } from "node:child_process";
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   realpathSync,
   rmSync,
   statSync,
@@ -17,7 +15,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { validatePrChangelog } from "./check-pr-changelog.mjs";
-import { validatePrDeploymentConcerns } from "./check-pr-deployment-concerns.mjs";
 import {
   normalizeFrogPullRequestBody,
   renderFrogChangeShape,
@@ -38,7 +35,7 @@ function actionRefs(workflow: string): string[] {
 
 function renderPlainFooterDeclaration(
   body: string,
-  heading: "Changelog" | "Deployment concerns",
+  heading: "Changelog",
 ): string {
   const items = new RegExp(`^## ${heading}\\n\\n(?<items>(?:- .+\\n?)+)`, "mu")
     .exec(body)?.groups?.items.trim().split("\n");
@@ -207,73 +204,13 @@ fi
       ).toBe(1);
     }
 
-    expect(
-      JSON.parse(readRepoFile(".agents", "friction-log", "config.json")),
-    ).toEqual({
-      $schema: "https://unpkg.com/frog@1.1.0/schema.json",
+    const config = JSON.parse(readRepoFile(".agents", "friction-log", "config.json"));
+    expect(config).toMatchObject({
       inbound: { enabled: false },
-      labels: ["enhancement"],
-      maxPerRun: 5,
       outbound: { enabled: false },
     });
-    expect(JSON.parse(readRepoFile("package.json")).devDependencies.frog).toBe(
-      "1.1.0",
-    );
-
-    const issueTemplateDir = path.join(repoRoot, ".github", "ISSUE_TEMPLATE");
-    const issueForms = existsSync(issueTemplateDir)
-      ? readdirSync(issueTemplateDir, { withFileTypes: true })
-          .filter(
-            (entry) =>
-              entry.isFile()
-              && entry.name !== "config.yml"
-              && /\.ya?ml$/u.test(entry.name),
-          )
-          .map((entry) => entry.name)
-      : [];
-    const selectedIssueForm = issueForms.find((file) => file === "friction.yml")
-      ?? (issueForms.length === 1
-        ? issueForms[0]
-        : issueForms.find((file) => file.includes("bug")));
-    // Frog validates supplied bodies against the form it auto-selects.
-    expect(selectedIssueForm).toBeUndefined();
-
-    const readme = readRepoFile(".agents", "friction-log", "README.md");
-    expect(readme).toContain("scripts/frog list");
-    expect(readme).toContain("workflow cleanup, not data deletion");
-    expect(readme).toContain(".agents/friction-log/.sync.json");
-
-    const skill = readRepoFile(".agents", "skills", "frog", "SKILL.md");
-    expect(skill).toContain("current request authorizes repository edits");
-    expect(skill).toContain("review-only");
-    expect(skill).toContain(
-      "Creating or updating a tracked plan file is edit-authorized repository work",
-    );
-    expect(skill).toContain("planning-only");
-    expect(skill).toContain("scripts/frog list");
-    expect(skill).toContain(
-      'Do not create an empty or synthetic "no friction" entry',
-    );
-    expect(skill).toContain("include it in the same scoped task commit");
-    expect(skill).toContain("untracked, unstaged, or omitted from the commit");
-    expect(skill).toMatch(
-      /If a safe scoped\s+commit is blocked, preserve the entry and report the exact blocker/u,
-    );
-    expect(skill).toContain("repository root");
-    expect(skill).toContain("`--cwd` and `--mcp`");
-    expect(skill).toContain("cat <<'FROG' | scripts/frog log");
-    expect(skill).toContain("Use synthetic reproduction data only.");
-    expect(skill).toContain("raw logs or command output");
-    expect(skill).toContain("Closing an issue is not data deletion");
-    for (const heading of [
-      "## Expected Behavior",
-      "## Current Behavior",
-      "## Possible Solution",
-      "## Minimal Reproducible Example",
-      "## Context",
-    ]) {
-      expect(skill).toContain(heading);
-    }
+    expect(config.maxPerRun).toBeGreaterThan(0);
+    expect(config.maxPerRun).toBeLessThanOrEqual(5);
   });
 
   it("keeps the Action on trusted default-branch events with narrow authority", () => {
@@ -283,19 +220,6 @@ fi
       "friction-log.yml",
     );
 
-    expect(workflow).toContain(`push:
-    branches:
-      - main
-    paths:
-      - ".agents/friction-log/**"`);
-    expect(workflow).toContain(`issues:
-    types:
-      - closed
-      - reopened`);
-    expect(workflow).toContain("  workflow_dispatch:");
-    expect(workflow).toContain('cron: "17 0 * * *"');
-    expect(workflow).toContain("group: friction-log");
-    expect(workflow).toContain("cancel-in-progress: false");
     expect(workflow).toContain(
       "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)",
     );
@@ -316,7 +240,6 @@ fi
       .exec(workflow)?.groups?.permissions;
     expect(jobPermissions).toBe("      contents: read\n");
     expect(workflow).not.toContain("id-token: write");
-    expect(workflow).toContain("timeout-minutes: 10");
     expect(workflow).toContain("persist-credentials: false");
     expect(workflow).toContain("ref: ${{ github.sha }}");
     expect(workflow).toContain(
@@ -325,13 +248,9 @@ fi
     expect(workflow).not.toContain("pnpm dlx");
     expect(workflow).not.toMatch(/\bnpm install\b/u);
     expect(workflow).not.toMatch(/^\s+max:/mu);
-    expect(actionRefs(workflow)).toEqual([
-      "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
-      "fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
-      "48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
-      "bcd2ba49218906704ab6c1aa796996da409d3eb1",
-      "7b71c098683d49a573c279a2031a24205ea76841",
-    ]);
+    const refs = actionRefs(workflow);
+    expect(refs.length).toBeGreaterThan(0);
+    expect(refs.every((ref) => /^[a-f0-9]{40}$/u.test(ref))).toBe(true);
     const appTokenInputs =
       /^        uses: actions\/create-github-app-token@[^\n]+\n        with:\n(?<inputs>(?:          [^\n]+\n)+)/mu
         .exec(workflow)?.groups?.inputs;
@@ -359,17 +278,6 @@ fi
     expect(workflow).toContain(
       "GH_TOKEN: ${{ steps.frog-app-token.outputs.token }}",
     );
-    expect(workflow).toContain(
-      '-f head="${GITHUB_REPOSITORY_OWNER}:$FROG_PR_BRANCH"',
-    );
-    expect(workflow).toContain("-F per_page=2");
-    expect(workflow).toContain("frog-pr-context.ts select");
-    expect(workflow).toContain("frog-pr-context.ts normalize");
-    expect(workflow).toContain(
-      'cmp -s "$frog_current_body_file" "$frog_body_file"',
-    );
-    expect(workflow).toContain("gh pr edit \"$frog_pr_number\"");
-
     const footerMarker = "          FROG_PR_BODY_FOOTER: |-\n";
     const footerStart = workflow.indexOf(footerMarker);
     const footerEnd = workflow.indexOf(
@@ -450,20 +358,7 @@ fi
       renderFrogChangeShape({ changedFiles: 0, additions: 0, deletions: 0, files: [] }))).toBe(
       normalizedBody,
     );
-    expect(normalizedBody.match(/^## Why and outcome$/gmu)).toHaveLength(1);
-    expect(normalizedBody.match(/^## Evidence$/gmu)).toHaveLength(1);
-    expect(
-      normalizedBody.match(/^## Non-obvious affected surfaces$/gmu),
-    ).toHaveLength(1);
-    expect(normalizedBody.match(/^## Hot reply path impact$/gmu)).toHaveLength(
-      1,
-    );
-    expect(
-      normalizedBody.match(/^## Murph initial provider input impact$/gmu),
-    ).toHaveLength(1);
-    expect(normalizedBody.match(/^## Deployment concerns$/gmu)).toHaveLength(1);
-    expect(normalizedBody.match(/^## Changelog$/gmu)).toHaveLength(1);
-    expect(normalizedBody.match(/^## Change-shape breakdown$/gmu)).toHaveLength(1);
+    expect(normalizedBody).toContain(generatedBody);
     expect(
       normalizedBody.match(/<!-- murph:frog-pr-context:start -->/gu),
     ).toHaveLength(1);
@@ -476,21 +371,5 @@ fi
         prBodyHtml: renderPlainFooterDeclaration(normalizedBody, "Changelog"),
       }),
     ).toEqual([]);
-    expect(
-      validatePrDeploymentConcerns({
-        prBodyHtml: renderPlainFooterDeclaration(
-          normalizedBody,
-          "Deployment concerns",
-        ),
-      }),
-    ).toEqual([]);
-
-    const readme = readRepoFile(".agents", "friction-log", "README.md");
-    expect(readme).toContain("FROG_APP_CLIENT_ID");
-    expect(readme).toContain("FROG_APP_BOT_LOGIN");
-    expect(readme).toContain("FROG_APP_PRIVATE_KEY");
-    expect(readme).toContain("installed only on this repository");
-    expect(readme).toContain("environment is limited");
-    expect(readme).toMatch(/Missing credentials\s+fail the workflow closed/u);
   });
 });

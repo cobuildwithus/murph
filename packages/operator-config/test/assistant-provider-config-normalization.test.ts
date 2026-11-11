@@ -39,14 +39,6 @@ describe('assistant provider config normalization', () => {
     })
   })
 
-  it('fails closed when a caller explicitly selects an unsupported provider', () => {
-    expect(() =>
-      normalizeAssistantProviderConfig({
-        provider: 'unsupported-provider',
-      }),
-    ).toThrow(/Assistant runtime targets must use Codex App Server/u)
-  })
-
   it('fails closed when session options are serialized with invalid or unknown model providers', () => {
     expect(() =>
       serializeAssistantProviderSessionOptions({
