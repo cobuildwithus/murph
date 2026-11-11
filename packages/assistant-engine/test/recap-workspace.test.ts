@@ -1,6 +1,9 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
+import sharp from 'sharp'
+import * as z from '@murphai/contracts/zod-runtime'
 import { afterEach, describe, expect, it } from 'vitest'
 import { materializeRecapWorkspace, readCommittedRecapReplies } from '../src/assistant/recap-workspace.js'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
@@ -14,6 +17,42 @@ const material = { game: { id: 'game_synthetic', days: [] }, players: ['Player A
   result: [{ memberId: 'player-a', name: 'Player A', score: 4 }, { memberId: 'player-b', name: 'Player B', score: 3 }], startedAt, settledAt, references: [] }
 
 describe('recap workspace material', () => {
+  it('materializes readable person references and skips unavailable or corrupt photos', async () => {
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'recap-photos-')); roots.push(vault)
+    const references = [
+      { id: '1'.repeat(64), kind: 'profile', memberId: 'player-a' },
+      { id: '2'.repeat(64), kind: 'entry', memberId: 'player-a', entryId: 'entry-a' },
+      { id: '3'.repeat(64), kind: 'profile', memberId: 'player-b' },
+      { id: '4'.repeat(64), kind: 'murph' },
+      { id: '5'.repeat(64), kind: 'entry', memberId: 'player-b', entryId: 'entry-b' },
+    ]
+    const bytes = await sharp({ create: { width: 2, height: 3, channels: 3, background: 'blue' } }).jpeg().toBuffer()
+    const requested: string[] = []
+    const exported = await materializeRecapWorkspace({ vault, eventId: 'game-recap:game_synthetic', gameId: 'game_synthetic', sessionId,
+      material: { ...material, references }, lore: '', tool: { async request(request) {
+        if (request.action !== 'read_game') throw new Error('Unexpected tool request')
+        if (request.recapRead?.kind === 'transcript') return { action: 'read_game', result: { status: 'ok', recapGame: {
+          messages: [], next: null, through: '0', since: startedAt, until: settledAt, retainedSince: startedAt, incomplete: false,
+        } } }
+        if (request.recapRead?.kind !== 'reference') throw new Error('Unexpected tool request')
+        const id = request.recapRead.id
+        requested.push(id)
+        if (id === references[2].id) throw new Error('Synthetic unavailable photo')
+        return { action: 'read_game', result: { status: 'ok', recapGame: {
+          id, bytes: bytes.toString('base64'), byteLength: bytes.length, mediaType: 'image/jpeg', width: 2, height: 3,
+          hash: id === references[4].id ? '0'.repeat(64) : createHash('sha256').update(bytes).digest('hex'),
+        } } }
+      } } })
+    const manifest = z.object({ directory: z.string(), material: z.object({ references: z.array(z.object({ id: z.string(), path: z.string().optional() })) }) }).parse(exported.manifest)
+    for (const reference of manifest.material.references.slice(0, 2)) {
+      expect(reference.path).toBe(`${manifest.directory}/refs/${reference.id}.jpg`)
+      expect(await readFile(path.join(vault, reference.path!))).toEqual(bytes)
+    }
+    expect(manifest.material.references.slice(2).every(reference => reference.path === undefined)).toBe(true)
+    expect(requested).toEqual([references[0].id, references[1].id, references[2].id, references[4].id])
+    expect(exported.material.references).toEqual(references)
+    expect(JSON.stringify(exported.manifest)).not.toContain(vault)
+  })
   it('exports over 100 ordered player messages and committed Murph replies with coverage gaps', async () => {
     const vault = await mkdtemp(path.join(os.tmpdir(), 'recap-inputs-')); roots.push(vault)
     const transcript = resolveAssistantTranscriptPath(resolveAssistantStatePaths(vault), sessionId)
