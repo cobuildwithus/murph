@@ -1,6 +1,7 @@
 ---
 title: 'Review archive fixtures inherit operator Git hooks'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4811'
 ---
 
 ## Expected Behavior

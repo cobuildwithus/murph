@@ -1,6 +1,7 @@
 ---
 title: 'Game PostgreSQL locked-preview assertion omits the existing preview reference'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4499'
 ---
 
 ## Expected Behavior

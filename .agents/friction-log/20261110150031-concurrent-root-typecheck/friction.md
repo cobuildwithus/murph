@@ -1,6 +1,7 @@
 ---
 title: 'Concurrent root typecheck can remove Prisma imports during Web test collection'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4813'
 ---
 
 ## Expected Behavior

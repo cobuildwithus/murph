@@ -1,6 +1,7 @@
 ---
 title: 'Review packets include SVG images outside the binary asset exclusions'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4517'
 ---
 
 ## Expected Behavior

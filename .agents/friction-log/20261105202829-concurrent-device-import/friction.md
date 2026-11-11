@@ -1,6 +1,7 @@
 ---
 title: 'Concurrent device-import fixture sometimes retains a scheduled maintenance item'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4619'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT accepted sends lose waited capture while the conversation URL settles'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4839'
 ---
 
 ## Expected Behavior

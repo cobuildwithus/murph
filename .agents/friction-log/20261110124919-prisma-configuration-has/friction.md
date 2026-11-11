@@ -1,6 +1,7 @@
 ---
 title: 'Prisma configuration has no option to skip local env files'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4800'
 ---
 
 ## Expected Behavior

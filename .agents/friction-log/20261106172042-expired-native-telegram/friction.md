@@ -1,6 +1,7 @@
 ---
 title: 'Expired native Telegram proof leaks into global auth cleanup test'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4703'
 ---
 
 ## Expected Behavior

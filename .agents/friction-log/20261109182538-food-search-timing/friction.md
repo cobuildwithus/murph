@@ -1,6 +1,7 @@
 ---
 title: 'Food search timing fixture cannot reproduce live labels-database timeouts'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4774'
 ---
 
 ## Expected Behavior

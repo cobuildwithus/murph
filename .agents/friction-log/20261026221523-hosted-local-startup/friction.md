@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local startup diagnostics discard the failing process behind noisy siblings'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4389'
 ---
 
 ## Expected Behavior

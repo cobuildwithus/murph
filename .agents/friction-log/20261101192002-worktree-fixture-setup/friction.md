@@ -1,6 +1,7 @@
 ---
 title: 'Worktree fixture setup commits bypass synthetic disk environment'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4429'
 ---
 
 ## Expected Behavior

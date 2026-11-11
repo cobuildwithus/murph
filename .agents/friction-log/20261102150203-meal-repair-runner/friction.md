@@ -1,6 +1,7 @@
 ---
 title: 'Meal repair runner aborts the whole member pass on an individual consent denial'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4466'
 ---
 
 ## Expected Behavior

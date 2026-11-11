@@ -1,6 +1,7 @@
 ---
 title: 'Hosted maintenance tests share a fixed temporary vault across runs'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4719'
 ---
 
 ## Expected Behavior

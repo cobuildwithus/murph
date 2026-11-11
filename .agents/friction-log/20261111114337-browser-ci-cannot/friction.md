@@ -1,6 +1,7 @@
 ---
 title: 'Browser CI cannot use installed libraries during an Ubuntu mirror outage'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4838'
 ---
 
 ## Expected Behavior

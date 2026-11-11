@@ -1,6 +1,7 @@
 ---
 title: 'Web full suite leaves an untracked SWC plugin cache'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4648'
 ---
 
 ## Expected Behavior

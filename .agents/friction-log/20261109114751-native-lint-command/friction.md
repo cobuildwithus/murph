@@ -1,6 +1,7 @@
 ---
 title: 'Native lint command traverses downloaded build dependencies'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4750'
 ---
 
 ## Expected Behavior

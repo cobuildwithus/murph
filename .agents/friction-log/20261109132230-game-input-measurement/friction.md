@@ -1,6 +1,7 @@
 ---
 title: 'Game input measurement adds the private reminder line only to the direct head capture'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4755'
 ---
 
 ## Expected Behavior

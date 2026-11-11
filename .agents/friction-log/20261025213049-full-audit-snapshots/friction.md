@@ -1,6 +1,7 @@
 ---
 title: 'Full audit snapshots omit unchanged pnpm patch dependencies'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4365'
 ---
 
 ## Expected Behavior
