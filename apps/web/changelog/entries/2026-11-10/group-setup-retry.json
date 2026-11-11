@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 100,
+  "item": {
+    "id": "group-setup-retry",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Retry group setup after signing in",
+    "summary": "If linking your Messages address briefly fails after sign-in, retrying keeps your successful sign-in.",
+    "details": "When your account is ready, a successful retry shows the action to return to your group.",
+    "relevanceTags": [
+      "groups",
+      "account"
+    ],
+    "sourcePullRequests": [
+      4829
+    ]
+  }
+}

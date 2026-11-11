@@ -532,7 +532,7 @@ test("JoinInvitePageView renders support mailto action for blocked accounts", ()
   assert.match(markup, /Context%3A\+Invite\+or\+hosted\+account\+is\+blocked/);
 });
 
-test("JoinInvitePageView renders active and activating account states", () => {
+test("JoinInvitePageView renders active account state", () => {
   const activeMarkup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {
       model: createModel({
@@ -553,26 +553,6 @@ test("JoinInvitePageView renders active and activating account states", () => {
       }),
     }),
   );
-  const activatingMarkup = renderToStaticMarkup(
-    createElement(JoinInvitePageView, {
-      model: createModel({
-        launchConsent: {
-          gateActive: false,
-          initialStatus: createConsentStatus({ launchGranted: true }),
-          status: "granted",
-        },
-        status: createStatus({
-          session: {
-            authenticated: true,
-            expiresAt: null,
-            matchesInvite: true,
-          },
-          stage: "activating",
-        }),
-      }),
-    }),
-  );
-
   assert.match(activeMarkup, /Welcome to Murph\./);
   assert.match(activeMarkup, /Text Murph below to start\./);
   assert.doesNotMatch(activeMarkup, /Murph will text you shortly/);
@@ -580,10 +560,6 @@ test("JoinInvitePageView renders active and activating account states", () => {
   assert.match(activeMarkup, /href="sms:\+15550100999"/);
   assert.match(activeMarkup, /Hey Murph/);
   assert.match(activeMarkup, /Add Murph to Contacts/);
-  assert.match(activatingMarkup, /Finishing your setup\./);
-  assert.match(activatingMarkup, /Setup finishes in about ten seconds\./);
-  assert.match(activatingMarkup, /data-slot="link-page-dots"/);
-  assert.doesNotMatch(activatingMarkup, /Hey Murph/);
 });
 
 test("JoinInvitePageView sends a Telegram member to message first", () => {

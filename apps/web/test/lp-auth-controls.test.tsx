@@ -658,7 +658,7 @@ test("LandingAuthActions split CTAs open the same unified auth modal", async () 
   ).toBeTruthy();
 });
 
-test("LandingAuthActions shows only an Open settings link for authenticated users", async () => {
+test("LandingAuthActions shows only a Home link for authenticated users", async () => {
   const { cleanup, container } = await renderClientComponent(
     createElement(
       "div",

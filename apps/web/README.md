@@ -3203,3 +3203,9 @@ Use a file for Web diagnostics:
 Avoid `tsx --tsconfig apps/web/tsconfig.json -e`: this pinned combination can exit
 successfully without evaluating inline code. Require an explicit result from
 the diagnostic, not just a zero exit status.
+
+## Retired browser live voice
+
+Browser live voice is retired. The `/voice` page, `/api/voice` admission route,
+voice design studies and browser call client are removed. Messaging voice memos
+and historical usage records remain supported.

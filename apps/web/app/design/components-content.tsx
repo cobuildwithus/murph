@@ -7,7 +7,7 @@ import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types
 import {
   DeviceSyncCompletionDialog,
   DeviceSyncSetupGuideDialog,
-} from "@/app/(dashboard)/home/device-sync-completion-dialog";
+} from "@/src/components/device-sync/device-sync-completion-dialog";
 import { ComputerHandoffIsland } from "@/src/components/computer-use/computer-handoff-active-view";
 import {
   LinkPageSurface,
@@ -104,8 +104,11 @@ import {
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
-import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/hosted-plan-change-button";
-import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
+import {
+  EdgeToPulseSwitchSummary,
+  HostedPlanChangeButton,
+  HostedPlanChangeConfirmationContent,
+} from "@/src/components/settings/hosted-plan-change-button";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
 import { CustomizeMurphSettings } from "@/src/components/settings/customize-murph-settings";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
@@ -444,9 +447,9 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Dashboard primary navigation">
+        <Section title="Account primary navigation">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-            Production dashboard destinations in their standard visual hierarchy.
+            Home and Settings in their standard visual hierarchy.
           </p>
           <DashboardSidebarStudy />
         </Section>
@@ -995,6 +998,28 @@ export function ComponentsContent() {
                 </div>
               </Dialog>
             </div>
+            <div className="space-y-3" id="edge-to-pulse-confirmation">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Edge to Pulse · scheduled switch
+              </p>
+              <Dialog open={false}>
+                <div
+                  className="max-w-md space-y-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436]"
+                  inert
+                >
+                  <HostedPlanChangeConfirmationContent
+                    details={
+                      <EdgeToPulseSwitchSummary currentPeriodEnd="2026-08-27T04:00:00.000Z" />
+                    }
+                    errorMessage={null}
+                    onClose={() => undefined}
+                    onConfirm={() => undefined}
+                    pending={false}
+                    targetPlanCode="launch_monthly"
+                  />
+                </div>
+              </Dialog>
+            </div>
             <div className="space-y-3">
               <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                 Immediate upgrade entry
@@ -1003,7 +1028,11 @@ export function ComponentsContent() {
                 className="rounded-2xl bg-muted/45 p-6"
                 inert
               >
-                <UpgradeToEdgeButton expectedCurrentPlanCode="launch_monthly" />
+                <HostedPlanChangeButton
+                  expectedCurrentPlanCode="launch_monthly"
+                  mode="upgrade"
+                  targetPlanCode="launch_edge_monthly"
+                />
               </div>
             </div>
           </div>

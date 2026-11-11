@@ -49,6 +49,7 @@ import type {
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceInvocationRequest,
 } from "@murphai/hosted-execution/runtime-control";
+import { HOSTED_OUTBOX_QUIESCENT_SNAPSHOT_STATUS_KEY } from "@murphai/hosted-execution/runtime-control";
 
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
@@ -789,6 +790,13 @@ async function createHostedWorkspaceV2Snapshot(
       run: async () => await workspaceSnapshotPort.completeSnapshotSession({
         checkpointRequest: {
           ...checkpointRequest,
+          redactedStatus: {
+            ...checkpointRequest.redactedStatus,
+            // Never carry a prior snapshot's witness forward. Failed or
+            // incomplete cleanup cannot certify an empty canonical outbox.
+            [HOSTED_OUTBOX_QUIESCENT_SNAPSHOT_STATUS_KEY]:
+              assistantGeneratedDeliveryPruneResult?.outboxQuiescent === true ? snapshotRef.snapshotId : null,
+          },
           snapshotRef,
         },
         ref: snapshotRef,

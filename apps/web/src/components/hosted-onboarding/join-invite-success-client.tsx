@@ -222,7 +222,7 @@ export function JoinInviteSuccessScreen({
 }
 
 function shouldRequestHostedBillingSuccess(stage: HostedInviteStatusPayload["stage"]): boolean {
-  return stage === "checkout" || stage === "activating" || stage === "active";
+  return stage === "checkout" || stage === "active";
 }
 
 function shouldRedirectHostedInviteSuccessToHome(input: {
@@ -281,13 +281,6 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
         description: "Opening your home page.",
         pending: false,
         title: "You’re all set.",
-      };
-    case "activating":
-      return {
-        buttonLabel: "Back to invite",
-        description: JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle,
-        pending: true,
-        title: "Payment confirmed.",
       };
     case "verify":
       return {

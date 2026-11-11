@@ -1,3 +1,4 @@
+import { renderConnectionCompletion } from "@/src/components/device-sync/connection-completion";
 import { isApprovalPasskeyEnrollmentEnabled } from "@/src/lib/sensitive-actions/passkey-rollout";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
@@ -113,7 +114,7 @@ type SettingsSearchParams = {
   usagePurchase?: string | string[] | undefined;
   usageRecovery?: string | string[] | undefined;
   voice?: string | string[] | undefined;
-};
+} & Record<string, string | string[] | undefined>;
 
 const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 
@@ -126,17 +127,24 @@ export default async function SettingsPage({
   const request = resolveSettingsPageRequest(resolvedSearchParams);
   const { authenticated, authenticatedMember, session } =
     await getHostedPageAuthSnapshot();
+  const connectionCompletion = await renderConnectionCompletion({
+    member: authenticatedMember,
+    searchParams: resolvedSearchParams,
+  });
   if (!authenticated) {
     return (
-      <SettingsAuthRequired
-        addUsage={request.openPersonalUsageTopUp || request.requestedFamilyOwnerUsageTopUp}
-        billingReturn={request.familyInviteReturnPath !== null
-          || request.groupPaymentMethodSaved
-          || request.planChangeReturn !== null
-          || request.usageTopUpPurchaseReturn !== null}
-        familyRecovery={request.familyRecoveryRequested}
-        usageRecovery={request.usageRecoveryInitialOpen}
-      />
+      <>
+        {connectionCompletion}
+        <SettingsAuthRequired
+          addUsage={request.openPersonalUsageTopUp || request.requestedFamilyOwnerUsageTopUp}
+          billingReturn={request.familyInviteReturnPath !== null
+            || request.groupPaymentMethodSaved
+            || request.planChangeReturn !== null
+            || request.usageTopUpPurchaseReturn !== null}
+          familyRecovery={request.familyRecoveryRequested}
+          usageRecovery={request.usageRecoveryInitialOpen}
+        />
+      </>
     );
   }
 
@@ -156,13 +164,18 @@ export default async function SettingsPage({
           request.usageTopUpPurchaseReturn?.purchaseId ?? null,
       })
     : null;
-  return renderAuthenticatedSettingsPage({
-    authenticated,
-    authenticatedMember,
-    request,
-    session,
-    settingsData,
-  });
+  return (
+    <>
+      {connectionCompletion}
+      {renderAuthenticatedSettingsPage({
+        authenticated,
+        authenticatedMember,
+        request,
+        session,
+        settingsData,
+      })}
+    </>
+  );
 }
 
 type HostedDashboardPageAuthSnapshot = Awaited<

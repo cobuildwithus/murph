@@ -1,8 +1,6 @@
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import type { HostedFamilyBillingRecoveryState } from "@/src/lib/hosted-onboarding/family-plan";
 
-import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
-
 export interface JoinInviteStatusRefreshSnapshot {
   fingerprint: string;
   serverProjectionPending: boolean;
@@ -28,7 +26,6 @@ export function shouldGateJoinInviteStatusWithLaunchConsent(
 
   return (
     status.stage === "checkout"
-    || status.stage === "activating"
     || status.stage === "active"
   );
 }
@@ -138,8 +135,6 @@ export function resolveJoinInviteTitle(status: HostedInviteStatusPayload): strin
       return status.messagingSetupRequired
         ? "How should Murph reach you?"
         : "Choose your Murph plan.";
-    case "activating":
-      return "Finishing your setup.";
     case "blocked":
       return "This account can’t continue.";
     case "active":
@@ -165,8 +160,6 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
       return status.messagingSetupRequired
         ? "Add your phone or Telegram so Murph can message you."
         : "Your data stays yours, and it’s never sold.";
-    case "activating":
-      return JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle;
     case "blocked":
       return "Contact support and we’ll help you get back in.";
     case "active":

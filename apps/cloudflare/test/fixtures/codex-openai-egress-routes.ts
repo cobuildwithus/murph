@@ -5,10 +5,10 @@
  * source review at the new commit rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "6ff1e1ca3b30fc8b914720681fcf5fe62e95f856",
+  upstreamCommit: "0a94398fa60c4fac0e7659e4213a0a36e613dd46",
   upstreamSourceRoot: "codex-rs",
-  upstreamTag: "rust-v0.166.0",
-  version: "0.166.0",
+  upstreamTag: "rust-v0.167.1",
+  version: "0.167.1",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",
@@ -53,8 +53,8 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       transport: "http",
     },
     {
-      disposition: "allowed",
-      feature: "public Live session setup (native patch)",
+      disposition: "blocked",
+      feature: "retired public Live session setup",
       method: "POST",
       owner: "codex",
       pathname: "/v1/live/sessions",
@@ -63,8 +63,8 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       transport: "http",
     },
     {
-      disposition: "allowed_scoped_websocket_only",
-      feature: "public Live attachment (native patch)",
+      disposition: "blocked",
+      feature: "retired public Live attachment",
       method: "GET",
       owner: "codex",
       pathname: "/v1/live/sessions/synthetic-session/attach",
@@ -221,58 +221,82 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
   ],
   nonProviderBinaryCandidates: [
     {
+      candidate: "/v1/analytics/codex/turn-costsinclude_settled_response_idsskipping",
+      disposition: "binary_false_positive",
+      owner: "codex-backend",
+      reason: "The 0.167.1 Linux release joins the exact turn-costs path from backend-client/src/client/turn_usage.rs to the include_settled_response_ids JSON field in chatgpt_turn_cost.rs and adjacent skipping log text. Only /v1/analytics/codex/turn-costs is sent to the separate analytics origin.",
+    },
+    {
+      candidate: "/v1/decisionssandbox_permissionstools/listmissing",
+      disposition: "binary_false_positive",
+      owner: "codex-guardian",
+      reason: "The 0.167.1 Linux release joins the exact Decisions URL in ext/guardian-v2/src/async_scorer/decisions.rs to the sandbox_permissions field read by the adjacent guardian owners and MCP discovery text. The real /v1/decisions route remains blocked.",
+    },
+    {
+      candidate: "/v1/rowscols-gnu.tmpsocksteplinerootcwdslastargvenumused",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "The 0.167.1 Linux release joins the rtc_avas/v1/ dependency literal to rows, cols, platform and field labels. The reviewed provider sources contain no such endpoint.",
+    },
+    {
+      candidate: "/v1/analytics/codex/turn-costsskipping",
+      disposition: "binary_false_positive",
+      owner: "codex-backend",
+      reason: "The 0.167.1 macOS binary concatenates the turn-costs analytics route with adjacent skipping log text; backend-client/src/client/turn_usage.rs retains the exact /v1/analytics/codex/turn-costs route.",
+    },
+    {
       candidate: "/v1/projects",
       disposition: "different_origin",
       owner: "codex-gcp",
-      reason: "The 0.166.0 GCP provider constructs https://aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/openai/v1 in model-provider/src/gcp/mod.rs. Murph does not select this provider.",
+      reason: "The 0.167.1 GCP provider constructs https://aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/openai/v1 in model-provider/src/gcp/mod.rs. Murph does not select this provider.",
     },
     {
       candidate: "/v1/responsesworkload",
       disposition: "binary_false_positive",
       owner: "codex-auth",
-      reason: "The 0.166.0 release concatenates the exact OpenAI /v1/responses URL with the workload-identity validation error in responses-api-proxy/src/auth.rs; the request route remains /v1/responses.",
+      reason: "The 0.167.1 release concatenates the exact OpenAI /v1/responses URL with the workload-identity validation error in responses-api-proxy/src/auth.rs; the request route remains /v1/responses.",
     },
     {
       candidate: "/v1/realtimewswsshttpsquicksilverintent",
       disposition: "binary_false_positive",
       owner: "codex",
-      reason: "The 0.166.0 macOS release joins the /v1/realtime normalization literal with adjacent scheme and intent literals in realtime_websocket/methods.rs; the reviewed route is /v1/realtime.",
+      reason: "The 0.167.1 macOS release joins the /v1/realtime normalization literal with adjacent scheme and intent literals in realtime_websocket/methods.rs; the reviewed route is /v1/realtime.",
     },
     {
       candidate: "/v1/realtimewswsshttpsrealtime",
       disposition: "binary_false_positive",
       owner: "codex",
-      reason: "The 0.166.0 Linux release joins the /v1/realtime normalization literal with adjacent scheme literals and the sideband URL error in realtime_websocket/methods.rs.",
+      reason: "The 0.167.1 Linux release joins the /v1/realtime normalization literal with adjacent scheme literals and the sideband URL error in realtime_websocket/methods.rs.",
     },
     {
       candidate: "/v1/realtimewswsshttpsquicksilverintentmodelinternal",
       disposition: "binary_false_positive",
       owner: "codex",
-      reason: "The patched 0.166.0 Linux source build in the hosted runner base image joins the /v1/realtime normalization literal with adjacent scheme, quicksilver intent, and short query-key literals from the realtime websocket and call owners; the reviewed route is /v1/realtime.",
+      reason: "The patched 0.167.1 Linux source build in the hosted runner base image joins the /v1/realtime normalization literal with adjacent scheme, quicksilver intent, and short query-key literals from the realtime websocket and call owners; the reviewed route is /v1/realtime.",
     },
     {
       candidate: "/v1/user-auth-credential/whoamisk-proj-fedramp-sk-svcacct-fedramp-auth.lock",
       disposition: "binary_false_positive",
       owner: "codex-auth",
-      reason: "The 0.166.0 macOS release joins WHOAMI_PATH in login/src/auth/personal_access_token.rs to adjacent credential-prefix and auth-lock constants. Only /v1/user-auth-credential/whoami is sent to the separate authentication origin.",
+      reason: "The 0.167.1 macOS release joins WHOAMI_PATH in login/src/auth/personal_access_token.rs to adjacent credential-prefix and auth-lock constants. Only /v1/user-auth-credential/whoami is sent to the separate authentication origin.",
     },
     {
       candidate: "/v1/user-auth-credential/whoamisk-svcacct-fedramp-",
       disposition: "binary_false_positive",
       owner: "codex-auth",
-      reason: "The 0.166.0 Linux release joins WHOAMI_PATH in login/src/auth/personal_access_token.rs to an adjacent credential-prefix constant. Only /v1/user-auth-credential/whoami is sent to the separate authentication origin.",
+      reason: "The 0.167.1 Linux release joins WHOAMI_PATH in login/src/auth/personal_access_token.rs to an adjacent credential-prefix constant. Only /v1/user-auth-credential/whoami is sent to the separate authentication origin.",
     },
     {
       candidate: "/v1/decisionsanswerschoiceinputcontentphasetools/listmissing",
       disposition: "binary_false_positive",
       owner: "codex-guardian",
-      reason: "The 0.166.0 Linux release joins the exact /v1/decisions URL in ext/guardian-v2/src/async_scorer/decisions.rs to serialized request fields and MCP discovery text. The real Decisions route remains blocked.",
+      reason: "The 0.167.1 Linux release joins the exact /v1/decisions URL in ext/guardian-v2/src/async_scorer/decisions.rs to serialized request fields and MCP discovery text. The real Decisions route remains blocked.",
     },
     {
       candidate: "/v1/rowscols-gnu.tmpsocksteplinediffrootcwdslastargvenumusedwait",
       disposition: "binary_false_positive",
       owner: "dependency",
-      reason: "The 0.166.0 Linux release joins the rtc_avas/v1/ dependency literal to adjacent field and platform labels; reviewed provider sources contain no such endpoint.",
+      reason: "The 0.167.1 Linux release joins the rtc_avas/v1/ dependency literal to adjacent field and platform labels; reviewed provider sources contain no such endpoint.",
     },
     {
       candidate: "/v1/analytics/codex/turn-costsmethodspath_prefixesstruct",

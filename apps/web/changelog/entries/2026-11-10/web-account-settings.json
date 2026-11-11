@@ -1,0 +1,23 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 200,
+  "item": {
+    "id": "web-account-settings",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A simpler website, with Home and Settings",
+    "summary": "Home keeps your setup and messaging shortcuts, while Settings keeps your account controls together.",
+    "details": "The Training page is retired. Device connections, billing, consent, and data export remain available through Settings.",
+    "relevanceTags": [
+      "account",
+      "settings"
+    ],
+    "sourcePullRequests": [
+      4829
+    ],
+    "tryIt": {
+      "label": "Open Settings",
+      "href": "/settings"
+    }
+  }
+}

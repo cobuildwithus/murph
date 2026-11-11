@@ -364,11 +364,7 @@ current candidate: 40.2 seconds, `gpt-6.1-sol`, local subscription auth, reply
 review Ready. It saved one meal, acknowledged the photo and asked for essential
 food/portion information, with no invented nutrition, card or extra save.
 
-The additional canonical-launcher exact-read attempt exited 64 before any
-provider request: both available Codex binaries lack `--ignore-user-config`,
-and no compatible built binary was available in the known sibling targets.
-Keep the canonical launcher's prerequisite and permission profiles unchanged.
-The new exact-read test instead reuses the existing ordinary-provider fixture
+The exact-read test reuses the existing ordinary-provider fixture
 and native built-CLI subprocess helper. After the normal prepared CLI build,
 run it with:
 
@@ -415,7 +411,7 @@ docker run --rm --platform linux/amd64 --network none \
   --cpus 1 --memory 3g --memory-swap 3g --pids-limit 128 --user 0 \
   --mount "type=bind,src=$PWD/.artifacts/container-cpu,dst=/bench,readonly" \
   --entrypoint node \
-  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.158.0-live1 \
+  ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.158.0-runtime1 \
   /bench/import.mjs
 ```
 

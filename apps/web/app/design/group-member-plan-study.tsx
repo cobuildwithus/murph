@@ -5,7 +5,6 @@ import type {
 } from "@murphai/hosted-execution/plan-usage";
 
 import { SettingsFamilyRecoveryAuthRequiredView } from "@/app/(dashboard)/settings/settings-auth-required";
-import { UsageLimitBanner } from "@/src/components/home/usage-limit-banner";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
@@ -394,74 +393,6 @@ export function GroupMemberPlanStudy() {
             scheduledBillingEffectiveAt={new Date("2026-08-27T04:00:00.000Z")}
             scheduledBillingPlanCode="launch_group_monthly"
             showGroupPlan
-          />
-        </div>
-      </StudyState>
-
-      <StudyState
-        label="Core usage exhausted"
-        state="core-usage-exhausted"
-      >
-        <div inert>
-          <UsageLimitBanner
-            noticeCode="group_upgrade_pulse"
-            now={new Date("2026-08-21T12:00:00.000Z")}
-            recommendedAction={{
-              kind: "change_plan",
-              label: "Choose Pulse",
-              targetPlanCode: "launch_monthly",
-              url: "/settings#subscription",
-            }}
-            resetAt={new Date("2026-08-27T04:00:00.000Z")}
-          />
-        </div>
-      </StudyState>
-
-      <StudyState
-        label="Family allowance exhausted with the fallback Add usage action"
-        state="family-usage-exhausted-fallback"
-      >
-        <div inert>
-          <UsageLimitBanner
-            noticeCode="family_usage_limit_reached"
-            now={new Date("2026-08-21T12:00:00.000Z")}
-            resetAt={new Date("2026-08-27T04:00:00.000Z")}
-          />
-        </div>
-      </StudyState>
-
-      <StudyState
-        label="Pulse usage exhausted with an add-usage action"
-        state="pulse-usage-exhausted-add-usage"
-      >
-        <div inert>
-          <UsageLimitBanner
-            noticeCode="pulse_upgrade_edge"
-            now={new Date("2026-08-21T12:00:00.000Z")}
-            recommendedAction={{
-              kind: "add_usage",
-              label: "Add usage",
-              url: "/settings?addUsage=true#subscription",
-            }}
-            resetAt={new Date("2026-08-27T04:00:00.000Z")}
-          />
-        </div>
-      </StudyState>
-
-      <StudyState
-        label="Max usage exhausted with an add-usage action"
-        state="max-usage-exhausted-add-usage"
-      >
-        <div inert>
-          <UsageLimitBanner
-            noticeCode="max_usage_limit_reached"
-            now={new Date("2026-08-21T12:00:00.000Z")}
-            recommendedAction={{
-              kind: "add_usage",
-              label: "Add usage",
-              url: "/settings?addUsage=true#subscription",
-            }}
-            resetAt={new Date("2026-08-27T04:00:00.000Z")}
           />
         </div>
       </StudyState>

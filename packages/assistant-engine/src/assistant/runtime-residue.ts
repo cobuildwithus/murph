@@ -63,6 +63,7 @@ const ASSISTANT_INPUT_EVENT_RETENTION_LIMIT = 1_000
 const ASSISTANT_RUNTIME_RESIDUE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 
 export interface AssistantGeneratedDeliveryResiduePruneResult {
+  outboxQuiescent: boolean
   generatedDeliveryActiveFilesMissing: number
   generatedDeliveryActiveFilesRetained: number
   generatedDeliveryCleanupSkippedUntrustedOutbox: boolean
@@ -219,6 +220,8 @@ export async function pruneAssistantGeneratedDeliveryResidue(input: {
         vault: input.vault,
       })
       return {
+        outboxQuiescent: outbox.trusted
+          && !outbox.records.some(({ record }) => isActiveAssistantOutboxIntent(record)),
         generatedDeliveryActiveFilesMissing: plan.activeFilesMissing,
         generatedDeliveryActiveFilesRetained: plan.activeFilesRetained,
         generatedDeliveryCleanupSkippedUntrustedOutbox:

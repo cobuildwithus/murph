@@ -2369,7 +2369,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     yieldedEffectCount: number;
   }) => void;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
-  platform?: Pick<HostedRuntimePlatform, "logPort" | "voicePort"> | null;
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
@@ -3547,7 +3547,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   linqEnv: NodeJS.ProcessEnv;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
-  platform: Pick<HostedRuntimePlatform, "logPort" | "voicePort"> | null;
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
@@ -3670,18 +3670,11 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       trackMessageVolumeReceipt:
         input.effectsPort.recordOutboundMessageVolumeReceipt !== undefined,
       dependencies: {
-        sendVoice: async (request) => {
-          const voicePort = input.platform?.voicePort;
-          if (!voicePort) {
-            throw Object.assign(new VaultCliError(
-              "ASSISTANT_VOICE_DELIVERY_UNAVAILABLE",
-              "The accepted voice call is no longer available.",
-            ), { deliveryMayHaveSucceeded: false, retryable: false });
-          }
-          await assertHostedDeliveryCanEnterProvider(input);
-          providerDispatchEntered = true;
-          await voicePort.speak(request);
-          await assertHostedDeliveryLiveNow(input);
+        sendVoice: async () => {
+          throw Object.assign(new VaultCliError(
+            "ASSISTANT_VOICE_DELIVERY_UNAVAILABLE",
+            "Browser live voice is no longer available.",
+          ), { deliveryMayHaveSucceeded: false, retryable: false });
         },
         sendEmail: async (request) => {
           if (request.targetKind === "participant") {

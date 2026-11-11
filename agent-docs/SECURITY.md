@@ -167,25 +167,10 @@ Existing product admission, delivery and runtime safety rules still apply.
 
 ## Runtime Security Posture
 
-- Website voice reservation and connection require the authenticated member,
-  same-origin mutation policy, active access, consent, and managed AI allowance.
-  Close remains available to that authenticated member after policy revocation.
-  Web derives member identity; the OIDC-bound Worker route and active container
-  invocation enforce the exact runtime attempt/generation and opaque call id.
-  Control commands cannot allocate or start a container. SDP is bounded in transit
-  and absent from job state, errors, and logs. Browser media carries no provider
-  key or runtime credential. Native normalized input still requires the signed
-  durable mailbox admission before ordinary backing work can run.
-- Public Live creation requires the platform-resolved native container and
-  its current registered invocation/spend authority. The bounded request permits only native client
-  delegation; browser events cannot append instructions, commentary, or start
-  another session. Attachment requires a signed resource reference bound to the
-  authenticated member and current attempt/generation, resolved through its exact
-  physical container. Raw provider ids and replaced owners are rejected. An existing
-  resource may attach during that exact owner's retirement or after allowance
-  revocation so native cancellation can close it; this cannot create a session.
-  Worker-owned credentials stay upstream, redirects are not followed, and neither
-  resource references nor private media payloads enter diagnostics.
+- Browser live voice is retired: Web and Worker call admission and native media
+  attachment are removed. Public Live creation and attachment are denied by the
+  OpenAI egress policy. Historical voice data remains private under its existing
+  owners; no provider credentials or active call authority survive in a browser.
 - The database-health cron is a platform operation, not runner provider egress.
   Its PlanetScale service-token id/token, Linq token, and two operator chat ids
   are required Worker-only secrets and must never enter runner env, URLs, logs,

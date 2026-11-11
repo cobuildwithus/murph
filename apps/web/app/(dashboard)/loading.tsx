@@ -1,8 +1,7 @@
 import { Skeleton } from "@/src/components/ui/skeleton";
 
 /**
- * Route-group transition feedback. The dashboard layout (shell + browser-vault
- * provider) persists across this boundary, so only the page body swaps to these
+ * Route-group transition feedback. The account shell persists across this boundary, so only the page body swaps to these
  * placeholders. Mirrors the shared page header + content rhythm so the switch to
  * real content lands without a layout shift.
  */
@@ -14,7 +13,7 @@ export default function DashboardLoading() {
       className="flex flex-col gap-8"
       role="status"
     >
-      <span className="sr-only">Loading dashboard</span>
+      <span className="sr-only">Loading account</span>
       <div aria-hidden="true" className="flex flex-col gap-8">
         <div className="flex flex-col gap-2">
           <Skeleton className="h-3 w-24 motion-reduce:animate-none" />
