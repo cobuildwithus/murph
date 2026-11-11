@@ -1,6 +1,6 @@
 # Replies never wait on a workspace snapshot
 
-Status: active
+Status: completed
 Created: 2026-11-11
 Updated: 2026-11-11
 
@@ -146,6 +146,16 @@ shows the loss window is materially larger than estimated.
   - Shutdown wording qualified above.
   - Deploy evidence: also measure acceptance to successful publication, not
     only turn end to provider entry.
+- PR #4840 ReviewGPT round 1 (apollo lane): two fresh threads on 99ffef492b each
+  returned PASS with no findings. Neither was attested: both completed at 246 s
+  with an empty model slug in `thread export`, the same pattern seen 11-04, so
+  rerunning was stopped. An independent read-only Codex (c2) review of the same
+  head found no qualifying findings. It noted that the voice-obligation cases
+  cover the foreground caller only (pre-existing; the approval and settlement
+  cases cover both callers). Owner decision 2026-11-11: merge on that evidence
+  once required CI is green.
+- Follow-up, not in this PR: the cold-start restored-effects publication
+  deadline.
 
 ## Verification
 
@@ -159,3 +169,4 @@ shows the loss window is materially larger than estimated.
   idle retirement).
 - `pnpm --dir packages/assistant-runtime typecheck`, `pnpm complexity:diff`,
   `git diff --check`: exit 0. assistant-engine is unchanged.
+Completed: 2026-11-11
