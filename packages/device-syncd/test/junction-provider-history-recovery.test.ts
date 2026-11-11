@@ -214,11 +214,20 @@ test("Junction account jobs keep a concurrently fenced connected source out of p
         return stored;
       },
   });
-  const initialResult = await executeJunctionJob(
-    provider,
-    context,
-    createJob("reconcile", {}),
+  const job = createJob("reconcile", {});
+  await assert.rejects(
+    executeJunctionJob(provider, context, job),
+    (error: unknown) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_TIMESERIES_SOURCE_LIFECYCLE_SUPERSEDED"
+      && error.retryable,
   );
+  assert.equal(importedSnapshots.length, 0);
+  // Retry after the worker hydrates the current roster, preserving the fence.
+  context.account.sources = liveSources.map((source) => ({
+    ...source,
+    resourceCount: Object.keys(source.resourceAvailabilitySummary).length,
+  }));
+  const initialResult = await executeJunctionJob(provider, context, job);
   await executeFullJobTimeseriesContinuations({
     context,
     initialResult,

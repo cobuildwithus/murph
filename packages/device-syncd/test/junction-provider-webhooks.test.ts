@@ -2673,11 +2673,14 @@ test("Junction ambiguous sleep_cycle summary failure still imports the other sum
     }),
   );
 
-  assert.equal(importedSnapshots.length, 1);
-  const snapshot = importedSnapshots[0] as { summaries?: Record<string, unknown[]> };
-  assert.equal(snapshot.summaries?.activity?.length, 1);
-  assert.equal(snapshot.summaries?.sleep?.length, 1);
-  assert.deepEqual(snapshot.summaries?.sleep_cycle, []);
+  assert.equal(importedSnapshots.length, 2);
+  const activitySnapshot = importedSnapshots[0] as { summaries?: Record<string, unknown[]> };
+  const sleepSnapshot = importedSnapshots[1] as { summaries?: Record<string, unknown[]> };
+  assert.deepEqual(Object.keys(activitySnapshot.summaries ?? {}), ["activity"]);
+  assert.deepEqual(Object.keys(sleepSnapshot.summaries ?? {}), ["sleep", "sleep_cycle"]);
+  assert.equal(activitySnapshot.summaries?.activity?.length, 1);
+  assert.equal(sleepSnapshot.summaries?.sleep?.length, 1);
+  assert.deepEqual(sleepSnapshot.summaries?.sleep_cycle, []);
   assert.deepEqual(warnings, [
     {
       errorCode: "JUNCTION_API_REQUEST_FAILED",

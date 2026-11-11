@@ -1268,6 +1268,7 @@ describe("hosted Prisma baseline migration", () => {
       "20261108010000_hosted_accepted_subscription_receipt",
       "20261110180000_hosted_linq_group_line_move",
       "20261110190000_linq_group_line_move_silent",
+      "20261111000000_normalize_clinical_retrieval_phase",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
