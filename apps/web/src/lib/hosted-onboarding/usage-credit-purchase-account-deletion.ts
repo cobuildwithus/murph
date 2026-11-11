@@ -100,9 +100,9 @@ export async function closeHostedUsageCreditPurchasesForAccountDeletion(input: {
           ...(purchase.beneficiaryMemberId !== purchase.payerMemberId
             ? {
                 memberLockOrder:
-                  readHostedUsageCreditPurchaseMemberLockOrder({
+                  await readHostedUsageCreditPurchaseMemberLockOrder({
                     beneficiaryMemberId: purchase.beneficiaryMemberId,
-                    checkoutSuccessUrl: purchase.checkoutSuccessUrl,
+                    prisma,
                     payerMemberId:
                       requireHostedUsageCreditPurchasePayerMemberId(purchase),
                   }),
@@ -495,9 +495,9 @@ async function persistHostedUsageCreditAccountDeletionSessionState(input: {
       await lockHostedUsageCreditPurchaseReservationOwnersTx({
         beneficiaryMemberId: input.purchase.beneficiaryMemberId,
         memberLockOrder:
-          readHostedUsageCreditPurchaseMemberLockOrder({
+          await readHostedUsageCreditPurchaseMemberLockOrder({
             beneficiaryMemberId: input.purchase.beneficiaryMemberId,
-            checkoutSuccessUrl: input.purchase.checkoutSuccessUrl,
+            prisma: tx,
             payerMemberId,
           }),
         payerMemberId,
@@ -623,9 +623,9 @@ async function persistHostedUsageCreditAccountDeletionNoSessionProof(input: {
     await lockHostedUsageCreditPurchaseReservationOwnersTx({
       beneficiaryMemberId: input.purchase.beneficiaryMemberId,
       memberLockOrder:
-        readHostedUsageCreditPurchaseMemberLockOrder({
+        await readHostedUsageCreditPurchaseMemberLockOrder({
           beneficiaryMemberId: input.purchase.beneficiaryMemberId,
-          checkoutSuccessUrl: input.purchase.checkoutSuccessUrl,
+          prisma: tx,
           payerMemberId,
         }),
       payerMemberId,

@@ -177,22 +177,6 @@ export async function runHostedAccountDeletionCleanup(input: {
   const now = input.now ?? new Date();
   assertValidDate(now);
   const attemptTimeoutMs = normalizeAttemptTimeoutMs(input.attemptTimeoutMs);
-  return await runClaimedHostedAccountDeletionCleanup({
-    attemptTimeoutMs,
-    cleanupId: input.cleanupId,
-    now,
-    prisma: input.prisma,
-  });
-}
-
-async function runClaimedHostedAccountDeletionCleanup(input: {
-  attemptTimeoutMs: number;
-  cleanupId: string;
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<HostedAccountDeletionCleanupRunResult> {
-  const now = input.now;
-  const attemptTimeoutMs = input.attemptTimeoutMs;
   const leaseToken = randomBytes(18).toString("base64url");
   const claimed = await input.prisma.hostedAccountDeletionCleanup.updateMany({
     data: {
@@ -225,66 +209,78 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
     );
   }
 
+  return runClaimedHostedAccountDeletionCleanup({
+    attemptTimeoutMs,
+    cleanup,
+    leaseToken,
+    now,
+    prisma: input.prisma,
+  });
+}
+
+async function runClaimedHostedAccountDeletionCleanup(input: {
+  attemptTimeoutMs: number;
+  cleanup: HostedAccountDeletionCleanup;
+  leaseToken: string;
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<HostedAccountDeletionCleanupRunResult> {
+  const { cleanup, leaseToken, now } = input;
+
   try {
-    const deadline = createCleanupDeadline(attemptTimeoutMs);
+    const deadline = createCleanupDeadline(input.attemptTimeoutMs);
     const payload = await decryptCleanupPayload(cleanup, deadline.signal);
-    if (
-      !Number.isSafeInteger(cleanup.temporalNextRuntimeIndex)
-      || cleanup.temporalNextRuntimeIndex < 0
-      || cleanup.temporalNextRuntimeIndex > payload.runtimeMemberIds.length
-    ) {
-      throw new TypeError("Hosted Temporal cleanup cursor is invalid.");
-    }
-    const [
-      cloudflare,
-      runtimeLogs,
-      temporal,
-      stripeCustomer,
-    ] = await Promise.all([
-      cleanup.cloudflareCompletedAt
-        ? completedCloudflareResult()
-        : deleteHostedRunnerData(payload.runtimeMemberIds, deadline),
-      cleanup.runtimeLogsCompletedAt
-        ? completedHostedRuntimeLogDeletionResult()
-        : deleteHostedRuntimeLogs(payload.runtimeMemberIds, deadline),
-      cleanup.temporalCompletedAt
-        ? completedHostedTemporalWorkflowTerminationResult(
-            payload.runtimeMemberIds.length,
-          )
-        : terminateHostedRuntimeWorkflows(
-            payload.runtimeMemberIds,
-            cleanup.temporalNextRuntimeIndex,
-            deadline,
-          ),
-      cleanup.stripeCompletedAt
-        ? completedOrSkippedVendorResult(payload.stripeCustomerIds.length > 0)
-        : deleteStripeCustomers(payload.stripeCustomerIds, deadline),
-    ]);
+    const [cloudflareAttempt, runtimeLogs, temporal, stripeAttempt] =
+      await runCleanupTargets({ cleanup, deadline, payload });
+    const cloudflare = cloudflareAttempt.result;
+    const stripeCustomer = stripeAttempt.result;
+    const stripeMadeProgress = stripeAttempt.remainingIds.length
+      < payload.stripeCustomerIds.length;
     const cloudflareCompletedAt = cleanup.cloudflareCompletedAt
       ?? (cloudflare.deleted ? now : null);
     const stripeCompletedAt = cleanup.stripeCompletedAt
       ?? (isTerminalVendorDeletion(stripeCustomer) ? now : null);
     const runtimeLogsCompletedAt = cleanup.runtimeLogsCompletedAt
       ?? (runtimeLogs.completed ? now : null);
-    const temporalNextRuntimeIndex = Math.max(
+    let temporalNextRuntimeIndex = Math.max(
       cleanup.temporalNextRuntimeIndex,
       temporal.nextRuntimeIndex,
     );
     const temporalCompletedAt = cleanup.temporalCompletedAt
       ?? (temporal.completed ? now : null);
-    const cleanupMadeProgress = temporalNextRuntimeIndex > cleanup.temporalNextRuntimeIndex;
+    const cloudflareMadeProgress = Boolean(runtimeLogsCompletedAt && temporalCompletedAt)
+      && cloudflareAttempt.remainingIds.length > 0
+      && cloudflareAttempt.remainingIds.length < payload.runtimeMemberIds.length;
+    const cleanupMadeProgress = temporalNextRuntimeIndex > cleanup.temporalNextRuntimeIndex
+      || cloudflareMadeProgress
+      || (stripeMadeProgress && stripeAttempt.remainingIds.length > 0);
     let cleanupPending = [cloudflareCompletedAt,
       runtimeLogsCompletedAt, temporalCompletedAt, stripeCompletedAt].some(at => !at);
 
     if (cleanupPending) {
+      // Runtime logs and Temporal share the original list. After both finish,
+      // only Cloudflare needs it, so retain its unfinished targets. The existing
+      // encrypted payload only shrinks, including for near-limit legacy receipts.
+      if (cloudflareMadeProgress) {
+        temporalNextRuntimeIndex = cloudflareAttempt.remainingIds.length;
+      }
+      const progress = cloudflareMadeProgress || stripeMadeProgress
+        ? await encryptCleanupProgress(cleanup, {
+            ...payload,
+            runtimeMemberIds: cloudflareMadeProgress
+              ? cloudflareAttempt.remainingIds
+              : payload.runtimeMemberIds,
+            stripeCustomerIds: stripeAttempt.remainingIds,
+          })
+        : {};
       await input.prisma.hostedAccountDeletionCleanup.updateMany({
         data: {
+          ...progress,
           attemptCount: cleanupMadeProgress ? 0 : { increment: 1 },
           cloudflareCompletedAt,
           lastAttemptedAt: now,
           lastErrorCode: pendingErrorCode({
             cloudflare,
-
             runtimeLogs,
             stripeCustomer,
             temporal,
@@ -305,7 +301,7 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
     } else {
       // Persist every additive target before deleting the receipt. Primary
       // triggers keep older cleanup code from erasing this retry owner.
-      const completed = await input.prisma.hostedAccountDeletionCleanup.updateMany({
+      await input.prisma.hostedAccountDeletionCleanup.updateMany({
         data: {
           cloudflareCompletedAt,
           lastAttemptedAt: now,
@@ -318,24 +314,15 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
         },
         where: { id: cleanup.id, leaseToken },
       });
-      if (completed.count === 0) {
-        cleanupPending =
-          await input.prisma.hostedAccountDeletionCleanup.findUnique({
-            select: { id: true },
-            where: { id: cleanup.id },
-          }) !== null;
-      } else {
-        const deleted = await input.prisma.hostedAccountDeletionCleanup.deleteMany({
-          where: { id: cleanup.id, leaseToken },
-        });
-        if (deleted.count === 0) {
-          cleanupPending =
-            await input.prisma.hostedAccountDeletionCleanup.findUnique({
-              select: { id: true },
-              where: { id: cleanup.id },
-            }) !== null;
-        }
-      }
+      // Both writes use the same lease token. A lost completion write cannot
+      // authorize deletion; reread presence to report the actual durable owner.
+      await input.prisma.hostedAccountDeletionCleanup.deleteMany({
+        where: { id: cleanup.id, leaseToken },
+      });
+      cleanupPending = await input.prisma.hostedAccountDeletionCleanup.findUnique({
+        select: { id: true },
+        where: { id: cleanup.id },
+      }) !== null;
     }
 
     return {
@@ -357,6 +344,45 @@ async function runClaimedHostedAccountDeletionCleanup(input: {
     });
     throw error;
   }
+}
+
+// Execute external obligations under one deadline, outside receipt writes.
+async function runCleanupTargets(input: {
+  cleanup: HostedAccountDeletionCleanup;
+  deadline: CleanupDeadline;
+  payload: CleanupPayload;
+}) {
+  const { cleanup, deadline, payload } = input;
+  if (
+    !Number.isSafeInteger(cleanup.temporalNextRuntimeIndex)
+    || cleanup.temporalNextRuntimeIndex < 0
+    || cleanup.temporalNextRuntimeIndex > payload.runtimeMemberIds.length
+  ) {
+    throw new TypeError("Hosted Temporal cleanup cursor is invalid.");
+  }
+  return Promise.all([
+    cleanup.cloudflareCompletedAt
+      ? { result: completedCloudflareResult(), remainingIds: [] }
+      : deleteHostedRunnerData(payload.runtimeMemberIds, deadline),
+    cleanup.runtimeLogsCompletedAt
+      ? completedHostedRuntimeLogDeletionResult()
+      : deleteHostedRuntimeLogs(payload.runtimeMemberIds, deadline),
+    cleanup.temporalCompletedAt
+      ? completedHostedTemporalWorkflowTerminationResult(
+          payload.runtimeMemberIds.length,
+        )
+      : terminateHostedRuntimeWorkflows(
+          payload.runtimeMemberIds,
+          cleanup.temporalNextRuntimeIndex,
+          deadline,
+        ),
+    cleanup.stripeCompletedAt
+      ? {
+          result: completedOrSkippedVendorResult(payload.stripeCustomerIds.length > 0),
+          remainingIds: [],
+        }
+      : deleteStripeCustomers(payload.stripeCustomerIds, deadline),
+  ]);
 }
 
 export async function drainHostedAccountDeletionCleanupBatch(input: {
@@ -476,21 +502,38 @@ function parseCleanupPayload(value: unknown): CleanupPayload {
   };
 }
 
+async function encryptCleanupProgress(
+  cleanup: Pick<HostedAccountDeletionCleanup, "id" | "environment" | "kmsKeyName">,
+  payload: CleanupPayload,
+): Promise<{ payloadCiphertext: string; kmsKeyName: string }> {
+  const plaintext = new TextEncoder().encode(JSON.stringify(payload));
+  try {
+    const encrypted = await getHostedWebCryptoConfig().gcpKms.encrypt({
+      additionalAuthenticatedData: cleanupAad(cleanup),
+      keyName: normalizeGcpKmsCryptoKeyName(cleanup.kmsKeyName),
+      plaintext,
+      signal: AbortSignal.timeout(5_000),
+    });
+    return {
+      payloadCiphertext: encrypted.ciphertext,
+      kmsKeyName: normalizeGcpKmsCryptoKeyName(encrypted.keyName),
+    };
+  } finally {
+    plaintext.fill(0);
+  }
+}
+
 async function deleteHostedRunnerData(
   runtimeMemberIds: readonly string[],
   deadline: CleanupDeadline,
-): Promise<HostedRunnerUserDataDeletionBestEffortResult> {
+): Promise<{ result: HostedRunnerUserDataDeletionBestEffortResult; remainingIds: string[] }> {
   const results: HostedRunnerUserDataDeletionBestEffortResult[] = [];
   let nextIndex = 0;
-  const workers = Array.from({
+  await Promise.all(Array.from({
     length: Math.min(CLEANUP_RUNTIME_TARGET_CONCURRENCY, runtimeMemberIds.length),
   }, async () => {
-    while (!cleanupDeadlineExpired(deadline)) {
-      const index = nextIndex;
-      if (index >= runtimeMemberIds.length) {
-        return;
-      }
-      nextIndex += 1;
+    while (!cleanupDeadlineExpired(deadline) && nextIndex < runtimeMemberIds.length) {
+      const index = nextIndex++;
       results[index] = await deleteHostedRunnerUserDataBestEffort({
         context: "account-deletion-cleanup",
         signal: deadline.signal,
@@ -498,39 +541,33 @@ async function deleteHostedRunnerData(
         userId: runtimeMemberIds[index]!,
       });
     }
-  });
-  await Promise.all(workers);
-  const deadlineIncomplete = (
-    cleanupDeadlineExpired(deadline)
-    || results.filter((result) => result !== undefined).length < runtimeMemberIds.length
-  );
-  if (deadlineIncomplete) {
-    results.push(timedOutCloudflareResult());
-  }
-  const merged = mergeCloudflareDeletionResults(results);
-  return deadlineIncomplete
-    ? {
-        ...merged,
-        errorCode: CLEANUP_TARGET_TIMEOUT_ERROR_CODE,
-      }
-    : merged;
+  }));
+  const remainingIds = runtimeMemberIds.filter((_, index) => !results[index]?.deleted);
+  const deadlineIncomplete = remainingIds.length > 0 && cleanupDeadlineExpired(deadline);
+  if (deadlineIncomplete) results.push(timedOutCloudflareResult());
+  return {
+    result: {
+      ...mergeCloudflareDeletionResults(results),
+      ...(deadlineIncomplete ? { errorCode: CLEANUP_TARGET_TIMEOUT_ERROR_CODE } : {}),
+    },
+    remainingIds,
+  };
 }
 
 async function deleteStripeCustomers(
   stripeCustomerIds: readonly string[],
   deadline: CleanupDeadline,
-): Promise<HostedAccountVendorDeletionResult> {
+): Promise<{ result: HostedAccountVendorDeletionResult; remainingIds: string[] }> {
   if (stripeCustomerIds.length === 0) {
-    return { errorCode: null, status: "skipped_no_record" };
+    return { result: { errorCode: null, status: "skipped_no_record" }, remainingIds: [] };
   }
   const stripe = getHostedOnboardingStripe();
   if (!stripe) {
-    return { errorCode: null, status: "skipped_not_configured" };
+    return { result: { errorCode: null, status: "skipped_not_configured" }, remainingIds: [...stripeCustomerIds] };
   }
-
-  for (const customerId of stripeCustomerIds) {
+  for (const [index, customerId] of stripeCustomerIds.entries()) {
     if (cleanupDeadlineExpired(deadline)) {
-      return timedOutVendorResult();
+      return { result: timedOutVendorResult(), remainingIds: stripeCustomerIds.slice(index) };
     }
     try {
       await stripe.customers.del(customerId, {}, {
@@ -538,15 +575,17 @@ async function deleteStripeCustomers(
         timeout: remainingCleanupDeadlineMs(deadline),
       });
     } catch (error) {
-      if (cleanupDeadlineExpired(deadline)) {
-        return timedOutVendorResult();
-      }
       if (!isStripeResourceMissingError(error)) {
-        return { errorCode: safeErrorCode(error), status: "failed" };
+        return {
+          result: cleanupDeadlineExpired(deadline)
+            ? timedOutVendorResult()
+            : { errorCode: safeErrorCode(error), status: "failed" },
+          remainingIds: stripeCustomerIds.slice(index),
+        };
       }
     }
   }
-  return { errorCode: null, status: "completed" };
+  return { result: { errorCode: null, status: "completed" }, remainingIds: [] };
 }
 
 interface CleanupDeadline {
