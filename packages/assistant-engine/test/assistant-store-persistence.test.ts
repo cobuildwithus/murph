@@ -556,7 +556,7 @@ describe('assistant store persistence seams', () => {
     })).resolves.toEqual({
       entriesRedacted: 0,
       entriesTrimmed: 6,
-      nextEligibleAt: '2026-04-22T00:07:00.000Z',
+      nextEligibleAt: '2026-05-08T00:07:00.000Z',
       transcriptsTrimmed: 1,
     })
 

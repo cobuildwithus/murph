@@ -9,8 +9,7 @@ import { isGameEnabled } from "../game/access";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 
-// Migration columns remain in the schema only until contract cleanup.
-export type HostedRuntimeOwner = Omit<StoredHostedRuntimeOwner, "migrationPhase" | "migrationId">;
+export type HostedRuntimeOwner = StoredHostedRuntimeOwner;
 
 export interface HostedRuntimeIdentity {
   userId: string;
@@ -32,7 +31,7 @@ const COLD_RETIREMENT = { phase: "retiring", completedAt: null, platformAiUsageA
 const WARM_RETIREMENT = { phase: "retiring", completedAt: { not: null } } as const;
 const IDLE_OWNER = {
   phase: "idle", attemptId: null, processingMode: null, workspaceVersion: null,
-  providerEgressTokenHash: null, platformAiUsageAllowed: false,
+  providerEgressTokenHash: null, platformAiUsageAllowed: false, recapMediaScope: Prisma.DbNull,
 } as const;
 const IDLE_OWNER_WITHOUT_ASSIGNMENT = { ...IDLE_OWNER, allocationId: null, runnerContainerName: null } as const;
 
@@ -75,6 +74,7 @@ export async function claimHostedRuntime(input: {
     const data = {
       generation: (existing?.generation ?? 0n) + 1n,
       attemptId,
+      recapMediaScope: Prisma.DbNull,
       phase: "starting",
       processingMode: input.processingMode,
       allocationId: existing?.runnerContainerName
@@ -91,7 +91,7 @@ export async function claimHostedRuntime(input: {
     };
     const owner = existing
       ? await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data })
-      : await tx.hostedRuntimeOwner.create({ data: { ...data, userId: input.userId, migrationPhase: "postgres" } });
+      : await tx.hostedRuntimeOwner.create({ data: { ...data, userId: input.userId } });
     return { cutover, status: "claimed", owner };
   }, OWNER_TRANSACTION_OPTIONS);
 }
@@ -392,6 +392,7 @@ const runtimeOwnerColumns = Prisma.sql`
   owner.processing_mode AS "processingMode", owner.allocation_id AS "allocationId",
   owner.runner_container_name AS "runnerContainerName", owner.workspace_version AS "workspaceVersion",
   owner.provider_egress_token_hash AS "providerEgressTokenHash",
+  owner.recap_media_scope AS "recapMediaScope",
   owner.platform_ai_usage_allowed AS "platformAiUsageAllowed", owner.started_at AS "startedAt",
   owner.allowance_beneficiary_member_id AS "allowanceBeneficiaryMemberId",
   owner.accepted_at AS "acceptedAt", owner.completed_at AS "completedAt",

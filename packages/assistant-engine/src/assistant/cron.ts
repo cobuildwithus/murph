@@ -732,13 +732,7 @@ export async function processDueAssistantCronJobsLocal(
 
       throw error
     }
-    summary.processed += 1
-
-    if (assistantCronRunCountsAsProcessSuccess(result.run)) {
-      summary.succeeded += 1
-    } else if (result.run.outcome === 'failed') {
-      summary.failed += 1
-    }
+    recordAssistantCronProcessResult(summary, result.run)
     emitAssistantCronJobCompletedEvent({
       automationSlug: result.automationSlug,
       errorCode: result.runErrorCode,
@@ -756,6 +750,9 @@ export async function processDueAssistantCronJobsLocal(
       runOutcome: result.run.outcome,
       sourceKind: claimed.kind === 'canonical' ? claimed.source.kind : 'local',
     })
+    // Publish and dispatch queued output before another background decision
+    // reads accepted-message history. The existing outbox owns retries.
+    if (result.run.outcome === 'delivery_pending') break
   }
 
   return summary
@@ -765,12 +762,17 @@ function nullableCronValue<T>(value: T | undefined): T | null {
   return value ?? null
 }
 
-function assistantCronRunCountsAsProcessSuccess(
+function recordAssistantCronProcessResult(
+  summary: AssistantCronProcessDueResult,
   run: AssistantCronRunRecord,
-): boolean {
-  return run.outcome === 'delivered' ||
-    (run.outcome === 'no_op' &&
-      run.reason !== 'background_maintenance_non_replayable_work')
+): void {
+  summary.processed += 1
+  if (run.outcome === 'failed') {
+    summary.failed += 1
+  } else if (run.outcome === 'delivered' || (run.outcome === 'no_op'
+    && run.reason !== 'background_maintenance_non_replayable_work')) {
+    summary.succeeded += 1
+  }
 }
 
 function assistantCronRetryScheduled(

@@ -269,9 +269,6 @@ describe.skipIf(!runPostgresProof)(
                 phoneNumber: memberPhone,
                 prisma: tx,
 
-                signupPhoneCodeSendAttemptId: null,
-                signupPhoneCodeSendAttemptStartedAt: null,
-                signupPhoneCodeSentAt: null,
                 signupPhoneNumber: null,
               })),
               maskedPhoneNumberHint: "*** test",

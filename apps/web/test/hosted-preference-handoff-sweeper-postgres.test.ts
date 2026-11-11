@@ -234,7 +234,7 @@ describe.skipIf(!runPostgresProof)(
       const mailboxItems = members.map((member, index) =>
         mailboxItem({
           createdAt: index < 2
-            ? new Date(now.getTime() - (16 - index) * DAY_MS)
+            ? new Date(now.getTime() - (32 - index) * DAY_MS)
             : new Date(now.getTime() - 60_000),
           dedupeKey: `clinical-records:sync:v1:${member.runId}:1`,
           id: member.mailboxItemId,

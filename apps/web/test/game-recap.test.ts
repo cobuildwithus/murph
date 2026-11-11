@@ -137,8 +137,12 @@ describe("optional recap superlatives", () => {
     expect(parse([...pair].reverse()).superlatives).toEqual([...pair].reverse());
     expect(withValidGameSuperlatives(valid, ["player_first", "player_second"])).toEqual(valid);
   });
+  it("preserves one eligible pair card but retains exact group cardinality", () => {
+    expect(parse([pair[0]]).superlatives).toEqual([pair[0]]);
+    expect(withValidGameSuperlatives({ ...valid, superlatives: [pair[0]] }, pair.map(item => item.memberId), true).superlatives).toBeUndefined();
+  });
   it.each([
-    null, {}, [], [pair[0]], [...pair, pair[0]], [pair[0], pair[0]],
+    null, {}, [], [...pair, pair[0]], [pair[0], pair[0]],
     [pair[0], { ...pair[1], memberId: "outsider" }],
     [pair[0], { ...pair[1], title: pair[0].title.toUpperCase() }],
     [{ ...pair[0], title: "Most likely to train" }, pair[1]],

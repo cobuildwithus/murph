@@ -59,6 +59,18 @@ import {
 
 const appTestDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(appTestDir, "..");
+test("accepts the recap migrations through the unchanged expand-only guard", async () => {
+  const migrationsDir = await mkdtemp(path.join(tmpdir(), "synthetic-recap-migrations-"));
+  try {
+    for (const id of ["20261110230000_game_recap_retirement", "20261111001000_recap_media_admission"]) {
+      await writeMigrationSql(migrationsDir, id, await readFile(path.join(appRoot, "prisma/migrations", id, "migration.sql"), "utf8"));
+    }
+    await assertHostedWebPrismaPredeployMigrationsAreExpandOnly(migrationsDir);
+  } finally {
+    await rm(migrationsDir, { recursive: true, force: true });
+  }
+});
+
 const normalizeShellContinuations = (source: string): string =>
   source.replace(/\\\r?\n[\t ]*/gu, " ");
 const productionVercelEnvRun =

@@ -1,3 +1,5 @@
+import { recapProviderRequestSchema } from "@murphai/contracts/recap-admission";
+import { recapFileReceiptSchema, gameRecapDraftSchema } from "@murphai/contracts/recap-show";
 import * as z from "@murphai/contracts/zod-runtime";
 
 // A new value of the existing error field: this generation is durably finished and must end without sending.
@@ -50,43 +52,30 @@ export const hostedGamePhotoSchema = z.object({
   replaceEntryId: gameId.optional(),
 }).strict();
 export type HostedGamePhoto = z.infer<typeof hostedGamePhotoSchema>;
-const recapBlock = z.object({
-  kind: z.enum(["photo", "photoPair", "contactSheet", "headline", "kicker", "quote", "stat"]),
-  entryIds: z.array(ref).optional(),
-  style: z.enum(["print", "fullBleed"]).optional(),
-  text: z.string().optional(),
-  statValue: z.string().optional(),
-  quote: z.object({ who: z.string(), text: z.string(), date: z.string().optional() }).strict().optional(),
-}).strict();
-const recapSuperlatives = z.array(z.object({
-  memberId: ref,
-  title: z.string().trim().min(1).max(80).refine((title) => {
-    const words = title.split(/\s+/u).length;
-    return words >= 2 && words <= 6 && !/[.。]$/u.test(title) && !/^most\s+likely\s+to\b/iu.test(title);
-  }),
-  line: z.string().trim().min(1).max(160),
-}).strict()).min(2).max(10).refine((items) =>
-  new Set(items.map((item) => item.memberId)).size === items.length
-  && new Set(items.map((item) => item.title.toLowerCase())).size === items.length);
-
-export const hostedGameRecapSchema = z.object({
-  pages: z.array(z.object({
-    background: z.enum(["night", "paper", "sage", "sienna", "slate"]),
-    blocks: z.array(recapBlock),
-  }).strict()),
-  superlatives: recapSuperlatives.optional().catch(undefined),
-  scoreLine: z.string().optional(),
-  chatLine: z.string(),
-}).strict();
-export type HostedGameRecap = z.infer<typeof hostedGameRecapSchema>;
+export { gameRecapStorySchema as hostedGameRecapSchema, gameRecapWriterSchema as hostedGameRecapWriterSchema } from "@murphai/contracts/recap-show";
+import { gameRecapStorySchema as hostedGameRecapSchema, gameRecapWriterSchema } from "@murphai/contracts/recap-show";
+export type { GameRecapStory as HostedGameRecap } from "@murphai/contracts/recap-show";
 export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("my_game_reminders"), origin: acceptedInputOrigin, operation: z.enum(["read", "set"]),
     minutes: z.number().int().min(0).max(1439).optional(), gameId: gameId.optional(), on: z.boolean().optional(),
     everyDay: z.boolean().optional(), text: z.boolean().optional(), push: z.boolean().optional() }).strict(),
-  z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin, automationOccurrenceOrigin]), includePlayers: z.literal(true).optional() }).strict(),
+  z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin, automationOccurrenceOrigin]), includePlayers: z.literal(true).optional(),
+    recapRead: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("recover") }).strict(),
+      z.object({ kind: z.literal("stage"), receipt: recapFileReceiptSchema, bytes: z.string().max(2_800_000) }).strict(),
+      z.object({ kind: z.literal("admit"), runId: z.string().uuid() }).strict(),
+      z.object({ kind: z.literal("reserve"), runId: z.string().uuid(), operationId: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u), providerRequest: recapProviderRequestSchema, referenceIds: z.array(z.string().regex(/^[a-f0-9]{64}$/u)).max(3).optional() }).strict(),
+      z.object({ kind: z.literal("finished"), operationId: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u), token: z.string().regex(/^[a-f0-9]{64}$/u), receipt: recapFileReceiptSchema.optional() }).strict(),
+      z.object({ kind: z.literal("end"), runId: z.string().uuid(), token: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
+      z.object({ kind: z.literal("lore_checkpointed"), generationIds: z.array(z.string().min(1).max(128)).min(1).max(20) }).strict(),
+      z.object({ kind: z.literal("transcript"), after: z.string().regex(/^\d{1,20}$/u).optional() }).strict(),
+      z.object({ kind: z.literal("reference"), id: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
+    ]).optional() }).strict(),
   z.object({ action: z.literal("game_photo"), origin: acceptedInputOrigin, photo: hostedGamePhotoSchema }).strict(),
   z.object({ action: z.literal("update_game"), origin: acceptedInputOrigin, update: hostedGameUpdateSchema }).strict(),
-  z.object({ action: z.literal("write_recap"), origin: gameRecapOrigin, recap: hostedGameRecapSchema,
+  z.object({ action: z.literal("write_recap"), origin: gameRecapOrigin, recap: gameRecapWriterSchema,
+    files: gameRecapDraftSchema.shape.files.optional(), phase: z.enum(["prepare", "accept"]).optional(),
+    usedTreatments: z.array(z.string().min(1).max(60)).max(1000).optional(),
     priorChatLines: z.array(z.string().max(160)).max(100) }).strict(),
 ]);
 export type HostedGameToolRequest = z.infer<typeof hostedGameToolRequestSchema>;

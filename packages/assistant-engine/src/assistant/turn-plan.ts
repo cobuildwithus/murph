@@ -93,6 +93,12 @@ export function resolveAssistantRequestedWorkingDirectory(
     explicitWorkingDirectory !== null
     && path.resolve(explicitWorkingDirectory) === path.resolve(input.vault)
 
+  // Recap manifest paths and restricted file grants share one concrete vault
+  // root. Avoid procfs alias handling for this isolated filesystem.
+  if (executionContext.hosted?.gameRecapScope?.show === true) {
+    return path.resolve(input.vault)
+  }
+
   if (explicitWorkingDirectory && !explicitWorkingDirectoryMatchesVault) {
     return explicitWorkingDirectory
   }

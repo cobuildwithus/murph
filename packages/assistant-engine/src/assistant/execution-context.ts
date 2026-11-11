@@ -1,3 +1,4 @@
+import type { RecapRunAdmission } from './recap-media-runtime.js'
 import type { CompanionPresence } from "@murphai/hosted-execution/companion-presence";
 import { gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantCurrentDeliveryRoute } from '@murphai/operator-config/assistant/current-delivery-route'
@@ -606,7 +607,8 @@ export type AssistantWorkspaceArtifactMaterializer = (
 ) => Promise<AssistantWorkspaceArtifactMaterializationResult>
 
 export interface AssistantHostedExecutionContext {
-  gameRecapScope?: { gameId: string; eventId: string; pairFingerprint: string; loreAccess?: 'read' } | null
+  gameRecapAdmission?: RecapRunAdmission | null
+  gameRecapScope?: { gameId: string; eventId: string; pairFingerprint: string; loreAccess?: 'read'; show?: true } | null
   gameMissedCheckInScope?: HostedGameGroupMissedCheckInPolicy | { gameId: string; eventId: string; memberId: string; firstMissedDate: string; pairFingerprint: string } | null
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
   assertTurnCommitAuthority?(input: {
@@ -717,7 +719,7 @@ function normalizeAssistantGameRecapScope(scope: AssistantHostedExecutionContext
   const gameId = normalizeNullableString(scope?.gameId)
   const eventId = normalizeNullableString(scope?.eventId)
   const pairFingerprint = normalizeNullableString(scope?.pairFingerprint)
-  return gameId && eventId && pairFingerprint ? { gameId, eventId, pairFingerprint, ...(scope?.loreAccess === 'read' ? { loreAccess: 'read' as const } : {}) } : null
+  return gameId && eventId && pairFingerprint ? { gameId, eventId, pairFingerprint, ...(scope?.loreAccess === 'read' ? { loreAccess: 'read' as const } : {}), ...(scope?.show === true ? { show: true as const } : {}) } : null
 }
 
 function normalizeAssistantGameMissedCheckInScope(scope: AssistantHostedExecutionContext['gameMissedCheckInScope']): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null {
@@ -840,6 +842,7 @@ export function normalizeAssistantExecutionContext(
       ...optionalHostedField('groupSharedReader', groupSharedReader),
       ...optionalHostedField('groupTool', hosted.groupTool),
       ...optionalHostedField('gameRecapScope', gameRecapScope),
+      ...optionalHostedField('gameRecapAdmission', hosted.gameRecapAdmission),
       ...optionalHostedField('gameMissedCheckInScope', gameMissedCheckInScope),
       ...optionalHostedField('labsTool', labsTool),
       ...optionalHostedField('planUsageTool', planUsageTool),

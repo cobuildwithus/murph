@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates, createHostedLinqChatLookupKeyReadCandidates, createHostedPhoneLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { getHostedLinqChatSummary, type HostedLinqChatSummary } from "../hosted-onboarding/linq-client";
+import { readHostedMailboxProgress } from "../hosted-mailbox/projection";
 import { resolveHostedLinqEgressPolicyForRuntime } from "../hosted-onboarding/linq-egress-engagement";
 import { acquireHostedLinqLinePhoneLockTx, listHostedLinqAssignableHomeLines } from "../hosted-onboarding/linq-line-store";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
@@ -113,12 +114,16 @@ export async function assertGroupMoveQuiet(input: { containerMemberId: string; c
     OR: [{ receivedAt: { gte: cutoff } }, { providerCreatedAt: { gte: cutoff } }],
   }, select: { eventId: true } });
   if (recent) groupMoveError("CHAT_NOT_QUIET");
-  const pending = await prisma.hostedMailboxItem.findFirst({ where: { userId: containerMemberId,
-    OR: [{ consumedAt: null }, { kind: "conversation.message", createdAt: { gte: cutoff } }] }, select: { id: true } });
+  // System acknowledgements advance the lane watermark without stamping items.
+  const progress = await readHostedMailboxProgress({ userId: containerMemberId, prisma });
+  const pending = progress.maxSeqByLane.some(row => BigInt(row.maxSeq) > BigInt(
+    progress.consumedSeqByLane.find(consumed => consumed.lane === row.lane)?.consumedSeq ?? "0"));
+  const recentConversation = await prisma.hostedMailboxItem.findFirst({ where: { userId: containerMemberId,
+    kind: "conversation.message", createdAt: { gte: cutoff } }, select: { id: true } });
   const runtime = await prisma.hostedRuntimeOwner.findUnique({ where: { userId: containerMemberId }, select: { phase: true } });
   const delivery = await prisma.hostedLinqDelivery.findFirst({ where: {
     OR: [{ linqChatLookupKey: { in: chatKeys } }, { payloadOwnerMemberId: containerMemberId }],
     status: { in: ["attempted", "provider_dispatch_started", "accepted", "awaiting_generation", "generation_queued"] },
   }, select: { id: true } });
-  if (pending || (runtime && runtime.phase !== "idle") || delivery) groupMoveError("WORK_PENDING");
+  if (pending || recentConversation || (runtime && runtime.phase !== "idle") || delivery) groupMoveError("WORK_PENDING");
 }

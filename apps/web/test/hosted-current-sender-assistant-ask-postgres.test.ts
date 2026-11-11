@@ -158,7 +158,7 @@ describe.skipIf(!runPostgresProof)(
         });
 
         const privacyDeadline = new Date(
-          abandonedRequest.createdAt.getTime() + 14 * 24 * 60 * 60 * 1_000,
+          abandonedRequest.createdAt.getTime() + 30 * 24 * 60 * 60 * 1_000,
         );
         await runHostedControlPlaneRetentionCleanup({
           now: privacyDeadline,
