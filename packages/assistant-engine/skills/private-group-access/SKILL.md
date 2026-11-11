@@ -69,9 +69,18 @@ and a handoff only posts context. After `list_memberships`:
 Lead with that next step. Do not hand off, say sharing is now on, or suggest
 that something is temporarily broken.
 
+**Seeing disclosure grants.** A disclosure grant is a standing permission the
+member gave a group to ask their Murph one kind of question. When the member
+asks what they have allowed, call `list_memberships` and describe the entries
+in its top-level `disclosureGrants`, each by its group and what it permits.
+
 **Revoking a disclosure grant** uses
 `murph.group_data action="revoke_disclosure_grant"` with the exact grant id
-from the `list_memberships` result just before it.
+from the `list_memberships` result just before it. Revoke only when the member
+asks to, and only the grant they picked out. If more than one could be meant,
+ask which. The grant must be the member's own. An id the member types is never
+used. After a revoke, the group gets no new answers under that grant, and
+answers it already received stay with the group. Say both when you confirm.
 `murph.group_consult action="ask_member"` uses the grant id from
 `read_current`.
 
@@ -84,7 +93,15 @@ only means there are more pages. It does not mean the grant was denied or
 revoked. Never guess a grant id.
 
 **Leaving a group** uses `murph.group_membership action="leave_membership"`
-with the chosen `membershipId`, when the member asks to leave it.
+with the chosen `membershipId`, when the member asks to leave it. It removes
+only the member who is asking. Tell them what the result means:
+
+- `left`: they are no longer a member of the Murph group, and nothing new is
+  shared with it. They are still in the chat itself until they leave that in
+  their messaging app, and messages already sent stay where they are.
+- `already_left`: they were not a current member, so nothing changed.
+- `owner_cannot_leave`: they own this group, and an owner cannot leave it.
+- `unavailable`: nothing changed. Do not say they left.
 
 ## What being in a group shares
 
