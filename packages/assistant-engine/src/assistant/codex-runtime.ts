@@ -13,7 +13,6 @@ import {
 import {
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   preinitializeCodexAssistantProcess as preinitializeCodexAssistantProcessUnchecked,
-  startCodexAssistantVoice,
 } from './providers/codex-cli.js'
 
 import type {
@@ -23,7 +22,6 @@ import type {
   AssistantProviderTurnExecutionResult,
   AssistantProviderTurnInput,
 } from './providers/types.js'
-import type { CodexRealtimeOptions, CodexRealtimeSession } from '../assistant-codex.js'
 
 export interface HostedCodexAssistantProcessPreparationInput {
   env?: NodeJS.ProcessEnv
@@ -33,24 +31,6 @@ export interface HostedCodexAssistantProcessPreparationInput {
 }
 export interface HostedCodexAssistantProcessPreparation {
   cancelPending(): Promise<void>
-}
-
-export interface HostedCodexAssistantVoiceInput
-  extends Omit<HostedCodexAssistantProcessPreparationInput, 'signal'>, CodexRealtimeOptions {
-  mediaModel: string
-  mediaModelProvider: string
-}
-
-/** Keep the member's process identity; only the tool-free media thread uses OpenAI. */
-export async function startHostedCodexAssistantVoice(
-  input: HostedCodexAssistantVoiceInput,
-): Promise<CodexRealtimeSession> {
-  return await startCodexAssistantVoice({
-    ...input,
-    providerConfig: normalizeAssistantProviderConfig(
-      assistantModelTargetToProviderConfigInput(input.target),
-    ),
-  })
 }
 
 /**

@@ -9,7 +9,7 @@ import type {
   HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 
-import { HOSTED_RETIRED_MAILBOX_KINDS } from "@murphai/hosted-execution/runtime-control";
+import { HOSTED_RETIRED_MAILBOX_KINDS, HOSTED_OUTBOX_QUIESCENT_SNAPSHOT_STATUS_KEY } from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedRetiredMailboxKind,
   HostedWorkspaceCheckpointResponse,
@@ -2803,6 +2803,22 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         threadId: "thread-disabled-residue",
       },
     });
+  });
+
+  it.each(["empty", "pending", "cleanup failure"])("binds outbox settlement to the published snapshot for %s", async state => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    if (state === "pending") await createAssistantOutboxIntent({ vault: vaultRoot, channel: "linq",
+      identityId: "synthetic-person", sessionId: "synthetic-session", turnId: "synthetic-turn",
+      threadId: "synthetic-group", threadIsDirect: false, message: "Synthetic pending reply" });
+    if (state === "cleanup failure") vi.spyOn(runtimeResidue, "pruneAssistantGeneratedDeliveryResidue")
+      .mockRejectedValueOnce(new Error("Synthetic unavailable inventory"));
+    const options = createBridgeOptions({ platform, vaultRoot });
+    await options.createCheckpointSnapshot({ ...createCheckpointInput("idle_shutdown"),
+      redactedStatus: { [HOSTED_OUTBOX_QUIESCENT_SNAPSHOT_STATUS_KEY]: "synthetic-old-snapshot" } });
+    const request = calls.completeSnapshotSession.mock.lastCall![0].checkpointRequest;
+    expect(request.redactedStatus?.[HOSTED_OUTBOX_QUIESCENT_SNAPSHOT_STATUS_KEY])
+      .toBe(state === "empty" ? calls.completeSnapshotSession.mock.lastCall![0].ref.snapshotId : null);
   });
 
   it("prunes only quiescent runtime deliveries before archive planning", async () => {

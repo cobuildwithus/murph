@@ -56,7 +56,6 @@ import type {
 import type {
   AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
-import type { AssistantChannelDependencies } from "@murphai/assistant-engine/assistant-runtime";
 import type {
   HostedRuntimeAssistantPersonalizationToolAuthority,
   HostedRuntimeAssistantPersonalizationToolRequest,
@@ -738,9 +737,6 @@ export type HostedRuntimeMailboxFetchResponse = HostedMailboxFetchResponse & {
 };
 
 export interface HostedRuntimeMailboxPort {
-  admitVoiceInput?(
-    request: import("@murphai/hosted-execution").HostedVoiceInputRequest,
-  ): Promise<{ mailboxItemId: string }>;
   fetch(
     request: HostedMailboxFetchRequest,
     context?: { signal?: AbortSignal | null },
@@ -915,8 +911,6 @@ export interface HostedRuntimePlatform {
   phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
-  /** Ephemeral, invocation-bound speech; never an independently retried effect. */
-  voicePort?: { speak: NonNullable<AssistantChannelDependencies["sendVoice"]> } | null;
   vaultSharePort?: HostedRuntimeVaultSharePort | null;
   workspacePort?: HostedRuntimeWorkspacePort | null;
   workspaceSnapshotPort?: HostedRuntimeWorkspaceSnapshotPort | null;

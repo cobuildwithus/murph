@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const codexAppServerMocks = vi.hoisted(() => ({
   executeCodexAppServerTurn: vi.fn(),
   preinitializeCodexAppServer: vi.fn(),
-  startCodexAppServerRealtime: vi.fn(),
   readCodexAppServerTurnFailureContext: vi.fn(),
 }))
 const diagnosticsMocks = vi.hoisted(() => ({
@@ -16,7 +15,6 @@ const turnsMocks = vi.hoisted(() => ({
 vi.mock('../src/assistant-codex.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/assistant-codex.ts')>()),
   executeCodexAppServerTurn: codexAppServerMocks.executeCodexAppServerTurn,
-  startCodexAppServerRealtime: codexAppServerMocks.startCodexAppServerRealtime,
   preinitializeCodexAppServer:
     codexAppServerMocks.preinitializeCodexAppServer,
   readCodexAppServerTurnFailureContext:
@@ -68,7 +66,6 @@ import {
   executeCodexAssistantTurnAttempt as executeCodexAssistantTurnAttemptUnchecked,
   executeCodexAssistantTurnAttemptFromInput,
   prepareHostedCodexAssistantProcess,
-  startHostedCodexAssistantVoice,
 } from '../src/assistant/codex-runtime.ts'
 import {
   MURPH_DYNAMIC_TOOLS,
@@ -237,7 +234,6 @@ function executeCodexAssistantTurnAttempt(
 afterEach(() => {
   codexAppServerMocks.executeCodexAppServerTurn.mockReset()
   codexAppServerMocks.preinitializeCodexAppServer.mockReset()
-  codexAppServerMocks.startCodexAppServerRealtime.mockReset()
   codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReset()
   diagnosticsMocks.recordAssistantDiagnosticEvent.mockReset()
   turnsMocks.appendAssistantTurnReceiptEvent.mockReset()

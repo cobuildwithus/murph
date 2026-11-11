@@ -276,10 +276,6 @@ package_script="scripts/package-audit-context-full.sh"
 app_connector="current"
 model="gpt-6-pro"
 thinking="current"
-# A marked answer faster than this is untrusted. The package's 5 minutes threw
-# out real passes on small PRs (murph-ios #371: 246 s, twice); 2 still catches
-# a cut-off or downgraded round.
-minimum_marked_response_ms="2m"
 response_timeout_ms="${response_timeout_ms:-$((250 * 60 * 1000))}"
 
 review_gpt_register_dir_preset "security" "security-audit.md" \

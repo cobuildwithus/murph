@@ -6,7 +6,7 @@ import path from 'node:path'
 import { expect, onTestFinished, test } from 'vitest'
 import { addNativeReviewContext, nativeContextOwners, readNativeContextPin } from './review-gpt-native-context.ts'
 
-const patchPath = 'patches/codex-public-live.patch'
+const patchPath = 'patches/codex-websocket-ack.patch'
 const target = 'codex-rs/codex-api/src/endpoint/changed.rs'
 const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim()
 async function write(root: string, file: string, text: string) {
@@ -166,7 +166,7 @@ cobuild_repo_tool_bin() { printf '%s\\n' "$TEST_BASE_PACKAGER"; }
         --name) name="$2"; shift 2;;
         *) shift;; esac; done
       mkdir -p "$out"
-      zip -q "$out/$name.zip" patches/codex-public-live.patch
+      zip -q "$out/$name.zip" patches/codex-websocket-ack.patch
       printf 'ZIP: %s (%s bytes)\\n' "$out/$name.zip" "$(wc -c < "$out/$name.zip")"`,
   }
   for (const [name, script] of Object.entries(commands)) {

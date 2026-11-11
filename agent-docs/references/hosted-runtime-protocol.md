@@ -4817,6 +4817,17 @@ existing diagnostic calls. Presign and PUT timings are nested within direct-uplo
 timing and must not be added again. A throwing step records elapsed time before
 the existing failure or best-effort cleanup handler runs; no new event is emitted.
 
+Idle snapshot completion publishes `hostedOutboxQuiescentSnapshotId` in checkpoint
+redacted status, using the existing generated-delivery cleanup's complete outbox
+inventory. Only a trusted inventory with no active or confirmation-pending intent
+publishes the current snapshot ID; all other results, including cleanup failure,
+publish null. Incoming status cannot preserve an older witness. The witness is
+private control metadata, not a delivery receipt or public log field. Operator
+group-line moves may use it only against the current validated member-bound
+snapshot while holding an idle runtime owner lock; the architecture's delivery
+settlement rules retain all other route and pending-work checks. Old writers and
+either-side rollback fail closed without another scan or foreground operation.
+
 Every finished event reports `assistantRuntimeResiduePruneAttemptedCount` and
 `assistantRuntimeResiduePruneCompletedCount` as zero or one, plus the existing
 per-category residue removal counts even when zero. A skipped prune has zero

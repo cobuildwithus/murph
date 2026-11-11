@@ -163,6 +163,20 @@ describe('assistant runtime residue pruning', () => {
     await expectPathExists(prefixSiblingPath)
   })
 
+  it.each(['pending', 'sending', 'retryable', 'awaiting_approval', 'sent', 'failed', 'abandoned'] as const)
+  ('certifies outbox quiescence from canonical %s records without needing media', async status => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-quiescence-')
+    const intent = await createAssistantOutboxIntent({ vault: vaultRoot, channel: 'linq',
+      identityId: 'synthetic-person', sessionId: 'synthetic-session', turnId: 'synthetic-turn',
+      threadId: 'synthetic-group', threadIsDirect: false, message: 'Synthetic reply' })
+    await saveAssistantOutboxIntent(vaultRoot, { ...intent, status,
+      sentAt: status === 'sent' ? RECENT_RECORD_AT : null })
+    expect((await pruneAssistantGeneratedDeliveryResidue({ vault: vaultRoot })).outboxQuiescent)
+      .toBe(['sent', 'failed', 'abandoned'].includes(status))
+    await saveAssistantOutboxIntent(vaultRoot, { ...intent, status: 'failed', deliveryConfirmationPending: true })
+    expect((await pruneAssistantGeneratedDeliveryResidue({ vault: vaultRoot })).outboxQuiescent).toBe(false)
+  })
+
   it('retains exact generated delivery media for every active lifecycle state', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-generated-active-',
@@ -438,6 +452,7 @@ describe('assistant runtime residue pruning', () => {
     expect(result.generatedDeliveryCleanupSkippedUntrustedOutbox).toBe(true)
     await expectPathExists(file.filePath)
     await expectPathExists(unexpectedPath)
+    expect(result.outboxQuiescent).toBe(false)
   })
 
   it('prunes an orphan staging hardlink without changing its ordinary vault file', async () => {

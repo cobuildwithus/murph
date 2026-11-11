@@ -1,6 +1,9 @@
 import { sendHostedLinqChatMessage } from "@/src/lib/hosted-onboarding/linq-client";
 import { assertHostedLinqRecentInboundEngagementForRuntime } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import { APIError } from "@linqapp/sdk";
+import { HOSTED_OUTBOX_QUIESCENT_SNAPSHOT_STATUS_KEY } from "@murphai/hosted-execution/runtime-control";
+import { buildHostedWorkspaceSnapshotV2Aad, HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
+  HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME, HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import { createHmac, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "@/src/lib/prisma";
@@ -12,7 +15,8 @@ import { createHostedExternalThreadIdentityLookupKey, createHostedExternalThread
 import { encryptHostedLinqLinePhoneNumber } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 import { startHostedLinqGroupLineMove, operateHostedLinqGroupLineMove } from "@/src/lib/hosted-ops/linq-group-line-move";
 import { readHostedLinqGroupLineMoveOverview } from "@/src/lib/hosted-ops/linq-group-line-move-overview";
-import { claimHostedLinqDeliveryProviderDispatchTx } from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import { claimHostedLinqDeliveryProviderDispatchTx, recordHostedLinqRuntimeDeliveryOutcomeTx,
+  recordHostedLinqRuntimeProviderDispatchFenceTx } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { prepareHostedLinqGroupMoveCleanup } from "@/src/lib/hosted-routing/linq-group-line-move-store";
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 import { buildHostedThreadDeliveryRoute, sealHostedThreadDeliveryRoute } from "@/src/lib/hosted-routing/thread-delivery-route";
@@ -460,6 +464,112 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     await expect(start()).rejects.toMatchObject({ httpStatus: 409 }); expect(provider.add).not.toHaveBeenCalled();
     expect(await db.hostedLinqGroupLineMove.count({ where: { containerMemberId: room } })).toBe(0);
     expect((await db.hostedThreadRoute.findFirstOrThrow({ where: { containerMemberId: room } })).accountLookupKey).toBeNull();
+  });
+  it("keeps an idle acknowledged runtime's ambiguous dispatch blocked until its outcome settles", async () => {
+    const startedAt = new Date(), idempotencyKey = randomUUID(), sourceRef = randomUUID();
+    const dispatch = () => recordHostedLinqRuntimeProviderDispatchFenceTx({ idempotencyKey, sourceRef,
+      linqChatId: sourceChat, phoneNumber: source, targetKind: "thread", prisma: db });
+    expect((await dispatch()).claimed).toBe(true);
+    await db.hostedMailboxItem.create({ data: { id: randomUUID(), userId: room, lane: "conversation", laneSeq: 1n,
+      dedupeKey: randomUUID(), kind: "conversation.message", occurredAt: startedAt, payloadSchema: "synthetic" } });
+    await db.hostedMailboxLaneCounter.create({ data: { userId: room, lane: "conversation", nextSeq: 2n } });
+    await advanceHostedMailboxConsumedSeqByLane({ userId: room, prisma: db,
+      lanes: [{ lane: "conversation", consumedSeq: "1" }] });
+    await db.hostedRuntimeOwner.create({ data: { userId: room, phase: "idle", processingMode: "default" } });
+    vi.setSystemTime(startedAt.getTime() + 31 * 60_000);
+    await db.hostedLinqLine.updateMany({ where: { phoneNumberLookupKey: { in: [sourceKey, targetKey] } },
+      data: { providerInventoryConfirmedAt: new Date() } });
+    // A replay-safe retry can proceed after a false claim without refreshing
+    // the original Web fence; idle and mailbox acknowledgement are insufficient.
+    expect((await dispatch()).claimed).toBe(false);
+    await expect(start()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_WORK_PENDING" });
+    expect(provider.add).not.toHaveBeenCalled();
+    expect(await db.hostedLinqGroupLineMove.count({ where: { containerMemberId: room } })).toBe(0);
+    expect((await db.hostedThreadRoute.findFirstOrThrow({ where: { containerMemberId: room } })).accountLookupKey).toBe(sourceKey);
+    await recordHostedLinqRuntimeDeliveryOutcomeTx({ idempotencyKey, sourceRef, attemptedAt: startedAt,
+      acceptedAt: new Date(), messageId: randomUUID(), linqChatId: sourceChat, phoneNumber: source,
+      targetKind: "thread", threadIsDirect: false, userId: room, prisma: db });
+    expect(await start()).toMatchObject({ status: "reserved", code: null });
+    expect(provider.add).toHaveBeenCalledOnce();
+  });
+  it.each(["current", "missing witness", "older snapshot", "foreign owner", "future snapshot", "newer fence", "active runtime"])
+  ("requires current snapshot settlement evidence for historical dispatch: %s", async state => {
+    const snapshotId = randomUUID(), id = randomUUID();
+    const snapshotOwner = state === "foreign owner" ? owner : room;
+    const objectKey = `users/hsn_abcdef0123456789abcdef01/workspace-snapshots/${snapshotId}.snapshot.enc`;
+    const snapshotAt = new Date(Date.now() + (state === "future snapshot" ? 60_000 : -30 * 60_000));
+    const earlier = new Date(Date.now() - (state === "newer fence" ? 20 * 60_000 : 86_400_000));
+    await db.hostedLinqDelivery.create({ data: { id, status: "provider_dispatch_started",
+      source: "hosted_runtime_linq_delivery", attemptedAt: earlier, updatedAt: earlier,
+      linqChatLookupKey: createHostedLinqChatLookupKey(sourceChat), phoneNumberLookupKey: sourceKey } });
+    await db.hostedRuntimeOwner.create({ data: { userId: room,
+      phase: state === "active runtime" ? "active" : "idle", processingMode: "default",
+      ...(state === "active runtime" ? { attemptId: randomUUID(), allocationId: randomUUID(),
+        runnerContainerName: "synthetic-runner", workspaceVersion: 0n } : {}) } });
+    await db.hostedWorkspace.create({ data: { userId: room, snapshotRef: {
+      archive: { compression: "zstd", encryptedByteSize: 1024, encryptedObjectSha256: "b".repeat(64),
+        fileCount: 2, format: "tar", plaintextArchiveSha256: "a".repeat(64), totalPlainBytes: 2048 },
+      createdAt: snapshotAt.toISOString(), encryption: {
+        aad: { ...buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId: snapshotOwner }) },
+        ivBase64: "AQIDBAUGBwgJCgsM", rootKeyId: "udrk:runtime:synthetic",
+        scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME, wrappedDataKey: "synthetic-wrapped-key" },
+      objectKey, schema: HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA, snapshotId,
+      upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND, userId: snapshotOwner,
+    }, redactedStatusJson: { [HOSTED_OUTBOX_QUIESCENT_SNAPSHOT_STATUS_KEY]:
+      state === "missing witness" ? null : state === "older snapshot" ? randomUUID() : snapshotId } } });
+    if (state === "current") {
+      expect(await start()).toMatchObject({ status: "reserved", code: null });
+      expect(provider.add).toHaveBeenCalledOnce();
+    } else {
+      await expect(start()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_WORK_PENDING" });
+      expect(provider.add).not.toHaveBeenCalled();
+    }
+    expect((await db.hostedLinqDelivery.findUniqueOrThrow({ where: { id } })).status).toBe("provider_dispatch_started");
+  });
+  it.each(["runtime accepted", "webhook accepted"])("starts past historical %s metadata without rewriting it", async kind => {
+    const earlier = new Date(Date.now() - 86_400_000), id = randomUUID();
+    const status = "accepted";
+    await db.hostedLinqDelivery.create({ data: { id, source: kind === "webhook accepted"
+      ? "hosted_webhook_side_effect" : "hosted_runtime_linq_delivery",
+      status, attemptedAt: earlier, updatedAt: earlier, acceptedAt: status === "accepted" ? earlier : null,
+      targetKind: "explicit", threadIsDirect: null,
+      linqChatLookupKey: createHostedLinqChatLookupKey(sourceChat), phoneNumberLookupKey: sourceKey } });
+    const before = await db.hostedLinqDelivery.findUniqueOrThrow({ where: { id } });
+    const move = await start();
+    expect(move).toMatchObject({ status: "reserved", code: null });
+    expect(provider.add).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
+    const eventId = randomUUID();
+    const incoming = () => webhook(targetChat, person, "Synthetic handoff", target, eventId);
+    await expect(incoming()).rejects.toMatchObject({ httpStatus: 503 });
+    await incoming(); await incoming();
+    for (const callback of callbacks) await callback();
+    expect((await row(move.moveId)).status).toBe("left");
+    expect(await db.hostedMailboxItem.count({ where: { userId: room, kind: "conversation.message" } })).toBe(1);
+    expect((await db.hostedThreadRoute.findFirstOrThrow({ where: { containerMemberId: room } })).accountLookupKey).toBe(targetKey);
+    expect(provider.leave).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
+    expect(await db.hostedLinqDelivery.findUniqueOrThrow({ where: { id } })).toEqual(before);
+  });
+  it.each(["recent attempt", "recent update", "recent acceptance", "missing acceptance", "payload", "drain window", "recent dispatch",
+    "payload owner", "payload schema", "other source", "generation", "dispatch receipt", "dispatch failure"])
+  ("keeps the delivery veto for %s", async kind => {
+    const earlier = new Date(Date.now() - 86_400_000), now = new Date();
+    const dispatch = kind.includes("dispatch");
+    await db.hostedLinqDelivery.create({ data: { id: randomUUID(),
+      source: kind === "other source" ? "game_lifecycle" : "hosted_runtime_linq_delivery",
+      status: kind === "generation" ? "generation_queued" : dispatch ? "provider_dispatch_started" : "accepted",
+      attemptedAt: kind === "recent attempt" || kind === "recent dispatch" ? now
+        : kind === "drain window" ? new Date(Date.now() - 14 * 60_000) : earlier,
+      updatedAt: kind === "recent update" ? now : earlier,
+      acceptedAt: dispatch || kind === "missing acceptance" ? null : kind === "recent acceptance" ? now : earlier,
+      payloadCiphertext: kind === "payload" ? "synthetic-sealed-obligation" : null,
+      payloadOwnerMemberId: kind === "payload owner" ? room : null,
+      payloadSchema: kind === "payload schema" ? "synthetic-obligation" : null,
+      messageLookupKey: kind === "dispatch receipt" ? randomUUID() : null,
+      failureCode: kind === "dispatch failure" ? "synthetic-partial-send" : null,
+      linqChatLookupKey: createHostedLinqChatLookupKey(sourceChat), phoneNumberLookupKey: sourceKey } });
+    await expect(start()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_WORK_PENDING" });
+    expect(provider.add).not.toHaveBeenCalled();
+    expect(await db.hostedLinqGroupLineMove.count({ where: { containerMemberId: room } })).toBe(0);
   });
   it.each(["acknowledged", "unacknowledged", "expired"])("uses canonical lane progress for %s system work", async state => {
     const id = randomUUID(), earlier = new Date(Date.now() - 120_000);

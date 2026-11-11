@@ -292,18 +292,6 @@ export function executeAssistantRealCodexRun(
     return 2
   }
 
-  const nativeHelp = dependencies.runCommand({
-    args: ['app-server', '--help'],
-    timeoutMs: 10_000,
-    command: options.codexCommand ?? ASSISTANT_REAL_CODEX_COMMAND,
-    env: buildAssistantRealCodexLoginEnv(dependencies.sourceEnv, options.codexHome),
-    stdio: 'capture',
-  })
-  if (nativeHelp.status !== 0 || !nativeHelp.stdout?.includes('--ignore-user-config')) {
-    dependencies.writeStderr('Live journeys require the Murph native patch. Select its binary with --codex-command before starting a provider run.\n')
-    return 1
-  }
-
   if (options.authMode === 'subscription') {
     const loginStatus = dependencies.runCommand({
       args: ['login', 'status'],
@@ -331,7 +319,7 @@ export function executeAssistantRealCodexRun(
   )
   if (options.authMode === 'subscription') {
     dependencies.writeStdout(
-      'Subscription runs keep the selected Codex home configuration; use a dedicated home for production-like evidence.\n',
+      'Subscription runs retain personal configuration and global instructions; they are developer-local evidence. Use the configured provider lane for isolated release evidence.\n',
     )
   }
 

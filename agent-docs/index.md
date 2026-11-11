@@ -23,6 +23,12 @@ normalization for games. [Architecture](../ARCHITECTURE.md#linq-group-line-moves
 and [Security](SECURITY.md#weekly-game-chat-authority) own the contracts;
 silent producer release, bounded source fallback and provider proof remain in the
 [active plan](exec-plans/active/2026-11-10-linq-group-line-move.md).
+Historical dispatch fences require the snapshot-bound outbox settlement witness
+owned by the [runtime protocol](references/hosted-runtime-protocol.md), with
+reservation and rollback rules in Architecture.
+The [verification workflow](operations/verification-and-runtime.md) and
+[CI map](references/testing-ci-map.md) cover Chromium's installed-library
+preflight during dependency mirror outages; real browser checks remain required.
 
 The [synthetic game self-play QA map](references/game-selfplay-qa.md) records reachable game states, local native gameplay, real-model chat edits and explicit coverage gaps, with a [machine-readable native scenario inventory](references/game-selfplay-scenarios.json).
 
@@ -1510,7 +1516,7 @@ Worker callback preparation, HTTP-header timing, and bounded Vercel region
 attribution are tracked in
 [`mailbox latency phases`](exec-plans/completed/2026-09-22-mailbox-latency-phases.md).
 
-Current native voice release port and rollout proof:
+Historical native voice release port and rollout proof (feature retired):
 [`2026-09-22-native-voice-codex-155.md`](exec-plans/completed/2026-09-22-native-voice-codex-155.md).
 
 Preserving query-source error privacy across audit archives is tracked in
@@ -2074,5 +2080,9 @@ Current compatibility gates remain in `../packages/core/README.md` and
 
 Downstream canonical type composition and existing group-room audit value support
 are recorded in [the correction proof](exec-plans/completed/2026-11-10-canonical-type-composition.md).
+
+Browser live voice retirement is tracked in [the retirement plan](exec-plans/completed/2026-11-10-retire-live-voice.md); `../apps/web/README.md` owns the website boundary.
+
+Dependency patch reduction is tracked in [the cleanup plan](exec-plans/completed/2026-11-10-dependency-patch-cleanup.md).
 
 Invite phone-code lifecycle retirement is owned by [hosted authentication migration](../docs/hosted-auth-migration.md#retired-invite-phone-code-lifecycle); the [execution plan](exec-plans/completed/2026-11-10-simplify-auth-lifecycle.md) records validation and remaining audit dispositions.

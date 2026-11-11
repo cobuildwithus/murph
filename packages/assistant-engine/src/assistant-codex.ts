@@ -29,7 +29,6 @@ import {
 import type {
   AssistantResponseMedia,
   AssistantSandbox,
-  AssistantTurnTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
   AssistantAcceptedTurnInputReferenceWindow,
@@ -133,18 +132,6 @@ import {
   readCodexThreadTokenUsage,
   type CodexTokenUsageBreakdown,
 } from './assistant-codex/app-server-protocol.js'
-import {
-  CodexRealtimeBinding,
-  isCodexRealtimeNotification,
-  type CodexRealtimeOptions,
-  type CodexRealtimeSession,
-} from './assistant-codex/realtime.js'
-export type {
-  CodexRealtimeClosure,
-  CodexRealtimeInput,
-  CodexRealtimeOptions,
-  CodexRealtimeSession,
-} from './assistant-codex/realtime.js'
 import {
   collectCodexCompactionResponseUsage,
   type CodexCompactionResponseUsage,
@@ -582,7 +569,6 @@ export interface CodexAppServerTurnInput {
   // Sent on every turn/start: a value selects the tier, null explicitly
   // resets a sticky thread-level override back to the default tier.
   serviceTier?: AssistantProviderServiceTier | null
-  turnTrigger?: AssistantTurnTrigger | null
   progressDelivery?: AssistantProgressDelivery | null
   hostedToolContext?: AssistantHostedToolContext | null
   providerRequestOrdinal?: number | null
@@ -603,33 +589,6 @@ export interface CodexAppServerPreinitializeInput
 
 export interface CodexAppServerPreinitialization {
   cancelPending(): Promise<void>
-}
-
-export interface CodexAppServerRealtimeInput extends CodexAppServerLaunchInput, CodexRealtimeOptions {
-  model?: string | null
-  modelProvider?: string | null
-}
-
-/** The native media thread has no Murph tools; accepted work uses the ordinary turn path. */
-export async function startCodexAppServerRealtime(
-  input: CodexAppServerRealtimeInput,
-): Promise<CodexRealtimeSession> {
-  const prepared = await prepareCodexAppServerProcessInput(input)
-  // Media attachment is process setup, not an ordinary turn. Keep lifecycle
-  // operations behind the existing slot lock until startup settles; a checkpoint
-  // must wait here instead of mistaking negotiation for an in-flight host turn.
-  return await withWarmCodexSlotLock(async () => {
-    const existing = warmCodexProcess?.canShareForLaunch(prepared.launchKey)
-      ? warmCodexProcess
-      : null
-    const processInstance = existing ?? await claimWarmCodexProcess(prepared)
-    try {
-      await processInstance.initialize()
-      return await processInstance.startRealtime({ ...input, workingDirectory: prepared.workingDirectory })
-    } finally {
-      if (!existing) processInstance.releaseReservation()
-    }
-  })
 }
 
 export interface CodexAppServerTurnFailureContext {
@@ -1243,7 +1202,6 @@ class CodexAppServerProcess {
   readonly startedAt = Date.now()
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
-  private realtime: CodexRealtimeBinding | null = null
   private boundThreadGroupConversation = false
   private boundThreadId: string | null = null
   private boundThreadModel: string | null = null
@@ -1467,40 +1425,6 @@ class CodexAppServerProcess {
   releaseReservation(): void {
     if (this.state === 'reserved' && !this.activeTurn) {
       this.state = 'idle'
-    }
-  }
-
-  async startRealtime(input: CodexAppServerRealtimeInput): Promise<CodexRealtimeSession> {
-    if (this.realtime) throw this.buildBusyError('A native voice session is already attached.')
-    const result = readCodexRecord(await this.sendRequestWithTimeout({
-      method: 'thread/start',
-      params: {
-        cwd: input.workingDirectory,
-        model: input.model ?? null,
-        modelProvider: input.modelProvider ?? null,
-        approvalPolicy: 'never',
-        sandbox: 'read-only',
-        dynamicTools: [],
-        ephemeral: true,
-        config: { 'features.realtime_conversation': true },
-      },
-      timeoutLabel: 'voice thread',
-      timeoutMs: 30_000,
-    }))
-    const threadId = readCodexNonEmptyString(readCodexRecord(result?.thread)?.id)
-    if (!threadId) throw new Error('Native voice thread did not return an identity.')
-    const binding = new CodexRealtimeBinding(threadId, input, (method, params) => this.sendRequestWithTimeout({
-      method, params, timeoutLabel: method, timeoutMs: 30_000,
-    }))
-    this.realtime = binding
-    void binding.closed.then(() => {
-      if (this.realtime === binding) this.realtime = null
-    })
-    try {
-      return await binding.start()
-    } catch (error) {
-      await binding.close()
-      throw error
     }
   }
 
@@ -1884,8 +1808,6 @@ class CodexAppServerProcess {
     this.endReason ??= resolveCodexAppServerEndReason(reason)
     this.normalShutdown = true
     this.state = 'stopping'
-    // The process owns native media shutdown as well as backing-turn teardown.
-    await this.realtime?.close()
     this.rejectPending(
       new VaultCliError(
         'ASSISTANT_CODEX_APP_SERVER_STOPPED',
@@ -1988,7 +1910,6 @@ class CodexAppServerProcess {
         stderr: this.startupStderr,
       })
     this.stdinFailure = failure
-    this.realtime?.processClosed()
     this.poisoned = true
     if (!this.initialized) {
       this.startupFailure ??= failure
@@ -2001,7 +1922,6 @@ class CodexAppServerProcess {
   }
 
   private handleProcessError(error: Error): void {
-    this.realtime?.processClosed()
     const failure = normalizeCodexStartupFailure({
       codexCommand: this.codexCommand,
       error,
@@ -2145,11 +2065,6 @@ class CodexAppServerProcess {
 
   private handleStdoutLine(line: string): void {
     const parsed = tryParseJsonLine(line)
-    // Voice notifications are not another turn's transcript or tool stream.
-    if (parsed.ok && isCodexRealtimeNotification(parsed.value)) {
-      this.realtime?.handle(parsed.value)
-      return
-    }
     if (!parsed.ok || (parsed.value.method !== 'rawResponseItem/completed'
       && parsed.value.method !== 'rawResponse/completed')) {
       this.activeTurn?.onStdoutText(`${line}\n`)
@@ -2208,7 +2123,6 @@ class CodexAppServerProcess {
       this.handleStdoutLine(this.stdoutBuffer)
     }
     this.stdoutBuffer = ''
-    this.realtime?.processClosed()
 
     if (!this.normalShutdown) {
       this.poisoned = true
