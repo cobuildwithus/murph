@@ -304,16 +304,6 @@ describe('game recap dynamic contract', () => {
     if (parsed?.kind !== 'game' || parsed.request.action !== 'write_recap') throw new Error('Expected recap request')
     expect(parsed.request.recap).toEqual(candidate)
   })
-  it('gives a pair show only file media, preview, submission, read and lore tools', async () => {
-    const tools = resolveAssistantGameHostDynamicTools({ currentGameRecapScope: () => ({ gameId: 'game', eventId: 'game-recap:game', pairFingerprint: 'a'.repeat(32), show: true }) })
-    expect(tools.map(tool => tool.name)).toEqual(['read_game', 'preview_recap', 'write_recap', 'game_lore', 'generate_image', 'generate_song'])
-    expect(tools.filter(tool => tool.name.startsWith('generate_')).every(tool => tool.description.includes('sends nothing to chat'))).toBe(true)
-    const { buildGameRecapInstructions, RECAP_SHOW_CRAFT } = await import('@murphai/hosted-execution/runtime-control')
-    const instructions = buildGameRecapInstructions([], undefined, false, true)
-    expect(instructions).toContain('parent')
-    expect(instructions).not.toContain('bounded current-room transcript')
-    for (const rule of ['Jokes may exaggerate, facts may not', 'setup above', 'whole prints', 'Most likely to', 'theme song', 'Do not call providers from shell']) expect(RECAP_SHOW_CRAFT).toContain(rule)
-  })
   it('gives isolated recap and check-in turns only their host-owned tools', () => {
     expect(resolveAssistantGameHostDynamicTools({ currentGameRecapScope: () => ({ gameId: 'game', eventId: 'game-recap:game', pairFingerprint: 'a'.repeat(32) }) }))
       .toEqual([MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL])
@@ -600,39 +590,19 @@ it('passes a seated player’s group edit proposal and individual vote through t
   }
 });
 
-it('retries the identical frozen file draft after staging fails and records only the accepted line', async () => {
+it('can correct an unaccepted draft after an upload error', async () => {
   const { executeGameTool } = await import('../src/assistant-codex/dynamic-tools/games.js')
-  const story = { treatment: 'Synthetic theatre', pages: [{ background: 'paper' as const, blocks: [{ kind: 'headline' as const, text: 'The last curtain' }] }], chatLine: 'Player A won 3–2.' }
-  const receipt = { operationId: 'cover', path: '.runtime/tmp/recap/synthetic/media/cover.jpg', hash: 'a'.repeat(64), mediaType: 'image/jpeg' as const, byteLength: 3, width: 1, height: 1 }
-  const draft = { story, files: [{ slot: 'scene-0', receipt }] }
-  const line = `${story.chatLine}\nWatch the recap: https://recaps.murph.test/recap/synthetic`
-  let failStage = true, accepts = 0
-  const drafts: unknown[] = []
-  const record = vi.fn()
+  const story = { pages: [{ background: 'paper' as const, blocks: [{ kind: 'headline' as const, text: 'The curtain' }] }], chatLine: 'The week ended.' }
+  const draft = { story, files: [{ slot: 'scene-0', path: 'media/cover.jpg' }] }
+  const record = vi.fn(), request = vi.fn().mockRejectedValueOnce(new Error('Synthetic upload failed')).mockResolvedValue({ action: 'write_recap', result: { status: 'ok', recap: story, chatLine: 'Accepted line and link', recapOutcome: 'Saved.' } })
   const ctx: AssistantHostedToolContext = { ...context(), currentGameRecapScope: () => ({ gameId: 'synthetic', eventId: 'game-recap:synthetic', pairFingerprint: 'a'.repeat(32), show: true }),
-    readGameRecapDraft: async () => structuredClone(draft), readGameRecapMedia: async () => 'YWJj', recordSavedGameRecapChatLine: record,
-    groupTool: { request: async request => {
-      if (request.action === 'read_game') {
-        expect(request.recapRead?.kind).toBe('stage')
-        if (failStage) { failStage = false; throw new Error('Synthetic transient upload failure') }
-        return { action: 'read_game', result: { status: 'ok', recapGame: { staged: true } } }
-      }
-      if (request.action !== 'write_recap') throw new Error('Unexpected action')
-      drafts.push({ story: request.recap, files: request.files })
-      if (request.phase === 'prepare' && !accepts) return { action: 'write_recap', result: { status: 'ok', recapGame: { prepared: true } } }
-      if (request.phase === 'accept') accepts++
-      return { action: 'write_recap', result: { status: 'ok', recap: story, chatLine: line, recapOutcome: 'ok' } }
-    } },
-  }
+    readGameRecapDraft: async () => draft, readGameRecapMedia: async () => ({ bytes: 'YWJj', mediaType: 'image/jpeg', referenceIds: [] }),
+    recordSavedGameRecapChatLine: record, groupTool: { request } }
   const call = () => executeGameTool({ context: ctx, request: { action: 'write_recap_file', draftPath: 'drafts/show.json' } })
-  const failed = await call()
-  expect(failed.rpcResult.success).toBe(false)
-  expect(failed.rpcResult.contentItems[0]?.text).toContain('Retry the same local draft; do not regenerate media')
+  expect((await call()).rpcResult.success).toBe(false)
   expect(record).not.toHaveBeenCalled()
+  draft.files = []; draft.story.pages[0]!.blocks[0]!.text = 'A better curtain'
   expect((await call()).rpcResult.success).toBe(true)
-  expect((await call()).rpcResult.success).toBe(true)
-  expect(accepts).toBe(1)
-  expect(drafts[0]).toEqual(draft)
-  expect(drafts.every(value => JSON.stringify(value) === JSON.stringify(drafts[0]))).toBe(true)
-  expect(record.mock.calls.every(([value]) => value === line)).toBe(true)
+  expect(record).toHaveBeenCalledWith('Accepted line and link')
+  expect(request.mock.calls[1]?.[0]).toMatchObject({ action: 'write_recap', recap: draft.story, assets: [] })
 })

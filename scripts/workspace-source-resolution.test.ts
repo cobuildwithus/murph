@@ -31,8 +31,6 @@ describe("workspace source resolution", () => {
   it.each([
     { packageName: "core", entry: "event-read.ts", specifier: "@murphai/core/event-read", symbol: "readEvent" },
     { packageName: "contracts", entry: "recap-show.ts", specifier: "@murphai/contracts/recap-show", symbol: "gameRecapDraftSchema" },
-    { packageName: "contracts", entry: "recap-admission.ts", specifier: "@murphai/contracts/recap-admission", symbol: "recapProviderRequestSchema" },
-    { packageName: "contracts", entry: "recap-renderer.ts", specifier: "@murphai/contracts/recap-renderer", symbol: "renderRecapPageSvg" },
     { packageName: "contracts", entry: "recap-material.ts", specifier: "@murphai/contracts/recap-material", symbol: "recapMaterialSchema" },
     { packageName: "contracts", entry: "recap-validation.ts", specifier: "@murphai/contracts/recap-validation", symbol: "withValidGameSuperlatives" },
     { packageName: "contracts", entry: "zod-runtime.ts", specifier: "@murphai/contracts/zod-runtime", symbol: "object" },
@@ -93,8 +91,8 @@ describe("workspace source resolution", () => {
     expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution")).toBe(
       path.join(repoRoot, "packages/hosted-execution/src/index.ts"),
     );
-    expect(resolveAliasReplacement(aliases, "@murphai/contracts/recap-admission")).toBe(
-      path.join(repoRoot, "packages/contracts/src/recap-admission.ts"),
+    expect(resolveAliasReplacement(aliases, "@murphai/contracts/recap-show")).toBe(
+      path.join(repoRoot, "packages/contracts/src/recap-show.ts"),
     );
     expect(resolveAliasReplacement(aliases, "@murphai/operator-config/generated-audio")).toBe(
       path.join(repoRoot, "packages/operator-config/src/generated-audio.ts"),

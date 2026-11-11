@@ -580,29 +580,35 @@ resulting avatar. No private photo is shared with the subject or other players.
   line plus the recap link, with no chat image or audio. Groups keep the existing
   behavior below. The [presentation contract](../references/recap-show-contract.md)
   owns the stable synthetic native fixtures and media authentication.
-  Failed scenes preserve setup and payoff; failed songs disappear. After two
-  exhausted attempts or the twenty-minute deadline, trusted code validates and seals
-  a plain three-page fallback from canonical facts. Revocation ends without save
-  or send. An accepted recap is replayed without further generation.
+  Failed scenes preserve readable text or whole-photo pages; missing songs are omitted.
+  One normal group turn receives the authorized game, retained chat and narrative
+  lore in read_game, generates files, and calls write_recap once. No separate
+  sandbox, working directory, preview, frozen draft or lore acknowledgment is
+  required. Pair-show acceptance checks structure, selected bytes and current
+  source authority; writing preferences stay in the craft guide. An accepted
+  event replays its canonical result through the existing outbox.
 
-  Activation order: apply the retirement and admission migrations, deploy the Web
-  control/storage consumers, deploy the Worker egress fence and runtime image,
-  ship the native decoder/player, then enable all pair shows. Keep the flag off
-  through incompatible producer/consumer skew. Cover and scene files default to
-  high quality at 1024×1536. Each generation allows six image attempts, two images
-  concurrently, one song, and $3.00 in prospective reservations. All references
-  fit within 1024×1024 before upload. Admission defaults to 36,847 input tokens
-  for photo edits, using the conservative legacy high-fidelity estimate documented
-  in the plan's amendment 19; Flare publishes no equivalent input-token guarantee.
-  `MURPH_RECAP_IMAGE_INPUT_TOKEN_CEILING` is an optional total-input override.
-  Ordinary Responses and Live traffic bypass recap admission; paid media alone
-  consults it. Recap turns disable Codex's native image tool.
-  `MURPH_GAME_RECAP_MEDIA_VISIBLE=false` hides generated media and cover previews;
-  it does not remove readable text. `MURPH_GAME_RECAP_MEDIA_DIR` is local-test
-  storage only. Once envelopes exist, retain compatible readers on rollback.
-  Provider scope requires the new Web consumer before Worker rollout. After an
-  authorized deployment, verify a synthetic show and regenerate the three
-  approved settled pairs through existing Ops. PR A performs no production work.
+  Initial generation failure publishes a plain result from canonical facts.
+  An interrupted initial generation also has a read-only result projection after
+  the existing UI wait. Failed regeneration preserves the prior recap and assets,
+  silently retires the queued generation and permits a later regeneration ID.
+
+  Recap media funding comes from authenticated Web game authority, installed in
+  the current native invocation. Model arguments and request headers cannot grant
+  it. One in-memory egress counter allows six total forwarded media requests;
+  forwarded failures consume the count, and a container restart may reset it.
+  Bounded recap image/song requests bypass ordinary subscription/allowance vetoes.
+  There are no reservations, per-kind limits, pricing estimates or recap deadlines.
+  Scenes default to high quality at 1024×1536; reference exports fit 1024×1024.
+
+  Deploy Web, then runner, with no recap turns in flight. The post-deploy contract
+  migration drops hosted_runtime_owner.recap_media_scope after old Web functions
+  drain; older Web cannot be restored after that drop without re-expansion.
+  The presentation payload and decoder fixtures remain compatible with iOS build
+  96. MURPH_GAME_RECAP_SHOW_ENABLED remains the producer flag;
+  MURPH_GAME_RECAP_MEDIA_VISIBLE=false hides generated media and cover previews.
+  MURPH_GAME_RECAP_MEDIA_DIR is local-test storage only. No production regeneration
+  is part of implementation or local proof.
 
 - **Hosted recap (groups and legacy pairs).** Settlement reserves one durable recap turn for the bound
   group. The turn reads the finished shared game, a bounded current-room

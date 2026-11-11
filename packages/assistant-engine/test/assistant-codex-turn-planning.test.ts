@@ -540,8 +540,8 @@ describe('assistant Codex turn planning', () => {
       ]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "b12a7c9c273726af172dc7234c01ceae73caf7de79d05bb6a137cf5e7be2b6f2",
-        "group": "882ab7610c489c11033108eb4068c8d53bf6cef7a1641521f9ac36be9bd5ad30",
+        "direct": "f6821d9d3b797fa40b1df294899938e2168a688b85243cf11a675430265a912e",
+        "group": "74f8a6b28b37c3467606710b27598777106fc74365980a2d8ae562f9e00f2b87",
       }
     `)
     const digestPlan = (
@@ -605,8 +605,8 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "c946ca0f4f511cdbe4ac90e004813297e696a933d34039e8b5538429b6e0c008",
-        "group": "4f1fea673df45ce5519bae3098d4f1b6bc618d309e14919fa7d409514c16d8c9",
+        "direct": "d1077422e3bc24493a91765f84fc8080ce44c08158aa759d8085c536f3cc5baf",
+        "group": "f1c68ce0ab35f9152d160875e5a2965276b0e8079c7243bf6b827cbfc4f74abf",
         "maintenance": "ea99a6725085104db8b7225bc03cfa0860609937f9aead8536fcf2b15213c18d",
         "outputOnly": "57cb2bf34c00e716ba46d49e3b5813f9bd7eb171b1a801f269141a1ebba21449",
         "scheduledEmail": "96a313c4d285d74270068be94d6dfeec8cae78f1226f121b85ae9ed1ac88f617",

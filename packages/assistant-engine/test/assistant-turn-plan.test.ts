@@ -31,7 +31,7 @@ describe('assistant turn plan', () => {
   })
 
   it.each([undefined, '/tmp/hosted-runner-launch-alpha', '/workspace/explicit'])(
-    'anchors recap shows to the concrete vault when explicit cwd is %s',
+    'uses the normal hosted cwd for recap shows when explicit cwd is %s',
     workingDirectory => {
       const vault = '/tmp/hosted-runner-launch-alpha'
       expect(resolveAssistantRequestedWorkingDirectory(createMessageInput({
@@ -40,7 +40,7 @@ describe('assistant turn plan', () => {
           memberId: 'synthetic-room', userEnvKeys: [],
           gameRecapScope: { gameId: 'synthetic-game', eventId: 'synthetic-recap', pairFingerprint: 'synthetic-pair', show: true },
         } },
-      }), { currentWorkingDirectory: vault, env: { MURPH_HOSTED_RUNTIME_PROCESS: '1' }, platform: 'linux' })).toBe(vault)
+      }), { currentWorkingDirectory: vault, env: { MURPH_HOSTED_RUNTIME_PROCESS: '1' }, platform: 'linux' })).toBe(resolveAssistantRequestedWorkingDirectory(createMessageInput({ vault, workingDirectory, executionContext: { hosted: { memberId: 'synthetic-room', userEnvKeys: [] } } }), { currentWorkingDirectory: vault, env: { MURPH_HOSTED_RUNTIME_PROCESS: '1' }, platform: 'linux' }))
     },
   )
 

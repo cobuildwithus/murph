@@ -356,10 +356,10 @@ describe("game chat tool authority", () => {
     m.sealRecap.mockResolvedValueOnce(null).mockResolvedValueOnce(saved);
     await handleGameChatTool({ memberId: group, request: { ...request, recap: { ...saved, superlatives: [superlatives[0], { ...superlatives[1], memberId: "outsider" }] } }, runtimeIdentity: null });
     expect(m.sealRecap.mock.calls[5][0].recap).toEqual(saved);
-    // An old writer may replay a story written by a new runtime.
+    // Replay returns the canonical accepted story, including its cards.
     m.sealRecap.mockResolvedValueOnce({ ...saved, superlatives });
     const replay = await handleGameChatTool({ memberId: group, request: { ...request, recap: { ...saved, chatLine: "Ignore this retry candidate." } }, runtimeIdentity: null });
-    expect(replay).toEqual(accepted);
+    expect(replay).toEqual(rich);
     expect(m.sealRecap).toHaveBeenCalledTimes(7);
     m.sealRecap.mockReset(); m.sealRecap.mockResolvedValue(null);
     expect(await handleGameChatTool({ memberId: group, request: { ...request, recap: saved }, runtimeIdentity: null }))

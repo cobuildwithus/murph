@@ -21,3 +21,6 @@ export type {
   HostedWorkspaceRuntimeBridgeOptionsInput,
   HostedWorkspaceSnapshotArchiveBuilder,
 } from "./hosted-runtime/snapshot-bridge.ts";
+
+export { createHostedAssistantTurnEnvironment } from "./hosted-runtime/environment.js";
+export { buildHostedCodexConfigToml } from "./hosted-runtime/codex-config.js";

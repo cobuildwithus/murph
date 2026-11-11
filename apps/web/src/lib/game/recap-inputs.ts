@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import type { RecapReference } from "@murphai/contracts/recap-material";
-import { RECAP_REFERENCE_MAX_EDGE } from "@murphai/contracts/recap-admission";
+const RECAP_REFERENCE_MAX_EDGE = 1024;
 import { getPrisma } from "../prisma";
 import { readGameMedia } from "./media";
 import type { readGameRecapMaterial } from "./service";

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH } from "@murphai/hosted-execution/routes";
+import { HOSTED_RUNTIME_GROUP_TOOL_PATH, HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH } from "@murphai/hosted-execution/routes";
 
 const mocks = vi.hoisted(() => ({
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
@@ -79,5 +79,27 @@ describe("workspace checkpoint web-control responses", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace checkpoint response was invalid.",
     });
+  });
+});
+
+
+describe('trusted recap media scope', () => {
+  it.each([null, 'synthetic-recap', 'clear'])('only takes scope from the authenticated Web response (%s)', async scope => {
+    const setRecapMediaScope = vi.fn(async () => {});
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(Response.json({ result: { status: 'ok' } }, {
+      headers: scope ? { 'x-murph-recap-scope': scope } : {},
+    }));
+    const env: RunnerOutboundEnvironmentSource = { BUNDLES: { get: async () => null, put: async () => undefined },
+      RUNNER_CONTAINER: { idFromString: id => ({ toString: () => id }), get: () => ({ setRecapMediaScope }) } };
+    const url = new URL(`http://web-control.worker${HOSTED_RUNTIME_GROUP_TOOL_PATH}`);
+    const request = new Request(url, { method: 'POST', body: '{}', headers: {
+      [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: 'attempt_1', [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: '9',
+      [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: '4', 'x-murph-recap-scope': 'forged-model-header',
+    } });
+    await handleRunnerWebControlRequest({ env,
+      environment: readHostedExecutionEnvironment(createHostedExecutionTestEnv({ HOSTED_WEB_BASE_URL: 'https://web.example.test' })),
+      caller: { className: 'RunnerContainer', containerId: 'synthetic-container' }, request, url, userId: 'member_123' });
+    expect(setRecapMediaScope).toHaveBeenCalledTimes(scope ? 1 : 0);
+    if (scope) expect(setRecapMediaScope).toHaveBeenCalledWith({ userId: 'member_123', attemptId: 'attempt_1', generation: '9', eventId: scope === 'clear' ? null : scope });
   });
 });

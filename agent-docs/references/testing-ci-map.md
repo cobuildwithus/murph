@@ -1367,7 +1367,7 @@ boundaries are owned by `agent-docs/operations/verification-and-runtime.md`.
   Node 24. A missing current prepared artifact is an explicit skip; direct
   `next start` plus the full Retell roundtrip remain private cross-repository
   integration proof.
-- `.github/workflows/cloudflare-runner-permission-sandbox.yml` runs the production `linux/amd64` runner image smoke on native GitHub-hosted `ubuntu-24.04` when the pinned Codex package, permission executor/config, runner image, bundle, or smoke proof changes. It builds the production runner closure, prepares the anonymously readable pinned base image, disables Ubuntu's host-only restriction on capability-bearing unprivileged user namespaces for this disposable job, and runs `runner:docker:smoke:prepared-base` without provider credentials. The smoke transport also disables Docker's outer default seccomp and AppArmor profiles while retaining `--network none`, so the pinned bubblewrap binary can create and police its nested mount namespace; those outer test-harness settings do not change the production image or inner permission profile. The gate proves both read-only `murph-group-read` and `murph-member-read` profile behavior through authorized reads and denied writes, runtime/secrets/sibling/outside-root reads, loopback networking, and secret-environment inheritance. For the ordinary `murph-member-workspace` profile, it additionally runs the real bundled CLI with arbitrary Node preload flags, proves all five automation mutation routes are denied without changing the automation tree, preserves automation reads plus ordinary vault and temporary writes, and verifies the same CLI mutations still work outside the profile. The native lane is required because ARM64 Docker Desktop's AMD64 emulation cannot install the inner Codex seccomp filter and must remain a fail-closed local gap rather than weakening the profile. The same gate runs `pnpm hosted-local e2e recap-show-files --no-bundle` inside the pinned image with the real `murph-recap` sandbox: restored process cwd, materialized read-only inputs, denied sibling reads and input writes, only drafts/media/previews writable, file-mode image and song, two previews, real validation and one queued chat line/link without media. Its model and media providers are synthetic loopback/in-process fixtures; the scenario is explicit-only outside this native gate.
+- `.github/workflows/cloudflare-runner-permission-sandbox.yml` runs the production `linux/amd64` runner image smoke on native GitHub-hosted `ubuntu-24.04` when the pinned Codex package, permission executor/config, runner image, bundle, or smoke proof changes. It builds the production runner closure, prepares the anonymously readable pinned base image, disables Ubuntu's host-only restriction on capability-bearing unprivileged user namespaces for this disposable job, and runs `runner:docker:smoke:prepared-base` without provider credentials. The smoke transport also disables Docker's outer default seccomp and AppArmor profiles while retaining `--network none`, so the pinned bubblewrap binary can create and police its nested mount namespace; those outer test-harness settings do not change the production image or inner permission profile. The gate proves both read-only `murph-group-read` and `murph-member-read` profile behavior through authorized reads and denied writes, runtime/secrets/sibling/outside-root reads, loopback networking, and secret-environment inheritance. For the ordinary `murph-member-workspace` profile, it additionally runs the real bundled CLI with arbitrary Node preload flags, proves all five automation mutation routes are denied without changing the automation tree, preserves automation reads plus ordinary vault and temporary writes, and verifies the same CLI mutations still work outside the profile. The native lane is required because ARM64 Docker Desktop's AMD64 emulation cannot install the inner Codex seccomp filter and must remain a fail-closed local gap rather than weakening the profile. The same gate runs `pnpm hosted-local e2e recap-show-files --no-bundle` inside the pinned image using the normal hosted group profile and cwd. It proves that read_game supplies the game, chat and lore, the shell can write task files, provider secrets are absent from shell, file-mode image/song tools work, and publication queues one line/link without chat media. Model and media providers are synthetic; the scenario is explicit-only outside this native gate.
 - `packages/assistant-runtime/test/hosted-runtime-metadata-checkpoint-timing.test.ts`
   uses fake time at the production 180-second floor to prove that no-progress
   projection correction preserves an active quiet window and does not start a
@@ -2222,3 +2222,29 @@ PostgreSQL proof. Prepare it with `pnpm --dir apps/web prisma:migrate:deploy`,
 not `db push`, when checking migration-owned constraints. Run files sharing that
 database with `--maxWorkers=1`; runtime-cutover singleton tests cannot overlap
 other files. The canonical PostgreSQL runner already enforces this serial lane.
+
+### Pair show real-provider proof
+
+Use an isolated migrated loopback `murph_test_*` database and an approved local
+OpenAI image test credential. In one terminal start the synthetic canonical Web
+bridge (it creates only synthetic games and local encrypted media):
+
+```sh
+DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 MURPH_RECAP_LIVE_BRIDGE=1 pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/game-service-postgres.test.ts -t 'serves synthetic recap publication'
+```
+
+In another terminal run the one journey twice through the sanctioned live lane:
+
+```sh
+pnpm test:assistant:live -- --test 'pair recap show real providers canonical publication'
+```
+
+The local subscription runs Sol; the image tool uses the local test key. Song is
+optional. Each run must accept a show through Web with a real image, one queued
+line/link, and no chat media. Presentation and proof JSON go under ignored
+`audit-packages/recap-show-simplify/run-*/`. When the two runs finish, close the
+bridge so its test cleanup executes:
+
+```sh
+node --input-type=module -e 'import {readFile} from "node:fs/promises"; const {url}=JSON.parse(await readFile("audit-packages/recap-show-simplify/bridge.json","utf8")); await fetch(url+"/finish",{method:"POST",body:"{}"});'
+```

@@ -33,7 +33,7 @@ describe('recap workspace material', () => {
       } },
     })
     expect(cursors).toEqual([undefined, '200'])
-    const lines = (await readFile(path.join(exported.root, 'inputs/chat.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    const lines = exported.chat
     expect(lines).toHaveLength(206)
     expect(lines[0].id).toBe('message-1')
     expect(lines[204].id).toBe('message-205')

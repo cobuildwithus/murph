@@ -1,4 +1,3 @@
-import { RecapControlError } from '@murphai/contracts/recap-admission';
 import { readHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 import {
   parseHostedRuntimeGroupToolRequest,
@@ -57,7 +56,7 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedRuntimeGroupToolRequest(currentSenderWire.payload, {
     privateMediaDeliveryOrigin: readHostedExecutionControlOrigin(),
   });
-  if (new URL(request.url).searchParams.get("recapMedia") === "1" && !(body.action === "read_game" && body.origin.kind === "game_recap" && body.recapRead?.kind === "stage")) throw new TypeError("Recap protocol requires its own command.");
+  if (new URL(request.url).searchParams.get("recapMedia") === "1" && !(body.action === "read_game" && body.origin.kind === "game_recap" && body.recapRead?.kind === "upload")) throw new TypeError("Recap protocol requires its own command.");
   const supportedProjectionScopeKeys =
     readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
   const membershipInventoryProtocol = new URL(request.url).searchParams.get(
@@ -92,16 +91,9 @@ export const POST = withJsonError(async (request: Request) => {
   );
 
   if (body.action !== "ask") {
-    try {
-      return jsonOk(encodeHostedCurrentSenderLegacyWireResponse(
-        await executeTool(), currentSenderWire.compatibility,
-      ));
-    } catch (error) {
-      if ((body.action === "read_game" || body.action === "write_recap") && body.origin.kind === "game_recap" && error instanceof RecapControlError) {
-        return jsonOk({ action: body.action, result: { status: "rejected", error: error.code, recapOutcome: error.message } });
-      }
-      throw error;
-    }
+    const result = await executeTool();
+    const headers = recapMediaScopeHeaders(body, result);
+    return jsonOk(encodeHostedCurrentSenderLegacyWireResponse(result, currentSenderWire.compatibility), 200, headers);
   }
 
   const responseHeaders = {
@@ -124,6 +116,19 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 });
+
+function recapMediaScopeHeaders(body: ReturnType<typeof parseHostedRuntimeGroupToolRequest>, result: HostedRuntimeGroupToolResponse): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if ((body.action === 'read_game' || body.action === 'write_recap') && body.origin.kind === 'game_recap') {
+      if (body.action === 'read_game' && !body.recapRead && result.result.status === 'ok'
+        && 'recapGame' in result.result && result.result.recapGame && typeof result.result.recapGame === 'object' && 'material' in result.result.recapGame) {
+        headers['x-murph-recap-scope'] = body.origin.eventId;
+      } else if (body.action === 'write_recap' && result.result.status === 'ok' || body.action === 'read_game' && body.recapRead?.kind === 'recover') {
+        headers['x-murph-recap-scope'] = 'clear';
+      }
+    }
+    return headers;
+}
 
 function readHostedAssistantAskDiagnosticCode(error: unknown): string | undefined {
   if ((typeof error !== "object" && typeof error !== "function") || error === null) {

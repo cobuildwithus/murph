@@ -1,5 +1,5 @@
 import { boundUsageRequestCliTiming } from "../usage-record-body.ts";
-import type { RuntimeProviderCaller } from "../runtime-provider-authorization.ts";
+import { readNativeRuntimeProviderContainer, type RuntimeProviderCaller } from "../runtime-provider-authorization.ts";
 import { beginHostedRuntimeUsageSettlement } from "../runtime-usage-settlement.ts";
 import { type readHostedExecutionEnvironment } from "../env.ts";
 import {
@@ -144,12 +144,9 @@ export async function handleRunnerWebControlRequest(input: {
       input.request.headers.get(HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER),
     )
     : null;
-  const isClinicalRecordsRequest = (
-    policy.operation === "clinical_records_connect_link"
-    || policy.operation === "clinical_records_fetch_page"
-    || policy.operation === "clinical_records_read_run"
-    || policy.operation === "clinical_records_record_outcome"
-  ) && input.request.method === "POST";
+  const isClinicalRecordsRequest = ["clinical_records_connect_link", "clinical_records_fetch_page",
+    "clinical_records_read_run", "clinical_records_record_outcome"].includes(policy.operation)
+    && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceHeaders;
   try {
     writeAuthority = requireRunnerRuntimeWriteFenceHeaders(input.request);
@@ -258,6 +255,7 @@ export async function handleRunnerWebControlRequest(input: {
         : input.environment.webControlTimeoutMs,
     }),
   });
+  if (response.headers.has('x-murph-recap-scope')) await applyRecapMediaScope(input, policy.operation, response, writeAuthority);
   const mailboxResponse = policy.operation === "mailbox_fetch"
     ? await completeRunnerMailboxFetchResponse({ ...input, response, body, requestStartedAt, forwardStartedAt, webControlTiming })
     : null;
@@ -486,3 +484,11 @@ function readRunnerStringEnv(
   const value = env[key];
   return typeof value === "string" && value.trim() ? value : null;
 }
+
+async function applyRecapMediaScope(input: Parameters<typeof handleRunnerWebControlRequest>[0], operation: string, response: Response, writeAuthority: RunnerRuntimeWriteFenceHeaders): Promise<void> {
+  const recapScope = response.headers.get('x-murph-recap-scope');
+  if (response.ok && operation === 'group_tool' && recapScope) {
+    await readNativeRuntimeProviderContainer(input.env, input.caller)?.setRecapMediaScope?.({ userId: input.userId,
+      attemptId: writeAuthority.attemptId, generation: writeAuthority.generation, eventId: recapScope === 'clear' ? null : recapScope });
+  }
+ }

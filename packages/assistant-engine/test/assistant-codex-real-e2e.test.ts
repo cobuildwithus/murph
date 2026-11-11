@@ -1,3 +1,4 @@
+import * as z from '@murphai/contracts/zod-runtime'
 import { notificationHistoryIntent } from './notification-history-fixtures.ts'
 import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath } from '@murphai/runtime-state/node'
 import { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.ts'
@@ -1032,7 +1033,7 @@ describeRealCodex('real natural goal canary journey', () => {
         expect(trace.filter((item) => item.type === 'subAgentActivity')).toEqual([])
         const memory = await readMemoryDocument(fixture.vault)
         expect(memory.records.filter((record) => /^Preferred display name: Robin$/u.test(record.text))).toHaveLength(1)
-        expect(memory.records.filter((record) => /^Age: 32 \(as of /u.test(record.text))).toHaveLength(1)
+        expect(memory.records.filter((record) => record.text.startsWith('Age: 32 (as of '))).toHaveLength(1)
         const commands = expandRecordedVaultCommands((await readFile(path.join(fixture.root, 'commands.jsonl'), 'utf8'))
           .split('\n').filter(Boolean).map((line) => (JSON.parse(line) as string[]).join(' ')))
         expect(commands.filter((command) => /^memory set-name Robin(?: |$)/u.test(command))).toHaveLength(1)
@@ -1230,7 +1231,7 @@ describeRealCodex('real natural goal canary journey', () => {
       if (capabilities) {
         const memory = await readMemoryDocument(fixture.vault)
         expect(memory.records.filter((record) => /^Preferred display name: Robin$/u.test(record.text))).toHaveLength(1)
-        expect(memory.records.filter((record) => /^Age: 32 \(as of /u.test(record.text))).toHaveLength(1)
+        expect(memory.records.filter((record) => record.text.startsWith('Age: 32 (as of '))).toHaveLength(1)
         const commands = expandRecordedVaultCommands((await readFile(path.join(fixture.root, 'commands.jsonl'), 'utf8'))
           .split('\n').filter(Boolean).map((line) => (JSON.parse(line) as string[]).join(' ')))
         expect(commands.filter((command) => /^memory set-name Robin(?: |$)/u.test(command))).toHaveLength(1)
@@ -1243,8 +1244,8 @@ describeRealCodex('real natural goal canary journey', () => {
       expect(acceptedProgress).toHaveLength(0)
       expect(commands.filter((command) => /^regimen list(?: |$)/u.test(command))).toEqual([])
       expect(commands.filter((command) => /^commons goal (list|show)(?: |$)/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
-      expect(commands.filter((command) => /^goal save /u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
-      expect(commands.filter((command) => /^regimen save /u.test(command) && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
+      expect(commands.filter((command) => command.startsWith('goal save ') && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
+      expect(commands.filter((command) => command.startsWith('regimen save ') && !isRecordedVaultHelpCommand(command))).toHaveLength(1)
       expect(commands.filter((command) => /^(goal show|regimen show|automation )/u.test(command) && !isRecordedVaultHelpCommand(command))).toEqual([])
       const vault = await readVaultRawTolerant(fixture.vault)
       expect(vault.goals).toHaveLength(1)
@@ -3243,9 +3244,7 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
   ],
   minimal_identity_answer: [],
   minimal_identity_prompt: [],
-  wearable_source_awareness: [
-    ...ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
-  ],
+  wearable_source_awareness: ONBOARDING_POLICY_PATHS.map((entry) => entry[1]),
   wearable_connection_offer: [
     ONBOARDING_POLICY_PATHS[0][1],
     ONBOARDING_POLICY_PATHS[1][1],
@@ -7026,7 +7025,7 @@ describeRealCodex('real Codex optional knowledge show e2e', () => {
       process.stdout.write(`[optional-show-e2e] ${JSON.stringify({ finalMessage: result.finalMessage })}\n`)
       // Exactly one optional read of the target; no strict retry, alias, or other wiki command.
       expect(commands.filter((command) => /^knowledge show trail-gear-list(?:\s|$)/u.test(command))).toHaveLength(1)
-      expect(commands.filter((command) => /^knowledge /u.test(command))).toEqual([
+      expect(commands.filter((command) => command.startsWith('knowledge '))).toEqual([
         expect.stringMatching(/^knowledge show trail-gear-list .*--if-exists/u),
       ])
       expect(knowledgeOutputs.filter((output) => /knowledge_page_not_found|VALIDATION_ERROR/u.test(output))).toEqual([])
@@ -7820,7 +7819,7 @@ describeRealCodex('real Codex routine chat readiness e2e', () => {
         if (scenario.kind === 'save') {
           expect(writes).toHaveLength(1)
           expect(writes[0]).toMatch(/^workout format (?:save|import-json) /u)
-          const showIndex = turnCommands.findIndex((command) => /^workout format show /u.test(command))
+          const showIndex = turnCommands.findIndex((command) => command.startsWith('workout format show '))
           expect(showIndex).toBeGreaterThan(turnCommands.indexOf(writes[0]!))
           const formats = await listWorkoutFormats(workingDirectory)
           expect(formats).toHaveLength(1)
@@ -7840,7 +7839,7 @@ describeRealCodex('real Codex routine chat readiness e2e', () => {
           expect(result.finalMessage).toMatch(/(?:2|two).*?(?:6|six)/iu)
         }
         if (scenario.kind === 'show' || scenario.kind === 'missing' || scenario.kind === 'unreadable') {
-          expect(turnCommands.some((command) => /^workout format show /u.test(command)), JSON.stringify(turnCommands)).toBe(true)
+          expect(turnCommands.some((command) => command.startsWith('workout format show ')), JSON.stringify(turnCommands)).toBe(true)
         }
         if (scenario.kind === 'missing') {
           expect(result.finalMessage).toMatch(/(?:couldn[’']t|could not|cannot|can[’']t|didn[’']t|did not|don[’']t|do not).*find|not (?:found|saved)|no saved|isn[’']t saved/iu)
@@ -46852,7 +46851,7 @@ describeRealCodex('real Codex fresh multi-pass delegation e2e', () => {
       })
       await waitForWarmCodexBackgroundWork()
       const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
-      const reads = commands.filter((command) => /^knowledge show /u.test(command) && !isRecordedVaultHelpCommand(command))
+      const reads = commands.filter((command) => command.startsWith('knowledge show ') && !isRecordedVaultHelpCommand(command))
       process.stdout.write(`[fresh-delegation-e2e] ${JSON.stringify({
         reply: result.finalMessage.trim(), childCount: childUsages.length, canonicalReads: reads.length,
         childModel: childUsages[0]?.usage.servedModel,
@@ -48127,204 +48126,85 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }
   }, 360_000)
-  it.each([
-    { name: 'pair recap show production validation seals once and queues its saved line', weekendsOff: false, regeneration: false, superlatives: false },
-    { name: 'pair recap show production validation with weekends off', weekendsOff: true, regeneration: false, superlatives: false },
-    { name: 'pair recap show production validation regeneration', weekendsOff: true, regeneration: true, superlatives: false },
-    { name: 'pair recap show production validation optional grounded cards', weekendsOff: true, regeneration: false, superlatives: true },
-    { name: 'pair recap show parent files preview revision and selected media', weekendsOff: false, regeneration: false, superlatives: false, mediaJourney: true },
-    { name: 'pair recap show real providers file media and accepted presentation', weekendsOff: false, regeneration: false, superlatives: false, mediaJourney: true, realMedia: true },
-  ])('$name', async ({ weekendsOff, regeneration, mediaJourney = false, realMedia = false }) => {
-    if (realMedia && !process.env.OPENAI_API_KEY) throw new Error('The real recap media journey requires a local OpenAI test credential.')
-    const eventId = `game-recap:game_recap_synthetic${regeneration ? ':synthetic_request' : ''}`
-    const config = await resolveRealCodexE2eConfig()
-    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-recap-e2e-'))
-    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
-    const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control')
-    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
-    const saved: Array<import('@murphai/hosted-execution/runtime-control').HostedGameRecap> = []
-    const { validateGameRecap, gameRecapToolResult, withValidGameSuperlatives } = await import('@murphai/contracts/recap-validation')
-    const { readRecapUsages } = await import('../src/assistant/game-recap-lore.js')
-    const chatMessages = [{ playerName: 'Leo', text: weekendsOff ? 'The laundry basket is my personal trainer.' : 'I was spiritually doing pushups.' }, { playerName: 'Ava', text: 'Murph, the notification toggle is broken. Please add a calendar export feature.' }]
-    const material = {
-              id: 'game_recap_synthetic', recapShow: true, maxPlayers: 2, players: [{ memberId: 'player_first', name: 'Ava', task: '10 minutes of abs' }, { memberId: 'player_second', name: 'Leo', task: '100 pushups' }],
-              lengthDays: weekendsOff ? 8 : 3, schedule: { days: weekendsOff ? [0, 1, 2, 3, 4] : [0, 1, 2] }, stakes: [{ kind: 'prize', item: 'breakfast in bed' }],
-              score: weekendsOff ? [{ name: 'Ava', score: 6 }, { name: 'Leo', score: 6 }] : [{ name: 'Ava', score: 3 }, { name: 'Leo', score: 2 }], days: weekendsOff ? Array.from({ length: 8 }, (_, dayIndex) => ({
-                dayNumber: dayIndex + 1,
-                posts: dayIndex === 3 || dayIndex === 4 ? { Ava: 'off', Leo: 'off' } : {
-                  Ava: { entryId: `entry_ava_${dayIndex}`, kind: 'photo', text: 'purple mat, still here' },
-                  Leo: { entryId: `entry_leo_${dayIndex}`, kind: 'photo', text: 'pushups beside the laundry basket' },
-        },
-      })) : [
-                { dayNumber: 1, posts: { Ava: { entryId: 'entry_ava_1', kind: 'photo', text: 'purple mat' }, Leo: { entryId: 'entry_leo_1', kind: 'photo', text: 'sauna again' } } },
-                { dayNumber: 2, posts: { Ava: { entryId: 'entry_ava_2', kind: 'photo', text: 'leg raises' }, Leo: 'missed' } },
-                { dayNumber: 3, posts: { Ava: { entryId: 'entry_ava_3', kind: 'photo', text: 'crunches' }, Leo: { entryId: 'entry_leo_3', kind: 'words', text: 'I was spiritually doing pushups' } } },
-              ],
-    }
-    const entries = material.days.flatMap(day => Object.entries(day.posts).flatMap(([playerName, post]) =>
-      typeof post === 'object' && post ? [{ entryId: post.entryId, kind: post.kind, text: post.text, playerName, visibleToBoth: true }] : []))
-    const scores = material.score.map((score, index) => ({ ...score, memberId: material.players[index]!.memberId }))
-    const { createRecapShowLiveProviders } = await import('@murphai/assistant-engine/recap-show-testkit')
-    const providerResponses: { kind: string; status: number }[] = []
-    const realSong = realMedia && Boolean(process.env.ELEVENLABS_API_KEY)
-    const providers = await createRecapShowLiveProviders({ game: material, players: material.players, entries, result: scores, chat: chatMessages,
-      ...(realMedia ? { mediaFetch: async (url, init) => {
-        const request = new Request(url, init)
-        if (!['api.openai.com', 'api.elevenlabs.io'].includes(new URL(request.url).hostname)) throw new Error('Unexpected live media destination.')
-        request.headers.delete('x-murph-recap-reservation')
-        const response = await fetch(request)
-        providerResponses.push({ kind: new URL(request.url).hostname === 'api.openai.com' ? 'image' : 'song', status: response.status })
-        return response
-      } } : {}) })
-    const events: unknown[] = []
-    let rejectedWrites = 0
-    let conflictingTreatment: string | undefined
+  it('pair recap show real providers canonical publication', async () => {
+    const startedAt = Date.now();
+    if (!process.env.OPENAI_API_KEY) throw new Error('The sanctioned journey requires a local OpenAI test credential.');
+    const artifacts = fileURLToPath(new URL('../../../audit-packages/recap-show-simplify/', import.meta.url));
+    const { url } = JSON.parse(await readFile(path.join(artifacts, 'bridge.json'), 'utf8'));
+    if (!/^http:\/\/127[.]0[.]0[.]1:\d+$/u.test(url)) throw new Error('Only the local synthetic Web bridge is allowed.');
+    const call = async (route: string, body: unknown) => {
+      const response = await fetch(url + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    };
+    const { gameId, room, eventId } = z.object({ gameId: z.string(), room: z.string(), eventId: z.string() }).parse(await call('/setup', {}));
+    const config = await resolveRealCodexE2eConfig();
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config);
+    const vault = await mkdtemp(path.join(tmpdir(), 'murph-recap-live-'));
+    const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control');
+    const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control');
+    const { gameRecapPresentationSchema } = await import('@murphai/contracts/recap-show');
+    const actions: string[] = [], media: { kind: string; status: number; references: number }[] = [];
+    const events: unknown[] = [];
     try {
-      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
-      await mkdir(path.join(workingDirectory, 'games'), { recursive: true })
-      await writeFile(path.join(workingDirectory, 'games', 'lore-0123456789abcdef0123456789abcdef.md'), '# Ava & Leo\n\n- Used bit: sauna citizenship.\n', 'utf8')
-      const modelTarget = createAssistantModelTarget({
-        approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
-        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider,
-        provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write',
-      })
-      if (!modelTarget) throw new Error('Expected real Codex target.')
-      const result = await sendAssistantNotificationLocal({
-        actorId: null, bindingDeliveryTarget: 'synthetic-game-thread', channel: 'linq',
-        deliveryDispatchMode: 'queue-only', deliveryTarget: 'synthetic-game-thread',
-        deliveryIdempotencyKey: eventId,
-        deliveryDedupeToken: eventId,
-        executionContext: { hosted: {
-          defaultTarget: modelTarget, providerFetch: providers.providerFetch,
-          gameRecapScope: { gameId: 'game_recap_synthetic', eventId, pairFingerprint: '0123456789abcdef0123456789abcdef', show: true },
-          groupTool: { request: async (request): Promise<import('@murphai/hosted-execution/runtime-control').HostedGameToolResponse> => {
-            calls.push(request)
-            if (request.action === 'read_game') return providers.control(request)
-            if (request.action === 'write_recap') {
-              // Simulate a concurrent lore repair discovering the first genre.
-              if (regeneration && conflictingTreatment === undefined) conflictingTreatment = request.recap.treatment
-              const corrections = validateGameRecap({ recap: request.recap, players: material.players.map(player => player.name),
-                entries, chatMessages, result: scores, show: true, usedTreatments: conflictingTreatment ? [conflictingTreatment] : [], priorChatLines: [] })
-              if (corrections.length) {
-                rejectedWrites += 1
-                return { action: 'write_recap', result: { status: 'rejected', recapOutcome: gameRecapToolResult(corrections) } }
-              }
-              if (saved[0]) return { action: 'write_recap', result: { status: 'ok', recapOutcome: gameRecapToolResult([]), recap: saved[0], chatLine: `${saved[0].chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic` } }
-              if (request.phase === 'prepare') return { action: 'write_recap', result: { status: 'ok', recapGame: providers.prepare({ story: request.recap, files: request.files }) } }
-              providers.accept()
-              saved.push(withValidGameSuperlatives(request.recap, material.players.map(player => player.memberId)))
-              return { action: 'write_recap', result: { status: 'ok', recapOutcome: gameRecapToolResult([]), recap: request.recap, chatLine: `${request.recap.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic` } }
-            }
-            throw new Error('The recap turn authorizes only read_game and write_recap.')
+      await initializeVault({ timezone: 'UTC', vaultRoot: vault });
+      await mkdir(path.join(vault, 'games'), { recursive: true });
+      await writeFile(path.join(vault, 'games/lore-0123456789abcdef0123456789abcdef.md'), '# Synthetic pair lore\nThe purple mat and laundry basket are running bits.\n');
+      const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' });
+      if (!target) throw new Error('Expected real Codex target.');
+      const result = await sendAssistantNotificationLocal({ channel: 'linq', deliveryTarget: 'synthetic-game-room', threadId: 'synthetic-game-room', threadIsDirect: false,
+        deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+        executionContext: { hosted: { defaultTarget: target, memberId: room, userEnvKeys: [],
+          gameRecapScope: { gameId, eventId, pairFingerprint: '0123456789abcdef0123456789abcdef', show: true },
+          groupTool: { request: async request => {
+            actions.push(request.action);
+            return hostedGameToolResponseSchema.parse(await call('/tool', { gameId, request }));
           } },
-          memberId: 'synthetic-group', userEnvKeys: [],
+          providerFetch: async (url, init) => {
+            const request = new Request(url, init);
+            const host = new URL(request.url).hostname;
+            if (!['api.openai.com', 'api.elevenlabs.io'].includes(host)) throw new Error('Unexpected live provider.');
+            const references = request.headers.get('content-type')?.includes('multipart/form-data') ? (await request.clone().formData()).getAll('image[]').length : 0;
+            const response = await fetch(request);
+            media.push({ kind: host === 'api.openai.com' ? 'image' : 'song', status: response.status, references });
+            return response;
+          },
         } },
-        identityId: null, onTraceEvent: event => events.push(event.rawEvent), instructions: buildGameRecapInstructions(chatMessages, undefined, false, true) + (mediaJourney ? '\nExercise the complete file flow: generate at least one image and the song, preview, inspect the PNGs, deliberately improve one detail in the draft, preview the revision and submit once. All game data and reference photos are synthetic.' + (realMedia ? ' Use the real media provider. Generate one strong cover first with referenceImageRefs from the manifest; keep its verified receipt. ' + (realSong ? 'Generate one song.' : 'The song credential is unavailable; call file mode once, then omit the song and finish the show.') : '') : ''), responsePolicy: { kind: 'require_game_recap', gameId: 'game_recap_synthetic', eventId, pairFingerprint: '0123456789abcdef0123456789abcdef', show: true },
-        threadId: 'synthetic-game-thread', threadIsDirect: false,
-        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: { ...config.env, OPENAI_API_KEY: realMedia ? process.env.OPENAI_API_KEY : 'synthetic-file-provider', ELEVENLABS_API_KEY: realMedia ? process.env.ELEVENLABS_API_KEY : 'synthetic-file-provider' } },
-        turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory,
-      })
-      const intents = await listAssistantOutboxIntents(workingDirectory)
-      process.stdout.write(`[game-recap notification] ${JSON.stringify({ weekendsOff, regeneration, actions: calls.map((call) => call.action), intents: intents.length })}\n`)
-      expect(calls[0]?.action).toBe('read_game')
-      expect(calls.every((call) => 'origin' in call && call.origin.kind === 'game_recap' && call.origin.eventId === eventId)).toBe(true)
-      // Corrections may take separate attempts; exactly one write may succeed.
-      expect(calls.filter((call) => call.action === 'write_recap' && call.phase === 'accept')).toHaveLength(1)
-      expect(calls.filter((call) => call.action === 'write_recap' && call.phase === 'prepare')).toHaveLength(rejectedWrites + 1)
-      expect(saved).toHaveLength(1)
-      if (regeneration) { expect(rejectedWrites).toBeGreaterThanOrEqual(1); expect(saved[0]?.treatment).not.toBe(conflictingTreatment) }
-      expect(saved[0]).not.toHaveProperty('scoreLine')
-      {
-        const pair = saved[0].superlatives ?? []
-        expect(pair.length).toBeLessThanOrEqual(2)
-        expect(new Set(pair.map(item => item.memberId)).size).toBe(pair.length)
-        expect(new Set(pair.map(item => item.title.toLowerCase())).size).toBe(pair.length)
-        for (const item of pair ?? []) {
-          expect(item.title.split(/\s+/u).length).toBeGreaterThanOrEqual(2)
-          expect(item.title.split(/\s+/u).length).toBeLessThanOrEqual(6)
-          expect(item.title).not.toMatch(/\.$|^most\s+likely\s+to\b/iu)
-          expect(item.line.length).toBeLessThanOrEqual(160)
-          expect(item.title + ' ' + item.line).toMatch(item.memberId === 'player_first' ? /mat|purple|abs/iu : /laundry|basket|pushups/iu)
-          expect(item.title + ' ' + item.line).not.toMatch(/lazy|fat|weight|ugly|loser|pathetic|body|bodies/iu)
-        }
-        process.stdout.write('[game-recap superlatives] ' + JSON.stringify(pair) + '\n')
-      }
-
-      expect(saved[0]?.pages.length).toBeGreaterThanOrEqual(5)
-      expect(saved[0]?.pages.length).toBeLessThanOrEqual(7)
-      expect(saved[0]?.treatment).toBeTruthy()
-      expect(JSON.stringify(saved[0])).not.toMatch(/notification toggle|calendar export|feature request/iu)
-      if (weekendsOff) {
-        expect(JSON.stringify(saved[0])).not.toMatch(/(?:weekend|saturday|sunday|days? (?:4|5|four|five)).{0,40}(?:missed|skipped|no.show)|(?:missed|skipped).{0,40}(?:weekend|saturday|sunday)/iu)
-      }
-      expect(result.decision.kind).toBe('send_message')
-      expect(result.deliveryOutcome?.kind).toBe('queued')
-      expect(intents).toHaveLength(1)
-      expect(result.response).toBe(`${saved[0]?.chatLine}\nWatch the recap: https://recaps.murph.test/recap/game_recap_synthetic`)
-      expect(intents[0]?.message).toBe(result.response)
-      expect(intents[0]?.media ?? []).toEqual([])
-      if (mediaJourney) {
-        expect(providers.providerCalls.some(call => call.kind === 'image')).toBe(true)
-        for (const call of providers.providerCalls.filter(call => call.kind === 'image')) {
-          expect(call).toMatchObject({ quality: 'high', size: '1024x1536' })
-        }
-        expect(providers.providerCalls.filter(call => call.kind === 'song')).toHaveLength(realMedia && !realSong ? 0 : 1)
-        if (realMedia) {
-          expect(providerResponses.some(response => response.kind === 'image' && response.status === 200)).toBe(true)
-          expect(providers.providerCalls.some(call => call.kind === 'image' && call.referenceHashes.length > 0)).toBe(true)
-          expect(providers.accept().files.some(file => file.receipt.mediaType === 'image/jpeg')).toBe(true)
-          if (realSong) expect(providers.accept().files.some(file => file.slot === 'song')).toBe(true)
-        }
-        const actions = readCapabilityRoutingActions(events)
-        const previews = actions.filter(action => action.kind === 'dynamic' && /(?:^|[.])preview_recap$/u.test(action.tool) && action.success)
-        expect(previews.length).toBeGreaterThanOrEqual(2)
-        const hashes = previews.flatMap(action => action.kind === 'dynamic' ? [JSON.parse(action.output).draftHash] : [])
-        expect(new Set(hashes).size).toBeGreaterThanOrEqual(2)
-        expect(actions.some(action => action.kind === 'command' && /chat[.]jsonl|writing-guide[.]md/u.test(action.command ?? ''))).toBe(true)
-        const { recapTaskDirectory } = await import('../src/assistant/recap-workspace.js')
-        const artifactRoot = fileURLToPath(new URL(realMedia ? '../../../audit-packages/recap-show-real-providers/' : '../../../audit-packages/recap-show-live/', import.meta.url))
-        await mkdir(artifactRoot, { recursive: true })
-        await cp(path.join(recapTaskDirectory(workingDirectory, eventId), 'previews'), path.join(artifactRoot, 'previews'), { recursive: true })
-        const { presentGameRecap } = await import('@murphai/contracts/recap-show')
-        const accepted = providers.accept(), now = new Date().toISOString()
-        const presentation = presentGameRecap({ stored: { version: 1, generationId: 'synthetic-accepted', story: accepted.story,
-          acceptedAt: now, preview: { token: 'synthetic-capability'.repeat(3), expiresAt: now },
-          assets: accepted.files.map(({ slot, receipt }) => ({ slot, recipeId: receipt.operationId, storageKey: slot, references: [],
-            kind: receipt.mediaType === 'image/jpeg' ? 'image' : 'song', hash: receipt.hash, mediaType: receipt.mediaType, byteLength: receipt.byteLength,
-            width: receipt.width, height: receipt.height, durationMs: receipt.durationMs })) },
-          permittedPhotoIds: new Set(entries.map(entry => entry.entryId)), mediaUrl: slot => `/api/game/v1/games/synthetic-game/recap-assets/${slot}?generation=synthetic-accepted` })
-        await writeFile(path.join(artifactRoot, 'accepted-presentation.json'), JSON.stringify(presentation, null, 2) + '\n')
-        await writeFile(path.join(artifactRoot, 'verification.json'), JSON.stringify({ model: config.model, mediaProviders: realMedia ? { image: 'real OpenAI', song: realSong ? 'real ElevenLabs' : 'credential absent' } : 'synthetic in-process fixtures', providerResponses,
-          accepted: saved.length, chatMessages: intents.length, chatMedia: 0, previewDrafts: [...new Set(hashes)], providerCalls: providers.providerCalls.map(call => ({ kind: call.kind, ...(call.kind === 'image' ? { referenceCount: call.referenceHashes.length } : {}) })) }, null, 2) + '\n')
-      }
-      expect(saved[0]?.chatLine).not.toMatch(/https?:\/\//iu)
-      expect(saved[0]?.chatLine.length).toBeLessThan(160)
-      const chatLine = saved[0]?.chatLine ?? ''
-      expect(chatLine).toMatch(weekendsOff ? /6\s*(?:[-–—:]|to)\s*6/u : /3\s*(?:[-–—:]|to)\s*2/u)
-      expect(chatLine.split(/[.!?]/u)[0]).toMatch(weekendsOff ? /tie|tied|draw|week|game|finished|over/iu : /Ava/iu)
-      expect(chatLine).not.toMatch(/\b(?:open|watch|swipe|tap|click)\b|recap.{0,10}(?:ready|up)/iu)
-      process.stdout.write(`[game-recap chatLine] ${JSON.stringify({ weekendsOff, regeneration, chatLine })}\n`)
-
-      const lore = await readFile(path.join(workingDirectory, 'games', 'lore-0123456789abcdef0123456789abcdef.md'), 'utf8')
-      expect(readRecapUsages(lore)).toEqual([{ generationId: eventId, treatment: saved[0]?.treatment, chatLine: saved[0]?.chatLine }])
-      expect(lore).not.toContain('Watch the recap:')
-      expect(lore).not.toContain('https://recaps.murph.test')
+        instructions: buildGameRecapInstructions([], undefined, false, true) + '\nUse the synthetic game material to make a show. Generate at least one real scene with the permitted referenceImageRefs, and submit with write_recap. A song is optional.',
+        responsePolicy: { kind: 'require_game_recap', gameId, eventId, pairFingerprint: '0123456789abcdef0123456789abcdef', show: true },
+        onTraceEvent: event => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: vault, env: { ...config.env, OPENAI_API_KEY: process.env.OPENAI_API_KEY, ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY } },
+        turnTrigger: 'manual-deliver', vault, workingDirectory: vault,
+      });
+      const presentation = gameRecapPresentationSchema.parse(await call('/presentation', { gameId }));
+      const intents = await listAssistantOutboxIntents(vault);
+      expect(presentation.show).toBeDefined();
+      expect(media.some(call => call.kind === 'image' && call.status === 200 && call.references > 0)).toBe(true);
+      expect(actions.filter(action => action === 'write_recap')).toHaveLength(1);
+      expect(result.decision.kind).toBe('send_message');
+      expect(intents).toHaveLength(1);
+      expect(intents[0]?.message.split('\n')).toHaveLength(2);
+      expect(intents[0]?.media ?? []).toEqual([]);
+      const run = path.join(artifacts, `run-${Date.now()}`);
+      await mkdir(run, { recursive: true });
+      await writeFile(path.join(run, 'presentation.json'), JSON.stringify(presentation, null, 2));
+      const toolErrors = readCapabilityRoutingActions(events).filter(action => action.kind === 'command' ? action.ok === false : action.success === false)
+        .map(action => action.kind === 'command' ? { kind: action.kind, output: action.output.slice(-800) }
+          : { kind: action.kind, tool: action.tool, output: action.output.slice(-1500) });
+      const proof = { model: config.model, wallTimeMs: Date.now() - startedAt, media, imageCount: media.filter(call => call.kind === 'image' && call.status === 200).length, toolErrors, accepted: 1, chatMessages: 1, chatMedia: 0 };
+      await writeFile(path.join(run, 'proof.json'), JSON.stringify(proof, null, 2).replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>'));
+      process.stdout.write(`[recap proof] ${JSON.stringify(proof).replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>')}\n`);
+      process.stdout.write(`[recap show] ${JSON.stringify({ reply: result.response, media, presentation, accepted: 1, chatMessages: 1, chatMedia: 0 })}\n`);
     } catch (error) {
-      process.stdout.write(`[game-recap failure] ${JSON.stringify({ weekendsOff, regeneration, providerResponses, actions: calls.map((call) => call.action), seals: saved.length })}\n`)
-      const diagnostics = events.flatMap(event => {
-        const row = readRecord(event), params = readRecord(row?.params), item = readRecord(params?.item), turn = readRecord(params?.turn)
-        if (row?.method === 'item/completed' && item?.type === 'agentMessage') return [{ kind: 'reply', text: String(item.text).replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>').slice(-3000) }]
-        if (row?.method === 'turn/completed') return [{ kind: 'turn', text: String(turn?.status) }]
-        if (row?.method === 'item/completed' || /error|warn/iu.test(String(row?.method))) return [{ kind: String(row?.method), text: JSON.stringify(params).replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>').slice(-1200) }]
-        return []
-      })
-      process.stdout.write(`[game-recap diagnostics] ${JSON.stringify({ diagnostics, actions: readCapabilityRoutingActions(events).map(action => action.kind === 'command' ? { kind: action.kind, command: action.command.slice(0, 300), ok: action.ok, output: action.output.slice(-600) } : { kind: action.kind, tool: action.tool, success: action.success, output: action.output.slice(-600) }) })}\n`)
+      const diagnostics = readCapabilityRoutingActions(events).map(action => action.kind === 'command'
+        ? { kind: action.kind, ok: action.ok, output: action.output.slice(-800) }
+        : { kind: action.kind, tool: action.tool, success: action.success, output: action.output.slice(-1500) });
+      process.stdout.write('[synthetic recap diagnostics] ' + JSON.stringify({ actions, media, diagnostics }).replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>') + '\n');
+      throw error;
+    } finally { await removeRealCodexTemporaryPaths([vault, ...permissionHome.temporaryPaths, ...config.temporaryPaths]); }
+  }, 600_000)
 
-      throw error
-    } finally {
-      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
-    }
-  }, 360_000)
 })
 
 describeRealCodex('real Codex game bootstrap e2e', () => {

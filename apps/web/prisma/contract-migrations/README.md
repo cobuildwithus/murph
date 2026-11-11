@@ -99,3 +99,10 @@ this lane. Older deployment-pinned Stripe Workflows still select them during pai
 activation. Retain the physical nullable columns until every older execution capable
 of that read has settled; the ordinary function drain and production-alias check do
 not establish this. See `docs/hosted-auth-migration.md` for the contraction gate.
+
+The `20261111210000_drop_recap_media_scope` cleanup drops the obsolete nullable
+runtime-owner recap admission field after the simplified Web consumer is live
+and drained. Deploy Web before the matching runner, with no recap turns in
+flight. This Web version is the rollback floor after cleanup; older Web requires
+re-expanding the nullable JSON column first. The runtime-local media count is
+in-memory only and needs no data migration.

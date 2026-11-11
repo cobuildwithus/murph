@@ -35,7 +35,7 @@ export const MURPH_GENERATE_SONG_TOOL = {
     'Translate requests to sound like a real artist, song, show, or franchise into generic musical traits; never pass the protected name or copied lyrics to the generator.',
     'Never include sensitive or potentially embarrassing personal details.',
     'If the user asks only for the song, attach it and leave final response text empty unless an owning flow requires accompanying text.',
-    'For an authorized recap, output=file writes an MP3 receipt and attaches nothing. Supply a stable operationId and durationSeconds=20.',
+    'For an authorized recap, output=file writes an MP3 file and returns its path without attaching anything. Use durationSeconds=20.',
     'This does not send directly.',
   ].join(' '),
   inputSchema: {
@@ -43,7 +43,6 @@ export const MURPH_GENERATE_SONG_TOOL = {
     additionalProperties: false,
     properties: {
       output: { type: 'string', enum: ['chat', 'file'] },
-      operationId: { type: 'string', pattern: '^[a-zA-Z0-9_-]{1,80}$' },
       prompt: {
         type: 'string',
         minLength: 1,
@@ -67,7 +66,6 @@ export const MURPH_GENERATE_SONG_TOOL = {
 const generateSongArgumentsSchema = z
   .object({
     output: z.enum(['chat', 'file']).optional(),
-    operationId: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u).optional(),
     durationSeconds: z.number().int().min(3).max(300).default(30),
     instrumental: z.boolean().default(false),
     prompt: z.string().trim().min(1).max(4100),

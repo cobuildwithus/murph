@@ -1,4 +1,4 @@
-import { recapGenerationId, recapMediaKey } from '@/src/lib/game/recap-submission';
+import { recapGenerationId } from '@/src/lib/game/recap-media';
 import { claimHostedRuntimeResourceCleanup } from '@/src/lib/hosted-execution/runtime-resource-cleanup';
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { registerRecapAssetsTx } from "@/src/lib/game/recap-retirement";
@@ -178,9 +178,7 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     await words(ava, gameId, "Ava day one");
     await getPrisma().game.update({ where: { id: gameId }, data: { recapEncrypted: "synthetic-must-clear" } });
     const recapEventId = `synthetic-recap:${gameId}`;
-    const storageKeys = (['image/jpeg', 'audio/mpeg'] as const).map((mediaType, index) => recapMediaKey(recapEventId, {
-      operationId: `synthetic-media-${index}`, path: 'media/synthetic', hash: String(index + 1).repeat(64), mediaType, byteLength: 100,
-    }));
+    const storageKeys = ['jpg', 'mp3'].map((extension, index) => `recap/${recapGenerationId(recapEventId)}/${String(index + 1).repeat(64)}.${extension}`);
     await getPrisma().$transaction(tx => registerRecapAssetsTx(tx, { gameId, generationId: recapGenerationId(recapEventId), ownerMemberId: leo,
       storageKeys, acceptedAt: new Date(), recoveryUntil: new Date(Date.now() + 600_000) }));
     const [gone, stays] = leaver === "creator" ? [leo, ava] : [ava, leo];
