@@ -1,3 +1,5 @@
+import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
+import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { sendHostedLinqChatMessage } from "@/src/lib/hosted-onboarding/linq-client";
 import { assertHostedLinqRecentInboundEngagementForRuntime } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import { APIError } from "@linqapp/sdk";
@@ -492,20 +494,9 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect(await start()).toMatchObject({ status: "reserved", code: null });
     expect(provider.add).toHaveBeenCalledOnce();
   });
-  it.each(["current", "missing witness", "older snapshot", "foreign owner", "future snapshot", "newer fence", "active runtime"])
-  ("requires current snapshot settlement evidence for historical dispatch: %s", async state => {
-    const snapshotId = randomUUID(), id = randomUUID();
-    const snapshotOwner = state === "foreign owner" ? owner : room;
+  async function quiescentSnapshot(state = "current", snapshotAt = new Date(Date.now() - 30 * 60_000)) {
+    const snapshotId = randomUUID(), snapshotOwner = state === "foreign owner" ? owner : room;
     const objectKey = `users/hsn_abcdef0123456789abcdef01/workspace-snapshots/${snapshotId}.snapshot.enc`;
-    const snapshotAt = new Date(Date.now() + (state === "future snapshot" ? 60_000 : -30 * 60_000));
-    const earlier = new Date(Date.now() - (state === "newer fence" ? 20 * 60_000 : 86_400_000));
-    await db.hostedLinqDelivery.create({ data: { id, status: "provider_dispatch_started",
-      source: "hosted_runtime_linq_delivery", attemptedAt: earlier, updatedAt: earlier,
-      linqChatLookupKey: createHostedLinqChatLookupKey(sourceChat), phoneNumberLookupKey: sourceKey } });
-    await db.hostedRuntimeOwner.create({ data: { userId: room,
-      phase: state === "active runtime" ? "active" : "idle", processingMode: "default",
-      ...(state === "active runtime" ? { attemptId: randomUUID(), allocationId: randomUUID(),
-        runnerContainerName: "synthetic-runner", workspaceVersion: 0n } : {}) } });
     await db.hostedWorkspace.create({ data: { userId: room, snapshotRef: {
       archive: { compression: "zstd", encryptedByteSize: 1024, encryptedObjectSha256: "b".repeat(64),
         fileCount: 2, format: "tar", plaintextArchiveSha256: "a".repeat(64), totalPlainBytes: 2048 },
@@ -517,6 +508,20 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
       upload: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND, userId: snapshotOwner,
     }, redactedStatusJson: { [HOSTED_OUTBOX_QUIESCENT_SNAPSHOT_STATUS_KEY]:
       state === "missing witness" ? null : state === "older snapshot" ? randomUUID() : snapshotId } } });
+  }
+  it.each(["current", "missing witness", "older snapshot", "foreign owner", "future snapshot", "newer fence", "active runtime"])
+  ("requires current snapshot settlement evidence for historical dispatch: %s", async state => {
+    const id = randomUUID();
+    const snapshotAt = new Date(Date.now() + (state === "future snapshot" ? 60_000 : -30 * 60_000));
+    const earlier = new Date(Date.now() - (state === "newer fence" ? 20 * 60_000 : 86_400_000));
+    await db.hostedLinqDelivery.create({ data: { id, status: "provider_dispatch_started",
+      source: "hosted_runtime_linq_delivery", attemptedAt: earlier, updatedAt: earlier,
+      linqChatLookupKey: createHostedLinqChatLookupKey(sourceChat), phoneNumberLookupKey: sourceKey } });
+    await db.hostedRuntimeOwner.create({ data: { userId: room,
+      phase: state === "active runtime" ? "active" : "idle", processingMode: "default",
+      ...(state === "active runtime" ? { attemptId: randomUUID(), allocationId: randomUUID(),
+        runnerContainerName: "synthetic-runner", workspaceVersion: 0n } : {}) } });
+    await quiescentSnapshot(state, snapshotAt);
     if (state === "current") {
       expect(await start()).toMatchObject({ status: "reserved", code: null });
       expect(provider.add).toHaveBeenCalledOnce();
@@ -525,6 +530,45 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
       expect(provider.add).not.toHaveBeenCalled();
     }
     expect((await db.hostedLinqDelivery.findUniqueOrThrow({ where: { id } })).status).toBe("provider_dispatch_started");
+  });
+  it.each(["expired pair", "expired group", "fresh", "missing witness", "payload", "schema", "retry", "receipt", "other template", "awaiting", "foreign owner", "newer update", "pending mailbox", "expiry boundary", "accepted", "failure"])
+  ("settles only expired quiescent missed-check-in history: %s", async state => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const earlier = new Date(Date.now() - 3 * 60 * 60_000), id = randomUUID();
+    const eventId = `game-missed:${randomUUID()}:${state === "expired group" ? "group" : sender}:2030-01-01`;
+    await db.hostedRuntimeOwner.create({ data: { userId: room, phase: "idle" } });
+    await quiescentSnapshot(state === "missing witness" ? state : "current");
+    await db.hostedLinqDelivery.create({ data: { id, source: "game_lifecycle", idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId),
+      template: state === "other template" ? "game_recap" : state === "expired group" ? "game_group_missed" : "game_missed",
+      status: state === "awaiting" ? "awaiting_generation" : "generation_queued",
+      createdAt: state === "fresh" ? new Date(Date.now() - 60 * 60_000)
+        : state === "expiry boundary" ? new Date(Date.now() - 2 * 60 * 60_000) : earlier,
+      attemptedAt: earlier, updatedAt: state === "newer update" ? new Date() : earlier,
+      payloadOwnerMemberId: state === "foreign owner" ? owner : room,
+      payloadCiphertext: state === "payload" ? "synthetic-sealed-obligation" : null,
+      payloadSchema: state === "schema" ? "synthetic" : null,
+      retryAfterAt: state === "retry" ? earlier : null,
+      lastReceiptAt: state === "receipt" ? earlier : null,
+      acceptedAt: state === "accepted" ? earlier : null, failureCode: state === "failure" ? "synthetic" : null,
+      linqChatLookupKey: state === "expired pair" ? null : createHostedLinqChatLookupKey(sourceChat), phoneNumberLookupKey: sourceKey } });
+    if (state === "pending mailbox") {
+      await db.hostedMailboxItem.create({ data: { id: randomUUID(), userId: room, lane: "system", laneSeq: 1n,
+        dedupeKey: randomUUID(), kind: "assistant.notification.requested", occurredAt: earlier, createdAt: earlier, payloadSchema: "synthetic" } });
+      await db.hostedMailboxLaneCounter.create({ data: { userId: room, lane: "system", nextSeq: 2n } });
+    }
+    const before = await db.hostedLinqDelivery.findUniqueOrThrow({ where: { id } });
+    if (state.startsWith("expired")) {
+      await expect(db.$transaction(tx => assertGameProposalDeliveryCurrentTx({
+        deliveryIdempotencyKey: eventId, containerMemberId: room, tx,
+      }))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+      expect(await start()).toMatchObject({ status: "reserved", code: null });
+      expect(provider.add).toHaveBeenCalledOnce();
+    } else {
+      await expect(start()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_WORK_PENDING" });
+      expect(provider.add).not.toHaveBeenCalled();
+    }
+    expect(provider.send).not.toHaveBeenCalled();
+    expect(await db.hostedLinqDelivery.findUniqueOrThrow({ where: { id } })).toEqual(before);
   });
   it.each(["runtime accepted", "webhook accepted"])("starts past historical %s metadata without rewriting it", async kind => {
     const earlier = new Date(Date.now() - 86_400_000), id = randomUUID();
