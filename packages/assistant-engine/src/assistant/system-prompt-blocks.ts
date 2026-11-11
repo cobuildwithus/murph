@@ -34,6 +34,11 @@ export const ASSISTANT_PROMPT_BLOCK_DEFINITIONS = {
   "core.unverified-external": { layer: "core", audience: "unverified", boundary: true },
   "core.identity.direct": { layer: "core", audience: "private", boundary: true },
   "core.identity.group": { layer: "core", audience: "group", boundary: true },
+  "core.social-role.group": { layer: "core", audience: "group", boundary: true },
+  "core.humor.group": { layer: "core", audience: "group", boundary: true },
+  // Reserved for the resident sentences about games; admits nothing until they exist.
+  "core.games.group": { layer: "core", audience: "group" },
+  "core.private-data.group": { layer: "core", audience: "group", boundary: true },
   "core.product-principles": { layer: "core", audience: "group" },
   "core.how-you-help.direct": { layer: "core", audience: "private" },
   "core.understand-before-recommending.direct": { layer: "core", audience: "private" },
@@ -87,6 +92,7 @@ export const ASSISTANT_PROMPT_BLOCK_DEFINITIONS = {
   "route.habitat": { layer: "route", audience: "private" },
   "route.hosted-groups.private-consult": { layer: "route", audience: "private", boundary: true },
   "route.hosted-groups": { layer: "route", audience: "private-or-group", boundary: true },
+  "route.hosted-groups.shared-data-detail": { layer: "route", audience: "group", boundary: true },
   "route.knowledge": { layer: "route", audience: "private" },
   "route.automation": { layer: "route", audience: "private-or-group" },
   "route.automation.unavailable": { layer: "route", audience: "private-or-group" },
@@ -109,6 +115,7 @@ export const ASSISTANT_PROMPT_BLOCK_DEFINITIONS = {
   "thread.tone": { layer: "thread", audience: "private-or-group" },
   "thread.personality-dials": { layer: "thread", audience: "private-or-group" },
   "thread.reply-style": { layer: "thread", audience: "any" },
+  "thread.message-shape.group": { layer: "thread", audience: "group" },
   "thread.onboarding": { layer: "thread", audience: "private" },
   "thread.link-self-check": { layer: "thread", audience: "any" },
 
