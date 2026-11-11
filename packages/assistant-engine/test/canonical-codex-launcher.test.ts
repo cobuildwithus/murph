@@ -130,7 +130,9 @@ it.each(['subscription', 'provider'] as const)('preserves selected %s home input
     const inspected = await inspectCanonicalCodex({
       command: launcher, cwd: workspace,
       env: { ...env, MURPH_CANONICAL_JOURNEY_CODEX: path.resolve(import.meta.dirname, '../node_modules/.bin/codex') },
-      threadParams: { modelProvider: 'synthetic', config: {
+      // This synthetic inspection submits no turns or commands; sandbox boundaries
+      // are exercised separately without requiring Linux namespaces here.
+      threadParams: { sandbox: 'danger-full-access', modelProvider: 'synthetic', config: {
         'model_providers.synthetic': { name: 'Synthetic', base_url: 'http://127.0.0.1:1/v1', wire_api: 'responses' },
       } },
     })
