@@ -8,7 +8,12 @@
     "title": "Keep the recap that already works",
     "summary": "If a replacement pair-game recap cannot finish, the existing recap stays available.",
     "details": "An unsuccessful replacement sends no new group message. A later successful replacement can still update the recap.",
-    "relevanceTags": ["games", "recaps"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "games",
+      "recaps"
+    ],
+    "sourcePullRequests": [
+      4834
+    ]
   }
 }

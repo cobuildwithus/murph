@@ -45,3 +45,8 @@ Proof: shared preview/write failures, media recovery, existing recap preservatio
 ## Deployment and completion
 
 Web consumer first, then Worker/runner. The new runner emits `phase: preview`, so retain this Web consumer until all such runners have been rolled back. No migration, environment flag or iOS presentation change; existing show flags and media limits remain. Worker transport headers are optional to older runners. Ordinary turns add no awaited calls. ReviewGPT, production access, regeneration, merge and deployment are explicitly outside this task's authorization. PR CI results are reported by the completion owner after the candidate is pushed.
+
+PR: #4834. Local implementation and candidate review complete. Runner assembly passes (22 static chunks within 25; entry/static byte guards pass). Native Linux and exact-head PR CI remain the completion owner’s post-push gate; no ReviewGPT is authorized.
+Status: completed
+Updated: 2026-11-11
+Completed: 2026-11-11
