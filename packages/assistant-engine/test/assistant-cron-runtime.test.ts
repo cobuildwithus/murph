@@ -10304,7 +10304,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(updatedCanonical.state.runningAt).toBeNull()
   })
 
-  it('derives the durable scheduled-delivery cohort from every job processed in one pass', async () => {
+  it('derives the durable scheduled-delivery cohort across passes that yield for queued delivery', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T08:10:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -10371,13 +10371,18 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(summary).toEqual({
       failed: 0,
-      processed: 2,
+      processed: 1,
       succeeded: 0,
     })
 
     const updatedFirst = await getAssistantCronJob(vaultRoot, firstJob.jobId)
     expect(updatedFirst.state.pendingDeliveryIntentId).toBe(queuedIntentIds[0])
     expect(updatedFirst.state.nextRunAt).toBeNull()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+    // A later pass may proceed even if the first transport is delayed; this
+    // ordering rule must not turn pending delivery into an indefinite barrier.
+    expect(await processDueAssistantCronJobsLocal({ deliveryDispatchMode: 'queue-only', limit: 5, vault: vaultRoot }))
+      .toEqual({ failed: 0, processed: 1, succeeded: 0 })
     const updatedSecond = await getAssistantCronJob(vaultRoot, secondJob.jobId)
     expect(updatedSecond.state.pendingDeliveryIntentId).toBe(queuedIntentIds[1])
     expect(updatedSecond.state.nextRunAt).toBeNull()
@@ -13436,6 +13441,31 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(snapshot.bindingDelivery).toBeNull()
+  })
+
+  it('yields after the first queued reminder before generating another due reminder', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-04T16:00:12.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-dispatch-before-next-')
+    getVaultAutomationStore(vaultRoot).push(...['first', 'second'].map(name => ({
+      automationId: `automation-${name}`, relativePath: `bank/automations/${name}.md`,
+      continuityPolicy: 'preserve' as const, createdAt: '2026-05-03T12:00:00.000Z',
+      instructions: 'Ask about the scheduled walk.', route: { channel: 'linq' as const,
+        deliveryTarget: 'synthetic-room', threadId: 'synthetic-room', identityId: null, participantId: null },
+      schedule: { kind: 'at' as const, at: '2026-05-04T16:00:00.000Z' },
+      slug: name, status: 'active' as const, tags: [], title: name, updatedAt: '2026-05-03T12:00:00.000Z',
+    })))
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: { kind: 'send_message', privateSummary: 'Queued reminder.', text: 'Time for a walk?' },
+      deliveryOutcome: { kind: 'queued', error: null, intentId: 'outbox_first_reminder',
+        session: { sessionId: 'session-default' } },
+      response: 'Time for a walk?', session: { sessionId: 'session-default' },
+    })
+    expect(await processDueAssistantCronJobsLocal({ deliveryDispatchMode: 'queue-only', vault: vaultRoot }))
+      .toEqual({ failed: 0, processed: 1, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    expect((await getAssistantCronJob(vaultRoot, 'automation-second')).state.runningAt).toBeNull()
+    expect((await getAssistantCronJob(vaultRoot, 'automation-second')).state.nextRunAt).toBe('2026-05-04T16:00:00.000Z')
   })
 
   it('keeps queue-only canonical cron pending until sent outbox confirmation', async () => {
