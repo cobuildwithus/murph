@@ -7,9 +7,6 @@ import type {
   HostedMemberBillingSnapshot,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
-  getHostedDomainRootUnwrapCache,
-} from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
-import {
   HostedStripeCheckoutLoserCleanupPendingError,
 } from "@/src/lib/hosted-onboarding/stripe-checkout-loser-cleanup";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -61,6 +58,7 @@ const mocks = vi.hoisted(() => ({
   sendHostedSubscriptionCancellationEmailForMember: vi.fn(),
   signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
+  startStripeWorkflow: vi.fn(),
   stripe: {
     events: {
       retrieve: vi.fn(),
@@ -324,7 +322,12 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/stripe-webhook-workflow-start", () => ({
+  startHostedStripeWebhookReconciliationWorkflow: mocks.startStripeWorkflow,
+}));
+
 import {
+  dispatchDueHostedStripeEvents,
   HOSTED_STRIPE_EVENT_LEASE_BUDGET,
   HOSTED_USAGE_CREDIT_RUNTIME_RECHECK_TIMEOUT_MS,
   reconcileHostedStripeEventById as reconcileHostedStripeEventByIdImpl,
@@ -419,7 +422,7 @@ async function expectActivationTargetRetainedAcrossPaymentStageFailure(input: {
       newlyActivatedMemberIds: ["member_123"],
       welcomeEmailMemberId: "member_123",
     })
-    .mockResolvedValueOnce({
+    .mockResolvedValue({
       activatedMemberId: null,
       hostedExecutionEventId: null,
       newlyActivatedMemberIds: [],
@@ -480,22 +483,24 @@ async function expectActivationTargetRetainedAcrossPaymentStageFailure(input: {
     expect(prisma.rows[0]!.paymentNotificationEmailSentAt).toBeNull();
   }
 
+  if (input.failureStage === "completion") {
+    prisma.rows[0]!.nextAttemptAt = new Date(0);
+    await expect(reconcileHostedStripeEventById({ eventId: event.id, prisma: prisma.client }))
+      .resolves.toMatchObject({ status: "failed" });
+  }
   prisma.rows[0]!.nextAttemptAt = new Date(0);
   await expect(reconcileHostedStripeEventById({
     eventId: event.id,
     prisma: prisma.client,
   })).resolves.toMatchObject({
-    activatedMemberId: "member_123",
-    hostedExecutionEventId: "dispatch_123",
-    hostedExecutionMailboxItemId: "mailbox_dispatch_123",
     status: "completed",
   });
 
-  expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledTimes(2);
+  expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledTimes(input.failureStage === "completion" ? 3 : 2);
   expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledOnce();
   expect(
     mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
-  ).toHaveBeenCalledTimes(2);
+  ).toHaveBeenCalledTimes(input.failureStage === "completion" ? 3 : 2);
   const activationTarget = {
     hostedExecutionEventId: "dispatch_123",
     mailboxItemId: "mailbox_dispatch_123",
@@ -562,6 +567,44 @@ function mockPartialLegacyFamilyRefundSupportCase(): void {
 }
 
 describe("hosted Stripe event reconciliation", () => {
+  it("keeps lost dispatch claimable and fences duplicate execution starts at the receipt", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    const event = makeInvoicePaidEvent();
+    mocks.stripe.events.retrieve.mockResolvedValue(event);
+    await recordHostedStripeEvent({ event, prisma: prisma.client });
+    mocks.startStripeWorkflow.mockRejectedValueOnce(new Error("enqueue unavailable"));
+    await expect(dispatchDueHostedStripeEvents({ prisma: prisma.client })).rejects.toThrow("enqueue unavailable");
+    expect(prisma.rows[0]).toMatchObject({ status: "pending", attemptCount: 0 });
+    mocks.startStripeWorkflow.mockResolvedValue({ runId: "run_fixture" });
+    await expect(dispatchDueHostedStripeEvents({ prisma: prisma.client })).resolves.toEqual([event.id]);
+    await expect(dispatchDueHostedStripeEvents({ prisma: prisma.client })).resolves.toEqual([event.id]);
+    const attempts = await Promise.all([
+      reconcileHostedStripeEventById({ eventId: event.id, prisma: prisma.client }),
+      reconcileHostedStripeEventById({ eventId: event.id, prisma: prisma.client }),
+    ]);
+    expect(attempts).toEqual(expect.arrayContaining([null, { eventId: event.id, status: "completed" }]));
+    expect(prisma.rows[0]).toMatchObject({ status: "completed", attemptCount: 1 });
+    expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledOnce();
+  });
+
+  it("stops dispatching due receipts before the cron request budget expires", async () => {
+    const prisma = createStripeEventPrismaHarness();
+    for (let index = 0; index < 26; index += 1) {
+      await recordHostedStripeEvent({ event: { ...makeInvoicePaidEvent(), id: `evt_due_${index}` }, prisma: prisma.client });
+    }
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    mocks.startStripeWorkflow.mockImplementation(async () => {
+      now += 5_000;
+      return { runId: "run_fixture" };
+    });
+    const dispatched = await dispatchDueHostedStripeEvents({ prisma: prisma.client });
+    expect(dispatched).toHaveLength(24);
+    expect(prisma.client.hostedStripeEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 25, select: { eventId: true } }));
+    expect(prisma.rows.every((row) => row.attemptCount === 0 && row.status === "pending")).toBe(true);
+    mocks.startStripeWorkflow.mockReset();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "info").mockImplementation(() => {});
@@ -701,13 +744,14 @@ describe("hosted Stripe event reconciliation", () => {
 
   it("derives the receipt lease from every bounded top-up processing phase", () => {
     expect(HOSTED_STRIPE_EVENT_LEASE_BUDGET.totalMs).toBe(
-      HOSTED_STRIPE_EVENT_LEASE_BUDGET.eventRetrieveMs +
+      HOSTED_STRIPE_EVENT_LEASE_BUDGET.activationReplayMs +
+        HOSTED_STRIPE_EVENT_LEASE_BUDGET.eventRetrieveMs +
         HOSTED_STRIPE_EVENT_LEASE_BUDGET.usageCreditPreparationMs +
         HOSTED_STRIPE_EVENT_LEASE_BUDGET.memberMutationMs +
         HOSTED_STRIPE_EVENT_LEASE_BUDGET.postCommitMs +
         HOSTED_STRIPE_EVENT_LEASE_BUDGET.marginMs,
     );
-    expect(HOSTED_STRIPE_EVENT_LEASE_BUDGET.totalMs).toBe(27 * 60_000);
+    expect(HOSTED_STRIPE_EVENT_LEASE_BUDGET.activationReplayMs).toBe(30_000);
     expect(HOSTED_USAGE_CREDIT_RUNTIME_RECHECK_TIMEOUT_MS).toBeLessThan(
       HOSTED_STRIPE_EVENT_LEASE_BUDGET.postCommitMs,
     );
@@ -736,10 +780,7 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       }),
     ).resolves.toEqual({
-      activatedMemberId: "member_123",
       eventId: "evt_invoice_paid_123",
-      hostedExecutionEventId: "dispatch_123",
-      hostedExecutionMailboxItemId: "mailbox_dispatch_123",
       status: "completed",
     });
 
@@ -924,9 +965,7 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       }),
     ).resolves.toEqual({
-      activatedMemberId: null,
       eventId: event.id,
-      hostedExecutionEventId: null,
       status: "completed",
     });
 
@@ -1096,11 +1135,8 @@ describe("hosted Stripe event reconciliation", () => {
       eventId: event.id,
       prisma: prisma.client,
     })).resolves.toEqual({
-      activatedMemberId: null,
       eventId: event.id,
-      hostedExecutionEventId: null,
       status: "completed",
-      usageCreditGrantedMemberId: "member_123",
     });
 
     expect(mocks.reconcileHostedUsageCreditStripeEvent).toHaveBeenCalledWith({
@@ -1359,11 +1395,8 @@ describe("hosted Stripe event reconciliation", () => {
       eventId: event.id,
       prisma: prisma.client,
     })).resolves.toEqual({
-      activatedMemberId: null,
       eventId: event.id,
-      hostedExecutionEventId: null,
       status: "completed",
-      usageCreditGrantedMemberId: "member_123",
     });
 
     expect(grantCount).toBe(1);
@@ -1604,12 +1637,8 @@ describe("hosted Stripe event reconciliation", () => {
         runtimeRecheckMemberIds: [],
         welcomeEmailMemberId: null,
       });
-    mocks.signalHostedRuntimeRecheckRuntime
-      .mockRejectedValueOnce(new Error("runtime unavailable"))
-      .mockResolvedValueOnce({
-        signalAccepted: true,
-        workflowId: "hosted-user-runtime:member_123",
-      });
+    mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult
+      .mockResolvedValueOnce({ accepted: false, errorCode: "TEMPORAL_UNAVAILABLE" });
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
     prisma.rows[0]!.attemptCount = 5;
@@ -1637,12 +1666,9 @@ describe("hosted Stripe event reconciliation", () => {
       memberIds: ["member_123"],
       prisma: prisma.client,
     });
-    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
-    expect(
-      mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.signalHostedRuntimeRecheckRuntime.mock.invocationCallOrder[0],
-    );
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalledTimes(2);
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       activationResultJson: {
         activationMailboxItemIds: ["mailbox_dispatch_retry"],
@@ -1687,9 +1713,6 @@ describe("hosted Stripe event reconciliation", () => {
       eventId: event.id,
       prisma: prisma.client,
     })).resolves.toMatchObject({
-      activatedMemberId: "member_123",
-      hostedExecutionEventId: "runtime-control:access-restored:dispute",
-      hostedExecutionMailboxItemId: "mailbox_access_restored_dispute",
       status: "completed",
     });
 
@@ -1706,7 +1729,7 @@ describe("hosted Stripe event reconciliation", () => {
     }));
   });
 
-  it("reissues a paid direct-billing wake after an expired processing lease", async () => {
+  it.each([null, new Date(0)])("recovers a paid direct-billing wake from an inactive processing lease %s", async (claimExpiresAt) => {
     const prisma = createStripeEventPrismaHarness({
       currentBillingPhase: "paid",
     });
@@ -1723,7 +1746,7 @@ describe("hosted Stripe event reconciliation", () => {
     await recordHostedStripeEvent({ event, prisma: prisma.client });
     Object.assign(prisma.rows[0]!, {
       attemptCount: 1,
-      claimExpiresAt: new Date(0),
+      claimExpiresAt,
       status: HostedStripeEventStatus.processing,
     });
 
@@ -1964,11 +1987,8 @@ describe("hosted Stripe event reconciliation", () => {
       eventId: event.id,
       prisma: prisma.client,
     })).resolves.toEqual({
-      activatedMemberId: null,
       eventId: event.id,
-      hostedExecutionEventId: null,
       status: "completed",
-      usageCreditGrantedMemberId: "member_123",
     });
 
     expect(grantCount).toBe(1);
@@ -2208,9 +2228,7 @@ describe("hosted Stripe event reconciliation", () => {
       eventId: event.id,
       prisma: prisma.client,
     })).resolves.toEqual({
-      activatedMemberId: null,
       eventId: event.id,
-      hostedExecutionEventId: null,
       status: "completed",
     });
 
@@ -2687,9 +2705,7 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       }),
     ).resolves.toEqual({
-      activatedMemberId: null,
       eventId: event.id,
-      hostedExecutionEventId: null,
       status: "completed",
     });
 
@@ -2725,9 +2741,7 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       }),
     ).resolves.toEqual({
-      activatedMemberId: null,
       eventId: event.id,
-      hostedExecutionEventId: null,
       status: "completed",
     });
 
@@ -2945,10 +2959,7 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       }),
     ).resolves.toEqual({
-      activatedMemberId: "member_123",
       eventId: "evt_invoice_paid_123",
-      hostedExecutionEventId: "dispatch_123",
-      hostedExecutionMailboxItemId: "mailbox_dispatch_123",
       status: "completed",
     });
 
@@ -3021,22 +3032,7 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       }),
     ).resolves.toEqual({
-      activatedMemberId: "member_family_owner",
-      activatedMembers: [
-        {
-          activatedMemberId: "member_family_owner",
-          hostedExecutionEventId: "member.activated:family:owner",
-          hostedExecutionMailboxItemId: "mailbox_family_owner",
-        },
-        {
-          activatedMemberId: "member_family_child",
-          hostedExecutionEventId: "member.activated:family:child",
-          hostedExecutionMailboxItemId: "mailbox_family_child",
-        },
-      ],
       eventId: event.id,
-      hostedExecutionEventId: "member.activated:family:owner",
-      hostedExecutionMailboxItemId: "mailbox_family_owner",
       status: "completed",
     });
 
@@ -3373,7 +3369,7 @@ describe("hosted Stripe event reconciliation", () => {
     await expect(reconcileHostedStripeEventById({
       eventId: event.id,
       prisma: prisma.client,
-    })).resolves.toMatchObject({ activatedMemberId: null, status: "completed" });
+    })).resolves.toMatchObject({ status: "completed" });
 
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith("sub_123");
     expect(mocks.findMemberForStripeSubscription).toHaveBeenCalledTimes(2);
@@ -3651,9 +3647,7 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       }),
     ).resolves.toEqual({
-      activatedMemberId: null,
       eventId: event.id,
-      hostedExecutionEventId: null,
       status: "completed",
     });
 
@@ -4096,9 +4090,7 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       }),
     ).resolves.toEqual({
-      activatedMemberId: null,
       eventId: event.id,
-      hostedExecutionEventId: null,
       status: "failed",
     });
 
@@ -4212,9 +4204,7 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       }),
     ).resolves.toEqual({
-      activatedMemberId: null,
       eventId: event.id,
-      hostedExecutionEventId: null,
       status: "completed",
     });
 
@@ -4341,9 +4331,7 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       }),
     ).resolves.toEqual({
-      activatedMemberId: null,
       eventId: "evt_invoice_paid_123",
-      hostedExecutionEventId: null,
       status: "failed",
     });
 
@@ -4458,9 +4446,7 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       }),
     ).resolves.toEqual({
-      activatedMemberId: null,
       eventId: "evt_invoice_paid_123",
-      hostedExecutionEventId: null,
       status: "failed",
     });
 
@@ -4629,114 +4615,6 @@ function makePulseTrialCheckoutCompletedEvent(): Stripe.Event {
     },
     type: "checkout.session.completed",
   });
-}
-
-function makeExactPulseTrialCheckoutCompletedEvent(): Stripe.Event {
-  return makeStripeEvent({
-    api_version: "2025-03-31.basil",
-    created: 1_774_708_801,
-    data: {
-      object: {
-        client_reference_id: "member_123",
-        customer: "cus_checkout",
-        id: "cs_exact_trial_123",
-        metadata: makeExactPulseTrialMetadata(),
-        mode: "subscription",
-        status: "complete",
-        subscription: "sub_checkout_123",
-      },
-    },
-    id: "evt_exact_trial_checkout_completed_123",
-    livemode: false,
-    object: "event",
-    pending_webhooks: 0,
-    request: {
-      id: null,
-      idempotency_key: null,
-    },
-    type: "checkout.session.completed",
-  });
-}
-
-function makeExactPulseTrialSubscriptionCreatedEvent(): Stripe.Event {
-  return makeStripeEvent({
-    api_version: "2025-03-31.basil",
-    created: 1_774_708_800,
-    data: {
-      object: {
-        customer: "cus_checkout",
-        id: "sub_checkout_123",
-        metadata: makeExactPulseTrialMetadata(),
-        status: "trialing",
-      },
-    },
-    id: "evt_exact_trial_subscription_created_123",
-    livemode: false,
-    object: "event",
-    pending_webhooks: 0,
-    request: {
-      id: null,
-      idempotency_key: null,
-    },
-    type: "customer.subscription.created",
-  });
-}
-
-function makeExactPulseTrialSubscription(
-  status: Stripe.Subscription.Status,
-): Stripe.Subscription {
-  return {
-    customer: "cus_checkout",
-    id: "sub_checkout_123",
-    items: {
-      data: [{
-        id: "si_pulse_123",
-        price: {
-          id: "price_pulse_monthly_123",
-          recurring: {
-            interval: "month",
-            usage_type: "licensed",
-          },
-        },
-        quantity: 1,
-      }],
-      has_more: false,
-    },
-    metadata: makeExactPulseTrialMetadata(),
-    status,
-    trial_end: 1_775_313_600,
-    trial_start: 1_774_708_000,
-  } as Stripe.Subscription;
-}
-
-function makeExactPulseTrialMetadata(): Record<string, string> {
-  return {
-    billingPlanCode: "launch_monthly",
-    checkoutOffer: "pulse_trial_7d",
-    memberId: "member_123",
-    trialDurationDays: "10",
-    trialPolicyVersion: "pulse-trial-2026-06-30-v2",
-    trialUsageLimitUsdMicros: "4500000",
-  };
-}
-
-function makeActiveNonTrialMemberWithoutSubscription() {
-  return {
-    billingRef: {
-      currentBillingPhase: null,
-      memberId: "member_123",
-      pulseTrialRedeemedAt: null,
-      stripeCustomerId: "cus_checkout",
-      stripeSubscriptionId: null,
-    },
-    core: {
-      billingStatus: HostedBillingStatus.active,
-      createdAt: new Date("2026-03-28T12:00:00.000Z"),
-      id: "member_123",
-      suspendedAt: null,
-      updatedAt: new Date("2026-03-28T12:00:00.000Z"),
-    },
-  };
 }
 
 function makeSubscriptionUpdatedEvent(): Stripe.Event {
@@ -5077,10 +4955,11 @@ function matchesStripeEventWhere(row: MutableStripeEventRow, where: StripeEventW
 
   return where.OR.some((condition) => {
     if ("claimExpiresAt" in condition) {
-      return row.status === HostedStripeEventStatus.processing
-        && row.claimExpiresAt !== null
-        && condition.claimExpiresAt?.lte instanceof Date
-        && row.claimExpiresAt.getTime() <= condition.claimExpiresAt.lte.getTime();
+      return row.status === HostedStripeEventStatus.processing && (
+        condition.claimExpiresAt === null ? row.claimExpiresAt === null
+          : row.claimExpiresAt !== null && condition.claimExpiresAt?.lte instanceof Date
+            && row.claimExpiresAt.getTime() <= condition.claimExpiresAt.lte.getTime()
+      );
     }
 
     const retryCondition = condition as {
@@ -5124,9 +5003,7 @@ type StripeEventWhere = {
   updatedAt?: Date;
   OR?: Array<
     | {
-        claimExpiresAt?: {
-          lte: Date;
-        };
+        claimExpiresAt?: { lte: Date } | null;
         status: "processing";
       }
     | {

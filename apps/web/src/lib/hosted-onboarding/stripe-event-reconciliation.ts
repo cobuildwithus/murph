@@ -62,6 +62,7 @@ import {
   readStripeShouldRetryDirective,
 } from "./billing";
 import {
+  HOSTED_FAMILY_MAX_SEATS,
   HOSTED_PULSE_TRIAL_OFFER,
   parseHostedBillingCheckoutOffer,
   parseHostedBillingPlanCode,
@@ -116,13 +117,14 @@ import {
   sendHostedSubscriptionCancellationEmailForMember,
 } from "./subscription-cancellation-email";
 import {
-  resolveHostedMemberActivationRuntimeWakeTargets,
+  HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS,
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
 import {
   buildHostedStripeActivationResultJson,
   parseHostedStripeActivationResultJson,
   readStoredHostedStripeActivationMailboxItems,
+  type HostedStripeActivationMailboxItem,
   type HostedStripeActivationResultJson,
 } from "./stripe-activation-result";
 import {
@@ -145,6 +147,7 @@ import { signalHostedRuntimeRecheckRuntime } from "../hosted-orchestration/signa
 // lease large enough for every bounded top-up phase so new provider work cannot
 // silently outrun it.
 const HOSTED_STRIPE_EVENT_LEASE_PHASES = {
+  activationReplayMs: HOSTED_FAMILY_MAX_SEATS * HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS,
   eventRetrieveMs: 6 * 60_000,
   marginMs: 60_000,
   memberMutationMs: HOSTED_MEMBER_STRIPE_MUTATION_TRANSACTION_TIMEOUT_MS,
@@ -155,6 +158,7 @@ const HOSTED_STRIPE_EVENT_LEASE_PHASES = {
 export const HOSTED_STRIPE_EVENT_LEASE_BUDGET = {
   ...HOSTED_STRIPE_EVENT_LEASE_PHASES,
   totalMs:
+    HOSTED_STRIPE_EVENT_LEASE_PHASES.activationReplayMs +
     HOSTED_STRIPE_EVENT_LEASE_PHASES.eventRetrieveMs +
     HOSTED_STRIPE_EVENT_LEASE_PHASES.usageCreditPreparationMs +
     HOSTED_STRIPE_EVENT_LEASE_PHASES.memberMutationMs +
@@ -198,6 +202,7 @@ const STRIPE_EVENT_RETRYABLE_PRISMA_CODES = new Set([
 const HOSTED_LEGACY_FAMILY_REFUND_INVOICE_METADATA_KEY = "hosted_family_legacy_invoice_id";
 
 type HostedStripeEventReconciliationStage =
+  | "activation_replay"
   | "event_retrieval"
   | "event_application"
   | "post_commit"
@@ -243,14 +248,20 @@ class HostedStripePaymentNotificationPendingError extends Error {
   }
 }
 
-export type HostedStripeEventReconcileResult = {
-  activatedMemberId: string | null;
-  activatedMembers?: HostedStripeActivatedMemberOutcome[];
+type HostedStripeEventReconcileResult = {
   eventId: string;
-  hostedExecutionEventId: string | null;
-  hostedExecutionMailboxItemId?: string | null;
   status: "completed" | "failed";
-  usageCreditGrantedMemberId?: string;
+};
+
+type HostedStripeEventProcessingResult = {
+  activations: HostedStripeActivationMailboxItem[];
+  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
+  cleanupFamilySponsoredStripeSubscriptionId: string | null;
+  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
+  newlyActivatedMemberIds: string[];
+  runtimeRecheckMemberIds: string[];
+  subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
+  welcomeEmailMemberId: string | null;
 };
 
 export async function recordHostedStripeEvent(input: {
@@ -290,54 +301,33 @@ export async function recordHostedStripeEvent(input: {
   }
 }
 
-export async function reconcileDueHostedStripeEvents(input: {
-  limit?: number;
-  prisma: PrismaClient;
+export async function dispatchDueHostedStripeEvents(input: {
+  prisma: {
+    hostedStripeEvent: {
+      findMany(args: Pick<Prisma.HostedStripeEventFindManyArgs, "orderBy" | "take" | "where"> & {
+        select: { eventId: true };
+      }): Promise<Array<{ eventId: string }>>;
+    };
+  };
 }): Promise<string[]> {
-  const reconciledEventIds: string[] = [];
-  const now = new Date();
+  const deadline = Date.now() + 120_000;
   const candidates = await input.prisma.hostedStripeEvent.findMany({
-    where: buildDueHostedStripeEventWhere(now),
-    orderBy: [
-      {
-        stripeCreatedAt: "asc",
-      },
-      {
-        createdAt: "asc",
-      },
-    ],
-    take: input.limit ?? 25,
+    where: buildDueHostedStripeEventWhere(new Date()),
+    orderBy: [{ stripeCreatedAt: "asc" }, { createdAt: "asc" }],
+    select: { eventId: true },
+    take: 25,
   });
-  if (candidates.length === 0) {
-    return reconciledEventIds;
-  }
-  const { stripeLiveMode } = requireHostedStripeApiMode();
-
+  const { startHostedStripeWebhookReconciliationWorkflow } =
+    await import("./stripe-webhook-workflow-start");
+  const dispatchedEventIds: string[] = [];
   for (const candidate of candidates) {
-    const claimed = await claimHostedStripeEvent({
-      eventId: candidate.eventId,
-      lastErrorCode: candidate.lastErrorCode,
-      now,
-      prisma: input.prisma,
-      status: candidate.status,
-      updatedAt: candidate.updatedAt,
-    });
-
-    if (!claimed) {
-      continue;
-    }
-
-    const result = await processClaimedHostedStripeEvent(
-      claimed,
-      input.prisma,
-      stripeLiveMode,
-    );
-    if (result.status === "completed") {
-      reconciledEventIds.push(result.eventId);
-    }
+    if (Date.now() >= deadline) break;
+    // Do not claim before enqueue. A lost start stays due; duplicate starts
+    // compete for the same receipt lease when their execution step begins.
+    await startHostedStripeWebhookReconciliationWorkflow({ eventId: candidate.eventId });
+    dispatchedEventIds.push(candidate.eventId);
   }
-
-  return reconciledEventIds;
+  return dispatchedEventIds;
 }
 
 export async function reconcileHostedStripeEventById(input: {
@@ -421,19 +411,7 @@ async function processHostedStripeEventRecord(
   event: Stripe.Event,
   processingContext: HostedStripeEventProcessingContext,
   prisma: Prisma.TransactionClient,
-): Promise<{
-  activatedMemberId: string | null;
-  activatedMembers: HostedStripeActivatedMemberOutcome[];
-  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
-  cleanupFamilySponsoredStripeSubscriptionId: string | null;
-  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
-  hostedExecutionEventId: string | null;
-  hostedExecutionMailboxItemId: string | null;
-  newlyActivatedMemberIds: string[];
-  runtimeRecheckMemberIds: string[];
-  subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
-  welcomeEmailMemberId: string | null;
-}> {
+): Promise<HostedStripeEventProcessingResult> {
   const payload = event.data.object;
   const dispatchContext: HostedStripeDispatchContext = buildHostedStripeDispatchContext(event);
 
@@ -456,7 +434,7 @@ async function processHostedStripeEventRecord(
     case "customer.subscription.paused":
     case "customer.subscription.resumed":
     case "customer.subscription.trial_will_end":
-      return mapHostedStripeSubscriptionUpdateOutcome(
+      return mapHostedStripeActivationOutcome(
         await applyStripeSubscriptionUpdated(
           requireHostedStripeCanonicalSubscription(processingContext, event.type),
           dispatchContext,
@@ -544,14 +522,7 @@ async function processHostedStripeEventRecord(
           );
         }
         if (typeof disputeResult === "object") {
-          return {
-            ...buildEmptyHostedStripeEventProcessingResult(),
-            activatedMemberId: disputeResult.activatedMemberId,
-            hostedExecutionEventId:
-              disputeResult.hostedExecutionEventId,
-            hostedExecutionMailboxItemId:
-              disputeResult.hostedExecutionMailboxItemId ?? null,
-          };
+          return mapHostedStripeActivationOutcome(disputeResult);
         }
         return buildEmptyHostedStripeEventProcessingResult();
       }
@@ -890,10 +861,6 @@ function computeHostedStripeEventNextAttemptAt(attemptCount: number, now = new D
   return new Date(now.getTime() + delayMs);
 }
 
-type HostedStripeEventProcessingResult = Awaited<
-  ReturnType<typeof processHostedStripeEventRecord>
->;
-
 async function processHostedStripeEventRecordAndRetainActivation(input: {
   activationReceipt: HostedStripeEventActivationReceipt;
   event: Stripe.Event;
@@ -905,7 +872,7 @@ async function processHostedStripeEventRecordAndRetainActivation(input: {
     input.processingContext,
     input.transaction,
   );
-  const activationResultJson = buildHostedStripeActivationResultJson(result);
+  const activationResultJson = buildHostedStripeActivationResultJson(result.activations);
 
   if (activationResultJson.activationMailboxItemIds.length === 0) {
     return result;
@@ -939,7 +906,7 @@ async function restoreHostedStripeActivationResult(input: {
   result: HostedStripeEventProcessingResult;
 }> {
   const currentActivationResultJson =
-    buildHostedStripeActivationResultJson(input.result);
+    buildHostedStripeActivationResultJson(input.result.activations);
   if (currentActivationResultJson.activationMailboxItemIds.length > 0) {
     return {
       activationResultJson: currentActivationResultJson,
@@ -961,23 +928,9 @@ async function restoreHostedStripeActivationResult(input: {
     mailboxItemIds: storedActivationResultJson.activationMailboxItemIds,
     prisma: input.prisma,
   });
-  const firstActivation = activations[0] ?? null;
-
   return {
     activationResultJson: storedActivationResultJson,
-    result: firstActivation
-      ? {
-          ...input.result,
-          activatedMemberId: firstActivation.userId,
-          activatedMembers: activations.map((activation) => ({
-            activatedMemberId: activation.userId,
-            hostedExecutionEventId: activation.dedupeKey,
-            hostedExecutionMailboxItemId: activation.id,
-          })),
-          hostedExecutionEventId: firstActivation.dedupeKey,
-          hostedExecutionMailboxItemId: firstActivation.id,
-        }
-      : input.result,
+    result: { ...input.result, activations },
   };
 }
 
@@ -990,10 +943,26 @@ async function processClaimedHostedStripeEvent(
     attemptCount: claimed.attemptCount,
     eventType: claimed.type,
   });
-  let reconciliationStage: HostedStripeEventReconciliationStage = "event_retrieval";
+  let reconciliationStage: HostedStripeEventReconciliationStage = "activation_replay";
   let usageCreditEventHandled = false;
 
   try {
+    // A replay may see different Family membership. Acknowledge the previous
+    // transaction's exact targets before another application can replace them.
+    const retained = parseHostedStripeActivationResultJson(claimed.activationResultJson);
+    const retainedActivations = retained
+      ? await readStoredHostedStripeActivationMailboxItems({
+          mailboxItemIds: retained.activationMailboxItemIds,
+          prisma,
+        })
+      : [];
+    if (!await signalHostedStripeActivationRuntimeWake({ prisma, activations: retainedActivations })) {
+      throw new HostedStripeRuntimeRecheckPendingError(
+        new Error("Retained Stripe activation mailbox wake is pending."),
+      );
+    }
+    const acknowledgedMailboxItemIds = new Set(retainedActivations.map(({ id }) => id));
+    reconciliationStage = "event_retrieval";
     const stripeEvent = await fetchHostedStripeEventForReconciliation(claimed.eventId);
     reconciliationStage = "event_application";
     const usageCreditReconciliation = await reconcileHostedUsageCreditStripeEvent({
@@ -1057,12 +1026,10 @@ async function processClaimedHostedStripeEvent(
         usageCreditEventHandled: usageCreditReconciliation.handled,
       });
     let paymentNotificationSent = false;
-    if (paymentNotificationCandidate) {
-      await signalHostedStripeActivationRuntimeWakeBeforePaymentNotification({
-        prisma,
-        result,
-      });
-    }
+    const activationWakeAccepted = await signalHostedStripeActivationRuntimeWake({
+      prisma,
+      activations: result.activations.filter(({ id }) => !acknowledgedMailboxItemIds.has(id)),
+    });
     const paymentNotificationAttempt = (async () => {
       if (
         paymentNotificationCandidate &&
@@ -1138,6 +1105,10 @@ async function processClaimedHostedStripeEvent(
         runtimeRecheckMemberIds.add(processingMemberId);
       }
       for (const memberId of runtimeRecheckMemberIds) {
+        // The exact activation mailbox signal already wakes this same runtime.
+        if (result.activations.some((activation) => activation.userId === memberId)) {
+          continue;
+        }
         await signalHostedBillingRuntimeRecheckIgnoringInactive({
           prisma,
           userId: memberId,
@@ -1215,6 +1186,11 @@ async function processClaimedHostedStripeEvent(
     if (postCanonicalResult.status === "rejected") {
       throw postCanonicalResult.reason;
     }
+    if (!activationWakeAccepted) {
+      throw new HostedStripeRuntimeRecheckPendingError(
+        new Error("Stripe activation mailbox wake is pending."),
+      );
+    }
     reconciliationStage = "receipt_finalization";
     const completed = await prisma.hostedStripeEvent.updateMany({
       where: {
@@ -1237,9 +1213,7 @@ async function processClaimedHostedStripeEvent(
       );
     }
     finishHostedOnboardingTiming(timing, "completed", {
-      activatedMember: Boolean(result.activatedMemberId),
-      activatedMemberCount: result.activatedMembers?.length ?? 0,
-      hostedExecutionEventScheduled: Boolean(result.hostedExecutionEventId),
+      activatedMemberCount: result.activations.length,
       subscriptionCancellationEmailCandidate:
         Boolean(result.subscriptionCancellationEmail),
       paymentNotificationCandidate: Boolean(paymentNotificationCandidate),
@@ -1249,27 +1223,7 @@ async function processClaimedHostedStripeEvent(
       welcomeEmailCandidate: Boolean(result.welcomeEmailMemberId),
     });
 
-    const activatedMembers = result.activatedMembers ?? [];
-    const hostedExecutionMailboxItemId =
-      result.activatedMembers[0]?.hostedExecutionMailboxItemId
-      ?? result.hostedExecutionMailboxItemId;
-
-    return {
-      activatedMemberId: result.activatedMemberId,
-      ...(activatedMembers.length > 0 ? { activatedMembers } : {}),
-      eventId: claimed.eventId,
-      hostedExecutionEventId: result.hostedExecutionEventId,
-      ...(hostedExecutionMailboxItemId
-        ? { hostedExecutionMailboxItemId }
-        : {}),
-      status: "completed",
-      ...(usageCreditReconciliation.handled && usageCreditReconciliation.granted
-        ? {
-            usageCreditGrantedMemberId:
-              usageCreditReconciliation.beneficiaryMemberId,
-          }
-        : {}),
-    };
+    return { eventId: claimed.eventId, status: "completed" };
   } catch (error) {
     const poisoned = claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS &&
       !(error instanceof HostedLegacyFamilyCleanupPendingError) &&
@@ -1327,9 +1281,7 @@ async function processClaimedHostedStripeEvent(
     });
 
     return {
-      activatedMemberId: null,
       eventId: claimed.eventId,
-      hostedExecutionEventId: null,
       status: "failed",
     };
   }
@@ -2037,81 +1989,13 @@ function buildDueHostedStripeEventWhere(now: Date): Prisma.HostedStripeEventWher
           lte: now,
         },
       },
+      // Legacy interrupted receipts without a lease have no active claimant.
+      { status: HostedStripeEventStatus.processing, claimExpiresAt: null },
     ],
   };
 }
 
 function mapHostedStripeActivationOutcome(
-  outcome: {
-    activatedMemberId: string | null;
-    activatedMembers?: HostedStripeActivatedMemberOutcome[];
-    cleanupFamilySponsoredCheckout?: HostedStripeCheckoutCleanup | null;
-    cleanupFamilySponsoredStripeSubscriptionId?: string | null;
-    cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
-    hostedExecutionEventId: string | null;
-    hostedExecutionMailboxItemId?: string | null;
-    newlyActivatedMemberIds: string[];
-    runtimeRecheckMemberIds?: string[];
-    welcomeEmailMemberId?: string | null;
-  },
-): {
-  activatedMemberId: string | null;
-  activatedMembers: HostedStripeActivatedMemberOutcome[];
-  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
-  cleanupFamilySponsoredStripeSubscriptionId: string | null;
-  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
-  hostedExecutionEventId: string | null;
-  hostedExecutionMailboxItemId: string | null;
-  newlyActivatedMemberIds: string[];
-  runtimeRecheckMemberIds: string[];
-  subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
-  welcomeEmailMemberId: string | null;
-} {
-  return {
-    activatedMemberId: outcome.activatedMemberId,
-    activatedMembers: outcome.activatedMembers ?? [],
-    cleanupFamilySponsoredCheckout:
-      outcome.cleanupFamilySponsoredCheckout ?? null,
-    cleanupFamilySponsoredStripeSubscriptionId:
-      outcome.cleanupFamilySponsoredStripeSubscriptionId ?? null,
-    cleanupStandardCheckout: outcome.cleanupStandardCheckout ?? null,
-    hostedExecutionEventId: outcome.hostedExecutionEventId,
-    hostedExecutionMailboxItemId:
-      outcome.hostedExecutionMailboxItemId ?? null,
-    newlyActivatedMemberIds: outcome.newlyActivatedMemberIds,
-    runtimeRecheckMemberIds: outcome.runtimeRecheckMemberIds ?? [],
-    subscriptionCancellationEmail: null,
-    welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
-  };
-}
-
-async function signalHostedStripeActivationRuntimeWakeBeforePaymentNotification(
-  input: {
-    prisma: PrismaClient;
-    result: {
-      activatedMemberId: string | null;
-      activatedMembers: HostedStripeActivatedMemberOutcome[];
-      hostedExecutionEventId: string | null;
-      hostedExecutionMailboxItemId: string | null;
-    };
-  },
-): Promise<void> {
-  const activationTargets = resolveHostedMemberActivationRuntimeWakeTargets(
-    input.result,
-  );
-
-  for (const activationTarget of activationTargets) {
-    await signalHostedMemberActivationRuntimeWakeBestEffortResult({
-      hostedExecutionEventId: activationTarget.hostedExecutionEventId,
-      mailboxItemId: activationTarget.hostedExecutionMailboxItemId,
-      memberId: activationTarget.memberId,
-      prisma: input.prisma,
-      source: "stripe.webhook.activation",
-    });
-  }
-}
-
-function mapHostedStripeSubscriptionUpdateOutcome(
   outcome: {
     activatedMemberId?: string | null;
     activatedMembers?: HostedStripeActivatedMemberOutcome[];
@@ -2125,30 +2009,30 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
     welcomeEmailMemberId?: string | null;
   } | null | undefined,
-): {
-  activatedMemberId: string | null;
-  activatedMembers: HostedStripeActivatedMemberOutcome[];
-  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
-  cleanupFamilySponsoredStripeSubscriptionId: string | null;
-  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
-  hostedExecutionEventId: string | null;
-  hostedExecutionMailboxItemId: string | null;
-  newlyActivatedMemberIds: string[];
-  runtimeRecheckMemberIds: string[];
-  subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
-  welcomeEmailMemberId: string | null;
-} {
+): HostedStripeEventProcessingResult {
+  const candidates = outcome?.activatedMembers?.length
+    ? outcome.activatedMembers
+    : outcome ? [outcome] : [];
+  const activations = candidates.flatMap((activation) => {
+    if (!activation.activatedMemberId || !activation.hostedExecutionEventId) {
+      return [];
+    }
+    if (!activation.hostedExecutionMailboxItemId) {
+      throw new Error("Stripe activation completion requires an exact mailbox pointer.");
+    }
+    return [{
+      dedupeKey: activation.hostedExecutionEventId,
+      id: activation.hostedExecutionMailboxItemId,
+      userId: activation.activatedMemberId,
+    }];
+  });
   return {
-    activatedMemberId: outcome?.activatedMemberId ?? null,
-    activatedMembers: outcome?.activatedMembers ?? [],
+    activations,
     cleanupFamilySponsoredCheckout:
       outcome?.cleanupFamilySponsoredCheckout ?? null,
     cleanupFamilySponsoredStripeSubscriptionId:
       outcome?.cleanupFamilySponsoredStripeSubscriptionId ?? null,
     cleanupStandardCheckout: outcome?.cleanupStandardCheckout ?? null,
-    hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
-    hostedExecutionMailboxItemId:
-      outcome?.hostedExecutionMailboxItemId ?? null,
     newlyActivatedMemberIds: outcome?.newlyActivatedMemberIds ?? [],
     runtimeRecheckMemberIds: outcome?.runtimeRecheckMemberIds ?? [],
     subscriptionCancellationEmail:
@@ -2157,32 +2041,26 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   };
 }
 
-function buildEmptyHostedStripeEventProcessingResult(): {
-  activatedMemberId: string | null;
-  activatedMembers: HostedStripeActivatedMemberOutcome[];
-  cleanupFamilySponsoredCheckout: HostedStripeCheckoutCleanup | null;
-  cleanupFamilySponsoredStripeSubscriptionId: string | null;
-  cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
-  hostedExecutionEventId: string | null;
-  hostedExecutionMailboxItemId: string | null;
-  newlyActivatedMemberIds: string[];
-  runtimeRecheckMemberIds: string[];
-  subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
-  welcomeEmailMemberId: string | null;
-} {
-  return {
-    activatedMemberId: null,
-    activatedMembers: [],
-    cleanupFamilySponsoredCheckout: null,
-    cleanupFamilySponsoredStripeSubscriptionId: null,
-    cleanupStandardCheckout: null,
-    hostedExecutionEventId: null,
-    hostedExecutionMailboxItemId: null,
-    newlyActivatedMemberIds: [],
-    runtimeRecheckMemberIds: [],
-    subscriptionCancellationEmail: null,
-    welcomeEmailMemberId: null,
-  };
+async function signalHostedStripeActivationRuntimeWake(input: {
+  prisma: PrismaClient;
+  activations: HostedStripeActivationMailboxItem[];
+}): Promise<boolean> {
+  let accepted = true;
+  for (const activation of input.activations) {
+    const wake = await signalHostedMemberActivationRuntimeWakeBestEffortResult({
+      hostedExecutionEventId: activation.dedupeKey,
+      mailboxItemId: activation.id,
+      memberId: activation.userId,
+      prisma: input.prisma,
+      source: "stripe.webhook.activation",
+    });
+    accepted = accepted && (wake.accepted || wake.errorCode === "HOSTED_RUNTIME_USER_INACTIVE");
+  }
+  return accepted;
+}
+
+function buildEmptyHostedStripeEventProcessingResult(): HostedStripeEventProcessingResult {
+  return mapHostedStripeActivationOutcome(null);
 }
 
 function buildClaimableHostedStripeEventWhere(input: {

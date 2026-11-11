@@ -262,37 +262,29 @@ describe("hosted Family plan", () => {
     expect(parseHostedFamilyInviteReturnPath("/settings")).toBeNull();
   });
 
-  const previousHostedContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
-  const previousHostedContactPrivacyCurrentKeyVersion =
-    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
-  const previousHostedFamilyStripePriceId =
-    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY;
-  const previousHostedFamilyEdgeStripePriceId =
-    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY;
-  const previousHostedFamilyMaxStripePriceId =
-    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY;
-  const previousLegacyHostedFamilyStripePriceId =
-    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY;
-  const previousHostedPulseStripePriceId =
-    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY;
-  const previousHostedEdgeStripePriceId =
-    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY;
-  const previousHostedOnboardingPublicBaseUrl =
-    process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
-
   beforeEach(() => {
     vi.resetAllMocks();
-    process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${TEST_CONTACT_PRIVACY_KEY}`;
-    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
-    process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://local.withmurph.ai:3443";
-    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY = "price_pulse";
-    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY = "price_edge";
-    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY = "price_family";
-    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY =
-      "price_family_edge";
-    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY =
-      "price_family_max";
-    delete process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY;
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", `v1:${TEST_CONTACT_PRIVACY_KEY}`);
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v1");
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://local.withmurph.ai:3443");
+    vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY", "price_pulse");
+    vi.stubEnv("HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY", "price_edge");
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
+      "price_family",
+    );
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY",
+      "price_family_edge",
+    );
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY",
+      "price_family_max",
+    );
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY",
+      undefined,
+    );
     clearHostedOnboardingEnvCache();
     encryptionMocks.encryptHostedWebNullableString.mockImplementation(async ({ value }) =>
       value ? `encrypted:${value}` : null
@@ -406,39 +398,6 @@ describe("hosted Family plan", () => {
   });
 
   afterEach(() => {
-    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousHostedContactPrivacyKeys);
-    restoreEnvValue(
-      "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
-      previousHostedContactPrivacyCurrentKeyVersion,
-    );
-    restoreEnvValue(
-      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY",
-      previousLegacyHostedFamilyStripePriceId,
-    );
-    restoreEnvValue(
-      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
-      previousHostedFamilyStripePriceId,
-    );
-    restoreEnvValue(
-      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY",
-      previousHostedFamilyEdgeStripePriceId,
-    );
-    restoreEnvValue(
-      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY",
-      previousHostedFamilyMaxStripePriceId,
-    );
-    restoreEnvValue(
-      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
-      previousHostedPulseStripePriceId,
-    );
-    restoreEnvValue(
-      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
-      previousHostedEdgeStripePriceId,
-    );
-    restoreEnvValue(
-      "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
-      previousHostedOnboardingPublicBaseUrl,
-    );
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     clearHostedOnboardingEnvCache();
@@ -584,12 +543,7 @@ describe("hosted Family plan", () => {
   });
 
   it("converts an active direct trial into Family on the same subscription", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     tx.hostedMember.findUnique.mockResolvedValue({
@@ -599,10 +553,7 @@ describe("hosted Family plan", () => {
     tx.hostedMemberBillingRef.findUnique.mockResolvedValue(
       createMemberBillingRefMock({ currentBillingPhase: "trial" }),
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const checkoutCreate = vi.fn();
     const directTrial = makeFamilyStripeSubscription({
       customerId: "cus_direct",
@@ -680,12 +631,7 @@ describe("hosted Family plan", () => {
     ["pending provider update", { pendingUpdate: { expires_at: FAMILY_STRIPE_PERIOD_END_SECONDS } as NonNullable<Stripe.Subscription["pending_update"]> }],
     ["attached schedule", { schedule: "sched_direct" }],
   ])("rejects a direct-to-Family conversion with %s before mutation", async (_label, state) => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     tx.hostedMember.findUnique.mockResolvedValue({
@@ -695,10 +641,7 @@ describe("hosted Family plan", () => {
     tx.hostedMemberBillingRef.findUnique.mockResolvedValue(
       createMemberBillingRefMock(),
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const subscriptionUpdate = vi.fn();
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
       subscriptions: {
@@ -731,12 +674,7 @@ describe("hosted Family plan", () => {
   });
 
   it("does not convert a direct subscription after account suspension wins the owner lock", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     tx.hostedMember.findUnique.mockResolvedValue({
@@ -2178,69 +2116,83 @@ describe("hosted Family plan", () => {
     });
   });
 
-  it("accepts a phone plus Telegram invite from the matching Telegram username", async () => {
-    const tx = createTxMock();
-    const invite = createPendingInvite({
-      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
-      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
-    });
-    tx.hostedAccountGroupInvite.findUnique
-      .mockResolvedValueOnce(invite)
-      .mockResolvedValueOnce(invite);
+  it.each(["phone", "email"] as const)(
+    "accepts a %s plus Telegram invite from the matching Telegram username",
+    async (contact) => {
+      const tx = createTxMock();
+      const invite = createPendingInvite({
+        targetEmailLookupKey: contact === "email"
+          ? createHostedEmailLookupKey("mom@example.com")
+          : null,
+        targetPhoneLookupKey: contact === "phone"
+          ? createHostedPhoneLookupKey("+48600000000")
+          : null,
+        targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
+      });
+      tx.hostedAccountGroupInvite.findUnique
+        .mockResolvedValueOnce(invite)
+        .mockResolvedValueOnce(invite);
 
-    await expect(acceptHostedFamilyInviteFromTelegramTx({
-      telegramThreadId: "123",
-      telegramUserId: "456",
-      telegramUsername: "mom_user",
-      text: "/start family_invite_phone",
-      tx,
-    })).resolves.toMatchObject({
-      groupId: "hbag_family",
-      status: "active",
-    });
+      await expect(acceptHostedFamilyInviteFromTelegramTx({
+        telegramThreadId: "123",
+        telegramUserId: "456",
+        telegramUsername: "mom_user",
+        text: "/start family_invite_phone",
+        tx,
+      })).resolves.toMatchObject({
+        groupId: "hbag_family",
+        status: "active",
+      });
 
-    expect(tx.hostedMember.create).toHaveBeenCalled();
-    expect(tx.hostedMemberRouting.upsert).toHaveBeenCalled();
-    expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        memberId: expect.stringMatching(/^hbm_/u),
-      }),
-    }));
-    expect(
-      activationMocks.activateHostedMemberForFamilySponsorshipTx.mock.calls[0]?.[0],
-    ).not.toHaveProperty("preparedCryptoDomainRoots");
-  });
+      expect(tx.hostedMember.create).toHaveBeenCalled();
+      expect(tx.hostedMemberRouting.upsert).toHaveBeenCalled();
+      expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        create: expect.objectContaining({
+          memberId: expect.stringMatching(/^hbm_/u),
+        }),
+      }));
+      expect(activationMocks.activateHostedMemberForFamilySponsorshipTx.mock.calls[0]?.[0])
+        .not.toHaveProperty("preparedCryptoDomainRoots");
+    },
+  );
 
-  it("accepts a phone plus Telegram invite from the matching phone webhook sender", async () => {
-    const now = new Date("2026-06-18T12:30:00.000Z");
-    const tx = createTxMock();
-    const invite = createPendingInvite({
-      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
-      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
-    });
-    tx.hostedAccountGroupInvite.findUnique
-      .mockResolvedValueOnce(invite)
-      .mockResolvedValueOnce(invite);
+  it.each(["phone plus Telegram", "unbound", "phone"] as const)(
+    "accepts a %s invite from the matching phone sender with provider-verified identity",
+    async (binding) => {
+      const now = new Date("2026-06-18T12:30:00.000Z");
+      const tx = createTxMock();
+      const invite = createPendingInvite({
+        targetPhoneLookupKey: binding === "unbound"
+          ? null
+          : createHostedPhoneLookupKey("+48600000000"),
+        targetTelegramUsernameLookupKey: binding === "phone plus Telegram"
+          ? createHostedTelegramUsernameLookupKey("@Mom_User")
+          : null,
+      });
+      tx.hostedAccountGroupInvite.findUnique
+        .mockResolvedValueOnce(invite)
+        .mockResolvedValueOnce(invite);
 
-    await expect(acceptHostedFamilyInviteFromPhoneTx({
-      now,
-      phoneNumber: "+48 600 000 000",
-      text: "family_invite_phone",
-      tx,
-    })).resolves.toMatchObject({
-      memberId: "member_mom",
-      status: "active",
-    });
+      await expect(acceptHostedFamilyInviteFromPhoneTx({
+        now,
+        phoneNumber: "+48 600 000 000",
+        text: "family_invite_phone",
+        tx,
+      })).resolves.toMatchObject({
+        memberId: "member_mom",
+        status: "active",
+      });
 
-    expect(identityMocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
-      phoneNumber: "+48 600 000 000",
-      phoneNumberVerifiedAt: now,
-      prisma: tx,
-    });
-    expect(
-      activationMocks.activateHostedMemberForFamilySponsorshipTx.mock.calls[0]?.[0],
-    ).not.toHaveProperty("preparedCryptoDomainRoots");
-  });
+      expect(identityMocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
+        phoneNumber: "+48 600 000 000",
+        phoneNumberVerifiedAt: now,
+        prisma: tx,
+      });
+      expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalled();
+      expect(activationMocks.activateHostedMemberForFamilySponsorshipTx.mock.calls[0]?.[0])
+        .not.toHaveProperty("preparedCryptoDomainRoots");
+    },
+  );
 
   it("forwards prepared roots through phone-bound Family activation", async () => {
     const now = new Date("2026-06-18T12:30:00.000Z");
@@ -2679,24 +2631,30 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
-  it("rejects a phone plus Telegram invite from the wrong phone webhook sender", async () => {
-    const tx = createTxMock();
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
-      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
-      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
-    }));
+  it.each(["phone", "phone plus Telegram"] as const)(
+    "rejects a %s invite from the wrong phone before creating a member",
+    async (binding) => {
+      const tx = createTxMock();
+      tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
+        targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
+        targetTelegramUsernameLookupKey: binding === "phone plus Telegram"
+          ? createHostedTelegramUsernameLookupKey("@Mom_User")
+          : null,
+      }));
 
-    await expect(acceptHostedFamilyInviteFromPhoneTx({
-      phoneNumber: "+48 700 000 000",
-      text: "family_invite_phone",
-      tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
-    });
+      await expect(acceptHostedFamilyInviteFromPhoneTx({
+        phoneNumber: "+48 700 000 000",
+        text: "family_invite_phone",
+        tx,
+      })).rejects.toMatchObject({
+        code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+      });
 
-    expect(identityMocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
-    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
-  });
+      expect(identityMocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    },
+  );
 
   it("accepts email-bound invites only from the invited email address", async () => {
     const tx = createTxMock();
@@ -2750,33 +2708,6 @@ describe("hosted Family plan", () => {
       memberId: "member_mom",
       status: "active",
     });
-  });
-
-  it("accepts an email plus Telegram invite from the matching Telegram username", async () => {
-    const tx = createTxMock();
-    const invite = createPendingInvite({
-      targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
-      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Mom_User"),
-    });
-    tx.hostedAccountGroupInvite.findUnique
-      .mockResolvedValueOnce(invite)
-      .mockResolvedValueOnce(invite);
-
-    await expect(acceptHostedFamilyInviteFromTelegramTx({
-      telegramThreadId: "123",
-      telegramUserId: "456",
-      telegramUsername: "mom_user",
-      text: "/start family_invite_phone",
-      tx,
-    })).resolves.toMatchObject({
-      groupId: "hbag_family",
-      status: "active",
-    });
-    expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
-        memberId: expect.stringMatching(/^hbm_/u),
-      }),
-    }));
   });
 
   it("rejects an email plus Telegram invite on web when no session identity matches", async () => {
@@ -2970,60 +2901,6 @@ describe("hosted Family plan", () => {
     });
   });
 
-  it("accepts an unbound invite from a new phone and binds the sender phone", async () => {
-    const now = new Date("2026-06-18T12:30:00.000Z");
-    const tx = createTxMock();
-    const unboundInvite = createPendingInvite({
-      targetEmailLookupKey: null,
-      targetPhoneLookupKey: null,
-      targetTelegramUsernameLookupKey: null,
-    });
-    tx.hostedAccountGroupInvite.findUnique
-      .mockResolvedValueOnce(unboundInvite)
-      .mockResolvedValueOnce(unboundInvite);
-
-    await expect(acceptHostedFamilyInviteFromPhoneTx({
-      now,
-      phoneNumber: "+48 600 000 000",
-      text: "family_invite_phone",
-      tx,
-    })).resolves.toMatchObject({
-      memberId: "member_mom",
-    });
-
-    expect(identityMocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
-      phoneNumber: "+48 600 000 000",
-      phoneNumberVerifiedAt: now,
-      prisma: tx,
-    });
-    expect(tx.hostedAccountGroupMembership.upsert).toHaveBeenCalled();
-  });
-
-  it("marks family invite phone acceptance as provider-verified", async () => {
-    const now = new Date("2026-06-18T12:30:00.000Z");
-    const tx = createTxMock();
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
-      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
-    })).mockResolvedValueOnce(createPendingInvite({
-      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
-    }));
-
-    await expect(acceptHostedFamilyInviteFromPhoneTx({
-      now,
-      phoneNumber: "+48 600 000 000",
-      text: "family_invite_phone",
-      tx,
-    })).resolves.toMatchObject({
-      memberId: "member_mom",
-    });
-
-    expect(identityMocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
-      phoneNumber: "+48 600 000 000",
-      phoneNumberVerifiedAt: now,
-      prisma: tx,
-    });
-  });
-
   it("returns the same phone member membership when a phone invite retry is already accepted", async () => {
     const now = new Date("2026-06-18T12:30:00.000Z");
     const onAcceptedMemberLocked = vi.fn();
@@ -3100,60 +2977,30 @@ describe("hosted Family plan", () => {
       .not.toHaveBeenCalled();
   });
 
-  it("does not let phone acceptance claim a Telegram-bound invite", async () => {
-    const tx = createTxMock();
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
-      targetPhoneLookupKey: null,
-      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@alice"),
-    }));
+  it.each(["Telegram", "email"] as const)(
+    "does not let phone acceptance claim a %s-bound invite",
+    async (binding) => {
+      const tx = createTxMock();
+      tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
+        targetEmailLookupKey: binding === "email"
+          ? createHostedEmailLookupKey("mom@example.com")
+          : null,
+        targetTelegramUsernameLookupKey: binding === "Telegram"
+          ? createHostedTelegramUsernameLookupKey("@alice")
+          : null,
+      }));
 
-    await expect(acceptHostedFamilyInviteFromPhoneTx({
-      phoneNumber: "+48 600 000 000",
-      text: "family_invite_phone",
-      tx,
-    })).resolves.toBeNull();
+      await expect(acceptHostedFamilyInviteFromPhoneTx({
+        phoneNumber: "+48 600 000 000",
+        text: "family_invite_phone",
+        tx,
+      })).resolves.toBeNull();
 
-    expect(identityMocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
-    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
-    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("does not let phone acceptance claim an email-bound invite", async () => {
-    const tx = createTxMock();
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
-      targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
-      targetPhoneLookupKey: null,
-    }));
-
-    await expect(acceptHostedFamilyInviteFromPhoneTx({
-      phoneNumber: "+48 600 000 000",
-      text: "family_invite_phone",
-      tx,
-    })).resolves.toBeNull();
-
-    expect(identityMocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
-    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
-    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("rejects phone acceptance from the wrong phone before creating a member", async () => {
-    const tx = createTxMock();
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
-      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
-    }));
-
-    await expect(acceptHostedFamilyInviteFromPhoneTx({
-      phoneNumber: "+48 700 000 000",
-      text: "family_invite_phone",
-      tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
-    });
-
-    expect(identityMocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
-    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
-    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
-  });
+      expect(identityMocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    },
+  );
 
   it("runs phone acceptance consent hooks after invite validation and before membership write", async () => {
     const tx = createTxMock();
@@ -3475,10 +3322,7 @@ describe("hosted Family plan", () => {
         update: stripeUpdate,
       },
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(updateHostedFamilyMemberPlan({
       groupId: "hbag_family",
@@ -3585,10 +3429,7 @@ describe("hosted Family plan", () => {
         update: stripeUpdate,
       },
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(updateHostedFamilyMemberPlan({
       groupId: "hbag_family",
@@ -3672,10 +3513,7 @@ describe("hosted Family plan", () => {
         update: stripeUpdate,
       },
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(updateHostedFamilyMemberPlan({
       groupId: "hbag_family",
@@ -3762,10 +3600,7 @@ describe("hosted Family plan", () => {
         update: stripeUpdate,
       },
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(updateHostedFamilyMemberPlan({
       groupId: "hbag_family",
@@ -3808,10 +3643,7 @@ describe("hosted Family plan", () => {
         },
         role: "member",
       });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(updateHostedFamilyMemberPlan({
       groupId: "hbag_family",
@@ -3860,10 +3692,7 @@ describe("hosted Family plan", () => {
         update: vi.fn().mockRejectedValue(new Error("stripe unavailable")),
       },
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(updateHostedFamilyMemberPlan({
       groupId: "hbag_family",
@@ -4007,10 +3836,7 @@ describe("hosted Family plan", () => {
         update: stripeUpdate,
       },
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const fetchMock = stubFamilyStripeAlertEmailDelivery();
     const input = {
       groupId: "hbag_family",
@@ -4057,10 +3883,7 @@ describe("hosted Family plan", () => {
     cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValueOnce(
       preparedCryptoDomainRoots,
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(acceptHostedFamilyInvite({
       acceptedMemberId: "member_mom",
@@ -4125,10 +3948,7 @@ describe("hosted Family plan", () => {
         signalAccepted: false,
         workflowIdPresent: true,
       });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(acceptHostedFamilyInvite({
       acceptedMemberId: "member_mom",
@@ -4159,10 +3979,7 @@ describe("hosted Family plan", () => {
     cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockRejectedValue(
       new Error("KMS unavailable"),
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(acceptHostedFamilyInvite({
       acceptedMemberId: "member_mom",
@@ -4177,61 +3994,48 @@ describe("hosted Family plan", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it("rejects a wrong-phone browser identity before crypto preparation", async () => {
+  it.each([
+    {
+      binding: "phone",
+      code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+      identity: { phoneNumber: "+48 700 000 000" },
+      inviteCode: "invite_phone",
+    },
+    {
+      binding: "email",
+      code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
+      identity: { email: "someone-else@example.com" },
+      inviteCode: "invite_email",
+    },
+  ])("rejects a wrong-$binding browser identity before crypto preparation", async ({
+    binding,
+    code,
+    identity,
+    inviteCode,
+  }) => {
     const tx = createTxMock();
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValue({
-      ...createPendingInvite(),
-      targetPhoneLookupKey: createHostedPhoneLookupKey("+48600000000"),
-    });
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValue(createPendingInvite({
+      targetPhoneLookupKey: binding === "phone"
+        ? createHostedPhoneLookupKey("+48600000000")
+        : null,
+      targetEmailLookupKey: binding === "email"
+        ? createHostedEmailLookupKey("mom@example.com")
+        : null,
+    }));
     cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockRejectedValue(
       new Error("KMS unavailable"),
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await expect(acceptHostedFamilyInvite({
         acceptedMemberId: "member_mom",
-        inviteCode: "invite_phone",
-        phoneNumber: "+48 700 000 000",
+        ...identity,
+        inviteCode,
         prisma: prisma as never,
         requireWebBinding: true,
-      })).rejects.toMatchObject({
-        code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
-        httpStatus: 403,
-      });
+      })).rejects.toMatchObject({ code, httpStatus: 403 });
     }
-
-    expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
-    expect(prisma.$transaction).not.toHaveBeenCalled();
-  });
-
-  it("rejects a wrong-email browser identity before crypto preparation", async () => {
-    const tx = createTxMock();
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValue({
-      ...createPendingInvite(),
-      targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
-    });
-    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockRejectedValue(
-      new Error("KMS unavailable"),
-    );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
-
-    await expect(acceptHostedFamilyInvite({
-      acceptedMemberId: "member_mom",
-      email: "someone-else@example.com",
-      inviteCode: "invite_email",
-      prisma: prisma as never,
-      requireWebBinding: true,
-    })).rejects.toMatchObject({
-      code: "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
-      httpStatus: 403,
-    });
 
     expect(cryptoRootMocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
@@ -4251,10 +4055,7 @@ describe("hosted Family plan", () => {
       role: "member",
       status: "active",
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(acceptHostedFamilyInvite({
       acceptedMemberId: "member_mom",
@@ -4301,10 +4102,7 @@ describe("hosted Family plan", () => {
   }) => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(invite);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(acceptHostedFamilyInvite({
       acceptedMemberId: "member_mom",
@@ -4331,10 +4129,7 @@ describe("hosted Family plan", () => {
         ...createPendingInvite(),
         targetEmailLookupKey: createHostedEmailLookupKey("other@example.com"),
       });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(acceptHostedFamilyInvite({
       acceptedMemberId: "member_mom",
@@ -4382,10 +4177,7 @@ describe("hosted Family plan", () => {
         ...transactionInvite,
         targetEmailLookupKey: matchingInvite.targetEmailLookupKey,
       });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(acceptHostedFamilyInvite({
       acceptedMemberId: "member_mom",
@@ -4416,10 +4208,7 @@ describe("hosted Family plan", () => {
           targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
         }),
       );
-      const prisma = tx as FamilyPlanTxMock & {
-        $transaction: ReturnType<typeof vi.fn>;
-      };
-      prisma.$transaction = vi.fn((callback) => callback(tx));
+      const prisma = createPrismaMock(tx);
       vi.setSystemTime(new Date("2026-06-18T11:59:59.000Z"));
       cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockImplementationOnce(
         async () => {
@@ -4457,10 +4246,7 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValue(createPendingInvite({
       targetEmailLookupKey: createHostedEmailLookupKey("mom@example.com"),
     }));
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(acceptHostedFamilyInvite({
       acceptedMemberId: "member_mom",
@@ -4672,51 +4458,26 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupPlanCapacity.findMany).not.toHaveBeenCalled();
   });
 
-  it("lets a concurrent billing bind win over automatic draft abandonment", async () => {
+  it.each([
+    {
+      authority: "subscription binding",
+      draft: { stripeSubscriptionId: "sub_race_winner" },
+    },
+    {
+      authority: "future effect claim",
+      draft: { stripeEffectClaimId: "opaque-future-draft-claim" },
+    },
+  ])("preserves an owner draft when a $authority wins before invite acceptance", async ({ draft }) => {
     const tx = createTxMock({
       activeMembershipCount: 1,
       pulseCapacity: 2,
     });
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(
-      createPendingInvite(),
-    );
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
     tx.hostedAccountGroupMembership.findFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(createNeverPaidFamilyDraftMembership());
     tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(
-      createNeverPaidFamilyDraftRecord({
-        stripeSubscriptionId: "sub_race_winner",
-      }),
-    );
-
-    await expect(acceptHostedFamilyInviteTx({
-      acceptedMemberId: "member_mom",
-      inviteCode: "invite_phone",
-      tx,
-    })).rejects.toMatchObject({
-      code: "HOSTED_FAMILY_DRAFT_BILLING_SYNCING",
-    });
-
-    expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
-    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
-    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
-  });
-
-  it("preserves a claim-only owner draft during invite acceptance", async () => {
-    const tx = createTxMock({
-      activeMembershipCount: 1,
-      pulseCapacity: 2,
-    });
-    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(
-      createPendingInvite(),
-    );
-    tx.hostedAccountGroupMembership.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(createNeverPaidFamilyDraftMembership());
-    tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(
-      createNeverPaidFamilyDraftRecord({
-        stripeEffectClaimId: "opaque-future-draft-claim",
-      }),
+      createNeverPaidFamilyDraftRecord(draft),
     );
 
     await expect(acceptHostedFamilyInviteTx({
@@ -4738,10 +4499,7 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroup.findUnique
       .mockResolvedValueOnce(draft)
       .mockResolvedValueOnce(draft);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(abandonHostedFamilyDraftForOwner({
       expectedDraftClaim: {
@@ -4764,10 +4522,7 @@ describe("hosted Family plan", () => {
         stripeEffectClaimId: "opaque-future-draft-claim",
       }),
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(abandonHostedFamilyDraftForOwner({
       expectedDraftClaim: {
@@ -4797,10 +4552,7 @@ describe("hosted Family plan", () => {
       .mockResolvedValueOnce(originalDraft)
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(replacementDraft);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const input = {
       expectedDraftClaim: {
         checkoutAttemptId: null,
@@ -4928,10 +4680,7 @@ describe("hosted Family plan", () => {
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
       checkout: { sessions: { retrieve } },
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(abandonHostedFamilyDraftForOwner({
       expectedDraftClaim: {
@@ -4974,10 +4723,7 @@ describe("hosted Family plan", () => {
         },
       },
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(abandonHostedFamilyDraftForOwner({
       expectedDraftClaim: {
@@ -5013,10 +4759,7 @@ describe("hosted Family plan", () => {
         },
       },
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(abandonHostedFamilyDraftForOwner({
       expectedDraftClaim: {
@@ -5063,10 +4806,7 @@ describe("hosted Family plan", () => {
         },
       },
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(abandonHostedFamilyDraftForOwner({
       expectedDraftClaim: {
@@ -5115,10 +4855,7 @@ describe("hosted Family plan", () => {
           },
         },
       });
-      const prisma = tx as FamilyPlanTxMock & {
-        $transaction: ReturnType<typeof vi.fn>;
-      };
-      prisma.$transaction = vi.fn((callback) => callback(tx));
+      const prisma = createPrismaMock(tx);
 
       await expect(abandonHostedFamilyDraftForOwner({
         expectedDraftClaim: {
@@ -5146,10 +4883,7 @@ describe("hosted Family plan", () => {
     });
     const tx = createTxMock();
     tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(staleDraft);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(abandonHostedFamilyDraftForOwner({
       expectedDraftClaim: {
@@ -5330,10 +5064,7 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(
       createNeverPaidFamilyDraftRecord(relations),
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(abandonHostedFamilyDraftForOwner({
       expectedDraftClaim: {
@@ -5388,10 +5119,7 @@ describe("hosted Family plan", () => {
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
       checkout: { sessions: { expire, retrieve } },
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(abandonHostedFamilyDraftForOwner({
       expectedDraftClaim: {
@@ -5421,10 +5149,7 @@ describe("hosted Family plan", () => {
       },
       billingStatus: HostedBillingStatus.active,
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(abandonHostedFamilyDraftForOwner({
       expectedDraftClaim: {
@@ -6097,85 +5822,6 @@ describe("hosted Family plan", () => {
     });
   });
 
-  it("replays the exact Family upgrade wake without another tier transition", async () => {
-    const tx = createTxMock();
-    const eventCreatedAt = new Date("2026-07-15T12:30:00.000Z");
-    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
-      {
-        id: "hbagm_owner",
-        memberId: "member_owner",
-        pendingPlanCode: null,
-        planCode: "pulse",
-        usagePlanTransitionAt: null,
-        usagePlanTransitionFromCode: null,
-        usagePlanTransitionKind: null,
-        usagePlanTransitionToCode: null,
-      },
-      {
-        id: "hbagm_mom",
-        memberId: "member_mom",
-        pendingPlanCode: null,
-        planCode: "edge",
-        usagePlanTransitionAt: eventCreatedAt,
-        usagePlanTransitionFromCode: "launch_monthly",
-        usagePlanTransitionKind: "plan_upgrade",
-        usagePlanTransitionToCode: "launch_edge_monthly",
-      },
-    ]);
-    tx.hostedAccountGroupPlanCapacity.findMany.mockResolvedValue([
-      { billedQuantity: 1, planCode: "pulse" },
-      { billedQuantity: 1, planCode: "edge" },
-    ]);
-
-    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
-      dispatchContext: { eventCreatedAt },
-      subscription: makeFamilyStripeSubscription({
-        edgeItemQuantity: 1,
-        itemQuantity: 1,
-      }),
-      tx,
-    })).resolves.toMatchObject({
-      groupId: "hbag_family",
-      runtimeRecheckMemberIds: ["member_mom"],
-    });
-
-    expect(tx.hostedAccountGroupMembership.updateMany).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ planCode: "edge" }),
-      }),
-    );
-  });
-
-  it("replays the exact active Family owner handoff after the direct binding is cleared", async () => {
-    const tx = createTxMock();
-    const eventCreatedAt = new Date("2026-07-15T12:30:00.000Z");
-    const billingRef = createBillingRefMock({
-      lastStripeEventCreatedAt: eventCreatedAt,
-    });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
-    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([]);
-    tx.hostedMemberBillingRef.findUnique.mockResolvedValue(null);
-
-    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
-      dispatchContext: { eventCreatedAt },
-      subscription: makeFamilyStripeSubscription(),
-      tx,
-    })).resolves.toMatchObject({
-      activations: [{ memberId: "member_owner" }],
-      groupId: "hbag_family",
-      runtimeRecheckMemberIds: [],
-    });
-
-    expect(tx.hostedMember.update).not.toHaveBeenCalled();
-    expect(tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
-    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
-      .toHaveBeenCalledWith(expect.objectContaining({
-        accessRestorationSourceEventId:
-          "family-subscription:sub_family:2026-07-15T12:30:00.000Z",
-        memberId: "member_owner",
-      }));
-  });
-
   it("replays the current active Family owner wake after a newer event", async () => {
     const tx = createTxMock();
     const eventCreatedAt = new Date("2026-07-15T12:30:00.000Z");
@@ -6308,12 +5954,7 @@ describe("hosted Family plan", () => {
       object: "invoice",
       subscription: "sub_family",
     });
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       group,
     });
@@ -6518,12 +6159,7 @@ describe("hosted Family plan", () => {
 
   it("releases direct and Family retry when terminal state wins before active handoff", async () => {
     const terminalEventCreatedAt = new Date("2026-06-18T12:30:00.000Z");
-    const group = {
-      billingStatus: HostedBillingStatus.incomplete,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.incomplete);
     const tx = createTxMock({ group });
     let currentBillingRef = createBillingRefMock({
       group,
@@ -6702,10 +6338,7 @@ describe("hosted Family plan", () => {
         },
       },
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(createHostedFamilyBillingCheckout({
       groupId: group.id,
@@ -7112,10 +6745,7 @@ describe("hosted Family plan", () => {
     tx.hostedThreadContainer.findUnique.mockResolvedValueOnce({
       memberId: "member_owner",
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(createHostedFamilyBillingCheckout({
       groupId: "hbag_family",
@@ -7132,22 +6762,14 @@ describe("hosted Family plan", () => {
   });
 
   it("creates a fresh Stripe Checkout Session for each billing start", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique
       .mockResolvedValueOnce(null);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const checkoutCreate = vi.fn().mockResolvedValue({
       id: "cs_test_familyRetry123",
       url: "https://checkout.stripe.com/c/pay/cs_test_familyRetry123",
@@ -7204,12 +6826,7 @@ describe("hosted Family plan", () => {
   });
 
   it("preserves an idempotent Family Checkout session when binding fails indeterminately", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
@@ -7299,12 +6916,7 @@ describe("hosted Family plan", () => {
   });
 
   it("preserves a completed subscription when a duplicate provider response binds late", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({ pulseCapacity: null, group });
     let billingRefState: ReturnType<typeof createBillingRefMock> | null = null;
     tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(
@@ -7330,10 +6942,7 @@ describe("hosted Family plan", () => {
         ? 1
         : 0,
     }));
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     let signalFirstCreate: (() => void) | undefined;
     const firstCreateStarted = new Promise<void>((resolve) => {
@@ -7446,12 +7055,7 @@ describe("hosted Family plan", () => {
   });
 
   it("expires a Family Checkout session when account deletion wins the owner fence", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
@@ -7508,12 +7112,7 @@ describe("hosted Family plan", () => {
   it.each(["group", "member"] as const)(
     "stops before Family Checkout provider entry when a %s claim wins after reservation",
     async (claimOwner) => {
-      const group = {
-        billingStatus: HostedBillingStatus.not_started,
-        id: "hbag_family",
-        ownerMemberId: "member_owner",
-        suspendedAt: null,
-      };
+      const group = createFamilyGroup(HostedBillingStatus.not_started);
       const tx = createTxMock({ pulseCapacity: null, group });
       tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
       const prisma = tx as FamilyPlanTxMock & {
@@ -7568,12 +7167,7 @@ describe("hosted Family plan", () => {
   it.each(["group", "member"] as const)(
     "expires the unbound Family Session when a %s claim wins at bind",
     async (claimOwner) => {
-      const group = {
-        billingStatus: HostedBillingStatus.not_started,
-        id: "hbag_family",
-        ownerMemberId: "member_owner",
-        suspendedAt: null,
-      };
+      const group = createFamilyGroup(HostedBillingStatus.not_started);
       const tx = createTxMock({ pulseCapacity: null, group });
       tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
       const prisma = tx as FamilyPlanTxMock & {
@@ -7652,22 +7246,14 @@ describe("hosted Family plan", () => {
   );
 
   it("expires a newly created Checkout when draft abandonment removes its claim before binding", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
     tx.hostedAccountGroupBillingRef.updateMany.mockResolvedValueOnce({ count: 0 });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const checkoutExpire = vi.fn().mockResolvedValue({
       customer: null,
       status: "expired",
@@ -7723,12 +7309,7 @@ describe("hosted Family plan", () => {
     currentPlanCode,
     currentPriceId,
   }) => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
@@ -7745,10 +7326,7 @@ describe("hosted Family plan", () => {
       currentBillingPlanCode: currentPlanCode,
     }));
 
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const checkoutCreate = vi.fn();
     const directSubscription = makeFamilyStripeSubscription({
       customerId: "cus_direct",
@@ -7902,12 +7480,7 @@ describe("hosted Family plan", () => {
   });
 
   it("normalizes metadata on an already-applied direct-to-Family retry without rebuilding the obsolete direct item swap", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     tx.hostedMember.findUnique.mockResolvedValue({
@@ -7917,10 +7490,7 @@ describe("hosted Family plan", () => {
     tx.hostedMemberBillingRef.findUnique.mockResolvedValue(
       createMemberBillingRefMock(),
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     const alreadyApplied = makeFamilyStripeSubscription({
       customerId: "cus_direct",
@@ -7981,12 +7551,7 @@ describe("hosted Family plan", () => {
   });
 
   it("distinguishes direct-paid Family actions by their complete provider effect", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     tx.hostedMember.findUnique.mockResolvedValue({
@@ -7996,10 +7561,7 @@ describe("hosted Family plan", () => {
     tx.hostedMemberBillingRef.findUnique.mockResolvedValue(
       createMemberBillingRefMock(),
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const fetchMock = stubFamilyStripeAlertEmailDelivery();
     const subscriptionRetrieve = vi.fn().mockRejectedValue(
       buildFamilyStripeConnectionErrorWithoutRequestId(),
@@ -8039,12 +7601,7 @@ describe("hosted Family plan", () => {
   });
 
   it("keeps unsupported direct paid subscription items as a non-retryable owner transfer error", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
@@ -8056,10 +7613,7 @@ describe("hosted Family plan", () => {
     });
     tx.hostedMemberBillingRef.findUnique.mockResolvedValue(createMemberBillingRefMock());
 
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const subscriptionUpdate = vi.fn();
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
       subscriptions: {
@@ -8093,29 +7647,15 @@ describe("hosted Family plan", () => {
   });
 
   it("reuses a pending Family checkout attempt for duplicate checkout starts", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
-    const tx = createTxMock({
-      pulseCapacity: null,
-      group,
-    });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
-      ...createBillingRefMock({
+    const { prisma } = createCheckoutFixture(
+      HostedBillingStatus.not_started,
+      {
         checkoutAttemptId: "hbfca_existing",
         checkoutCreatedAt: new Date("2026-07-28T11:00:00.000Z"),
         checkoutSeatCount: 2,
         stripeSubscriptionIdEncrypted: null,
-      }),
-      group,
-    });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+      },
+    );
     const checkoutCreate = vi.fn().mockResolvedValue({
       id: "cs_test_familyRetry123",
       url: "https://checkout.stripe.com/c/pay/cs_test_familyRetry123",
@@ -8149,12 +7689,7 @@ describe("hosted Family plan", () => {
   });
 
   it("replays a Session-before-bind attempt with provider-identical neutral parameters", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const billingRef = {
       ...createBillingRefMock({
         checkoutAttemptId: "hbfca_existing",
@@ -8168,10 +7703,7 @@ describe("hosted Family plan", () => {
     };
     const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const sessionId = "cs_test_familyNeutralReplay123";
     const metadata = {
       accountGroupId: group.id,
@@ -8242,18 +7774,10 @@ describe("hosted Family plan", () => {
   });
 
   it("does not create a new Family attempt when invite recovery loses its existing claim", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(createHostedFamilyBillingCheckout({
       allowDirectPaidUpgrade: false,
@@ -8271,12 +7795,7 @@ describe("hosted Family plan", () => {
   });
 
   it("does not replay a replacement Family attempt during invite recovery", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const replacementAttemptId = "hbfca_replacement";
     const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
@@ -8288,10 +7807,7 @@ describe("hosted Family plan", () => {
       }),
       group,
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const checkoutCreate = vi.fn().mockResolvedValue(
       makeFamilyStripeCheckoutSession({
         cancelUrl: "https://local.withmurph.ai:3443/settings",
@@ -8323,30 +7839,16 @@ describe("hosted Family plan", () => {
   });
 
   it("retains a freshly bound Family Session past the attempt cutoff", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.canceled,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
-    const tx = createTxMock({
-      pulseCapacity: null,
-      group,
-    });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
-      ...createBillingRefMock({
+    const { group, tx, prisma } = createCheckoutFixture(
+      HostedBillingStatus.canceled,
+      {
         checkoutAttemptId: "hbfca_existing",
         checkoutCreatedAt: new Date("2026-07-27T12:00:00.000Z"),
         checkoutSeatCount: 2,
         stripeCheckoutSessionIdEncrypted: "encrypted:cs_test_familyLate123",
         stripeSubscriptionIdEncrypted: null,
-      }),
-      group,
-    });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+      },
+    );
     const checkoutCreate = vi.fn().mockResolvedValue({
       id: "cs_test_familyRestart123",
       url: "https://checkout.stripe.com/c/pay/cs_test_familyRestart123",
@@ -8391,12 +7893,7 @@ describe("hosted Family plan", () => {
     async (claimOwner) => {
       const sessionId = "cs_test_familyResumeClaim123";
       const checkoutAttemptId = "hbfca_resume_claim";
-      const group = {
-        billingStatus: HostedBillingStatus.canceled,
-        id: "hbag_family",
-        ownerMemberId: "member_owner",
-        suspendedAt: null,
-      };
+      const group = createFamilyGroup(HostedBillingStatus.canceled);
       const billingRef = createBillingRefMock({
         checkoutAttemptId,
         checkoutCreatedAt: new Date("2026-07-27T12:00:00.000Z"),
@@ -8407,10 +7904,7 @@ describe("hosted Family plan", () => {
       });
       const tx = createTxMock({ pulseCapacity: null, group });
       tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
-      const prisma = tx as FamilyPlanTxMock & {
-        $transaction: ReturnType<typeof vi.fn>;
-      };
-      prisma.$transaction = vi.fn((callback) => callback(tx));
+      const prisma = createPrismaMock(tx);
       const openSession = makeFamilyStripeCheckoutSession({
         checkoutAttemptId,
         sessionId,
@@ -8467,12 +7961,7 @@ describe("hosted Family plan", () => {
   );
 
   it("applies a completed bound Family Session instead of replacing it", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.canceled,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.canceled);
     const billingRef = {
       ...createBillingRefMock({
         checkoutAttemptId: "hbfca_existing",
@@ -8489,10 +7978,7 @@ describe("hosted Family plan", () => {
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const checkoutCreate = vi.fn();
     const checkoutRetrieve = vi.fn().mockResolvedValue(
       makeFamilyStripeCheckoutSession({
@@ -8537,12 +8023,7 @@ describe("hosted Family plan", () => {
   });
 
   it("does not rebind a completed Family Session after terminal reconciliation releases it", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.canceled,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.canceled);
     let billingRef = {
       ...createBillingRefMock({
         checkoutAttemptId: "hbfca_existing",
@@ -8561,10 +8042,7 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(
       async () => billingRef,
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const checkoutCreate = vi.fn();
     const checkoutRetrieve = vi.fn().mockImplementation(async () => {
       billingRef = {
@@ -8646,10 +8124,7 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(
       async () => billingRef,
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const checkoutCreate = vi.fn();
     const checkoutRetrieve = vi.fn().mockImplementation(async () => {
       billingRef = {
@@ -8710,12 +8185,7 @@ describe("hosted Family plan", () => {
   });
 
   it("restarts only after Stripe proves the exact Family Session expired", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.canceled,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.canceled);
     let billingRef = {
       ...createBillingRefMock({
         checkoutAttemptId: "hbfca_expired",
@@ -8763,10 +8233,7 @@ describe("hosted Family plan", () => {
         return billingRef;
       },
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const checkoutCreate = vi.fn().mockResolvedValue({
       id: "cs_test_familyRestart123",
       url: "https://checkout.stripe.com/c/pay/cs_test_familyRestart123",
@@ -8817,12 +8284,7 @@ describe("hosted Family plan", () => {
   });
 
   it("rebinds a failed replacement Family checkout alert to the replacement attempt", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.canceled,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.canceled);
     let billingRef = {
       ...createBillingRefMock({
         checkoutAttemptId: "hbfca_expired",
@@ -8867,10 +8329,7 @@ describe("hosted Family plan", () => {
         return billingRef;
       },
     );
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const fetchMock = stubFamilyStripeAlertEmailDelivery();
     const checkoutCreate = vi.fn().mockRejectedValue(
       buildFamilyStripeConnectionErrorWithoutRequestId(),
@@ -8923,31 +8382,16 @@ describe("hosted Family plan", () => {
   });
 
   it("fails closed for a stale unbound Family attempt", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.canceled,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
-    const tx = createTxMock({
-      pulseCapacity: null,
-      group,
-    });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
-      ...createBillingRefMock({
+    const { group, tx, prisma } = createCheckoutFixture(
+      HostedBillingStatus.canceled,
+      {
         checkoutAttemptId: "hbfca_ambiguous",
         checkoutCreatedAt: new Date("2026-07-27T11:59:59.999Z"),
         checkoutSeatCount: 2,
-        group,
         stripeCheckoutSessionIdEncrypted: null,
         stripeSubscriptionIdEncrypted: null,
-      }),
-      group,
-    });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+      },
+    );
 
     await expect(createHostedFamilyBillingCheckout({
       groupId: group.id,
@@ -8967,30 +8411,16 @@ describe("hosted Family plan", () => {
   });
 
   it("keeps a delivered Family Checkout owned when Session retrieval fails", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
-    const tx = createTxMock({
-      pulseCapacity: null,
-      group,
-    });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
-      ...createBillingRefMock({
+    const { tx, prisma } = createCheckoutFixture(
+      HostedBillingStatus.not_started,
+      {
         checkoutAttemptId: "hbfca_existing",
         checkoutCreatedAt: new Date("2026-07-28T11:00:00.000Z"),
         checkoutSeatCount: 2,
         stripeCheckoutSessionIdEncrypted: "encrypted:cs_test_delivered123",
         stripeSubscriptionIdEncrypted: null,
-      }),
-      group,
-    });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+      },
+    );
     vi.stubEnv("RESEND_API_KEY", "re_test");
     vi.stubEnv(
       "HOSTED_LINQ_ALERT_EMAIL_FROM",
@@ -9047,12 +8477,7 @@ describe("hosted Family plan", () => {
   });
 
   it("does not start a second pending Family checkout for a different seat count", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
@@ -9066,10 +8491,7 @@ describe("hosted Family plan", () => {
       }),
       group,
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(createHostedFamilyBillingCheckout({
       groupId: "hbag_family",
@@ -9085,12 +8507,7 @@ describe("hosted Family plan", () => {
   });
 
   it("rejects Family checkout when an inactive owner group belongs to a sponsored member", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
@@ -9107,10 +8524,7 @@ describe("hosted Family plan", () => {
       role: "member",
       status: "active",
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(createHostedFamilyBillingCheckout({
       groupId: "hbag_family",
@@ -9125,21 +8539,13 @@ describe("hosted Family plan", () => {
   });
 
   it("requires the per-seat Family Stripe price env and ignores the old fixed price env", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     delete process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY;
     process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY = "price_fixed_family";
     clearHostedOnboardingEnvCache();
@@ -9285,12 +8691,7 @@ describe("hosted Family plan", () => {
   });
 
   it("does not bind checkout completion when the pending attempt does not match", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
@@ -9324,12 +8725,7 @@ describe("hosted Family plan", () => {
   });
 
   it("rejects a legacy checkout completion for a synthetic Family owner before billing writes", async () => {
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
@@ -9450,12 +8846,7 @@ describe("hosted Family plan", () => {
   it("validates an exact invite return on a current Family redirect", async () => {
     const sessionId = "cs_test_familyRedirectOpen123";
     const checkoutUrl = `https://checkout.stripe.com/c/pay/${sessionId}`;
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({ pulseCapacity: null, group });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
       ...createBillingRefMock({
@@ -9489,12 +8880,7 @@ describe("hosted Family plan", () => {
   it("routes a completed URL-less Family Session to verified success without clearing it", async () => {
     const sessionId = "cs_test_unavailable123";
     const checkoutCreatedAt = new Date("2026-07-28T12:00:00.000Z");
-    const group = {
-      billingStatus: HostedBillingStatus.canceled,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.canceled);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
@@ -9600,29 +8986,15 @@ describe("hosted Family plan", () => {
 
   it("clears only an exact Stripe-expired Family checkout session", async () => {
     const sessionId = "cs_test_expired123";
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
-    const tx = createTxMock({
-      pulseCapacity: null,
-      group,
-    });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue({
-      ...createBillingRefMock({
+    const { tx, prisma } = createCheckoutFixture(
+      HostedBillingStatus.not_started,
+      {
         checkoutAttemptId: "hbfca_current",
         checkoutSeatCount: 2,
         stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
         stripeSubscriptionIdEncrypted: null,
-      }),
-      group,
-    });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+      },
+    );
     const retrieve = vi.fn().mockResolvedValue(makeFamilyStripeCheckoutSession({
       checkoutAttemptId: "hbfca_current",
       sessionId,
@@ -9661,12 +9033,7 @@ describe("hosted Family plan", () => {
 
   it("preserves an open Family checkout claim when Stripe omits its URL", async () => {
     const sessionId = "cs_test_openMissingUrl123";
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
@@ -9709,12 +9076,7 @@ describe("hosted Family plan", () => {
 
   it("rejects a checkout redirect for a synthetic Family owner", async () => {
     const sessionId = "cs_test_syntheticowner123";
-    const group = {
-      billingStatus: HostedBillingStatus.not_started,
-      id: "hbag_family",
-      ownerMemberId: "member_owner",
-      suspendedAt: null,
-    };
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
       group,
@@ -9767,10 +9129,7 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroupBillingRef.findFirst.mockResolvedValue({
       stripeEffectClaimId: "opaque-future-family-checkout-claim",
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(createHostedFamilyBillingCheckout({
       groupId: "hbag_family",
@@ -9794,10 +9153,7 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
       { memberId: "member_owner", planCode: "pulse" },
     ]);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const stripeSubscriptionRetrieve = vi.fn().mockResolvedValue(
       makeFamilyStripeSubscription({ itemQuantity: 2 }),
     );
@@ -9852,10 +9208,7 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroupBillingRef.findFirst.mockResolvedValue({
       stripeEffectClaimId: "opaque-future-family-claim",
     });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(updateHostedFamilyPlanCapacities({
       groupId: "hbag_family",
@@ -9884,10 +9237,7 @@ describe("hosted Family plan", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ id: "hbagm_target" });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(updateHostedFamilyPlanCapacities({
       autoSeatInviteTarget: {
@@ -9944,10 +9294,7 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
       { memberId: "member_owner", planCode: "pulse" },
     ]);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const stripeSubscriptionRetrieve = vi.fn().mockResolvedValue(
       makeFamilyStripeSubscription({ itemQuantity: 2 }),
     );
@@ -9994,10 +9341,7 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
       { memberId: "member_owner", planCode: "pulse" },
     ]);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const providerError = buildFamilyStripeConnectionErrorWithoutRequestId();
     const stripeSubscriptionRetrieve = vi.fn().mockRejectedValue(providerError);
     const stripeSubscriptionUpdate = vi.fn();
@@ -10048,10 +9392,7 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
       { memberId: "member_owner", planCode: "pulse" },
     ]);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const stripeSubscriptionUpdate = vi.fn();
     runtimeMocks.requireHostedStripeApi.mockReturnValue({
       subscriptions: {
@@ -10087,10 +9428,7 @@ describe("hosted Family plan", () => {
       { billedQuantity: 2, planCode: "pulse" },
       { billedQuantity: 2, planCode: "edge" },
     ]);
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
     const stripeSubscriptionUpdate = vi.fn().mockResolvedValue(
       makeFamilyStripeSubscription({
         edgeItemQuantity: 1,
@@ -10224,10 +9562,7 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroupMembership.findFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ id: "hbagm_mom" });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const prisma = createPrismaMock(tx);
 
     await expect(updateHostedFamilyPlanCapacities({
       groupId: "hbag_family",
@@ -10335,64 +9670,32 @@ function createBillingRefMock(overrides: Partial<{
   stripeSubscriptionItemIdEncrypted: string | null;
   updatedAt: Date;
 }> = {}) {
-  const group = overrides.group ?? {
-    billingStatus: HostedBillingStatus.active,
-    id: "hbag_family",
-    ownerMemberId: "member_owner",
-    suspendedAt: null,
-  };
-
-  const resolveNullableOverride = <Key extends keyof typeof overrides>(
-    key: Key,
-    fallback: (typeof overrides)[Key],
-  ): (typeof overrides)[Key] | typeof fallback =>
-    Object.hasOwn(overrides, key) ? overrides[key] : fallback;
-
-  const stripeCheckoutSessionIdEncrypted = resolveNullableOverride(
-    "stripeCheckoutSessionIdEncrypted",
-    null,
-  );
-  const stripeSubscriptionIdEncrypted = resolveNullableOverride(
-    "stripeSubscriptionIdEncrypted",
-    "encrypted:sub_family",
-  );
+  const stripeCheckoutSessionIdEncrypted = overrides.stripeCheckoutSessionIdEncrypted ?? null;
+  const stripeSubscriptionIdEncrypted = Object.hasOwn(overrides, "stripeSubscriptionIdEncrypted")
+    ? overrides.stripeSubscriptionIdEncrypted
+    : "encrypted:sub_family";
   return {
-    checkoutAttemptId: resolveNullableOverride("checkoutAttemptId", null),
-    checkoutCreatedAt: resolveNullableOverride("checkoutCreatedAt", null),
-    checkoutSeatCount: resolveNullableOverride("checkoutSeatCount", null),
-    currentBillingPhase: resolveNullableOverride("currentBillingPhase", "paid"),
-    currentBillingPlanCode: resolveNullableOverride(
-      "currentBillingPlanCode",
-      "launch_family_monthly",
-    ),
-    currentPeriodEnd: resolveNullableOverride(
-      "currentPeriodEnd",
-      new Date("2026-07-18T12:00:00.000Z"),
-    ),
-    currentPeriodStart: resolveNullableOverride(
-      "currentPeriodStart",
-      new Date("2026-06-18T12:00:00.000Z"),
-    ),
-    group,
-    groupId: resolveNullableOverride("groupId", "hbag_family"),
-    lastStripeEventCreatedAt: resolveNullableOverride("lastStripeEventCreatedAt", null),
+    checkoutAttemptId: null,
+    checkoutCreatedAt: null,
+    checkoutSeatCount: null,
+    currentBillingPhase: "paid",
+    currentBillingPlanCode: "launch_family_monthly",
+    currentPeriodEnd: new Date("2026-07-18T12:00:00.000Z"),
+    currentPeriodStart: new Date("2026-06-18T12:00:00.000Z"),
+    groupId: "hbag_family",
+    lastStripeEventCreatedAt: null,
     stripeCheckoutSessionIdEncrypted,
-    stripeCheckoutSessionLookupKey:
-      createHostedStripeCheckoutSessionLookupKey(
-        stripeCheckoutSessionIdEncrypted?.replace(/^encrypted:/u, "") ?? null,
-      ),
-    stripeCustomerIdEncrypted: resolveNullableOverride(
-      "stripeCustomerIdEncrypted",
-      "encrypted:cus_family",
-    ),
-    stripeEffectClaimId: resolveNullableOverride("stripeEffectClaimId", null),
+    stripeCustomerIdEncrypted: "encrypted:cus_family",
+    stripeEffectClaimId: null,
     stripeSubscriptionIdEncrypted,
+    stripeSubscriptionItemIdEncrypted: "encrypted:si_family",
+    ...overrides,
+    group: overrides.group ?? createFamilyGroup(),
+    stripeCheckoutSessionLookupKey: createHostedStripeCheckoutSessionLookupKey(
+      stripeCheckoutSessionIdEncrypted?.replace(/^encrypted:/u, "") ?? null,
+    ),
     stripeSubscriptionLookupKey: createHostedStripeSubscriptionLookupKey(
       stripeSubscriptionIdEncrypted?.replace(/^encrypted:/u, "") ?? null,
-    ),
-    stripeSubscriptionItemIdEncrypted: resolveNullableOverride(
-      "stripeSubscriptionItemIdEncrypted",
-      "encrypted:si_family",
     ),
     updatedAt: overrides.updatedAt ?? new Date("2026-06-18T12:00:00.000Z"),
   };
@@ -10528,6 +9831,32 @@ function createNeverPaidFamilyDraftMembership(input: {
       suspendedAt: null,
     },
     role: "owner",
+  };
+}
+
+function createCheckoutFixture(
+  billingStatus: HostedBillingStatus,
+  billingRefOverrides: Parameters<typeof createBillingRefMock>[0],
+) {
+  const group = createFamilyGroup(billingStatus);
+  const tx = createTxMock({ pulseCapacity: null, group });
+  const billingRef = createBillingRefMock({ ...billingRefOverrides, group });
+  tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
+  return { group, prisma: createPrismaMock(tx), tx };
+}
+
+function createPrismaMock(tx: FamilyPlanTxMock) {
+  return Object.assign(tx, {
+    $transaction: vi.fn((callback) => callback(tx)),
+  });
+}
+
+function createFamilyGroup(billingStatus: HostedBillingStatus = HostedBillingStatus.active) {
+  return {
+    billingStatus,
+    id: "hbag_family",
+    ownerMemberId: "member_owner",
+    suspendedAt: null,
   };
 }
 
@@ -10999,15 +10328,6 @@ function createPendingInvite(overrides: Partial<{
     updatedAt: new Date("2026-06-18T12:00:00.000Z"),
     ...overrides,
   };
-}
-
-function restoreEnvValue(key: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[key];
-    return;
-  }
-
-  process.env[key] = value;
 }
 
 function clearHostedOnboardingEnvCache(): void {

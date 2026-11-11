@@ -443,9 +443,9 @@ export async function expireHostedUsageCreditCheckout(input: {
     if (providerState === "expired") {
       await lockHostedUsageCreditPurchaseReservationOwnersTx({
         beneficiaryMemberId: purchase.beneficiaryMemberId,
-        memberLockOrder: readHostedUsageCreditPurchaseMemberLockOrder({
+        memberLockOrder: await readHostedUsageCreditPurchaseMemberLockOrder({
           beneficiaryMemberId: purchase.beneficiaryMemberId,
-          checkoutSuccessUrl: purchase.checkoutSuccessUrl,
+          prisma: tx,
           payerMemberId: input.payerMemberId,
         }),
         payerMemberId: input.payerMemberId,

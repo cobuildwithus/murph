@@ -4,9 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   after: vi.fn<(task: () => Promise<void>) => void>(),
   constructEvent: vi.fn(),
-  prepareDuplicateEvent: vi.fn(),
   recordEvent: vi.fn(),
-  startWorkflow: vi.fn(),
 }));
 
 vi.mock("next/server", () => ({
@@ -26,15 +24,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
   recordHostedStripeEvent: mocks.recordEvent,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/stripe-webhook-reconciliation", () => ({
-  prepareDuplicateHostedStripeWebhookEventForWorkflowRetry:
-    mocks.prepareDuplicateEvent,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/stripe-webhook-workflow-start", () => ({
-  startHostedStripeWebhookReconciliationWorkflow: mocks.startWorkflow,
 }));
 
 import {
@@ -102,12 +91,10 @@ describe("hosted Stripe alert integration", () => {
     vi.unstubAllGlobals();
     stubAlertEnvironment();
     mocks.constructEvent.mockReturnValue(makeFailureEvent());
-    mocks.prepareDuplicateEvent.mockResolvedValue(false);
     mocks.recordEvent.mockResolvedValue({
       duplicate: false,
       type: "payment_intent.payment_failed",
     });
-    mocks.startWorkflow.mockResolvedValue({ runId: "run_123" });
   });
 
   it("delivers a failed checkout operation through the real Resend transport", async () => {
@@ -182,7 +169,6 @@ describe("hosted Stripe alert integration", () => {
       duplicate: true,
       type: "payment_intent.payment_failed",
     });
-    mocks.prepareDuplicateEvent.mockResolvedValueOnce(true);
     await expect(handleHostedStripeWebhook({
       prisma: {} as never,
       rawBody: "{}",

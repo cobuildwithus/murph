@@ -278,9 +278,9 @@ export async function reconcileHostedUsageCreditCheckoutEventTx(input: {
     }
     await lockHostedUsageCreditPurchaseReservationOwnersTx({
       beneficiaryMemberId: input.purchase.beneficiaryMemberId,
-      memberLockOrder: readHostedUsageCreditPurchaseMemberLockOrder({
+      memberLockOrder: await readHostedUsageCreditPurchaseMemberLockOrder({
         beneficiaryMemberId: input.purchase.beneficiaryMemberId,
-        checkoutSuccessUrl: input.purchase.checkoutSuccessUrl,
+        prisma: input.tx,
         payerMemberId: requireHostedUsageCreditPurchasePayerMemberId(
           input.purchase,
         ),

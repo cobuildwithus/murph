@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   drainHostedGroupJoinOutreachSweep: vi.fn(),
   getPrisma: vi.fn(),
   drainGameChatLifecycle: vi.fn(),
-  reconcileDueHostedStripeEvents: vi.fn(),
+  dispatchDueHostedStripeEvents: vi.fn(),
   requireVercelCronRequest: vi.fn(),
 }));
 
@@ -31,7 +31,7 @@ vi.mock("@/src/lib/hosted-groups/group-sponsorship-refill-dispatch", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
-  reconcileDueHostedStripeEvents: mocks.reconcileDueHostedStripeEvents,
+  dispatchDueHostedStripeEvents: mocks.dispatchDueHostedStripeEvents,
 }));
 
 vi.mock("@/src/lib/game/chat-lifecycle", () => ({ drainGameChatLifecycle: mocks.drainGameChatLifecycle }));
@@ -179,7 +179,7 @@ describe("hosted onboarding Stripe cron route", () => {
       results: [],
       sent: 0,
     });
-    mocks.reconcileDueHostedStripeEvents.mockResolvedValue(["evt_paid", "evt_trial"]);
+    mocks.dispatchDueHostedStripeEvents.mockResolvedValue(["evt_paid", "evt_trial"]);
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
   });
 
@@ -201,7 +201,7 @@ describe("hosted onboarding Stripe cron route", () => {
     expect(mocks.dispatchHostedGroupSponsorshipRefills).toHaveBeenCalledWith({
       prisma: { label: "test-prisma" },
     });
-    expect(mocks.reconcileDueHostedStripeEvents).toHaveBeenCalledWith({
+    expect(mocks.dispatchDueHostedStripeEvents).toHaveBeenCalledWith({
       prisma: { label: "test-prisma" },
     });
     expect(
@@ -210,7 +210,7 @@ describe("hosted onboarding Stripe cron route", () => {
     expect(
       mocks.requireVercelCronRequest.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.reconcileDueHostedStripeEvents.mock.invocationCallOrder[0] ??
+      mocks.dispatchDueHostedStripeEvents.mock.invocationCallOrder[0] ??
         Number.POSITIVE_INFINITY,
     );
     await expect(response.json()).resolves.toEqual({
@@ -221,7 +221,7 @@ describe("hosted onboarding Stripe cron route", () => {
         dispatched: 0,
         recoveryRequired: 0,
       },
-      reconciledEventIds: ["evt_paid", "evt_trial"],
+      dispatchedStripeEventIds: ["evt_paid", "evt_trial"],
     });
   });
 
@@ -236,7 +236,7 @@ describe("hosted onboarding Stripe cron route", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       gameChatLifecycle: { kind: "failed" },
-      reconciledEventIds: ["evt_paid", "evt_trial"],
+      dispatchedStripeEventIds: ["evt_paid", "evt_trial"],
     });
     expect(info).toHaveBeenCalledWith(expect.any(String), {
       diagnostic: "game.chat-lifecycle-drain",
@@ -271,7 +271,7 @@ describe("hosted onboarding Stripe cron route", () => {
         dispatched: 0,
         recoveryRequired: 0,
       },
-      reconciledEventIds: ["evt_paid", "evt_trial"],
+      dispatchedStripeEventIds: ["evt_paid", "evt_trial"],
     });
   });
 
@@ -293,7 +293,7 @@ describe("hosted onboarding Stripe cron route", () => {
     expect(mocks.getPrisma).not.toHaveBeenCalled();
     expect(mocks.dispatchHostedGroupSponsorshipRefills).not.toHaveBeenCalled();
     expect(mocks.drainHostedGroupJoinOutreachSweep).not.toHaveBeenCalled();
-    expect(mocks.reconcileDueHostedStripeEvents).not.toHaveBeenCalled();
+    expect(mocks.dispatchDueHostedStripeEvents).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "VERCEL_CRON_UNAUTHORIZED",

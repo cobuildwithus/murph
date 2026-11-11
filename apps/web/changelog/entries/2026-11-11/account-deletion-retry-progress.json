@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 100,
+  "item": {
+    "id": "account-deletion-retry-progress",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Account deletion keeps its progress",
+    "summary": "Account deletion keeps completed cleanup progress when a temporary service error requires another attempt.",
+    "details": "Retries resume saved progress and continue working through the remaining cleanup.",
+    "relevanceTags": [
+      "account",
+      "privacy"
+    ],
+    "sourcePullRequests": [
+      4864
+    ]
+  }
+}
