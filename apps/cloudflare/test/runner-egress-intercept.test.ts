@@ -1,3 +1,4 @@
+import { mockRecapMediaAdmission } from "./helpers/recap-media-admission.ts";
 import { createCloudflareHostedProviderFetch } from "../src/runtime-platform/provider-fetch.ts";
 import type { TestProviderContext } from "./postgres-owner-fixtures.ts";
 import { createPostgresTestOwner } from "./postgres-owner-fixtures.ts";
@@ -371,6 +372,7 @@ const interceptControl = new WeakMap<Readonly<Record<string, unknown>>, {
   input: Parameters<typeof createInterceptEnv>[0]; owner: HostedRuntimeOwnerSnapshot | null; revoked: boolean;
 }>();
 beforeEach(() => {
+  mockRecapMediaAdmission();
   vi.spyOn(runtimeOwnerClient, "commandHostedRuntimeOwner").mockImplementation(async ({ source, userId, command }) => {
     const state = interceptControl.get(source);
     if (!state) throw new Error("Missing synthetic canonical owner.");
@@ -1475,6 +1477,158 @@ describe("hostedRunnerIntercept", () => {
     const upstream = findFetchCall(fetchMock, "api.openai.com");
     expect(Boolean(upstream)).toBe(status === 200);
     expect(fetchMock.mock.calls.filter(([target]) => new URL(readFetchTargetUrl(target)).pathname !== "/api/internal/hosted-runtime/log")).toHaveLength(Number(image) + Number(status === 200));
+  });
+
+  it.each([
+    { path: '/v1/images/generations', method: 'POST', body: { model: 'gpt-image-2.6-flare', prompt: 'Synthetic stage', size: '1024x1024', quality: 'low', output_format: 'jpeg' }, status: 403 },
+    { path: '/v1/images/edits', method: 'POST', body: { model: 'gpt-image-2.6-flare', prompt: 'Synthetic stage', size: '1024x1024', quality: 'low', output_format: 'jpeg' }, status: 403 },
+    { path: '/v1/responses', method: 'POST', body: { model: 'gpt-6.1-sol', input: 'Draw a stage', tools: [{ type: 'image_generation' }] }, status: 403 },
+  ])('rejects an invalid recap reservation for $method $path', async ({ path, method, body, status }) => {
+    const admission = mockRecapMediaAdmission({ scoped: true, allowed: false });
+    const upstream = vi.fn<typeof fetch>(async () => new Response('must not call provider'));
+    vi.stubGlobal('fetch', upstream);
+    const response = await hostedRunnerIntercept(new Request(`https://api.openai.com${path}`, {
+      method, headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        'content-type': 'application/json', 'x-murph-recap-reservation': 'c'.repeat(64) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    }), createInterceptEnv({ OPENAI_API_KEY: 'synthetic-key', validateRuntimeWriteFence: async () => true }),
+    { className: 'RunnerContainer', containerId: 'member_123--v-version_1' });
+    expect(response.status).toBe(status);
+    expect(admission).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ token: 'c'.repeat(64) }), boundUserId: 'member_123' }));
+    expect(findFetchCall(upstream, 'api.openai.com')).toBeUndefined();
+  });
+
+  it('runs file-mode music from generated host credentials through the real SDK and Worker to a validated receipt', async () => {
+    const { mkdtemp, readFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const path = await import('node:path');
+    const { buildHostedRunnerContainerEnv } = await import('../src/hosted-env-policy.ts');
+    const { createRecapShowLiveProviders, createRecapMediaRuntime, materializeRecapWorkspace, recapRunAdmissionSchema, executeGenerateSongTool } = await import('@murphai/assistant-engine/recap-show-testkit');
+    const vault = await mkdtemp(path.join(tmpdir(), 'recap-song-egress-'));
+    const song = await readFile(new URL('../../../fixtures/generated-audio/recap-synthetic-20s.mp3', import.meta.url));
+    const upstream = vi.fn<typeof fetch>(async target => {
+      const request = new Request(target);
+      if (new URL(request.url).hostname !== 'api.elevenlabs.io') return Response.json({});
+      expect(request.headers.get('xi-api-key')).toBe('synthetic-worker-key');
+      expect(request.headers.has('x-murph-recap-reservation')).toBe(false);
+      expect(await request.json()).toMatchObject({ model_id: 'music_v2', music_length_ms: 20_000 });
+      return new Response(song, { headers: { 'content-type': 'audio/mpeg' } });
+    });
+    vi.stubGlobal('fetch', upstream);
+    mockRecapMediaAdmission({ scoped: true, allowed: true });
+    const workerEnv = createInterceptEnv({ ELEVENLABS_API_KEY: 'synthetic-worker-key', validateRuntimeWriteFence: async () => true });
+    const runnerEnv = buildHostedRunnerContainerEnv({ HOSTED_ASSISTANT_PROVIDER: 'openai', ELEVENLABS_API_KEY: 'synthetic-worker-key' });
+    expect(runnerEnv.ELEVENLABS_API_KEY).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
+    const providerFetch = createCloudflareHostedProviderFetch('member_123', async (url, init) => {
+      return hostedRunnerIntercept(new Request(url, init), workerEnv, { className: 'RunnerContainer', containerId: RUNNER_CONTAINER_NAME });
+    }, {});
+    const players = [{ name: 'Player A', memberId: 'synthetic-a' }, { name: 'Player B', memberId: 'synthetic-b' }];
+    const fixture = await createRecapShowLiveProviders({ game: {}, players, entries: [], result: players.map(player => ({ ...player, score: 1 })), chat: [], mediaFetch: providerFetch });
+    const scope = { gameId: 'synthetic', eventId: 'game-recap:synthetic', pairFingerprint: 'a'.repeat(32), show: true as const };
+    const tool = { request: fixture.control };
+    try {
+      const workspace = await materializeRecapWorkspace({ ...scope, vault, sessionId: 'synthetic', material: fixture.material, lore: '', tool });
+      const admitted = await tool.request({ action: 'read_game', origin: { kind: 'game_recap', gameId: scope.gameId, eventId: scope.eventId }, recapRead: { kind: 'admit', runId: crypto.randomUUID() } });
+      const admission = recapRunAdmissionSchema.parse('recapGame' in admitted.result ? admitted.result.recapGame : null);
+      const args = { output: 'file' as const, operationId: 'theme', durationSeconds: 20, instrumental: false, prompt: 'A synthetic laundry theme song.' };
+      const fileRuntime = createRecapMediaRuntime({ env: runnerEnv, vault, workspace, scope, tool, admission, fetchImpl: fixture.providerFetch, request: { kind: 'song', args } });
+      const result = await executeGenerateSongTool({ env: {}, args, fileRuntime });
+      expect(result).toMatchObject({ rpcSuccess: true });
+      expect(result.responseMedia).toBeUndefined();
+      expect(result.rpcText).not.toContain('synthetic-worker-key');
+      const receipt = JSON.parse(result.rpcText);
+      expect(receipt).toMatchObject({ mediaType: 'audio/mpeg', durationMs: expect.any(Number) });
+      expect(await readFile(path.join(vault, receipt.path))).toEqual(song);
+      expect(findFetchCall(upstream, 'api.elevenlabs.io')).toBeDefined();
+    } finally { await rm(vault, { recursive: true, force: true }); }
+  });
+
+  it.each([true, false])('uses scoped recap admission as image spending authority (scoped=%s)', async scoped => {
+    const admission = mockRecapMediaAdmission({ scoped, allowed: true });
+    const upstream = vi.fn<typeof fetch>(async target => new URL(readFetchTargetUrl(target)).hostname === 'api.openai.com'
+      ? Response.json({ data: [{ b64_json: 'synthetic-image' }] })
+      : Response.json({ allowed: false, reason: 'subscription_required' }));
+    vi.stubGlobal('fetch', upstream);
+    const response = await hostedRunnerIntercept(new Request('https://api.openai.com/v1/images/generations', {
+      method: 'POST', headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        'content-type': 'application/json', 'x-murph-recap-reservation': 'c'.repeat(64) },
+      body: JSON.stringify({ model: 'gpt-image-2.6-flare', prompt: 'A synthetic stage.', quality: 'high', size: '1024x1536', output_format: 'jpeg' }),
+    }), createInterceptEnv({ OPENAI_API_KEY: 'synthetic-key', validateRuntimeWriteFence: async () => true }),
+    { className: 'RunnerContainer', containerId: 'member_123--v-version_1' });
+    expect(await response.clone().text()).not.toContain('MURPH_IMAGE_SUBSCRIPTION_REQUIRED');
+    expect(response.status).toBe(scoped ? 200 : 403);
+    expect(Boolean(findFetchCall(upstream, 'api.openai.com'))).toBe(scoped);
+    expect(admission.mock.calls.filter(([input]) => input.route.path === '/api/internal/hosted-execution/recap-media/access')).toHaveLength(1);
+  });
+
+  it.each(['image', 'song'] as const)('validates the actual reserved %s callback with the Web schema', async kind => {
+    const token = 'c'.repeat(64);
+    let consumed = 0;
+    const admission = mockRecapMediaAdmission((body: import('@murphai/contracts/recap-admission').RecapMediaAccessRequest) => {
+      expect(body).toMatchObject({ attemptId: 'attempt_1', generation: '7', opaque: false, nativeImage: false, token });
+      expect(body.providerRequest).toMatchObject({ kind });
+      expect(body.providerRequest?.requestHash).toMatch(/^[a-f0-9]{64}$/u);
+      consumed++;
+      return { scoped: true, allowed: true };
+    });
+    const host = kind === 'song' ? 'api.elevenlabs.io' : 'api.openai.com';
+    const upstream = vi.fn<typeof fetch>(async target => new URL(readFetchTargetUrl(target)).hostname === host
+      ? new Response('synthetic media') : Response.json({ allowed: true, reason: 'allowed' }));
+    vi.stubGlobal('fetch', upstream);
+    const response = await hostedRunnerIntercept(new Request(kind === 'song'
+      ? 'https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192' : 'https://api.openai.com/v1/images/generations', {
+      method: 'POST', headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, 'content-type': 'application/json',
+        authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`, 'xi-api-key': HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        'x-murph-recap-reservation': token },
+      body: JSON.stringify(kind === 'song'
+        ? { model_id: 'music_v2', prompt: 'A synthetic theme song.', music_length_ms: 20_000, force_instrumental: false }
+        : { model: 'gpt-image-2.6-flare', prompt: 'A synthetic portrait scene.', quality: 'high', size: '1024x1536', output_format: 'jpeg' }),
+    }), createInterceptEnv({ OPENAI_API_KEY: 'synthetic-key', ELEVENLABS_API_KEY: 'synthetic-key', validateRuntimeWriteFence: async () => true }),
+    { className: 'RunnerContainer', containerId: 'member_123--v-version_1' });
+    expect(response.status).toBe(200);
+    expect(admission.mock.calls.filter(([input]) => input.route.path === '/api/internal/hosted-execution/recap-media/access')).toHaveLength(1);
+    expect(consumed).toBe(1);
+    expect(findFetchCall(upstream, host)).toBeDefined();
+  });
+
+  it.each([
+    { host: 'api.openai.com', path: '/v1/images/generations', body: { model: 'gpt-image-2.6-flare', prompt: 'Synthetic stage' } },
+    { host: 'api.openai.com', path: '/v1/images/edits', body: { model: 'gpt-image-2.6-flare', prompt: 'Synthetic edit' } },
+    { host: 'api.openai.com', path: '/v1/responses', body: { model: 'gpt-6.1-sol', input: 'Synthetic scene', tools: [{ type: 'image_generation' }] } },
+    { host: 'api.elevenlabs.io', path: '/v1/music?output_format=mp3_48000_192', body: { model_id: 'music_v2', prompt: 'Synthetic song', music_length_ms: 20_000, force_instrumental: false } },
+    { host: 'api.elevenlabs.io', path: '/v1/text-to-speech/voice_123?output_format=mp3_44100_128', body: { model_id: 'eleven_multilingual_v2', text: 'Synthetic memo.' } },
+  ].flatMap(route => [200, 401, 404, 500, 504].map(status => ({ ...route, status }))))('passes unscoped $path status $status through with zero admission calls', async ({ host, path, body, status }) => {
+    const admission = mockRecapMediaAdmission(new Error('Synthetic admission outage'));
+    const upstream = vi.fn<typeof fetch>(async target => new URL(readFetchTargetUrl(target)).hostname === host
+      ? new Response('synthetic upstream body', { status, headers: { 'x-synthetic-provider': 'unchanged' } })
+      : Response.json({ allowed: true, reason: 'allowed' }));
+    vi.stubGlobal('fetch', upstream);
+    const response = await hostedRunnerIntercept(new Request(`https://${host}${path}`, {
+      method: 'POST', headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, 'content-type': 'application/json',
+        authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`, 'xi-api-key': HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL },
+      body: JSON.stringify(body),
+    }), createInterceptEnv({ OPENAI_API_KEY: 'synthetic-key', ELEVENLABS_API_KEY: 'synthetic-key', validateRuntimeWriteFence: async () => true }),
+    { className: 'RunnerContainer', containerId: 'member_123--v-version_1' });
+    expect(response.status).toBe(status);
+    expect(await response.text()).toBe('synthetic upstream body');
+    expect(response.headers.get('x-synthetic-provider')).toBe('unchanged');
+    expect(admission.mock.calls.filter(([input]) => input.route.path === '/api/internal/hosted-execution/recap-media/access')).toHaveLength(0);
+  });
+
+  it.each(['POST', 'GET'])('forwards ordinary Responses %s with zero recap admission calls even when admission is unavailable', async method => {
+    const admission = mockRecapMediaAdmission(new Error('Synthetic admission outage'));
+    const upstream = vi.fn<typeof fetch>(async request => new URL(readFetchTargetUrl(request)).hostname === 'api.openai.com'
+      ? new Response('synthetic model response') : Response.json({ allowed: true, reason: 'allowed' }));
+    vi.stubGlobal('fetch', upstream);
+    const response = await hostedRunnerIntercept(new Request('https://api.openai.com/v1/responses', {
+      method, headers: { ...BOUND_USER_WRITE_FENCE_HEADERS, authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        'content-type': 'application/json', ...(method === 'GET' ? OPENAI_WEBSOCKET_HANDSHAKE_HEADERS : {}) },
+      ...(method === 'POST' ? { body: JSON.stringify({ model: 'gpt-6.1-sol', input: 'Synthetic ordinary reply', tools: [] }) } : {}),
+    }), createInterceptEnv({ OPENAI_API_KEY: 'synthetic-key', validateRuntimeWriteFence: async () => true }),
+    { className: 'RunnerContainer', containerId: 'member_123--v-version_1' });
+    expect(response.status).toBe(200);
+    expect(findFetchCall(upstream, 'api.openai.com')).toBeDefined();
+    expect(admission.mock.calls.filter(([input]) => input.route.path === '/api/internal/hosted-execution/recap-media/access')).toHaveLength(0);
   });
 
   it.each(["generations", "edits"])("denies image %s before OpenAI when the subscription gate rejects", async (operation) => {

@@ -10,7 +10,7 @@ import { startHostedDirectRuntimeWakeBestEffort } from "@/src/lib/hosted-executi
 
 const input = { source: "linq" as const, userId: "member-test" };
 const liveOwner = {
-  userId: input.userId, migrationPhase: "postgres", generation: 7n,
+  userId: input.userId, generation: 7n,
   attemptId: "runtime-attempt-test", phase: "active", processingMode: "default",
   allocationId: "standby-claim-test", runnerContainerName: "synthetic-runner",
   workspaceVersion: 0n, platformAiUsageAllowed: true,

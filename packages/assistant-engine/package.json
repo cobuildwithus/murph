@@ -102,6 +102,10 @@
     "./outbound-channel": {
       "types": "./dist/outbound-channel.d.ts",
       "default": "./dist/outbound-channel.js"
+    },
+    "./recap-show-testkit": {
+      "types": "./dist/recap-show-testkit.d.ts",
+      "default": "./dist/recap-show-testkit.js"
     }
   },
   "files": [
@@ -128,7 +132,8 @@
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@murphai/vault-usecases": "workspace:*",
-    "openai": "6.45.0"
+    "openai": "6.45.0",
+    "sharp": "0.35.5"
   },
   "engines": {
     "node": ">=24.22.1"

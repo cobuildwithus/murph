@@ -17,6 +17,7 @@ import {
 } from "./route-handlers/telegram-send.ts";
 import { gameImageRoutes } from "./route-handlers/game-images.ts";
 import { gameMediaRoutes } from "./route-handlers/game-media.ts";
+import { recapMediaRoutes } from "./route-handlers/recap-media.ts";
 import { mealThumbnailRoutes } from "./route-handlers/meal-thumbnail.ts";
 import { mealPhotoRoutes } from "./route-handlers/meal-photo-stage.ts";
 import {
@@ -33,6 +34,7 @@ export const workerInternalRoutes = [
   ...mealPhotoRoutes,
   ...mealThumbnailRoutes,
   ...gameMediaRoutes,
+  ...recapMediaRoutes,
   ...gameImageRoutes,
   ...browserVaultRoutes,
   ...userStatusRoutes,

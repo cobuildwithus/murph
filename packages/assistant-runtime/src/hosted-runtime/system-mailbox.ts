@@ -1063,22 +1063,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   nextWakeReason?: string | null;
   recorded: number;
 }> {
-  if (!input.item.postCheckpointRecord) {
-    await removeHostedSystemMailboxPendingItemIfCurrent({
-      item: input.item,
-      vaultRoot: input.vaultRoot,
-    });
-    const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({
-      assistantExecutionBlocked: input.assistantExecutionBlocked,
-      vaultRoot: input.vaultRoot,
-    });
-    return {
-      failed: 0,
-      nextWakeAt: nextWake.at,
-      ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
-      recorded: 0,
-    };
-  }
+  if (!input.item.postCheckpointRecord) return completeSystemMailboxItemWithoutRecord(input);
 
   try {
     const recordResult = await recordHostedSystemMailboxPostCheckpointRecord({
@@ -1089,6 +1074,8 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       vaultShareProjectionResult: input.vaultShareProjectionResult,
       vaultRoot: input.vaultRoot,
     });
+    const resumed = await resumeRecapAfterCheckpoint(input, recordResult.recorded);
+    if (resumed) return resumed;
     const completion = await finalizeHostedDeviceSyncMailboxAfterCheckpoint({
       acceptedInCurrentAdmission:
         input.deviceSyncCompletionAcceptedInCurrentAdmission === true,
@@ -1745,6 +1732,22 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
   vaultRoot: string | null;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
+  if (input.record.kind !== "game.recap-lore-checkpointed") return recordHostedSystemMailboxPostCheckpointRecordLegacy({ ...input, record: input.record });
+  const port = input.runtime.platform.groupToolPort;
+  if (!port) throw new Error("Recap checkpoint control is unavailable.");
+  const acknowledged = await port.request({ action: "read_game", origin: { kind: "game_recap", gameId: input.record.gameId, eventId: input.record.eventId }, recapRead: { kind: "lore_checkpointed", generationIds: input.record.generationIds } }, { signal: input.signal });
+  if (acknowledged.result.status !== "ok") throw new Error("Recap lore checkpoint was not acknowledged.");
+  return { newerRevisionPending: false, nextWakeAt: null, recorded: 1, stillDirty: false };
+}
+
+async function recordHostedSystemMailboxPostCheckpointRecordLegacy(input: {
+  operatorHomeRoot: string | null;
+  record: Exclude<HostedSystemMailboxPostCheckpointRecord, { kind: "game.recap-lore-checkpointed" }>;
+  runtime: HostedSystemMailboxRuntime;
+  signal?: AbortSignal | null;
+  vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
+  vaultRoot: string | null;
+}): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
   switch (input.record.kind) {
     case "vault-share.projection": {
       if (!input.vaultRoot) {
@@ -2084,4 +2087,31 @@ async function writeHostedDeviceSyncDirtyAckPersistenceFailureLog(input: {
     },
     platform: input.runtime.platform,
   });
+}
+
+async function completeSystemMailboxItemWithoutRecord(input: Parameters<typeof recordHostedSystemMailboxItemAfterCheckpoint>[0]) {
+    await removeHostedSystemMailboxPendingItemIfCurrent({
+      item: input.item,
+      vaultRoot: input.vaultRoot,
+    });
+    const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({
+      assistantExecutionBlocked: input.assistantExecutionBlocked,
+      vaultRoot: input.vaultRoot,
+    });
+    return {
+      failed: 0,
+      nextWakeAt: nextWake.at,
+      ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
+      recorded: 0,
+    };
+}
+
+async function resumeRecapAfterCheckpoint(input: Parameters<typeof recordHostedSystemMailboxItemAfterCheckpoint>[0], recorded: number) {
+  if (input.item.postCheckpointRecord?.kind !== "game.recap-lore-checkpointed" || !input.item.postCheckpointRecord.resume) return null;
+      const nextAttemptAt = new Date().toISOString();
+      await updateHostedSystemMailboxState(input.vaultRoot, state => ({ ...state,
+        pending: state.pending.map(item => hostedSystemMailboxPendingItemsMatchForClaim(item, input.item)
+          ? { ...item, status: "pending" as const, postCheckpointRecord: null, nextAttemptAt, lastErrorCode: null, lastErrorMessage: null } : item) }));
+      const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({ assistantExecutionBlocked: input.assistantExecutionBlocked, vaultRoot: input.vaultRoot });
+      return { failed: 0, nextWakeAt: nextWake.at, ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}), recorded: recorded };
 }

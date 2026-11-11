@@ -34,7 +34,7 @@ describe.skipIf(!enabled)("Postgres ownership after account deletion", () => {
 
   it("keeps retained ownership unchanged when concurrent claims target a deleted member", async () => {
     const userId = deletedMember();
-    await prisma.hostedRuntimeOwner.create({ data: { userId, migrationPhase: "postgres", generation: 9n } });
+    await prisma.hostedRuntimeOwner.create({ data: { userId, generation: 9n } });
     const results = await Promise.all(Array.from({ length: 2 }, () =>
       claimHostedRuntime({ prisma, userId, processingMode: "default" })));
     expect(results).toEqual(Array.from({ length: 2 }, () => ({ cutover: "postgres", status: "blocked", reason: "admission" })));
@@ -43,7 +43,7 @@ describe.skipIf(!enabled)("Postgres ownership after account deletion", () => {
 
   it("bounds cleanup for retained resources without a canonical member", async () => {
     const userId = deletedMember();
-    await prisma.hostedRuntimeOwner.create({ data: { userId, migrationPhase: "postgres" } });
+    await prisma.hostedRuntimeOwner.create({ data: { userId } });
     await prisma.hostedRuntimeOrphan.createMany({ data: Array.from({ length: 60 }, (_, i) => ({
       userId, kind: "snapshot", resourceId: `synthetic_ready_${i}`, objectKey: `synthetic_ready_${i}`,
       createdAt: new Date("2025-01-01T00:00:00Z"), cleanupAt: new Date("2025-01-01T00:00:00Z"),

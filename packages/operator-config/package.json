@@ -153,6 +153,11 @@
       "types": "./dist/workout-action-binding.d.ts",
       "import": "./dist/workout-action-binding.js",
       "default": "./dist/workout-action-binding.js"
+    },
+    "./generated-audio": {
+      "types": "./dist/generated-audio.d.ts",
+      "import": "./dist/generated-audio.js",
+      "default": "./dist/generated-audio.js"
     }
   },
   "files": [

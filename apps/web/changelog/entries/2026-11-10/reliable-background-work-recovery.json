@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-10",
+  "order": 100,
+  "item": {
+    "id": "reliable-background-work-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable background-work recovery",
+    "summary": "Murph more reliably resumes and finishes cleanup for work that began before an infrastructure update.",
+    "details": "Cleanup still waits for confirmation that affected work has stopped.",
+    "relevanceTags": [
+      "reliability",
+      "privacy"
+    ],
+    "sourcePullRequests": [
+      4826
+    ]
+  }
+}

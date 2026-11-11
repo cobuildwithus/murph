@@ -57,6 +57,8 @@ describe("cloudflare hosted control routes", () => {
       ["gameMediaRead", "game-media/read"],
       ["gameMediaStage", "game-media/stage"],
       ["gameMediaStat", "game-media/stat"],
+      ["recapMediaStage", "recap-media/stage"],
+      ["recapMediaRead", "recap-media/read"],
     ] as const) {
       const built = buildCloudflareHostedControlGameMediaPath(routeName, "user/a b");
       expect(built).toBe(`/internal/users/user%2Fa%20b/${suffix}`);
@@ -144,6 +146,8 @@ describe("cloudflare hosted control routes", () => {
       matchCloudflareHostedControlUserRoutePath("status", "/internal/users//status"),
     ).toBeNull();
     expect(CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS).toEqual({
+      recapMediaStage: { method: "POST", suffix: "recap-media/stage" },
+      recapMediaRead: { method: "GET", suffix: "recap-media/read" },
       browserVaultSession: { method: "POST", suffix: "browser-vault/session" },
       gameMediaDelete: { method: "DELETE", suffix: "game-media/delete" },
       gameImageStage: { method: "POST", suffix: "game-images/stage" },

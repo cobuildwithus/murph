@@ -149,10 +149,6 @@ export function generateHostedGroupJoinCode(): string {
   return generateHostedInviteCode();
 }
 
-export function generateHostedPhoneCodeAttemptId(): string {
-  return `hbpc_${randomBytes(12).toString("base64url")}`;
-}
-
 export function inviteExpiresAt(now: Date, ttlHours: number): Date {
   return new Date(now.getTime() + ttlHours * 60 * 60 * 1000);
 }

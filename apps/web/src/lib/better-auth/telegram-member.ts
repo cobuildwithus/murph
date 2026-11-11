@@ -92,8 +92,7 @@ async function prepareNewTelegramLogin(input: { telegramUserId: string; prisma: 
     await revalidatePreparedHostedDomainRootForWebTx({ prepared: root, tx });
     if (!identity) await upsertHostedMemberIdentity({
       memberId, maskedPhoneNumberHint: null, phoneLookupKey: null, phoneNumber: null, phoneNumberVerifiedAt: null,
-      signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null, signupPhoneNumber: null, preparedControlRoot: root, prisma: tx,
+      signupPhoneNumber: null, preparedControlRoot: root, prisma: tx,
     });
     await upsertHostedMemberTelegramRoutingBindingTx({ memberId, telegramUserId, prisma: tx });
     // Root preparation is outside this transaction. Revalidation above installs

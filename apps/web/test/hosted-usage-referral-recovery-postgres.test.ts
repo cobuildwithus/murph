@@ -107,7 +107,7 @@ describe.skipIf(!runPostgresProof)(
       const laterLiveCreatedAt = new Date(now.getTime() - 30_000);
       const latestLiveCreatedAt = new Date(now.getTime() - 20_000);
       const retiredCreatedAt = new Date(
-        now.getTime() - 15 * 24 * 60 * 60_000,
+        now.getTime() - 31 * 24 * 60 * 60_000,
       );
       const blockedMemberId = createId("member_referral_blocked_head");
       const retainedFloorMemberId = createId("member_referral_retained_floor");

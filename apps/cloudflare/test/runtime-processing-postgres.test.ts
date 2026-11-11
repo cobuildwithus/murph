@@ -64,6 +64,21 @@ function harness() {
 }
 
 describe("Postgres runtime orchestration", () => {
+  it("wakes a retained small target without selecting the primary namespace", async () => {
+    const h = harness();
+    const retainedTarget = `runner-small--v-release_1--${"1".repeat(32)}`;
+    const primaryGet = vi.fn(() => { throw new Error("Wrong namespace"); });
+    const smallGet = vi.fn(() => h.container);
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner({ runnerContainerName: retainedTarget })));
+    await expect(ensurePostgresRuntimeProcessing({ ...h.source,
+      RUNNER_CONTAINER: { getByName: primaryGet }, SMALL_RUNNER_CONTAINER: { getByName: smallGet },
+    }, request)).resolves.toMatchObject({ kind: "runtime_processing_accepted", action: "woken" });
+    expect(smallGet).toHaveBeenCalledWith(retainedTarget);
+    expect(primaryGet).not.toHaveBeenCalled();
+    expect(h.container.startSupervisedInvocation).not.toHaveBeenCalled();
+    expect(h.container.bindStandbySlot).not.toHaveBeenCalled();
+  });
+
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
   beforeEach(() => {
     vi.clearAllMocks();

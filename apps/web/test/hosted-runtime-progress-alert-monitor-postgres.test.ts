@@ -307,7 +307,7 @@ describe.skipIf(!runPostgresProof)(
           redactedStatusJson: { hostedMailboxSystemImportedSeq: "1" },
         } });
         await prisma.hostedRuntimeOwner.create({ data: {
-          userId, migrationPhase: "postgres", phase: "active", processingMode: "default",
+          userId, phase: "active", processingMode: "default",
           attemptId: runtimeAttemptId, generation: 2n, acceptedAt,
           allocationId: `${userId}-allocation`, runnerContainerName: `${userId}-runner`,
           workspaceVersion: 1n,

@@ -1986,7 +1986,7 @@ idle checkpoints safely resend them until the durable floor confirms the
 accepted transaction.
 
 Mailbox retention clears payload ciphertext in place rather than deleting an
-accepted conversation gap. At the inclusive 14-day deadline, an unconsumed
+accepted conversation gap. At the inclusive 30-day deadline, an unconsumed
 conversation row receives `policy_non_reply.content_expired`, `consumed_at`, and
 content-retirement metadata in the same statement that deletes its payload
 sidecar and clears inline payload fields. The lane counter advances only through

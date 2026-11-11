@@ -508,7 +508,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     const a = await person(), b = await person(), c = await person();
     const phone = "+12025550123";
     await db.$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(phone), memberId: b.id, prisma: tx,
-      phoneNumberVerifiedAt: createdAt, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
+      phoneNumberVerifiedAt: createdAt, signupPhoneNumber: null }));
     expect(await run(a.id, { type: "createGame", gameId: randomUUID(), maxPlayers: 10, groupWord: "Crew", terms,
       invitees: [{ seat: 1, firstName: "Player", recipient: { kind: "email", value: b.email } }, { seat: 2, firstName: "Player", recipient: { kind: "phone", value: phone } }] }))
       .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
@@ -1101,7 +1101,7 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     await ok(people[1].id, join(group.token));
     const phones = ["+15555550301", "+15555550302"];
     for (const [index, p] of people.entries()) await db.$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(phones[index]), memberId: p.id, prisma: tx,
-      phoneNumberVerifiedAt: createdAt, signupPhoneCodeSendAttemptId: null, signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
+      phoneNumberVerifiedAt: createdAt, signupPhoneNumber: null }));
     const pairRoom = await exactRoom(people);
     chatProof.rooms.set(pairRoom, phones);
     const pair = await runGameCommand({ actorMemberId: people[0].id, command: { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Player",
@@ -1829,8 +1829,8 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     const invited = await person();
     const oldPhone = "+12025550172";
     const phoneIdentity = (phone: string) => db.$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(phone),
-      memberId: invited.id, prisma: tx, phoneNumberVerifiedAt: createdAt, signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
+      memberId: invited.id, prisma: tx, phoneNumberVerifiedAt: createdAt,
+      signupPhoneNumber: null }));
     await phoneIdentity(oldPhone);
     const room = await exactRoom([...people, invited]);
     chatProof.rooms.set(room, [...people.map(p => p.email), oldPhone]);
@@ -2284,8 +2284,8 @@ describe.skipIf(!enabled)("group app change parity", () => {
     const people = [await person(), await person(), await person()];
     const oldPhone = "+12025550174";
     const phone = (value: string) => db.$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(value),
-      memberId: people[2].id, prisma: tx, phoneNumberVerifiedAt: createdAt, signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null, signupPhoneCodeSentAt: null, signupPhoneNumber: null }));
+      memberId: people[2].id, prisma: tx, phoneNumberVerifiedAt: createdAt,
+      signupPhoneNumber: null }));
     await phone(oldPhone);
     const room = await exactRoom(people); chatProof.rooms.set(room, [people[0].email, people[1].email, oldPhone]);
     const game = await create(people[0], [], { invitees: [

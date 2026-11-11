@@ -85,3 +85,9 @@ deletion cannot be undone. Billing, recovery and revenue reporting never needed 
 table, and the runner never accesses it directly. #4615 is the rollback floor after
 cleanup; older Web writes this table, so restoring it requires re-expanding the
 table first.
+
+The retired invite code-send attempt/cooldown columns are deliberately absent from
+this lane. Older deployment-pinned Stripe Workflows still select them during paid
+activation. Retain the physical nullable columns until every older execution capable
+of that read has settled; the ordinary function drain and production-alias check do
+not establish this. See `docs/hosted-auth-migration.md` for the contraction gate.

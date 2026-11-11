@@ -271,9 +271,6 @@ interface HostedMemberIdentityStoreModule {
     phoneNumber: string | null;
     phoneNumberVerifiedAt: Date | null;
     prisma: HostedBillingTestTransaction;
-    signupPhoneCodeSendAttemptId: string | null;
-    signupPhoneCodeSendAttemptStartedAt: Date | null;
-    signupPhoneCodeSentAt: Date | null;
     signupPhoneNumber: string | null;
   }): Promise<unknown>;
 }
@@ -397,9 +394,6 @@ export async function seedHostedBillingMemberForTest(
           phoneNumberVerifiedAt: null,
           prisma: tx,
 
-          signupPhoneCodeSendAttemptId: null,
-          signupPhoneCodeSendAttemptStartedAt: null,
-          signupPhoneCodeSentAt: null,
           signupPhoneNumber: null,
 
 
