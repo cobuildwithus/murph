@@ -57,7 +57,11 @@ export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("my_game_reminders"), origin: acceptedInputOrigin, operation: z.enum(["read", "set"]),
     minutes: z.number().int().min(0).max(1439).optional(), gameId: gameId.optional(), on: z.boolean().optional(),
     everyDay: z.boolean().optional(), text: z.boolean().optional(), push: z.boolean().optional() }).strict(),
-  z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin, automationOccurrenceOrigin]), includePlayers: z.literal(true).optional() }).strict(),
+  z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin, automationOccurrenceOrigin]), includePlayers: z.literal(true).optional(),
+    recapRead: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("transcript"), after: z.string().regex(/^\d{1,20}$/u).optional() }).strict(),
+      z.object({ kind: z.literal("reference"), id: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
+    ]).optional() }).strict(),
   z.object({ action: z.literal("game_photo"), origin: acceptedInputOrigin, photo: hostedGamePhotoSchema }).strict(),
   z.object({ action: z.literal("update_game"), origin: acceptedInputOrigin, update: hostedGameUpdateSchema }).strict(),
   z.object({ action: z.literal("write_recap"), origin: gameRecapOrigin, recap: gameRecapWriterSchema,

@@ -1,5 +1,6 @@
+import { readRecapUsages, recapUsageSchema } from '../../assistant/game-recap-lore.js'
 import * as z from '@murphai/contracts/zod-runtime'
-import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapSchema, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap } from '@murphai/hosted-execution/runtime-control'
+import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 import { toolTextResult } from '../tool-failure-diagnostics.js'
@@ -27,20 +28,8 @@ export const MURPH_READ_GAME_RECAP_TOOL = {
 } as const
 export const MURPH_WRITE_RECAP_TOOL = {
   namespace: 'murph', name: 'write_recap',
-  description: 'Save the recap for this finished game. Include superlatives only when read_game supplies eligible player memberIds: exactly one {memberId, title, line} each. Titles finish “Most likely to…” but omit those heading words from title; use 2–6 words, at most 80 characters, no trailing period, and differ between players. Each line is one short warm teasing sentence, at most 160 characters. Ground each only in this game’s entries and text all players can see: their posts, words, timing, streaks, shared excuses and tasks. Never invent details, use private information, be mean, or joke about bodies or weight. Groups require exactly one kind superlative per eligible person, with no missed-person shaming. Returns ok, or a list of problems to fix (unknown entries, a quote that is not verbatim, text over its limit, banned words). Fix every problem and call it again; the last accepted call is what the players see.',
-  inputSchema: { type: 'object', additionalProperties: false, required: ['pages', 'chatLine'], properties: {
-    pages: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['background', 'blocks'], properties: {
-      background: { type: 'string', enum: ['night', 'paper', 'sage', 'sienna', 'slate'] },
-      blocks: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['kind'], properties: {
-        kind: { type: 'string', enum: ['contactSheet', 'headline', 'kicker', 'photo', 'photoPair', 'quote', 'stat'] },
-        entryIds: { type: 'array', items: { type: 'string' } }, style: { type: 'string', enum: ['print', 'fullBleed'] },
-        text: { type: 'string' }, statValue: { type: 'string' },
-        quote: { type: 'object', additionalProperties: false, required: ['who', 'text'], properties: { who: { type: 'string' }, text: { type: 'string' }, date: { type: 'string' } } },
-      } } },
-    } } }, superlatives: { type: 'array', minItems: 2, maxItems: 10, items: { type: 'object', additionalProperties: false, required: ['memberId', 'title', 'line'], properties: {
-      memberId: { type: 'string' }, title: { type: 'string', maxLength: 80 }, line: { type: 'string', maxLength: 160 },
-    } } }, scoreLine: { type: 'string' }, chatLine: { type: 'string' },
-  } },
+  description: 'Save the recap for this finished game. Include superlatives only when read_game supplies eligible player memberIds: {memberId, title, line}, at most one per player. Titles finish “Most likely to…” but omit those heading words from title; use 2–6 words, at most 80 characters, no trailing period, and differ between players. Each line is one short warm teasing sentence, at most 160 characters. Ground each only in this game’s entries and text all players can see: their posts, words, timing, streaks, shared excuses and tasks. Never invent details, use private information, be mean, or joke about bodies or weight. Groups require exactly one kind superlative per eligible person, with no missed-person shaming. Returns ok, or a list of problems to fix (unknown entries, a quote that is not verbatim, text over its limit, banned words). Fix every problem and call it again; the first accepted story is final; only explicit regeneration replaces it.',
+  inputSchema: z.toJSONSchema(hostedGameRecapWriterSchema),
 } as const
 export const MURPH_GAME_LORE_TOOL = {
   namespace: 'murph', name: 'game_lore',
@@ -128,7 +117,7 @@ export function readGameDynamicToolRequest(input: { arguments: unknown; tool: st
     return parsed.ok ? { kind: 'game' as const, request: { action: 'game_lore' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'write_recap') {
-    const parsed = parseDynamicToolArguments({ schema: hostedGameRecapSchema, value: input.arguments, schemaRootKeys: ['pages', 'scoreLine', 'chatLine', 'superlatives'], toolName: 'murph.write_recap' })
+    const parsed = parseDynamicToolArguments({ schema: hostedGameRecapWriterSchema, value: input.arguments, schemaRootKeys: ['pages', 'scoreLine', 'chatLine', 'superlatives', 'treatment', 'song'], toolName: 'murph.write_recap' })
     return parsed.ok ? { kind: 'game' as const, request: { action: 'write_recap' as const, recap: parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'read_game') {
@@ -154,7 +143,7 @@ async function executeTrustedGameRecapTool(input: { request: GameDynamicRequest;
   const origin = { kind: 'game_recap' as const, gameId: recapScope.gameId, eventId: recapScope.eventId }
   try {
     return input.request.action === 'read_game'
-      ? await executeTrustedGameRecapRead({ origin, tool })
+      ? await executeTrustedGameRecapRead({ origin, tool, context: input.context })
       : await executeTrustedGameRecapWrite({ context: input.context, origin, recap: input.request.recap, tool })
   } catch (error) {
     return toolTextResult(false, 'The recap action could not be confirmed. Read the game and fix every reported problem before trying again.', 'handler_exception', error)
@@ -168,10 +157,22 @@ function unavailableGameRecapToolResult(action: 'read_game' | 'write_recap'): Re
 }
 
 async function executeTrustedGameRecapRead(input: {
+  context: AssistantHostedToolContext | null
   origin: { kind: 'game_recap'; gameId: string; eventId: string }
   tool: NonNullable<AssistantHostedToolContext['groupTool']>
 }): Promise<ReturnType<typeof toolTextResult>> {
   const result = await input.tool.request({ action: 'read_game', origin: input.origin })
+  if (input.context?.currentGameRecapScope?.()?.show && result.result.status === 'ok') {
+    const game = 'recapGame' in result.result ? result.result.recapGame : null
+    const pending = typeof game === 'object' && game !== null && 'pendingRecapUsages' in game ? z.array(recapUsageSchema).max(20).parse(game.pendingRecapUsages) : []
+    for (const usage of pending) {
+      if (!input.context.appendGameRecapUsage) throw new Error('Trusted recap lore is unavailable.')
+      await input.context.appendGameRecapUsage(usage)
+    }
+    if (typeof game === 'object' && game !== null && 'material' in game && input.context.prepareGameRecapInputs) {
+      return toolTextResult(true, JSON.stringify(await input.context.prepareGameRecapInputs(game.material)))
+    }
+  }
   return toolTextResult(true, JSON.stringify('recapGame' in result.result ? result.result.recapGame : result))
 }
 
@@ -181,7 +182,9 @@ async function executeTrustedGameRecapWrite(input: {
   recap: HostedGameRecap
   tool: NonNullable<AssistantHostedToolContext['groupTool']>
 }): Promise<ReturnType<typeof toolTextResult>> {
-  const priorChatLines = (await input.context?.readGameLore?.() ?? '')
+  const lore = await input.context?.readGameLore?.() ?? ''
+  const show = input.context?.currentGameRecapScope?.()?.show === true
+  const priorChatLines = lore
     .split(/\r?\n/u)
     .flatMap((line) => {
       const marker = line.indexOf('Chat line used:')
@@ -189,20 +192,30 @@ async function executeTrustedGameRecapWrite(input: {
       const chatLine = line.slice(marker + 'Chat line used:'.length).trim()
       return chatLine && chatLine.length <= 160 ? [chatLine] : []
     })
+    .concat(show ? readRecapUsages(lore).map(usage => usage.chatLine) : [])
     .slice(-100)
-  const result = await input.tool.request({ action: 'write_recap', origin: input.origin, recap: input.recap, priorChatLines })
+  const result = await input.tool.request({ action: 'write_recap', origin: input.origin, recap: input.recap, priorChatLines, ...(show ? { usedTreatments: readRecapUsages(lore).map(usage => usage.treatment) } : {}) })
   const payload = result.result
-  if (payload.status === 'ok' && input.context?.currentGameRecapScope?.()?.loreAccess === 'read'
-    && 'recap' in payload && payload.recap) {
-    await input.context.appendGameRecapChatLine?.(payload.recap.chatLine)
-  }
-  if (payload.status === 'ok' && 'chatLine' in payload && typeof payload.chatLine === 'string') {
-    input.context?.recordSavedGameRecapChatLine?.(payload.chatLine)
-  }
+  if ('recapOutcome' in payload) await recordAcceptedRecap(input, payload, show)
   const output = 'recapOutcome' in payload && typeof payload.recapOutcome === 'string'
     ? payload.recapOutcome
     : JSON.stringify(result)
   return toolTextResult(true, output)
+}
+
+async function recordAcceptedRecap(input: { context: AssistantHostedToolContext | null; origin: { gameId: string; eventId: string } }, payload: HostedGameToolResponse['result'], show: boolean): Promise<void> {
+  if (payload.status === 'ok' && 'chatLine' in payload && typeof payload.chatLine === 'string') input.context?.recordSavedGameRecapChatLine?.(payload.chatLine)
+  if (payload.status === 'ok' && 'recap' in payload && payload.recap) {
+    try {
+      if (show && payload.recap.treatment) {
+        if (!input.context?.appendGameRecapUsage) throw new Error('Trusted recap lore is unavailable.')
+        await input.context.appendGameRecapUsage({ generationId: input.origin.eventId, treatment: payload.recap.treatment, chatLine: payload.recap.chatLine })
+      } else if (input.context?.currentGameRecapScope?.()?.loreAccess === 'read') await input.context.appendGameRecapChatLine?.(payload.recap.chatLine)
+    } catch {
+      // Acceptance and its delivery intent already succeeded. The durable asset task
+      // and the next trusted read repair the missing canonical usage stamp.
+    }
+  }
 }
 
 async function executeGameLoreTool(input: {

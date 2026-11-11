@@ -1,3 +1,5 @@
+import { appendRecapUsage, replaceRecapNarrative, type RecapUsage } from './game-recap-lore.js'
+import { materializeRecapWorkspace } from './recap-workspace.js'
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -207,11 +209,14 @@ export interface AssistantHostedToolContext {
   currentDeviceActivityOccurrence?(): AssistantDeviceActivityOccurrence | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentGameRecapScope?(): NonNullable<AssistantHostedExecutionContext['gameRecapScope']> | null
+  prepareGameRecapInputs?(material: unknown): Promise<unknown>
+  readGameRecapWorkspace?(): Awaited<ReturnType<typeof materializeRecapWorkspace>> | null
   currentGameMissedCheckInScope?(): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null
   prepareGameLore?(): Promise<string | null>
   readGameLore?(): Promise<string>
   replaceGameLore?(content: string): Promise<void>
   appendGameRecapChatLine?(chatLine: string): Promise<void>
+  appendGameRecapUsage?(usage: RecapUsage): Promise<void>
   recordSavedGameRecapChatLine?(chatLine: string): void
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
@@ -268,6 +273,7 @@ export function createAssistantHostedToolContext(input: {
   session: AssistantSession
 }): AssistantHostedToolContext {
   const executionContext = input.executionContext ?? null
+  let recapWorkspace: Awaited<ReturnType<typeof materializeRecapWorkspace>> | null = null
   let ordinaryGameLore: Promise<{ fingerprint: string; guidance: string } | null> | null = null
   const route = input.route ?? null
   const clinicalRecordsConnectLinkTool =
@@ -628,12 +634,25 @@ export function createAssistantHostedToolContext(input: {
     currentDeviceActivityOccurrence: readCurrentDeviceActivityOccurrence,
     currentUserActionScope: readCurrentUserActionScope,
     currentGameRecapScope: () => executionContext?.gameRecapScope ?? null,
+    readGameRecapWorkspace: () => recapWorkspace,
+    prepareGameRecapInputs: async material => {
+      const scope = executionContext?.gameRecapScope
+      if (!scope?.show || !executionContext?.groupTool) throw new Error('Pair show scope is unavailable.')
+      recapWorkspace = await materializeRecapWorkspace({ vault: input.messageInput.vault, gameId: scope.gameId,
+        eventId: scope.eventId, sessionId: input.session.sessionId, material, lore: await readGameLore(), tool: executionContext.groupTool })
+      return recapWorkspace.manifest
+    },
     currentGameMissedCheckInScope: () => executionContext?.gameMissedCheckInScope ?? null,
     prepareGameLore: async () => (await prepareGameLore())?.guidance || null,
     readGameLore,
     replaceGameLore: async (content) => {
       if (executionContext?.gameRecapScope?.loreAccess === 'read') throw new TypeError('Game lore is read-only for this recap.')
-      await writeGameLore(content)
+      if (Buffer.byteLength(content, 'utf8') > 64 * 1024) throw new TypeError('Game lore is too large.')
+      await writeGameLore(replaceRecapNarrative(await readGameLore(), content))
+    },
+    appendGameRecapUsage: async usage => {
+      if (!executionContext?.gameRecapScope?.show) return
+      await writeGameLore(appendRecapUsage(await readGameLore(), usage))
     },
     appendGameRecapChatLine: async (chatLine) => {
       if (executionContext?.gameRecapScope?.loreAccess !== 'read') return

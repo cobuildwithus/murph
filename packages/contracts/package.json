@@ -63,6 +63,11 @@
       "types": "./dist/recap-validation.d.ts",
       "import": "./dist/recap-validation.js",
       "default": "./dist/recap-validation.js"
+    },
+    "./recap-material": {
+      "types": "./dist/recap-material.d.ts",
+      "import": "./dist/recap-material.js",
+      "default": "./dist/recap-material.js"
     }
   },
   "scripts": {
