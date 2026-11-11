@@ -390,6 +390,45 @@ function createProviderAttemptResult(): AssistantProviderTurnAttemptResult {
 }
 
 describe('Codex provider routing', () => {
+  it('keeps the recap local environment with only its exact task directory writable', async () => {
+    const route = createRoute(), session = createAssistantSession({ providerOptions: route.providerOptions })
+    const input = { prompt: 'Build the synthetic recap.', vault: '/vaults/test' }
+    const scope = { gameId: 'synthetic-game', eventId: 'synthetic-event', pairFingerprint: 'a'.repeat(32), show: true as const }
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(createProviderAttemptResult())
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [] } },
+      hostedToolContext: { currentGameRecapScope: () => scope,
+        currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+        computerToolsAvailable: false, vaultFileSendAvailable: false,
+        sendVaultFile: async () => { throw new Error('Recaps never send chat media.') } }, input,
+      profile: { promptProfile: 'system-notification', toolProfile: 'game-host-turn', threadScope: 'isolated-thread' },
+      promptTimeContext: { currentLocalDate: '2026-11-10', currentTimeZone: 'UTC' },
+      route, sharedPlan: createSharedPlan(), progressDelivery: null, turnId: 'synthetic-recap-turn',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({ route, session, routePlan: {
+      transcriptBoundary: 'start', assistantContractFingerprint: 'a'.repeat(64), assistantCliContract: null, cliEnv: {},
+      codexContinuation: { kind: 'explicit-structured-history' }, developerInstructions: null,
+      diagnosticsPolicy: { environment: 'hosted', privateIssueCaptureEnabled: false, surface: null },
+      dynamicTools: [], environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }], onboardingGuidanceInjected: false,
+      planningDiagnostics: createRoutePlanningDiagnostics(), resume: null, sessionContext: undefined,
+      systemPrompt: 'Build a synthetic recap.', turnContextPrompt: null, workingDirectory: '/vaults/test',
+    } } satisfies AssistantCodexAttemptPlan)
+    const outcome = await executeCodexTurnWithRecovery({ input, plan: createSharedPlan(), resolvedSession: session,
+      route, turnCreatedAt: '2026-11-10T00:00:00.000Z', turnId: 'synthetic-recap-turn' })
+    expect(outcome.kind).toBe('succeeded')
+    const provider = providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+    expect(provider.environments).toBeUndefined()
+    expect(provider.permissions).toBe('murph-recap')
+    expect(provider.codexThreadConfig).toMatchObject({ 'features.shell_tool': true, 'features.multi_agent': false, 'features.image_generation': false })
+    // RPC override keys use raw dot segments; TOML quotes would become literal key bytes.
+    const { recapTaskDirectory } = await import('../src/assistant/recap-workspace.js')
+    const root = path.relative(input.vault, recapTaskDirectory(input.vault, scope.eventId))
+    expect(provider.codexThreadConfig['permissions.murph-recap.filesystem.:workspace_roots']).toEqual({
+      '.': 'deny', [root]: 'read', [`${root}/drafts`]: 'write', [`${root}/media`]: 'write', [`${root}/previews`]: 'write',
+    })
+  })
+
   it('emits only the final provider reasoning effort after routing overrides resolve', async () => {
     const baseAutomationTarget = createAssistantModelTarget({
       model: 'gpt-6.1-sol',

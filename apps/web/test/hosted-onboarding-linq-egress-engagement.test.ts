@@ -1646,7 +1646,7 @@ describe("hosted Linq egress authority", () => {
     expect(
       answeredQuery.where.OR[1].expiresAt.gt.getTime()
       - answeredQuery.where.createdAt.gt.getTime(),
-    ).toBe(14 * 24 * 60 * 60 * 1000);
+    ).toBe(30 * 24 * 60 * 60 * 1000);
   });
 
   it("keeps malformed refs outside payload reads and foreign rows outside decrypts", async () => {

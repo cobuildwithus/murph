@@ -1,3 +1,5 @@
+import { recapTaskDirectory } from './recap-workspace.js'
+import { relative } from 'node:path'
 import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
 import {
   assistantReasoningEffortValues,
@@ -18,6 +20,7 @@ import {
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_GAME_HOST_PERMISSION_PROFILE,
+  MURPH_RECAP_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
@@ -658,6 +661,7 @@ function resolveCodexAttemptCapabilities(
 ) {
   const outputOnlyTurn =
     executionPlan.profile.toolProfile === 'output-only-turn'
+  const recapShowTurn = recapScopeForExecution(executionPlan)?.show === true
   const gameHostTurn =
     executionPlan.profile.toolProfile === 'game-host-turn'
   // Process isolation (one-shot member-read process, read-only sandbox, no
@@ -718,6 +722,7 @@ function resolveCodexAttemptCapabilities(
   return {
     outputOnlyTurn,
     gameHostTurn,
+    recapShowTurn,
     readOnlyAutomationTurn,
     nativeCapabilitiesRestrictedTurn,
     systemNotificationTurn,
@@ -738,9 +743,28 @@ function resolveCodexAttemptCapabilities(
 
 type CodexAttemptCapabilities = ReturnType<typeof resolveCodexAttemptCapabilities>
 
+function resolveCodexAttemptEnvironments(capabilities: CodexAttemptCapabilities, attemptPlan: AssistantCodexAttemptPlan) {
+  // An empty RPC environment list disables execution entirely. Recap file work
+  // needs the default local environment, constrained by its task permission profile.
+  if (capabilities.recapShowTurn) return undefined
+  return capabilities.hostedCapabilitiesRestricted ? [] : attemptPlan.routePlan.environments
+}
+
 function resolveCodexAttemptThreadConfig(
   capabilities: CodexAttemptCapabilities,
+  executionPlan: AssistantCodexTurnExecutionPlan,
 ): AssistantProviderTurnInput['turn']['codexThreadConfig'] {
+  if (capabilities.recapShowTurn) {
+    const scope = recapScopeForExecution(executionPlan)!
+    const root = relative(executionPlan.input.vault, recapTaskDirectory(executionPlan.input.vault, scope.eventId))
+    return { ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG, ...ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+      'features.shell_tool': true,
+      'features.image_generation': false,
+      [`permissions.${MURPH_RECAP_PERMISSION_PROFILE}.filesystem.:workspace_roots`]: {
+        '.': 'deny', [root]: 'read', [`${root}/drafts`]: 'write', [`${root}/media`]: 'write', [`${root}/previews`]: 'write',
+      },
+    }
+  }
   if (capabilities.nativeCapabilitiesRestrictedTurn) {
     return ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
   }
@@ -760,6 +784,7 @@ function resolveCodexAttemptPermissions(
   if (capabilities.groupRoomModelMaintenanceTurn) {
     return MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
   }
+  if (capabilities.recapShowTurn) return MURPH_RECAP_PERMISSION_PROFILE
   if (capabilities.gameHostTurn) {
     return MURPH_GAME_HOST_PERMISSION_PROFILE
   }
@@ -835,16 +860,14 @@ function buildCodexAttemptProviderInput(
         ),
       authorizeAcceptedMessageTarget:
         executionPlan.authorizeAcceptedMessageTarget ?? null,
-      codexThreadConfig: resolveCodexAttemptThreadConfig(capabilities),
+      codexThreadConfig: resolveCodexAttemptThreadConfig(capabilities, executionPlan),
       conversationHistoryMessages:
         attemptPlan.routePlan.conversationHistoryMessages,
       developerInstructions: attemptPlan.routePlan.developerInstructions,
       dynamicTools: capabilities.toolsRestricted
         ? []
         : attemptPlan.routePlan.dynamicTools,
-      environments: capabilities.hostedCapabilitiesRestricted
-        ? []
-        : attemptPlan.routePlan.environments,
+      environments: resolveCodexAttemptEnvironments(capabilities, attemptPlan),
       env: attemptEnv,
       followUpAttachmentAllowed: attemptPlan.routePlan.followUpAttachmentAllowed,
       groupConversation: capabilities.groupConversation,
@@ -1175,4 +1198,8 @@ function isReadOnlyScheduledTurn(input: {
   scheduledInvocationAuthority?: { automationId: string } | null
 }, followUpInvocation?: boolean): boolean {
   return followUpInvocation === true || input.scheduledInvocationAuthority?.automationId === MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
+}
+
+function recapScopeForExecution(executionPlan: AssistantCodexTurnExecutionPlan) {
+  return executionPlan.hostedToolContext?.currentGameRecapScope?.() ?? null
 }

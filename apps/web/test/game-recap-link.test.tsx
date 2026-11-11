@@ -7,7 +7,7 @@ vi.mock("@/src/lib/prisma", () => { throw new Error("Public recap must not impor
 vi.mock("@/src/lib/hosted-growth/signup-referral", () => { throw new Error("Recap must not load referrals"); });
 vi.mock("@/src/lib/game/service", () => { throw new Error("Public recap must not import game reads"); });
 
-import GameRecapPage, { metadata as recapMetadata } from "@/app/recap/[gameId]/page";
+import GameRecapPage, { generateMetadata } from "@/app/recap/[gameId]/page";
 import { gameRecapAppUrl } from "@/src/lib/game/app-links";
 import { gameRecapMessage } from "@/src/lib/game/recap-message";
 import { hostedGameToolResponseSchema } from "@murphai/hosted-execution/runtime-control";
@@ -21,6 +21,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe("public recap handoff", () => {
   it("renders the same generic page for any valid ID without reading a game", async () => {
+    const recapMetadata = await generateMetadata({ params: Promise.resolve({ gameId: id }), searchParams: Promise.resolve({}) });
     vi.stubEnv("MURPH_GAME_APP_URL_SCHEME", "ai.withmurph.app.dev");
     const html = renderToStaticMarkup(await GameRecapPage({ params: Promise.resolve({ gameId: id }) }));
     expect(html).toContain("Your week, in pictures.");

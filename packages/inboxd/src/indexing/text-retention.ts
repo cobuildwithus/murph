@@ -15,7 +15,7 @@ import {
 } from "@murphai/core";
 import { openInboxRuntime } from "../kernel/sqlite.js";
 
-export const INBOX_TEXT_RETENTION_DAYS = 14;
+export const INBOX_TEXT_RETENTION_DAYS = 30;
 export const INBOX_TEXT_RETENTION_WINDOW_MS =
   INBOX_TEXT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
@@ -54,7 +54,7 @@ interface ShardRedaction {
 }
 
 /**
- * Expire inbound message content 14 days after it was received.
+ * Expire inbound message content 30 days after it was received.
  *
  * Message text is not a standalone file the way attachment media is, so this
  * cannot mirror `runInboxMediaRetention` and unlink bytes: the text lives inside

@@ -1073,7 +1073,7 @@ describe("hosted pending assistant input index", () => {
       mailboxItemId: "item_retention_suppressed",
       vault: vaultRoot,
     });
-    const deadline = "2026-04-15T00:00:02.000Z";
+    const deadline = "2026-05-01T00:00:02.000Z";
 
     await expect(runHostedPendingAssistantInputContentRetention({
       now: deadline,
@@ -1166,7 +1166,7 @@ describe("hosted pending assistant input index", () => {
       ...intent,
       attemptCount: 1,
       lastAttemptAt: "2026-04-01T00:02:00.000Z",
-      nextAttemptAt: "2026-04-15T01:00:00.000Z",
+      nextAttemptAt: "2026-05-01T01:00:00.000Z",
       status: "retryable",
       updatedAt: "2026-04-01T00:02:00.000Z",
     });
@@ -1193,7 +1193,7 @@ describe("hosted pending assistant input index", () => {
       .resolves.toEqual([]);
 
     await expect(runHostedPendingAssistantInputContentRetention({
-      now: "2026-04-15T00:00:02.000Z",
+      now: "2026-05-01T00:00:02.000Z",
       vaultRoot,
     })).resolves.toEqual({
       inputsRetired: 1,
@@ -1279,7 +1279,7 @@ describe("hosted pending assistant input index", () => {
     }
 
     await expect(runHostedPendingAssistantInputContentRetention({
-      now: "2026-04-15T00:00:12.000Z",
+      now: "2026-05-01T00:00:12.000Z",
       vaultRoot,
     })).resolves.toEqual({
       inputsRetired: 2,
@@ -1352,7 +1352,7 @@ describe("hosted pending assistant input index", () => {
     });
 
     await expect(runHostedPendingAssistantInputContentRetention({
-      now: "2026-04-15T00:00:02.000Z",
+      now: "2026-05-01T00:00:02.000Z",
       vaultRoot,
     })).resolves.toEqual({
       inputsRetired: 1,
@@ -1391,7 +1391,7 @@ describe("hosted pending assistant input index", () => {
       .resolves.toEqual([]);
 
     await expect(runHostedPendingAssistantInputContentRetention({
-      now: "2026-04-15T00:00:02.000Z",
+      now: "2026-05-01T00:00:02.000Z",
       vaultRoot,
     })).resolves.toEqual({
       inputsRetired: 1,
@@ -1405,7 +1405,7 @@ describe("hosted pending assistant input index", () => {
       content: {
         text: null,
       },
-      contentRetiredAt: "2026-04-15T00:00:02.000Z",
+      contentRetiredAt: "2026-05-01T00:00:02.000Z",
     });
   });
 
@@ -1445,7 +1445,7 @@ describe("hosted pending assistant input index", () => {
     })).resolves.toEqual({
       inputsRetired: 0,
       inputsSuppressed: 0,
-      nextEligibleAt: "2026-04-16T03:04:05.000Z",
+      nextEligibleAt: "2026-05-02T03:04:05.000Z",
     });
   });
 

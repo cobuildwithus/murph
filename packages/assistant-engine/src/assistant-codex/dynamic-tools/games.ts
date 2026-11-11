@@ -1,5 +1,7 @@
+import { type GameRecapDraft, gameRecapDraftSchema } from '@murphai/contracts/recap-show'
+import { readRecapUsages, recapUsageSchema } from '../../assistant/game-recap-lore.js'
 import * as z from '@murphai/contracts/zod-runtime'
-import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapSchema, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap } from '@murphai/hosted-execution/runtime-control'
+import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 import { toolTextResult } from '../tool-failure-diagnostics.js'
@@ -22,25 +24,23 @@ export const MURPH_MY_GAME_REMINDERS_TOOL = {
 export const GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE = 'For game reminders, use murph.my_game_reminders.'
 export const MURPH_READ_GAME_RECAP_TOOL = {
   namespace: 'murph', name: 'read_game',
-  description: 'Read the finished game bound to this recap turn. Returns its players, terms, result, and each day’s posts or misses with entry IDs and post details; call it first.',
-  inputSchema: { type: 'object', additionalProperties: false, properties: {}, required: [] },
+  description: 'Read the finished game bound to this recap turn. For a show, returns local game, chat, lore and reference files with coverage gaps; call it first. Pass referenceIds from the manifest to materialize more permitted photos.',
+  inputSchema: { type: 'object', additionalProperties: false, properties: { referenceIds: { type: 'array', maxItems: 9, items: { type: 'string', pattern: '^[a-f0-9]{64}$' } } }, required: [] },
+} as const
+export const MURPH_PREVIEW_RECAP_TOOL = {
+  namespace: 'murph', name: 'preview_recap',
+  description: 'Validate a local {story, files} recap draft with the real validator and render its pages and contact sheet as PNGs. Read the returned errors, view the PNGs, revise the draft, then preview again before submitting. This is an authoring preview; iOS owns native layout.',
+  inputSchema: { type: 'object', additionalProperties: false, required: ['draftPath'], properties: { draftPath: { type: 'string', minLength: 1, maxLength: 512 } } },
 } as const
 export const MURPH_WRITE_RECAP_TOOL = {
   namespace: 'murph', name: 'write_recap',
-  description: 'Save the recap for this finished game. Include superlatives only when read_game supplies eligible player memberIds: exactly one {memberId, title, line} each. Titles finish “Most likely to…” but omit those heading words from title; use 2–6 words, at most 80 characters, no trailing period, and differ between players. Each line is one short warm teasing sentence, at most 160 characters. Ground each only in this game’s entries and text all players can see: their posts, words, timing, streaks, shared excuses and tasks. Never invent details, use private information, be mean, or joke about bodies or weight. Groups require exactly one kind superlative per eligible person, with no missed-person shaming. Returns ok, or a list of problems to fix (unknown entries, a quote that is not verbatim, text over its limit, banned words). Fix every problem and call it again; the last accepted call is what the players see.',
-  inputSchema: { type: 'object', additionalProperties: false, required: ['pages', 'chatLine'], properties: {
-    pages: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['background', 'blocks'], properties: {
-      background: { type: 'string', enum: ['night', 'paper', 'sage', 'sienna', 'slate'] },
-      blocks: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['kind'], properties: {
-        kind: { type: 'string', enum: ['contactSheet', 'headline', 'kicker', 'photo', 'photoPair', 'quote', 'stat'] },
-        entryIds: { type: 'array', items: { type: 'string' } }, style: { type: 'string', enum: ['print', 'fullBleed'] },
-        text: { type: 'string' }, statValue: { type: 'string' },
-        quote: { type: 'object', additionalProperties: false, required: ['who', 'text'], properties: { who: { type: 'string' }, text: { type: 'string' }, date: { type: 'string' } } },
-      } } },
-    } } }, superlatives: { type: 'array', minItems: 2, maxItems: 10, items: { type: 'object', additionalProperties: false, required: ['memberId', 'title', 'line'], properties: {
-      memberId: { type: 'string' }, title: { type: 'string', maxLength: 80 }, line: { type: 'string', maxLength: 160 },
-    } } }, scoreLine: { type: 'string' }, chatLine: { type: 'string' },
-  } },
+  description: 'Save the recap for this finished game. Include superlatives only when read_game supplies eligible player memberIds: {memberId, title, line}, at most one per player. Titles finish “Most likely to…” but omit those heading words from title; use 2–6 words, at most 80 characters, no trailing period, and differ between players. Each line is one short warm teasing sentence, at most 160 characters. Ground each only in this game’s entries and text all players can see: their posts, words, timing, streaks, shared excuses and tasks. Never invent details, use private information, be mean, or joke about bodies or weight. Groups require exactly one kind superlative per eligible person, with no missed-person shaming. Returns ok, or a list of problems to fix (unknown entries, a quote that is not verbatim, text over its limit, banned words). Fix every problem and call it again; the first accepted story is final; only explicit regeneration replaces it.',
+  inputSchema: z.toJSONSchema(hostedGameRecapWriterSchema),
+} as const
+export const MURPH_WRITE_RECAP_FILE_TOOL = {
+  namespace: 'murph', name: 'write_recap',
+  description: 'Submit the local {story, files} draft after preview and revision. Freezes selected media hashes, stages only those files, and accepts exactly one show. Use the same draft when retrying an interrupted upload. Returns ok only for canonical acceptance. Send no media in chat; the host delivers the accepted line and link.',
+  inputSchema: { type: 'object', additionalProperties: false, required: ['draftPath'], properties: { draftPath: { type: 'string', minLength: 1, maxLength: 512 } } },
 } as const
 export const MURPH_GAME_LORE_TOOL = {
   namespace: 'murph', name: 'game_lore',
@@ -110,8 +110,12 @@ const rawUpdateArguments = z.object({ messageRef: z.string().min(1).max(128), op
   }
   return { messageRef, update: parsed.data }
 })
-export type GameDynamicRequest = { action: 'my_game_reminders'; operation: 'read' | 'set'; messageRef?: string; minutes?: number; gameId?: string; on?: boolean; everyDay?: boolean; text?: boolean; push?: boolean } | { action: 'read_game'; messageRef?: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto } | { action: 'write_recap'; recap: HostedGameRecap } | { action: 'game_lore'; operation: 'read' | 'replace'; content?: string }
+export type GameDynamicRequest = { action: 'my_game_reminders'; operation: 'read' | 'set'; messageRef?: string; minutes?: number; gameId?: string; on?: boolean; everyDay?: boolean; text?: boolean; push?: boolean } | { action: 'read_game'; messageRef?: string; referenceIds?: string[] } | { action: 'preview_recap'; draftPath: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto } | { action: 'write_recap'; recap: HostedGameRecap } | { action: 'write_recap_file'; draftPath: string } | { action: 'game_lore'; operation: 'read' | 'replace'; content?: string }
 export function readGameDynamicToolRequest(input: { arguments: unknown; tool: string | null }) {
+  if (input.tool === 'preview_recap') {
+    const parsed = parseDynamicToolArguments({ schema: z.object({ draftPath: z.string().min(1).max(512) }).strict(), value: input.arguments, toolName: 'murph.preview_recap' })
+    return parsed.ok ? { kind: 'game' as const, request: { action: 'preview_recap' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
+  }
   if (input.tool === 'my_game_reminders') {
     const schema = z.object({ operation: z.enum(['read', 'set']), messageRef: z.string().min(1).max(128).optional(),
       minutes: z.number().int().min(0).max(1439).optional(), gameId: z.string().min(8).max(64).optional(),
@@ -127,12 +131,16 @@ export function readGameDynamicToolRequest(input: { arguments: unknown; tool: st
     const parsed = parseDynamicToolArguments({ schema, value: input.arguments, schemaRootKeys: ['operation', 'content'], toolName: 'murph.game_lore' })
     return parsed.ok ? { kind: 'game' as const, request: { action: 'game_lore' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
   }
+  if (input.tool === 'write_recap' && input.arguments && typeof input.arguments === 'object' && 'draftPath' in input.arguments) {
+    const parsed = parseDynamicToolArguments({ schema: z.object({ draftPath: z.string().min(1).max(512) }).strict(), value: input.arguments, toolName: 'murph.write_recap' })
+    return parsed.ok ? { kind: 'game' as const, request: { action: 'write_recap_file' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
+  }
   if (input.tool === 'write_recap') {
-    const parsed = parseDynamicToolArguments({ schema: hostedGameRecapSchema, value: input.arguments, schemaRootKeys: ['pages', 'scoreLine', 'chatLine', 'superlatives'], toolName: 'murph.write_recap' })
+    const parsed = parseDynamicToolArguments({ schema: hostedGameRecapWriterSchema, value: input.arguments, schemaRootKeys: ['pages', 'scoreLine', 'chatLine', 'superlatives', 'treatment', 'song'], toolName: 'murph.write_recap' })
     return parsed.ok ? { kind: 'game' as const, request: { action: 'write_recap' as const, recap: parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'read_game') {
-    const parsed = parseDynamicToolArguments({ schema: z.object({ messageRef: z.string().min(1).max(128).optional() }).strict(), value: input.arguments, schemaRootKeys: ['messageRef'], toolName: 'murph.read_game' })
+    const parsed = parseDynamicToolArguments({ schema: z.object({ messageRef: z.string().min(1).max(128).optional(), referenceIds: z.array(z.string().regex(/^[a-f0-9]{64}$/u)).max(9).optional() }).strict(), value: input.arguments, schemaRootKeys: ['messageRef', 'referenceIds'], toolName: 'murph.read_game' })
     return parsed.ok ? { kind: 'game' as const, request: { action: 'read_game' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'game_photo') {
@@ -154,7 +162,7 @@ async function executeTrustedGameRecapTool(input: { request: GameDynamicRequest;
   const origin = { kind: 'game_recap' as const, gameId: recapScope.gameId, eventId: recapScope.eventId }
   try {
     return input.request.action === 'read_game'
-      ? await executeTrustedGameRecapRead({ origin, tool })
+      ? await executeTrustedGameRecapRead({ origin, tool, context: input.context, referenceIds: input.request.referenceIds })
       : await executeTrustedGameRecapWrite({ context: input.context, origin, recap: input.request.recap, tool })
   } catch (error) {
     return toolTextResult(false, 'The recap action could not be confirmed. Read the game and fix every reported problem before trying again.', 'handler_exception', error)
@@ -168,10 +176,21 @@ function unavailableGameRecapToolResult(action: 'read_game' | 'write_recap'): Re
 }
 
 async function executeTrustedGameRecapRead(input: {
+  referenceIds?: string[]
+  context: AssistantHostedToolContext | null
   origin: { kind: 'game_recap'; gameId: string; eventId: string }
   tool: NonNullable<AssistantHostedToolContext['groupTool']>
 }): Promise<ReturnType<typeof toolTextResult>> {
+  if (input.referenceIds?.length) {
+    if (!input.context?.currentGameRecapScope?.()?.show || !input.context.materializeGameRecapReferences) return toolTextResult(false, 'Recap photos are unavailable.', 'authority_rejected')
+    return toolTextResult(true, JSON.stringify(await input.context.materializeGameRecapReferences(input.referenceIds)))
+  }
   const result = await input.tool.request({ action: 'read_game', origin: input.origin })
+  if (input.context?.currentGameRecapScope?.()?.show && result.result.status === 'ok') {
+    const prepared = await prepareRecapReadResult(input.context, result)
+    if (prepared) return prepared
+
+  }
   return toolTextResult(true, JSON.stringify('recapGame' in result.result ? result.result.recapGame : result))
 }
 
@@ -181,7 +200,9 @@ async function executeTrustedGameRecapWrite(input: {
   recap: HostedGameRecap
   tool: NonNullable<AssistantHostedToolContext['groupTool']>
 }): Promise<ReturnType<typeof toolTextResult>> {
-  const priorChatLines = (await input.context?.readGameLore?.() ?? '')
+  const lore = await input.context?.readGameLore?.() ?? ''
+  const show = input.context?.currentGameRecapScope?.()?.show === true
+  const priorChatLines = lore
     .split(/\r?\n/u)
     .flatMap((line) => {
       const marker = line.indexOf('Chat line used:')
@@ -189,20 +210,30 @@ async function executeTrustedGameRecapWrite(input: {
       const chatLine = line.slice(marker + 'Chat line used:'.length).trim()
       return chatLine && chatLine.length <= 160 ? [chatLine] : []
     })
+    .concat(show ? readRecapUsages(lore).map(usage => usage.chatLine) : [])
     .slice(-100)
-  const result = await input.tool.request({ action: 'write_recap', origin: input.origin, recap: input.recap, priorChatLines })
+  const result = await input.tool.request({ action: 'write_recap', origin: input.origin, recap: input.recap, priorChatLines, ...(show ? { usedTreatments: readRecapUsages(lore).map(usage => usage.treatment) } : {}) })
   const payload = result.result
-  if (payload.status === 'ok' && input.context?.currentGameRecapScope?.()?.loreAccess === 'read'
-    && 'recap' in payload && payload.recap) {
-    await input.context.appendGameRecapChatLine?.(payload.recap.chatLine)
-  }
-  if (payload.status === 'ok' && 'chatLine' in payload && typeof payload.chatLine === 'string') {
-    input.context?.recordSavedGameRecapChatLine?.(payload.chatLine)
-  }
+  if ('recapOutcome' in payload) await recordAcceptedRecap(input, payload, show)
   const output = 'recapOutcome' in payload && typeof payload.recapOutcome === 'string'
     ? payload.recapOutcome
     : JSON.stringify(result)
   return toolTextResult(true, output)
+}
+
+export async function recordAcceptedRecap(input: { context: AssistantHostedToolContext | null; origin: { gameId: string; eventId: string } }, payload: HostedGameToolResponse['result'], show: boolean): Promise<void> {
+  if (payload.status === 'ok' && 'chatLine' in payload && typeof payload.chatLine === 'string') input.context?.recordSavedGameRecapChatLine?.(payload.chatLine)
+  if (payload.status === 'ok' && 'recap' in payload && payload.recap) {
+    try {
+      if (show && payload.recap.treatment) {
+        if (!input.context?.appendGameRecapUsage) throw new Error('Trusted recap lore is unavailable.')
+        await input.context.appendGameRecapUsage({ generationId: input.origin.eventId, treatment: payload.recap.treatment, chatLine: payload.recap.chatLine })
+      } else if (input.context?.currentGameRecapScope?.()?.loreAccess === 'read') await input.context.appendGameRecapChatLine?.(payload.recap.chatLine)
+    } catch {
+      // Acceptance and its delivery intent already succeeded. The next trusted
+      // read repairs the pending canonical usage stamp after a lost checkpoint.
+    }
+  }
 }
 
 async function executeGameLoreTool(input: {
@@ -255,6 +286,8 @@ function gameReadGuidance(result: Awaited<ReturnType<NonNullable<AssistantHosted
 }
 
 export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null }) {
+  if (input.request.action === 'write_recap_file') return executeRecapFileWrite({ context: input.context, draftPath: input.request.draftPath })
+  if (input.request.action === 'preview_recap') return executeRecapPreview(input.context, input.request.draftPath)
   if (input.request.action === 'my_game_reminders') {
     const scope = input.context?.currentUserActionScope?.()
     const tool = input.context?.myGameRemindersTool
@@ -290,4 +323,66 @@ async function executeScheduledGameRead(context: AssistantHostedToolContext | nu
   } catch (error) {
     return toolTextResult(false, 'The game state could not be read.', 'handler_exception', error)
   }
+}
+
+
+async function executeRecapFileWrite(input: { context: AssistantHostedToolContext | null; draftPath: string }) {
+  const context = input.context
+  const scope = context?.currentGameRecapScope?.()
+  const tool = context?.groupTool
+  if (!scope?.show || !tool || !context?.readGameRecapDraft || !context.readGameRecapMedia) return toolTextResult(false, 'File submission requires a bound pair show.', 'authority_rejected')
+  try {
+    const draft = gameRecapDraftSchema.parse(await context.readGameRecapDraft(input.draftPath))
+    const lore = await context.readGameLore?.() ?? ''
+    const usages = readRecapUsages(lore)
+    const origin = { kind: 'game_recap' as const, gameId: scope.gameId, eventId: scope.eventId }
+    const request = { action: 'write_recap' as const, origin, recap: draft.story, files: draft.files,
+      priorChatLines: usages.map(usage => usage.chatLine).slice(-100), usedTreatments: usages.map(usage => usage.treatment).slice(-1000) }
+    // Read and hash every selected file once before freezing anything remotely.
+    const selected = await Promise.all(draft.files.map(async file => ({ ...file, bytes: await context.readGameRecapMedia!(file.receipt) })))
+    const prepared = await tool.request({ ...request, phase: 'prepare' })
+    if (prepared.action !== 'write_recap') throw new Error('Wrong recap preparation response.')
+    if (prepared.result.recap) {
+      await recordAcceptedRecap({ context, origin }, prepared.result, true)
+      return toolTextResult(true, prepared.result.recapOutcome ?? 'ok')
+    }
+    if (prepared.result.status !== 'ok') return toolTextResult(true, prepared.result.recapOutcome ?? JSON.stringify(prepared.result))
+    await stageSelectedRecapFiles(tool, origin, selected)
+    const accepted = await tool.request({ ...request, phase: 'accept' })
+    if (accepted.action !== 'write_recap') throw new Error('Wrong recap acceptance response.')
+    await recordAcceptedRecap({ context, origin }, accepted.result, true)
+    return toolTextResult(true, accepted.result.recapOutcome ?? JSON.stringify(accepted.result))
+  } catch (error) {
+    return toolTextResult(false, 'Submission was not confirmed. Retry the same local draft; do not regenerate media.', 'handler_exception', error)
+  }
+}
+
+async function prepareRecapReadResult(context: AssistantHostedToolContext, result: Awaited<ReturnType<NonNullable<AssistantHostedToolContext['groupTool']>['request']>>) {
+    const game = 'recapGame' in result.result ? result.result.recapGame : null
+    const pending = typeof game === 'object' && game !== null && 'pendingRecapUsages' in game ? z.array(recapUsageSchema).max(20).parse(game.pendingRecapUsages) : []
+    for (const usage of pending) {
+      if (!context.appendGameRecapUsage) throw new Error('Trusted recap lore is unavailable.')
+      await context.appendGameRecapUsage(usage)
+    }
+    if (typeof game === 'object' && game !== null && 'material' in game && context.prepareGameRecapInputs) {
+      return toolTextResult(true, JSON.stringify(await context.prepareGameRecapInputs(game.material)))
+    }  return null
+}
+
+async function executeRecapPreview(context: AssistantHostedToolContext | null, draftPath: string) {
+    if (!context?.currentGameRecapScope?.()?.show || !context.previewGameRecap) return toolTextResult(false, 'Preview requires a bound pair show.', 'authority_rejected')
+    try { return toolTextResult(true, JSON.stringify(await context.previewGameRecap(draftPath))) }
+    catch (error) {
+      const { RecapDraftValidationError } = await import('../../assistant/recap-preview.js')
+      return toolTextResult(false, error instanceof RecapDraftValidationError ? error.message
+        : 'Preview failed. Check the selected file paths, hashes and image formats.', 'invalid_result', error)
+    }
+}
+
+async function stageSelectedRecapFiles(tool: NonNullable<AssistantHostedToolContext['groupTool']>,
+  origin: { kind: 'game_recap'; gameId: string; eventId: string }, selected: { receipt: GameRecapDraft['files'][number]['receipt']; bytes: string }[]) {
+    for (const file of selected) {
+      const staged = await tool.request({ action: 'read_game', origin, recapRead: { kind: 'stage', receipt: file.receipt, bytes: file.bytes } })
+      if (staged.result.status !== 'ok') throw new Error('Selected media upload was not confirmed.')
+    }
 }

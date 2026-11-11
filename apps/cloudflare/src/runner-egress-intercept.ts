@@ -1,3 +1,4 @@
+import { inspectRecapProviderRequest, type RecapProviderRequest } from "@murphai/contracts/recap-admission";
 import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
 import { HOSTED_RUNTIME_DATA_API_PATHS } from "@murphai/hosted-execution/routes";
 import { readNativeRuntimeProviderAuthority, type RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
@@ -1153,7 +1154,7 @@ async function readHostedOpenAiRequestBody(input: {
     boundedBody = body;
   } else if (
     input.request.method === "POST"
-    && input.pathnameSuffix === "/v1/images/edits"
+    && (input.pathnameSuffix === "/v1/images/edits" || input.pathnameSuffix === "/v1/images/generations")
   ) {
     const body = await readBoundedRequestBody(
       input.request,
@@ -1218,6 +1219,9 @@ async function maybeHandleOpenAiRequest(input: {
   if (bodyRead instanceof Response) return bodyRead;
   const { boundedBody, imageGenerationRequested } = bodyRead;
 
+  const recapDenied = await checkRecapOpenAiRequest({ authorization, env: input.env,
+    request: input.request, pathnameSuffix, boundedBody, imageGenerationRequested });
+  if (recapDenied) return recapDenied;
   const imageDenied = await checkHostedOpenAiImageRequestAccess({
     request: input.request, env: input.env, authorization, pathnameSuffix, imageGenerationRequested,
   });
@@ -1271,6 +1275,20 @@ async function maybeHandleOpenAiRequest(input: {
   // native Codex owns connection reuse/recovery. Accepting here would couple
   // every subsequent frame to this Worker invocation's JavaScript lifetime.
   return response;
+}
+
+async function checkRecapOpenAiRequest(input: {
+  request: Request; env: RunnerOutboundEnvironmentSource; authorization: HostedProviderEgressAuthorization;
+  pathnameSuffix: string; boundedBody: ArrayBuffer | undefined; imageGenerationRequested: boolean;
+}): Promise<Response | null> {
+  // Text model traffic and opaque transports must not acquire a Web dependency.
+  // Recap turns disable Codex's native image tool in their trusted configuration.
+  if (input.request.method !== "POST" || !input.request.headers.has('x-murph-recap-reservation')) return null;
+  const imageEndpoint = input.pathnameSuffix === "/v1/images/generations" || input.pathnameSuffix === "/v1/images/edits";
+  if (!imageEndpoint && !input.imageGenerationRequested) return null;
+  return checkRecapProviderRequest({ authorization: input.authorization, env: input.env,
+    request: new Request(input.request.url, { method: input.request.method, headers: input.request.headers, body: input.boundedBody }),
+    media: imageEndpoint, nativeImage: input.imageGenerationRequested });
 }
 
 async function checkHostedOpenAiImageRequestAccess(input: {
@@ -1418,6 +1436,11 @@ async function maybeHandleElevenLabsRequest(input: {
   if (providerRequest === null) {
     return disallowedProviderEgress();
   }
+
+  const recapDenied = await checkRecapProviderRequest({ authorization, env: input.env,
+    request: new Request(input.request.url, { method: 'POST', headers: input.request.headers, body: requestBody }),
+    media: pathnameSuffix === '/v1/music', nativeImage: pathnameSuffix !== '/v1/music' });
+  if (recapDenied) return recapDenied;
 
   const token = readRequiredInterceptSecret(
     input.env.ELEVENLABS_API_KEY,
@@ -2648,6 +2671,7 @@ function stripHostedProviderUpstreamHeaders(headers: Headers): Headers {
   stripped.delete("xi-api-key");
   stripped.delete("x-murph-api-key");
   stripped.delete("x-murph-data-api-key");
+  stripped.delete("x-murph-recap-reservation");
   stripped.delete("openai-organization");
   stripped.delete("openai-project");
   return stripped;
@@ -3074,4 +3098,38 @@ async function checkHostedImageGenerationAccess(input: {
     code: "MURPH_IMAGE_ACCESS_UNAVAILABLE",
     message: "Image generation access could not be confirmed. Try again later.",
   } }, { status: 503 });
+}
+
+/** Only reservation-bearing media requests acquire the recap admission dependency. */
+async function checkRecapProviderRequest(input: {
+  authorization: HostedProviderEgressAuthorization; env: RunnerOutboundEnvironmentSource;
+  request: Request; media: boolean; nativeImage: boolean;
+}): Promise<Response | null> {
+  if (!input.request.headers.has('x-murph-recap-reservation')) return null;
+  const token = input.request.headers.get('x-murph-recap-reservation');
+  if (!token || !/^[a-f0-9]{64}$/u.test(token)) return new Response('Invalid recap reservation.', { status: 403 });
+  // This separate bounded smoke owner has no member runtime or recap scope.
+  if (input.authorization.authorized && input.authorization.mode === 'deploy_smoke_live_model_turn') return null;
+  try {
+    const fence = requireHostedDirectUsageWriteFence(input.authorization);
+    let providerRequest: RecapProviderRequest | null = null;
+    let invalidMedia = false;
+    if (input.media) {
+      try { providerRequest = await inspectRecapProviderRequest(input.request); }
+      catch { invalidMedia = true; }
+    }
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const result = await fetchHostedWebControlPlaneJson({
+      body: { attemptId: fence.attemptId, generation: fence.leaseGeneration,
+        token, providerRequest,
+        opaque: false, nativeImage: input.nativeImage || invalidMedia },
+      boundUserId: fence.userId, description: 'Recap provider admission', fetchImpl: fetch,
+      route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.recapMediaAccess, timeoutMs: environment.webControlTimeoutMs,
+      transport: { callbackSigning: environment.webCallbackSigning, mode: 'direct', webControlBaseUrl: environment.hostedWebBaseUrl, workspaceCheckpointBridge: null },
+    });
+    if (result && typeof result === 'object' && 'allowed' in result && result.allowed === true) return null;
+    return new Response('Recap provider admission rejected this request.', { status: 403 });
+  } catch {
+    return new Response('Recap provider admission is unavailable.', { status: 503 });
+  }
 }

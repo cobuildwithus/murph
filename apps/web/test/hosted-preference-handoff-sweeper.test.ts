@@ -387,7 +387,7 @@ describe("hosted preference handoff sweeper", () => {
     expect(sql).toContain('"item"."expires_at" IS NULL OR "item"."expires_at" > ?');
     expect(sql).toContain('"item"."created_at" > ?');
     expect(query?.values).toContainEqual(
-      new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000),
+      new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
     );
     expect(requestHandoff).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),

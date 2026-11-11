@@ -49,13 +49,14 @@ export const POST = withJsonError(async (request: Request) => {
   // charged to the operation that has to finish inside it.
   const requestStartedAtMs = Date.now();
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
-    maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
+    maxBodyBytes: new URL(request.url).searchParams.get("recapMedia") === "1" ? 3 * 1024 * 1024 : HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
   });
   const runtimeAuthority = readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers);
   const currentSenderWire = readHostedCurrentSenderWire(payload);
   const body = parseHostedRuntimeGroupToolRequest(currentSenderWire.payload, {
     privateMediaDeliveryOrigin: readHostedExecutionControlOrigin(),
   });
+  if (new URL(request.url).searchParams.get("recapMedia") === "1" && !(body.action === "read_game" && body.origin.kind === "game_recap" && body.recapRead?.kind === "stage")) throw new TypeError("Recap protocol requires its own command.");
   const supportedProjectionScopeKeys =
     readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
   const membershipInventoryProtocol = new URL(request.url).searchParams.get(

@@ -1,3 +1,12 @@
+import type { RecapFileReceipt } from '@murphai/contracts/recap-show'
+import { readRecapFile } from './recap-files.js'
+import { previewRecap, readRecapDraftFile } from './recap-preview.js'
+import { createRecapMediaRuntime } from './recap-media-runtime.js'
+import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
+import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
+import type { GenerateSongToolArgs } from '../assistant-codex/generate-voice-memo-tool.js'
+import { appendRecapUsage, replaceRecapNarrative, type RecapUsage } from './game-recap-lore.js'
+import { fetchRecapReference, materializeRecapReference, materializeRecapWorkspace } from './recap-workspace.js'
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -207,11 +216,19 @@ export interface AssistantHostedToolContext {
   currentDeviceActivityOccurrence?(): AssistantDeviceActivityOccurrence | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentGameRecapScope?(): NonNullable<AssistantHostedExecutionContext['gameRecapScope']> | null
+  prepareRecapMedia?(request: { kind: 'image'; args: GenerateImageToolArgs } | { kind: 'song'; args: GenerateSongToolArgs }, fetchImpl: typeof fetch): Promise<GeneratedMediaFileRuntime>
+  prepareGameRecapInputs?(material: unknown): Promise<unknown>
+  readGameRecapDraft?(draftPath: string): Promise<unknown>
+  readGameRecapMedia?(receipt: RecapFileReceipt): Promise<string>
+  previewGameRecap?(draftPath: string): Promise<unknown>
+  materializeGameRecapReferences?(ids: readonly string[]): Promise<unknown>
+  readGameRecapWorkspace?(): Awaited<ReturnType<typeof materializeRecapWorkspace>> | null
   currentGameMissedCheckInScope?(): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null
   prepareGameLore?(): Promise<string | null>
   readGameLore?(): Promise<string>
   replaceGameLore?(content: string): Promise<void>
   appendGameRecapChatLine?(chatLine: string): Promise<void>
+  appendGameRecapUsage?(usage: RecapUsage): Promise<void>
   recordSavedGameRecapChatLine?(chatLine: string): void
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
@@ -254,6 +271,7 @@ export function createAssistantHostedToolContext(input: {
   ) => void
   recordGroupEmailPendingDeliveryIntentId?: (intentId: string) => void
   recordSavedGameRecapChatLine?: (chatLine: string) => void
+  recordGameRecapUsageStamped?: (generationId: string) => void
   verifyGeneratedImageDelivery?: (input: {
     contentType: AssistantVaultImageResponseMedia['contentType']
     imageRef: string
@@ -268,6 +286,7 @@ export function createAssistantHostedToolContext(input: {
   session: AssistantSession
 }): AssistantHostedToolContext {
   const executionContext = input.executionContext ?? null
+  let recapWorkspace: Awaited<ReturnType<typeof materializeRecapWorkspace>> | null = null
   let ordinaryGameLore: Promise<{ fingerprint: string; guidance: string } | null> | null = null
   const route = input.route ?? null
   const clinicalRecordsConnectLinkTool =
@@ -628,12 +647,64 @@ export function createAssistantHostedToolContext(input: {
     currentDeviceActivityOccurrence: readCurrentDeviceActivityOccurrence,
     currentUserActionScope: readCurrentUserActionScope,
     currentGameRecapScope: () => executionContext?.gameRecapScope ?? null,
+    readGameRecapWorkspace: () => recapWorkspace,
+    readGameRecapDraft: async draftPath => {
+      if (!executionContext?.gameRecapScope?.show || !recapWorkspace) throw new Error('Read recap material first.')
+      return readRecapDraftFile({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, recapWorkspace.root), draftPath })
+    },
+    readGameRecapMedia: async receipt => {
+      if (!executionContext?.gameRecapScope?.show || !recapWorkspace) throw new Error('Read recap material first.')
+      const bytes = await readRecapFile({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, recapWorkspace.root), file: receipt.path, maxBytes: 2 * 1024 * 1024 })
+      if (bytes.length !== receipt.byteLength || createHash('sha256').update(bytes).digest('hex') !== receipt.hash) throw new Error('Selected recap media changed.')
+      return bytes.toString('base64')
+    },
+    materializeGameRecapReferences: async ids => {
+      const scope = executionContext?.gameRecapScope
+      const workspace = recapWorkspace
+      const tool = executionContext?.groupTool
+      if (!scope?.show || !workspace || !tool) throw new Error('Read recap material first.')
+      return Promise.all(ids.map(id => materializeRecapReference({ ...scope, id, tool,
+        material: workspace.material, root: workspace.root, vault: input.messageInput.vault })))
+    },
+    previewGameRecap: async draftPath => {
+      const scope = executionContext?.gameRecapScope
+      const workspace = recapWorkspace
+      const tool = executionContext?.groupTool
+      if (!scope?.show || !workspace || !tool) throw new Error('Read recap material first.')
+      const material = workspace.material
+      return previewRecap({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, workspace.root),
+        draftPath, material, chat: workspace.chat, lore: await readGameLore(), photo: async entryId => {
+          const ref = material.references.find(reference => reference.entryId === entryId)
+          return ref ? (await fetchRecapReference({ ...scope, id: ref.id, material, tool })).bytes : null
+        } })
+    },
+    prepareRecapMedia: async (request, fetchImpl) => {
+      const scope = executionContext?.gameRecapScope
+      const admission = executionContext?.gameRecapAdmission
+      if (!scope?.show || !admission || !recapWorkspace || !executionContext.groupTool) throw new Error('Read the authorized recap material before generating media.')
+      return createRecapMediaRuntime({ vault: input.messageInput.vault, workspace: recapWorkspace, scope, admission,
+        tool: executionContext.groupTool, fetchImpl, request })
+    },
+    prepareGameRecapInputs: async material => {
+      const scope = executionContext?.gameRecapScope
+      if (!scope?.show || !executionContext?.groupTool) throw new Error('Pair show scope is unavailable.')
+      if (recapWorkspace) return recapWorkspace.manifest
+      recapWorkspace = await materializeRecapWorkspace({ vault: input.messageInput.vault, gameId: scope.gameId,
+        eventId: scope.eventId, sessionId: input.session.sessionId, material, lore: await readGameLore(), tool: executionContext.groupTool })
+      return recapWorkspace.manifest
+    },
     currentGameMissedCheckInScope: () => executionContext?.gameMissedCheckInScope ?? null,
     prepareGameLore: async () => (await prepareGameLore())?.guidance || null,
     readGameLore,
     replaceGameLore: async (content) => {
       if (executionContext?.gameRecapScope?.loreAccess === 'read') throw new TypeError('Game lore is read-only for this recap.')
-      await writeGameLore(content)
+      if (Buffer.byteLength(content, 'utf8') > 64 * 1024) throw new TypeError('Game lore is too large.')
+      await writeGameLore(replaceRecapNarrative(await readGameLore(), content))
+    },
+    appendGameRecapUsage: async usage => {
+      if (!executionContext?.gameRecapScope?.show) return
+      await writeGameLore(appendRecapUsage(await readGameLore(), usage))
+      input.recordGameRecapUsageStamped?.(usage.generationId)
     },
     appendGameRecapChatLine: async (chatLine) => {
       if (executionContext?.gameRecapScope?.loreAccess !== 'read') return
