@@ -57,5 +57,9 @@ existing recap and silently retires its delivery receipt.
 - Rebased onto `3a31792d92`; retained main's deletion of the Live voice test.
   Full typecheck, focused egress tests and complete input measurements pass again.
 
+CI found one obsolete craft-guide assertion for the deleted photo quota; removed
+it while preserving the explicit-pair policy test. The live bridge initializes
+its artifact directory, and its repeatable invocation is in the testing map.
+
 Candidate PR: #4837. Status: active; implementation complete, live/native proof
 pending. No ReviewGPT requested or started.

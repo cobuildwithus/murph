@@ -280,7 +280,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
 
   if (process.env.MURPH_RECAP_LIVE_BRIDGE === "1") it("serves synthetic recap publication to the sanctioned live journey", async () => {
     const { createServer } = await import("node:http");
-    const { writeFile } = await import("node:fs/promises");
+    const { mkdir, writeFile } = await import("node:fs/promises");
     const { hostedGameToolRequestSchema } = await import("@murphai/hosted-execution/runtime-control");
     const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
     const { readRecapEnvelope, readAuthorizedRecapAsset } = await import("@/src/lib/game/recap-asset-access");
@@ -350,6 +350,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('Expected local bridge.');
+    await mkdir(new URL('../../../audit-packages/recap-show-simplify/', import.meta.url), { recursive: true });
     await writeFile(new URL('../../../audit-packages/recap-show-simplify/bridge.json', import.meta.url), JSON.stringify({ url: `http://127.0.0.1:${address.port}` }));
     try { await done; expect(fixtures.size).toBeGreaterThanOrEqual(2); }
     finally {

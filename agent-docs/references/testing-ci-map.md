@@ -2222,3 +2222,29 @@ PostgreSQL proof. Prepare it with `pnpm --dir apps/web prisma:migrate:deploy`,
 not `db push`, when checking migration-owned constraints. Run files sharing that
 database with `--maxWorkers=1`; runtime-cutover singleton tests cannot overlap
 other files. The canonical PostgreSQL runner already enforces this serial lane.
+
+### Pair show real-provider proof
+
+Use an isolated migrated loopback `murph_test_*` database and an approved local
+OpenAI image test credential. In one terminal start the synthetic canonical Web
+bridge (it creates only synthetic games and local encrypted media):
+
+```sh
+DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 MURPH_RECAP_LIVE_BRIDGE=1 pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/game-service-postgres.test.ts -t 'serves synthetic recap publication'
+```
+
+In another terminal run the one journey twice through the sanctioned live lane:
+
+```sh
+pnpm test:assistant:live -- --test 'pair recap show real providers canonical publication'
+```
+
+The local subscription runs Sol; the image tool uses the local test key. Song is
+optional. Each run must accept a show through Web with a real image, one queued
+line/link, and no chat media. Presentation and proof JSON go under ignored
+`audit-packages/recap-show-simplify/run-*/`. When the two runs finish, close the
+bridge so its test cleanup executes:
+
+```sh
+node --input-type=module -e 'import {readFile} from "node:fs/promises"; const {url}=JSON.parse(await readFile("audit-packages/recap-show-simplify/bridge.json","utf8")); await fetch(url+"/finish",{method:"POST",body:"{}"});'
+```
