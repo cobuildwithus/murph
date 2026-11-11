@@ -1219,15 +1219,9 @@ async function maybeHandleOpenAiRequest(input: {
   if (bodyRead instanceof Response) return bodyRead;
   const { boundedBody, imageGenerationRequested } = bodyRead;
 
-  const imageEndpoint = pathnameSuffix === "/v1/images/generations" || pathnameSuffix === "/v1/images/edits";
-  // Text model traffic and opaque transports must not acquire a Web dependency.
-  // Recap turns disable Codex's native image tool in their trusted configuration.
-  if (input.request.method === "POST" && (imageEndpoint || imageGenerationRequested)) {
-    const recapDenied = await checkRecapProviderRequest({ authorization, env: input.env,
-      request: new Request(input.request.url, { method: input.request.method, headers: input.request.headers, body: boundedBody }),
-      media: imageEndpoint, nativeImage: imageGenerationRequested });
-    if (recapDenied) return recapDenied;
-  }
+  const recapDenied = await checkRecapOpenAiRequest({ authorization, env: input.env,
+    request: input.request, pathnameSuffix, boundedBody, imageGenerationRequested });
+  if (recapDenied) return recapDenied;
   const imageDenied = await checkHostedOpenAiImageRequestAccess({
     request: input.request, env: input.env, authorization, pathnameSuffix, imageGenerationRequested,
   });
@@ -1281,6 +1275,20 @@ async function maybeHandleOpenAiRequest(input: {
   // native Codex owns connection reuse/recovery. Accepting here would couple
   // every subsequent frame to this Worker invocation's JavaScript lifetime.
   return response;
+}
+
+async function checkRecapOpenAiRequest(input: {
+  request: Request; env: RunnerOutboundEnvironmentSource; authorization: HostedProviderEgressAuthorization;
+  pathnameSuffix: string; boundedBody: ArrayBuffer | undefined; imageGenerationRequested: boolean;
+}): Promise<Response | null> {
+  // Text model traffic and opaque transports must not acquire a Web dependency.
+  // Recap turns disable Codex's native image tool in their trusted configuration.
+  if (input.request.method !== "POST") return null;
+  const imageEndpoint = input.pathnameSuffix === "/v1/images/generations" || input.pathnameSuffix === "/v1/images/edits";
+  if (!imageEndpoint && !input.imageGenerationRequested) return null;
+  return checkRecapProviderRequest({ authorization: input.authorization, env: input.env,
+    request: new Request(input.request.url, { method: input.request.method, headers: input.request.headers, body: input.boundedBody }),
+    media: imageEndpoint, nativeImage: input.imageGenerationRequested });
 }
 
 async function checkHostedOpenAiImageRequestAccess(input: {
