@@ -38,7 +38,8 @@ test("Settings navigation and retained billing confirmation fit phones and deskt
     const navigation = page.locator("#dashboard-primary-navigation-component");
     await expect(navigation.locator('a[href="/settings"]')).toHaveCount(1);
     await expect(navigation.locator('a[href="/home"]')).toHaveCount(1);
-    await expect(navigation.locator('a[href="/training"], a[href="/connect"]')).toHaveCount(0);
+    await expect(navigation.locator('a[href="/training"]')).toHaveCount(0);
+    await expect(navigation.getByRole("link", { name: "Wearables", includeHidden: true })).toHaveAttribute("href", "/connect");
     const billing = page.locator("#edge-to-pulse-confirmation");
     await expect(billing.getByText("Switch to Pulse", { exact: true }).first()).toBeVisible();
     await expect(billing.getByText(/You keep Edge through/)).toBeVisible();

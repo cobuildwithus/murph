@@ -6,6 +6,7 @@ import {
   ChevronsUpDown,
   Home,
   Settings,
+  Watch,
 } from "lucide-react";
 import {
   useEffect,
@@ -310,7 +311,20 @@ export function SidebarPrimaryNavigation({
       </SidebarMenuItem>
       <SidebarMenuItem>
         <SidebarMenuButton
-          isActive={pathname.startsWith("/settings") || pathname.startsWith("/connect")}
+          isActive={pathname === "/connect" || pathname.startsWith("/connect/")}
+          size="lg"
+          className={SIDEBAR_NAV_ITEM_CLASS}
+          render={
+            <Link href="/connect">
+              <Watch className={SIDEBAR_NAV_ICON_CLASS} />
+              Wearables
+            </Link>
+          }
+        />
+      </SidebarMenuItem>
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          isActive={pathname.startsWith("/settings")}
           size="lg"
           className={SIDEBAR_NAV_ITEM_CLASS}
           render={
