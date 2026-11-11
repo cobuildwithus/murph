@@ -339,6 +339,9 @@ function buildStableRouteCapabilityBlocks(
     return [];
   }
   const direct = conversationScope === "direct";
+  // A block only private chat carries.
+  const directOnly = (id: Parameters<typeof promptBlock>[0], build: () => string) =>
+    promptBlock(id, direct ? build() : null);
   return collectPromptBlocks(
     buildAssistantTurnPriorityBlock(conversationScope),
     promptBlock("route.current-state", buildAssistantCurrentStateGuidanceText(conversationScope)),
@@ -380,11 +383,11 @@ function buildStableRouteCapabilityBlocks(
           })
         : null,
     ),
-    promptBlock("route.member-content-saving", direct ? buildAssistantMemberContentSavingText() : null),
-    promptBlock("route.vault-file-sends", direct ? buildAssistantVaultFileSendGuidanceText() : null),
+    directOnly("route.member-content-saving", buildAssistantMemberContentSavingText),
+    directOnly("route.vault-file-sends", buildAssistantVaultFileSendGuidanceText),
     buildAssistantStableExecutionGuidanceBlocks(input),
-    promptBlock("route.computer-use", direct ? buildAssistantComputerUseGuidanceText() : null),
-    promptBlock("route.phone-calls", direct ? buildAssistantPhoneCallGuidanceText() : null),
+    directOnly("route.computer-use", buildAssistantComputerUseGuidanceText),
+    directOnly("route.phone-calls", buildAssistantPhoneCallGuidanceText),
     buildAssistantConnectedAppsGuidanceBlock(conversationScope),
     promptBlock("route.product-updates", buildAssistantProductUpdatesGuidanceText()),
     buildAssistantProductFeedbackGuidanceBlock(conversationScope),
@@ -397,13 +400,13 @@ function buildStableRouteCapabilityBlocks(
       conversationScope,
     }),
     buildAssistantFamilyPlanGuidanceBlock(conversationScope),
-    promptBlock("route.habitat", direct ? buildAssistantHabitatGuidanceText() : null),
+    directOnly("route.habitat", buildAssistantHabitatGuidanceText),
     buildAssistantHostedGroupGuidanceBlock(
       conversationScope,
       input.channel,
       input.assistantHostedGroupToolSurface ?? "families",
     ),
-    promptBlock("route.knowledge", direct ? buildAssistantKnowledgeGuidanceText() : null),
+    directOnly("route.knowledge", buildAssistantKnowledgeGuidanceText),
     buildAssistantCronGuidanceBlocks(
       conversationScope,
       input.hostedRuntime ?? false,

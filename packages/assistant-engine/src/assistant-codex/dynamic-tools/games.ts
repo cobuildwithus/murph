@@ -335,17 +335,21 @@ function gameResultGuidance(payload: GameToolResult, request: OrdinaryGameReques
   const games = ('state' in payload ? payload.state?.games : undefined) ?? []
   const open = games.filter(game => ['live', 'negotiating', 'invited'].includes(game.status))
   const selection = open.length > 1 ? GAME_SELECTION_GUIDANCE : ''
-  if (request.action !== 'read_game') {
-    const said = payload.status !== 'ok' ? gameRefusalGuidance(payload, request.action)
-      : request.action === 'game_photo' ? ('photoOutcome' in payload && payload.photoOutcome ? GAME_PHOTO_OUTCOME_GUIDANCE[payload.photoOutcome] : '')
-      : gameUpdateGuidance(payload, request.update, games)
-    return selection + (said ? '\n' + said : '')
-  }
-  if (payload.status !== 'ok') return selection
+  if (request.action === 'read_game') return payload.status === 'ok' ? selection + '\n' + gameReadGuidance(games, open) : selection
+  const said = payload.status !== 'ok' ? gameRefusalGuidance(payload, request.action)
+    : request.action === 'game_photo' ? ('photoOutcome' in payload && payload.photoOutcome ? GAME_PHOTO_OUTCOME_GUIDANCE[payload.photoOutcome] : '')
+    : gameUpdateGuidance(payload, request.update, games)
+  return selection + (said ? '\n' + said : '')
+}
+
+type GameRuleFacts = { status: string; maxPlayers?: number | null; pendingInviteeCount?: number | null }
+
+/** The rules for what the room holds right now. `open` is the subset of `games` still in play. */
+function gameReadGuidance(games: readonly GameRuleFacts[], open: readonly GameRuleFacts[]): string {
   const pair = open.filter(game => game.maxPlayers !== 10)
   const group = open.filter(game => game.maxPlayers === 10)
   const live = open.some(game => game.status === 'live')
-  return selection + '\n' + [GAME_READ_FACTS_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE,
+  return [GAME_READ_FACTS_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE,
     ...(!open.length || open.some(game => game.status !== 'live') ? [GAME_SHARED_CHOICE_POLL_GUIDANCE] : []),
     ...(games.some(game => game.status === 'settled' || game.status === 'void') ? [GAME_PLAY_AGAIN_GUIDANCE] : []),
     ...(pair.some(game => game.status !== 'live') ? [GAME_PAIR_AGREE_GUIDANCE] : []),
@@ -365,7 +369,11 @@ function gameUpdateGuidance(payload: GameToolResult, update: HostedGameUpdate, g
   // A yes with no proposalId accepts an invitation.
   if (update.operation === 'approve' && !update.proposalId) return GAME_UPDATE_RESULT_GUIDANCE.joined
   if (!('state' in payload) || !payload.state) return ''
-  const game = games.find(candidate => candidate.id === update.gameId)
+  return gameChangeGuidance(update, games.find(candidate => candidate.id === update.gameId))
+}
+
+/** What to say after a yes, a no or an ask, from the game as the write left it. */
+function gameChangeGuidance(update: HostedGameUpdate, game: { status: string; pendingChange?: unknown } | undefined): string {
   const waiting = game?.pendingChange != null
   switch (update.operation) {
     case 'approve':
