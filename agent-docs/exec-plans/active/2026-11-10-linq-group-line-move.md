@@ -31,8 +31,25 @@ diagnostics to start a legacy route. No plaintext identity is accepted.
 The requested real-group test is authorized, but waits for this fix's focused
 proof, review, exact-head CI and managed deployment. No group move has started.
 
-Local verification reproduces the null-projection failure before the correction
-and passes afterward: 74 consumer/producer PostgreSQL tests plus 15 move-unit
+An additional preflight exposed a second start blocker: system acknowledgements
+advance the canonical lane watermark without stamping every item's `consumed_at`.
+The quietness guard mistook already handled system items for pending work.
+Use the existing one-statement `readHostedMailboxProgress` projection, including
+its live-item retention and expiry rules, and compare lane high-water marks to
+consumed watermarks. Keep the recent-conversation, active-runtime and pending
+delivery guards. This adds one bounded metadata read only to operator start;
+it neither changes acknowledgements nor replays or discards mailbox items.
+New synthetic cases reproduce the acknowledged/expired-item rejection before
+the correction and preserve rejection for unacknowledged system work and recent
+acknowledged conversation. The fixture now settles work through canonical lane
+acknowledgement rather than timestamp-only updates.
+
+Round 1 passed on `c220df0b440a88fc63982f9ff1fc3e3a3d703aed`. The mailbox guard
+correction adds production behavior after that review, so the completion owner
+will run round 2 on the next stable pushed head alongside fresh exact-head CI.
+
+Local verification reproduces both start blockers before their corrections
+and passes afterward: 78 consumer/producer PostgreSQL tests plus 15 move-unit
 and Ops-route tests. Coverage includes the complete legacy start/hold/adopt/leave
 path, unchanged projected starts, inconsistent authority, a projection changed
 during provider preparation, concurrent starts and failed quietness checks.
