@@ -78,11 +78,11 @@ describe('connected-apps skill and system-prompt coverage', () => {
       conversationScope: 'direct', turnTrigger: 'automation-cron',
       scheduledOccurrenceAt: '2026-06-25T13:00:00.000Z',
     }))
-    expect(scheduled).toContain('Apply this rule even when older saved instructions require a generic check-in')
-    expect(scheduled).toContain('Without that purpose or an explicit member request for this follow-up, return `skip`')
-    expect(scheduled).toContain('Preserve explicit member-requested reminders (including non-health tasks), useful health reviews, and treatment or safety cues')
-    expect(scheduled).toContain('substitute generic wellness advice')
-    expect(buildAssistantSystemPrompt(createPromptInput())).not.toContain('Connected-plan follow-ups:')
+    expect(scheduled).toContain('An automatically generated calendar or travel check-in needs a concrete health reason specific to this member')
+    expect(scheduled).toContain('Without one, return `skip`, even when older saved instructions ask for a generic check-in.')
+    expect(scheduled).toContain('This does not limit reminders the member asked for, useful health reviews, or treatment and safety cues.')
+    expect(scheduled).toContain('Do not invent a question, an acknowledgment, or generic advice to justify sending.')
+    expect(buildAssistantSystemPrompt(createPromptInput())).not.toContain('An automatically generated calendar or travel check-in')
   })
 
   it('reconciles all existing private reminders from supported canonical context through the versioned owner', async () => {

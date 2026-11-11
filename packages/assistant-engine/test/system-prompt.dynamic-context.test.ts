@@ -244,7 +244,9 @@ describe('assistant dynamic context prompt blocks', () => {
       scheduledOccurrenceAt: '2026-06-29T12:00:00Z',
     })
     expect(scheduled.dynamicTurnContextPrompt).not.toContain('Turn kind: ordinary inbound.')
-    expect(scheduled.stableRouteCapabilityPrompt).toContain('Never perform this recheck during a scheduled automation')
+    // The late-result policy applies to ordinary inbound turns only, so a
+    // scheduled turn does not carry it.
+    expect(scheduled.stableRouteCapabilityPrompt).not.toContain('Late child results for ordinary inbound turns:')
   })
 
   it('does not route group email into unavailable filesystem or browser procedures', () => {

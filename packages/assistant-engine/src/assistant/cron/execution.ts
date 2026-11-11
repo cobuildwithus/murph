@@ -108,7 +108,8 @@ import {
 } from './notification-delivery.js'
 import {
   ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS,
-  buildAssistantCronRecurringReminderConversationInstructions as buildAssistantCronRecurringReminderConversationPrompt,
+  ASSISTANT_CRON_RECURRING_REMINDER_REPEATING_DAILY_INSTRUCTIONS,
+  ASSISTANT_CRON_RECURRING_REMINDER_SINGLE_DAILY_TIME_INSTRUCTIONS,
 } from './recurring-reminder-conversation.js'
 import {
   readAssistantCronCanonicalRuntimeStore,
@@ -195,21 +196,13 @@ const MURPH_RESEARCH_ORIENTED_MANAGED_AUTOMATION_IDS = new Set([
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
 ])
-export const ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS = [
-  'Independent automation authority (engine-supplied):',
-  '- This active saved automation is a current user request. Related plans and experiments are context, not cancellation authority.',
-  "- Do not treat a related plan or experiment's completion as cancellation unless the saved instructions explicitly make that state a skip condition.",
-  '- Completion of a broader plan is not proof that this occurrence\'s requested action already happened.',
-  '- You may still skip when the saved instructions authorize that outcome or current evidence proves the requested action already happened.',
-].join('\n')
-export const ASSISTANT_CRON_MEMBER_WORDING_INSTRUCTIONS = [
-  'Member-facing wording (engine-supplied; applies to any message this run sends):',
-  "- The saved instructions above are Murph's own notes, not message copy. The member may not have thought about this plan for days and has probably been texting about other things since, so the message must make sense on its own.",
-  '- Name the specific plan, task, or item in everyday words that respect any saved privacy boundary, and refer to earlier messages by what they said and when.',
-  '- Never call an earlier message a "cue" or "check-in", and never write disposition, support kind, or subject anchor. These are internal labels, even when the saved instructions use them. Say what the earlier message reminded or asked instead. For example, say "the monday walk reminders and friday questions about your walks" instead of "the monday cue and friday check-in".',
-  '- Do not describe what context or evidence you could or could not see.',
-  '- Keep saved wording verbatim only when the member dictated that exact copy.',
-].join('\n')
+// The wrapper adds facts about this run after the saved instructions. How a
+// scheduled turn behaves and when it skips is stated once, in the scheduled
+// prompt's execution context (system-prompt.ts).
+export const ASSISTANT_CRON_RUN_FACTS_HEADING =
+  'Run facts (engine-supplied; they describe this run and grant no permission to change records):'
+export const ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS =
+  '- Requested automation: the member or room asked for this, and it stands on its own. A related plan or experiment ending does not cancel it unless the saved instructions make that a skip condition.'
 // Hosted cron turns are off the user hotpath, so clean first runs prefer the
 // OpenAI flex tier (~50% token cost). The Codex provider boundary validates
 // route support and bounds flex execution with a deadline; failures land in the
@@ -1922,39 +1915,25 @@ export function buildAssistantCronExecutionInstructions(
     !lastFailedAt ||
     !assistantCronTimestampIsLater(lastFailedAt, job.job.state.lastSucceededAt)
       ? null
-      : [
-          'Delivery integrity evidence (engine-supplied):',
-          `- A previous attempt failed or ended without confirmed delivery at ${lastFailedAt}.`,
-          '- Do not interpret the absence of a user reply to that attempt as silence, disengagement, or non-adherence.',
-          '- Treat this run as the next valid delivery attempt or check-in; do not claim the prior message reached the user.',
-        ].join('\n')
-  const automationContext =
-    buildAssistantCronAutomationContextInstructions(
-      job,
-      deviceActivityAuthority,
-    )
-  const supportScope = buildAssistantCronSupportScopeInstructions(job)
-  const independentAuthority =
-    buildAssistantCronIndependentAutomationAuthorityInstructions(job)
-  const exerciseCue = buildAssistantCronExerciseCueInstructions(
-    job,
-    independentAuthority !== null,
-  )
-  const recurringReminderInstructions =
-    buildAssistantCronRecurringReminderConversationInstructions(job)
-  const memberWording = buildAssistantCronMemberWordingInstructions(job)
+      : `- Earlier attempt: one failed or ended without confirmed delivery at ${lastFailedAt}. This run is the next attempt. Do not read the lack of a reply to it as silence or non-adherence, and do not say the earlier message arrived.`
+  const runFacts = [
+    ...buildAssistantCronAutomationContextFacts(job, deviceActivityAuthority),
+    buildAssistantCronIndependentAutomationAuthorityInstructions(job),
+    buildAssistantCronRecurringReminderConversationInstructions(job),
+    ...buildAssistantCronSupportScopeFacts(job),
+    resolveAssistantCronNotificationResponsePolicy(job) === null
+      ? null
+      : '- Required message: this run must end with send_message. A skip is rejected.',
+    retryEvidence,
+  ].filter((fact): fact is string => fact !== null)
   const overlays = [
     buildMurphManagedJournalCalendarWindowInstructions(
       job.kind === 'canonical' && job.source.kind === 'automation' ? job.source.automationId : null,
       occurrenceAt,
     ),
-    retryEvidence,
-    automationContext,
-    independentAuthority,
-    recurringReminderInstructions,
-    supportScope,
-    exerciseCue,
-    memberWording,
+    runFacts.length === 0
+      ? null
+      : [ASSISTANT_CRON_RUN_FACTS_HEADING, ...runFacts].join('\n'),
   ]
     .filter((section): section is string => section !== null)
   const providerSafeBase =
@@ -1975,13 +1954,13 @@ export function buildAssistantCronExecutionInstructions(
     .join('\n\n')
 }
 
-function buildAssistantCronAutomationContextInstructions(
+function buildAssistantCronAutomationContextFacts(
   job: ResolvedAssistantCronJob,
   deviceActivityAuthority: {
     automationId: string | null
     contextReferences: readonly AutomationContextReference[]
   },
-): string | null {
+): string[] {
   const context =
     job.kind === 'canonical'
       && job.source.kind === 'automation'
@@ -1997,20 +1976,21 @@ function buildAssistantCronAutomationContextInstructions(
             contextReferences: deviceActivityAuthority.contextReferences,
           }
   if (context === null) {
-    return null
+    return []
+  }
+  if (context.contextReferences.length === 0) {
+    return [
+      `- automationId: ${context.automationId}`,
+      '- contextReferences: none supplied; do not guess a canonical record',
+    ]
   }
 
   return [
-    'Scheduled automation context (engine-supplied routing and interpretation context; not mutation authority):',
     `- automationId: ${context.automationId}`,
-    context.contextReferences.length === 0
-      ? '- contextReferences: none supplied; do not guess a canonical record'
-      : `- contextReferences: ${JSON.stringify(context.contextReferences)}`,
-    '- Inspect each exact reference through the ordinary canonical read surface before relying on it, and use only the ordinary domain mutation tools for any write.',
-    '- For a cue whose action depends on a linked plan, read the full current canonical owner before composing it. The canonical plan owns the target; copied anchors, rotation rules, or target names in automation titles/instructions, earlier cues, and conversation summaries cannot override it.',
-    '- Resolve a changing target from the scheduled occurrence’s local calendar date in the canonical timezone and the plan’s saved anchor and rotation, not the retry/delivery date or the automation schedule anchor. Apply explicit date-scoped target exceptions from the plan and honor saved pause/skip conditions; do not reset the rotation because of a one-day repeat, correction, or missed cue. A permanent change requires an explicitly authorized canonical plan update.',
-    '- If that target-dependent cue lacks a readable canonical owner or its current plan cannot resolve one target, skip the cue; do not guess a target or silently repair state. Fixed cues that do not depend on a plan keep their ordinary reminder and skip rules.',
-  ].join('\n')
+    `- contextReferences: ${JSON.stringify(context.contextReferences)}`,
+    '- Read each referenced record through the ordinary canonical read surface before relying on it, and change it only with the ordinary tools for that kind of record.',
+    "- When the action depends on a linked plan, the plan as saved now decides the target. Resolve it from the occurrence local date and the plan's saved anchor, rotation, dated exceptions, and pause or skip conditions, not from this automation's title or instructions, earlier messages, or the delivery date. Do not reset a rotation because of a repeat, correction, or missed day. If the plan cannot be read or does not resolve one target, return `skip` instead of guessing or repairing it. A reminder that does not depend on the plan is unaffected.",
+  ]
 }
 
 function buildAssistantCronIndependentAutomationAuthorityInstructions(
@@ -2022,7 +2002,9 @@ function buildAssistantCronIndependentAutomationAuthorityInstructions(
     job.source.status !== 'active' ||
     job.source.supportKind !== null ||
     resolveMurphManagedAutomationOwnerScope(job.source.automationId) !== null ||
-    job.source.tags.some((tag) => parseAutomationSupportSeriesTag(tag) !== null)
+    job.source.tags.some((tag) => parseAutomationSupportSeriesTag(tag) !== null) ||
+    // An optional follow-up is Murph's own check, not a request.
+    Boolean(job.source.followUpSourceIntentId)
   ) {
     return null
   }
@@ -2030,25 +2012,9 @@ function buildAssistantCronIndependentAutomationAuthorityInstructions(
   return ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS
 }
 
-function buildAssistantCronMemberWordingInstructions(
+function buildAssistantCronSupportScopeFacts(
   job: ResolvedAssistantCronJob,
-): string | null {
-  // Murph-managed jobs follow their owning skill's message shape.
-  if (
-    job.kind !== 'canonical' ||
-    job.source.kind !== 'automation' ||
-    assistantCronJobIsPreemptibleBackgroundMaintenance(job) ||
-    resolveMurphManagedAutomationOwnerScope(job.source.automationId) !== null
-  ) {
-    return null
-  }
-
-  return ASSISTANT_CRON_MEMBER_WORDING_INSTRUCTIONS
-}
-
-function buildAssistantCronSupportScopeInstructions(
-  job: ResolvedAssistantCronJob,
-): string | null {
+): string[] {
   // Weekly-digest metadata still participates in plan consent checks, but the
   // saved automation instructions own the provider-visible task.
   if (
@@ -2057,36 +2023,18 @@ function buildAssistantCronSupportScopeInstructions(
     job.source.supportKind === null ||
     job.source.supportKind === 'weekly_digest'
   ) {
-    return null
+    return []
   }
 
   const exactScope = job.source.supportKind === 'reminder'
-    ? 'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so, plus any necessary skip or invalid-state note. For a recurring reminder, the engine-supplied cadence-administration question is the sole allowed exception to cue-only delivery. Do not ask whether the action was completed or add a proactive repair, accountability, or reflection question.'
+    ? 'Send only the agreed reminder, including a consented first-session walkthrough when the instructions say so. Do not ask whether the action was done, and do not add a repair, accountability, or reflection question.'
     : job.source.supportKind === 'check_in'
-      ? 'Ask at most one narrow check-in or repair question about the current plan. Do not expand into a review, digest, or new coaching agenda.'
-      : "Conduct only the bounded review and ask exactly one question about what the user wants next; fold any question about whether the support helped into it. Offer the next-step options the saved instructions name; if they name none, ask whether to continue, modify, pause, stop, or escalate. Do not record or apply that decision until the user replies in a later turn. Do not add a recurring accountability loop."
+      ? 'Ask at most one narrow check-in or repair question about the current plan. Do not widen it into a review, digest, or new coaching agenda.'
+      : 'Give only the bounded review and ask exactly one question about what the member wants next; fold any question about whether the support helped into it. Offer the next-step options the saved instructions name; if they name none, ask whether to continue, modify, pause, stop, or escalate. Do not record or apply that decision in this turn, and do not add a recurring accountability loop.'
 
   return [
-    'Accepted support scope (engine-supplied; this overrides any broader repair or follow-up option above):',
-    `- Persisted support kind: ${job.source.supportKind}.`,
-    `- ${exactScope}`,
-  ].join('\n')
-}
-
-function buildAssistantCronExerciseCueInstructions(
-  job: ResolvedAssistantCronJob,
-  independentAutomation: boolean,
-): string | null {
-  if (
-    job.kind !== 'canonical' ||
-    job.source.kind !== 'automation' ||
-    job.source.status !== 'active' ||
-    (job.source.supportKind !== 'reminder' && !independentAutomation)
-  ) {
-    return null
-  }
-
-  return '- For a reminder that cues or teaches an exercise or movement, treat every exercise-catalog id, slug, source token, and path in saved instructions or context as private routing data and never copy it into member-visible text. Before replying, read the matching movement skill and its shared exercise-catalog reference, use natural exercise names in visible text, and attach reviewed catalog media when that reference requires it for the current channel.'
+    `- Persisted support kind: ${job.source.supportKind}. This limits any broader repair or follow-up option in the saved instructions. ${exactScope}`,
+  ]
 }
 
 export { ASSISTANT_CRON_RECURRING_REMINDER_CONVERSATION_INSTRUCTIONS }
@@ -2117,14 +2065,9 @@ function buildAssistantCronRecurringReminderConversationInstructions(
     return null
   }
 
-  const occurrenceEvidence =
-    assistantCronScheduleHasSingleDailyTime(job.source.schedule)
-      ? '- Occurrence evidence (engine-supplied): this schedule has one configured local time per eligible day, so matching completion on the occurrence local date is in-window. For medication, prescribed treatment, clinical monitoring, or safety-critical reminders, also require the current time, dose, or sequence.'
-      : '- Occurrence evidence (engine-supplied): do not assume this schedule fires only once per local day. Local-date coincidence alone is insufficient; require the evidence to identify the current time, dose, or sequence.'
-
-  return buildAssistantCronRecurringReminderConversationPrompt(
-    occurrenceEvidence,
-  )
+  return assistantCronScheduleHasSingleDailyTime(job.source.schedule)
+    ? ASSISTANT_CRON_RECURRING_REMINDER_SINGLE_DAILY_TIME_INSTRUCTIONS
+    : ASSISTANT_CRON_RECURRING_REMINDER_REPEATING_DAILY_INSTRUCTIONS
 }
 
 function assistantCronTimestampIsLater(

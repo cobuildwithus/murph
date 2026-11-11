@@ -112,6 +112,6 @@ onboardingGuidance: false, turnTrigger: null,
     expect(prompt).toContain('Ask only for missing subjective context, ambiguous details, consent, or facts no available source can answer.')
     expect(prompt).toContain('Use canonical query surfaces first for health data')
     expect(prompt).not.toContain('This is an output-only turn.')
-    expect(prompt).not.toContain('This turn was triggered by an existing scheduled automation run.')
+    expect(prompt).not.toContain('Execution context:')
   })
 })

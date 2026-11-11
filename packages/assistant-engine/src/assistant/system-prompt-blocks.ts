@@ -144,6 +144,82 @@ export interface AssistantPromptBlock {
   text: string;
 }
 
+/**
+ * What a scheduled automation occurrence carries besides boundary blocks.
+ *
+ * Nobody is texting on a scheduled turn: it runs saved instructions, then sends
+ * one message or stays quiet. It keeps who Murph is, how to read records and
+ * skills, how to write for the channel, and the scheduled blocks. Blocks about
+ * answering, capturing, offering, account products and automation authoring
+ * are left out. A boundary block is never dropped, so a block added later is
+ * left out of scheduled turns unless it is a boundary or is listed here.
+ */
+export const ASSISTANT_SCHEDULED_TURN_PROMPT_BLOCK_IDS: ReadonlySet<AssistantPromptBlockId> = new Set<AssistantPromptBlockId>([
+  // Who Murph is and how it reasons about health. Private chat and group rooms
+  // each have their own block.
+  "core.how-you-help.direct",
+  "core.product-principles",
+  // The group-email health block refers to these rules by name.
+  "core.understand-before-recommending.group",
+  "core.chronic-support",
+  // Reading records and skills for runs that look something up.
+  "route.current-state",
+  "route.tool-discovery",
+  "route.vault-navigation",
+  "route.skill-router",
+  "route.group-email-health",
+  "route.execution-behavior",
+  "route.cli-guidance",
+  "route.connected-apps.direct",
+  "route.knowledge",
+  "route.private-reminder-location",
+  "route.cli-contract",
+  // Short "read the skill first" pointers for tools scheduled runs use: lab
+  // lookups, call status, and the monthly usage review's feedback report.
+  "route.labs",
+  "route.phone-calls",
+  "route.product-feedback.direct",
+  // Time, voice and channel formatting.
+  "thread.time-style",
+  "thread.date-style.unverified",
+  "thread.product-base-url",
+  "thread.workout-access",
+  "thread.strength-training",
+  "thread.persona",
+  "thread.tone",
+  "thread.personality-dials",
+  "thread.reply-style",
+  "thread.link-self-check",
+  // This turn.
+  "turn.current-time",
+  "turn.current-date",
+  "turn.injected-context",
+  "turn.execution-context",
+  "turn.scheduled-occurrence",
+  "turn.delivery-decision-contract",
+]);
+
+/** Added for a scheduled occurrence in a group room, where runs post polls. */
+export const ASSISTANT_SCHEDULED_GROUP_TURN_PROMPT_BLOCK_IDS: ReadonlySet<AssistantPromptBlockId> = new Set<AssistantPromptBlockId>([
+  "route.native-polls",
+  // One bubble, and the layout of a report that covers several people.
+  "thread.message-shape.group",
+]);
+
+/** Keeps boundary blocks and the blocks a scheduled occurrence needs. */
+export function admitScheduledTurnPromptBlocks(
+  blocks: readonly AssistantPromptBlock[],
+  options: { groupRoom: boolean },
+): AssistantPromptBlock[] {
+  return blocks.filter(
+    (block) =>
+      block.boundary
+      || ASSISTANT_SCHEDULED_TURN_PROMPT_BLOCK_IDS.has(block.id)
+      || (options.groupRoom
+        && ASSISTANT_SCHEDULED_GROUP_TURN_PROMPT_BLOCK_IDS.has(block.id)),
+  );
+}
+
 export type AssistantPromptBlockEntry =
   | AssistantPromptBlock
   | null

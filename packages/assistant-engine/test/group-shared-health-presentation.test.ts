@@ -55,7 +55,8 @@ currentLocalDate: '2030-02-12', currentTimeZone: 'UTC',
       currentLocalDate: '2026-08-05', currentTimeZone: 'America/New_York',
       turnTrigger: 'automation-cron', scheduledOccurrenceAt: '2026-08-05T13:00:00.000Z',
     })
-    expect(scheduled).toContain('Scheduled automation changes for this group room are available through `murph.automation`')
+    // A scheduled turn reports and offers; it does not carry the authoring block.
+    expect(scheduled).not.toContain('Scheduled automation changes for this group room are available through `murph.automation`')
     expect(scheduled).toContain('move future updates 30 minutes later')
     expect(scheduled).toContain('specific recovery information permitted by the control-wording rule')
     expect(scheduled).toContain('still report the actual check time')

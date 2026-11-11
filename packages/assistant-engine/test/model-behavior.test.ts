@@ -283,7 +283,8 @@ describe('assistant execution prompt contract', () => {
     expect(groupPrompt.match(/Late child results for ordinary inbound turns:/g) ?? [])
       .toHaveLength(1)
     expect(nonHostedGroupPrompt).not.toContain('Late child results')
-    expect(scheduledPrompt).toContain('Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.')
+    // The late-result policy is for ordinary inbound turns; scheduled turns do not carry it.
+    expect(scheduledPrompt).not.toContain('Late child results for ordinary inbound turns:')
     expect(scheduledPrompt).not.toContain('Turn kind: ordinary inbound. Apply')
     expect(autoReplyPrompt.match(/Late child results for ordinary inbound turns:/g) ?? [])
       .toHaveLength(1)
@@ -1380,7 +1381,12 @@ describe('assistant system prompt layers', () => {
     expect(layers.threadContextPrompt).toContain(
       'Before sending any user-facing reply, quickly scan the visible answer for forbidden link and source formatting',
     )
-    expect(layers.threadContextPrompt).toContain('Murph onboarding:')
+    // Onboarding guidance is about replies to the member, so a scheduled
+    // turn does not carry it; an attended turn keeps it in the thread layer.
+    expect(layers.threadContextPrompt).not.toContain('Murph onboarding:')
+    expect(buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
+      onboardingGuidance: true,
+    })).threadContextPrompt).toContain('Murph onboarding:')
     expect(layers.threadContextPrompt).not.toContain(
       "Today's date for the user is April 15, 2026.",
     )
@@ -1389,9 +1395,7 @@ describe('assistant system prompt layers', () => {
     expect(layers.dynamicTurnContextPrompt).toContain(
       'Today\'s date for the user is April 15, 2026.',
     )
-    expect(layers.dynamicTurnContextPrompt).toContain(
-      'Treat the user prompt as the execution instructions for this scheduled run.',
-    )
+    expect(layers.dynamicTurnContextPrompt).toContain('Execution context:')
     expect(layers.dynamicTurnContextPrompt).toContain(
       'Delivery adapter contract:',
     )
@@ -1404,62 +1408,117 @@ describe('assistant system prompt layers', () => {
     expect(layers.prompt.endsWith(layers.dynamicTurnContextPrompt)).toBe(true)
   })
 
-  it('gives scheduled work the ordinary turn prompt layers', () => {
-    const input = createCommonNotificationPromptInput({
-      currentLocalDate: '2026-04-15',
-      currentTimeZone: 'Asia/Kuala_Lumpur',
-    })
-    const scheduledLayers = buildAssistantSystemPromptLayers(input)
-    const regularLayers = buildAssistantSystemPromptLayers({
-      ...input,
-      scheduledOccurrenceAt: null,
-      turnTrigger: null,
-    })
+  it.each(['direct', 'group'] as const)(
+    'gives %s scheduled work a lean prompt made of attended blocks',
+    (conversationScope) => {
+      const input = createCommonNotificationPromptInput({
+        assistantHostedAutomationAvailable: true,
+        assistantPollsAvailable: true,
+        conversationScope,
+        hostedRuntime: true,
+        onboardingGuidance: conversationScope === 'direct',
+      })
+      const scheduledLayers = buildAssistantSystemPromptLayers(input)
+      const regularLayers = buildAssistantSystemPromptLayers({
+        ...input,
+        ordinaryInboundTurn: true,
+        scheduledOccurrenceAt: null,
+        turnTrigger: null,
+      })
+      const scheduledIds = scheduledLayers.blocks.map((block) => block.id)
+      const regularText = new Map(
+        regularLayers.blocks.map((block) => [block.id, block.text]),
+      )
 
-    expect(scheduledLayers.staticCacheableCorePrompt).toBe(
-      regularLayers.staticCacheableCorePrompt,
-    )
-    expect(scheduledLayers.stableRouteCapabilityPrompt).toBe(
-      regularLayers.stableRouteCapabilityPrompt,
-    )
-    expect(scheduledLayers.threadContextPrompt).toBe(
-      regularLayers.threadContextPrompt,
-    )
-    expect(scheduledLayers.threadContextPrompt).toContain(
-      "The user's canonical timezone for this vault is Asia/Kuala_Lumpur.",
-    )
-    expect(scheduledLayers.dynamicTurnContextPrompt).toContain(
-      'Delivery adapter contract:',
-    )
-    expect(regularLayers.dynamicTurnContextPrompt).not.toContain(
-      'Delivery adapter contract:',
-    )
-  })
+      // Outside the turn layer, a scheduled turn only drops blocks: what it
+      // keeps is the attended block, unchanged.
+      for (const block of scheduledLayers.blocks) {
+        if (block.layer !== 'turn') {
+          expect(regularText.get(block.id)).toBe(block.text)
+        }
+      }
+      // Every privacy, safety and authority boundary of the route is kept.
+      for (const block of regularLayers.blocks) {
+        if (block.boundary) {
+          expect(scheduledIds).toContain(block.id)
+        }
+      }
+      // Blocks about answering, capturing, offering and authoring are dropped.
+      for (const id of [
+        `route.turn-priority.${conversationScope}`,
+        'route.delegated-initiative',
+        'route.low-usage',
+        'route.capability-offers',
+        'route.message-reactions',
+        'route.late-child-results',
+        'route.product-updates',
+        'route.automation',
+      ] as const) {
+        expect(regularLayers.blocks.map((block) => block.id)).toContain(id)
+        expect(scheduledIds).not.toContain(id)
+      }
+      expect(scheduledIds).not.toContain('thread.onboarding')
+      // Scheduled runs post polls in group rooms, not in a private chat.
+      expect(regularLayers.blocks.map((block) => block.id)).toContain('route.native-polls')
+      expect(scheduledIds.includes('route.native-polls')).toBe(
+        conversationScope === 'group',
+      )
+      // What a run needs to read, reason and write for the channel stays.
+      for (const id of [
+        'core.product-principles',
+        'route.tool-discovery',
+        'route.skill-router',
+        'route.execution-behavior',
+        'route.cli-guidance',
+        'thread.time-style',
+        'thread.tone',
+        'thread.reply-style',
+        'turn.execution-context',
+        'turn.scheduled-occurrence',
+        'turn.delivery-decision-contract',
+      ] as const) {
+        expect(scheduledIds).toContain(id)
+      }
+      expect(scheduledLayers.threadContextPrompt).toContain(
+        conversationScope === 'direct'
+          ? "The user's canonical timezone for this vault is Asia/Kuala_Lumpur."
+          : 'Asia/Kuala_Lumpur',
+      )
+      expect(scheduledLayers.dynamicTurnContextPrompt).toContain(
+        'Delivery adapter contract:',
+      )
+      expect(regularLayers.dynamicTurnContextPrompt).not.toContain(
+        'Delivery adapter contract:',
+      )
+      expect(Buffer.byteLength(scheduledLayers.prompt, 'utf8')).toBeLessThan(
+        Buffer.byteLength(regularLayers.prompt, 'utf8'),
+      )
+    },
+  )
 
   it.each(['direct', 'group'] as const)(
-    'puts context before questions in every %s scheduled turn, outside saved automation eligibility',
+    'states the send-or-skip rule once in every %s scheduled turn',
     (conversationScope) => {
       const input = createCommonNotificationPromptInput({ conversationScope })
       const layers = buildAssistantSystemPromptLayers(input)
       const policy = layers.dynamicTurnContextPrompt
-      expect(policy).toContain('Context before questions applies to every automation')
-      expect(policy).toContain('one-shots, recurring reminders, check-ins, and managed jobs')
-      expect(policy).toContain('takes precedence over saved wording such as "only say" or "ask exactly"')
-      expect(policy).toContain('over instructions to send a cue normally')
-      expect(policy).toContain('make a bounded, targeted read before asking the member to repeat it')
-      expect(policy).toContain('ask only for a still-useful missing detail within the agreed purpose')
-      expect(policy).toContain('return `skip` for this occurrence after completing any independently required work')
-      expect(policy).toContain('distinguish a plan from a completed action')
-      expect(policy).toContain('unavailable history, or mere topic overlap as proof of completion')
-      expect(policy).toContain('Preserve still-needed reminders, including treatment and safety cues')
+      expect(policy).toContain('Use what is already known before asking.')
+      expect(policy).toContain('This holds even when the saved wording says to ask.')
+      expect(policy).toContain('send it at every occurrence, whether or not anyone replied to earlier ones')
+      expect(policy).toContain('Return `skip` for this occurrence only when')
+      expect(policy).toContain('never ask whether to keep, change, or pause a reminder because earlier ones went unanswered')
+      expect(policy).toContain('the proof must also match this time, dose, or step')
+      expect(policy).toContain('A skip covers this occurrence only.')
+      expect(layers.prompt.match(/Return `skip` for this occurrence only when/gu)).toHaveLength(1)
       expect(policy).not.toContain('Do not read conversation history')
       expect(policy).not.toContain('Always send')
+      // A scheduled turn has no finish_without_reply tool; nothing names it.
+      expect(layers.prompt).not.toContain('Use `finish_without_reply` only when')
       const foreground = buildAssistantSystemPromptLayers({
         ...input, scheduledOccurrenceAt: null, turnTrigger: null,
       })
-      expect(foreground.prompt).not.toContain('Context before questions applies to every automation')
-      expect(layers.staticCacheableCorePrompt).toBe(foreground.staticCacheableCorePrompt)
-      expect(layers.threadContextPrompt).toBe(foreground.threadContextPrompt)
+      expect(foreground.prompt).not.toContain('Execution context:')
+      expect(foreground.prompt).not.toContain('Return `skip` for this occurrence only when')
     },
   )
 

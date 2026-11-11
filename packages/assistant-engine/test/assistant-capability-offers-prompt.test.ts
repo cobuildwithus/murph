@@ -365,13 +365,18 @@ describe('assistant capability-offers prompt contract', () => {
       turnTrigger: 'automation-cron',
     })
 
-    expect(scheduled.staticCacheableCorePrompt).toBe(
-      attended.staticCacheableCorePrompt,
+    // A scheduled turn admits fewer blocks, but every core, route and thread
+    // block it carries is the attended block, word for word.
+    const attendedText = new Map(
+      attended.blocks.map((block) => [block.id, block.text]),
     )
-    expect(scheduled.stableRouteCapabilityPrompt).toBe(
-      attended.stableRouteCapabilityPrompt,
+    const scheduledStableBlocks = scheduled.blocks.filter(
+      (block) => block.layer !== 'turn',
     )
-    expect(scheduled.threadContextPrompt).toBe(attended.threadContextPrompt)
+    expect(scheduledStableBlocks.length).toBeGreaterThan(0)
+    for (const block of scheduledStableBlocks) {
+      expect(attendedText.get(block.id)).toBe(block.text)
+    }
     expect(scheduled.dynamicTurnContextPrompt).toContain(
       'Delivery adapter contract:',
     )

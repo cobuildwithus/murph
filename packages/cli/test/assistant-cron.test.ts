@@ -584,7 +584,7 @@ test('assistant cron manual runs record history and remove completed one-shot jo
   )
   assert.match(
     instructions,
-    /Independent automation authority \(engine-supplied\):/u,
+    /Requested automation: the member or room asked for this/u,
   )
   assert.equal(
     cronServiceMocks.sendAssistantMessage.mock.calls[0]?.[0]?.channel,

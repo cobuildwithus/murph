@@ -24,6 +24,7 @@ import { buildAssistantPersonaPrompt } from "./persona-prompts.js";
 import { buildAssistantExecutionBehaviorText } from "./model-behavior.js";
 import { GROUP_ROOM_MODEL_PHOTO_REFERENCES_MAINTENANCE_GUIDANCE } from "../assistant-codex/dynamic-tools/group-room-model.js";
 import {
+  admitScheduledTurnPromptBlocks,
   collectPromptBlocks,
   promptBlock,
   renderPromptBlocks,
@@ -239,13 +240,21 @@ export function buildAssistantSystemPromptLayers(
   input: AssistantSystemPromptInput
 ): AssistantSystemPromptLayers {
   const conversationScope = input.conversationScope ?? "direct";
-  const coreBlocks = buildStaticCacheableCoreBlocks(
+  // A scheduled occurrence carries only the blocks it needs; see
+  // ASSISTANT_SCHEDULED_TURN_PROMPT_BLOCK_IDS. Every other turn keeps them all.
+  const admit = isAssistantScheduledOccurrenceTurn(input)
+    ? (blocks: AssistantPromptBlock[]) =>
+        admitScheduledTurnPromptBlocks(blocks, {
+          groupRoom: conversationScope === "group",
+        })
+    : (blocks: AssistantPromptBlock[]) => blocks;
+  const coreBlocks = admit(buildStaticCacheableCoreBlocks(
     conversationScope,
     input.assistantAndroidAppAvailable === true,
-  );
-  const routeBlocks = buildStableRouteCapabilityBlocks(input);
-  const threadBlocks = buildThreadContextBlocks(input);
-  const turnBlocks = buildDynamicTurnContextBlocks(input);
+  ));
+  const routeBlocks = admit(buildStableRouteCapabilityBlocks(input));
+  const threadBlocks = admit(buildThreadContextBlocks(input));
+  const turnBlocks = admit(buildDynamicTurnContextBlocks(input));
   const staticCacheableCorePrompt = renderPromptBlocks(coreBlocks);
   const stableRouteCapabilityPrompt = renderPromptBlocks(routeBlocks);
   const threadContextPrompt = renderPromptBlocks(threadBlocks);
@@ -268,6 +277,15 @@ export function buildAssistantSystemPromptLayers(
     staticCacheableCorePrompt,
     threadContextPrompt,
   };
+}
+
+/** True when the turn runs one occurrence of a saved automation. */
+function isAssistantScheduledOccurrenceTurn(
+  input: Pick<AssistantSystemPromptInput, "scheduledOccurrenceAt">,
+): boolean {
+  return input.scheduledOccurrenceAt
+    ? Number.isFinite(new Date(input.scheduledOccurrenceAt).getTime())
+    : false;
 }
 
 function buildStaticCacheableCoreBlocks(
@@ -1034,7 +1052,7 @@ function buildDynamicTurnContextBlocks(
     promptBlock(
       "turn.delivery-decision-contract",
       scheduledOccurrenceContext
-        ? buildAssistantDeliveryDecisionContractText(input.channel)
+        ? buildAssistantScheduledDeliveryDecisionContractText(input.channel)
         : null,
     ),
   );
@@ -1827,6 +1845,28 @@ function buildAssistantDeliveryDecisionContractText(
   );
 }
 
+// Scheduled turns can call tools and attach cards, so their contract says what
+// to return after an attachment. Output-only notification turns keep the
+// contract above.
+function buildAssistantScheduledDeliveryDecisionContractText(
+  channel: string | null,
+): string {
+  const channelText = channel
+    ? `The bound outbound channel is ${channel}.`
+    : null;
+  return joinPromptSections(
+    channelText,
+    `Delivery adapter contract:
+- End the turn with exactly one JSON object and nothing else, including after tool calls. All message wording goes inside \`text\`, never outside the object. Saved wording does not change this format.
+  {"kind":"send_message","text":"<the message>","privateSummary":"<one-line internal note>"}
+  {"kind":"skip","privateSummary":"<why nothing was sent>"}
+- Add \`"subject":"..."\` to a send_message only for a new outbound email.
+- The platform delivers \`text\`; do not send or narrate the message any other way. If you attached a card, image, or other media in this turn, return send_message with a short \`text\`; the platform shows the attachment.
+- If a tool call in this turn already sent everything this occurrence should send, for example a poll or an email-only update, return skip and say so in \`privateSummary\`.
+- When the saved instructions give exact \`privateSummary\` text, use it.`
+  );
+}
+
 function buildAssistantScheduledOccurrenceContextText(input: {
   canonicalTimeZoneAvailable: boolean;
   occurrenceAt: string | null;
@@ -1916,18 +1956,21 @@ function buildAssistantUserFacingLinkSelfCheckText(
   return `Before sending, check the links in the reply: no citation markers copied from search results, no tracking parameters such as \`utm_*\`, and a raw URL only when it is an action link, the deliverable, or something the person asked for.${conversationScope === "group" ? " In a group, also check the URL against the links allowed under Truthfulness and links." : conversationScope === "unverified-external" ? " For an unverified external audience, never send a personal account, settings, billing, device, or authorization URL." : ""}`;
 }
 
+// The one place that says how a scheduled occurrence behaves and when it
+// skips. The per-run wrapper (cron/execution.ts) adds facts about the job, not
+// more policy, and stored automation instructions add their own skip conditions.
 function buildAssistantExecutionContextText(conversationScope: AssistantConversationScope): string {
   return `Execution context:
-- This turn was triggered by an existing scheduled automation run.
-- The automation already exists and is active.
-- Treat the user prompt as the execution instructions for this scheduled run.
-- Saved notes about changing, pausing, or stopping an automation are operating instructions, not routine message copy. A statement that the recipient can adjust or pause updates does not request that sentence in the message. Do not echo or paraphrase those statements in a routine notification. Include control wording only when the task explicitly asks to include that wording or a requested review needs a decision. Preserve concrete stop conditions.
-- Saved instructions to check freshness or import lag, state coverage, or label totals as partial or incomplete describe how to count. Apply them silently: let counts such as "6 of 7 days" show coverage, and mention a gap only for a missing current day or a whole-period absence.${conversationScope === "group" ? `\n- ${ASSISTANT_GROUP_WEARABLE_RECOVERY_INSTRUCTION}` : ""}
-- Connected-plan follow-ups: an automatically generated calendar/travel check-in needs a concrete member-specific health purpose, not merely confirmation of attendance, arrival, or completion. Apply this rule even when older saved instructions require a generic check-in. Without that purpose or an explicit member request for this follow-up, return \`skip\`; do not invent a concern, substitute generic wellness advice, or ask a different question to justify sending. Preserve explicit member-requested reminders (including non-health tasks), useful health reviews, and treatment or safety cues.
-- Context before questions applies to every automation, including one-shots, recurring reminders, check-ins, and managed jobs. It takes precedence over saved wording such as "only say" or "ask exactly", and over instructions to send a cue normally.
-- Before asking, check the available recent conversation, including member reports, shared media, and assistant acknowledgments. If the answer may already be in retained context or relevant canonical records, make a bounded, targeted read before asking the member to repeat it; do not audit unrelated history or require a tool read when the supplied context already answers the question.
-- Do not ask for information already supplied or discussed sufficiently to answer the current question. Match the person, subject, and relevant local date or occurrence; distinguish a plan from a completed action and an earlier occurrence from the current one. If only part is known, use it and ask only for a still-useful missing detail within the agreed purpose. Do not restart a generic questionnaire or invent a follow-up to justify sending.
-- When that leaves no useful message, return \`skip\` for this occurrence after completing any independently required work. Do not send a redundant acknowledgment, change future schedules, or treat a missing record, unavailable history, or mere topic overlap as proof of completion. Preserve still-needed reminders, including treatment and safety cues, unless evidence resolves this exact occurrence or another authorized skip condition applies.`;
+- A saved, active automation triggered this turn. Nobody sent a message and nobody is waiting for a reply. The user prompt holds the automation's saved instructions, then any run facts the engine added. Do what the instructions describe, then send one message or stay quiet.
+- The saved instructions are Murph's working notes, not message copy. Write the message fresh in everyday words so it makes sense on its own after hours of unrelated chat: name the task, plan, or item, and refer to an earlier message by what it said and when. Keep wording word for word only where the instructions require exact text or the member dictated it. Write in the member's language: a saved language preference first, then the language of their recent messages, then the observed conversational language saved in memory.
+- Keep operating notes out of the message: internal labels such as cue, check-in, support kind, disposition, or subject anchor; what context or records you could or could not see; and how to change, pause, or stop the automation, unless the instructions ask for that sentence or a requested review needs the decision. Apply freshness, import-lag, and coverage rules silently: show coverage as a count such as "6 of 7 days" and mention a gap only when the current day or the whole period is missing.${conversationScope === "group" ? `\n- ${ASSISTANT_GROUP_WEARABLE_RECOVERY_INSTRUCTION}` : ""}
+- Use what is already known before asking. When the recent conversation or one targeted read answers a question the instructions would ask, use that answer and ask only for a detail that is still missing and still useful. This holds even when the saved wording says to ask.
+- Skip rule for a reminder or message the member or room asked for or agreed to: send it at every occurrence, whether or not anyone replied to earlier ones. Return \`skip\` for this occurrence only when (a) the conversation, engine-supplied evidence, or a record you read for this run directly shows that this exact action is already done, or this exact message already delivered, for this occurrence, or (b) the saved instructions or run facts name a skip condition that applies now. Silence, a missing record, unavailable history, a similar topic, an unrelated record, an earlier occurrence, or a related plan or experiment ending is not proof. For medication, treatment, clinical-monitoring, and safety reminders, the proof must also match this time, dose, or step. Do not search for proof beyond the conversation shown and the reads the instructions ask for, and never ask whether to keep, change, or pause a reminder because earlier ones went unanswered.
+- A check-in, review, or summary that Murph designed is different: return \`skip\` when it would add nothing, for example the question is already answered or there is nothing new to report. Do not invent a question, an acknowledgment, or generic advice to justify sending.
+- An automatically generated calendar or travel check-in needs a concrete health reason specific to this member, not just confirming attendance or arrival. Without one, return \`skip\`, even when older saved instructions ask for a generic check-in. This does not limit reminders the member asked for, useful health reviews, or treatment and safety cues.
+- A skip covers this occurrence only. Finish any other work the instructions require first, and leave future occurrences and the schedule as they are.
+- For a reminder that cues or teaches an exercise, first read the matching movement skill and its shared exercise-catalog reference. Use natural exercise names, attach reviewed catalog media when that reference requires it for this channel, and never show a catalog id, slug, source token, or path.
+- The saved instructions authorize the work they describe and nothing more. Do not create or change automations, plans, or settings, and do not spend, book, or contact anyone else, unless the instructions direct that step.`;
 }
 
 function buildAssistantOnboardingGuidanceText(input: {

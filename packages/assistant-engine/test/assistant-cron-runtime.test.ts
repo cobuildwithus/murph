@@ -212,7 +212,11 @@ import {
   resolveCanonicalRuntimeState,
 } from '../src/assistant/cron/canonical-jobs.ts'
 import {
-  ASSISTANT_CRON_MEMBER_WORDING_INSTRUCTIONS,
+  ASSISTANT_CRON_RECURRING_REMINDER_REPEATING_DAILY_INSTRUCTIONS,
+  ASSISTANT_CRON_RECURRING_REMINDER_SINGLE_DAILY_TIME_INSTRUCTIONS,
+} from '../src/assistant/cron/recurring-reminder-conversation.ts'
+import {
+  ASSISTANT_CRON_RUN_FACTS_HEADING,
   claimResolvedAssistantCronJob,
   executeClaimedAssistantCronJob,
 } from '../src/assistant/cron/execution.ts'
@@ -4193,14 +4197,14 @@ describe('assistant cron runtime orchestration', () => {
       | { instructions?: string }
       | undefined
     expect(providerInput?.instructions).toContain(
-      'Independent automation authority (engine-supplied):',
+      '- Requested automation: the member or room asked for this, and it stands on its own.',
     )
     expect(providerInput?.instructions).toContain(
-      "Do not treat a related plan or experiment's completion as cancellation",
+      'A related plan or experiment ending does not cancel it',
     )
-    expect(providerInput?.instructions).toContain(
-      'You may still skip when the saved instructions authorize that outcome or current evidence proves the requested action already happened.',
-    )
+    // The wrapper states facts; the skip rule lives once in the scheduled prompt.
+    expect(providerInput?.instructions).toContain(ASSISTANT_CRON_RUN_FACTS_HEADING)
+    expect(providerInput?.instructions).not.toContain('You may still skip')
     expect(result.run).toMatchObject({
       notificationDecision: {
         kind: 'send_message',
@@ -4227,7 +4231,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         instructions: expect.stringContaining(
-          'Independent automation authority (engine-supplied):',
+          '- Requested automation: the member or room asked for this, and it stands on its own.',
         ),
         responsePolicy: null,
       }),
@@ -4236,7 +4240,7 @@ describe('assistant cron runtime orchestration', () => {
       | { instructions?: string }
       | undefined
     expect(providerInput?.instructions).toContain(
-      "Completion of a broader plan is not proof that this occurrence's requested action already happened.",
+      'A related plan or experiment ending does not cancel it unless the saved instructions make that a skip condition.',
     )
     expect(result.run.notificationDecision).toEqual({
       kind: 'send_message',
@@ -4267,7 +4271,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         instructions: expect.stringContaining(
-          'Independent automation authority (engine-supplied):',
+          '- Requested automation: the member or room asked for this, and it stands on its own.',
         ),
       }),
     )
@@ -4374,7 +4378,7 @@ describe('assistant cron runtime orchestration', () => {
             input.instructions,
           )
         expect(providerInstructions).toContain(
-          'Independent automation authority (engine-supplied):',
+          '- Requested automation: the member or room asked for this, and it stands on its own.',
         )
         expect(providerInstructions).not.toContain(
           AVAILABILITY_CONFLICT_BLOCK_START,
@@ -4456,25 +4460,25 @@ describe('assistant cron runtime orchestration', () => {
       'missing end marker',
       'missing-end',
       'independent',
-      'Independent automation authority (engine-supplied):',
+      '- Requested automation: the member or room asked for this, and it stands on its own.',
     ],
     [
       'markerless snapshot',
       'markerless',
       'independent',
-      'Independent automation authority (engine-supplied):',
+      '- Requested automation: the member or room asked for this, and it stands on its own.',
     ],
     [
       'duplicate start marker with support scope',
       'duplicate-start',
       'support',
-      'Accepted support scope (engine-supplied;',
+      '- Persisted support kind:',
     ],
     [
       'misplaced end marker with retry evidence',
       'misplaced-end',
       'retry',
-      'Delivery integrity evidence (engine-supplied):',
+      '- Earlier attempt: one failed or ended without confirmed delivery',
     ],
   ] as const)(
     'keeps trusted overlays provider-visible for recurring availability evidence with a %s',
@@ -4623,18 +4627,18 @@ describe('assistant cron runtime orchestration', () => {
   it.each([
     [
       'reminder',
-      'Deliver only the agreed reminder purpose, including a consented first-session walkthrough when the automation says so',
-      'Do not ask whether the action was completed or add a proactive repair, accountability, or reflection question.',
+      'Send only the agreed reminder, including a consented first-session walkthrough when the instructions say so.',
+      'Do not ask whether the action was done, and do not add a repair, accountability, or reflection question.',
     ],
     [
       'check_in',
       'Ask at most one narrow check-in or repair question about the current plan.',
-      'Do not expand into a review, digest, or new coaching agenda.',
+      'Do not widen it into a review, digest, or new coaching agenda.',
     ],
     [
       'review',
-      'Conduct only the bounded review',
-      'Do not record or apply that decision until the user replies in a later turn.',
+      'Give only the bounded review',
+      'Do not record or apply that decision in this turn',
     ],
   ] as const)(
     'passes the exact accepted %s support scope into the provider turn',
@@ -4693,39 +4697,25 @@ describe('assistant cron runtime orchestration', () => {
         | undefined
       expect(providerInput?.instructions).toContain(expectedScope)
       expect(providerInput?.instructions).toContain(expectedBoundary)
-      if (supportKind === 'reminder') {
-        expect(providerInput?.instructions).toContain(
-          'treat every exercise-catalog id, slug, source token, and path in saved instructions or context as private routing data',
-        )
-        expect(providerInput?.instructions).toContain(
-          'read the matching movement skill and its shared exercise-catalog reference',
-        )
-        expect(providerInput?.instructions).toContain(
-          'attach reviewed catalog media when that reference requires it for the current channel',
-        )
-      } else {
-        expect(providerInput?.instructions).not.toContain(
-          'treat every exercise-catalog id, slug, source token, and path in saved instructions or context as private routing data',
-        )
-      }
+      // Exercise-cue and member-wording rules are scheduled-prompt policy now.
+      expect(providerInput?.instructions).not.toContain('exercise-catalog')
+      expect(providerInput?.instructions).not.toContain('Member-facing wording')
       expect(providerInput?.instructions).toContain(
         `- automationId: ${canonicalAutomation.automationId}`,
       )
       expect(providerInput?.instructions).toContain(
         `- contextReferences: ${JSON.stringify(canonicalAutomation.contextReferences)}`,
       )
+      expect(providerInput?.instructions).toContain(ASSISTANT_CRON_RUN_FACTS_HEADING)
       expect(providerInput?.instructions).toContain(
-        'routing and interpretation context; not mutation authority',
+        'grant no permission to change records',
       )
       expect(providerInput?.instructions).toContain(
         'ordinary canonical read surface',
       )
-      expect(providerInput?.instructions).toContain(
-        ASSISTANT_CRON_MEMBER_WORDING_INSTRUCTIONS,
-      )
       if (supportKind === 'review') {
         expect(providerInput?.instructions).toContain(
-          'ask exactly one question about what the user wants next; fold any question about whether the support helped into it',
+          'ask exactly one question about what the member wants next; fold any question about whether the support helped into it',
         )
         expect(providerInput?.instructions).toContain(
           'Offer the next-step options the saved instructions name',
@@ -4733,10 +4723,10 @@ describe('assistant cron runtime orchestration', () => {
         expect(providerInput?.instructions).not.toContain('request or record')
       }
       expect(providerInput?.instructions).toContain(
-        'this overrides any broader repair or follow-up option above',
+        'This limits any broader repair or follow-up option in the saved instructions.',
       )
       expect(providerInput?.instructions).not.toContain(
-        'Independent automation authority (engine-supplied):',
+        '- Requested automation: the member or room asked for this, and it stands on its own.',
       )
     },
   )
@@ -4756,17 +4746,17 @@ describe('assistant cron runtime orchestration', () => {
     const input = cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0]
     expect(input?.instructions).toContain(automation.instructions)
     expect(input?.instructions).toContain(JSON.stringify(automation.contextReferences))
-    expect(input?.instructions).toContain('The canonical plan owns the target')
-    expect(input?.instructions).toContain('local calendar date')
-    expect(input?.instructions).toContain('do not reset the rotation')
-    expect(input?.instructions).toContain('do not guess a target or silently repair state')
-    expect(input?.instructions.indexOf('The canonical plan owns the target')).toBeGreaterThan(
+    expect(input?.instructions).toContain('the plan as saved now decides the target')
+    expect(input?.instructions).toContain('occurrence local date')
+    expect(input?.instructions).toContain('Do not reset a rotation')
+    expect(input?.instructions).toContain('return `skip` instead of guessing or repairing it')
+    expect(input?.instructions.indexOf('the plan as saved now decides the target')).toBeGreaterThan(
       input?.instructions.indexOf(automation.instructions) ?? -1,
     )
     expect(automation.instructions).toBe('Cue seated rows from a copied anchor. Skip on 2026-04-19 only.')
   })
 
-  it('passes exercise cue guidance into an ordinary independent automation after its saved task', async () => {
+  it('adds run facts after the saved task and leaves exercise cue guidance to the scheduled prompt', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-independent-exercise-cue-',
     )
@@ -4800,15 +4790,11 @@ describe('assistant cron runtime orchestration', () => {
       | undefined
     expect(providerInput?.outboxAutomationContextReferences).toBeNull()
     expect(providerInput?.instructions).toContain(
-      'Independent automation authority (engine-supplied):',
+      '- Requested automation: the member or room asked for this, and it stands on its own.',
     )
-    expect(providerInput?.instructions).toContain(
-      'read the matching movement skill and its shared exercise-catalog reference',
-    )
+    expect(providerInput?.instructions).not.toContain('exercise-catalog')
     expect(providerInput?.instructions?.indexOf(savedInstructions)).toBeLessThan(
-      providerInput?.instructions?.indexOf(
-        'read the matching movement skill and its shared exercise-catalog reference',
-      ) ?? -1,
+      providerInput?.instructions?.indexOf(ASSISTANT_CRON_RUN_FACTS_HEADING) ?? -1,
     )
   })
 
@@ -4858,7 +4844,7 @@ describe('assistant cron runtime orchestration', () => {
       | { instructions?: string }
       | undefined
     expect(providerInput?.instructions).not.toContain(
-      'Accepted support scope (engine-supplied',
+      '- Persisted support kind:',
     )
     expect(providerInput?.instructions).not.toContain(
       'Persisted support kind: weekly_digest.',
@@ -4934,7 +4920,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         instructions: expect.not.stringContaining(
-          'Recurring reminder conversation (engine-supplied',
+          '- Recurring reminder',
         ),
       }),
     )
@@ -4963,18 +4949,12 @@ describe('assistant cron runtime orchestration', () => {
     const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
       | { instructions?: string }
       | undefined
+    // The wrapper says which reports fall in this occurrence's window; the
+    // skip rule itself is stated once in the scheduled prompt.
     expect(providerInput?.instructions).toContain(
-      'Direct-message completion takes precedence: return `skip` for only this occurrence',
+      ASSISTANT_CRON_RECURRING_REMINDER_SINGLE_DAILY_TIME_INSTRUCTIONS,
     )
-    expect(providerInput?.instructions).toContain(
-      'a user report or assistant acknowledgment that explicitly confirms this exact action was completed in its window',
-    )
-    expect(providerInput?.instructions).toContain(
-      'future recurrences remain active',
-    )
-    expect(providerInput?.instructions).toContain(
-      'this schedule has one configured local time per eligible day, so matching completion on the occurrence local date is in-window',
-    )
+    expect(providerInput?.instructions).not.toContain('return `skip`')
   })
 
   it('requires occurrence-specific completion evidence for multi-fire treatment reminders', async () => {
@@ -5004,10 +4984,10 @@ describe('assistant cron runtime orchestration', () => {
       | { instructions?: string }
       | undefined
     expect(providerInput?.instructions).toContain(
-      'do not assume this schedule fires only once per local day',
+      ASSISTANT_CRON_RECURRING_REMINDER_REPEATING_DAILY_INSTRUCTIONS,
     )
-    expect(providerInput?.instructions).toContain(
-      'Local-date coincidence alone is insufficient; require the evidence to identify the current time, dose, or sequence.',
+    expect(providerInput?.instructions).not.toContain(
+      ASSISTANT_CRON_RECURRING_REMINDER_SINGLE_DAILY_TIME_INSTRUCTIONS,
     )
   })
 
@@ -5050,13 +5030,7 @@ describe('assistant cron runtime orchestration', () => {
         { sessionId: 'session-room-reminder' },
       )
       expect(notificationInput.instructions).toContain(
-        'Recurring reminder conversation (engine-supplied',
-      )
-      expect(notificationInput.instructions).toContain(
-        '- Otherwise send the current cue as scheduled with its requested wording. A lack of replies to earlier occurrences never justifies skipping this one or adding a question about keeping, changing, or pausing the reminder.',
-      )
-      expect(notificationInput.instructions).toContain(
-        'Direct-message completion takes precedence: return `skip` for only this occurrence',
+        '- Recurring reminder',
       )
       expect(notificationInput.instructions).not.toContain('keep, change, or pause')
       expect(notificationInput.instructions).not.toContain('Confirmed-output reminder cadence policy')
@@ -5170,12 +5144,8 @@ describe('assistant cron runtime orchestration', () => {
       const notificationInput = await prepareAssistantCronNotificationInput(
         input as AssistantNotificationInput,
       )
-      expect(notificationInput.instructions).toContain(
-        'Otherwise send the current cue as scheduled with its requested wording.',
-      )
-      expect(notificationInput.instructions).toContain(
-        'Direct-message completion takes precedence: return `skip` for only this occurrence',
-      )
+      expect(notificationInput.instructions).toContain('- Recurring reminder')
+      expect(notificationInput.instructions).not.toContain('return `skip`')
       if (occurrenceIndex > 0) {
         expect(notificationInput.instructions).toContain(
           'Recent outputs from this automation',
@@ -5258,7 +5228,7 @@ describe('assistant cron runtime orchestration', () => {
         | { instructions?: string }
         | undefined
     expect(notificationInput?.instructions).not.toContain(
-      'Independent automation authority (engine-supplied):',
+      '- Requested automation: the member or room asked for this, and it stands on its own.',
     )
     expect(findCanonicalAutomation(
       vaultRoot,
@@ -12755,7 +12725,7 @@ describe('assistant cron runtime orchestration', () => {
       expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
         expect.objectContaining({
           instructions: expect.stringContaining(
-            'Independent automation authority (engine-supplied):',
+            '- Requested automation: the member or room asked for this, and it stands on its own.',
           ),
         }),
       )
@@ -13705,7 +13675,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenLastCalledWith(
       expect.objectContaining({
         instructions: expect.stringContaining(
-          'Do not interpret the absence of a user reply to that attempt as silence',
+          'Do not read the lack of a reply to it as silence or non-adherence',
         ),
       }),
     )

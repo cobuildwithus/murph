@@ -3214,7 +3214,7 @@ describe('assistant Codex turn planning', () => {
       })
       expect(email.toolNames).not.toContain('generate_image')
       expect(email.systemPrompt).toContain('The bound outbound channel is email.')
-      expect(email.systemPrompt).toContain('`text` is the single final user-facing message.')
+      expect(email.systemPrompt).toContain('Delivery adapter contract:')
     }
     await expect(toolNames({
       channel: 'linq',
@@ -4164,7 +4164,9 @@ describe('assistant Codex turn planning', () => {
       'current group',
     )
     expect(directPlan.systemPrompt).toContain('murph.send_progress_update')
-    expect(directPlan.systemPrompt).toContain(
+    // A scheduled turn has no inbound message to react or reply to, so it
+    // does not carry the message-reactions block.
+    expect(directPlan.systemPrompt).not.toContain(
       'including every `---` bubble',
     )
     expect(directPlan.systemPrompt).not.toContain(
