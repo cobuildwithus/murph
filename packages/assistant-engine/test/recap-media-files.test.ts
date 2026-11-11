@@ -58,7 +58,7 @@ test('candidate files reject traversal, symlinks, oversized bytes and tampering'
   const receipt = await saveRecapMediaFile(input)
   await expect(saveRecapMediaFile(input)).resolves.toEqual(receipt)
   await expect(readRecapFile({ vault: root, relativeRoot, file: `${relativeRoot}/../private`, maxBytes: 100 })).rejects.toThrow('outside')
-  await expect(saveRecapMediaFile({ ...input, bytes: new Uint8Array(2 * 1024 * 1024 + 1) })).rejects.toThrow('byte limit')
+  await expect(saveRecapMediaFile({ ...input, bytes: new Uint8Array(2 * 1024 * 1024 + 1) })).rejects.toMatchObject({ code: 'RECAP_MEDIA_VALIDATION_FAILED', context: { mediaFailureReason: 'image_byte_limit', mediaSizeClass: 'le_10mib' } })
   await writeFile(path.join(root, receipt.path), 'tampered')
   await expect(saveRecapMediaFile(input)).rejects.toThrow('integrity')
   await symlink(path.join(root, receipt.path), path.join(root, relativeRoot, 'media/link.jpg'))

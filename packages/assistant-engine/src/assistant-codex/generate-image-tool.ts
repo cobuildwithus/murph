@@ -1,3 +1,4 @@
+import { generatedMediaFailureResult, mediaValidationError } from './generated-media-failure.js'
 import type { GeneratedMediaFileArgs, GeneratedMediaFileRuntime } from './generated-media-file.js'
 import { AssistantWorkspaceArtifactMaterializationError } from '../assistant/execution-context.js'
 import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
@@ -131,15 +132,9 @@ export async function executeGenerateImageTool(input: {
 }): Promise<GenerateImageToolResult> {
   if (input.args.output === 'file' && !input.fileRuntime) return { rpcSuccess: false, rpcText: 'File output requires an authorized owning flow.' }
   const fileRuntime = input.args.output === 'file' ? input.fileRuntime : null
-  if (fileRuntime && input.args.outputFormat !== 'jpeg') return { rpcSuccess: false, rpcText: 'Recap file images require outputFormat=jpeg.' }
+  if (fileRuntime && input.args.outputFormat !== 'jpeg') return generatedMediaFailureResult(mediaValidationError('image_format'))
   const apiKey = normalizeNullableString(input.env.OPENAI_API_KEY)
-  if (!apiKey) {
-    return {
-      failureDiagnostic: toolFailureDiagnostic('unavailable'),
-      rpcSuccess: false,
-      rpcText: 'OPENAI_API_KEY is required for image generation',
-    }
-  }
+  if (!apiKey) return imageCredentialFailure(fileRuntime)
 
   const referenceImageRefs = input.args.referenceImageRefs ?? []
   const vaultRoot = fileRuntime ? null : normalizeNullableString(input.vaultRoot)
@@ -702,14 +697,7 @@ async function generateRecapOrChatImageBytes(input: Parameters<typeof executeGen
       if (isGenerateImageControlFlowError(error)) {
         throw error
       }
-      return {
-        failureDiagnostic: toolFailureDiagnostic('handler_exception', error),
-        rpcSuccess: false,
-        rpcText: describeGenerateImageFailure(
-          'image references could not be loaded',
-          error,
-        ),
-      }
+      return imageExecutionFailure(error, fileRuntime, 'image references could not be loaded')
     }
 
     const referenceValidationFailure =
@@ -753,14 +741,7 @@ async function generateRecapOrChatImageBytes(input: Parameters<typeof executeGen
       if (isGenerateImageControlFlowError(error)) {
         throw error
       }
-      return {
-        failureDiagnostic: toolFailureDiagnostic('handler_exception', error),
-        rpcSuccess: false,
-        rpcText: describeGenerateImageFailure(
-          `${operationLabel} failed`,
-          error,
-        ),
-      }
+      return imageExecutionFailure(error, fileRuntime, `${operationLabel} failed`)
     }
 
     const hasValidGeneratedImageBytes = isValidGeneratedImageBytes({
@@ -785,13 +766,8 @@ async function generateRecapOrChatImageBytes(input: Parameters<typeof executeGen
       usageExtractionSourcePath,
     })
 
-    if (!hasValidGeneratedImageBytes) {
-      return {
-        failureDiagnostic: toolFailureDiagnostic('invalid_result'),
-        rpcSuccess: false,
-        rpcText: `${operationLabel} returned invalid image data`,
-        usageDraft,
-      }
+    if (!hasValidGeneratedImageBytes) return {
+      ...imageBytesFailure(fileRuntime, openAiResult.imageBytes, operationLabel), usageDraft,
     }
 
     const generatedImageBytes = openAiResult.imageBytes
@@ -800,10 +776,29 @@ async function generateRecapOrChatImageBytes(input: Parameters<typeof executeGen
         const receipt = await fileRuntime.save(generatedImageBytes, 'image/jpeg')
         return { rpcSuccess: true, rpcText: JSON.stringify(receipt), usageDraft }
       } catch (error) {
-        return { rpcSuccess: false, rpcText: 'Generated image could not be verified and saved.',
-          failureDiagnostic: toolFailureDiagnostic('invalid_result', error), usageDraft }
+        return { ...generatedMediaFailureResult(error), usageDraft }
       }
     }
 
   return { bytes: generatedImageBytes, references: referenceImages, usageDraft }
+}
+
+
+function imageCredentialFailure(fileRuntime: GeneratedMediaFileRuntime | null | undefined): GenerateImageToolResult {
+  return fileRuntime ? generatedMediaFailureResult(mediaValidationError('credentials')) : {
+    failureDiagnostic: toolFailureDiagnostic('unavailable'), rpcSuccess: false,
+    rpcText: 'OPENAI_API_KEY is required for image generation',
+  }
+}
+function imageExecutionFailure(error: unknown, fileRuntime: GeneratedMediaFileRuntime | null | undefined, label: string): GenerateImageToolResult {
+  return fileRuntime ? generatedMediaFailureResult(error) : {
+    failureDiagnostic: toolFailureDiagnostic('handler_exception', error), rpcSuccess: false,
+    rpcText: describeGenerateImageFailure(label, error),
+  }
+}
+function imageBytesFailure(fileRuntime: GeneratedMediaFileRuntime | null | undefined, bytes: Uint8Array, label: string): GenerateImageToolResult {
+  return fileRuntime ? generatedMediaFailureResult(mediaValidationError('image_format', bytes)) : {
+    failureDiagnostic: toolFailureDiagnostic('invalid_result'), rpcSuccess: false,
+    rpcText: `${label} returned invalid image data`,
+  }
 }

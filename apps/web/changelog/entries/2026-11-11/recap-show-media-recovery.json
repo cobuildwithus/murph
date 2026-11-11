@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 100,
+  "item": {
+    "id": "recap-show-media-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable game recaps",
+    "summary": "Pair game recaps can keep their illustrated scenes and finish even when an image or song is unavailable.",
+    "details": "Murph keeps the parts that succeeded and uses readable photos and text for missing media. Your group receives one recap line and link.",
+    "relevanceTags": [
+      "games",
+      "recaps"
+    ],
+    "sourcePullRequests": [
+      4833
+    ]
+  }
+}

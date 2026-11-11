@@ -1,6 +1,15 @@
 import * as z from './zod-runtime.ts'
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u)
+
+const recapControlMessages = {
+  recap_media_attempt_limit: 'Recap media attempt limit reached. Stop generating media; omit failed receipts and finish the show with readable photo/text pages. Omit an unavailable song before submission.',
+  recap_submission_frozen: 'This submission is already frozen. Retry the same draft with the same selected receipts; do not change the story or regenerate media. Only the server recovery path may replace a frozen submission.',
+} as const
+export class RecapControlError extends Error {
+  constructor(readonly code: keyof typeof recapControlMessages) { super(recapControlMessages[code]); this.name = 'RecapControlError' }
+}
+
 export const RECAP_REFERENCE_MAX_EDGE = 1024
 export const RECAP_REFERENCE_MAX_COUNT = 3
 export const RECAP_IMAGE_PROMPT_MAX_BYTES = 16_384
@@ -62,7 +71,7 @@ export function reserveRecapOperation(state: RecapAdmissionState, input: {
   const prior = state.operations.find(operation => operation.id === input.id)
   if (prior) throw new Error('This operation was already attempted; use its existing file or omit it.')
   if (input.reserved === null || !Number.isSafeInteger(input.reserved) || input.reserved < 0) throw new Error('Provider cost cannot be bounded for this request.')
-  if (state.operations.filter(operation => operation.kind === input.request.kind).length >= (input.request.kind === 'image' ? RECAP_IMAGE_ATTEMPTS : 1)) throw new Error('Recap media attempt limit reached.')
+  if (state.operations.filter(operation => operation.kind === input.request.kind).length >= (input.request.kind === 'image' ? RECAP_IMAGE_ATTEMPTS : 1)) throw new RecapControlError('recap_media_attempt_limit')
   if (input.request.kind === 'image' && state.operations.filter(operation => operation.kind === 'image' && operation.active).length >= 2) throw new Error('Two recap images are already in progress.')
   if (state.operations.reduce((sum, operation) => sum + operation.reserved, 0) + input.reserved > RECAP_MEDIA_CAP_MICRODOLLARS) throw new Error('Recap media budget exhausted.')
   return { ...state, operations: [...state.operations, { id: input.id, kind: input.request.kind,

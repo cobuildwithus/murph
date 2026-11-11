@@ -803,10 +803,10 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
         expect(await consumeRecapProviderReservation({ memberId: room, runtimeIdentity, token: next.token, providerRequest: nextRequest })).toEqual({ scoped: true, allowed: true });
         await handleRecapAdmission({ ...identity, material, command: { kind: "finished", operationId, token: next.token } });
       }
-      await expect(handleRecapAdmission({ ...identity, material, command: { ...command, operationId: "seventh-image" } })).rejects.toThrow("attempt limit");
+      await expect(handleRecapAdmission({ ...identity, material, command: { ...command, operationId: "seventh-image" } })).rejects.toMatchObject({ code: "recap_media_attempt_limit" });
       const files = [{ slot: "scene-0", receipt }];
       await prepareRecapSubmission({ ...identity, draft: { story: recap, files } });
-      await expect(prepareRecapSubmission({ ...identity, draft: { story: { ...recap, chatLine: "Changed" }, files } })).rejects.toThrow("frozen");
+      await expect(prepareRecapSubmission({ ...identity, draft: { story: { ...recap, chatLine: "Changed" }, files } })).rejects.toMatchObject({ code: "recap_submission_frozen" });
       await expect(sealGameRecap({ ...scope, recap, files })).rejects.toThrow("not been uploaded");
       await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: null } });
       await expect(stageRecapSubmissionFile({ ...identity, receipt, bytes: bytes.toString("base64") })).rejects.toThrow("revoked");

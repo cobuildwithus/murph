@@ -1,3 +1,4 @@
+import { mediaValidationError } from '../assistant-codex/generated-media-failure.js'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open, realpath } from 'node:fs/promises'
@@ -25,17 +26,18 @@ export async function saveRecapMediaFile(input: {
 }): Promise<RecapFileReceipt> {
   if (!/^[a-zA-Z0-9_-]{1,80}$/u.test(input.operationId)) throw new TypeError('Invalid media operation.')
   const bytes = input.bytes
-  if (!bytes.length || bytes.length > (input.mediaType === 'image/jpeg' ? 2 : 1) * 1024 * 1024) throw new TypeError('Recap media exceeds its byte limit.')
+  if (!bytes.length || bytes.length > (input.mediaType === 'image/jpeg' ? 2 : 1) * 1024 * 1024) throw mediaValidationError(input.mediaType === 'image/jpeg' ? 'image_byte_limit' : 'audio_byte_limit', bytes)
   let dimensions: { width: number; height: number } | { durationMs: number }
   if (input.mediaType === 'image/jpeg') {
     const image = sharp(bytes, { limitInputPixels: 4_000_000, failOn: 'warning' })
-    const metadata = await image.metadata()
-    if (metadata.format !== 'jpeg' || !metadata.width || !metadata.height || metadata.width > 2048 || metadata.height > 2048) throw new TypeError('Invalid recap JPEG.')
-    await image.raw().toBuffer() // Decode all pixels before issuing a receipt.
+    const metadata = await image.metadata().catch(() => { throw mediaValidationError('image_decode', bytes) })
+    if (metadata.format !== 'jpeg') throw mediaValidationError('image_format', bytes)
+    if (!metadata.width || !metadata.height || metadata.width > 2048 || metadata.height > 2048) throw mediaValidationError('image_dimensions', bytes)
+    await image.raw().toBuffer().catch(() => { throw mediaValidationError('image_decode', bytes) }) // Decode all pixels before issuing a receipt.
     dimensions = { width: metadata.width, height: metadata.height }
   } else {
-    dimensions = await inspectGeneratedMp3Audio(bytes)
-    if (Math.abs(dimensions.durationMs - 20_000) > 500) throw new TypeError('Recap songs must be twenty seconds.')
+    dimensions = await inspectGeneratedMp3Audio(bytes).catch(() => { throw mediaValidationError('audio_decode', bytes) })
+    if (Math.abs(dimensions.durationMs - 20_000) > 500) throw mediaValidationError('audio_duration', bytes)
   }
   const hash = createHash('sha256').update(bytes).digest('hex')
   const directory = await recapDirectory(input.vault, `${input.relativeRoot}/media`)

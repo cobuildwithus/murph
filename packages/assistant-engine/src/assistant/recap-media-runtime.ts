@@ -1,3 +1,4 @@
+import { mediaValidationError } from '../assistant-codex/generated-media-failure.js'
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -43,8 +44,8 @@ export function createRecapMediaRuntime(input: {
 }): GeneratedMediaFileRuntime {
   const operationId = input.request.args.operationId
   if (!operationId || !/^[a-zA-Z0-9_-]{1,80}$/u.test(operationId)) throw new TypeError('Use a stable operationId for file output.')
-  if (input.request.kind === 'image' && input.request.args.outputFormat !== 'jpeg') throw new TypeError('Recap file images require JPEG output.')
-  if (input.request.kind === 'song' && input.request.args.durationSeconds !== 20) throw new TypeError('Recap songs are twenty seconds.')
+  if (input.request.kind === 'image' && input.request.args.outputFormat !== 'jpeg') throw mediaValidationError('image_format')
+  if (input.request.kind === 'song' && input.request.args.durationSeconds !== 20) throw mediaValidationError('audio_duration')
   const origin = { kind: 'game_recap' as const, gameId: input.scope.gameId, eventId: input.scope.eventId }
   const referenceIds = input.request.kind === 'image' ? [...(input.request.args.referenceImageRefs ?? [])] : []
   if (referenceIds.length > RECAP_REFERENCE_MAX_COUNT || new Set(referenceIds).size !== referenceIds.length) throw new TypeError('Use up to three distinct authorized reference IDs.')
@@ -71,7 +72,7 @@ export function createRecapMediaRuntime(input: {
       if (providerRequest.kind !== input.request.kind) throw new Error('Wrong recap provider.')
       const response = await input.tool.request({ action: 'read_game', origin, recapRead: {
         kind: 'reserve', runId: input.admission.runId, operationId, providerRequest, referenceIds } })
-      if (response.result.status !== 'ok' || !('recapGame' in response.result)) throw new Error('Recap reservation was rejected.')
+      if (response.result.status !== 'ok' || !('recapGame' in response.result)) throw mediaValidationError('reservation')
       const reservation = z.object({ token: z.string().regex(/^[a-f0-9]{64}$/u), deadline: z.string() }).strict().parse(response.result.recapGame)
       token = reservation.token
       request.headers.set('x-murph-recap-reservation', token)
@@ -82,7 +83,7 @@ export function createRecapMediaRuntime(input: {
       signal.throwIfAborted()
       const receipt = await saveRecapMediaFile({ vault: input.vault, relativeRoot: path.relative(input.vault, input.workspace.root), operationId, bytes, mediaType })
       const response = await input.tool.request({ action: 'read_game', origin, recapRead: { kind: 'finished', token, operationId, receipt } })
-      if (response.result.status !== 'ok') throw new Error('Recap media receipt was rejected.')
+      if (response.result.status !== 'ok') throw mediaValidationError('receipt')
       finished = true
       return receipt
     },

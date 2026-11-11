@@ -1219,10 +1219,12 @@ async function maybeHandleOpenAiRequest(input: {
   if (bodyRead instanceof Response) return bodyRead;
   const { boundedBody, imageGenerationRequested } = bodyRead;
 
-  const recapDenied = await checkRecapOpenAiRequest({ authorization, env: input.env,
+  const recapAccess = await checkRecapOpenAiRequest({ authorization, env: input.env,
     request: input.request, pathnameSuffix, boundedBody, imageGenerationRequested });
-  if (recapDenied) return recapDenied;
-  const imageDenied = await checkHostedOpenAiImageRequestAccess({
+  if (recapAccess instanceof Response) return recapAccess;
+  // A consumed recap reservation is the server-owned spending authority for
+  // this one request. The room itself need not own an ordinary image subscription.
+  const imageDenied = recapAccess === 'authorized_recap' ? null : await checkHostedOpenAiImageRequestAccess({
     request: input.request, env: input.env, authorization, pathnameSuffix, imageGenerationRequested,
   });
   if (imageDenied) return imageDenied;
@@ -1280,7 +1282,7 @@ async function maybeHandleOpenAiRequest(input: {
 async function checkRecapOpenAiRequest(input: {
   request: Request; env: RunnerOutboundEnvironmentSource; authorization: HostedProviderEgressAuthorization;
   pathnameSuffix: string; boundedBody: ArrayBuffer | undefined; imageGenerationRequested: boolean;
-}): Promise<Response | null> {
+}): Promise<Response | 'authorized_recap' | null> {
   // Text model traffic and opaque transports must not acquire a Web dependency.
   // Recap turns disable Codex's native image tool in their trusted configuration.
   if (input.request.method !== "POST" || !input.request.headers.has('x-murph-recap-reservation')) return null;
@@ -1437,10 +1439,10 @@ async function maybeHandleElevenLabsRequest(input: {
     return disallowedProviderEgress();
   }
 
-  const recapDenied = await checkRecapProviderRequest({ authorization, env: input.env,
+  const recapAccess = await checkRecapProviderRequest({ authorization, env: input.env,
     request: new Request(input.request.url, { method: 'POST', headers: input.request.headers, body: requestBody }),
     media: pathnameSuffix === '/v1/music', nativeImage: pathnameSuffix !== '/v1/music' });
-  if (recapDenied) return recapDenied;
+  if (recapAccess instanceof Response) return recapAccess;
 
   const token = readRequiredInterceptSecret(
     input.env.ELEVENLABS_API_KEY,
@@ -3104,7 +3106,7 @@ async function checkHostedImageGenerationAccess(input: {
 async function checkRecapProviderRequest(input: {
   authorization: HostedProviderEgressAuthorization; env: RunnerOutboundEnvironmentSource;
   request: Request; media: boolean; nativeImage: boolean;
-}): Promise<Response | null> {
+}): Promise<Response | 'authorized_recap' | null> {
   if (!input.request.headers.has('x-murph-recap-reservation')) return null;
   const token = input.request.headers.get('x-murph-recap-reservation');
   if (!token || !/^[a-f0-9]{64}$/u.test(token)) return new Response('Invalid recap reservation.', { status: 403 });
@@ -3127,7 +3129,8 @@ async function checkRecapProviderRequest(input: {
       route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.recapMediaAccess, timeoutMs: environment.webControlTimeoutMs,
       transport: { callbackSigning: environment.webCallbackSigning, mode: 'direct', webControlBaseUrl: environment.hostedWebBaseUrl, workspaceCheckpointBridge: null },
     });
-    if (result && typeof result === 'object' && 'allowed' in result && result.allowed === true) return null;
+    if (result && typeof result === 'object' && 'allowed' in result && result.allowed === true
+      && 'scoped' in result && result.scoped === true) return 'authorized_recap';
     return new Response('Recap provider admission rejected this request.', { status: 403 });
   } catch {
     return new Response('Recap provider admission is unavailable.', { status: 503 });

@@ -1,3 +1,4 @@
+import { generatedMediaFailureResult, mediaValidationError } from './generated-media-failure.js'
 import type { GeneratedMediaFileArgs, GeneratedMediaFileRuntime } from './generated-media-file.js'
 import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 import { randomUUID } from 'node:crypto'
@@ -255,7 +256,7 @@ export async function executeGenerateSongTool(input: {
   if (input.args.output === 'file') {
     const runtime = input.fileRuntime
     const apiKey = runtime?.elevenLabsApiKey ?? resolveElevenLabsApiKey(input.env ?? {})
-    if (!runtime || !apiKey) return { rpcSuccess: false, rpcText: 'Song file output is unavailable.' }
+    if (!runtime || !apiKey) return generatedMediaFailureResult(mediaValidationError('credentials'))
     try {
       const result = await generateElevenLabsMusic({ apiKey, durationMs: input.args.durationSeconds * 1000,
         forceInstrumental: input.args.instrumental, modelId: assistantVoiceMemoMusicModelId,
@@ -264,8 +265,7 @@ export async function executeGenerateSongTool(input: {
         ...(runtime.signal || input.abortSignal ? { signal: AbortSignal.any([...(runtime.signal ? [runtime.signal] : []), ...(input.abortSignal ? [input.abortSignal] : [])]) } : {}) })
       return { rpcSuccess: true, rpcText: JSON.stringify(await runtime.save(result.bytes, 'audio/mpeg')) }
     } catch (error) {
-      return { rpcSuccess: false, rpcText: 'Song generation or file verification failed.',
-        failureDiagnostic: toolFailureDiagnostic('handler_exception', error) }
+      return generatedMediaFailureResult(error)
     }
   }
   const mediaConflict = rejectIfResponseMediaConflicts(
