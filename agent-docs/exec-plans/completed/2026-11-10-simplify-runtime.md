@@ -1,6 +1,6 @@
 # Simplify runtime ownership and retire proved compatibility paths
 
-Status: active
+Status: completed
 Created: 2026-11-10
 Updated: 2026-11-10
 
@@ -100,6 +100,8 @@ retired Stripe-meter schema cleanup belongs to the separate billing lane.
   inventory. A later read-only batch capacity probe passed. Public-safe Frog
   entry `20261110232635-worktree-storage-guard` records the diagnostic gap; no
   unrelated checkout was mutated and no guard was bypassed.
-- Root owns candidate review, ReviewGPT, CI and final plan completion. Draft PR
-  [#4826](https://github.com/cobuildwithus/murph/pull/4826) is published; the plan
-  stays active for that owner.
+- Parent source and diff review passed. Local implementation and verification
+  are complete; this plan is closed at the parent's request. Draft PR
+  [#4826](https://github.com/cobuildwithus/murph/pull/4826) remains draft, with
+  ReviewGPT, exact-head CI and merge owned by the root completion session.
+Completed: 2026-11-10

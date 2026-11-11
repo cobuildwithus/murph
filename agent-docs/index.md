@@ -165,7 +165,7 @@ per-case test audit and local verification are tracked in
 [the removal plan](exec-plans/completed/2026-11-02-remove-finished-migrations.md).
 Runtime cutover schema cleanup belongs to `references/hosted-postgres-runtime.md`;
 its retained-schema proof and retained-target routing are tracked in
-[the simplification plan](exec-plans/active/2026-11-10-simplify-runtime.md).
+[the simplification plan](exec-plans/completed/2026-11-10-simplify-runtime.md).
 
 Device-sync single-snapshot retirement and cold journal replay: [implementation plan](exec-plans/active/2026-11-02-device-sync-single-snapshot.md).
 
