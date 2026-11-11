@@ -3227,11 +3227,11 @@ async function executeGenerateImageDynamicTool(
   request: Extract<MurphDynamicToolRequest, { kind: 'generate-image' }>,
 ): Promise<MurphDynamicToolExecutionResult> {
   if (request.args.output === 'file') {
-    const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'image', args: request.args })
+    const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'image', args: request.args }, input.fetchImpl)
     if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
     const result = await executeGenerateImageTool({ args: request.args, fileRuntime,
       abortSignal: input.abortSignal, env: input.env, fetchImpl: input.fetchImpl,
-      providerRequestOrdinal: input.nextUsageOrdinal() })
+      providerRequestOrdinal: input.nextUsageOrdinal() }).finally(() => fileRuntime.finish?.())
     return { ...toolTextResult(result.rpcSuccess, result.rpcText), usageDraft: result.usageDraft ?? null }
   }
   if (input.hostedToolContext?.currentGameRecapScope?.()?.show) return toolTextResult(false, 'Recap media requires output=file.', 'authority_rejected')
@@ -4005,9 +4005,9 @@ async function dispatchMurphDynamicToolRequest(
     }
     case 'generate-song': {
       if (input.request.args.output === 'file') {
-        const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'song', args: input.request.args })
+        const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'song', args: input.request.args }, input.fetchImpl)
         if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
-        return executeGenerateSongDynamicTool({ args: input.request.args, env: input.env, fileRuntime, abortSignal: input.abortSignal })
+        return executeGenerateSongDynamicTool({ args: input.request.args, env: input.env, fileRuntime, abortSignal: input.abortSignal }).finally(() => fileRuntime.finish?.())
       }
       if (input.hostedToolContext?.currentGameRecapScope?.()?.show) return toolTextResult(false, 'Recap media requires output=file.', 'authority_rejected')
       if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {

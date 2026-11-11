@@ -1,3 +1,4 @@
+import { createRecapMediaRuntime } from './recap-media-runtime.js'
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
 import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
 import type { GenerateSongToolArgs } from '../assistant-codex/generate-voice-memo-tool.js'
@@ -212,7 +213,7 @@ export interface AssistantHostedToolContext {
   currentDeviceActivityOccurrence?(): AssistantDeviceActivityOccurrence | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentGameRecapScope?(): NonNullable<AssistantHostedExecutionContext['gameRecapScope']> | null
-  prepareRecapMedia?(request: { kind: 'image'; args: GenerateImageToolArgs } | { kind: 'song'; args: GenerateSongToolArgs }): Promise<GeneratedMediaFileRuntime>
+  prepareRecapMedia?(request: { kind: 'image'; args: GenerateImageToolArgs } | { kind: 'song'; args: GenerateSongToolArgs }, fetchImpl: typeof fetch): Promise<GeneratedMediaFileRuntime>
   prepareGameRecapInputs?(material: unknown): Promise<unknown>
   readGameRecapWorkspace?(): Awaited<ReturnType<typeof materializeRecapWorkspace>> | null
   currentGameMissedCheckInScope?(): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null
@@ -639,9 +640,17 @@ export function createAssistantHostedToolContext(input: {
     currentUserActionScope: readCurrentUserActionScope,
     currentGameRecapScope: () => executionContext?.gameRecapScope ?? null,
     readGameRecapWorkspace: () => recapWorkspace,
+    prepareRecapMedia: async (request, fetchImpl) => {
+      const scope = executionContext?.gameRecapScope
+      const admission = executionContext?.gameRecapAdmission
+      if (!scope?.show || !admission || !recapWorkspace || !executionContext.groupTool) throw new Error('Read the authorized recap material before generating media.')
+      return createRecapMediaRuntime({ vault: input.messageInput.vault, workspace: recapWorkspace, scope, admission,
+        tool: executionContext.groupTool, fetchImpl, request })
+    },
     prepareGameRecapInputs: async material => {
       const scope = executionContext?.gameRecapScope
       if (!scope?.show || !executionContext?.groupTool) throw new Error('Pair show scope is unavailable.')
+      if (recapWorkspace) return recapWorkspace.manifest
       recapWorkspace = await materializeRecapWorkspace({ vault: input.messageInput.vault, gameId: scope.gameId,
         eventId: scope.eventId, sessionId: input.session.sessionId, material, lore: await readGameLore(), tool: executionContext.groupTool })
       return recapWorkspace.manifest

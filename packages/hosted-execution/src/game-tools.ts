@@ -1,3 +1,5 @@
+import { recapProviderRequestSchema } from "@murphai/contracts/recap-admission";
+import { recapFileReceiptSchema } from "@murphai/contracts/recap-show";
 import * as z from "@murphai/contracts/zod-runtime";
 
 // A new value of the existing error field: this generation is durably finished and must end without sending.
@@ -59,6 +61,11 @@ export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
     everyDay: z.boolean().optional(), text: z.boolean().optional(), push: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin, automationOccurrenceOrigin]), includePlayers: z.literal(true).optional(),
     recapRead: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("admit"), runId: z.string().uuid() }).strict(),
+      z.object({ kind: z.literal("reserve"), runId: z.string().uuid(), operationId: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u), providerRequest: recapProviderRequestSchema, referenceIds: z.array(z.string().regex(/^[a-f0-9]{64}$/u)).max(3).optional() }).strict(),
+      z.object({ kind: z.literal("finished"), operationId: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u), token: z.string().regex(/^[a-f0-9]{64}$/u), receipt: recapFileReceiptSchema.optional() }).strict(),
+      z.object({ kind: z.literal("end"), runId: z.string().uuid(), token: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
+      z.object({ kind: z.literal("lore_checkpointed") }).strict(),
       z.object({ kind: z.literal("transcript"), after: z.string().regex(/^\d{1,20}$/u).optional() }).strict(),
       z.object({ kind: z.literal("reference"), id: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
     ]).optional() }).strict(),

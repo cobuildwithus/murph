@@ -260,7 +260,7 @@ export async function executeGenerateImageTool(input: {
     let openAiResult: Awaited<ReturnType<typeof generateOpenAiImage>>
     try {
       openAiResult = await generateOpenAiImage({
-        abortSignal: input.abortSignal ?? null,
+        abortSignal: fileRuntime?.signal ? AbortSignal.any([fileRuntime.signal, ...(input.abortSignal ? [input.abortSignal] : [])]) : input.abortSignal ?? null,
         apiKey,
         fetchImpl: fileRuntime?.fetchImpl ?? input.fetchImpl,
         ...(input.args.outputCompression !== undefined

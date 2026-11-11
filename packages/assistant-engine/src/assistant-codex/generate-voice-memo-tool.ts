@@ -261,7 +261,7 @@ export async function executeGenerateSongTool(input: {
         forceInstrumental: input.args.instrumental, modelId: assistantVoiceMemoMusicModelId,
         outputFormat: assistantVoiceMemoMusicOutputFormat, prompt: input.args.prompt,
         fetchImplementation: async (url, init) => runtime.fetchImpl(url, init),
-        ...(input.abortSignal ? { signal: input.abortSignal } : {}) })
+        ...(runtime.signal || input.abortSignal ? { signal: AbortSignal.any([...(runtime.signal ? [runtime.signal] : []), ...(input.abortSignal ? [input.abortSignal] : [])]) } : {}) })
       return { rpcSuccess: true, rpcText: JSON.stringify(await runtime.save(result.bytes, 'audio/mpeg')) }
     } catch (error) {
       return { rpcSuccess: false, rpcText: 'Song generation or file verification failed.',

@@ -1,3 +1,4 @@
+import { handleRecapAdmission } from "./recap-admission";
 import { readPendingRecapUsages } from "./recap-lore";
 import { readRecapTranscriptPage, readRecapTranscriptForValidation } from "./recap-transcript";
 import { readRecapSourceReferences, readRecapReferenceBytes, publicRecapReferences } from "./recap-inputs";
@@ -19,7 +20,7 @@ import { assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread
 import { getPrisma } from "../prisma";
 import { readGameChatState, readGameChatProfiles, readGameRecapMaterial, runGameCommand, runGameChatUpdate, sealGameRecap } from "./service";
 import { isGameRecapGenerationRetired } from "./recap-witness";
-import { acceptedGameRecapMessage } from "./recap-message";
+import { acceptedGameRecapMessage, gameRecapMessage } from "./recap-message";
 import { gameRecapToolResult, validateGameRecap, withValidGameSuperlatives, type GameRecapChatMessage } from "./recap";
 import { addressedGameRematchWhere, gameChatPlayerIds, gamePairWhere, readGameChatPlayerIds, readGameChatAudience, readGameChatAuthority, type GameChatAudience, hasGameChatRestriction, requireExactGameChat, sameGamePlayers } from "./chat-membership";
 import { isGameEnabled, isGameOn } from "./access";
@@ -226,10 +227,15 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
   };
+  if (input.request.action === "read_game" && input.request.recapRead && !["transcript", "reference"].includes(input.request.recapRead.kind)) {
+    if (!material.validation.show) return unavailable();
+    return { action: "read_game", result: { status: "ok", recapGame: await handleRecapAdmission({ memberId: input.memberId,
+      runtimeIdentity: input.runtimeIdentity, gameId, eventId, command: input.request.recapRead, material }) } };
+  }
   if (input.request.action === "read_game") return readRecapForWriter({ material, request: input.request, containerMemberId: input.memberId, playerMemberIds: players, beforeMutationTx: authorizeMutation });
   const replay = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId,
     eventId, gameId, playerMemberIds: players, recap: null });
-  if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(replay, input.request.recap), chatLine: await acceptedGameRecapMessage(gameId, replay.chatLine) } };
+  if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(replay, input.request.recap), chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, replay.chatLine) : gameRecapMessage(gameId, replay.chatLine) } };
   if (await isGameRecapGenerationRetired(prisma, eventId, input.memberId)) return { action: "write_recap", result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
   const chatMessages = await readGameRecapChatMessages({ containerMemberId: input.memberId, material, eventId });
   const errors = validateGameRecap({ recap: input.request.recap, players: material.players, entries: material.entries,
@@ -238,7 +244,7 @@ async function handleGameRecapTool(input: Input & { request: Extract<HostedGameT
   if (!await refreshGameChatAudience({ ...input, audience }, players)) return { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const saved = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, recap: withValidGameSuperlatives(input.request.recap, material.validation.result.map(player => player.memberId), material.validation.group) });
   return saved
-    ? { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(saved, input.request.recap), chatLine: await acceptedGameRecapMessage(gameId, saved.chatLine) } }
+    ? { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: recapForWriter(saved, input.request.recap), chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, saved.chatLine) : gameRecapMessage(gameId, saved.chatLine) } }
     : unavailable();
 }
 
@@ -258,7 +264,7 @@ export async function readGameRecapChatMessages(input: {
 }): Promise<GameRecapChatMessage[]> {
   if (input.material.validation.show && input.eventId && input.material.validation.settledAt) {
     return readRecapTranscriptForValidation({ containerMemberId: input.containerMemberId, eventId: input.eventId,
-      gameId: input.material.game.id, players: input.material.validation.playerNamesByMemberId,
+      gameId: String(input.material.game.id), players: input.material.validation.playerNamesByMemberId,
       since: input.material.validation.startedAt, until: input.material.validation.settledAt });
   }
   return readGameChatTranscript({

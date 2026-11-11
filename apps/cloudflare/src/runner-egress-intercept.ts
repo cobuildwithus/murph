@@ -1,3 +1,4 @@
+import { inspectRecapProviderRequest, type RecapProviderRequest } from "@murphai/contracts/recap-admission";
 import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
 import { HOSTED_RUNTIME_DATA_API_PATHS } from "@murphai/hosted-execution/routes";
 import { readNativeRuntimeProviderAuthority, type RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
@@ -1153,7 +1154,7 @@ async function readHostedOpenAiRequestBody(input: {
     boundedBody = body;
   } else if (
     input.request.method === "POST"
-    && input.pathnameSuffix === "/v1/images/edits"
+    && (input.pathnameSuffix === "/v1/images/edits" || input.pathnameSuffix === "/v1/images/generations")
   ) {
     const body = await readBoundedRequestBody(
       input.request,
@@ -1218,6 +1219,12 @@ async function maybeHandleOpenAiRequest(input: {
   if (bodyRead instanceof Response) return bodyRead;
   const { boundedBody, imageGenerationRequested } = bodyRead;
 
+  const recapDenied = await checkRecapProviderRequest({ authorization, env: input.env,
+    request: new Request(input.request.url, { method: input.request.method, headers: input.request.headers,
+      ...(boundedBody !== undefined ? { body: boundedBody } : {}) }),
+    media: pathnameSuffix === "/v1/images/generations" || pathnameSuffix === "/v1/images/edits",
+    opaque: input.request.method === "GET", nativeImage: imageGenerationRequested });
+  if (recapDenied) return recapDenied;
   const imageDenied = await checkHostedOpenAiImageRequestAccess({
     request: input.request, env: input.env, authorization, pathnameSuffix, imageGenerationRequested,
   });
@@ -1418,6 +1425,11 @@ async function maybeHandleElevenLabsRequest(input: {
   if (providerRequest === null) {
     return disallowedProviderEgress();
   }
+
+  const recapDenied = await checkRecapProviderRequest({ authorization, env: input.env,
+    request: new Request(input.request.url, { method: 'POST', headers: input.request.headers, body: requestBody }),
+    media: pathnameSuffix === '/v1/music', opaque: false, nativeImage: pathnameSuffix !== '/v1/music' });
+  if (recapDenied) return recapDenied;
 
   const token = readRequiredInterceptSecret(
     input.env.ELEVENLABS_API_KEY,
@@ -2648,6 +2660,7 @@ function stripHostedProviderUpstreamHeaders(headers: Headers): Headers {
   stripped.delete("xi-api-key");
   stripped.delete("x-murph-api-key");
   stripped.delete("x-murph-data-api-key");
+  stripped.delete("x-murph-recap-reservation");
   stripped.delete("openai-organization");
   stripped.delete("openai-project");
   return stripped;
@@ -3074,4 +3087,33 @@ async function checkHostedImageGenerationAccess(input: {
     code: "MURPH_IMAGE_ACCESS_UNAVAILABLE",
     message: "Image generation access could not be confirmed. Try again later.",
   } }, { status: 503 });
+}
+
+/** Scope comes from the current runtime owner, including requests with no header. */
+async function checkRecapProviderRequest(input: {
+  authorization: HostedProviderEgressAuthorization; env: RunnerOutboundEnvironmentSource;
+  request: Request; media: boolean; opaque: boolean; nativeImage: boolean;
+}): Promise<Response | null> {
+  try {
+    const fence = requireHostedDirectUsageWriteFence(input.authorization);
+    let providerRequest: RecapProviderRequest | null = null;
+    let invalidMedia = false;
+    if (input.media) {
+      try { providerRequest = await inspectRecapProviderRequest(input.request); }
+      catch { invalidMedia = true; }
+    }
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const result = await fetchHostedWebControlPlaneJson({
+      body: { attemptId: fence.attemptId, generation: fence.leaseGeneration,
+        token: input.request.headers.get('x-murph-recap-reservation'), providerRequest,
+        opaque: input.opaque, nativeImage: input.nativeImage || invalidMedia },
+      boundUserId: fence.userId, description: 'Recap provider admission', fetchImpl: fetch,
+      route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.recapMediaAccess, timeoutMs: environment.webControlTimeoutMs,
+      transport: { callbackSigning: environment.webCallbackSigning, mode: 'direct', webControlBaseUrl: environment.hostedWebBaseUrl, workspaceCheckpointBridge: null },
+    });
+    if (result && typeof result === 'object' && 'allowed' in result && result.allowed === true) return null;
+    return new Response('Recap provider admission rejected this request.', { status: input.opaque ? 426 : 403 });
+  } catch {
+    return new Response('Recap provider admission is unavailable.', { status: 503 });
+  }
 }

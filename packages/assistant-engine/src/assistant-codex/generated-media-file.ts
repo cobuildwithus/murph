@@ -3,6 +3,8 @@ import type { ResolvedGenerateImageReference } from './image-reference-resolver.
 
 /** Supplied by the owning flow, never by model arguments or an editable manifest. */
 export interface GeneratedMediaFileRuntime {
+  signal?: AbortSignal
+  finish?(): Promise<void>
   fetchImpl: typeof fetch
   resolveReferences(refs: readonly string[]): Promise<ResolvedGenerateImageReference[]>
   save(bytes: Uint8Array, mediaType: 'image/jpeg' | 'audio/mpeg'): Promise<RecapFileReceipt>

@@ -1,3 +1,4 @@
+import { admitRecapRun, finishRecapRun } from './recap-media-runtime.js'
 import { deliverAssistantGameBootstrapMessage, prepareAssistantGameBootstrap, recoverAssistantGameBootstrapResult } from './game-chat-bootstrap.js'
 import type { HostedGameChatBootstrapResult, HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateEveningCheckInPolicy, HostedGamePrivateKickoffPolicy } from '@murphai/hosted-execution/runtime-control'
 import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
@@ -216,7 +217,7 @@ export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
   | { kind: 'require_send' }
   | { kind: 'require_send_exact_text'; text: string }
-  | { kind: 'require_game_recap'; eventId: string; gameId: string; pairFingerprint: string; loreAccess?: 'read' }
+  | { kind: 'require_game_recap'; eventId: string; gameId: string; pairFingerprint: string; loreAccess?: 'read'; show?: true }
   | { kind: 'require_game_rematch'; eventId: string; gameId: string; termsVersion: number }
   | { kind: 'game_missed_check_in'; eventId: string; firstMissedDate: string; gameId: string; memberId: string; pairFingerprint: string }
 
@@ -458,6 +459,7 @@ export async function sendAssistantNotificationLocal(
         input,
         executionContext,
       )
+      if (hostedExecutionContext?.gameRecapScope?.show) hostedExecutionContext.gameRecapAdmission = await admitRecapRun(hostedExecutionContext)
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       let savedGameRecapChatLine: string | null = null
       const gameRecapTurn = hostedExecutionContext?.gameRecapScope != null
@@ -920,6 +922,7 @@ export async function sendAssistantNotificationLocal(
           session: committedDeliveryOutcome.session,
         })
       } finally {
+        await finishRecapRun(hostedExecutionContext).catch(() => {})
         await stopAssistantChannelTypingIndicator(typingIndicator, {
           providerStop: !assistantDeliveryOutcomeSupersedesTypingIndicator(
             committedDeliveryOutcomeKind,

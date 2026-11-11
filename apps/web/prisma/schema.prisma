@@ -1310,6 +1310,8 @@ model HostedUserCryptoAudit {
 /// Runtime authority and exact cleanup target survive canonical member deletion.
 /// No expiry grants replacement authority; retirement requires adapter proof.
 model HostedRuntimeOwner {
+  // Sticky until trusted recap finalization or invocation turnover; no game FK.
+  recapMediaScope           Json?    @map("recap_media_scope")
   userId                    String   @id @map("user_id")
   // Retired migration metadata; retained for a later contract migration.
   migrationPhase            String   @default("legacy") @map("migration_phase")

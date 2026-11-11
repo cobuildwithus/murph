@@ -64,6 +64,7 @@
       "import": "./dist/recap-validation.js",
       "default": "./dist/recap-validation.js"
     },
+    "./recap-admission": { "types": "./dist/recap-admission.d.ts", "import": "./dist/recap-admission.js", "default": "./dist/recap-admission.js" },
     "./recap-material": {
       "types": "./dist/recap-material.d.ts",
       "import": "./dist/recap-material.js",

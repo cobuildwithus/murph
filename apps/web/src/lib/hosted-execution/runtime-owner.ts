@@ -32,7 +32,7 @@ const COLD_RETIREMENT = { phase: "retiring", completedAt: null, platformAiUsageA
 const WARM_RETIREMENT = { phase: "retiring", completedAt: { not: null } } as const;
 const IDLE_OWNER = {
   phase: "idle", attemptId: null, processingMode: null, workspaceVersion: null,
-  providerEgressTokenHash: null, platformAiUsageAllowed: false,
+  providerEgressTokenHash: null, platformAiUsageAllowed: false, recapMediaScope: Prisma.DbNull,
 } as const;
 const IDLE_OWNER_WITHOUT_ASSIGNMENT = { ...IDLE_OWNER, allocationId: null, runnerContainerName: null } as const;
 
@@ -75,6 +75,7 @@ export async function claimHostedRuntime(input: {
     const data = {
       generation: (existing?.generation ?? 0n) + 1n,
       attemptId,
+      recapMediaScope: Prisma.DbNull,
       phase: "starting",
       processingMode: input.processingMode,
       allocationId: existing?.runnerContainerName
