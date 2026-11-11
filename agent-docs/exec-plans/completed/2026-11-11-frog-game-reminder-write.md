@@ -1,6 +1,6 @@
 # Bound game reminder writes at maximum cardinality
 
-Status: active
+Status: completed
 Created: 2026-11-11
 Updated: 2026-11-11
 
@@ -53,4 +53,11 @@ value; an explicit empty array clears it. No new state or cached authority.
   1.35 seconds on replay in the bounded local diagnostic runtime.
 - Focused command/eligibility tests passed 38 cases (one opt-in case unselected).
   Web typecheck and source complexity checks passed.
-- Changelog, PR, parent final review and exact-head checks pending; no merge or deployment authority.
+- Draft PR #4854 opened; member-facing changelog provenance names that PR.
+- The additional database eligibility proof passed both cases. Parent source and
+  authority review passed; external ReviewGPT is explicitly opted out for this run.
+- Changelog archive proof passed four cases; final Web typecheck passed. Parent
+  Product UX review is Ready for the command/readback paths and unchanged UI.
+- Implementation is ready for exact-head CI and human merge review. No merge,
+  deployment or issue closure is claimed; keep the PR worktree while it is open.
+Completed: 2026-11-11

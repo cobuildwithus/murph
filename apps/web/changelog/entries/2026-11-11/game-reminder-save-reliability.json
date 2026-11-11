@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 100,
+  "item": {
+    "id": "game-reminder-save-reliability",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More reliable game reminder saves",
+    "summary": "Your reminder choices save more reliably when you have many active games.",
+    "details": "Changing which games send reminders keeps each game’s daily-reminder choice unless you change it too. Your choices affect only your own active games.",
+    "relevanceTags": [
+      "games",
+      "reminders"
+    ],
+    "sourcePullRequests": [
+      4854
+    ]
+  }
+}
