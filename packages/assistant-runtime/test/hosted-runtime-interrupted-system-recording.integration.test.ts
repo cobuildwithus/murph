@@ -4,6 +4,7 @@ import {
   createBrowserVaultReplicaRef,
   createDeferred,
   createDeviceSyncResolvedConfig,
+  createEmptyDeviceSyncPort,
   createMailboxItem,
   createMailboxPort,
   createPlatform,
@@ -14,11 +15,13 @@ import {
   createWorkspacePort,
   createWorkspaceRuntimeJobInput,
   createWorkspaceState,
+  enqueueDeviceSyncSystemMailboxItemForTest,
   mocks,
   removeTempRoot,
   runHostedWorkspaceRuntimeJobInProcess,
   stagePendingLinqAssistantInputForMailboxItem,
   withRealTimeout,
+  writeMailboxImportStateFile,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
@@ -40,7 +43,8 @@ import { runHostedWorkspaceAssistantPhase } from "../src/hosted-runtime/workspac
 import { readHostedAssistantInputCurrentDeliveryRoute } from "../src/hosted-runtime/current-delivery-route.ts";
 import { readHostedProviderCleanupCheckpoint } from "../src/hosted-runtime/provider-cleanup.ts";
 import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
-import { readHostedSystemMailboxState, resolveHostedSystemMailboxWakeCandidates } from "../src/hosted-runtime/system-mailbox-state.ts";
+import { createEmptyHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
+import { readHostedSystemMailboxState, resolveHostedSystemMailboxWakeCandidates, updateHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 import * as systemWork from "../src/hosted-runtime/workspace-system-work.ts";
 
 const CONNECTION_ID = "synthetic-recording-connection";
@@ -508,3 +512,132 @@ test.each([
     await Promise.all(roots.map(removeTempRoot));
   }
 }, 90_000);
+
+test.each(["due", "not-due"] as const)("cold-start recording with %s publication orders projection and capture", async (publication) => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cold-start-publication-"));
+  const controller = new AbortController();
+  const projectionStarted = createDeferred<void>();
+  const projectionRelease = createDeferred<void>();
+  const snapshotStarted = createDeferred<void>();
+  const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+  const events: string[] = [];
+  const capturedPending: Awaited<ReturnType<typeof readHostedSystemMailboxState>>["pending"][] = [];
+  let acknowledgments = 0;
+  let scopeReads = 0;
+  let assistantPasses = 0;
+  let runtimeCompletion: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(TEST_NOW));
+  try {
+    await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+    const deviceItem = createMailboxItem({
+      id: "mailbox_item_cold_start_recording",
+      dedupeKey: "device-sync.wake:cold-start-recording",
+      kind: "device-sync.wake", lane: "system", laneSeq: "1",
+    });
+    await enqueueDeviceSyncSystemMailboxItemForTest({ item: deviceItem, vaultRoot });
+    await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+      pending: state.pending.map((item) => ({
+        ...item,
+        status: "recording" as const,
+        postCheckpointRecord: {
+          kind: "device-sync.dirty-processed" as const,
+          connectionId: CONNECTION_ID,
+          processedRevision: "4",
+          processedDirtyPayloadIds: ["dirty_payload_cold_start_recording"],
+        },
+      })),
+    }));
+    const importState = createEmptyHostedMailboxImportState();
+    importState.watermarks.system = "1";
+    await writeMailboxImportStateFile(vaultRoot, importState);
+    const initial = await createVaultSnapshotBundle({ vaultRoot });
+    const artifactBytesByHash = new Map([[initial.hash, initial.bytes]]);
+    runtimeCompletion = runHostedWorkspaceRuntimeJobInProcess(
+      createWorkspaceRuntimeJobInput({
+        request: { runnerIdleTtlMs: 600_000 },
+        resolvedConfig: createDeviceSyncResolvedConfig(),
+      }),
+      {
+        vaultRoot,
+        signal: controller.signal,
+        async importItem({ item }) {
+          const assistantInputId = await stagePendingLinqAssistantInputForMailboxItem({ item, vaultRoot });
+          return { assistantInputId, status: "imported" };
+        },
+        async runAssistantPhase() {
+          if (++assistantPasses > 1) return { progressed: false };
+          return {
+            progressed: true,
+            checkpointReason: publication === "due" ? "outbox_receipt" : "assistant_runtime_commit",
+            ...(publication === "due" ? {
+              afterDurableCheckpoint: Object.assign(async () => {}, { checkpointStartByMs: Date.now() }),
+            } : {}),
+          };
+        },
+        async createCheckpointSnapshot() {
+          capturedPending.push((await readHostedSystemMailboxState(vaultRoot)).pending);
+          snapshotStarted.resolve();
+          const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+          artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+          return { snapshotRef: snapshot.snapshotRef };
+        },
+        platform: createPlatform({
+          artifactBytesByHash,
+          mailboxPort: createMailboxPort({ events, items: [createMailboxItem()] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests, events, workspace: createWorkspaceState({ snapshotRef: initial.snapshotRef }),
+          }),
+          deviceSyncPort: {
+            ...createEmptyDeviceSyncPort(),
+            async ackDirtyStateProcessed(request) {
+              acknowledgments += 1;
+              assert.equal(request.processedRevision, "4");
+              assert.deepEqual(request.processedDirtyPayloadIds, ["dirty_payload_cold_start_recording"]);
+              return {
+                connectionId: request.connectionId,
+                dirtyRevision: request.processedRevision,
+                processedRevision: request.processedRevision,
+                recorded: true,
+                stillDirty: false,
+                nextWakeAt: null,
+                userId: TEST_USER_ID,
+              };
+            },
+          },
+          vaultSharePort: {
+            async listActiveProjectionScopes(request) {
+              scopeReads += 1;
+              projectionStarted.resolve();
+              await projectionRelease.promise;
+              request?.signal?.throwIfAborted();
+              return { projectionKinds: [], projectionScopes: [] };
+            },
+            async deliver() { return { status: "delivered" }; },
+          },
+        }),
+      },
+    );
+    void runtimeCompletion.catch(publication === "due" ? snapshotStarted.reject : projectionStarted.reject);
+    if (publication === "due") {
+      await withRealTimeout(snapshotStarted.promise, 5_000,
+        () => `Due publication did not start snapshot capture: projection starts=${scopeReads}, acknowledgments=${acknowledgments}.`);
+      assert.equal(scopeReads, 0, "Due publication must start before the optional projection.");
+      await withRealTimeout(runtimeCompletion, 10_000, () => "Due publication did not finish.");
+      assert.equal(acknowledgments, 1, "Replay must acknowledge the restored recording exactly once.");
+      assert.deepEqual(capturedPending, [[]], "One snapshot must contain recording cleanup without an extra ack capture.");
+    } else {
+      await withRealTimeout(projectionStarted.promise, 5_000,
+        () => `Not-due publication skipped the projection opportunity: passes=${assistantPasses}, captures=${capturedPending.length}, acknowledgments=${acknowledgments}.`);
+      assert.equal(scopeReads, 1);
+      assert.deepEqual(capturedPending, [], "Projection must start before snapshot capture while the idle window is open.");
+      assert.equal(acknowledgments, 0, "Restored replay still waits for the not-due projection opportunity.");
+    }
+  } finally {
+    controller.abort();
+    projectionRelease.resolve();
+    await runtimeCompletion?.catch(() => undefined);
+    vi.useRealTimers();
+    await removeTempRoot(vaultRoot);
+  }
+}, 30_000);
