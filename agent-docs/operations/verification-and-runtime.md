@@ -269,7 +269,11 @@ pnpm test:assistant:live -- --test "<unique test-name pattern>"
 The helper requires a name pattern so it cannot accidentally fan out across
 the paid suite. It defaults to `gpt-6.1-sol` through the authenticated local
 ChatGPT/Codex subscription without copying auth material; `--auth provider`
-keeps the existing isolated provider-key route. Read every printed synthetic
+keeps the existing isolated provider-key route for canonical release evidence.
+Subscription runs retain unspecified personal configuration and global AGENTS
+instructions; classify them as developer-local evidence. They do not establish
+configuration isolation. Do not switch auth modes or copy credentials to make a
+local run appear isolated. Read every printed synthetic
 reply and record a `Ready` or `Hold` UX verdict covering correctness, action
 count, repetition, clarity, warmth, autonomy, and truthful recovery. Routine CI
 must never depend on local subscription state or make the paid call.

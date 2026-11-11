@@ -530,12 +530,11 @@ function listStaticPagePathnames(
   return appSources
     .filter(
       ({ path }) =>
-        // Synthetic screenshots, the local-only auth fixture, voice, and
+        // Synthetic screenshots, the local-only auth fixture, and
         // account-security settings stay outside the vendor allowlist.
         !path.startsWith("app/screenshots/")
         && path !== "app/test/better-auth-settings/page.tsx"
         && path !== "app/settings/accounts/page.tsx"
-        && path !== "app/(dashboard)/voice/page.tsx"
         && (path === "app/page.tsx" || path.endsWith("/page.tsx")),
     )
     .flatMap(({ path }) => {

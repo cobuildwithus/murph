@@ -385,27 +385,11 @@ States: waiting (automatic or paused), connecting, failed, navigated.
 Invariant: timer and click cannot race into two POSTs; a client retry must not
 invent reusable authority for a single-use server claim. Inspected.
 
-### W8. Browser voice call and media ownership
+### W8. Browser live voice (retired)
 
-Source: `voice/browser-voice-call.ts`, `voice/voice-audio.ts`.
-States: idle, starting, connected, ending, ended, error; muted/audio-blocked;
-reservation identity and media resources are implicit state.
-
-| From | Event / guard | To / effect |
-| --- | --- | --- |
-| Starting | Microphone permission | Attach stream, create peer/data channel |
-| Starting | Reservation readiness retry | Reuse call ID; retain exact attempt and lease generation |
-| Reserved | Connect retry | Reuse one SDP offer and call identity |
-| Starting | Peer connected | Connected; activate level monitoring |
-| Connected | Mute/unmute | Change owned audio tracks only |
-| Active | End, track loss, data-channel close or timeout | Synchronously stop microphone/resources, then settle server closure |
-| Ending/ended | Repeated close | Reuse closing promise |
-| Ended | Late permission/reservation | Release late media / close exact late server reservation |
-| Starting | Failure | Close resources, then error presentation |
-
-Invariants: browser owns media, server owns paid work/settlement; microphone
-release never waits on network; late startup cannot revive an ended call;
-uncertain server closure is reported honestly. Inspected; no confirmed defect.
+Removed in November 2026. The browser page, call-admission APIs, native media
+adapter and provider Live routes no longer exist. Historical voice records remain
+readable; messaging voice memos use their existing owners.
 
 ### W9. Sensitive-action enrollment and recovery
 

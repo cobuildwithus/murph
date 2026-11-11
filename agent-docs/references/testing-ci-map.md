@@ -180,9 +180,9 @@ decryption and authority proof with
 
 The live runner defaults to the pinned npm Codex binary. Select a locally built
 native binary with `--codex-command <absolute-path>`; the same executable handles
-native capability preflight, subscription login preflight, and the selected
-journey. The capability preflight rejects binaries without `--ignore-user-config`
-before login or provider work and times out after ten seconds. Ambient
+subscription login preflight and the selected journey. No custom isolation
+flag is required. Provider mode uses an isolated temporary home; subscription
+mode retains ambient personal configuration and is developer-local evidence. Ambient
 `MURPH_REAL_CODEX_COMMAND` does not override this explicit command-line choice.
 
 A rejected live selector prints up to 20 exact matching names, an omitted count,
@@ -406,7 +406,7 @@ admission alongside existing verified and recovered group behavior.
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm --dir apps/web test:prepared test/hosted-onboarding-linq-terminal-retry-postgres.test.ts` | Opt-in real-PostgreSQL proof for one terminal Linq send retry; requires an isolated loopback test database with the current schema. | Concurrent claims, provider ambiguity, direct/group and multipart recovery, both acceptance/receipt arrival orders, replacement receipt projection, and current route/access/line/chat blocks. Exported first-turn completion covers concurrent delivered/failed receipts, no-receipt acceptance, readable durable mailbox handoff, and replay without another provider send. Companion terminal-retry, HTTP, and delivery-route tests prove exact failure matching, preserved payloads, disabled SDK retries, and post-response scheduling. |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm --dir apps/web test:prepared test/hosted-linq-instant-first-turn-disposition-postgres.test.ts` | Opt-in local PostgreSQL first-turn ownership proof. | Dispositions (including held egress), losing abandonment, atomic first rejection, rejected retry reconciliation, five-minute reservation and sealed replay (with the same provider key), stale-owner dispatch fencing, later-event and egress empty-reservation skips, missed-CAS blocking, transaction rollback, one-read/no-write clean chats, late results, same-millisecond versions and legacy held rows. Real encrypted mailbox rows prove the held-only later-member witness excludes same-message edits, echoes, other chats, older messages and an absent held item. Companion `hosted-onboarding-linq-egress-engagement.test.ts` exercises the real route: held commit probes pass with a later message even with answered IDs; real sends and intent/idempotency checks aimed at the held input with a later member message end as terminal superseded. Lone held inputs, reaction/progress purposes, sealed and fresh reserved rows retain retryable vetoes; later-event checks preserve sealed and held rows byte for byte. Absent and sealed rows retain base scan costs; edits resolve their own source reference. Answered and fallback behavior stays unchanged. |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm --dir apps/web test:prepared test/hosted-telegram-incoming-reply-postgres.test.ts` | Opt-in local PostgreSQL incoming Telegram reply proof without member binding. | Duplicate and overlapping updates, lost responses, 429 retry timing, permanent rejection, distinct updates and unchanged group targets. |
-| `pnpm test:assistant:live -- --test "<name-pattern>"` | Required focused local real-Codex journey for assistant-behavior changes after deterministic proof. Defaults to the local ChatGPT/Codex subscription and `gpt-6.1-sol`; `--auth provider` preserves the isolated provider-key lane. | One selected `assistant-codex-real-e2e.test.ts` journey, including exact required/forbidden effects and printed synthetic replies for manual `Ready`/`Hold` UX review. Routine CI leaves the paid gate unset. |
+| `pnpm test:assistant:live -- --test "<name-pattern>"` | Required focused local real-Codex journey for assistant-behavior changes after deterministic proof. Defaults to the local ChatGPT/Codex subscription and `gpt-6.1-sol`; `--auth provider` preserves the isolated provider-key lane for canonical release evidence; subscription results are configuration-dependent developer evidence. | One selected `assistant-codex-real-e2e.test.ts` journey, including exact required/forbidden effects and printed synthetic replies for manual `Ready`/`Hold` UX review. Routine CI leaves the paid gate unset. |
 | `.github/workflows/foreground-reply-state-cardinality.yml` | Every-PR asymptotic gate that requires foreground reply filesystem work to saturate as unrelated persisted state grows. | The shared meter, convention-discovered `*-state-cardinality.test.ts` probes, fail-closed primitive coverage, and maintenance rules are specified in `agent-docs/references/README.md#foreground-reply-state-cardinality`. |
 | `pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/release-script-coverage-audit.test.ts -t 'review-gpt runner|ReviewGPT|review-gpt managed|Product UX|attests one fresh|fails closed marked'` | Focused PR review-tool contracts. | Packet vocabulary and completion outcomes, executable preset selection, full/delta packaging, protected config, and response capture. Narrative wording is not frozen; parent readback owns the realistic serious-bug and material Complexity Collapse thresholds, excluding speculation, minor refactoring, and disclosure findings. |
 | `pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/review-gpt-package-concurrency.test.ts` | Hermetic ReviewGPT packaging format guards. | PR-bound default, `--both`, and `--txt` modes fail before invoking packaging tools or producing and reporting incomplete artifacts; private invocation directories remain empty after each rejection. |
@@ -2208,9 +2208,11 @@ blocked provider runs are Hold evidence, not successful silence.
 ## Focused prerequisite and isolation rules
 
 Before focused Codex upgrade tests that invoke the workspace CLI, run
-`pnpm build:test-runtime:prepared`. Canonical live journeys additionally require
-a production-patched native Codex binary with `app-server --ignore-user-config`;
-pass it with `--codex-command`. Generate public-reference inputs with
+`pnpm build:test-runtime:prepared`. The pinned npm Codex supports both auth
+lanes: provider fixtures use an isolated home for canonical release evidence;
+subscription runs retain ambient configuration and provide developer-local
+evidence. Pass `--codex-command` when verifying a particular native artifact.
+Generate public-reference inputs with
 `pnpm health-commons:generate` before measuring a natural goal journey.
 Production capability comparisons also require
 `node scripts/assemble-assistant-cli-surface.mjs`.
@@ -2220,29 +2222,3 @@ PostgreSQL proof. Prepare it with `pnpm --dir apps/web prisma:migrate:deploy`,
 not `db push`, when checking migration-owned constraints. Run files sharing that
 database with `--maxWorkers=1`; runtime-cutover singleton tests cannot overlap
 other files. The canonical PostgreSQL runner already enforces this serial lane.
-
-
-### Focused native public Live verification
-
-Build the pinned patched native source and matching `codex-code-mode-host` before
-running the public Live app-server cases. On macOS, Cargo's test launch context
-can stall initialization even when the identical test executable passes directly.
-Keep the initialization deadlines intact and launch the compiled test from the
-native `codex-rs` workspace directory, explicitly selecting the candidate:
-
-```sh
-# Run inside the pinned, patched codex-rs workspace.
-cargo test --locked -p codex-app-server --test all public_live --no-run --message-format=json > target/public-live-build.jsonl
-native_test_binary="$(node -e 'const fs = require("node:fs"); const rows = fs.readFileSync("target/public-live-build.jsonl", "utf8").trim().split("\n").map(line => JSON.parse(line)); const binaries = [...new Set(rows.filter(row => row.reason === "compiler-artifact" && row.target?.name === "all" && row.profile?.test && row.executable).map(row => row.executable))]; if (binaries.length !== 1) process.exit(1); process.stdout.write(binaries[0]);')"
-native_app_server="$PWD/target/release/codex-app-server"
-test -x "$native_app_server"
-test -x "$PWD/target/release/codex-code-mode-host"
-env "CARGO_BIN_EXE_codex-app-server=$native_app_server" "$native_test_binary" public_live --list
-env "CARGO_BIN_EXE_codex-app-server=$native_app_server" "$native_test_binary" public_live --test-threads=1
-```
-
-Confirm the list contains the expected public Live cases; a zero-test run is not
-proof. Keep the app-server and helper from the same pinned build. This command
-fixes the demonstrated launch context, not the unexplained Cargo initialization
-failure. Native sandbox proof still requires native Linux; AMD64 emulation on an
-ARM host is not an equivalent sandbox verification environment.

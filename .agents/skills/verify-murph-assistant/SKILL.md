@@ -31,7 +31,7 @@ the acceptance result.
      compact synthetic scenario/reply line so the actual prose can be reviewed.
    - Give the journey a unique test name. Keep unrelated live turns in separate
      tests when they should be runnable independently.
-4. Run only that journey through the local Codex subscription:
+4. Run only that journey through the selected supported auth lane:
 
    ```bash
    pnpm test:assistant:live -- --test "<unique test-name pattern>"
@@ -41,7 +41,10 @@ the acceptance result.
    `gpt-6.1-sol` with the authenticated local ChatGPT/Codex subscription. Use
    `--model <model>` only when the product target differs. Use
    `--auth provider` only for an explicitly configured supported provider-key
-   lane. Never print, copy, or persist auth material.
+   lane. Subscription runs keep personal configuration and global instructions;
+   report them as developer-local evidence. Isolated provider-mode runs own
+   canonical release evidence. Do not silently change auth modes or copy
+   credentials to obtain isolation. Never print, copy, or persist auth material.
 
    If the default subscription home fails before any provider action, follow
    the alternate-home retry contract in
@@ -63,7 +66,8 @@ the acceptance result.
    the same focused live journey. Do not weaken an assertion to bless a poor
    experience.
 7. In the PR evidence, name the command, model, auth class
-   (`local subscription` or provider, never a secret), scenarios, exact effect
+   (`local subscription, ambient configuration` or `provider, isolated home`,
+   never a secret), scenarios, exact effect
    result, and `Ready`/`Hold` reply-review verdict. Summarize the UX evidence;
    do not paste transcripts into the PR.
 
@@ -78,7 +82,8 @@ the acceptance result.
 - The local subscription mode uses the normal local Codex home by default and
   may try each available authenticated local home once under the owning retry
   contract, but it never copies auth into a temporary home. It is
-  developer-local evidence, not a hermetic CI lane. Provider-key mode keeps its
+  developer-local evidence with ambient personal configuration, not canonical
+  isolated release proof. Provider-key mode keeps its
   isolated Codex home and minimal secret allowlist.
 - Do not call production databases, delivery providers, device providers, or
   member-facing channels. Inject synthetic ports and fixtures.

@@ -7,7 +7,6 @@ export const HOSTED_RUNTIME_POLL_TOOL_PATH = "/api/internal/hosted-execution/pol
 import type { HostedExecutionResolvedLinqDeliveryRoute } from "./contracts.ts";
 
 export const HOSTED_RUNTIME_MAILBOX_FETCH_PATH = "/api/internal/hosted-mailbox/fetch";
-export const HOSTED_RUNTIME_VOICE_INPUT_PATH = "/api/internal/hosted-mailbox/voice-input";
 export const HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH =
   "/api/internal/hosted-mailbox/payload/fetch";
 export const HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH =

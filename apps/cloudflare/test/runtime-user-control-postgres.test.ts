@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import type { HostedExecutionContainerStubLike } from "../src/runner-container.ts";
-import { controlPostgresRuntimeVoice, deletePostgresRunnerUserData, readPostgresRunnerStatus, reconcilePostgresRuntimeConsent, stopPostgresRuntimeForUser } from "../src/runtime-user-control.ts";
+import { deletePostgresRunnerUserData, readPostgresRunnerStatus, reconcilePostgresRuntimeConsent, stopPostgresRuntimeForUser } from "../src/runtime-user-control.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../src/web-control-plane.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
@@ -26,7 +26,6 @@ function harness(target = `runner--v-release_1--${"1".repeat(32)}`) {
     runnerContainerName: target, workspaceVersion: "0", platformAiUsageAllowed: true,
     startedAt: "2026-09-15T00:00:00.000Z", acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null };
   const slot = { invoke: vi.fn(), smokeHealth: vi.fn(), destroyInstance: vi.fn(),
-    controlVoice: vi.fn(async () => ({ kind: "closed" as const, providerConfirmed: true, seconds: 12 })),
     bindStandbySlot: vi.fn(), prepareStandbySlot: vi.fn(), resolveRetainedStandbySlot: vi.fn(),
     readStandbySlotCoordinatorState: vi.fn(), retireStandbySlot: vi.fn(async () => ({ retired: true as const })),
     readStandbySlotBinding: vi.fn(async () => ({ state: "retired" as const, slotName: target, claimId: null,
@@ -44,15 +43,11 @@ function harness(target = `runner--v-release_1--${"1".repeat(32)}`) {
 }
 
 describe("Postgres runtime user controls", () => {
-  it.each(["voice", "withdrawal", "deletion"] as const)("keeps a retained small target in its exact namespace during %s", async action => {
+  it.each(["withdrawal", "deletion"] as const)("keeps a retained small target in its exact namespace during %s", async action => {
     const h = harness(`runner-small--v-release_1--${"1".repeat(32)}`);
     const smallGet = vi.fn(() => h.slot);
     const source = { ...h.source, SMALL_RUNNER_CONTAINER: { getByName: smallGet } };
-    if (action === "voice") {
-      await expect(controlPostgresRuntimeVoice(source, h.userId, {
-        action: "close", callId: "synthetic-call", attemptId: h.owner.attemptId!, leaseGeneration: h.owner.generation,
-      })).resolves.toMatchObject({ kind: "closed" });
-    } else if (action === "withdrawal") {
+    if (action === "withdrawal") {
       vi.mocked(fetchHostedExecutionWebControlPlaneResponse).mockResolvedValue(Response.json({ userId: h.userId, processingAllowed: false, consentState: "revoked" }));
       await expect(reconcilePostgresRuntimeConsent(source, h.userId)).resolves.toMatchObject({ runnerContainerDestroyOk: true });
     } else {
@@ -62,50 +57,11 @@ describe("Postgres runtime user controls", () => {
     expect(smallGet).toHaveBeenCalledExactlyOnceWith(h.target);
     expect(h.source.RUNNER_CONTAINER.getByName).not.toHaveBeenCalled();
     expect(h.slot.bindStandbySlot).not.toHaveBeenCalled();
-    if (action !== "voice") expect(h.slot.retireStandbySlot).toHaveBeenCalledExactlyOnceWith({
+    expect(h.slot.retireStandbySlot).toHaveBeenCalledExactlyOnceWith({
       claimId: h.owner.allocationId, target: { slotName: h.target, userId: h.userId },
     });
   });
 
-  it("rejects an older container without voice capability before media startup", async () => {
-    const h = harness();
-    const { controlVoice: _voice, ...oldContainer } = h.slot;
-    const source = { ...h.source, RUNNER_CONTAINER: { getByName: () => oldContainer } };
-    expect(await controlPostgresRuntimeVoice(source, h.userId, {
-      action: "connect", callId: "call-synthetic", attemptId: h.owner.attemptId!,
-      leaseGeneration: h.owner.generation, sdp: "v=0\r\noffer",
-    })).toEqual({ kind: "unavailable" });
-    expect(h.slot.invoke).not.toHaveBeenCalled();
-  });
-  it("routes voice to the persisted exact owner without invoking or allocating work", async () => {
-    const h = harness();
-    const request = { action: "close" as const, callId: "call-synthetic",
-      attemptId: h.owner.attemptId!, leaseGeneration: h.owner.generation };
-    expect(await controlPostgresRuntimeVoice(h.source, h.userId, request)).toMatchObject({ kind: "closed", providerConfirmed: true });
-    expect(h.source.RUNNER_CONTAINER.getByName).toHaveBeenCalledExactlyOnceWith(h.target);
-    expect(h.slot.controlVoice).toHaveBeenCalledExactlyOnceWith({ ...request, userId: h.userId });
-    expect(h.slot.invoke).not.toHaveBeenCalled();
-    expect(h.slot.bindStandbySlot).not.toHaveBeenCalled();
-  });
-
-  it.each([{ attemptId: "old-attempt" }, { leaseGeneration: "0" }])("rejects stale voice authority before container lookup", async (change) => {
-    const h = harness();
-    expect(await controlPostgresRuntimeVoice(h.source, h.userId, {
-      action: "close", callId: "call-synthetic", attemptId: h.owner.attemptId!,
-      leaseGeneration: h.owner.generation, ...change,
-    })).toEqual({ kind: "unavailable" });
-    expect(h.source.RUNNER_CONTAINER.getByName).not.toHaveBeenCalled();
-  });
-
-  it("permits close after usage revocation while denying another connection", async () => {
-    const h = harness();
-    h.owner.platformAiUsageAllowed = false;
-    const request = { action: "connect" as const, callId: "call-synthetic", sdp: "v=0\r\noffer",
-      attemptId: h.owner.attemptId!, leaseGeneration: h.owner.generation };
-    expect(await controlPostgresRuntimeVoice(h.source, h.userId, request)).toEqual({ kind: "unavailable" });
-    expect(h.slot.controlVoice).not.toHaveBeenCalled();
-    expect(await controlPostgresRuntimeVoice(h.source, h.userId, { ...request, action: "close" })).toMatchObject({ kind: "closed" });
-  });
   beforeEach(() => vi.clearAllMocks());
 
   it("reads Web status and owner state without activating UserRunner", async () => {

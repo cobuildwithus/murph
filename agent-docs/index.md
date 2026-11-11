@@ -1510,7 +1510,7 @@ Worker callback preparation, HTTP-header timing, and bounded Vercel region
 attribution are tracked in
 [`mailbox latency phases`](exec-plans/completed/2026-09-22-mailbox-latency-phases.md).
 
-Current native voice release port and rollout proof:
+Historical native voice release port and rollout proof (feature retired):
 [`2026-09-22-native-voice-codex-155.md`](exec-plans/completed/2026-09-22-native-voice-codex-155.md).
 
 Preserving query-source error privacy across audit archives is tracked in
@@ -2065,5 +2065,9 @@ tracks combined verification and release of prompt checkpointing and unique fore
 App image sizing and native decoding proof: [image sizing plan](exec-plans/completed/2026-11-10-game-image-right-sizing.md). The media contract remains in `../ARCHITECTURE.md`.
 
 Frog backlog resolution and verification: [execution record](exec-plans/completed/2026-11-10-frog-backlog.md).
+
+Browser live voice retirement is tracked in [the retirement plan](exec-plans/completed/2026-11-10-retire-live-voice.md); `../apps/web/README.md` owns the website boundary.
+
+Dependency patch reduction is tracked in [the cleanup plan](exec-plans/completed/2026-11-10-dependency-patch-cleanup.md).
 
 Invite phone-code lifecycle retirement is owned by [hosted authentication migration](../docs/hosted-auth-migration.md#retired-invite-phone-code-lifecycle); the [execution plan](exec-plans/active/2026-11-10-simplify-auth-lifecycle.md) records validation and remaining audit dispositions.
