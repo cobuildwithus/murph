@@ -70,7 +70,7 @@ afterEach(async () => {
 it.each([
   { threadIsDirect: true, withMedia: false }, { threadIsDirect: false, withMedia: false },
   { threadIsDirect: true, withMedia: true }, { threadIsDirect: false, withMedia: true },
-])("uses one claiming call for a current-conversation reply (direct=$threadIsDirect, media=$withMedia)", async ({ threadIsDirect, withMedia }) => {
+])("claims a text reply in one call and keeps two calls for media (direct=$threadIsDirect, media=$withMedia)", async ({ threadIsDirect, withMedia }) => {
   const fixture = await createHostedLinqAttachmentFixture({ imageCount: 0,
     key: "one-claim", target: "synthetic-current-chat", message: "Synthetic reply." });
   const replyToMessageId = "synthetic-inbound-message";
@@ -85,7 +85,8 @@ it.each([
   const order: string[] = [];
   const assertLinqRecentInboundEngagement = vi.fn<NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["assertLinqRecentInboundEngagement"]>>(async request => {
     order.push(request.authorityCheckOnly ? "probe" : "claim");
-    expect(request.expectedResolvedRoute).toBeUndefined();
+    // A text reply claims with no prior route read; media keeps the route read first.
+    expect(request.expectedResolvedRoute === undefined).toBe(!withMedia || request.authorityCheckOnly);
     expect(request.homeRouteFallbackAllowed).toBe(false);
     monotonicMs += 40;
     return { providerDispatchClaimed: true, resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request, {
@@ -109,12 +110,14 @@ it.each([
     platform: { logPort },
   });
   expect(outcomes[0]?.deliveryStatus).toBe("sent");
-  expect(order).toEqual(threadIsDirect ? ["probe", "claim", "provider"] : ["claim", "provider"]);
+  // Direct replies start with the turn-commit probe; media adds the route read.
+  expect(order).toEqual([
+    ...(threadIsDirect ? ["probe"] : []), ...(withMedia ? ["probe"] : []), "claim", "provider",
+  ]);
   expect(providerFetch).toHaveBeenCalledOnce();
-  expect(assertLinqRecentInboundEngagement).toHaveBeenCalledTimes(threadIsDirect ? 2 : 1);
   await drainHostedRuntimeLogWritesBestEffort();
   expect(logPort.write).toHaveBeenCalledWith(expect.objectContaining({ entries: [expect.objectContaining({
-    redactedJson: expect.objectContaining({ deliveryProviderEntryFenceMs: 40, deliveryRouteAuthorityCheckMs: 0 }),
+    redactedJson: expect.objectContaining({ deliveryProviderEntryFenceMs: 40, deliveryRouteAuthorityCheckMs: withMedia ? 40 : 0 }),
   })] }));
 });
 

@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 2,
     "title": "Quicker everyday replies",
-    "summary": "Ordinary text and image replies in direct and group iMessage chats have less waiting before they send.",
-    "details": "This improves delivery after Murph finishes composing a reply. Cards, secure file sends and voice messages keep their existing delivery flow.",
+    "summary": "Ordinary text replies in direct and group iMessage chats have less waiting before they send.",
+    "details": "This improves delivery after Murph finishes composing a reply. Replies with images, cards, secure files or voice messages keep their existing delivery flow.",
     "relevanceTags": ["messaging", "performance"],
     "sourcePullRequests": [4898]
   }

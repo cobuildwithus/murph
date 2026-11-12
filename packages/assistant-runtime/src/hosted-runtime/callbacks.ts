@@ -4931,7 +4931,9 @@ function createHostedAssistantLinqSendDependency(input: {
       && !!request.replyToMessageId?.trim()
       && request.homeRouteFallbackAllowed !== true
       && request.card == null
-      && !includesVaultFile
+      // Media is fetched or loaded before the first provider request. Claiming
+      // ahead of that work could leave a dispatch fence with no provider entry.
+      && media.length === 0
       && !reviewedAssistantAskCompletion
       && !privateAssistantAskCompletion
       && !input.deliveryPurpose;

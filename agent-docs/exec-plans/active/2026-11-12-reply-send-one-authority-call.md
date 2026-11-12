@@ -252,6 +252,13 @@ request:
 
 ## Decisions
 
+- 2026-11-12, parent review of the implementation: the one-call path is
+  text-only. A send with any media keeps the route read followed by the claim,
+  because media is fetched or loaded after the claim point and before the first
+  provider request, and a terminal failure there would leave a dispatch fence
+  with no provider entry. Statements below that the one-call path reaches media
+  replies describe the first implementation and are superseded by this line.
+
 - 2026-11-12 implementation: the PostgreSQL-backed route proof passes for both
   direct accepted ingress and a durable group route. A claiming request without
   `expectedResolvedRoute` returns the requested target, creates one fence, and

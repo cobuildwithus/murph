@@ -16,12 +16,12 @@ retry owners record acceptance; later notifications derive bounded context
 from those receipts. Pending text never counts as a prior send, and a failed
 send creates no indefinite scheduling barrier.
 
-Ordinary Linq text and media sends to the current delivery context claim Web
+Ordinary Linq text sends to the current delivery context claim Web
 egress authority once, before building the provider request. A reply must carry
 its matching inbound message ID; sends without one retain route/alias resolution
 through the existing two calls. The matching context accepts thread and explicit
 targets; participant targets cannot match.
-Home-route fallback, cards, vault files, reviewed/private Assistant Ask
+Home-route fallback, cards, any media, reviewed/private Assistant Ask
 completions, progress updates, reactions and voice memos keep their existing
 authority ordering. Web must return the resolved route even for an already
 started claim; legacy already-started errors without a route fail closed.
