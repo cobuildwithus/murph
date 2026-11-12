@@ -63,6 +63,17 @@ function alertRows(count = 40, processingAttempts = 0, processingRetries = proce
 }
 
 describe("runtime runaway incident monitor", () => {
+  it("includes the start budget retry reason in the SQL email allowlist", async () => {
+    const result = alertRows(0, 100, 100);
+    result.rows[0]!.processingOutcome = "retry_later:start_budget_exhausted";
+    mocks.query.mockResolvedValue(result);
+    await runHostedRuntimeRunawayAlertMonitor({ now, env, sendAlert });
+    expect(mocks.query.mock.calls[0]?.[1]?.[7]).toContain("start_budget_exhausted");
+    expect(sendAlert).toHaveBeenCalledWith(expect.objectContaining({
+      text: expect.stringContaining("dominant processing outcome=retry_later:start_budget_exhausted"),
+    }));
+  });
+
   it("stays healthy when no subject reaches the aggregate threshold", async () => {
     expect(await runHostedRuntimeRunawayAlertMonitor({ now, env, sendAlert }))
       .toMatchObject({ configured: true, outcome: "healthy", health: { anomalous: false } });

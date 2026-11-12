@@ -125,6 +125,31 @@ Warm containers keep their existing media HTTP protocol unchanged.
 
 ## Claim, launch, completion, and recovery
 
+Fresh runtime attempts consume one per-member start-budget unit in the existing
+claim transaction, including attempts that fail before execution. The owner row's
+nullable `start_debt_until` holds the debt; existing claims, release, retirement
+and target-retired updates never charge or clear it. With interval three minutes,
+burst twelve and allowance `(burst - 1) * interval`, claim computes
+`tat = max(start_debt_until ?? now, now)` under the existing locks. It blocks when
+`tat > now + allowance`, returning `start_budget` and ISO `retryAt = tat - allowance`
+without writing. Otherwise its existing write stores `tat + interval`. `now` is
+the application time sampled after the member lock; host clock skew shifts the
+allowance by that skew. No extra read, transaction or external call is added.
+
+The Worker returns `retry_later` with reason `start_budget_exhausted` at that time,
+falling back to one interval for missing or unreadable times. All processing modes
+share the budget. A retired-target successor is another charged attempt. This
+limits minted attempts, not loop lifetime, all container boots or claim-call
+traffic: signals and other scheduler deadlines can re-ask before `retryAt`.
+New messages and other work needing a fresh attempt wait together; deletion,
+consent withdrawal, retirement, upload draining and completion do not claim.
+
+Deploy the compatible Worker first, then the additive nullable-column migration,
+then enforcing Web. The limit holds after older Web claim servers drain; older
+Web does not charge. Older Workers drop the unknown reason and retry after three
+seconds without minting attempts. Web rollback removes enforcement and leaves
+the column. No backfill, index, flag or Temporal workflow change is needed.
+
 Runtime admission keeps the member lock before one composed eligibility read
 (suspension, explicit consent withdrawal, and canonical direct or sponsored
 access; retention still skips only the access requirement). Game-only group

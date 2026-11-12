@@ -5,8 +5,10 @@ export const HOSTED_RUNTIME_OWNER_PATH = "/api/internal/hosted-runtime/owner";
 export const HOSTED_RUNTIME_OWNER_PHASES = ["idle", "starting", "active", "retiring"] as const;
 // Terminal wire field retained for deployed Worker readers. No backend selection.
 export const HOSTED_RUNTIME_CUTOVER_PHASES = ["postgres"] as const;
-/** `admission`: the member is inactive, suspended or withdrew health-data consent. */
-export const HOSTED_RUNTIME_OWNER_BLOCKED_REASONS = ["admission"] as const;
+/** `admission`: inactive, suspended or consent withdrawn; `start_budget`: fresh attempt budget exhausted. */
+export const HOSTED_RUNTIME_OWNER_BLOCKED_REASONS = ["admission", "start_budget"] as const;
+export const HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS = 3 * 60_000;
+export const HOSTED_RUNTIME_START_BUDGET_BURST = 12;
 
 export interface HostedRuntimeOwnerIdentity {
   attemptId: string;
@@ -54,6 +56,8 @@ export interface HostedRuntimeOwnerResponse {
   owner: HostedRuntimeOwnerSnapshot | null;
   /** Advisory claim detail; absent from older Web releases and other commands. */
   blockedReason?: (typeof HOSTED_RUNTIME_OWNER_BLOCKED_REASONS)[number];
+  /** ISO retry time for a blocked start_budget claim; unreadable values are omitted. */
+  retryAt?: string;
 }
 
 export function parseHostedRuntimeOwnerCommand(value: unknown): HostedRuntimeOwnerCommand {
@@ -123,6 +127,8 @@ export function parseHostedRuntimeOwnerResponse(value: unknown): HostedRuntimeOw
     status,
     owner,
     ...(blockedReason ? { blockedReason } : {}),
+    ...(blockedReason === "start_budget" && typeof r.retryAt === "string" && Number.isFinite(Date.parse(r.retryAt))
+      ? { retryAt: r.retryAt } : {}),
   };
 }
 

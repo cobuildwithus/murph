@@ -3,7 +3,7 @@ import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-exec
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import { parseHostedWorkspaceReadResponse } from "@murphai/hosted-execution/parsers";
 import { HOSTED_RUNTIME_WORKSPACE_PATH } from "@murphai/hosted-execution/routes";
-import type { HostedRuntimeOwnerCommand, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
+import { HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS, type HostedRuntimeOwnerCommand, type HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import type { WorkerEnvironmentSource } from "./worker-routes/shared.ts";
@@ -100,6 +100,11 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
     if (claim.blockedReason === "admission") {
       return retryProcessing(ctx, "admission_blocked", Date.now() + HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS);
     }
+    if (claim.blockedReason === "start_budget") {
+      const retryAt = Date.parse(claim.retryAt ?? "");
+      return retryProcessing(ctx, "start_budget_exhausted",
+        Number.isFinite(retryAt) ? retryAt : Date.now() + HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS);
+    }
     if (!owner || (claim.status !== "claimed" && claim.status !== "existing")) return retryProcessing(ctx, "claim_blocked");
     if (owner.userId !== ctx.input.userId) throw new TypeError("Runtime admission belongs to a different member.");
     if (owner.generation === previousGeneration) return retryProcessing(ctx, "claim_blocked");
@@ -170,7 +175,7 @@ function createProcessingContext(source: RuntimeProcessingSource, input: Runtime
 }
 
 function retryProcessing(ctx: { diagnostics: RuntimeProcessingDiagnostics }, reason:
-  | "missing_container_binding" | "admission_blocked"
+  | "missing_container_binding" | "admission_blocked" | "start_budget_exhausted"
   | "claim_blocked" | "retirement_pending" | "completion_unconfirmed" | "starting_fence_preserved"
   | "processing_mode_conflict" | "wake_unconfirmed" | "container_not_ready"
   | "command_budget_exhausted" | "container_rpc_timeout",

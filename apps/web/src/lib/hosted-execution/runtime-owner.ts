@@ -1,4 +1,5 @@
 import { HOSTED_RUNTIME_REPLICA_POST_STOP_DRAIN_MS } from "@murphai/hosted-execution/runtime-resources";
+import { HOSTED_RUNTIME_START_BUDGET_BURST, HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS } from "@murphai/hosted-execution/runtime-owner";
 import { randomUUID } from "node:crypto";
 
 import { Prisma, type HostedRuntimeOwner as StoredHostedRuntimeOwner, type PrismaClient } from "@prisma/client";
@@ -43,6 +44,7 @@ export async function claimHostedRuntime(input: {
 }): Promise<
   | { cutover: "postgres"; status: "claimed" | "existing"; owner: HostedRuntimeOwner }
   | { cutover: "postgres"; status: "blocked"; reason: "admission" }
+  | { cutover: "postgres"; status: "blocked"; reason: "start_budget"; retryAt: string }
 > {
   return input.prisma.$transaction(async (tx) => {
     const cutover = "postgres" as const;
@@ -68,6 +70,11 @@ export async function claimHostedRuntime(input: {
       }
       return { cutover, status: "existing", owner: existing };
     }
+    const allowance = (HOSTED_RUNTIME_START_BUDGET_BURST - 1) * HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS;
+    const debtUntil = Math.max(existing?.startDebtUntil?.getTime() ?? now.getTime(), now.getTime());
+    if (debtUntil > now.getTime() + allowance) {
+      return { cutover, status: "blocked", reason: "start_budget", retryAt: new Date(debtUntil - allowance).toISOString() };
+    }
     // Attribution belongs to the admitted invocation, not later game/room state.
     // Existing owners above retain their frozen beneficiary on every retry.
     const attemptId = `rt_${randomUUID()}`;
@@ -80,6 +87,7 @@ export async function claimHostedRuntime(input: {
         ? existing.allocationId
         : `standby-claim-${randomUUID()}`,
       startedAt: now,
+      startDebtUntil: new Date(debtUntil + HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS),
       completedAt: null,
       acceptedAt: null,
       lastErrorCode: null,
@@ -393,6 +401,7 @@ const runtimeOwnerColumns = Prisma.sql`
   owner.provider_egress_token_hash AS "providerEgressTokenHash",
   owner.platform_ai_usage_allowed AS "platformAiUsageAllowed", owner.started_at AS "startedAt",
   owner.allowance_beneficiary_member_id AS "allowanceBeneficiaryMemberId",
+  owner.start_debt_until AS "startDebtUntil",
   owner.accepted_at AS "acceptedAt", owner.completed_at AS "completedAt",
   owner.failure_count AS "failureCount", owner.last_error_code AS "lastErrorCode", owner.updated_at AS "updatedAt"
 `;
