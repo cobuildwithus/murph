@@ -661,6 +661,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               event: planningEvent,
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
+              pendingGroupRosterOversized:
+                planningResolution.pendingGroupRosterOversized ?? false,
               pendingGroupRosterUnavailable:
                 planningResolution.pendingGroupRosterUnavailable ?? false,
               prisma,
@@ -2489,6 +2491,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
+  pendingGroupRosterOversized: boolean;
   pendingGroupRosterUnavailable: boolean;
   prisma: PrismaClient;
   reusableDirectCryptoDomainRoots?: {
@@ -2547,6 +2550,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     const admission = await prepareHostedLinqThreadContainerAdmission({
       event: input.event,
       participantMemberIds: input.participantMemberIds,
+      pendingGroupRosterOversized: input.pendingGroupRosterOversized,
       pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
       prisma: input.prisma,
     });

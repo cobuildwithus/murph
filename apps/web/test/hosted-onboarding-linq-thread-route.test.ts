@@ -4671,11 +4671,8 @@ describe("Linq explicit external-thread routing", () => {
     });
 
     // The same sender in a normal-sized group gets the setup offer above. An
-    // oversized room without an active member gets nothing: no room notice,
-    // no private recovery (its response reason is outside the
-    // visible-secondary set), and no route. An active member can still start
-    // it; see "limits oversized-roster setup matching to the authenticated
-    // sender".
+    // oversized room gets nothing: no room notice, no private recovery (its
+    // response reason is outside the visible-secondary set), and no route.
     expect(plan.response).toMatchObject({
       ignored: true,
       ok: true,
@@ -8570,7 +8567,7 @@ describe("Linq group chat auto-provision", () => {
     });
   });
 
-  it("limits oversized-roster setup matching to the authenticated sender", async () => {
+  it("never starts a group larger than the setup cap, even for an active member", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     let transactionOpen = false;
     prisma.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => {
@@ -8624,38 +8621,21 @@ describe("Linq group chat auto-provision", () => {
       timestamp: null,
     });
 
+    // Big mixed iMessage/RCS rooms reappear under a new chat id on each roster
+    // change, so a bound assistant or setup notice would repeat in every copy.
     expect(response).toMatchObject({
-      ignored: false,
+      ignored: true,
       ok: true,
-      reason: "wake-appended-thread-route",
+      reason: "group-roster-oversized",
     });
     expect(
       preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
-    ).toHaveBeenCalledWith(expect.objectContaining({
-      participantMemberIds: ["member_owner_123"],
-      senderMemberId: "member_owner_123",
-    }));
+    ).not.toHaveBeenCalled();
+    // The oversized roster is detected before any per-handle member lookup.
     const rosterPhoneReads = prisma.hostedMemberIdentity.findMany.mock.calls
       .filter(([query]) => query.select?.phoneLookupKey === true);
-    expect(rosterPhoneReads).toHaveLength(1);
-    expect(rosterPhoneReads[0]?.[0]).toEqual({
-      select: {
-        memberId: true,
-        phoneLookupKey: true,
-      },
-      where: {
-        phoneLookupKey: { in: expect.any(Array) },
-      },
-    });
-    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedMemberEmailAuthorization.findMany).not.toHaveBeenCalled();
-    const participantReconciles = prisma.$executeRaw.mock.calls
-      .map(([query]) => query as Prisma.Sql)
-      .filter((query) => typeof query.sql === "string" && query.sql.includes(
-        "input_participant(participant_member_id, handle_lookup_key)",
-      ));
-    expect(participantReconciles).toHaveLength(1);
-    expect(prisma.hostedThreadContainerParticipant.updateMany.mock.calls.filter(([query]) => query.data?.removedAt instanceof Date)).toHaveLength(0);
+    expect(rosterPhoneReads).toHaveLength(0);
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("retries the first group message when roster authority is unavailable", async () => {

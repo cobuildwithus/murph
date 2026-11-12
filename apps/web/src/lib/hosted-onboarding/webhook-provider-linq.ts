@@ -382,6 +382,7 @@ export async function resolveHostedLinqDirectPreparationMemberId(input: {
 export async function prepareHostedLinqThreadContainerAdmission(input: {
   event: HostedLinqWebhookEvent;
   participantMemberIds: readonly string[];
+  pendingGroupRosterOversized?: boolean;
   pendingGroupRosterUnavailable?: boolean;
   prisma: PrismaClient;
 }): Promise<{
@@ -390,6 +391,7 @@ export async function prepareHostedLinqThreadContainerAdmission(input: {
 }> {
   if (
     input.event.event_type !== "message.received"
+    || input.pendingGroupRosterOversized === true
     || input.pendingGroupRosterUnavailable === true
   ) {
     return { shouldPrepareThreadContainer: false };
@@ -561,6 +563,7 @@ export async function prepareHostedLinqThreadContainerAdmission(input: {
 export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
   event: HostedLinqWebhookEvent;
   participantMemberIds: readonly string[];
+  pendingGroupRosterOversized?: boolean;
   pendingGroupRosterUnavailable?: boolean;
   prisma: PrismaClient;
 }): Promise<boolean> {
@@ -3878,6 +3881,14 @@ async function planHostedLinqGroupChatWebhook(input: {
     return ignored("own-message");
   }
 
+  // Murph never starts a group above the setup cap, whoever messages. Big
+  // mixed iMessage/RCS rooms reappear under a new chat id on each roster
+  // change, so a setup notice, private nudge or bound assistant repeats in
+  // every copy. The distinct response reason also skips private recovery.
+  if (input.rosterOversized) {
+    return ignored("group-roster-oversized", "none", "group-roster-oversized");
+  }
+
   if (messageEvent.data.message.parts.length === 0) {
     return ignored("empty-message-parts");
   }
@@ -3948,17 +3959,6 @@ async function planHostedLinqGroupChatWebhook(input: {
       })
     : null;
 
-  // Above the setup cap only an active member can start the group. Anyone
-  // else gets silence: big mixed iMessage/RCS rooms reappear under a new chat
-  // id on each roster change, so a per-chat setup notice repeats in every
-  // copy. The distinct response reason also skips private recovery.
-  if (input.rosterOversized && !activeSenderMemberId) {
-    return ignored(
-      "group-roster-oversized",
-      senderIdentityMatch,
-      "group-roster-oversized",
-    );
-  }
   if (senderSuspended) {
     return ignored("suspended-member", senderIdentityMatch);
   }
