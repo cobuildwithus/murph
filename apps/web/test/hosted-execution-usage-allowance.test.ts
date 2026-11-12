@@ -5096,6 +5096,18 @@ it.each([
   expect(priceHostedAiUsageForAllowance({ ...record, rawUsageJson: null }).costUsdMicros)
     .toBe(240_000n * numerator / denominator);
 });
+// Matches the two native Responses completions in assistant-codex-scripted-runtime:
+// native usage -> helpers.ts -> parseAssistantUsageRecord -> allowance pricing.
+it("prices the native reply lifetime record at the twelve-hour rate", () => {
+  const record = parseAssistantUsageRecord({
+    ...BASE_USAGE_RECORD, requestedModel: "gpt-6.1-sol", servedModel: "gpt-6.1-sol",
+    inputTokens: 200_000, cachedInputTokens: 100_000, cacheWriteTokens: 60_000,
+    outputTokens: 14, totalTokens: 200_014,
+    rawUsageJson: { cacheWriteInputTokens: 60_000, cacheWrite12hInputTokens: 40_000 },
+  });
+  expect(priceHostedAiUsageForAllowance(record).costUsdMicros).toBe(340_140n);
+});
+
 it("rejects a twelve-hour write subset exceeding aggregate writes", () => {
   expect(() => priceHostedAiUsageForAllowance({
     ...BASE_USAGE_RECORD, cacheWriteTokens: 10, rawUsageJson: { cacheWrite12hInputTokens: 11 },

@@ -1,3 +1,6 @@
+import { parseAssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
+import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
 import { readHostedDelegationHintOverrides } from './support/hosted-delegation-hints.js'
 import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import { execFile } from 'node:child_process'
@@ -8526,7 +8529,7 @@ text(JSON.stringify(result));
     ])
   })
 
-  it('leaves turns and compaction on provider-default cache retention', {
+  it.skipIf(!process.env.MURPH_TEST_CODEX_COMMAND)('keeps reply requests opted in and compaction on default retention', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario({ apiKeyEnv: 'OPENAI_API_KEY' })
@@ -8535,41 +8538,101 @@ text(JSON.stringify(result));
       env: { ...scenario.turnInput.env, MURPH_HOSTED_RUNTIME_PROCESS: '1' },
       groupConversation: true,
     }
-
+    const replyRequest = {
+      requestIncludes: ['"prompt_cache_options":{"ttl":"12h"}'],
+      usageInputTokens: 100_000,
+      usageCachedTokens: 50_000,
+      usageCacheWriteTokens: 30_000,
+      usageCacheWrite12hTokens: 20_000,
+    }
+    // A tool continuation and the mandatory closing call after silence use the
+    // same retention. Their usage must accumulate, including the lifetime subset.
     scenario.stub.queue({
-      requestExcludes: ['prompt_cache_options', 'turn_trigger'],
-      text: 'RETENTION_SCHEDULED_OK',
-      usageInputTokens: 50_000,
-    })
-    const scheduled = await executeCodexAppServerTurn({
-      ...turnInput,
-      prompt: 'Reply exactly RETENTION_SCHEDULED_OK.',
-    })
-    expect(scheduled.finalMessage).toBe('RETENTION_SCHEDULED_OK')
-
-    // Compaction uses the same native default as every other request.
-    scenario.stub.queue({
-      requestExcludes: ['prompt_cache_options', 'turn_trigger'],
-      text: 'RETENTION_COMPACT_SUMMARY',
-    })
-    const compacted = await compactWarmCodexThread({
-      groupMinThreadTokens: 50_000,
-      minThreadTokens: 90_000,
-      timeoutMs: 60_000,
-    })
-    expect(compacted.kind).toBe('compacted')
-
-    scenario.stub.queue({
-      requestExcludes: ['prompt_cache_options', 'turn_trigger'],
-      text: 'RETENTION_REPLY_OK',
-    })
+      ...replyRequest,
+      functionCall: { arguments: {}, name: 'finish_without_reply', namespace: 'murph' },
+    }, { ...replyRequest, text: '' })
     const reply = await executeCodexAppServerTurn({
       ...turnInput,
-      prompt: 'Reply exactly RETENTION_REPLY_OK.',
-      resumeSessionId: scheduled.sessionId,
+      allowFinishWithoutReply: true,
+      dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+      promptCacheRetention: '12h',
+      prompt: 'End without a text reply.',
     })
-    expect(reply.finalMessage).toBe('RETENTION_REPLY_OK')
-    expect(reply.threadId).toBe(scheduled.threadId)
+    expect(reply.finalMessage).toBe('')
+    const usage = extractCodexAssistantProviderUsage({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli', model: SCRIPTED_MODEL, modelProvider: 'openai',
+      }),
+      rawEvents: reply.jsonEvents,
+    })
+    expect(usage).toMatchObject({
+      inputTokens: 200_000, cachedInputTokens: 100_000, cacheWriteTokens: 60_000, outputTokens: 14,
+      rawUsageJson: { cacheWriteInputTokens: 60_000, cacheWrite12hInputTokens: 40_000 },
+    })
+    const record = parseAssistantUsageRecord({
+      ...usage, attemptCount: 1, credentialSource: 'platform', occurredAt: '2026-11-12T00:00:00.000Z',
+      provider: 'codex-cli', schema: 'murph.assistant-usage.v1', sessionId: 'session-cache',
+      turnId: 'turn-cache', usageId: 'turn-cache.attempt-1',
+    })
+    expect(record.rawUsageJson).toMatchObject({ cacheWrite12hInputTokens: 40_000 })
+    expect(record.cacheWriteTokens).toBe(60_000)
+
+    // A fresh turn used for reconsideration on the same native thread opts in again.
+    scenario.stub.queue({ ...replyRequest, text: 'RETENTION_RECONSIDERED_OK' })
+    const reconsidered = await executeCodexAppServerTurn({
+      ...turnInput, promptCacheRetention: '12h', resumeSessionId: reply.sessionId,
+      prompt: 'Reconsider and reply exactly RETENTION_RECONSIDERED_OK.',
+    })
+    expect(reconsidered.threadId).toBe(reply.threadId)
+    expect(reconsidered.finalMessage).toBe('RETENTION_RECONSIDERED_OK')
+    // Verify the turn delta excludes the previous reply's lifetime writes.
+    expect(extractCodexAssistantProviderUsage({
+      providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli', model: SCRIPTED_MODEL }),
+      rawEvents: reconsidered.jsonEvents,
+    })).toMatchObject({ cacheWriteTokens: 30_000, rawUsageJson: { cacheWrite12hInputTokens: 20_000 } })
+
+    // Reusing the process and thread must not opt an unmarked cron/notification in.
+    scenario.stub.queue({ requestExcludes: ['prompt_cache_options'], text: 'RETENTION_DEFAULT_OK', usageInputTokens: 50_000 })
+    const later = await executeCodexAppServerTurn({
+      ...turnInput, prompt: 'Reply exactly RETENTION_DEFAULT_OK.', resumeSessionId: reply.sessionId,
+    })
+    expect(later.threadId).toBe(reply.threadId)
+    expect(later.finalMessage).toBe('RETENTION_DEFAULT_OK')
+    expect(extractCodexAssistantProviderUsage({
+      providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli', model: SCRIPTED_MODEL }),
+      rawEvents: later.jsonEvents,
+    }).rawUsageJson).not.toHaveProperty('cacheWrite12hInputTokens')
+    scenario.stub.queue({ requestExcludes: ['prompt_cache_options'], text: 'RETENTION_COMPACT_SUMMARY' })
+    expect((await compactWarmCodexThread({
+      groupMinThreadTokens: 50_000, minThreadTokens: 90_000, timeoutMs: 60_000,
+    })).kind).toBe('compacted')
+
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(5)
+  })
+
+  it.skipIf(!process.env.MURPH_TEST_CODEX_COMMAND)('keeps in-turn compaction on default retention between twelve-hour requests', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({ apiKeyEnv: 'OPENAI_API_KEY' })
+    const configPath = path.join(scenario.turnInput.codexHome, 'config.toml')
+    await writeFile(configPath, `model_auto_compact_token_limit = 50000\n${await readFile(configPath, 'utf8')}`)
+    scenario.stub.queue({
+      requestIncludes: ['"prompt_cache_options":{"ttl":"12h"}'],
+      functionCall: { arguments: {}, name: 'finish_without_reply', namespace: 'murph' },
+      usageInputTokens: 50_001,
+    }, {
+      requestExcludes: ['prompt_cache_options'], text: 'Synthetic compacted context.',
+    }, {
+      requestIncludes: ['"prompt_cache_options":{"ttl":"12h"}'], text: '',
+    })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      env: { ...scenario.turnInput.env, MURPH_HOSTED_RUNTIME_PROCESS: '1' },
+      allowFinishWithoutReply: true,
+      dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+      promptCacheRetention: '12h', prompt: 'End without a text reply.',
+    })
+    expect(result.finalMessage).toBe('')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })
 

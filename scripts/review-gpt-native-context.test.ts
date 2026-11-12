@@ -7,7 +7,9 @@ import { expect, onTestFinished, test } from 'vitest'
 import { addNativeReviewContext, nativeContextOwners, readNativeContextPin } from './review-gpt-native-context.ts'
 
 const patchPath = 'patches/codex-websocket-ack.patch'
+const retentionPatchPath = 'patches/codex-prompt-cache-retention.patch'
 const target = 'codex-rs/codex-api/src/endpoint/changed.rs'
+const retentionTarget = 'codex-rs/codex-api/src/endpoint/retention.rs'
 const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim()
 async function write(root: string, file: string, text: string) {
   await mkdir(path.dirname(path.join(root, file)), { recursive: true })
@@ -24,6 +26,10 @@ function commit(root: string) {
   git(root, ['commit', '-qm', 'Synthetic native context fixture'])
   return git(root, ['rev-parse', 'HEAD'])
 }
+function patchFromIndex(source: string, upstream: string, binary = false) {
+  return git(source, ['diff', '--cached', ...(binary ? ['--binary'] : []), upstream,
+    '--', '.', `:(exclude)${retentionTarget}`]) + '\n'
+}
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'native-review-context-'))
   onTestFinished(() => rm(root, { recursive: true, force: true }))
@@ -34,21 +40,25 @@ async function fixture() {
   init(source)
   for (const owner of nativeContextOwners) await write(source, owner, '// synthetic adjacent owner\n')
   await write(source, target, '// preserved source outside patch\npub const VALUE: u8 = 1;\n')
+  await write(source, retentionTarget, '// synthetic retention owner\npub const TTL: u8 = 1;\n')
   const upstream = commit(source)
   git(source, ['tag', 'rust-v1.2.3'])
   await write(source, target, '// preserved source outside patch\npub const VALUE: u8 = 2;\n')
-  const patch = git(source, ['diff']) + '\n'
+  const patch = git(source, ['diff', '--', target]) + '\n'
+  await write(source, retentionTarget, '// synthetic retention owner\npub const TTL: u8 = 2;\n')
+  const retentionPatch = git(source, ['diff', '--', retentionTarget]) + '\n'
   init(repoRoot)
   await write(repoRoot, 'Dockerfile.cloudflare-hosted-runner-base', `ARG CODEX_UPSTREAM_REVISION=${upstream}\n`)
   await write(repoRoot, 'packages/assistant-engine/package.json', JSON.stringify({ devDependencies: { '@openai/codex': '1.2.3' } }))
   await write(repoRoot, patchPath, patch)
+  await write(repoRoot, retentionPatchPath, retentionPatch)
   const head = commit(repoRoot)
   const fetchSource = (repository: string, tag: string) => { git(repository, ['fetch', '-q', source, `refs/tags/${tag}`]) }
   return { root, repoRoot, source, contextDir, head, fetchSource, upstream, changedFiles: patchPath }
 }
 
-test('packages exact committed patched postimages and adjacent owners into the context ZIP', async () => {
-  const input = await fixture()
+test.each([patchPath, retentionPatchPath])('packages both committed native patches when %s changes', async (changedFiles) => {
+  const input = { ...await fixture(), changedFiles }
   await write(input.repoRoot, patchPath, 'unreviewed local replacement')
   await write(input.source, target, 'unreviewed upstream worktree change')
   await write(input.source, 'codex-rs/config/src/loader/mod.rs', 'unreviewed upstream owner change')
@@ -58,11 +68,15 @@ test('packages exact committed patched postimages and adjacent owners into the c
   execFileSync('zip', ['-qr', zip, 'review-gpt-pr-context'], { cwd: path.dirname(input.contextDir) })
   const read = (file: string) => execFileSync('unzip', ['-p', zip, `${base}/${file}`])
   expect(read(target).toString()).toBe('// preserved source outside patch\npub const VALUE: u8 = 2;\n')
+  expect(read(retentionTarget).toString()).toBe('// synthetic retention owner\npub const TTL: u8 = 2;\n')
   expect(read('codex-rs/config/src/loader/mod.rs').toString()).toBe('// synthetic adjacent owner\n')
   const manifest = JSON.parse(read('provenance.json').toString())
   expect(manifest.commit).toBe(input.upstream)
   expect(manifest.reviewedHead).toBe(input.head)
-  expect(manifest.files).toHaveLength(nativeContextOwners.length + 1)
+  expect(manifest.patches).toEqual([patchPath, retentionPatchPath].map(file => ({
+    path: file, sha256: createHash('sha256').update(git(input.repoRoot, ['show', `${input.head}:${file}`]) + '\n').digest('hex'),
+  })))
+  expect(manifest.files).toHaveLength(nativeContextOwners.length + 2)
   for (const file of manifest.files) expect(createHash('sha256').update(read(file.path)).digest('hex')).toBe(file.sha256)
   expect(await readdir(path.dirname(input.contextDir))).toEqual(['review-gpt-pr-context'])
 })
@@ -95,7 +109,7 @@ test('does not follow a patched source symlink', async () => {
   const input = await fixture()
   await symlink('../../../../outside.rs', path.join(input.source, 'codex-rs/codex-api/src/endpoint/link.rs'))
   git(input.source, ['add', '.'])
-  await write(input.repoRoot, patchPath, git(input.source, ['diff', '--cached', input.upstream]) + '\n')
+  await write(input.repoRoot, patchPath, patchFromIndex(input.source, input.upstream))
   input.head = commit(input.repoRoot)
   await expect(addNativeReviewContext(input)).rejects.toThrow('regular source')
 })
@@ -105,7 +119,7 @@ test('retains generated binary changes as explicit omissions, without source exe
   await write(input.source, 'codex-rs/generated.zst', '\0synthetic binary')
   git(input.source, ['add', '-f', 'codex-rs/generated.zst'])
   git(input.source, ['add', '.'])
-  await write(input.repoRoot, patchPath, git(input.source, ['diff', '--cached', '--binary', input.upstream]) + '\n\n')
+  await write(input.repoRoot, patchPath, patchFromIndex(input.source, input.upstream, true) + '\n')
   input.head = commit(input.repoRoot)
   expect(await readFile(path.join(input.repoRoot, patchPath), 'utf8')).toContain('codex-rs/generated.zst')
   expect(git(input.repoRoot, ['show', `${input.head}:${patchPath}`])).toContain('codex-rs/generated.zst')
@@ -118,7 +132,7 @@ test('preserves regular executable source files from the patched index', async (
   const input = await fixture()
   git(input.source, ['add', '.'])
   git(input.source, ['update-index', '--chmod=+x', target])
-  await write(input.repoRoot, patchPath, git(input.source, ['diff', '--cached', input.upstream]) + '\n')
+  await write(input.repoRoot, patchPath, patchFromIndex(input.source, input.upstream))
   input.head = commit(input.repoRoot)
   await expect(addNativeReviewContext(input)).resolves.toBe(true)
   expect(await readFile(path.join(input.contextDir, 'dependencies/codex-1.2.3', target), 'utf8')).toContain('VALUE: u8 = 2')

@@ -957,6 +957,10 @@ function buildCodexAttemptProviderInput(
         : attemptPlan.routePlan.resume,
       // Per-turn execution policy from the message input, not route identity.
       serviceTier,
+      promptCacheRetention: resolveConversationPromptCacheRetention({
+        profile: executionPlan.profile,
+        turnTrigger: executionPlan.input.turnTrigger,
+      }),
       turnTrigger: executionPlan.input.turnTrigger,
       sessionContext: attemptPlan.routePlan.sessionContext
         ? {
@@ -980,6 +984,21 @@ function buildCodexAttemptProviderInput(
       workingDirectory: attemptPlan.routePlan.workingDirectory,
     },
   }
+}
+
+// Isolated conversation profiles include notifications and recap shows.
+// New profiles and triggers keep provider defaults unless explicitly added here.
+function resolveConversationPromptCacheRetention(input: {
+  profile: Pick<AssistantCodexTurnExecutionPlan['profile'], 'promptProfile' | 'threadScope'>
+  turnTrigger?: AssistantCodexTurnExecutionPlan['input']['turnTrigger']
+}): '12h' | null {
+  return input.profile.promptProfile === 'conversation'
+    && input.profile.threadScope === 'session-thread'
+    && (input.turnTrigger == null
+      || input.turnTrigger === 'manual-ask'
+      || input.turnTrigger === 'automation-auto-reply')
+    ? '12h'
+    : null
 }
 
 function normalizeAssistantProviderAttemptMetadata(
