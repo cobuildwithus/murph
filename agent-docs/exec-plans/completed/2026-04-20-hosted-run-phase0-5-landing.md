@@ -34,7 +34,7 @@ Merge the run-centric hosted execution substrate patch into the current repo wit
 
 ## Notes
 
-- `git apply --check /Users/willhay/Downloads/hosted-run-phase0-5.patch` currently fails only on `packages/hosted-execution/src/parsers.ts` because the empty-import cleanup lane already changed that file.
+- `git apply --check ~/Downloads/hosted-run-phase0-5.patch` currently fails only on `packages/hosted-execution/src/parsers.ts` because the empty-import cleanup lane already changed that file.
 - The supplied patch otherwise matches the current tree shape and will be merged manually where necessary.
 Status: completed
 Updated: 2026-04-20

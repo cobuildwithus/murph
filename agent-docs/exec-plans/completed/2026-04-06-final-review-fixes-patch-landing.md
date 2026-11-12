@@ -44,8 +44,8 @@
 - `apps/web/src/lib/hosted-onboarding/stripe-billing-policy.ts`
 - `apps/web/src/lib/hosted-onboarding/billing-attempts.ts`
 - `apps/web/src/lib/hosted-onboarding/hosted-member-store.ts`
-- `/Users/willhay/Downloads/final-review-fixes.patch`
-- `/Users/willhay/Downloads/final-review-summary.md`
+- `~/Downloads/final-review-fixes.patch`
+- `~/Downloads/final-review-summary.md`
 Status: completed
 Updated: 2026-04-06
 Completed: 2026-04-06

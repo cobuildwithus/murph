@@ -45,7 +45,7 @@
 
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `agent-docs/exec-plans/active/2026-04-03-web-tools-security-audit-v2.md`
-- `/Users/willhay/Downloads/murph-web-tools-security-audit-v2.patch`
+- `~/Downloads/murph-web-tools-security-audit-v2.patch`
 - `packages/assistant-core/src/assistant/web-fetch.ts`
 - `packages/assistant-core/src/assistant-cli-tools.ts`
 - `packages/cli/test/inbox-model-harness.test.ts`

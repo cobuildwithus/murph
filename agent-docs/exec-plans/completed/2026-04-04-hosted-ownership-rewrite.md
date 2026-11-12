@@ -6,7 +6,7 @@ Land the supplied `hosted-ownership-rewrite-clean.patch` fully against the curre
 
 ## Scope
 
-- Supplied patch: `/Users/willhay/Downloads/hosted-ownership-rewrite-clean.patch`
+- Supplied patch: `~/Downloads/hosted-ownership-rewrite-clean.patch`
 - Hosted runtime/control/storage surfaces under `apps/cloudflare/**`
 - Hosted control-plane publishing and remaining dead-route removal under `apps/web/**`
 - Shared hosted execution/runtime contracts under `packages/{hosted-execution,runtime-state,assistant-runtime}/**`

@@ -48,7 +48,7 @@ Updated: 2026-04-05
 
 ## Decisions
 
-- The bug is shim-level, not `recipe upsert`-specific: `/Users/willhay/.local/bin/vault-cli` backgrounds the built CLI when stdin or stderr is non-TTY, and that background launch currently drops piped stdin.
+- The bug is shim-level, not `recipe upsert`-specific: `~/.local/bin/vault-cli` backgrounds the built CLI when stdin or stderr is non-TTY, and that background launch currently drops piped stdin.
 - When stdin is closed entirely, the shim should still launch the child under supervision with `/dev/null` rather than aborting during fd duplication.
 
 ## Verification

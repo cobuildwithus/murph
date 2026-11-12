@@ -71,7 +71,7 @@ Implemented in this clone. Hosted structured logs now redact operator messages, 
 
 ## Verification Notes
 
-- `git apply --check /Users/willhay/Downloads/0003-hosted-run-trace-log-hardening.patch` failed in `packages/hosted-execution/src/observability.ts`, so the code patch was merged manually against live file state. `0004` applied cleanly at the behavior level and its documentation change was merged.
+- `git apply --check ~/Downloads/0003-hosted-run-trace-log-hardening.patch` failed in `packages/hosted-execution/src/observability.ts`, so the code patch was merged manually against live file state. `0004` applied cleanly at the behavior level and its documentation change was merged.
 - Mandatory `simplify` audit pass ran via spawned subagent and produced one actionable finding: malformed pending-dispatch sanitization still depended on summary wording and stale meta writes. That finding was fixed by classifying malformed rows with explicit stable codes and rereading `runner_meta` before returning a no-pending claim result.
 - Mandatory `task-finish-review` audit pass ran via spawned subagent and produced one actionable finding: the hosted configuration-message allowlist was too broad and could preserve inline secret text. That finding was fixed by restricting the allowlist to closed-form safe patterns and adding a regression for secret-bearing configuration errors.
 - `pnpm --dir packages/hosted-execution typecheck` passed.

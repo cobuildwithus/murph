@@ -41,6 +41,6 @@ Verification:
 - `pnpm --dir packages/assistant-engine typecheck`
 - `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-cli-process-env.test.ts test/execution-adapters.test.ts --no-coverage`
 - `pnpm --dir apps/cloudflare typecheck`
-- `pnpm --dir /Users/willhay/startup1/murph exec vitest run --config apps/cloudflare/vitest.node.workspace.ts apps/cloudflare/test/deploy-preflight.test.ts apps/cloudflare/test/deploy-worker-version.test.ts apps/cloudflare/test/smoke-hosted-deploy.test.ts --no-coverage`
+- `pnpm --dir ~/startup1/murph exec vitest run --config apps/cloudflare/vitest.node.workspace.ts apps/cloudflare/test/deploy-preflight.test.ts apps/cloudflare/test/deploy-worker-version.test.ts apps/cloudflare/test/smoke-hosted-deploy.test.ts --no-coverage`
 - direct proof: `pnpm --dir packages/assistant-engine exec tsx <<'EOF' ... EOF` confirmed a Windows-style `Path` input is normalized into `PATH` and the mixed-case key is removed.
 Completed: 2026-04-12
