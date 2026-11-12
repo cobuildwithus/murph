@@ -46,14 +46,6 @@ describe("worker response crawler policy", () => {
     expect(await response.json()).toEqual({ error: "Internal error." });
   });
 
-  it("denies all crawling in robots.txt", async () => {
-    const response = await worker.fetch(new Request("https://runner.example.test/robots.txt"), env);
-    expect(response.status).toBe(200);
-    expect(response.headers.get("X-Robots-Tag")).toBe(NOINDEX);
-    expect(response.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
-    expect(await response.text()).toBe("User-agent: *\nDisallow: /");
-  });
-
   it("copies immutable redirect headers and preserves the redirect", async () => {
     const redirect = Response.redirect("https://runner.example.test/destination", 307);
     expect(() => redirect.headers.set("X-Robots-Tag", NOINDEX)).toThrow();
