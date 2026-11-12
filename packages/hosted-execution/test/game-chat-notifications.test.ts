@@ -354,6 +354,8 @@ it("activates show policy only for an explicitly selected pair", () => {
   const show = RECAP_SHOW_CRAFT;
   expect(show).toContain("scene.murph");
   expect(show).toContain("Each person must be instantly recognizable from their reference photos: keep their own face and their own hair. Their clothes, hats and every prop come from this scene.");
+  expect(show).toContain("open every photo of each cast player with view_image");
+  expect(show).toContain("A profile picture is just another candidate.");
   expect(show).toContain("never describe a face, body, hair, age or skin");
   expect(show).toContain("whole image visible");
   expect(show).not.toContain("give the best single shot of the week a full-bleed page");
