@@ -30,6 +30,20 @@ it("serves a portrait cover as a no-store 1200x630 JPEG with matching social met
   expect(metadata.twitter?.images).toEqual([image]);
 });
 
+it("crops a portrait cover's preview from its upper part, where the faces are, never the feet", async () => {
+  // A plain top with a busy bottom: the attention crop alone picks the bottom.
+  const width = 1024, height = 1536, busyFrom = Math.round(height * 0.7);
+  const pixels = Buffer.alloc(width * height * 3);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const i = (y * width + x) * 3, busy = y >= busyFrom && (x + y) % 2 === 0;
+    pixels[i] = busy ? 255 : 98; pixels[i + 1] = busy ? 20 : 130; pixels[i + 2] = busy ? 200 : 108;
+  }
+  mocks.readCover.mockResolvedValue(await sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer());
+  const bytes = Buffer.from(await (await GET(request, context)).arrayBuffer());
+  const { channels } = await sharp(bytes).stats();
+  expect(Math.max(...channels.map((channel) => channel.stdev))).toBeLessThan(8);
+});
+
 it("keeps missing or revoked cover capabilities unavailable and uncached", async () => {
   mocks.readCover.mockResolvedValue(null);
   const response = await GET(request, context);
