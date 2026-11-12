@@ -961,6 +961,17 @@ focused, diff-aware, and package-coverage lanes need no package-specific heap
 or invocation branch. Release checks leave job-wide `NODE_OPTIONS` unset so an
 unrelated memory regression remains visible at its owner.
 
+Root `pnpm typecheck` and `pnpm --dir apps/web typecheck` regenerate the
+Web-owned Prisma client. Web tests consume that same generated client, so
+these commands are not independent within one checkout: finish typechecking
+before starting the tests, for example
+`pnpm typecheck && pnpm --dir apps/web test`. The same ordering applies to an
+explicit `pnpm --dir apps/web prisma:generate` and any test importing that
+client. Do not regenerate it while those tests are collecting or running;
+regeneration can temporarily remove the module they import. The composed
+`pnpm --dir apps/web verify` lane already prepares Prisma before starting its
+checks. Keep concurrency for checks whose generated inputs are independent.
+
 Vercel also bounds checker concurrency in the initial Web typecheck.
 `apps/web/README.md` § Production build memory guard owns that boundary.
 
