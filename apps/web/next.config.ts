@@ -33,6 +33,37 @@ interface HostedWebWebpackContext {
 }
 
 const HOSTED_WEB_HEADER_SOURCE = "/(.*)";
+
+/**
+ * Search engines may index only the public pages the sitemap lists, the home
+ * page, and the files that describe the site. Every other path, including every
+ * private link Murph sends (recaps, invites, approvals, shares) and every route
+ * added later, answers with `X-Robots-Tag: noindex` without having to opt in.
+ */
+export const HOSTED_WEB_INDEXABLE_PAGES = [
+  "about",
+  "changelog",
+  "clubs",
+  "compare",
+  "consumer-health-data-privacy-policy",
+  "contact",
+  "legal",
+  "measurement-methods",
+  "refer",
+  "security",
+  "subprocessors",
+] as const;
+/** Public pages whose child pages are public too (no tokens below them). */
+export const HOSTED_WEB_INDEXABLE_SECTIONS = ["compare", "legal", "measurement-methods"] as const;
+const HOSTED_WEB_INDEXABLE_FILES = ["llms\\.txt", "robots\\.txt", "sitemap\\.xml", "icon\\.svg", "opengraph-image"];
+export const HOSTED_WEB_NOINDEX_HEADER_SOURCE = `/:path((?!(?:${[
+  ...HOSTED_WEB_INDEXABLE_PAGES,
+  ...HOSTED_WEB_INDEXABLE_FILES,
+].join("|")})$|(?:${HOSTED_WEB_INDEXABLE_SECTIONS.join("|")})/|_next/).+)`;
+export const HOSTED_WEB_NOINDEX_HEADER = {
+  key: "X-Robots-Tag",
+  value: "noindex, nofollow, noarchive, nosnippet, noimageindex",
+};
 const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
   "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
   "HOSTED_WEB_BASE_URL",
@@ -335,6 +366,7 @@ export function buildHostedWebNextConfig(
         source: HOSTED_WEB_HEADER_SOURCE,
         headers: buildHostedWebSecurityHeaders(environment),
       },
+      { source: HOSTED_WEB_NOINDEX_HEADER_SOURCE, headers: [HOSTED_WEB_NOINDEX_HEADER] },
     ],
   };
 }

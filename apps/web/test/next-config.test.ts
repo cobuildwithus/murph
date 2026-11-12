@@ -28,6 +28,7 @@ import {
   buildHostedWebSecurityHeaders,
   configureHostedWebWebpack,
   configureHostedWebWorkflowLocalDataDir,
+  HOSTED_WEB_NOINDEX_HEADER,
 
 
 } from "../next.config";
@@ -753,7 +754,7 @@ test("next.config serves global security headers", async () => {
   const routes = await productionNextConfig.headers?.();
 
   assert.ok(routes);
-  assert.equal(routes.length, 1);
+  assert.equal(routes.length, 2, "global security headers, then the noindex default");
   assert.equal(routes[0]?.source, "/(.*)");
   assert.deepEqual(
     routes[0]?.headers.map((header) => header.key),
@@ -824,3 +825,25 @@ function assertScriptDirectiveHasNoBroadSource(
     assert.ok(!sources.includes(broadSource), `${directive} must not include ${broadSource}.`);
   }
 }
+
+test("only public pages may be indexed; every private link answers noindex", async () => {
+  const { buildCustomRoute } = require("next/dist/lib/build-custom-route") as {
+    buildCustomRoute: (type: "header", route: { source: string; headers: unknown[] }) => { regex: string };
+  };
+  const rules = await productionNextConfig.headers!();
+  const noindex = rules.filter((rule) => rule.headers.some((header) => header.key === HOSTED_WEB_NOINDEX_HEADER.key));
+  assert.equal(noindex.length, 1);
+  assert.match(HOSTED_WEB_NOINDEX_HEADER.value, /\bnoindex\b.*\bnofollow\b/u);
+  const matcher = new RegExp(buildCustomRoute("header", { source: noindex[0]!.source, headers: [] }).regex);
+  const hidden = ["/recap/game/cover/token", "/g/token", "/approve/approval", "/join/code", "/r/code",
+    "/groups/join/code", "/family/accept/code", "/calendar/payload", "/imessage/card/v1/payload",
+    "/api/game/v1/media/key", "/changelog/card/v1/items", "/about/anything", "/aboutx", "/settings", "/hero.jpg"];
+  for (const path of hidden) assert.ok(matcher.test(path), `${path} must answer noindex`);
+  const { default: sitemap } = await import("../app/sitemap");
+  const listed = sitemap().map((entry) => new URL(entry.url).pathname);
+  assert.ok(listed.length > 10);
+  for (const path of [...listed, "/", "/robots.txt", "/sitemap.xml", "/llms.txt", "/_next/static/chunk.js"]) {
+    assert.ok(!matcher.test(path), `${path} is public and must stay indexable`);
+  }
+});
+
