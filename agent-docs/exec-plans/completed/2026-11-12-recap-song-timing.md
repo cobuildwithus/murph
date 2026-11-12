@@ -1,6 +1,6 @@
 # Recap lyrics, short premises and centered cover crops
 
-Status: active
+Status: completed
 Created: 2026-11-12
 Updated: 2026-11-12
 
@@ -211,3 +211,32 @@ will be verified with the installed SDK and provider-shaped synthetic responses.
   and provider-fetch adapter (22) hotspots retain their prior debt; new ordered
   alignment peaks at 20 and its work is schema-bounded.
 - Final external review and exact-head CI remain pending PR admission.
+
+## Final review and handoff
+
+- PR: https://github.com/cobuildwithus/murph/pull/4888 (Ready; owner merges).
+- Final GPT-6 Pro round 1 passed on
+  27e59624268c78c10da2a945decfd5724ceb6a98, with exact response/attachment
+  capture and REVIEW_COMPLETE. No qualifying findings; none rejected.
+  The first response was recovered but lacked model attestation and was not
+  accepted. A same-head retry supplied the valid review. Existing Frog #4870
+  covers that tooling gap; no duplicate entry was created.
+- CI exposed two stale recovery assertions expecting the removed story echo.
+  They now assert its absence, the canonical chat line, and preserved stored
+  recap. The three focused PostgreSQL recovery cases and Web typecheck pass.
+- CI also caught the new deferred song parameter exceeding its old byte ceiling.
+  Actual declaration size: 1632 -> 1770 bytes (+138). Its ceiling alone is
+  updated to 1850 using the existing 3%/50-byte rule; all 12 budget tests pass.
+  No prompt text changes were made.
+- The post-review commit contains only test expectations, the measured test
+  budget, changelog attribution and plan/index closeout. Runtime code remains
+  exactly the reviewed version; the test-only exemption needs no further round.
+- Final-head CI and current-main mergeability are checked before the final
+  handoff. No merge, deployment, production regeneration or iOS edit is authorized.
+- One owner placeholder: generate-song.ts lyrics description, TODO(prompt).
+  It needs guidance to supply the final song's exact lyric lines, output=file,
+  twenty seconds and vocals. Timings travel automatically with the selected
+  generated file; the model does not copy or edit timing metadata.
+- Safe deploy order: compatible Web, then Cloudflare Worker egress, then the
+  updated runner bundle/containers. Keep compatible Web after new envelopes.
+Completed: 2026-11-12
