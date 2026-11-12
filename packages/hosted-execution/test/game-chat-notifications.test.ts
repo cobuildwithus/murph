@@ -359,6 +359,10 @@ it("activates show policy only for an explicitly selected pair", () => {
   expect(show).toContain("their photos from other games the two of them played");
   expect(show).toContain("never describe a face, body, hair, age or skin");
   expect(show).toContain("whole image visible");
+  expect(show).toContain("Never reuse a treatment the lore lists for this pair");
+  expect(show).toContain("Leave the prize off it");
+  expect(show).toContain("Leo asked Ava to prove her abs on Thursday");
+  expect(show).not.toMatch(/kind:"stat"|- stat:|rep tape that|prize kicker/u);
   expect(show).not.toContain("give the best single shot of the week a full-bleed page");
   expect(show).not.toContain('or filling the page ("fullBleed")');
   expect(buildGameRecapInstructions([], undefined, true, true)).toBe(buildGameRecapInstructions([], undefined, true));
