@@ -51,7 +51,7 @@ preflight during dependency mirror outages; real browser checks remain required.
 
 The [synthetic game self-play QA map](references/game-selfplay-qa.md) records reachable game states, local native gameplay, real-model chat edits and explicit coverage gaps, with a [machine-readable native scenario inventory](references/game-selfplay-scenarios.json).
 
-Sparse calendar diagnostic refinement: [execution plan](exec-plans/completed/2026-11-10-sparse-row-incomplete-diagnostic.md). Day provenance and bounded relations: [implementation and verification](exec-plans/completed/2026-11-11-calendar-day-diagnostics.md).
+Sparse calendar diagnostic refinement: [execution plan](exec-plans/completed/2026-11-10-sparse-row-incomplete-diagnostic.md). Record-expansion diagnostics use the existing finite failure metadata contract in [Reliability](RELIABILITY.md); [implementation proof](exec-plans/completed/2026-11-11-calendar-record-shape-diagnostic.md). Day provenance and bounded relations: [implementation and verification](exec-plans/completed/2026-11-11-calendar-day-diagnostics.md).
 
 [Calendar day coverage](exec-plans/active/2026-11-11-calendar-day-coverage.md): complete bounded source-local sparse refresh collection and recovery proof.
 

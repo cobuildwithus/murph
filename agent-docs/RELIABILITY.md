@@ -1967,7 +1967,11 @@ Current product admission, delivery and native runtime safety rules remain.
   to the requested day. These are finite categories derived by the existing
   day resolver, never dates, timezone names, offsets, or health values. Both
   service and hosted boundaries allowlist them on the existing failure event;
-  event frequency and retention stay unchanged. Missing old fields mean unknown.
+  event frequency and retention stay unchanged. `normalizationRecordExpanded` adds
+  only a boolean (`false` for direct, `true` for expanded), derived from the importer entry iterator, to
+  distinguish a direct rejected row from a nested-envelope expansion after
+  source-day selection. It does not expose the envelope key or contents.
+  Missing old fields mean unknown.
   Compare these categories over 24–72 hours of natural retries after convergence
   to distinguish window errors from calendar interpretation. Retain them only
   if they resolve that diagnostic question; otherwise remove them in a later

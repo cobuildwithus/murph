@@ -4466,6 +4466,10 @@ describe("runHostedDeviceSyncPass", () => {
       extraDetails: { ...requestDetails, ...timeoutDetails },
       expectedExtra: requestDetails,
     },
+    ...[false, true].map((shape) => ({
+      label: `calendar record shape ${shape}`, code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      extraDetails: { normalizationRecordExpanded: shape }, expectedExtra: { normalizationRecordExpanded: shape },
+    })),
     ...["explicit_calendar", "timestamp_calendar", "source_offset", "vault_timezone", "utc", "missing"].map((basis) => ({
       label: `calendar day basis ${basis}`, code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
       extraDetails: { normalizationDayBasis: basis }, expectedExtra: { normalizationDayBasis: basis },
@@ -4477,11 +4481,11 @@ describe("runHostedDeviceSyncPass", () => {
     })),
     {
       label: "private calendar details are omitted", code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
-      extraDetails: { normalizationDayBasis: "synthetic-private-timezone", normalizationUtcDayRelation: "2026-04-21", normalizationResolvedDayRelation: -14400 },
+      extraDetails: { normalizationRecordExpanded: "synthetic-private-shape", normalizationDayBasis: "synthetic-private-timezone", normalizationUtcDayRelation: "2026-04-21", normalizationResolvedDayRelation: -14400 },
     },
     {
       label: "calendar details on another failure are omitted", code: "SYNC_JOB_FAILED",
-      extraDetails: { normalizationDayBasis: "source_offset", normalizationUtcDayRelation: "equal", normalizationResolvedDayRelation: "before" },
+      extraDetails: { normalizationRecordExpanded: true, normalizationDayBasis: "source_offset", normalizationUtcDayRelation: "equal", normalizationResolvedDayRelation: "before" },
     },
     {
       label: "oxygen classification", code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
