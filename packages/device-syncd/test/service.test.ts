@@ -11604,6 +11604,7 @@ test.each([
             valueKind: "numeric_string",
             valueRange,
             unitKind,
+            recordExpanded: true,
             dayBasis: "source_offset",
             utcDayRelation: "equal",
             resolvedDayRelation: "before",
@@ -11634,6 +11635,7 @@ test.each([
       normalizationValueKind: "numeric_string",
       normalizationValueRange: valueRange,
       normalizationUnitKind: unitKind,
+      normalizationRecordExpanded: true,
       normalizationDayBasis: "source_offset",
       normalizationUtcDayRelation: "equal",
       normalizationResolvedDayRelation: "before",
@@ -13889,6 +13891,9 @@ test.each([false, true])("retained snapshot gets an uninterrupted retry after 30
 
 
 test("Junction calendar diagnostics allow only finite day categories", () => {
+  for (const shape of [false, true]) {
+    assert.deepEqual(readSafeJunctionNormalizationDiagnostics({ normalizationRecordExpanded: shape }), { normalizationRecordExpanded: shape });
+  }
   for (const basis of ["explicit_calendar", "timestamp_calendar", "source_offset", "vault_timezone", "utc", "missing"]) {
     assert.deepEqual(readSafeJunctionNormalizationDiagnostics({ normalizationDayBasis: basis }), { normalizationDayBasis: basis });
   }
@@ -13898,7 +13903,7 @@ test("Junction calendar diagnostics allow only finite day categories", () => {
   }
   for (const value of ["2026-04-21", "synthetic-private-timezone", -14400, null, {}, []]) {
     assert.deepEqual(readSafeJunctionNormalizationDiagnostics({
-      normalizationDayBasis: value, normalizationUtcDayRelation: value, normalizationResolvedDayRelation: value,
+      normalizationRecordExpanded: value, normalizationDayBasis: value, normalizationUtcDayRelation: value, normalizationResolvedDayRelation: value,
     }), {});
   }
   assert.deepEqual(readSafeJunctionNormalizationDiagnostics({}), {});

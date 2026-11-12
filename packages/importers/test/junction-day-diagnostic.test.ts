@@ -49,3 +49,25 @@ test("calendar day diagnostics distinguish provenance without exposing dates", (
   assert.equal(typeof invalid === "object" && invalid.utcDayRelation, undefined);
   assert.equal(typeof explicitDay === "object" && explicitDay.reason, "sparse_interval.day_mismatch");
 });
+
+
+test("calendar rejection identifies direct versus expanded records without payload data", () => {
+  const row = { sourceProviderSlug: "garmin", sourceType: "watch", start: "2026-04-01T08:00:00Z", end: "2026-04-01T08:01:00Z", timezone_offset: 3600, value: 100 };
+  for (const key of [null, "data", "results", "items", "records"]) {
+    const records = key ? [{ sourceProviderSlug: "garmin", sourceType: "watch", [key]: [row] }] : [row];
+    assert.throws(() => normalizeJunctionSnapshot({
+      timeseriesWindowKind: "calendar_day",
+      strictSparseCalendarRepair: { dayKey: "2026-04-02", resource: "water", sourceProviderSlug: "garmin", sourceType: "watch" },
+      timeseries: { water: records },
+    }), (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.equal(error.diagnostic.reason, "sparse_interval.day_mismatch");
+      assert.equal(error.diagnostic.recordExpanded, key !== null);
+      assert.equal(error.diagnostic.dayBasis, "source_offset");
+      assert.equal(error.diagnostic.utcDayRelation, "before");
+      assert.equal(error.diagnostic.resolvedDayRelation, "before");
+      assert.equal(JSON.stringify(error.diagnostic).includes("2026-"), false);
+      return true;
+    });
+  }
+});

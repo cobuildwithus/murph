@@ -2476,6 +2476,7 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
         {
           ...valueDiagnostic,
           rowOrdinal: index + 1,
+          recordExpanded: Boolean(originFallback),
           sourceProvider: normalizeKnownJunctionSourceProviderSlug(
             resourceContext?.sourceProviderSlug,
           ),
@@ -2586,6 +2587,7 @@ export type JunctionNormalizationTimestampKind =
 export interface JunctionCalendarRefreshNormalizationDiagnostic {
   reason: JunctionCalendarRefreshNormalizationFailureReason;
   rowOrdinal?: number;
+  recordExpanded?: boolean;
   sourceProvider?: string;
   timestampKind?: JunctionNormalizationTimestampKind;
   timestampSemantics?: TimestampSemantics;
