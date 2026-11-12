@@ -771,8 +771,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       { memberId: b, title: "Object to burpees", line: "PlayerB files a motion for recess." },
     ].slice(0, cardCount);
     const { recapShowWriterSchema } = await import('@murphai/contracts/recap-show');
-    const recap = recapShowWriterSchema.parse({ ...(cards.length ? { superlatives: cards } : {}), treatment: "A silent-film courtroom melodrama about two athletes and a mat that takes the witness stand", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
-      scene: { cast: ["PlayerA", "PlayerB"], prompt: "A synthetic paper courtroom stage with a rolled mat on a witness stand, with warm lighting and simple wooden benches." } }] }], chatLine: "The mat entered evidence." });
+    const recap = recapShowWriterSchema.parse({ ...(cards.length ? { superlatives: cards } : {}), treatment: "A silent-film courtroom melodrama", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
+      scene: { cast: ["PlayerA", "PlayerB"], prompt: "A synthetic paper courtroom stage with a rolled mat on a witness stand, with warm lighting and simple wooden benches.", faceY: 0.3 } }] }], chatLine: "The mat entered evidence.",
+      song: { title: "The train", style: "Folk", lyrics: ["Leo goes", "Ava stays"] } });
     const scope = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [a, b] };
     vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
     vi.stubEnv("MURPH_GAME_RECAP_MEDIA_DIR", path.join(mediaDir, "recap"));
@@ -781,6 +782,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await db.hostedRuntimeOwner.upsert({ where: { userId: room }, create: { userId: room }, update: {} });
     const fence = vi.spyOn(ownerModule, "requireHostedRuntimeCallbackTx").mockImplementation(async tx => tx.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId: room } }));
     const active = vi.spyOn(accessModule, "requireHostedRuntimeActiveAccessForUpdateTx").mockResolvedValue();
+    const audio = await import("@murphai/operator-config/generated-audio");
+    // This case proves encrypted transport/persistence; decoder validity has its own real-byte suite.
+    const inspectAudio = vi.spyOn(audio, "inspectGeneratedMp3Audio").mockResolvedValue({ durationMs: 20_000 });
     try {
       const { uploadRecapMedia } = await import("@/src/lib/game/recap-media");
       const sharp = (await import("sharp")).default;
@@ -816,7 +820,13 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(asset.references).toContainEqual({ kind: "entry", memberId: pastPhoto.memberId, entryId: pastPhoto.entryId, key: pastPhoto.key });
       await expect(uploadRecapMedia({ memberId: room, gameId, eventId, material, beforeMutationTx: async () => {},
         file: { ...file, bytes: Buffer.from("not media").toString("base64") } })).rejects.toThrow();
-      const assets = [asset];
+      const { readFile } = await import("node:fs/promises");
+      const songBytes = await readFile(new URL("../../../fixtures/generated-audio/music.mp3", import.meta.url));
+      const wordsTimestamps = [{ word: "Leo", startMs: 100, endMs: 300 }, { word: "goes", startMs: 400, endMs: 600 },
+        { word: "Ava", startMs: 900, endMs: 1100 }, { word: "stays", startMs: 1200, endMs: 1400 }];
+      const songAsset = await uploadRecapMedia({ memberId: room, gameId, eventId, material, beforeMutationTx: async () => {},
+        file: { kind: "upload", slot: "song", mediaType: "audio/mpeg", referenceIds: [], bytes: songBytes.toString("base64"), wordsTimestamps } });
+      const assets = [asset, songAsset];
       expect(await sealGameRecap({ ...scope, recap, assets })).toEqual(recap);
       expect(await sealGameRecap({ ...scope, recap: { ...recap, chatLine: "Changed after acceptance" }, assets })).toEqual(recap);
       expect(await sealGameRecap({ ...scope, recap: null })).toEqual(recap);
@@ -824,15 +834,18 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       const accepted = (await readRecapEnvelope(gameId))!;
       expect(accepted.envelope.story.superlatives ?? []).toEqual(cards);
       expect(await db.gameEvent.count({ where: { commandKey: `${eventId}:selection` } })).toBe(0);
-      expect(accepted.envelope.assets).toHaveLength(1);
+      expect(accepted.envelope.assets).toHaveLength(2);
       expect(accepted.envelope.assets[0]).toMatchObject({ hash: asset.hash });
+      expect(accepted.envelope.assets[1]).toMatchObject({ hash: songAsset.hash, wordsTimestamps });
+      const song = (await readGame(gameId, a))?.recap?.show?.pages.find(page => page.kind === "song")?.song;
+      expect(song?.lines?.map(line => line.words.map(word => word.text).join(" "))).toEqual(recap.song!.lyrics);
       expect(await db.hostedMailboxItem.count({ where: { userId: room } })).toBe(0);
       expect((await readGame(gameId, a))?.recap?.show?.pages[0]?.media?.status).toBe("ready");
       const assetInput = { gameId, generationId: accepted.envelope.generationId, slot: "scene-0", memberId: a };
       expect((await readAuthorizedRecapAsset(assetInput))?.bytes.length).toBe(bytes.length);
       expect(await readAuthorizedRecapAsset({ ...assetInput, memberId: room })).toBeNull();
       const { readRecapCoverPreview } = await import("@/src/lib/game/recap-preview");
-      expect((await readRecapCoverPreview(gameId, accepted.envelope.preview.token))?.length).toBe(bytes.length);
+      expect(await readRecapCoverPreview(gameId, accepted.envelope.preview.token)).toEqual({ faceY: 0.3, bytes: new Uint8Array(bytes) });
       for (const photoKey of ["synthetic-contact-replacement", null]) {
         await db.gameContactLabel.update({ where: contactWhere, data: { photoKey } });
         expect(await readAuthorizedRecapAsset(assetInput)).toBeNull();
@@ -850,7 +863,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(await readAuthorizedRecapAsset(assetInput)).toBeNull();
       expect(await readRecapCoverPreview(gameId, accepted.envelope.preview.token)).toBeNull();
     } finally {
-      fence.mockRestore(); active.mockRestore(); vi.unstubAllEnvs();
+      fence.mockRestore(); active.mockRestore(); inspectAudio.mockRestore(); vi.unstubAllEnvs();
       await db.hostedRuntimeOwner.deleteMany({ where: { userId: room } });
       await db.gameRecapAsset.deleteMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
     }

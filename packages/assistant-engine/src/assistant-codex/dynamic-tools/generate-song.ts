@@ -30,12 +30,17 @@ export const MURPH_GENERATE_SONG_TOOL = {
     'Describe a real artist, song, show, or franchise as generic musical traits, and never pass the name or copied lyrics.',
     'The result is a text receipt and the audio is already attached, so an error while displaying the receipt does not undo the attachment and is no reason to generate again.',
     'When the user asked only for the song, leave the final text empty unless the owning flow needs text with it.',
-    'In an authorized recap, output=file writes the song to an MP3 file and returns its path; nothing is attached. Use durationSeconds=20.',
+    'In an authorized recap, output=file writes the song to an MP3 file and returns its path; nothing is attached. Use durationSeconds=20, put the exact lines to sing in lyrics and only the sound in prompt.',
   ].join(' '),
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
+      lyrics: {
+        type: 'array', minItems: 1, maxItems: 20,
+        items: { type: 'string', minLength: 1, maxLength: 200 },
+        description: 'The exact lines to sing, in order, one per item, with no labels like [Chorus]. Only with output=file and vocals.',
+      },
       output: { type: 'string', enum: ['chat', 'file'] },
       prompt: {
         type: 'string',
@@ -63,8 +68,11 @@ const generateSongArgumentsSchema = z
     durationSeconds: z.number().int().min(3).max(300).default(30),
     instrumental: z.boolean().default(false),
     prompt: z.string().trim().min(1).max(4100),
+    lyrics: z.array(z.string().trim().min(1).max(200).refine(line => !/[\r\n]/u.test(line), 'Each lyrics item must be one line.')).min(1).max(20).optional(),
   })
   .strict()
+  .refine(args => !args.lyrics || args.output === 'file' && !args.instrumental && args.durationSeconds <= 120,
+    'Explicit lyrics require output=file, instrumental=false and durationSeconds at most 120.')
 
 export function parseGenerateSongArguments(
   value: unknown,

@@ -1,9 +1,11 @@
 import * as z from "./zod-runtime.ts";
+import { alignSongLyrics, songLinesSchema, songWordTimestampsSchema } from "./song-timing.ts";
+export { alignSongLyrics, songWordTimestampsSchema, type SongWordTimestamp } from "./song-timing.ts";
 
 const ref = z.string().min(1).max(128);
 export const recapBlockSchema = z.object({
   kind: z.enum(["photo", "photoPair", "contactSheet", "headline", "kicker", "quote", "stat", "scene"]),
-  scene: z.object({ cast: z.array(z.string().min(1).max(200)).min(1).max(2), murph: z.literal(true).optional(), prompt: z.string().min(1).max(4000) }).strict().optional(),
+  scene: z.object({ cast: z.array(z.string().min(1).max(200)).min(1).max(2), murph: z.literal(true).optional(), prompt: z.string().min(1).max(4000), faceY: z.number().min(0).max(1).optional() }).strict().optional(),
   entryIds: z.array(ref).optional(),
   style: z.enum(["print", "fullBleed"]).optional(),
   text: z.string().optional(),
@@ -39,12 +41,15 @@ export const gameRecapWriterSchema = z.object({
 export type GameRecapStory = z.infer<typeof gameRecapWriterSchema>;
 
 /** Local selections carry paths; the host owns hashes, bytes and source lineage. */
-export const recapShowWriterSchema = gameRecapWriterSchema.extend({
+export const recapShowStorySchema = gameRecapWriterSchema.extend({
   treatment: z.string().trim().min(1).optional(),
   pages: z.array(gameRecapWriterSchema.shape.pages.element.extend({ blocks: z.array(recapBlockSchema).min(1).max(4) })).min(1).max(7),
   superlatives: showSuperlatives.max(2).refine(cards => new Set(cards.map(card => card.memberId)).size === cards.length).optional(),
   song: z.object({ title: z.string().trim().min(1).max(200), style: z.string().trim().min(1).max(2000), lyrics: z.array(z.string().trim().min(1).max(500)).min(1).max(20) }).strict().optional(),
   chatLine: z.string().trim().min(1).max(1000),
+});
+export const recapShowWriterSchema = recapShowStorySchema.extend({
+  treatment: z.string().trim().min(1).max(40).optional(),
 });
 export const gameRecapDraftSchema = z.object({
   story: recapShowWriterSchema,
@@ -74,6 +79,7 @@ export const recapAssetSchema = z.object({
   byteLength: z.number().int().positive().max(2 * 1024 * 1024),
   width: z.number().int().positive().optional(), height: z.number().int().positive().optional(),
   durationMs: z.number().int().positive().optional(),
+  wordsTimestamps: songWordTimestampsSchema.optional(),
 }).strict();
 export type RecapAsset = z.infer<typeof recapAssetSchema>;
 export const gameRecapEnvelopeSchema = z.object({
@@ -84,7 +90,7 @@ export const gameRecapEnvelopeSchema = z.object({
 }).strict();
 export type GameRecapEnvelope = z.infer<typeof gameRecapEnvelopeSchema>;
 export const storedGameRecapEnvelopeSchema = gameRecapEnvelopeSchema.extend({
-  story: gameRecapEnvelopeSchema.shape.story.extend({ superlatives: recapShowWriterSchema.shape.superlatives.catch(undefined) }),
+  story: recapShowStorySchema.extend({ song: recapShowStorySchema.shape.song.catch(undefined), superlatives: recapShowStorySchema.shape.superlatives.catch(undefined) }),
   assets: z.array(z.unknown()).max(5).transform(values => values.flatMap(value => {
     const asset = recapAssetSchema.safeParse(value);
     return asset.success ? [asset.data] : [];
@@ -115,7 +121,7 @@ export const recapShowPageSchema = z.object({
   media: displayMedia.optional(),
   fallback: z.object({ kind: z.enum(["photo", "text"]), entryIds: z.array(ref).max(1) }).strict().optional(),
   card: z.object({ memberId: ref, title: z.string(), line: z.string() }).strict().optional(),
-  song: z.object({ title: z.string(), lyrics: z.array(z.string()) }).strict().optional(),
+  song: z.object({ title: z.string(), lyrics: z.array(z.string()), lines: songLinesSchema.optional() }).strict().optional(),
 }).strict();
 export const gameRecapPresentationSchema = z.object({
   pages: z.array(z.object({ background: z.enum(["night", "paper", "sage", "sienna", "slate"]), blocks: z.array(legacyRecapBlockSchema) }).strict()),
@@ -171,7 +177,13 @@ export function presentGameRecap(input: {
   });
   for (const card of story.superlatives ?? []) pages.push({ id: `card-${card.memberId}`, kind: "superlative", background: "paper", blocks: [], card });
   const songMedia = media("song");
-  if (story.song && songMedia.status === "ready") pages.push({ id: "song", kind: "song", background: "night", blocks: [], media: songMedia, song: { title: story.song.title, lyrics: story.song.lyrics } });
+  if (story.song && songMedia.status === "ready") {
+    const asset = envelope.assets.find(item => item.slot === "song");
+    const lines = asset?.wordsTimestamps && asset.durationMs
+      ? alignSongLyrics(story.song.lyrics, asset.wordsTimestamps, asset.durationMs) : undefined;
+    pages.push({ id: "song", kind: "song", background: "night", blocks: [], media: songMedia,
+      song: { title: story.song.title, lyrics: story.song.lyrics, ...(lines ? { lines } : {}) } });
+  }
   pages.push({ id: "result", kind: "result", background: "paper", blocks: [] });
   return { ...legacy, show: { version: 1, generationId: envelope.generationId, treatment: (story.treatment ?? "").replace(/[\s.,;:]+$/u, ""), acceptedAt: envelope.acceptedAt, pages } };
 }

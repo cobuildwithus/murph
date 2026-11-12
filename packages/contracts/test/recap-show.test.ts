@@ -33,13 +33,13 @@ describe("recap presentation compatibility", () => {
     expect(view.show?.pages[0].imageIndex).toBe(2);
     expect(view.show?.pages[0].blocks.map(block => block.text)).toEqual(["Day three", "The door opens", "The mat objects"]);
   });
-  it("accepts a descriptive show treatment without the legacy copy cutoff", () => {
+  it("caps new treatments at 40 characters while retaining historical long treatments", () => {
     const treatment = "A silent-film domestic melodrama about the purple mat and the missing breakfast";
-    const draft = gameRecapDraftSchema.parse({ story: { ...story, treatment }, files: [] });
-    expect(draft.story.treatment).toBe(treatment);
-    const stored = storedGameRecapEnvelopeSchema.parse({ ...envelope, story: draft.story });
+    expect(gameRecapDraftSchema.safeParse({ story: { ...story, treatment: "x".repeat(40) }, files: [] }).success).toBe(true);
+    expect(gameRecapDraftSchema.safeParse({ story: { ...story, treatment: "x".repeat(41) }, files: [] }).success).toBe(false);
+    const stored = storedGameRecapEnvelopeSchema.parse({ ...envelope, story: { ...story, treatment } });
     expect(presentGameRecap({ ...input, stored }).show?.treatment).toBe(treatment);
-    expect(gameRecapWriterSchema.safeParse(draft.story).success).toBe(false);
+    expect(gameRecapWriterSchema.safeParse(stored.story).success).toBe(false);
   });
 
   it("drops a trailing full stop so the app's starring line reads cleanly", () => {
@@ -62,12 +62,34 @@ describe("recap presentation compatibility", () => {
     expect(view.show?.pages.map(page => page.kind)).toEqual(['cover', 'song', 'result']);
     expect(view.show?.pages[0].media).toMatchObject({ status: 'ready', mediaType: 'image/jpeg' });
     expect(view.show?.pages[1].media).toMatchObject({ status: 'ready', mediaType: 'audio/mpeg' });
+    expect(view.show?.pages[1].song).not.toHaveProperty('lines');
     expect(view.show).not.toHaveProperty('mediaDeadline');
     expect(view.show).not.toHaveProperty('refreshAfterMs');
     const hidden = presentGameRecap({ ...input, stored, mediaVisible: false });
     expect(hidden.show?.pages.map(page => page.kind)).toEqual(['cover', 'result']);
     expect(hidden.show?.pages[0]).toMatchObject({ media: { status: 'failed' }, fallback: { kind: 'photo', entryIds: ['photo-one'] } });
     expect(hidden.chatLine).toBe(story.chatLine);
+  });
+  it("projects exactly one timing line per lyric line without provider words or private asset metadata", () => {
+    const lyrics = ["Leo,  goes", "Ava stays."];
+    const stored = storedGameRecapEnvelopeSchema.parse({ ...envelope, story: { ...story, song: { ...story.song, lyrics } }, assets: [{
+      slot: 'song', kind: 'song', recipeId: 'synthetic-song', storageKey: 'private-song', references: [],
+      hash: 'b'.repeat(64), mediaType: 'audio/mpeg', byteLength: 100, durationMs: 20_000,
+      wordsTimestamps: [{ word: 'LEO', startMs: 100, endMs: 300 }, { word: 'goes', startMs: 400, endMs: 600 },
+        { word: 'ava', startMs: 900, endMs: 1200 }, { word: 'stays', startMs: 1500, endMs: 1800 }],
+    }] });
+    const view = gameRecapPresentationSchema.parse(presentGameRecap({ ...input, stored }));
+    expect(view.show?.pages.find(page => page.kind === 'song')?.song).toEqual({ title: story.song.title, lyrics, lines: [
+      { words: [{ text: 'Leo,', startMs: 100, endMs: 300 }, { text: 'goes', startMs: 400, endMs: 600 }] },
+      { words: [{ text: 'Ava', startMs: 900, endMs: 1200 }, { text: 'stays.', startMs: 1500, endMs: 1800 }] },
+    ] });
+    expect(JSON.stringify(view)).not.toMatch(/wordsTimestamps|private-song|LEO/);
+  });
+  it("accepts only bounded face positions and keeps timing facts out of editable file selections", () => {
+    const withFace = (faceY: number) => ({ story: { ...story, pages: [{ background: 'paper', blocks: [{ kind: 'scene', scene: { ...story.pages[0].blocks[1]!.scene, faceY } }] }] }, files: [] });
+    for (const y of [0, 0.25, 1]) expect(gameRecapDraftSchema.safeParse(withFace(y)).success).toBe(true);
+    for (const y of [-0.01, 1.01, NaN, Infinity]) expect(gameRecapDraftSchema.safeParse(withFace(y)).success).toBe(false);
+    expect(gameRecapDraftSchema.safeParse({ story, files: [{ slot: 'song', path: 'media/song.mp3', wordsTimestamps: [] }] }).success).toBe(false);
   });
   it("uses stable text fallback for missing media and revoked photo references", () => {
     const view = presentGameRecap({ ...input, stored: { ...envelope, assets: [] }, permittedPhotoIds: new Set() });

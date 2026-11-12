@@ -25,7 +25,7 @@ remaining snapshot retirement gates.
 
 [Hosted Linux recap file access](exec-plans/completed/2026-11-11-recap-show-hosted-files.md) records the restricted mount fix, host-only song credentials and native container proof.
 
-[Pair recap show presentation](references/recap-show-contract.md) owns the final-at-acceptance native presentation payload and synthetic decoder fixtures. Implementation evidence is recorded in the [simplification plan](exec-plans/completed/2026-11-11-recap-show-simplify.md).
+[Pair recap show presentation](references/recap-show-contract.md) owns the final-at-acceptance native presentation payload, optional lyric word timings, face-centered previews and synthetic decoder fixtures. Implementation evidence is recorded in the [simplification plan](exec-plans/completed/2026-11-11-recap-show-simplify.md) and [song timing plan](exec-plans/completed/2026-11-12-recap-song-timing.md).
 
 Bound pair and group games tolerate bystanders while retaining current-player,
 route and restriction checks. [Architecture](../ARCHITECTURE.md),

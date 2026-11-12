@@ -367,6 +367,10 @@ it("activates show policy only for an explicitly selected pair", () => {
   expect(show).toContain("Write treatment as the premise in a few words");
   expect(show).toContain("in 40 characters at most");
   expect(show).toContain("Then look for what nobody noticed.");
+  expect(show).toContain("open it with view_image and set faceY on its scene block");
+  expect(show).toContain("the story's style as prompt and its lyrics, exactly as written, as lyrics");
+  expect(show).toContain("so don't change the lyrics after that");
+  expect(show).toContain("with no labels like [Chorus]");
   expect(show).not.toContain("Name it briefly in treatment");
   expect(show).not.toMatch(/kind:"stat"|- stat:|rep tape that|prize kicker/u);
   expect(show).not.toContain("give the best single shot of the week a full-bleed page");

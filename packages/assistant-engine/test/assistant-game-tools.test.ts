@@ -563,3 +563,19 @@ it('can correct an unaccepted draft after an upload error', async () => {
   expect(record).toHaveBeenCalledWith('Accepted line and link')
   expect(request.mock.calls[1]?.[0]).toMatchObject({ action: 'write_recap', recap: draft.story, assets: [] })
 })
+
+it('submits host-owned song timings without asking the draft to carry them', async () => {
+  const { executeGameTool } = await import('../src/assistant-codex/dynamic-tools/games.js')
+  const story = { pages: [{ background: 'paper' as const, blocks: [{ kind: 'headline' as const, text: 'The train' }] }], chatLine: 'The train arrived.',
+    song: { title: 'Train', style: 'Folk', lyrics: ['Leo goes', 'Ava stays'] } }
+  const wordsTimestamps = [{ word: 'Leo', startMs: 100, endMs: 300 }]
+  const asset = { slot: 'song', kind: 'song', recipeId: 'synthetic', storageKey: 'synthetic', references: [], hash: 'a'.repeat(64), mediaType: 'audio/mpeg', byteLength: 3, durationMs: 20_000, wordsTimestamps }
+  const request = vi.fn().mockResolvedValueOnce({ action: 'read_game', result: { status: 'ok', recapGame: asset } })
+    .mockResolvedValueOnce({ action: 'write_recap', result: { status: 'ok', chatLine: 'Accepted line and link', recapOutcome: 'Saved.' } })
+  const ctx: AssistantHostedToolContext = { ...context(), currentGameRecapScope: () => ({ gameId: 'synthetic', eventId: 'game-recap:synthetic', pairFingerprint: 'a'.repeat(32), show: true }),
+    readGameRecapDraft: async () => ({ story, files: [{ slot: 'song', path: 'media/song.mp3' }] }),
+    readGameRecapMedia: async () => ({ bytes: 'YWJj', mediaType: 'audio/mpeg', referenceIds: [], wordsTimestamps }), groupTool: { request } }
+  expect((await executeGameTool({ context: ctx, request: { action: 'write_recap_file', draftPath: 'drafts/show.json' } })).rpcResult.success).toBe(true)
+  expect(request.mock.calls[0]?.[0]).toMatchObject({ action: 'read_game', recapRead: { kind: 'upload', slot: 'song', wordsTimestamps } })
+  expect(request.mock.calls[1]?.[0]).toMatchObject({ action: 'write_recap', recap: story, assets: [asset] })
+})

@@ -11,6 +11,28 @@ import { buildGamePrivateEveningInstructions, buildGamePrivateKickoffInstruction
 
 const origin = { kind: "accepted_input", assistantInputId: "ain_synthetic" };
 
+it.skipIf(process.env.MURPH_VERIFY_RECAP_SKEW !== "1")("base runners accept show receipts while new Web accepts historical long replay requests", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const suffix = randomUUID();
+  const oldStory = new URL(`../../contracts/src/.recap-skew-${suffix}.ts`, import.meta.url);
+  const oldTools = new URL(`../src/.recap-skew-${suffix}.ts`, import.meta.url);
+  const base = "9d0adef6908eb2b99521615ac33d5347fbff0f0c";
+  const source = (file: string) => execFileSync("git", ["show", `${base}:${file}`], { cwd: root, encoding: "utf8" });
+  await writeFile(oldStory, source("packages/contracts/src/recap-show.ts"), { flag: "wx" });
+  await writeFile(oldTools, source("packages/hosted-execution/src/game-tools.ts").replaceAll('"@murphai/contracts/recap-show"', JSON.stringify(`../../contracts/src/.recap-skew-${suffix}.ts`)), { flag: "wx" });
+  try {
+    const old = await import(oldTools.href) as typeof import("../src/game-tools.ts");
+    const story = { pages: [{ background: "paper", blocks: [{ kind: "scene", scene: { cast: ["Leo", "Ava"], prompt: "Synthetic train scene.", faceY: 0.3 } }] }], chatLine: "The train arrived." };
+    for (const action of ["read_game", "write_recap"]) {
+      const receipt = { action, result: { status: "ok", chatLine: story.chatLine } };
+      expect(old.hostedGameToolResponseSchema.parse(receipt)).toEqual(receipt);
+      expect(old.hostedGameToolResponseSchema.safeParse({ ...receipt, result: { ...receipt.result, recap: story } }).success).toBe(false);
+    }
+    const request = { action: "write_recap", origin: { kind: "game_recap", gameId: "game_synthetic", eventId: "game-recap:game_synthetic" }, recap: { ...story, treatment: "x".repeat(60) } };
+    expect(hostedGameToolRequestSchema.parse(request)).toEqual(request);
+  } finally { await Promise.all([rm(oldStory, { force: true }), rm(oldTools, { force: true })]); }
+});
+
 const rematchNotice = (termsVersion: unknown = 1) => ({ kind: "assistant.notification.requested", userId: "synthetic_room", notification: {
   instructions: "Synthetic compact comparison", responsePolicy: { kind: "require_game_rematch", gameId: "game_synthetic", eventId: "game-rematch:game_synthetic", termsVersion },
   route: { actorId: null, channel: "linq", delivery: { kind: "explicit", target: "synthetic_chat" }, identityId: null, threadId: "synthetic_chat", threadIsDirect: false },

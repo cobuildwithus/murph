@@ -173,7 +173,8 @@ describe.skipIf(!enabled)("recap moderation witness PostgreSQL proof", () => {
       expect(await f.db.gameEvent.count({ where: { commandKey: `${f.eventId}:accepted` } })).toBe(0);
       expect((await requestGameRecapRegeneration({ gameId: f.gameId, regenerationId: 'later_synthetic_retry', execute: true, operatorMemberId: 'system' })).outcome).toBe('reserved');
     } else {
-      expect(result.result).toMatchObject({ status: 'ok', recap: { pages: expect.any(Array) } });
+      expect(result.result).toMatchObject({ status: 'ok' });
+      expect(result.result).not.toHaveProperty('recap');
       expect(result.result.chatLine?.split('\n')).toHaveLength(2);
       expect((await readGame(f.gameId, f.players[0]!))?.recap?.pages).toHaveLength(3);
       expect((await story(f)).recapEncrypted).not.toBeNull();
@@ -190,7 +191,9 @@ describe.skipIf(!enabled)("recap moderation witness PostgreSQL proof", () => {
     const result = await handleGameChatTool({ memberId: f.room, runtimeIdentity: null, request: {
       action: 'read_game', origin: { kind: 'game_recap', gameId: f.gameId, eventId: f.eventId }, recapRead: { kind: 'recover', failed: true },
     } });
-    expect(result.result).toMatchObject({ status: 'ok', recap: cleanRecap });
+    expect(result.result).toMatchObject({ status: 'ok', chatLine: expect.stringContaining(cleanRecap.chatLine) });
+    expect(result.result).not.toHaveProperty('recap');
+    expect((await readGame(f.gameId, f.players[0]!))?.recap?.chatLine).toBe(cleanRecap.chatLine);
     expect((await story(f)).recapEncrypted).toBe(before);
     expect((await receipt(f)).status).toBe('generation_queued');
   });

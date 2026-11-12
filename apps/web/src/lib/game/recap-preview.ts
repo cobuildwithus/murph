@@ -14,7 +14,8 @@ export async function readRecapCoverPreview(gameId: string, token: string, now =
   const cover = current.envelope.assets.find(asset => asset.slot === "scene-0" && asset.mediaType === "image/jpeg");
   if (!cover || !await recapReferencesCurrent(getPrisma(), gameId, [cover])) return null;
   const media = await readRecapMedia({ ownerMemberId: current.row.wordsOwnerMemberId, storageKey: cover.storageKey });
-  return media && media.hash === cover.hash ? media.bytes : null;
+  const faceY = current.envelope.story.pages[0]?.blocks.find(block => block.kind === "scene")?.scene?.faceY;
+  return media && media.hash === cover.hash ? { bytes: media.bytes, ...(faceY === undefined ? {} : { faceY }) } : null;
 }
 
 function equalToken(a: string, b: string): boolean {

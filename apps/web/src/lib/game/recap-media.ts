@@ -147,5 +147,6 @@ export async function uploadRecapMedia(input: {
     ...(input.file.mediaType === 'audio/mpeg' ? { durationMs: 20_000 } : {}) });
   const { bytes: byteLength, ...media } = metadata;
   return recapAssetSchema.parse({ slot: input.file.slot, kind: input.file.mediaType === 'image/jpeg' ? 'image' : 'song',
-    recipeId: hash, storageKey, references, byteLength, ...media });
+    recipeId: hash, storageKey, references, byteLength, ...media,
+    ...(input.file.wordsTimestamps ? { wordsTimestamps: input.file.wordsTimestamps } : {}) });
 }

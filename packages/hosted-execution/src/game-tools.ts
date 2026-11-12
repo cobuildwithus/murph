@@ -1,4 +1,4 @@
-import { recapAssetSchema } from "@murphai/contracts/recap-show";
+import { recapAssetSchema, songWordTimestampsSchema } from "@murphai/contracts/recap-show";
 import * as z from "@murphai/contracts/zod-runtime";
 
 // A new value of the existing error field: this generation is durably finished and must end without sending.
@@ -52,7 +52,7 @@ export const hostedGamePhotoSchema = z.object({
 }).strict();
 export type HostedGamePhoto = z.infer<typeof hostedGamePhotoSchema>;
 export { gameRecapStorySchema as hostedGameRecapSchema, gameRecapWriterSchema as hostedGameRecapWriterSchema } from "@murphai/contracts/recap-show";
-import { gameRecapStorySchema as hostedGameRecapSchema, gameRecapWriterSchema, recapShowWriterSchema } from "@murphai/contracts/recap-show";
+import { gameRecapStorySchema as hostedGameRecapSchema, gameRecapWriterSchema, recapShowStorySchema } from "@murphai/contracts/recap-show";
 export type { GameRecapStory as HostedGameRecap } from "@murphai/contracts/recap-show";
 export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("my_game_reminders"), origin: acceptedInputOrigin, operation: z.enum(["read", "set"]),
@@ -61,13 +61,14 @@ export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin, automationOccurrenceOrigin]), includePlayers: z.literal(true).optional(),
     recapRead: z.discriminatedUnion("kind", [
       z.object({ kind: z.literal("recover"), failed: z.literal(true).optional() }).strict(),
-      z.object({ kind: z.literal("upload"), slot: z.string().regex(/^(scene-[0-6]|song)$/u), mediaType: z.enum(["image/jpeg", "audio/mpeg"]), referenceIds: z.array(z.string().regex(/^[a-f0-9]{64}$/u)).max(16), bytes: z.string().max(2_800_000) }).strict(),
+      z.object({ kind: z.literal("upload"), slot: z.string().regex(/^(scene-[0-6]|song)$/u), mediaType: z.enum(["image/jpeg", "audio/mpeg"]), referenceIds: z.array(z.string().regex(/^[a-f0-9]{64}$/u)).max(16), bytes: z.string().max(2_800_000), wordsTimestamps: songWordTimestampsSchema.optional() }).strict()
+        .refine(file => !file.wordsTimestamps || file.slot === "song" && file.mediaType === "audio/mpeg", "Word timings require a song file."),
       z.object({ kind: z.literal("transcript"), after: z.string().regex(/^\d{1,20}$/u).optional() }).strict(),
       z.object({ kind: z.literal("reference"), id: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
     ]).optional() }).strict(),
   z.object({ action: z.literal("game_photo"), origin: acceptedInputOrigin, photo: hostedGamePhotoSchema }).strict(),
   z.object({ action: z.literal("update_game"), origin: acceptedInputOrigin, update: hostedGameUpdateSchema }).strict(),
-  z.object({ action: z.literal("write_recap"), origin: gameRecapOrigin, recap: z.union([recapShowWriterSchema, gameRecapWriterSchema]),
+  z.object({ action: z.literal("write_recap"), origin: gameRecapOrigin, recap: z.union([recapShowStorySchema, gameRecapWriterSchema]),
     assets: z.array(recapAssetSchema).max(5).optional(),
     priorChatLines: z.array(z.string().max(160)).max(100).optional() }).strict(),
 ]);
@@ -127,7 +128,7 @@ export const hostedGameToolResponseSchema = z.object({
     photoOutcome: z.enum(["offer", "suppressed", "saved", "dismissed"]).optional(),
     recapGame: z.unknown().optional(),
     recapOutcome: z.string().optional(),
-    recap: z.union([recapShowWriterSchema, hostedGameRecapSchema]).optional(),
+    recap: z.union([recapShowStorySchema, hostedGameRecapSchema]).optional(),
     reaches: z.enum(["push", "text", "none"]).optional(),
     reminders: z.object({ minutes: z.number().int(), push: z.boolean(), text: z.boolean(), canText: z.boolean(),
       games: z.array(z.object({ id: gameId, task: z.string(), schedule: hostedGameScheduleSchema,

@@ -24,6 +24,8 @@ vi.mock("../src/lib/game/service", () => ({
   sealGameRecap: m.sealRecap,
 }));
 vi.mock("../src/lib/game/chat-photo", () => ({ handleGameChatPhoto: m.photo }));
+vi.mock("../src/lib/game/recap-asset-access", () => ({ readRecapEnvelope: async () => null }));
+import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "@murphai/hosted-execution/runtime-control";
 import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "../src/lib/game/audience";
 import { handleGameChatTool } from "../src/lib/game/chat-tool";
 const group = "container_synthetic";
@@ -400,6 +402,44 @@ describe("game chat tool authority", () => {
     await authorize({});
     expect(m.runtime).toHaveBeenCalledTimes(2);
     expect(m.access).toHaveBeenCalledTimes(2);
+  });
+  it("keeps show completion, replay and recovery compatible with old response readers", async () => {
+    const story = { treatment: "A train mystery", chatLine: "The train arrived.", pages: [
+      { background: "paper" as const, blocks: [{ kind: "scene" as const, scene: { cast: ["Leo", "Ava"], prompt: "Synthetic train scene.", faceY: 0.3 } }] },
+    ], song: { title: "Train", style: "Folk", lyrics: ["Leo goes", "Ava stays"] } };
+    m.recapMaterial.mockResolvedValue({ entries: [], game: {}, players: ["Leo", "Ava"], validation: { show: true, result: [], playerNamesByMemberId: [{ memberId: actor, name: "Leo" }, { memberId: "other_synthetic", name: "Ava" }], startedAt: new Date("2030-03-01T00:00:00Z") } });
+    const origin = { kind: "game_recap" as const, gameId: "game_synthetic", eventId: "game-recap:game_synthetic" };
+    const request = { action: "write_recap" as const, origin, priorChatLines: [], recap: story };
+    m.sealRecap.mockResolvedValueOnce(null).mockResolvedValueOnce(story);
+    const accepted = await handleGameChatTool({ memberId: group, runtimeIdentity: null, request });
+    expect(accepted.result).toMatchObject({ status: "ok", chatLine: expect.stringContaining(story.chatLine) });
+    expect(accepted.result).not.toHaveProperty("recap");
+    expect(hostedGameToolResponseSchema.parse(accepted)).toEqual(accepted);
+    expect(m.sealRecap.mock.calls[1][0].recap).toEqual(story);
+    // Historical overlong requests reach replay before the new authoring cap.
+    const historic = { ...story, treatment: "x".repeat(60) };
+    m.sealRecap.mockResolvedValue(historic);
+    const replayRequest = hostedGameToolRequestSchema.parse({ ...request, recap: historic });
+    expect(await handleGameChatTool({ memberId: group, runtimeIdentity: null, request: replayRequest })).toEqual(accepted);
+    const recovered = await handleGameChatTool({ memberId: group, runtimeIdentity: null, request: { action: "read_game", origin, recapRead: { kind: "recover" } } });
+    expect(recovered.result).toMatchObject({ status: "ok", chatLine: accepted.result.chatLine });
+    expect(recovered.result).not.toHaveProperty("recap");
+    m.sealRecap.mockReset(); m.sealRecap.mockResolvedValue(null);
+    const rejected = await handleGameChatTool({ memberId: group, runtimeIdentity: null, request: replayRequest });
+    expect(rejected.result).toMatchObject({ status: "rejected", recapOutcome: expect.stringContaining("treatment") });
+    expect(m.sealRecap).toHaveBeenCalledOnce();
+  });
+  it("rejects timings for different final lyrics before sealing", async () => {
+    m.recapMaterial.mockResolvedValue({ entries: [], game: {}, players: ["Leo", "Ava"], validation: { show: true, result: [], playerNamesByMemberId: [{ memberId: actor, name: "Leo" }, { memberId: "other_synthetic", name: "Ava" }] } });
+    m.sealRecap.mockResolvedValue(null);
+    const result = await handleGameChatTool({ memberId: group, runtimeIdentity: null, request: {
+      action: "write_recap", origin: { kind: "game_recap", gameId: "game_synthetic", eventId: "game-recap:game_synthetic" }, priorChatLines: [],
+      recap: { pages: [{ background: "paper", blocks: [{ kind: "headline", text: "The train" }] }], chatLine: "The train arrived.", song: { title: "Train", style: "Folk", lyrics: ["Leo goes", "Ava stays"] } },
+      assets: [{ slot: "song", kind: "song", recipeId: "synthetic-song", storageKey: "synthetic-song", references: [], hash: "a".repeat(64), mediaType: "audio/mpeg", byteLength: 100, durationMs: 20_000,
+        wordsTimestamps: [{ word: "unrelated", startMs: 100, endMs: 500 }] }],
+    } });
+    expect(result.result).toMatchObject({ status: "rejected", recapOutcome: expect.stringContaining("Song timings") });
+    expect(m.sealRecap).toHaveBeenCalledOnce();
   });
   it("rejects an addressed game from a different pair within the same reused container", async () => {
     await handleGameChatTool(update);
