@@ -367,6 +367,8 @@ it("activates show policy only for an explicitly selected pair", () => {
   expect(show).toContain("Write treatment as the premise in a few words");
   expect(show).toContain("in 40 characters at most");
   expect(show).toContain("Then look for what nobody noticed.");
+  expect(show).toContain("When someone posted is worth a mention only when the time is wild on its own");
+  expect(show).not.toContain("a streak that survived by minutes");
   expect(show).toContain("open it with view_image and set faceY on its scene block");
   expect(show).toContain("the story's style as prompt and its lyrics, exactly as written, as lyrics");
   expect(show).toContain("so don't change the lyrics after that");
