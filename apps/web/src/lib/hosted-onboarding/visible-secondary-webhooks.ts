@@ -31,7 +31,6 @@ import {
   releaseHostedLinqSignupLinkReminderNoticeClaim,
   resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
-import { buildHostedLinqGroupSetupEffectId } from "./linq-group-setup";
 import {
   createHostedLinqParticipantContactLookupKeyReadCandidates,
   normalizeHostedLinqParticipantContactValue,
@@ -208,9 +207,12 @@ export function withHostedVisibleSecondaryLinqOutcomes(
         })
       : null;
     const privateRecoveryReason = groupSetupAlreadySent ? "group-chat" : reason;
-    const privateRecoverySeed = groupSetupAlreadySent && recognizedSender
-      ? buildHostedLinqPrivateGroupSetupRecoverySeed({
-          chatId: context.summary.chatId,
+    // One private recovery per person per UTC day, whichever group or message
+    // triggered it. Keying on the chat or the event let a busy group, or one
+    // that Linq re-creates under a new chat id on every roster change, send
+    // the same setup nag once per message.
+    const privateRecoverySeed = recognizedSender
+      ? buildHostedLinqPrivateGroupRecoverySeed({
           memberId: recognizedSender.id,
           occurredAt: context.occurredAt,
         })
@@ -234,12 +236,10 @@ export function withHostedVisibleSecondaryLinqOutcomes(
       try {
         await dependencies.sendHostedLinqChatMessage({
           chatId: privateRecovery.chatId,
-          idempotencyKey: groupSetupAlreadySent
-            ? buildHostedLinqPrivateGroupSetupRecoveryId({
-                recoveryKind: privateRecovery.recoveryKind,
-                recoverySeed: privateRecoverySeed,
-              })
-            : `visible-secondary-private:${event.event_id}`,
+          idempotencyKey: buildHostedLinqPrivateGroupRecoveryId({
+            recoveryKind: privateRecovery.recoveryKind,
+            recoverySeed: privateRecoverySeed,
+          }),
           message: privateRecovery.message,
           replyToMessageId: null,
           ...(input.signal ? { signal: input.signal } : {}),
@@ -576,23 +576,19 @@ async function resolveHostedLinqPrivateGroupRecovery(input: {
   };
 }
 
-function buildHostedLinqPrivateGroupSetupRecoverySeed(input: {
-  chatId: string;
+function buildHostedLinqPrivateGroupRecoverySeed(input: {
   memberId: string;
   occurredAt: string;
 }): string {
-  const groupSetupEffectId = buildHostedLinqGroupSetupEffectId({
-    chatId: input.chatId,
-    occurredAt: input.occurredAt,
-  });
+  const dayUtc = resolveHostedLinqDayUtc(input.occurredAt);
 
   return `linq-group-private-recovery-seed:${sha256Hex(JSON.stringify({
-    groupSetupEffectId,
+    dayUtc: Number.isNaN(dayUtc.getTime()) ? null : dayUtc.toISOString(),
     memberId: input.memberId,
   })).slice(0, 32)}`;
 }
 
-function buildHostedLinqPrivateGroupSetupRecoveryId(input: {
+function buildHostedLinqPrivateGroupRecoveryId(input: {
   recoveryKind: string;
   recoverySeed: string;
 }): string {
