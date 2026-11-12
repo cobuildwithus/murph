@@ -718,7 +718,7 @@ function parsePendingLabel(value: Prisma.JsonValue | null): PendingLabel {
 }
 
 async function createGame(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>): Promise<string | { gameId: string; composer?: { murphPhoneNumber: string } }> {
-  if (command.maxPlayers === 10 && command.inviteeRecipient) reject("INVALID_REQUEST", "Group invites address each person in invitees.");
+  if (command.maxPlayers === 10 && (command.inviteeRecipient || command.inviteeMemberId)) reject("INVALID_REQUEST", "Group invites address each person in invitees.");
   if (command.maxPlayers === 10) return createGroupGame(context, command);
   if (command.invitees || command.groupWord || command.terms.defaultTask) reject("INVALID_REQUEST", "Group terms require maxPlayers 10.");
   const { actor } = context;
@@ -731,7 +731,7 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
   if (await isGameCreationReplay(prisma, actor, gameId, chatOther ? chatPlayers : undefined)) return gameId;
   const rematch = await readGameCreationRematch(context, command, chatOther);
   if (chatOther) await maintainPair(actor, chatOther);
-  const addressed = chatOther || rematch ? null : await knownInvitee(actor, command.inviteeRecipient);
+  const addressed = chatOther || rematch ? null : await knownInvitee(actor, command);
   const data = await prepareGameCreateData(context, command, rematch, chatOther, profile.timeZone, addressed);
   try {
     await commandTransaction(context, async (tx) => {
@@ -757,21 +757,27 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
 
 /**
  * Someone you already play one-on-one, by the number or email you picked for
- * them: the invite is theirs, on their Home, and only they can accept it. An
- * address that isn't a member's, a member you've never played, yourself, or a
- * blocked pair stays an open link, so an address never says whether a stranger
- * is on Murph.
+ * them, or by who they are when you picked them from the people you've played:
+ * the invite is theirs, on their Home, and only they can accept it. An address
+ * that isn't a member's, a member you've never played, yourself, or a blocked
+ * pair stays an open link, so an address never says whether a stranger is on
+ * Murph.
  */
-async function knownInvitee(actor: string, recipient: GameInviteRecipient | undefined): Promise<string | null> {
-  const contact = recipient ? createHostedLinqParticipantContact(recipient) : null;
-  if (!contact) return null;
-  const prisma = getPrisma();
-  const resolved = await lookupHostedGroupParticipantMemberIdsByHandles({ ambiguityPolicy: "unresolved", handles: [contact.value], prisma });
-  const member = resolved.get(contact.value) ?? null;
+async function knownInvitee(actor: string, { inviteeMemberId, inviteeRecipient }: Extract<GameCommand, { type: "createGame" }>): Promise<string | null> {
+  const member = inviteeMemberId ?? await memberByAddress(inviteeRecipient);
   if (!member || member === actor) return null;
-  const played = await prisma.game.findFirst({ where: gamePairWhere([actor, member]), select: { id: true } });
+  const prisma = getPrisma();
+  // A one-on-one game: a group of just the two of them isn't one.
+  const played = await prisma.game.findFirst({ where: { ...gamePairWhere([actor, member]), maxPlayers: 2 }, select: { id: true } });
   if (!played || await areGamePlayersBlocked(prisma, actor, member)) return null;
   return member;
+}
+
+async function memberByAddress(recipient: GameInviteRecipient | undefined): Promise<string | null> {
+  const contact = recipient ? createHostedLinqParticipantContact(recipient) : null;
+  if (!contact) return null;
+  const resolved = await lookupHostedGroupParticipantMemberIdsByHandles({ ambiguityPolicy: "unresolved", handles: [contact.value], prisma: getPrisma() });
+  return resolved.get(contact.value) ?? null;
 }
 
 /** Prepare encrypted words and immutable row data before taking database locks. */

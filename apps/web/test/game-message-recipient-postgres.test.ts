@@ -67,13 +67,16 @@ async function messageRecipient(token: string, id: string) {
   const body = await response.json();
   return response.status === 200 ? body.phone : `${response.status} ${body.error.code}`;
 }
-async function liveGame(challenger: string, invitee: string) {
-  const id = randomUUID();
-  const created = await game(create(request(challenger, { gameId: id, inviteeFirstName: "Ava", terms: {
+function invite(challenger: string, extra: Record<string, unknown> = {}) {
+  return game(create(request(challenger, { gameId: randomUUID(), inviteeFirstName: "Ava", terms: {
     startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
     schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Choose a book" }],
     tasks: [{ seat: 0, text: "Move" }, { seat: 1, text: "Move" }],
-  } })));
+  }, ...extra })));
+}
+async function liveGame(challenger: string, invitee: string) {
+  const created = await invite(challenger);
+  const { id } = created;
   const before = await messageRecipient(challenger, id);
   const joined = await game(accept(request(invitee, { termsVersion: 1, timeZone: "UTC" }), {
     params: Promise.resolve({ token: created.inviteToken! }),
@@ -110,6 +113,28 @@ describe.skipIf(!enabled)("Message on a live pair game texts the other player", 
     // Over: the card that texts is gone.
     await game(settle(request(leo.token), { params: Promise.resolve({ id }) }));
     expect(await messageRecipient(leo.token, id)).toBeNull();
+  }, 30_000);
+
+  it("texts someone you've played from your new invite to them, and no one from an open invite", async () => {
+    const leo = await member("Leo", "+15555550131"), ava = await member("Ava", "+15555550132"), kat = await member("Kat", "+15555550133");
+    const { id: first } = await liveGame(leo.token, ava.token);
+    await game(settle(request(leo.token), { params: Promise.resolve({ id: first }) }));
+
+    // Picked from the people Leo has played: the invite is Ava's, and Send texts her.
+    const again = await invite(leo.token, { inviteeMemberId: ava.id });
+    expect(again.players).toMatchObject([{ seat: 0 }, { seat: 1, memberId: ava.id }]);
+    expect(await messageRecipient(leo.token, again.id)).toBe("+15555550132");
+    // She isn't a player until she shakes on it.
+    expect(await messageRecipient(ava.token, again.id)).toBe("404 GAME_NOT_FOUND");
+
+    // Kat, whom Leo has never played: an open link, with no one to text.
+    const open = await invite(leo.token, { inviteeMemberId: kat.id });
+    expect(open.players).toMatchObject([{ seat: 0 }, { seat: 1, memberId: null }]);
+    expect(await messageRecipient(leo.token, open.id)).toBeNull();
+
+    // A block since: no one to text.
+    await getPrisma().gameBlock.create({ data: { blockerMemberId: ava.id, blockedMemberId: leo.id } });
+    expect(await messageRecipient(leo.token, again.id)).toBeNull();
   }, 30_000);
 
   it("is an exchange: no one to text unless both players have a verified number", async () => {

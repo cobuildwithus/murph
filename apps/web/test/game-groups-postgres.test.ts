@@ -9,6 +9,7 @@ import { upsertHostedMemberIdentity } from "@/src/lib/hosted-onboarding/hosted-m
 import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboarding/member-identity-fields";
 import { createHostedEmailLookupKey, createHostedExternalThreadIdentityLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { areGameGroupsEnabled } from "@/src/lib/game/access";
+import { readGameMessageRecipient } from "@/src/lib/game/message-recipient";
 import { gameAudienceKeys, gameGroupLoreFingerprint } from "@/src/lib/game/audience";
 import { runGameCommand, readGame, readHome, readGameChatState, readGameRematchNotice, runGameChatUpdate, readGameRecapMaterial, sealGameRecap, authorizeMediaRead } from "@/src/lib/game/service";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
@@ -509,6 +510,33 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(await run(a.id, { type: "createGame", gameId: randomUUID(), maxPlayers: 10, groupWord: "Crew", terms,
       invitees: [{ seat: 1, firstName: "Player", recipient: { kind: "email", value: b.email } }], inviteeRecipient: { kind: "email", value: b.email } }))
       .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+  });
+
+  it("never counts a group as a one-on-one game: an invite to a group-mate is an open link with no number to text", async () => {
+    const a = await person(), b = await person();
+    for (const [p, phone] of [[a, "+15555550311"], [b, "+15555550312"]] as const) await db.$transaction(tx => upsertHostedMemberIdentity({
+      ...buildHostedMemberPhoneIdentityFields(phone), memberId: p.id, prisma: tx, phoneNumberVerifiedAt: createdAt, signupPhoneNumber: null }));
+    // A group of just the two of them, live.
+    const group = await create(a, [b]);
+    await ok(b.id, join(group.token));
+    expect((await gameRow(group.id)).status).toBe("live");
+    const pairTerms: GameTerms = { startsOn: terms.startsOn, lengthDays: 10, schedule: { count: 10 }, stakes: terms.stakes,
+      tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Walk" }] };
+    const invite = async () => (await ok(a.id, { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Player", inviteeMemberId: b.id, terms: pairTerms }))!;
+    const inviteeOf = async (id: string) => (await db.gameInvitee.findUniqueOrThrow({ where: { gameId_seat: { gameId: id, seat: 1 } } })).memberId;
+
+    // Picked by who they are: the group isn't a one-on-one game, so it's an open link.
+    const open = await invite();
+    expect(await inviteeOf(open.id)).toBeNull();
+    // Even an invite addressed to them gets no number from the group.
+    await db.gameInvitee.update({ where: { gameId_seat: { gameId: open.id, seat: 1 } }, data: { memberId: b.id } });
+    expect(await readGameMessageRecipient(open.id, a.id)).toBeNull();
+
+    // Once they shake on a one-on-one game, it's addressed and texts them.
+    await ok(b.id, join(open.inviteToken!));
+    const again = await invite();
+    expect(await inviteeOf(again.id)).toBe(b.id);
+    expect(await readGameMessageRecipient(again.id, a.id)).toBe("+15555550312");
   });
 
   it("rejects two different handles resolving to one person and reuses an audience through key rotation", async () => {

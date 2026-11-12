@@ -151,6 +151,7 @@ function create(input: Record<string, unknown>): Extract<GameCommand, { type: "c
     ...optional(input.invitees, value => ({ invitees: inviteTargets(value) })),
     ...optional(input.inviteeLabel, (label) => ({ inviteeLabel: inviteeLabel(record(label, "inviteeLabel")) })),
     ...optional(input.inviteeRecipient, value => ({ inviteeRecipient: recipient(value) })),
+    ...optional(input.inviteeMemberId, id => ({ inviteeMemberId: opaque(id, "inviteeMemberId") })),
     ...optional(input.previousGameId, (id) => ({ previousGameId: clientId(id, "previousGameId") })),
   };
 }
