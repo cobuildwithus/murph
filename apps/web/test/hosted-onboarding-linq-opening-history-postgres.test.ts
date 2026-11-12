@@ -49,8 +49,17 @@ describe.skipIf(!enabled)("Linq opening history PostgreSQL proof", () => {
         expect(await read()).toHaveLength(3);
         await insert("fourth-current-claim", current, null, null);
         expect(await read()).toHaveLength(3);
+        // A different direct chat has a separate allowance, even for this member.
+        expect(await readHostedLinqOpeningDeliveries({
+          linqChatId: "synthetic-replacement-chat", memberId: "synthetic-member", prisma: tx, request,
+        })).toEqual([]);
         await tx.$executeRaw`DELETE FROM hosted_member WHERE id = 'synthetic-member'`;
         expect(await read()).toEqual([]);
+        // Retained chat deliveries do not close a newly created account's opening.
+        await tx.$executeRaw`INSERT INTO hosted_member VALUES ('synthetic-replacement-member', '2030-01-03T00:00:00Z')`;
+        expect(await readHostedLinqOpeningDeliveries({
+          linqChatId: "synthetic-chat", memberId: "synthetic-replacement-member", prisma: tx, request,
+        })).toEqual([]);
       });
     } finally {
       await prisma.$disconnect();

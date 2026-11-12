@@ -23,6 +23,7 @@ import {
   abandonHostedLinqInstantFirstTurn,
   claimHostedLinqInstantFirstTurn,
   completeHostedLinqInstantFirstTurn,
+  readHostedLinqOpeningDeliveries,
   type HostedLinqInstantFirstTurnGeneration,
 } from "@/src/lib/hosted-onboarding/linq-instant-first-turn";
 import { buildHostedMemberRoutingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
@@ -107,6 +108,52 @@ async function seed() {
 }
 
 describe.skipIf(!enabled)("first-turn disposition with PostgreSQL", () => {
+  it("the continuation cap does not close the first-contact recovery claim path", async () => withFixture(async (f) => {
+    for (let index = 0; index < 3; index += 1) {
+      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
+        idempotencyKey: `${f.idempotencyKey}-prior-${index}`, linqChatId: f.chatId,
+        prisma: f.prisma, source: "hosted_web_instant_first_turn",
+        sourceRef: `${f.eventId}-prior-${index}`, status: "attempted",
+        targetKind: "thread", template: "instant_first_turn_v1",
+      });
+      if (!claim.id) throw new Error("Expected synthetic prior claim");
+      await f.prisma.hostedLinqDelivery.update({ where: { id: claim.id }, data: {
+        acceptedAt: new Date(), status: "accepted", messageLookupKey: `synthetic-message-${index}`,
+      } });
+    }
+    expect(await readHostedLinqOpeningDeliveries({ ...f.claimInput, memberId: f.memberId })).toHaveLength(3);
+    expect(await claimHostedLinqInstantFirstTurn({ ...f.claimInput, continuationMemberId: f.memberId }))
+      .toEqual({ kind: "unavailable" });
+    // webhook-service exact-event model-allow recovery calls this same shape.
+    // That branch does not pass continuationMemberId or consult the cap.
+    expect((await claimHostedLinqInstantFirstTurn(f.claimInput)).kind).toBe("generate");
+    expect(await f.prisma.hostedLinqDelivery.count({ where: { linqChatLookupKey: f.chatKey } })).toBe(4);
+    expect(await f.egress()).toBe("defer");
+  }));
+
+  it("an existing sealed opening replays even when later rows exhaust the continuation cap", async () => withFixture(async (f) => {
+    await f.sealed();
+    for (let index = 0; index < 3; index += 1) {
+      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
+        idempotencyKey: `${f.idempotencyKey}-later-${index}`, linqChatId: f.chatId,
+        prisma: f.prisma, source: "hosted_web_instant_first_turn",
+        sourceRef: `${f.eventId}-later-${index}`, status: "attempted",
+        targetKind: "thread", template: "instant_first_turn_v1",
+      });
+      if (!claim.id) throw new Error("Expected synthetic later claim");
+      await f.prisma.hostedLinqDelivery.update({ where: { id: claim.id }, data: {
+        skippedAt: new Date(), status: "skipped",
+      } });
+    }
+    const before = await f.read();
+    expect(await readHostedLinqOpeningDeliveries({ ...f.claimInput, memberId: f.memberId })).toHaveLength(3);
+    expect((await claimHostedLinqInstantFirstTurn({ ...f.claimInput, continuationMemberId: f.memberId })).kind)
+      .toBe("resume");
+    expect((await f.read()).id).toBe(before.id);
+    expect((await f.read()).payloadCiphertext).toBe(before.payloadCiphertext);
+    expect(await f.egress()).toBe("defer");
+  }));
+
   it.each(["none", "older", "edit", "echo", "other-chat", "held-absent", "later"])(
     "derives the later-member witness from real mailbox rows: %s",
     async (candidate) => withFixture(async (f) => {
