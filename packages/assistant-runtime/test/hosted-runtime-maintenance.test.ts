@@ -160,10 +160,10 @@ import {
 import {
   buildHostedDeviceSyncFailureJobLineage,
   buildHostedDeviceSyncPassLineageDiagnostics,
-  resolveHostedDeviceSyncNextWakeAt,
   runHostedDeviceSyncPass,
   runHostedDeviceSyncWakeLane,
 } from "../src/hosted-runtime/device-sync-maintenance.ts";
+import { resolveHostedDeviceSyncNextWakeAt } from "../src/hosted-runtime/device-sync-wake-projection.ts";
 import {
   drainHostedRuntimeLogWritesBestEffort,
 } from "../src/hosted-runtime/runtime-logs.ts";

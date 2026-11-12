@@ -7,7 +7,6 @@ import {
   runHostedWorkspaceAssistantPhase,
 } from "./hosted-runtime-workspace-assistant-phase.harness.ts";
 import {
-  isHostedDeviceSyncMaintenanceModuleLoadError,
   loadHostedDeviceSyncMaintenanceModule,
 } from "../src/hosted-runtime/device-sync-maintenance-import.ts";
 
@@ -35,12 +34,6 @@ describe("pre-foreground planning timing", () => {
     mocks.runHostedAssistantAutomationLane.mockImplementation(async (...args) => {
       calls.push("automation");
       return lane(...args);
-    });
-    const loadModule = vi.mocked(loadHostedDeviceSyncMaintenanceModule).getMockImplementation()!;
-    vi.mocked(loadHostedDeviceSyncMaintenanceModule).mockImplementationOnce(async () => {
-      calls.push("module");
-      clock += 31;
-      return loadModule();
     });
     const nextWakeAt = "2026-11-03T00:00:00.000Z";
     mocks.resolveHostedDeviceSyncNextWakeAt.mockImplementation(() => {
@@ -71,24 +64,26 @@ describe("pre-foreground planning timing", () => {
       resolvedDeviceSync: deviceSync,
     }));
 
-    expect(calls).toEqual(["automation", "module", "device", "mailbox", "cleanup"]);
+    expect(calls).toEqual(["automation", "device", "mailbox", "cleanup"]);
+    // A queued reply never waits on the deferred maintenance module (provider
+    // registry and SDK); the wake read comes from the light projection module.
+    expect(loadHostedDeviceSyncMaintenanceModule).not.toHaveBeenCalled();
     expect(foregroundRow(logRequests)).toMatchObject({
-      turnTimingPreForegroundMs: 62,
+      turnTimingPreForegroundMs: 31,
       turnTimingPreForegroundPreludeMs: 0,
-      turnTimingDeviceWakeProjectionMs: 38,
-      turnTimingDeviceWakeModuleLoadMs: 31,
+      turnTimingDeviceWakeProjectionMs: 7,
       turnTimingSystemMailboxWakeProjectionMs: 11,
       turnTimingProviderCleanupPlanningMs: 13,
     });
     const addedFields = Object.fromEntries(Object.entries(foregroundRow(logRequests) ?? {})
       .filter(([key]) => [
         "turnTimingPreForegroundMs", "turnTimingPreForegroundPreludeMs",
-        "turnTimingDeviceWakeProjectionMs", "turnTimingDeviceWakeModuleLoadMs",
+        "turnTimingDeviceWakeProjectionMs",
         "turnTimingSystemMailboxWakeProjectionMs", "turnTimingProviderCleanupPlanningMs",
       ].includes(key)));
     expect(foregroundRow(logRequests.map(parseHostedRuntimeLogRequest)))
       .toMatchObject(addedFields);
-    expect(Object.keys(addedFields)).toHaveLength(6);
+    expect(Object.keys(addedFields)).toHaveLength(5);
     expect(Buffer.byteLength(JSON.stringify(addedFields))).toBeLessThan(400);
     expect(mocks.prepareHostedProviderCleanupPlan).toHaveBeenCalledOnce();
     expect(mocks.prepareHostedProviderCleanupPlan).toHaveBeenCalledWith(
@@ -103,37 +98,15 @@ describe("pre-foreground planning timing", () => {
     ]);
   });
 
-  it("omits unconfigured module timing while retaining an executed no-op projection", async () => {
+  it("retains an executed no-op projection when device sync is unconfigured", async () => {
     vi.spyOn(performance, "now").mockReturnValue(50);
     const logRequests: HostedRuntimeLogRequest[] = [];
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ importedCount: 1, logRequests }));
-    expect(loadHostedDeviceSyncMaintenanceModule).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedDeviceSyncNextWakeAt).not.toHaveBeenCalled();
     expect(foregroundRow(logRequests)).toMatchObject({
       turnTimingPreForegroundMs: 0,
       turnTimingDeviceWakeProjectionMs: 0,
     });
-    expect(foregroundRow(logRequests)).not.toHaveProperty("turnTimingDeviceWakeModuleLoadMs");
-  });
-
-  it("retains contained module-load failure and records its elapsed time", async () => {
-    let clock = 0;
-    vi.spyOn(performance, "now").mockImplementation(() => clock);
-    vi.mocked(isHostedDeviceSyncMaintenanceModuleLoadError).mockReturnValue(true);
-    vi.mocked(loadHostedDeviceSyncMaintenanceModule).mockImplementationOnce(async () => {
-      clock += 17;
-      throw new Error("Synthetic maintenance module load failure");
-    });
-    const logRequests: HostedRuntimeLogRequest[] = [];
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 1, logRequests, resolvedDeviceSync: deviceSync,
-    }));
-    expect(foregroundRow(logRequests)).toMatchObject({
-      turnTimingDeviceWakeModuleLoadMs: 17,
-      turnTimingDeviceWakeProjectionMs: 17,
-    });
-    expect(mocks.resolveHostedDeviceSyncNextWakeAt).not.toHaveBeenCalled();
-    expect(logRequests.flatMap((request) => request.entries))
-      .toContainEqual(expect.objectContaining({ eventCode: "device-sync.module_load_failed" }));
   });
 
   it("preserves a projection error without fabricating foreground completion", async () => {

@@ -25,7 +25,6 @@ import {
   JUNCTION_ECG_BINDING_REASONS,
   JUNCTION_ECG_DIAGNOSTIC_COUNT_LIMIT,
   readSafeJunctionNormalizationDiagnostics,
-  resolveDeviceSyncStoreNextJobWakeAt,
   type DeviceSyncService,
 } from "@murphai/device-syncd/service";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
@@ -112,8 +111,8 @@ import {
   withDeviceSyncPassTimings,
   type DeviceSyncPassTimings,
 } from "./device-sync-pass-timing.ts";
+import { resolveHostedDeviceSyncYieldRetryAt } from "./device-sync-wake-projection.ts";
 
-const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_FALLBACK = "Hosted device-sync job failed.";
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES = 25;
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES = 512 * 1024 * 1024;
@@ -843,39 +842,6 @@ function nonnegativeDurationMs(
   return endMs - startMs;
 }
 
-export function resolveHostedDeviceSyncNextWakeAt(input: {
-  deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
-  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
-  vaultRoot: string;
-}): string | null {
-  if (!input.deviceSyncConfig) {
-    return null;
-  }
-
-  try {
-    // Web's scheduled reconciler owns provider cadence; only unfinished jobs
-    // need a runtime wake. Including cadence creates a connectionless pass.
-    return resolveDeviceSyncStoreNextJobWakeAt({ vaultRoot: input.vaultRoot });
-  } catch (error) {
-    if (input.platform?.logPort) {
-      void writeHostedRuntimeLogBestEffort({
-        entry: {
-          component: "device-sync",
-          eventCode: "device-sync.wake_projection_failed",
-          level: "warn",
-          phase: "invoke",
-          redactedJson: {
-            errorSummary: sanitizeHostedRuntimeDiagnosticText(errorToString(error))
-              ?? "device sync wake projection failed",
-          },
-        },
-        platform: input.platform,
-      });
-    }
-    return resolveHostedDeviceSyncYieldRetryAt();
-  }
-}
-
 function createHostedDeviceSyncYieldPredicate(
   shouldYield: (() => boolean) | null,
   signal: AbortSignal | null,
@@ -1028,10 +994,6 @@ function buildHostedDeviceSyncDirtyAckKey(
   processedRevision: string,
 ): string {
   return `${connectionId}\0${processedRevision}`;
-}
-
-function resolveHostedDeviceSyncYieldRetryAt(now = new Date()): string {
-  return new Date(now.getTime() + HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS).toISOString();
 }
 
 function remainingHostedDeviceSyncDenseRawRetentionDeadlineMs(

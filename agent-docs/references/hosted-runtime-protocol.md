@@ -4946,14 +4946,14 @@ The existing `foreground-delivery-phase-started` row adds fixed optional
 numeric attribution for the interval after the most recent automation lane
 returns: `turnTimingPreForegroundMs` is the monotonic total,
 `turnTimingPreForegroundPreludeMs` covers the intervening foreground/maintenance
-classification, `turnTimingDeviceWakeProjectionMs` covers follow-up wake selection
-(including nested `turnTimingDeviceWakeModuleLoadMs` when configured),
+classification, `turnTimingDeviceWakeProjectionMs` covers follow-up wake selection,
 `turnTimingSystemMailboxWakeProjectionMs` covers the existing mailbox next-wake
 read, and `turnTimingProviderCleanupPlanningMs` covers the existing cleanup plan.
-The total includes adjacent unlabelled work; children are non-exhaustive and the
-module duration is nested within device projection. These numbers do not move
-the existing milestone or delivery anchors, add calls, flush logs, or change
-wake/cleanup behavior. A skipped module load is absent, not zero. The timings
+The total includes adjacent unlabelled work; children are non-exhaustive. Wake
+selection reads the local job store through a module that stays out of the
+deferred device-sync maintenance graph, so it never loads provider code on the
+reply path. These numbers do not move the existing milestone or delivery
+anchors, add calls, flush logs, or change wake/cleanup behavior. The timings
 are emitted only on the existing foreground milestone through its queued log
 owner. They are diagnostic attribution, not a latency improvement.
 

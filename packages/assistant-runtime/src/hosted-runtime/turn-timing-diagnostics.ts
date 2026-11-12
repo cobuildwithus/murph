@@ -14,7 +14,6 @@ export const HOSTED_ASSISTANT_PRE_FOREGROUND_TIMING_FIELDS = [
   "turnTimingPreForegroundMs",
   "turnTimingPreForegroundPreludeMs",
   "turnTimingDeviceWakeProjectionMs",
-  "turnTimingDeviceWakeModuleLoadMs",
   "turnTimingSystemMailboxWakeProjectionMs",
   "turnTimingProviderCleanupPlanningMs",
 ] as const;
