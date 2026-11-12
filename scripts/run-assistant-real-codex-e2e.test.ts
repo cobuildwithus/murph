@@ -16,6 +16,7 @@ describe('assistant real Codex local runner', () => {
   it('accepts pnpm engine warnings before a valid list but rejects arbitrary output', () => {
     const list = JSON.stringify([{ name: 'synthetic live journey' }]);
     expect(requireSingleAssistantRealCodexTest(` WARN  Unsupported engine: synthetic\n${list}`)).toBe('synthetic live journey');
+    expect(requireSingleAssistantRealCodexTest(`../.. |  WARN  Unsupported engine: synthetic\npackages/example |  WARN  Unsupported engine: synthetic\n${list}`)).toBe('synthetic live journey');
     expect(() => requireSingleAssistantRealCodexTest(`unrelated output\n${list}`)).toThrow('unreadable');
   });
 

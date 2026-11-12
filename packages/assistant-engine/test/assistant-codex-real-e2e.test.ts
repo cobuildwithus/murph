@@ -152,7 +152,7 @@ import {
   showWorkoutRecord,
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { getKnowledgePage, upsertKnowledgePage } from '../src/knowledge/service.ts'
 import {
   markAssistantContextSnapshotDirty,
@@ -419,6 +419,7 @@ import { realCodexProviderTomlLines, type RealCodexProviderConfig } from './supp
 import {
   MEAL_INTAKE_BENCHMARK_CASES,
   readMealIntakeBenchmarkEnvironment,
+  preflightSelectedMealIntakeBenchmarks,
   runMealIntakeBenchmarkCase,
 } from './support/meal-intake-benchmark.ts'
 
@@ -435,6 +436,8 @@ import {
 import { listAutomations as listFollowUpAutomations } from '@murphai/query'
 
 import { assertProductionHostedCapabilityParity, PRODUCTION_HOSTED_TOOL_NAMES } from './support/production-hosted-capabilities.js'
+
+beforeAll(async ({}, suite) => preflightSelectedMealIntakeBenchmarks(suite))
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const execFileAsync = promisify(execFile)
@@ -20903,6 +20906,8 @@ describeRealCodex('real Codex private Journal capture recovery e2e', () => {
 
   it('local bundled catalog saves a reported symptom during advice and verifies it without duplication', async () => {
     const config = await resolveRealCodexE2eConfig()
+    const now = new Date()
+    const localDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(now)
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-journal-recovery-e2e-'))
     try {
       await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
@@ -20920,7 +20925,7 @@ describeRealCodex('real Codex private Journal capture recovery e2e', () => {
           assistantCliContract: null,
           channel: 'telegram', conversationScope: 'direct', hostedRuntime: false,
           cliAccess: { rawCommand: 'vault-cli' },
-          currentInstant: '2026-05-18T16:00:00Z', currentLocalDate: '2026-05-18',
+          currentInstant: now.toISOString(), currentLocalDate: localDate,
           currentTimeZone: 'America/New_York',
           onboardingGuidance: false,
         }),
@@ -20951,8 +20956,8 @@ describeRealCodex('real Codex private Journal capture recovery e2e', () => {
       expect(facts[0]?.entityId).toBe(initialFacts[0]?.entityId)
       expect(JSON.stringify(initialFacts[0])).toMatch(/wrist|stiff/iu)
       expect(JSON.stringify(initialFacts[0])).not.toMatch(/weather/iu)
-      const view = buildJournalView(after, [], { asOf: '2026-05-18' })
-      expect(view.days.find((day) => day.date === '2026-05-18')?.events
+      const view = buildJournalView(after, [], { asOf: localDate })
+      expect(view.days.find((day) => day.date === localDate)?.events
         .flatMap((event) => event.records).some((record) => record.id === facts[0]?.entityId)).toBe(true)
       expect(readbackCommands).toMatch(/(?:event (?:list|show)|(?:^|\n)(?:list|show|timeline|search)\b|batch)/u)
       expect(second.finalMessage).toMatch(/saved|recorded|entry|note/iu)
