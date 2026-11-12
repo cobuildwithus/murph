@@ -4858,8 +4858,7 @@ async function runCodexAppServerTurnOnProcess(
       if (
         result.finalActionPatch?.kind === 'none' &&
         (
-          result.finalActionPatch.owner === 'group-email'
-          || result.finalActionPatch.owner === 'current-sender-ask'
+          ['leave-group', 'group-email', 'current-sender-ask'].includes(result.finalActionPatch.owner ?? '')
         )
       ) {
         if (result.externallyVisibleOutput) {

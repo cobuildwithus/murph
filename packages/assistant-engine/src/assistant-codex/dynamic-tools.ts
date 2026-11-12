@@ -1,6 +1,7 @@
 import { readMaterializeVaultMediaToolRequest, materializeVaultMedia } from './dynamic-tools/materialize-vault-media.js'
 import { sleepSummaryCardRequestSchema } from '@murphai/contracts'
 import { resolveTrustedSleepSummaryCard } from './dynamic-tools/sleep-summary-card.js'
+import { readLeaveGroupDynamicToolRequest, executeLeaveGroupTool } from './dynamic-tools/leave-group.js'
 import { readGameDynamicToolRequest, executeGameTool, type GameDynamicRequest } from './dynamic-tools/games.js'
 import { types } from 'node:util'
 import { executeGetSenderContactDynamicTool, readSenderContactDynamicToolRequest, type SenderContactDynamicToolRequest } from './dynamic-tools/sender-contact.js'
@@ -1229,7 +1230,7 @@ export type MurphDynamicToolResponseMediaPatch = {
 export type MurphDynamicToolFinalActionPatch =
   | {
       kind: 'none'
-      owner?: 'current-sender-ask' | 'group-email' | 'vault-file'
+      owner?: 'leave-group' | 'current-sender-ask' | 'group-email' | 'vault-file'
     }
   | {
       kind: 'reply-required'
@@ -1566,6 +1567,7 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | { kind: 'poll'; request: ConversationPollAction }
+  | { kind: 'leave-group'; request: Parameters<typeof executeLeaveGroupTool>[0]['request'] }
   | { kind: 'game'; request: GameDynamicRequest }
   | {
       kind: 'family-plan'
@@ -1734,6 +1736,7 @@ export function readMurphDynamicToolRequest(
   for (const readRequest of [
     readMaterializeVaultMediaToolRequest,
     readConversationPollDynamicToolRequest,
+    readLeaveGroupDynamicToolRequest,
     readGameDynamicToolRequest,
     readDeviceDynamicToolRequest,
     readLabsDynamicToolRequest,
@@ -3660,6 +3663,11 @@ function currentAcceptedInputIds(
   return context?.currentUserActionScope?.()?.acceptedInputIds
 }
 
+type CurrentConversationToolRequest = Extract<MurphDynamicToolRequest, { kind: 'leave-group' | 'game' | 'poll' | 'plan-usage' | 'usage-diagnostics' | 'imessage-contact' }>
+function isCurrentConversationToolRequest(request: MurphDynamicToolRequest): request is CurrentConversationToolRequest {
+  return ['leave-group', 'game', 'poll', 'plan-usage', 'usage-diagnostics', 'imessage-contact'].includes(request.kind)
+}
+
 async function dispatchMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
@@ -3696,6 +3704,7 @@ async function dispatchMurphDynamicToolRequest(
     )
   }
 
+  if (isCurrentConversationToolRequest(input.request)) return executeCurrentConversationTool(input, input.request)
   switch (input.request.kind) {
     case 'invalid-automation-arguments':
       return executeInvalidAutomationArgumentsDynamicTool(input.request)
@@ -3831,12 +3840,6 @@ async function dispatchMurphDynamicToolRequest(
         hostedToolContext: hostedContext,
         request: input.request.request,
       })
-    case 'usage-diagnostics':
-    case 'plan-usage':
-    case 'poll':
-    case 'game':
-    case 'imessage-contact':
-      return await executeCurrentConversationTool(input, input.request)
     case 'subscription':
       return await executeSubscriptionTool({
         hostedToolContext: hostedContext,
@@ -4346,11 +4349,12 @@ function projectHostedGroupPlanLabel(label: string): string {
 
 async function executeCurrentConversationTool(
   input: ExecuteMurphDynamicToolRequestInput,
-  request: Extract<MurphDynamicToolRequest, { kind: 'game' | 'poll' | 'plan-usage' | 'usage-diagnostics' | 'imessage-contact' }>,
+  request: CurrentConversationToolRequest,
 ): Promise<MurphDynamicToolExecutionResult> {
   const hostedToolContext = input.hostedToolContext ?? null
   switch (request.kind) {
     case 'usage-diagnostics': return executeUsageDiagnosticsTool(hostedToolContext, request.request)
+    case 'leave-group': return executeLeaveGroupTool({ request: request.request, context: hostedToolContext })
     case 'game': return executeGameTool({ request: request.request, context: hostedToolContext })
     case 'poll': return executeConversationPollTool({ request: request.request, context: hostedToolContext })
     case 'plan-usage': return executePlanUsageTool({ request: request.request, hostedToolContext })

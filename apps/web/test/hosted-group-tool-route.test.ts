@@ -103,8 +103,8 @@ describe("hosted group tool route", () => {
     expect(response.headers.get('x-murph-recap-scope')).toBe(authorized ? body.origin.eventId : null);
   });
 
-  it("forwards the signed game runtime identity for the mutation transaction fence", async () => {
-    const body = { action: "read_game", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } };
+  it.each(["read_game", "leave_group"])("forwards the signed %s runtime identity for the mutation transaction fence", async action => {
+    const body = { action, ...(action === "leave_group" ? { reason: "bot_loop" } : {}), origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } };
     mocks.handleTool.mockResolvedValue({ action: "read_game", result: { status: "ok", state: { games: [] } } });
     const response = await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}?runtimeAuthority=1&runtimeAttempt=attempt-synthetic&runtimeGeneration=7&runtimeWorkspaceVersion=3`, {
       method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },

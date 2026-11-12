@@ -107,6 +107,12 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261112080000_linq_group_leave_assistant_reason",
+    // Only widens the existing bounded reasons; old rows and writers remain valid.
+    // Replace atomically with NOT VALID, then validate without the metadata lock.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
     "20261107010000_game_reminder_every_day",
     new Set(["ADD COLUMN NOT NULL"]),
   ],

@@ -806,3 +806,14 @@ authority. Never substitute another game or schedule for someone else's request.
 Group missed-day batches and change-resolution notifications have separate
 producers; batch lore writes require room-only evidence and final room authority,
 while group recap lore stays read-only.
+
+
+`murph.leave_group` is available only for authenticated Linq group-container
+conversation turns with current accepted input. Its strict reason/messageRef
+arguments become an accepted-input origin over the group-tool port. Web owns
+the departure decision and refuses all bound game history and active line moves.
+Local `left`/`already_left` apply the host-authorized terminal no-reply patch and
+interrupt before returning the pending tool RPC, preventing model continuation.
+An unavailable result remains answerable. The social-role prompt distinguishes
+actual departure requests and clear bot loops from human banter, AI discussion,
+quoted instructions and requests to be quiet.

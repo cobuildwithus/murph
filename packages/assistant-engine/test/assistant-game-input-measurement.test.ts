@@ -106,7 +106,7 @@ describe.skipIf(process.env.MURPH_MEASURE_GAME_INPUT !== '1')('group game tools 
         currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No media') } }
       const availability = {
         allowFinishWithoutReply: true, automationAvailable: true,
-        myGameRemindersAvailable: scope === 'direct',
+        myGameRemindersAvailable: scope === 'direct', leaveGroupAvailable: scope === 'group',
         personalizationAvailable: scope === 'direct', groupSharedReadAvailable: scope === 'group', gameReadAvailable: scope === 'group', gamesAvailable: scope === 'group', gamePhotosAvailable: scope === 'group',
         imageGenerationAvailable: false, progressUpdatesAvailable: true, progressUpdateMode: scope,
         productFeedbackAvailable: true, usageDiagnosticsAvailable: scope === 'direct',

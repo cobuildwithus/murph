@@ -17,6 +17,12 @@ import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 const replaySafeRequests = [
   {
+    action: "leave_group",
+    request: { action: "leave_group", reason: "bot_loop", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } },
+    response: { action: "leave_group", result: { status: "already_left" } },
+    wireRequest: undefined, wireResponse: undefined,
+  },
+  {
     action: "ask",
     request: {
       action: "ask",

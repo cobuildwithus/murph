@@ -462,6 +462,10 @@ function isConversationGameReadAvailable(
   return input.hostedToolContext?.groupTool != null && scope === 'group' && (acceptedInputIds.length > 0 || scheduledInvocationScope !== null)
 }
 
+function isLeaveGroupAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], authenticatedGroupTurn: boolean, ordinaryInboundTurn: boolean, channel: string | null): boolean {
+  return authenticatedGroupTurn && ordinaryInboundTurn && channel === 'linq' && input.hostedToolContext?.groupTool != null && acceptedInputIds.length > 0
+}
+
 function areConversationGamesAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): boolean {
   return input.hostedToolContext?.groupTool != null && scope === 'group' && acceptedInputIds.length > 0
 }
@@ -1319,6 +1323,7 @@ export async function resolveAssistantRouteTurnPlan(
   let dynamicTools = specializedDynamicTools ?? resolveMurphDynamicTools({
         gameReadAvailable: isConversationGameReadAvailable(input, userActionAcceptedInputIds, conversationScope, scheduledInvocationScope),
         myGameRemindersAvailable: privateGameReminderAvailable(input, conversationScope, userActionAcceptedInputIds),
+        leaveGroupAvailable: isLeaveGroupAvailable(input, userActionAcceptedInputIds, authenticatedGroupProviderTurn, ordinaryInboundTurn, resolvedChannel),
         gamesAvailable: areConversationGamesAvailable(input, userActionAcceptedInputIds, conversationScope),
         gameLoreAvailable: isGameLoreToolDeclared(input, userActionAcceptedInputIds, conversationScope, authenticatedGroupProviderTurn, gameLoreGuidance),
         gamePhotosAvailable: gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope).length > 0,

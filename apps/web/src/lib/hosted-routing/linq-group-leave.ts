@@ -10,12 +10,12 @@ import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
 import { acquireHostedLinqChatOwnershipLockTx } from "./linq-chat-ownership-lock";
 import { deleteExactHostedLinqThreadRouteTx, lockHostedThreadRouteByThreadIdentityTx, type HostedLinqExactThreadRoute } from "./thread-route-store";
 
-export type HostedLinqGroupLeaveReason = "oversized" | "operator_cleanup";
+export type HostedLinqGroupLeaveReason = "oversized" | "operator_cleanup" | "assistant";
 export type HostedLinqGroupLeaveTarget = { chatId: string };
 export type HostedLinqGroupLeaveResult =
   | { status: "left"; postCommitLinqGroupLeave: HostedLinqGroupLeaveTarget }
   | { status: "already_left" }
-  | { status: "unavailable"; reason: "active_game" | "active_move" | "route_changed" };
+  | { status: "unavailable"; reason: "active_game" | "game_bound" | "active_move" | "route_changed" };
 
 function identityKeys(chatId: string | number) {
   return createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId: chatId });
@@ -75,7 +75,7 @@ export async function leaveHostedLinqGroupTx(input: {
   if (expected ? routes.length !== 1 || routes[0]?.containerMemberId !== expected.containerMemberId
     || routes[0]?.threadIdentityLookupKey !== expected.threadIdentityLookupKey : routes.length !== 0)
     return { status: "unavailable", reason: "route_changed" };
-  const conflict = await readLeaveConflict({ identities, containerMemberId: expected?.containerMemberId, prisma });
+  const conflict = await readLeaveConflict({ anyGame: prepared.reason === "assistant", identities, containerMemberId: expected?.containerMemberId, prisma });
   if (conflict) return { status: "unavailable", reason: conflict };
   const inserted = await prisma.hostedLinqGroupLeave.createMany({ data: {
     threadIdentityLookupKey: prepared.threadIdentityLookupKey, chatIdEncrypted: prepared.chatIdEncrypted, reason: prepared.reason,
@@ -90,11 +90,11 @@ export async function leaveHostedLinqGroupTx(input: {
 }
 
 async function readLeaveConflict(input: {
-  identities: string[]; containerMemberId?: string; prisma: Prisma.TransactionClient;
-}): Promise<"active_game" | "active_move" | null> {
+  anyGame: boolean; identities: string[]; containerMemberId?: string; prisma: Prisma.TransactionClient;
+}): Promise<"active_game" | "game_bound" | "active_move" | null> {
   if (input.containerMemberId && await input.prisma.game.findFirst({
-    where: { chatContainerMemberId: input.containerMemberId, status: { in: ["invited", "negotiating", "live"] } }, select: { id: true },
-  })) return "active_game";
+    where: { chatContainerMemberId: input.containerMemberId, ...(input.anyGame ? {} : { status: { in: ["invited", "negotiating", "live"] } }) }, select: { id: true },
+  })) return input.anyGame ? "game_bound" : "active_game";
   if (await input.prisma.hostedLinqGroupLineMove.findFirst({ where: { status: { in: ["reserved", "adopted"] }, OR: [
     ...(input.containerMemberId ? [{ containerMemberId: input.containerMemberId }] : []),
     { fromThreadIdentityLookupKey: { in: input.identities } }, { toThreadIdentityLookupKey: { in: input.identities } },

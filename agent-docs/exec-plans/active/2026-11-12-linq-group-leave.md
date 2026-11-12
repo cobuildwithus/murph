@@ -1,8 +1,123 @@
 # Murph leaves Linq groups
 
-Status: Phase 1 implemented and locally verified; uncommitted parent handoff; Phase 2 not started
+Status: Phase 1 merged and deployed (#4890); Phase 2 implemented, local verification complete, uncommitted parent handoff
 Created: 2026-11-12
 Updated: 2026-11-12
+
+
+## Phase 2 implementation and handoff
+
+- Engine: strict `reason`/`messageRef` tool, authenticated Linq group conversation
+  availability, short social-role guidance and terminal interruption while the
+  tool RPC is pending. Refusal remains answerable. No classifier was added.
+- Hosted execution/runtime/Cloudflare: strict accepted-input request and local
+  outcome schemas, unchanged RCS-compatible forwarding with no room injection,
+  marker-backed one-replay transport classification.
+- Web: callback fence before source decode and again in the mutation transaction;
+  persisted input scoped to the callback container, non-self/non-direct exact
+  route validation, any-game and active-move refusal, marker-backed replay after
+  route deletion, one post-commit provider attempt. Marker stores `assistant`,
+  never the tool's explanation or reason. Reason expansion retains old writers.
+- Lock order: accepted chat commands take runtime/access then route locks in
+  `authorizeGameChatActorTx`, before `commandTransaction` reaches pair/game locks.
+  Discovered candidates, app group creation and inbound invite association take
+  the container member's `FOR KEY SHARE` lock before the route, then pair,
+  audience or game locks. This takes the game's implicit foreign-key lock early,
+  avoiding route-to-member inversion with runtime callbacks. Assistant leave
+  releases its preflight, then takes chat ownership, owner/container access,
+  runtime and route locks; webhook admission already uses chat-before-member.
+  Leave only reads game existence; it takes no pair/audience/game lock. Historical rooms
+  and fresh route-less bootstrap containers retain their existing rules.
+- No production access, actual Linq call, member message, commit, push or PR.
+  Commits, exact-head CI and eligible final ReviewGPT remain with the parent.
+  Keep this plan active for that completion. Frog list succeeded; no new
+  repository friction required a workaround entry.
+- Changelog fragment `quiet-group-departure` describes the public behavior.
+  Parent must add the Phase 2 PR number to `sourcePullRequests` alongside #4890.
+
+### Phase 2 parent review
+
+- `game-service-postgres` "serializes concurrent room binding and reuses a
+  route-less primary across games" failed against the new pair-binding rule,
+  because it passed route-less candidates. Production discovery
+  (`findExistingGameChat` → `exactChat`) only returns rooms that have a route,
+  so the rule stays. The test now gives its candidate rooms routes, then removes
+  them before the third game reuses the bound primary.
+- Migration renamed to `20261112080000_linq_group_leave_assistant_reason`, so
+  its timestamp is not in the future. Changelog copy tightened.
+
+### Phase 2 product walkthrough
+
+Feature: a participant can ask Murph to leave a Linq room silently; the model can
+also leave clear bot loops/spam. Unknown humans, banter, AI discussion/pasted
+text, quoted requests and quiet requests are counterexamples. Private, email,
+Telegram, scheduled, maintenance, recap and output-only turns cannot use it.
+All bound game history and active moves refuse without destructive effects.
+Seven synthetic live journeys passed on `gpt-6.1-sol`, local subscription with
+ambient configuration: bot loop and actual request each called leave once and
+stayed silent; banter, quote, quiet request and unknown humans called it zero
+times; game refusal called once and gave one truthful explanation. Replies were
+reviewed: **Ready** for tested behavior. Local success never claims provider
+removal. Deterministic pending-RPC proof covers `left`, `already_left` and an
+answerable `unavailable`, including no successful tool response that could start
+another model request.
+
+### Phase 2 commands and results
+
+Commands run from the repository root unless a `--dir` is shown. Vitest uses
+`--no-coverage`; shell output redaction does not change the command or result.
+
+| Command | Result |
+| --- | --- |
+| `pnpm exec vitest run --config packages/assistant-engine/vitest.config.ts --no-coverage assistant-leave-group assistant-codex-dynamic-tool-runtime assistant-codex-turn-planning prompt-route-matrix` | 234 passed. |
+| `pnpm exec vitest run --config packages/hosted-execution/vitest.config.ts --no-coverage group-tool-dispatch-parser` | 58 passed. |
+| `pnpm exec vitest run --config packages/assistant-runtime/vitest.config.ts --no-coverage hosted-runtime-group-tool-linq-context hosted-runtime-linq-outbox-regression` | 67 passed. |
+| `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage group-tool-port-replay` | 20 passed. |
+| `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage game-chat-tool game-chat-membership game-chat-bootstrap game-chat-delivery game-chat-lifecycle hosted-group-tool.test production-migration-guard hosted-linq-group-leave-tool hosted-group-tool-route` | 515 passed; three existing opt-in bootstrap/skew cases skipped. |
+| `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage game-chat-tool game-chat-membership game-chat-bootstrap game-chat-delivery game-chat-lifecycle` | Final binding-lock recheck: 208 passed; three existing opt-in cases skipped. |
+| `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage hosted-linq-group-leave-tool hosted-group-tool-route` | 52 passed, including the held-chat regression that prevents member/runtime locks before chat ownership. |
+| `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage game-chat-membership game-chat-delivery changelog-page changelog-fragments` | 79 passed; one existing opt-in case skipped. Changelog generation also passed in Web typecheck. |
+| `MURPH_MEASURE_GAME_INPUT=1 MURPH_VERIFY_GAME_SKEW=1 MURPH_GAME_INPUT_BASE=HEAD pnpm exec vitest run --config packages/assistant-engine/vitest.config.ts --no-coverage assistant-game-input-measurement -t 'complete.*\((direct\|group)\)'` | Two passed; unrelated mixed fixture skipped. Direct complete provider input unchanged at 123,509 bytes. Group grows 157,210 to 159,133 bytes (+1,923, 1.22%); registered tool schema adds 727 bytes. Exact token counts unavailable because no exact model tokenizer is configured. |
+| `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test_linq_group_leave_phase2 MURPH_TEST_POSTGRES_CONCURRENCY=1 MURPH_VITEST_FILE_PARALLELISM=0 MURPH_VITEST_SUITE_CONCURRENCY=0 pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage --silent=true hosted-linq-group-leave-postgres` | 22 passed, including both route-lock race orders, any-status refusal and marker reason. |
+| `MURPH_PRISMA_SKIP_ENV_FILES=1 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test_linq_group_leave_phase2 pnpm --dir apps/web prisma:migrate:deploy` | All 287 migrations and schema contract passed on a fresh isolated local database. |
+| `pnpm --dir apps/web prisma:generate` | Passed. |
+| `pnpm --dir packages/hosted-execution typecheck`; `pnpm --dir packages/assistant-engine typecheck`; `pnpm --dir packages/assistant-runtime typecheck`; `pnpm --dir apps/cloudflare typecheck`; `pnpm --dir apps/web typecheck:prepared` | Passed. |
+| `pnpm --dir apps/web lint` | Passed with existing warnings. |
+| `pnpm complexity:diff`; `pnpm docs:drift`; `git diff --check` | Passed. Complexity adds no debt across 19 source files. |
+
+Live command requested by the brief, `pnpm test:assistant:live -- --test "linq group leave"`,
+was rejected before provider entry because the skill runner permits exactly one
+journey. Ran the same supported command once each with these exact patterns:
+`linq group leave: bot loop`, `linq group leave: human banter`,
+`linq group leave: actual request`, `linq group leave: quoted request`,
+`linq group leave: quiet request`, `linq group leave: unknown humans`,
+`linq group leave: game refusal`. All seven passed without auth-mode switching.
+
+Initial Web typecheck failed because generated Prisma bindings were absent;
+`prisma:generate` resolved it. The first migration attempt identified the
+required predeploy reason-expansion allowance; its focused guard test passes.
+The older Phase 1 test database had the marker table with inconsistent migration
+history (`P3018`, relation exists), so no reset/repair was attempted: a new local
+Phase 2 database was created. Initial game mocks lacked the new route lock and
+were corrected; a race fixture lacked required `joinedAt` and was corrected.
+The maintenance availability fixture needed its required profile and was corrected.
+These setup failures are not claimed as product failures or passing checks.
+
+### Phase 2 skew and deploy order
+
+**Migration/Web first, then Cloudflare/runtime.** Old runner/new Web continues
+using existing egress errors and existing request shapes. Unchanged consumer
+proof passed: `pnpm exec vitest run --config packages/assistant-runtime/vitest.config.ts --no-coverage hosted-runtime-callbacks hosted-runtime-system-mailbox-notification -t "blocks routed Linq provider egress when route authority is revoked|terminally advances a stale frozen referral target"`
+(two passed; unrelated cases skipped). It proves zero Linq provider entry after
+route rejection and durable terminal notification settlement with the next
+mailbox item advancing. Parser regression coverage preserves old actions.
+`pnpm exec vitest run --config packages/assistant-engine/vitest.config.ts --no-coverage assistant-outbox-runtime -t 'replays a tracked'`
+also passed four cases, including definite pre-provider route loss settling a
+tracked receipt after restart without provider reentry. An initial narrower
+filter matched no cases; only the corrected four-case run counts as proof.
+No live deployment or provider-removal outcome was tested. Retain the Phase 1
+Web rollback floor and refresh runtime producers only after Web accepts the new
+action; an older runner simply has no leave tool.
 
 ## Phase 1 implementation notes
 
@@ -107,7 +222,7 @@ pipeline: the group assistant judges conversational reasons for leaving.
 | Only the first marker insert requests provider leave; no automatic retry. | Floods and ambiguous outcomes must not cause repeated calls. |
 | Same-ID re-add stays left, including an own-line `participant.added`. | Avoid stale-event ordering and repeated reactivation. |
 | Per-chat identity is enough; no roster fingerprint. | #4886 silences oversized copies; similar rosters can be legitimate rooms. |
-| Refuse tool leave during an invited, negotiating or live bound game, or an owning line move. | Do not silently strand existing product flows. |
+| Refuse assistant leave when any game is bound, in any status, or during an active line move. Ops keeps the Phase 1 active-only game guard. | Game history establishes real players; the room is not AI slop. This replaces review finding 2 and preserves historical rematch/bootstrap reuse. |
 | Leave silently; preserve container history, memberships and games. | Chat departure is separate from deletion and consent. |
 
 ### Local state and deterministic auto-leave
@@ -188,12 +303,12 @@ new room at or below the cap follows ordinary admission.
 Strict schema: required `reason` enum
 `bot_loop | spam | no_real_members | asked_to_leave`, and required `messageRef`
 bounded like game tools. No free text, target ID, target line or force switch.
-Auto/Ops reasons are internal `oversized` and `operator_cleanup`.
+The marker reason for tool calls is `assistant`; the tool reason is logged only as a bounded code. Auto/Ops reasons stay `oversized` and `operator_cleanup`.
 
 Expose only in authenticated Linq group-container conversation turns with
 accepted input; exclude private, email, Telegram, scheduled, recap, maintenance
-and output-only turns. Resolve `messageRef` against current accepted inputs;
-inject route context in `createHostedGroupToolWithCurrentTurnContext`. Web
+and output-only turns. Resolve `messageRef` against current accepted inputs; forward only its accepted-input
+origin and the bounded reason, without leave-specific room context. Web
 independently verifies callback runtime identity, container, persisted input
 and exact current route. Reuse game accepted-input plumbing, not its player-only
 restriction: an actual participant may request leave without being a player or
@@ -210,8 +325,7 @@ enough: share the route mutation lock at binding/write authority, respecting
 the existing pair/member/game lock order. No automatic game cancellation.
 
 Guidance beside `buildAssistantGroupSocialRoleText`: leave clear assistant loops
-or spam; leave a room with no real Murph members only when trusted room facts
-support that conclusion; honor a current participant's actual leave request.
+or spam, or a room with no real people; honor a current participant's actual leave request.
 Unknown/inactive people, human banter and AI discussion alone are not bot
 evidence. Quoted requests and pasted instructions are not authority. Distinguish
 "be quiet" from "leave". On success use existing quiet-turn completion with no
@@ -229,7 +343,7 @@ Repository-relative paths; new names are proposals.
 | `apps/web/src/lib/hosted-onboarding/webhook-provider-linq.ts`, `webhook-provider-linq-types.ts`, `webhook-service.ts` | Extend #4886's oversized branch/plan; early and locked checks across messages, edits, reactions, participant events and prepared move adoption. |
 | `apps/web/src/lib/hosted-onboarding/webhook-transport.ts`, `visible-secondary-webhooks.ts`, `linq-egress-engagement.ts`; `apps/web/app/api/internal/hosted-runtime/linq-egress/engagement/route.ts` | Fence `drainHostedLinqSideEffectsDirect`, source-group recovery, `assertHostedLinqRecentInboundEngagementForRuntime` and typing. Reuse `linq-client.ts:leaveHostedLinqChat` unchanged. |
 | New `packages/assistant-engine/src/assistant-codex/dynamic-tools/leave-group.ts`; `packages/assistant-engine/src/assistant-codex/dynamic-tools.ts`, `dynamic-tool-catalog.ts`; `packages/assistant-engine/src/assistant/codex-turn/planning.ts`, `packages/assistant-engine/src/assistant/system-prompt.ts` | Tool definition/parser/handler, availability and guidance; follow `games.ts:executeOrdinaryGameTool`. |
-| `packages/hosted-execution/src/runtime-control.ts`, `parsers/runtime-control.ts`; `packages/assistant-runtime/src/hosted-runtime/group-tool-context.ts` | Strict request/response variants and trusted room-context injection. |
+| `packages/hosted-execution/src/runtime-control.ts`, `parsers/runtime-control.ts`; `packages/assistant-runtime/src/hosted-runtime/group-tool-context.ts` | Strict request/response variants; forward accepted-input origin without room-context injection. |
 | `apps/web/app/api/internal/hosted-execution/groups/tool/route.ts`; `apps/web/src/lib/hosted-groups/group-tool.ts`; new `linq-group-leave-tool.ts` beside it | Add leave to explicit runtime-identity forwarding; dispatch, accepted-input authorization and transactional game guard. |
 | `apps/web/src/lib/game/chat-membership.ts`, `chat-tool.ts`, `service.ts` | Audit and enforce common serialization for `readGameChatAuthority`, `bindPairGameChat`, `associateGameChatInviteTx`, `authorizeGameChatActorTx` and `runGameChatUpdate`; a concurrent game cannot bind/start after leave. |
 | `apps/cloudflare/src/runtime-platform/group-tool-port.ts` | Reuse transport; add replay-safe classification only with marker-backed provider deduplication. |
@@ -267,8 +381,8 @@ of the plan, fixtures and PR text. No cleanup is performed in this task.
   `group-tool-port-replay.test.ts`: forged room/input, unsupported origins,
   missing runtime identity, game/move refusals, idempotent success and terminal
   quiet settlement, including old runner/new Web compatibility.
-- Extend assistant-engine `assistant-codex-group-tool.test.ts` and
-  `prompt-route-matrix.test.ts`, then synthetic `assistant-codex-real-e2e.test.ts`
+- Engine `assistant-leave-group.test.ts`, `assistant-codex-dynamic-tool-runtime.test.ts`,
+  `assistant-codex-turn-planning.test.ts` and `prompt-route-matrix.test.ts`, then synthetic `assistant-codex-real-e2e.test.ts`
   journeys: bot loop, human banter, unrecognized humans, actual leave request,
   quoted injection, quiet request and live game. Assert exact tool args/count,
   silence on success and no announcement/private DM.
@@ -277,8 +391,8 @@ Implementation checks: focused Vitest through owning configs (Web uses
 `apps/web/vitest.workspace.ts`), migrated local Postgres proof, relevant
 typechecks/lint, then `pnpm test:assistant:live -- --test "linq group leave"`
 under the assistant-verification skill, with Ready/Hold reply review. Exact-head
-CI and one eligible final ReviewGPT round follow local proof. This plan-only
-task runs no runtime tests, model calls or external review.
+CI and one eligible final ReviewGPT round follow local proof in the parent
+completion session. Phase 2 local evidence is recorded above.
 
 ## Deploy order and risks
 
@@ -323,16 +437,15 @@ needed for these planning-document-only edits.
 
 Response: `audit-packages/plan-linq-group-leave.md` (apollo lane). It confirmed the
 independent marker table (a route needs a container and cascades with it; chat
-health needs real provider facts) and the existing group-tool transport. All
-seven findings are accepted; each cites current source, and none conflicts with
-the owner's direction. Revise the sections above before implementation:
+health needs real provider facts) and the existing group-tool transport. The initial review accepted all seven findings. The Phase 2 owner decision
+below supersedes finding 2 and permits deferral of the runtime halves of 1 and 4:
 
 | # | Finding | Disposition |
 | --- | --- | --- |
-| 1 | Group typing (`channel-activity.ts` `prepareHostedLinqTyping`) starts without route authority; Web unbound-notice dispatch and private recovery are permissive by design. | Accept. Keep bound egress on existing route authority; authorize group typing fail-closed at provider start/refresh; marker checks only at unbound-notice dispatch and source-group recovery. Deploy the typing consumer before any leave producer. |
-| 2 | Game-room reuse (`readPairGameChatTx`, `bindPairGameChat`, rematch, bootstrap) treats a route-less historical room as usable, so a left room can be inherited and re-bootstrapped. | Accept. One binding rule in `game/chat-membership.ts`: provider room needs a current locked route; route-less reuse only with an active unfinished bootstrap. Leave takes the route row lock (`lockHostedThreadRouteByThreadIdentityTx`) before its game query. |
+| 1 | Group typing (`channel-activity.ts` `prepareHostedLinqTyping`) starts without route authority; Web unbound-notice dispatch and private recovery are permissive by design. | Web half shipped in Phase 1. Defer runtime typing by the Phase 2 owner exception: `prepareHostedLinqTyping` delegates group start and refresh to the shared channel activity session; fencing both adds per-refresh Web authority calls and changes session failure/cleanup semantics. Early webhook rejection stops new turns; an already-running typing session can still show a bubble. Bound output remains denied by existing route authority. No typing lock order changes. |
+| 2 | Game-room reuse (`readPairGameChatTx`, `bindPairGameChat`, rematch, bootstrap) treats a route-less historical room as usable, so a left room can be inherited and re-bootstrapped. | Replaced by explicit Phase 2 owner decision: assistant leave refuses any bound game, including settled or void history, because that room has real players. Keep historical rematch/bootstrap binding rules unchanged and Ops active-only. First-time provider-room bindings still serialize their existing route validation with leave using the route row lock; leave reads game existence after that lock. |
 | 3 | A blind-index-only marker is lost once its key leaves the two-key read set. | Accept. Add one purpose-separated encrypted chat-id field (contact-phone-envelope pattern) so rotation can re-derive and reseal. Decide before the first marker write. |
-| 4 | Poll-vote notifications append to the mailbox outside the chat lock. | Accept. Early marker check before `handleHostedLinqNonMessageWebhook`; poll notification admission takes the chat-ownership lock before its route check. |
+| 4 | Poll-vote notifications append to the mailbox outside the chat lock. | Early marker check shipped. Defer notification-admission lock by the Phase 2 owner exception: `maybeNotifyPollResult` prepares destination/completion outside its transaction, then takes active-access locks, validates the route, claims the poll and appends. Adding chat ownership changes that cross-owner lock order while still not canceling already-admitted work. Exposure is one poll notification already in flight; existing route-authority egress denies output and system-mailbox terminal settlement advances it durably. No poll lock changes. |
 | 5 | Returning `left` lets the model continue. | Accept. `left`/`already_left` use the existing terminal external-effect no-reply path; `unavailable` stays answerable. |
 | 6 | Leave-specific room-context injection duplicates the accepted input's authority and rejects RCS. | Accept. Tool sends `{ action: "leave_group", reason, origin: { kind: "accepted_input", assistantInputId } }`; Web derives the target from the persisted input. Drop the `linqThread` injection. |
 | 7 | `releaseHostedLinqRemovedLineRouteTx` refuses completed-move destinations forever. | Accept. Factor the exact compare-and-delete leaf; keep active-move exclusions only; leave the Ops repair wrapper unchanged. |
@@ -356,6 +469,6 @@ Two PRs, so the cleanup of the incident rooms is not held behind the tool.
    removes bound routes with the same typing gap today, and Phase 1's only
    bound-route producer is an operator applying it to three assistant-bot rooms.
 2. **Tool, runtime and game binding.** `murph.leave_group` with accepted-input
-   origin (#6) and terminal no-reply (#5); fail-closed group typing (#1,
-   runtime half); poll notification chat lock (#4, second half); one game-room
-   binding rule (#2). Cloudflare deploys after Web.
+   origin (#6) and terminal no-reply (#5); any-game refusal replacing #2;
+   route locking at first game-binding boundaries. Typing and poll admission
+   are deferred as recorded above. Cloudflare deploys after Web.

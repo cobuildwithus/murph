@@ -2,6 +2,7 @@ import { handleGameChatBootstrapControl } from "../game/chat-bootstrap";
 import { handleGameChatTool } from "../game/chat-tool";
 import type { HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import "server-only";
+import { handleHostedLinqGroupLeaveTool } from "./linq-group-leave-tool";
 import { sharesCompanionContact } from "@murphai/hosted-execution/vault-share";
 
 import {
@@ -275,6 +276,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   my_game_reminders: "personal_active",
+  leave_group: "participant_aware",
   read_game: "participant_aware",
   update_game: "participant_aware",
   game_photo: "participant_aware",
@@ -455,6 +457,7 @@ async function recordHostedRuntimeGroupJournalFact(
 export async function handleHostedRuntimeConversationTool(
   input: HostedRuntimeGroupToolHandlerInput,
 ): Promise<HostedRuntimeGroupToolResponse> {
+  if (input.request.action === "leave_group") return handleHostedLinqGroupLeaveTool({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   if (input.request.action === "game_chat_bootstrap") {
     return handleGameChatBootstrapControl({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
@@ -469,7 +472,7 @@ export async function handleHostedRuntimeConversationTool(
 }
 
 type HostedRuntimeNonGameToolHandlerInput = Omit<HostedRuntimeGroupToolHandlerInput, "request"> & {
-  request: Exclude<HostedRuntimeGroupToolRequest, { action: "read_game" | "update_game" | "game_photo" | "write_recap" | "game_chat_bootstrap" | "my_game_reminders" }>;
+  request: Exclude<HostedRuntimeGroupToolRequest, { action: "leave_group" | "read_game" | "update_game" | "game_photo" | "write_recap" | "game_chat_bootstrap" | "my_game_reminders" }>;
 };
 
 export async function handleHostedRuntimeGroupTool(

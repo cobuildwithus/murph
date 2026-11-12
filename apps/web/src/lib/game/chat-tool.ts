@@ -17,7 +17,7 @@ import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../h
 import { buildHostedMailboxLiveItemWhere, decodeHostedMailboxStoredPayloads, readHostedMailboxConversationWakeByAssistantInputId } from "../hosted-mailbox/store";
 import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
 import { resolveHostedGroupMessageSenderMemberId } from "../hosted-groups/group-message-sender";
-import { assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
+import { lockHostedThreadRouteByThreadIdentityTx, assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { getPrisma } from "../prisma";
 import { readGameChatState, readGameChatProfiles, readGameRecapMaterial, runGameCommand, runGameChatUpdate, sealGameRecap } from "./service";
 import { isGameRecapGenerationRetired } from "./recap-witness";
@@ -180,6 +180,7 @@ export async function authorizeGameChatActorTx(input: Input, tx: Prisma.Transact
   if (!wake || wake.userId !== input.memberId) return null;
   const route = readGameIncomingRoute(wake, input.memberId);
   if (!route) return null;
+  await lockHostedThreadRouteByThreadIdentityTx({ authority: route, prisma: tx });
   await assertHostedThreadRouteEgressAuthority({ authority: route, prisma: tx });
   const actor = await resolveHostedGroupMessageSenderMemberId({ prisma: tx, routeAuthority: route, wake });
   if (!actor) return null;

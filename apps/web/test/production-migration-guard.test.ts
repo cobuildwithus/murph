@@ -684,6 +684,24 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits the group departure reason expansion to constraint replacement", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261112080000_linq_group_leave_assistant_reason";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      await writeMigrationSql(migrationsDir, migrationId, `${sql}\nALTER TABLE hosted_linq_group_leave DROP COLUMN left_at;`);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))
+          .map(({ migrationId: id, reason }) => ({ migrationId: id, reason })),
+        [{ migrationId, reason: "DROP COLUMN" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits many-game compatibility to the two obsolete roster guards", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "game-many-migration-"));
     const migrationId = "20261101230000_game_many_per_pair";

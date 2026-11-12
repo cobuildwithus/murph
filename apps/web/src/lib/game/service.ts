@@ -846,10 +846,10 @@ async function createGroupGame(context: CommandContext, command: Extract<GameCom
   const inviteTokenEncrypted = await seal(gameTarget(target, "invite_token"), token);
   try {
     await commandTransaction(context, async tx => {
+      await chat.revalidate?.(tx);
       await lockGameAudience(tx, prepared.keys.candidates);
       if (await isGameCreationReplay(tx, actor, command.gameId)) return;
       await prepared.revalidate(tx);
-      await chat.revalidate?.(tx);
       const existing = await tx.game.findFirst({ where: { audienceKey: { in: prepared.keys.candidates } }, select: { audienceKey: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
       const audienceKey = existing?.audienceKey ?? prepared.keys.current;
       const count = await tx.game.count({ where: { audienceKey: { in: prepared.keys.candidates }, status: { in: ACTIVE_STATUSES } } });

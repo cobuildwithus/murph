@@ -4942,7 +4942,7 @@ Hosted Linq local group departure is owned by
 `HostedLinqGroupLeave` marker holds a blind thread identity, purpose-separated
 encrypted identity, server timestamp and bounded reason. It survives container
 deletion; contact-privacy rotation re-derives and reseals it before prior-key
-retirement. Chat ownership precedes the route row lock, active game/move checks,
+retirement. Chat ownership precedes the route row lock, game/move checks,
 marker insertion and exact route deletion in one transaction. The removed-line
 repair action keeps its separate policy. Only the winning insert returns an
 ephemeral provider target: one three-second post-commit attempt, no retry or
@@ -4957,15 +4957,34 @@ the route, so a replayed bootstrap for a closed game cannot recreate a left
 room. Attested 1:1 chats skip the marker read. Unbound notices and private
 recovery check the source group before dispatch; bound egress keeps existing
 route authority. Oversized unbound groups on a managed recipient line and the
-Ops `leave_group` action are the Phase 1 producers. Ops uses a full opaque route
+Ops `leave_group` action are the deterministic producers. Ops uses a full opaque route
 ref and reports local and provider outcomes separately. Departure sends no
 announcement or private message. Same-chat re-add remains left.
 
 The additive migration must precede Web deployment, and older route writers
 must drain before the first marker. That first write establishes the compatible
-Web rollback floor. Phase 2 still owns the agent tool, runtime typing fence,
-poll-notification chat lock and common game-binding rule. Phase 1 does not claim
-to cancel accepted work or close those races; its bound producer is operator-only.
+Web rollback floor. The assistant `leave_group` producer deploys after Web.
+It accepts only a bounded reason and a current accepted-input reference from an
+authenticated Linq group conversation. Web fences the callback runtime, decodes
+the persisted container-scoped non-self/non-direct input outside the mutation
+transaction, and derives the exact route from it. No caller-selected room or
+Linq room-context injection is accepted. A validated replay reads the marker
+without needing the deleted route. Any participant may request departure.
+
+Assistant departure refuses every bound game status, including retained history;
+Ops retains its active-only game guard. Both refuse active line moves. New game
+bindings take the container member's foreign-key lock before the route, then
+pair/audience/game locks. Assistant leave takes chat ownership before its
+member/runtime locks, matching webhook admission; the leave owner reads
+game existence without taking a game row lock. Historical rematch/bootstrap reuse
+is unchanged. The stored reason is `assistant`; the model reason is a bounded
+log code only. `left` and `already_left` interrupt the pending tool RPC through
+the host-authorized terminal no-reply path. `unavailable` stays answerable.
+
+Typing start/refresh and an already-running poll notification can still race
+departure. The early webhook fence prevents new turns; existing route-authority
+egress rejects output and settles accepted work durably. This does not cancel
+already-authorized provider calls or guarantee provider removal.
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the first-contact path. It runs after cheap deterministic ingress filters and

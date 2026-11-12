@@ -1,3 +1,4 @@
+import { hostedLeaveGroupRequestSchema, hostedLeaveGroupResponseSchema } from "../leave-group.ts";
 import { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "../game-bootstrap-control.ts";
 import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../game-tools.ts";
 import { parseHostedMailboxLane, parseHostedMailboxKind } from "./mailbox.ts";
@@ -936,6 +937,7 @@ export function parseHostedRuntimeGroupToolRequest(
     record.action,
     "Hosted runtime group tool request action",
   );
+  if (action === "leave_group") return hostedLeaveGroupRequestSchema.parse(record);
   if (action === "game_chat_bootstrap") return hostedGameChatBootstrapRequestSchema.parse(record);
   if (["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders"].includes(action)) return hostedGameToolRequestSchema.parse(record);
   const parsed =
@@ -2861,6 +2863,7 @@ export function parseHostedRuntimeGroupToolResponse(
     "Hosted runtime group tool response action",
   );
 
+  if (action === "leave_group") return hostedLeaveGroupResponseSchema.parse(record);
   if (action === "game_chat_bootstrap") return hostedGameChatBootstrapResponseSchema.parse(record);
   if (["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders"].includes(action)) return hostedGameToolResponseSchema.parse(record);
   if (action === "ask_current_sender") {

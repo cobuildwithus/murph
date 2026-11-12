@@ -117,7 +117,8 @@ function isHostedReplaySafeGroupToolRequest(
     NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
   >[0],
 ): boolean {
-  return request.action === "ask"
+  return request.action === "leave_group"
+    || request.action === "ask"
     || request.action === "handoff"
     || request.action === "ask_current_sender"
     || request.action === "ask_member"
