@@ -276,13 +276,19 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
     if (!saved.count) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
     await recordGameReminderPreferencesTx(tx, actor, command.everyDayGameIds !== undefined);
     // A seat admitted after the recorded choice keeps its own activation defaults.
-    const where = { memberId: actor, game: { status: "live", events: { some: { actor, type: GAME_REMINDER_OFF_CHOICE_EVENT } } } };
-    await tx.gamePlayer.updateMany({ where: { ...where, gameId: { in: command.offGameIds } }, data: { reminderOff: true } });
-    await tx.gamePlayer.updateMany({ where: { ...where, gameId: { notIn: command.offGameIds } }, data: { reminderOff: false } });
-    if (command.everyDayGameIds) {
-      await tx.gamePlayer.updateMany({ where: { ...where, gameId: { in: command.everyDayGameIds } }, data: { reminderEveryDay: true } });
-      await tx.gamePlayer.updateMany({ where: { ...where, gameId: { notIn: command.everyDayGameIds } }, data: { reminderEveryDay: false } });
-    }
+    // Keep choice lists out of the row lookup: sparse event statistics can otherwise
+    // make PostgreSQL repeat a large ID-list bitmap scan for every admitted seat.
+    await tx.$executeRaw`
+      UPDATE game_player AS seat
+      SET reminder_off = seat.game_id = ANY(${command.offGameIds}::text[]),
+        reminder_every_day = CASE WHEN ${command.everyDayGameIds !== undefined}
+          THEN seat.game_id = ANY(${command.everyDayGameIds ?? []}::text[])
+          ELSE seat.reminder_every_day END
+      FROM game
+      WHERE game.id = seat.game_id AND game.status = 'live' AND seat.member_id = ${actor}
+        AND EXISTS (SELECT 1 FROM game_event choice WHERE choice.game_id = game.id
+          AND choice.actor = ${actor} AND choice.type = ${GAME_REMINDER_OFF_CHOICE_EVENT})
+    `;
     return readGameReminders(actor, tx);
   });
 }

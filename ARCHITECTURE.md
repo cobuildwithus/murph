@@ -6886,6 +6886,11 @@ first names and reminder settings. Settings and both chat tools write through
 remaining AI access and usage, and an already deliverable direct thread; the
 game never grants a private conversation. A per-seat `reminder_every_day` option
 changes count-game reminder urgency without changing posting eligibility.
+Saving choices records the ordered per-seat facts first, then updates the member's
+live seats in one parameterized statement with the same live receipt predicate.
+Choice arrays determine assigned values rather than row-lookup membership, so a
+large choice list does not become a repeated bitmap-index probe. Omitted cadence
+preserves its prior value; newly admitted seats without a choice fact are untouched.
 
 The minute drain reserves one `game_private_evening` receipt per member and
 local date, one hour after their saved reminder time, for open games no room
