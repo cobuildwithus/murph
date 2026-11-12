@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "More reliable wearable daily totals",
     "summary": "Water, caffeine, and mindfulness totals can recover when device records cross a timezone boundary.",
-    "details": "Murph waits for a complete day before replacing its total. If a refresh is interrupted or unavailable, your existing data stays in place while it retries.",
+    "details": "Murph waits for a complete day before replacing its total, including when device records arrive in different timestamp formats. If a refresh is interrupted or unavailable, your existing data stays in place while it retries.",
     "relevanceTags": [
       "wearables",
       "reliability"

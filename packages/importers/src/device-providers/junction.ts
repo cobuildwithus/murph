@@ -2368,9 +2368,12 @@ export function selectJunctionSparseCalendarDayRecords(
   return records.filter((record) => {
     const entry = asPlainObject(record);
     if (!entry) return true;
-    const startRaw = firstStringFromPaths(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS);
+    // The SDK decodes endpoints as Dates before snapshot sanitization. Resolve
+    // them here too so valid adjacent rows cannot bypass day selection.
+    const startRaw = firstJunctionCalendarSelectionTimestamp(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS);
     const startAt = resolveSafeTimestamp(startRaw);
-    const endAt = resolveSafeTimestamp(firstStringFromPaths(entry, JUNCTION_INTERVAL_END_TIMESTAMP_PATHS));
+    const endRaw = firstJunctionCalendarSelectionTimestamp(entry, JUNCTION_INTERVAL_END_TIMESTAMP_PATHS);
+    const endAt = resolveSafeTimestamp(endRaw);
     if (!startRaw || !startAt || !endAt || Date.parse(endAt) < Date.parse(startAt)) return true;
     const timestamp = resolveJunctionSparseIntervalTimestamp(entry, startRaw, {}, input.sourceProviderSlug);
     const { dayKey } = resolveJunctionTimeseriesAggregateDay(entry, timestamp, startAt, input.defaultTimeZone);
@@ -2379,6 +2382,15 @@ export function selectJunctionSparseCalendarDayRecords(
     const calendarShift = dayKey ? Math.abs(Date.parse(dayKey) - Date.parse(startAt.slice(0, 10))) : Number.NaN;
     return !dayKey || calendarShift > 86_400_000 || dayKey === input.dayKey;
   });
+}
+
+function firstJunctionCalendarSelectionTimestamp(entry: PlainObject, paths: readonly string[]): string | undefined {
+  for (const path of paths) {
+    const value = readPath(entry, path);
+    const raw = value instanceof Date ? normalizeTimestamp(value) : stringId(value);
+    if (raw) return raw;
+  }
+  return undefined;
 }
 
 function assertJunctionSparseCalendarRepairRowsValid(input: {
