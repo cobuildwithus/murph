@@ -58,7 +58,8 @@ it.skipIf(!enabled).each([true, false])(
       const item = await prisma.$transaction(tx => appendHostedMailboxEnvelopeTx({ envelope, tx }));
       const request = () => new Request("https://web.example.test/api/internal/hosted-runtime/linq-egress/engagement", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ authorityCheckOnly: false, target, targetKind: "thread",
+        // The runner sends the fallback flag on direct replies; a claiming call ignores it.
+        body: JSON.stringify({ authorityCheckOnly: false, target, targetKind: "thread", homeRouteFallbackAllowed: threadIsDirect,
           replyToMessageId: messageId, answeredMailboxItemIds: [item.item.id], idempotencyKey, intentId: idempotencyKey }),
       });
       const first = await POST(request());
@@ -75,6 +76,18 @@ it.skipIf(!enabled).each([true, false])(
       expect(replay.status).toBe(200);
       expect(await replay.json()).toEqual({ ...claimed, providerDispatchClaimed: false });
       expect(await rows()).toEqual(before);
+      // A claiming call never re-homes: an unowned chat is rejected and nothing is claimed.
+      const stale = `reply-claim-stale-${randomUUID()}`;
+      const rejected = await POST(new Request("https://web.example.test/api/internal/hosted-runtime/linq-egress/engagement", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ authorityCheckOnly: false, target: stale, targetKind: "thread", homeRouteFallbackAllowed: true,
+          replyToMessageId: `reply-claim-unknown-${randomUUID()}`, idempotencyKey: `assistant-outbox:${randomUUID()}`,
+          intentId: `assistant-outbox:${randomUUID()}` }),
+      }));
+      expect(rejected.status).toBeGreaterThanOrEqual(400);
+      expect(await prisma.hostedLinqDelivery.count({
+        where: { linqChatLookupKey: createHostedLinqChatLookupKey(stale)! },
+      })).toBe(0);
     } finally {
       await prisma.hostedLinqDelivery.deleteMany({ where: { linqChatLookupKey: chatKey } });
       await prisma.hostedThreadContainer.deleteMany({ where: { memberId } });

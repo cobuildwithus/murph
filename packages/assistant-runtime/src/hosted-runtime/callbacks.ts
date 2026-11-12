@@ -4927,9 +4927,10 @@ function createHostedAssistantLinqSendDependency(input: {
     const media = request.media ?? [];
     const answeredMailboxItemIds = request.answeredMailboxItemIds ?? [];
     const includesVaultFile = media.some((item) => item.kind === "vault_file");
+    // A reply anchored to an inbound goes to that inbound's chat. Web never
+    // re-homes a claiming call, so a home-route fallback flag changes nothing here.
     const claimBeforeBuild = !!deliveryContext?.target
       && !!request.replyToMessageId?.trim()
-      && request.homeRouteFallbackAllowed !== true
       && request.card == null
       // Media is fetched or loaded before the first provider request. Claiming
       // ahead of that work could leave a dispatch fence with no provider entry.
