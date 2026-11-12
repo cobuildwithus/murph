@@ -16,6 +16,19 @@ retry owners record acceptance; later notifications derive bounded context
 from those receipts. Pending text never counts as a prior send, and a failed
 send creates no indefinite scheduling barrier.
 
+Ordinary Linq text sends to the current delivery context claim Web
+egress authority once, before building the provider request. A reply must carry
+its matching inbound message ID; sends without one retain route/alias resolution
+through the existing two calls. The matching context accepts thread and explicit
+targets; participant targets cannot match.
+Home-route fallback, cards, any media, reviewed/private Assistant Ask
+completions, progress updates, reactions and voice memos keep their existing
+authority ordering. Web must return the resolved route even for an already
+started claim; legacy already-started errors without a route fail closed.
+Provider-entry liveness checks and attempt stamping remain at every fetch.
+Dispatch-fence timing begins with the claim; ordinary sends report zero
+route-authority-check time. The direct iMessage turn-commit probe is unchanged.
+
 Stopping the active mailbox watcher cancels its system HTTP fetch, preserving
 the system watermark for retry. Conversation imports keep their completion
 boundary, and stop still joins in-flight canonical persistence or rollback.

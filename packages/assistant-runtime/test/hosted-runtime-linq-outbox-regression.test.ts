@@ -1,4 +1,5 @@
 import { renderAssistantResponseCardText } from "@murphai/operator-config/assistant-response-cards";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -6,6 +7,7 @@ import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { buildHostedLinqLinkDelayNotice } from "../src/hosted-runtime/linq-link-delay-notice.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 
 import {
   createAssistantOutboxIntent,
@@ -61,7 +63,136 @@ const HOSTED_DIRECT_APP_CARD: HostedAssistantResponseCard = {
 
 afterEach(async () => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   await Promise.all(cleanupTasks.splice(0).map((cleanup) => cleanup()));
+});
+
+it.each([
+  { threadIsDirect: true, withMedia: false }, { threadIsDirect: false, withMedia: false },
+  { threadIsDirect: true, withMedia: true }, { threadIsDirect: false, withMedia: true },
+])("claims a text reply in one call and keeps two calls for media (direct=$threadIsDirect, media=$withMedia)", async ({ threadIsDirect, withMedia }) => {
+  const fixture = await createHostedLinqAttachmentFixture({ imageCount: 0,
+    key: "one-claim", target: "synthetic-current-chat", message: "Synthetic reply." });
+  const replyToMessageId = "synthetic-inbound-message";
+  const media: HostedAssistantDeliveryMedia[] = withMedia
+    ? [{ kind: "image", url: "https://cdn.example.test/synthetic.png", alt: "Synthetic image", source: "synthetic" }] : [];
+  await saveAssistantOutboxIntent(fixture.vaultRoot, { ...fixture.intent, threadIsDirect, replyToMessageId, media });
+  fixture.effect = { ...fixture.effect, payload: { ...fixture.effect.payload, threadIsDirect, replyToMessageId, media } };
+  const context = { ...fixture.linqDeliveryContext, threadIsDirect, replyToMessageId };
+  let monotonicMs = 100;
+  vi.spyOn(performance, "now").mockImplementation(() => monotonicMs);
+  const logPort = { write: vi.fn(async () => ({ loggedCount: 1 })) };
+  const order: string[] = [];
+  const assertLinqRecentInboundEngagement = vi.fn<NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["assertLinqRecentInboundEngagement"]>>(async request => {
+    order.push(request.authorityCheckOnly ? "probe" : "claim");
+    // A text reply claims with no prior route read; media keeps the route read first.
+    expect(request.expectedResolvedRoute === undefined).toBe(!withMedia || request.authorityCheckOnly);
+    expect(request.homeRouteFallbackAllowed).toBe(false);
+    monotonicMs += 40;
+    return { providerDispatchClaimed: true, resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request, {
+      threadIsDirect, directRecipientPhoneNumber: threadIsDirect ? "+15550000001" : null,
+    }) };
+  });
+  const effectsPort = createHostedRuntimeEffectsPortStub({ assertLinqRecentInboundEngagement });
+  await assertHostedAssistantLinqTurnCommitAuthority({ effectsPort, linqDeliveryContexts: [context], signal: null });
+  const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+    order.push("provider");
+    expect(String(request)).toContain(`/chats/${fixture.target}/messages`);
+    expect(JSON.parse(await readFetchRequestBody(request, init))).toMatchObject({ message: {
+      idempotency_key: `assistant-outbox:${fixture.intent.intentId}`,
+    } });
+    return new Response(JSON.stringify({ message: { id: "synthetic-accepted-message" } }));
+  });
+  const outcomes = await drainHostedPreparedAssistantDeliveries({
+    ...buildHostedLinqDrainInput({ fixture, providerFetch, publicInternetFetch: vi.fn<typeof fetch>() }),
+    linqDeliveryContext: context, effectsPort,
+    deliveryTraceContext: { runtimeAttemptId: "synthetic-reply-attempt", latencyTracePort: null },
+    platform: { logPort },
+  });
+  expect(outcomes[0]?.deliveryStatus).toBe("sent");
+  // Direct replies start with the turn-commit probe; media adds the route read.
+  expect(order).toEqual([
+    ...(threadIsDirect ? ["probe"] : []), ...(withMedia ? ["probe"] : []), "claim", "provider",
+  ]);
+  expect(providerFetch).toHaveBeenCalledOnce();
+  await drainHostedRuntimeLogWritesBestEffort();
+  expect(logPort.write).toHaveBeenCalledWith(expect.objectContaining({ entries: [expect.objectContaining({
+    redactedJson: expect.objectContaining({ deliveryProviderEntryFenceMs: 40, deliveryRouteAuthorityCheckMs: withMedia ? 40 : 0 }),
+  })] }));
+});
+
+it("keeps two calls for an unanchored group alias even with a matching stored delivery context", async () => {
+  const fixture = await createHostedLinqAttachmentFixture({ imageCount: 0,
+    key: "stored-group-alias", target: "synthetic-retired-chat", message: "Synthetic group update." });
+  await saveAssistantOutboxIntent(fixture.vaultRoot, { ...fixture.intent, threadIsDirect: false });
+  fixture.effect = { ...fixture.effect, payload: { ...fixture.effect.payload, threadIsDirect: false } };
+  const resolvedRoute = buildHostedRuntimeResolvedLinqRoute({ target: "synthetic-current-chat" }, {
+    conversationThreadId: fixture.target, threadIsDirect: false, directRecipientPhoneNumber: null,
+  });
+  const assertLinqRecentInboundEngagement = vi.fn<NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["assertLinqRecentInboundEngagement"]>>(async request => {
+    if (request.authorityCheckOnly) {
+      expect(request.target).toBe(fixture.target);
+      expect(request.expectedResolvedRoute).toBeUndefined();
+    } else {
+      expect(request.target).toBe(resolvedRoute.target);
+      expect(request.expectedResolvedRoute).toEqual(resolvedRoute);
+    }
+    return { providerDispatchClaimed: true, resolvedRoute };
+  });
+  const providerFetch = vi.fn<typeof fetch>(async request => {
+    expect(String(request)).toContain(`/chats/${resolvedRoute.target}/messages`);
+    return new Response(JSON.stringify({ message: { id: "synthetic-alias-accepted" } }));
+  });
+  const outcomes = await drainHostedPreparedAssistantDeliveries({
+    ...buildHostedLinqDrainInput({ fixture, providerFetch, publicInternetFetch: vi.fn<typeof fetch>() }),
+    linqDeliveryContext: { ...fixture.linqDeliveryContext, threadIsDirect: false, routeAuthority: {
+      channel: "linq", accountLookupKey: "synthetic-line-lookup", containerMemberId: "synthetic-container", threadId: fixture.target,
+    } },
+    effectsPort: createHostedRuntimeEffectsPortStub({ assertLinqRecentInboundEngagement }),
+  });
+  expect(outcomes[0]?.deliveryStatus).toBe("sent");
+  expect(assertLinqRecentInboundEngagement.mock.calls.map(([request]) => request.authorityCheckOnly)).toEqual([true, false]);
+  expect(providerFetch).toHaveBeenCalledOnce();
+});
+
+it("retries a local failure after the claim to one Linq request without stamping an attempt early", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const fixture = await createHostedLinqAttachmentFixture({ imageCount: 0,
+    key: "claim-before-local-failure", target: "synthetic-retry-chat", message: "Synthetic reply." });
+  const replyToMessageId = "synthetic-retry-inbound";
+  await saveAssistantOutboxIntent(fixture.vaultRoot, { ...fixture.intent, replyToMessageId });
+  fixture.effect = { ...fixture.effect, payload: { ...fixture.effect.payload, replyToMessageId } };
+  const controller = new AbortController();
+  const localFailure = new VaultCliError("SYNTHETIC_LIVENESS_LOST", "Synthetic liveness loss after claim", { retryable: true });
+  let claimed = false;
+  const assertLinqRecentInboundEngagement = vi.fn<NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["assertLinqRecentInboundEngagement"]>>(async request => {
+    expect(request.authorityCheckOnly).toBe(false);
+    expect(request.expectedResolvedRoute).toBeUndefined();
+    const providerDispatchClaimed = !claimed;
+    claimed = true;
+    if (providerDispatchClaimed) controller.abort(localFailure);
+    return { providerDispatchClaimed, resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request) };
+  });
+  const recordLinqDeliveryOutcome = vi.fn(async () => {});
+  const providerFetch = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ message: { id: "synthetic-retry-accepted" } })));
+  const input = {
+    ...buildHostedLinqDrainInput({ fixture, providerFetch, publicInternetFetch: vi.fn<typeof fetch>() }),
+    effectsPort: createHostedRuntimeEffectsPortStub({ assertLinqRecentInboundEngagement, recordLinqDeliveryOutcome }),
+    linqDeliveryContext: { ...fixture.linqDeliveryContext, replyToMessageId },
+  };
+  await expect(drainHostedPreparedAssistantDeliveries({ ...input, signal: controller.signal })).rejects.toBe(localFailure);
+  expect(assertLinqRecentInboundEngagement).toHaveBeenCalledOnce();
+  expect(providerFetch.mock.calls.filter(([request]) => String(request).endsWith("/messages"))).toHaveLength(0);
+  expect(recordLinqDeliveryOutcome).not.toHaveBeenCalled();
+  const pending = await readAssistantOutboxIntent(fixture.vaultRoot, fixture.intent.intentId);
+  expect(pending?.deliveryConfirmationPending).toBe(false);
+  expect(pending?.status).toBe("retryable");
+  if (!pending?.nextAttemptAt) throw new Error("Expected a scheduled pre-provider retry");
+  vi.setSystemTime(new Date(pending.nextAttemptAt));
+  expect((await drainHostedPreparedAssistantDeliveries(input))[0]?.deliveryStatus).toBe("sent");
+  expect(assertLinqRecentInboundEngagement).toHaveBeenCalledTimes(2);
+  expect(providerFetch.mock.calls.filter(([request]) => String(request).endsWith("/messages"))).toHaveLength(1);
+  expect(recordLinqDeliveryOutcome).toHaveBeenCalledOnce();
 });
 
 it("checks exact Web ownership before a direct iMessage turn can commit", async () => {

@@ -16436,18 +16436,11 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
+    expect(assertRecentInbound).toHaveBeenCalledOnce();
     expect(assertRecentInbound).toHaveBeenLastCalledWith({
       authorityCheckOnly: false,
       directRecipientPhoneNumber: "+15550001",
-      expectedResolvedRoute: {
-        conversationThreadId: null,
-        directRecipientPhoneNumber: "+15550001",
-        fromPhoneNumber: "+15550002",
-        target: "linq_chat_current",
-        targetKind: "thread",
-        threadIsDirect: true,
-      },
-      fromPhoneNumber: "+15550002",
+      fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -16459,7 +16452,7 @@ describe("hosted runtime callbacks", () => {
     });
     expect(assertRecentInbound.mock.calls.map(([request]) =>
       request.authorityCheckOnly
-    )).toEqual([true, false]);
+    )).toEqual([false]);
     expect(assertRecentInbound.mock.invocationCallOrder[0] ?? 0)
       .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
     expect(outcomes).toEqual([
@@ -16557,17 +16550,10 @@ describe("hosted runtime callbacks", () => {
     });
     await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
+    expect(assertRecentInbound).toHaveBeenCalledOnce();
     expect(assertRecentInbound).toHaveBeenLastCalledWith({
       authorityCheckOnly: false,
       directRecipientPhoneNumber: "+15550000001",
-      expectedResolvedRoute: {
-        conversationThreadId: null,
-        directRecipientPhoneNumber: "+15550000001",
-        fromPhoneNumber: "+15559990000",
-        target: "linq_chat_a",
-        targetKind: "thread",
-        threadIsDirect: true,
-      },
       fromPhoneNumber: "+15559990000",
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_123",
@@ -16688,7 +16674,7 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
     });
 
-    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
+    expect(assertRecentInbound).toHaveBeenCalledOnce();
     for (const [request] of assertRecentInbound.mock.calls) {
       expect(request).toMatchObject({
         answeredMailboxItemIds: [
@@ -16953,18 +16939,11 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
+    expect(assertRecentInbound).toHaveBeenCalledOnce();
     expect(assertRecentInbound).toHaveBeenLastCalledWith({
       authorityCheckOnly: false,
       directRecipientPhoneNumber: "+15550001",
-      expectedResolvedRoute: {
-        conversationThreadId: null,
-        directRecipientPhoneNumber: "+15550001",
-        fromPhoneNumber: "+15550002",
-        target: "linq_chat_current",
-        targetKind: "thread",
-        threadIsDirect: true,
-      },
-      fromPhoneNumber: "+15550002",
+      fromPhoneNumber: null,
       homeRouteFallbackAllowed: false,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -17178,7 +17157,7 @@ describe("hosted runtime callbacks", () => {
     ]);
 
     expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
-    expect(assertRecentInbound).toHaveBeenCalledTimes(3);
+    expect(assertRecentInbound).toHaveBeenCalledTimes(2);
   });
 
   it("authorizes routed Linq sends before vault-file approval or reads", async () => {
