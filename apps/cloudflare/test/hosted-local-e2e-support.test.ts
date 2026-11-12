@@ -954,6 +954,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && !name.startsWith("murph.connected_apps_")
       && !hostedGroupFamilyToolNames.includes(name)
       && name !== "murph.group_room_model"
+      && name !== "murph.leave_group"
       && name !== "murph.read_game"
       && name !== "murph.update_game"
       && name !== "murph.my_game_reminders"
@@ -992,6 +993,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       gamePhotosAvailable: true,
       myGameRemindersAvailable: true,
       groupRoomModelAvailable: true,
+      leaveGroupAvailable: true,
       imessageContactAvailable: true,
       messageTargetingAvailable: true,
       pendingVaultFilesAvailable: true,
@@ -1016,6 +1018,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames)
       .toEqual(expect.arrayContaining(hostedGroupFamilyToolNames));
     expect(allToolNames).toContain("murph.group_room_model");
+    expect(allToolNames).toContain("murph.leave_group");
     expect(allToolNames).toContain("murph.read_game");
     expect(allToolNames).toContain("murph.update_game");
     expect(allToolNames).toContain("murph.game_lore");

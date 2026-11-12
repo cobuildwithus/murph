@@ -46,7 +46,8 @@ export async function handleHostedLinqGroupLeaveTool(input: {
     if (!expected) return { status: "unavailable" as const, reason: "route_changed" as const };
     return leaveHostedLinqGroupTx({ expected, prepared, prisma: tx });
   });
-  console.info("Hosted assistant group departure outcome.", { reason: input.request.reason, status: result.status });
+  const departureReason = input.request.reason;
+  console.info("Hosted assistant group departure outcome.", { reason: departureReason, status: result.status });
   if (result.status === "left") await requestHostedLinqGroupLeaveAfterCommit(result.postCommitLinqGroupLeave);
   if (result.status === "unavailable") return unavailable(result.reason === "active_game" ? "game_bound" : result.reason);
   return { action: "leave_group", result: { status: result.status } };
