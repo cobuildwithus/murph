@@ -6,7 +6,7 @@ import {
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE,
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
   HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
-  HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
+  HOSTED_WEB_REQUEST_MAX_BYTES,
 } from "@murphai/hosted-execution/runtime-control";
 import { HOSTED_RUNTIME_GROUP_TOOL_PATH } from "@murphai/hosted-execution/routes";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -79,24 +79,17 @@ describe("hosted group tool route", () => {
     expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({ gameMultiplayer: enabled, request: body }));
   });
 
-  it("accepts a maximum-size recap image only through the recap upload protocol", async () => {
+  it.each(["", "?recapMedia=1"])("accepts a maximum-size recap image with new and old runner queries (%s)", async query => {
     const body = { action: "read_game", origin: { kind: "game_recap", gameId: "synthetic-game", eventId: "game-recap:synthetic-game" },
       recapRead: { kind: "upload", slot: "scene-0", mediaType: "image/jpeg",
         referenceIds: Array.from({ length: 16 }, (_, i) => i.toString(16).repeat(64)),
         bytes: Buffer.alloc(2 * 1024 * 1024).toString("base64") } };
     mocks.handleTool.mockResolvedValue({ action: "read_game", result: { status: "ok", recapGame: {} } });
-    const request = (query: string) => new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}${query}`, {
+    const request = new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}${query}`, {
       method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
     });
-    expect((await route.POST(request("?recapMedia=1"))).status).toBe(200);
+    expect((await route.POST(request)).status).toBe(200);
     expect(mocks.handleTool).toHaveBeenCalledWith(expect.objectContaining({ request: body }));
-    mocks.handleTool.mockClear();
-    expect((await route.POST(request(""))).ok).toBe(false);
-    expect(mocks.handleTool).not.toHaveBeenCalled();
-    expect((await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}?recapMedia=1`, {
-      method: "POST", body: JSON.stringify({ action: "read_current" }),
-    }))).ok).toBe(false);
-    expect(mocks.handleTool).not.toHaveBeenCalled();
   });
 
   it.each([true, false])('grants recap media scope only after authorized material is returned (authorized=%s)', async authorized => {
@@ -164,7 +157,7 @@ describe("hosted group tool route", () => {
     const payloadBytes = new TextEncoder().encode(payloadText).byteLength;
     expect(payloadBytes).toBeGreaterThan(8 * 1_024);
     expect(payloadBytes).toBeLessThanOrEqual(
-      HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
+      HOSTED_WEB_REQUEST_MAX_BYTES,
     );
     const request = new Request(
       `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
@@ -179,7 +172,7 @@ describe("hosted group tool route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.requireJsonCallback).toHaveBeenCalledWith(request, {
-      maxBodyBytes: HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
+      maxBodyBytes: HOSTED_WEB_REQUEST_MAX_BYTES,
     });
     expect(mocks.handleTool).toHaveBeenCalledWith({
       gameMultiplayer: false,

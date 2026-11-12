@@ -71,7 +71,7 @@ export function createHostedRuntimeGroupToolPort(input: {
         fetchImpl: input.fetchImpl,
         route: bindHostedRunnerWebControlRoutePath(
           HOSTED_RUNNER_WEB_CONTROL_ROUTES.groupTool,
-          buildHostedRuntimeGroupToolPath(request.action === "read_game" && request.recapRead?.kind === "upload"),
+          buildHostedRuntimeGroupToolPath(),
         ),
         replayOnceOnRetryableFailure: isHostedReplaySafeGroupToolRequest(request),
         ...(request.action === "read_game" && request.origin.kind === "game_recap" ? { sensitiveResponseBody: { maxBytes: 6 * 1024 * 1024 } } : {}),
@@ -124,10 +124,9 @@ function isHostedReplaySafeGroupToolRequest(
     || request.action === "record_current_sender_daily_metric";
 }
 
-function buildHostedRuntimeGroupToolPath(recapMedia = false): string {
+function buildHostedRuntimeGroupToolPath(): string {
   const params = new URLSearchParams();
   params.set("gameMultiplayer", "1");
-  if (recapMedia) params.set("recapMedia", "1");
   params.set(
     HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
     HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,

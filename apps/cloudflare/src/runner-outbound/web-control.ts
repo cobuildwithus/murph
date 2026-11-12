@@ -27,10 +27,9 @@ import {
   parseHostedVaultShareEffectDeadlineAtEpochMs,
 } from "@murphai/hosted-execution/vault-share";
 import {
-  HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH
 } from "@murphai/hosted-execution/routes";
-import { HOSTED_RUNTIME_RECAP_UPLOAD_REQUEST_MAX_BYTES } from "@murphai/hosted-execution/runtime-control";
+import { HOSTED_WEB_REQUEST_MAX_BYTES } from "@murphai/hosted-execution/runtime-control";
 import {
   createAssistantUsageReportingUserId,
 } from "@murphai/hosted-execution/assistant-usage";
@@ -67,8 +66,6 @@ import {
   HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
   readHostedRuntimeFetchCorrelationId,
 } from "./headers.ts";
-
-const HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES = 256 * 1024;
 
 export async function handleRunnerWebControlRequest(input: {
   caller?: RuntimeProviderCaller;
@@ -162,7 +159,7 @@ export async function handleRunnerWebControlRequest(input: {
   let body: string | undefined;
   try {
     body = input.request.method === "POST"
-      ? await readOptionalHostedRunnerWebControlBody(input.request, input.url.pathname)
+      ? await readOptionalHostedRunnerWebControlBody(input.request)
       : undefined;
     body = augmentHostedRunnerWebControlBody({
       body,
@@ -457,11 +454,9 @@ function forceHostedRunnerRuntimeSnapshotCredentialMaterial(body: string): strin
   });
 }
 
-async function readOptionalHostedRunnerWebControlBody(request: Request, path: string): Promise<string | undefined> {
+async function readOptionalHostedRunnerWebControlBody(request: Request): Promise<string | undefined> {
   const bodyText = await readRequestBodyText(request, {
-    limitBytes: path === HOSTED_RUNTIME_GROUP_TOOL_PATH
-      ? HOSTED_RUNTIME_RECAP_UPLOAD_REQUEST_MAX_BYTES
-      : HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES,
+    limitBytes: HOSTED_WEB_REQUEST_MAX_BYTES,
   });
   return bodyText.length > 0 ? bodyText : undefined;
 }
