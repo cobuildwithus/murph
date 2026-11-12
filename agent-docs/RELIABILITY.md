@@ -1961,6 +1961,9 @@ Current product admission, delivery and native runtime safety rules remain.
   offsets up to 24 hours. Source lifecycle is rechecked before canonical writes.
   Missing or malformed intervals remain strict failures; only valid neighboring
   days are excluded. A failed collection cannot produce an authoritative empty day.
+  Source-day selection accepts the SDK's decoded Date endpoints through the
+  existing timestamp normalizer before snapshot sanitization; string endpoints
+  keep their original timezone semantics and malformed rows remain strict.
   Day mismatches additionally report the selected `normalizationDayBasis`
   (explicit calendar, timestamp calendar, source offset, vault timezone, UTC,
   or missing) and UTC/resolved-day relations (before, equal, after, or missing)
