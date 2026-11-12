@@ -8,6 +8,9 @@ export { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSc
 export type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse, HostedGameChatBootstrapResult } from "./game-bootstrap-control.ts";
 export { GAME_PRIZE_WORDS, GAME_LIVE_LORE_GUIDANCE, GAME_ROOM_FAR_APART_HOURS, gameZoneSpreadHours, buildGameProposalInstructions, buildGameTalkInstructions, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameChangeResolvedInstructions, buildGameInviteCancelledInstructions, buildGameCalledOffInstructions, buildGameMissedDayInstructions, buildGameEveningCheckInInstructions, buildGameRecapInstructions } from "./game-chat-notifications.ts";
 export type { GameNoticeRoom } from "./game-chat-notifications.ts";
+import type { HostedLeaveGroupRequest, HostedLeaveGroupResponse } from "./leave-group.ts";
+export { hostedLeaveGroupReasonSchema, hostedLeaveGroupRequestSchema, hostedLeaveGroupResponseSchema } from "./leave-group.ts";
+export type { HostedLeaveGroupRequest, HostedLeaveGroupResponse } from "./leave-group.ts";
 import type { HostedGameToolRequest, HostedGameToolResponse } from "./game-tools.ts";
 export { GAME_RECAP_GENERATION_RETIRED, parseGameRecapEventId, hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema, hostedGamePhotoSchema, hostedGameRecapSchema, hostedGameRecapWriterSchema } from "./game-tools.ts";
 export type { HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate, HostedGamePhoto, HostedGameChatState, HostedGameRecap } from "./game-tools.ts";
@@ -1314,6 +1317,7 @@ export type HostedRuntimeGroupParticipantDisplayNamesResult =
 
 export type HostedRuntimeGroupToolRequest =
   | HostedGameChatBootstrapRequest
+  | HostedLeaveGroupRequest
   | HostedGameToolRequest
   | {
       action: "ask";
@@ -1515,6 +1519,7 @@ export type HostedRuntimeGroupJournalActionResult =
 
 export type HostedRuntimeGroupToolResponse =
   | HostedGameChatBootstrapResponse
+  | HostedLeaveGroupResponse
   | HostedGameToolResponse
   | {
       action: "ask";

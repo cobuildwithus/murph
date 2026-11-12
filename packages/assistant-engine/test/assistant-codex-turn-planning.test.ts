@@ -255,6 +255,25 @@ describe('assistant Codex turn planning', () => {
     ['conversation', 'output-only-turn', false],
     ['conversation', 'game-host-turn', false],
     ['maintenance', 'maintenance-turn', false],
+    ['system-notification', 'output-only-turn', false],
+    ['assistant-ask-continuation', 'output-only-turn', false],
+  ] as const)('gates leave on the %s/%s profile even with accepted input', async (promptProfile, toolProfile, available) => {
+    const plan = await planTurn({
+      acceptedInputItems: [{ id: `ain_${'e'.repeat(32)}`, source: 'assistant-input' }],
+      executionContext: { hosted: { memberId: 'synthetic-container', userEnvKeys: [] } },
+      hostedToolContext: { ...createHostedToolContext(), groupTool: { request: vi.fn() } },
+      input: createMessageInput({ channel: 'linq', threadIsDirect: false, turnTrigger: 'automation-auto-reply', ...(promptProfile === 'maintenance' ? { maintenanceProfile: 'group-room-model' as const } : {}) }),
+      profile: { promptProfile, toolProfile, threadScope: 'session-thread' },
+      sharedPlan: createSharedPlan({}, { channel: 'linq', threadIsDirect: false, threadId: 'synthetic-thread' }),
+    })
+    expect(plan.dynamicTools.some(tool => tool.name === 'leave_group')).toBe(available)
+  })
+
+  it.each([
+    ['conversation', 'provider-turn', true],
+    ['conversation', 'output-only-turn', false],
+    ['conversation', 'game-host-turn', false],
+    ['maintenance', 'maintenance-turn', false],
     ['assistant-ask-continuation', 'output-only-turn', false],
     ['system-notification', 'output-only-turn', false],
     ['operator-message', 'output-only-turn', false],
@@ -3837,6 +3856,7 @@ describe('assistant Codex turn planning', () => {
       sharedPlan: createSharedPlan({}, { channel, threadIsDirect, threadId: 'synthetic-photo-thread' }),
     })
     expect(plan.dynamicTools.some(tool => tool.name === 'game_photo')).toBe(available)
+    expect(plan.dynamicTools.some(tool => tool.name === 'leave_group')).toBe(available)
     expect((plan.systemPrompt ?? '').includes(GAME_PHOTO_CHAT_GUIDANCE)).toBe(available)
   })
 

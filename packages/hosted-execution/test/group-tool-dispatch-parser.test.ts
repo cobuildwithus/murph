@@ -116,3 +116,20 @@ describe("group tool dispatch wire contracts", () => {
       .toThrow(new TypeError("Hosted runtime group tool action is not supported."));
   });
 });
+
+
+describe("leave group wire contract", () => {
+  const request = { action: "leave_group", reason: "bot_loop", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } };
+  it("accepts only bounded reasons and accepted input", () => {
+    expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request);
+    for (const extra of ["target", "line", "force", "text", "linqThread"]) expect(() => parseHostedRuntimeGroupToolRequest({ ...request, [extra]: "untrusted" })).toThrow();
+    for (const kind of ["automation_occurrence", "game_recap", "system", "unknown"]) expect(() => parseHostedRuntimeGroupToolRequest({ ...request, origin: { ...request.origin, kind } })).toThrow();
+    for (const origin of [{ ...request.origin, extra: true }, { ...request.origin, assistantInputId: "" }, { ...request.origin, assistantInputId: "x".repeat(129) }]) expect(() => parseHostedRuntimeGroupToolRequest({ ...request, origin })).toThrow();
+    expect(() => parseHostedRuntimeGroupToolRequest({ ...request, reason: "free text" })).toThrow();
+  });
+  it.each(["left", "already_left", "unavailable"])("parses %s without provider claims", status => {
+    const result = { status, ...(status === "unavailable" ? { reason: "game_bound" } : {}) };
+    expect(parseHostedRuntimeGroupToolResponse({ action: "leave_group", result })).toEqual({ action: "leave_group", result });
+    expect(() => parseHostedRuntimeGroupToolResponse({ action: "leave_group", result: { ...result, removed: true } })).toThrow();
+  });
+});

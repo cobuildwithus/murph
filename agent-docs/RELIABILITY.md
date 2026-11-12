@@ -4050,8 +4050,19 @@ remain fail-closed against saved-set loss.
 
 ## Hosted operator tasks
 
+The assistant group tool returns local `left` or `already_left` only after
+validated source authority. The engine interrupts while its tool RPC is pending,
+using terminal no-reply rather than allowing another provider request. Refusals
+remain answerable. Marker-backed transport replay cannot repeat the Linq attempt.
+Web and its widened reason constraint precede the runtime producer; unchanged
+terminal route-loss consumers keep older runners compatible with new Web.
+
 Linq group departure commits its marker and exact route deletion together under
-chat-ownership then route-row locks. Only the winning marker insert requests one
+chat-ownership then route-row locks. Assistant calls reject all game history;
+Ops keeps its active-only guard. First game bindings take their container member
+foreign-key lock before the route, then pair/audience/game locks. Assistant leave
+takes chat ownership before member/runtime locks, matching webhook admission.
+Leave takes no game row locks. Only the winning marker insert requests one
 post-commit provider attempt; failure or a crash between commit and dispatch
 does not undo local silence or create a retry obligation. Web admission and
 unbound notice/source-group recovery fences follow `ARCHITECTURE.md`; runtime

@@ -58,7 +58,7 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
               ? input.request.args.question
               : null,
         })
-        if (input.request.kind === 'member-memory') {
+        if (input.request.kind === 'member-memory' || input.request.kind === 'leave-group') {
           return await actual.executeMurphDynamicToolRequest(input)
         }
         return {
@@ -260,6 +260,65 @@ describe('Codex dynamic tool runtime routing', () => {
       {
         deliveryContextOrdinal: 0,
         kind: 'group',
+        voiceMemoRuntime: null,
+      },
+    ])
+  })
+
+  it.each(['left', 'already_left', 'unavailable'] as const)('settles a %s leave turn at its pending tool RPC', async status => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-leave-group-terminal-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-leave-group-terminal-home-',
+    )
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void runScriptedTerminalLeaveGroupTurn(child, status === 'unavailable')
+      })
+      return child
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexCommand: 'codex',
+        codexHome,
+        dynamicTools: resolveMurphDynamicTools({ leaveGroupAvailable: true }),
+        env: {
+          CODEX_HOME: codexHome,
+          PATH: '/usr/bin',
+        },
+        hostedToolContext: {
+          groupTool: { request: vi.fn(async () => ({ action: 'leave_group' as const, result: status === 'unavailable' ? { status, reason: 'game_bound' as const } : { status } })) },
+          currentUserActionScope: () => ({ conversationScope: 'group', resultNotificationChannel: 'linq',
+            acceptedInputIds: [`ain_${'a'.repeat(32)}`], originSessionId: 'synthetic-session', conversationId: null, recipientKey: null, inboundMailboxItemIds: [] }),
+          beforeToolExecution: vi.fn(async () => undefined),
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: vi.fn(async () => {
+            throw new Error('Vault-file sending is unavailable for this turn.')
+          }),
+          vaultFileSendAvailable: false,
+        },
+        prompt: 'Leave this group.',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }),
+    ).resolves.toMatchObject({
+      acceptedNoReplyDeliveryContextOrdinals: status === 'unavailable' ? [] : [0],
+      finalMessage: status === 'unavailable' ? 'This group has a game, so I cannot leave.' : '',
+      threadId: 'thread-leave-group-terminal',
+      turnId: 'turn-leave-group-terminal',
+    })
+
+    expect(codexMocks.dynamicToolCalls).toEqual([
+      {
+        deliveryContextOrdinal: 0,
+        kind: 'leave-group',
         voiceMemoRuntime: null,
       },
     ])
@@ -877,6 +936,61 @@ async function runScriptedTerminalGroupEmailTurn(
     method: 'turn/completed',
     params: {
       turn: { id: 'turn-group-email-terminal', status: 'interrupted' },
+    },
+  }))
+}
+
+async function runScriptedTerminalLeaveGroupTurn(
+  child: MockChildProcess,
+  unavailable: boolean,
+): Promise<void> {
+  const initialize = await child.waitForRpcMethod('initialize')
+  child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  const threadStart = await child.waitForRpcMethod('thread/start')
+  child.stdout.write(jsonLine({
+    id: threadStart.id,
+    result: { thread: { id: 'thread-leave-group-terminal' } },
+  }))
+  const turnStart = await child.waitForRpcMethod('turn/start')
+  child.stdout.write(jsonLine({
+    id: turnStart.id,
+    result: { turn: { id: 'turn-leave-group-terminal' } },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/started',
+    params: { turn: { id: 'turn-leave-group-terminal' } },
+  }))
+  child.stdout.write(jsonLine({
+    id: 41,
+    method: 'item/tool/call',
+    params: {
+      arguments: { reason: 'asked_to_leave', messageRef: `ain_${'a'.repeat(32)}` },
+      callId: 'call-41',
+      namespace: 'murph',
+      threadId: 'thread-leave-group-terminal',
+      tool: 'leave_group',
+      turnId: 'turn-leave-group-terminal',
+    },
+  }))
+  if (unavailable) {
+    await child.waitForRpcId(41)
+    child.stdout.write(jsonLine({ method: 'item/completed', params: { item: { type: 'agentMessage', id: 'synthetic-refusal', text: 'This group has a game, so I cannot leave.' } } }))
+    child.stdout.write(jsonLine({ method: 'turn/completed', params: { turn: { id: 'turn-leave-group-terminal', status: 'completed' } } }))
+    return
+  }
+  const interrupt = await Promise.race([child.waitForRpcMethod('turn/interrupt'), child.waitForRpcId(41).then(() => { throw new Error('Tool response allowed model continuation') })])
+  child.stdout.write(jsonLine({ id: interrupt.id, result: {} }))
+  child.stdout.write(jsonLine({
+    method: 'serverRequest/resolved',
+    params: {
+      requestId: 41,
+      threadId: 'thread-leave-group-terminal',
+    },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      turn: { id: 'turn-leave-group-terminal', status: 'interrupted' },
     },
   }))
 }

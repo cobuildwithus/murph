@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
 }));
 vi.mock("../src/lib/prisma", () => {
   const db = {
+    $queryRaw: async () => [{ container_member_id: "synthetic-room" }],
     $executeRaw: (...args: unknown[]) => String(args[0]).includes("pg_advisory_xact_lock") ? Promise.resolve(0) : m.updateStatus(...args),
     game: { findFirst: m.game, findUnique: m.game, updateMany: m.updateGame, update: m.updateGame },
     hostedMember: { count: async () => 2, findFirst: async () => null },

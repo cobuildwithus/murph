@@ -49,6 +49,14 @@ function buildEmailDeliveryContext(
 }
 
 describe("createHostedGroupToolWithCurrentTurnContext", () => {
+  it.each(["imessage", "sms", "rcs"])("forwards leave unchanged for %s", async service => {
+    const request = vi.fn().mockResolvedValue({ action: "leave_group", result: { status: "left" } });
+    const tool = createHostedGroupToolWithCurrentTurnContext({ groupToolPort: { request },
+      linqDeliveryContexts: [buildLinqDeliveryContext({ service, routeAuthority: ROUTE_AUTHORITY })] });
+    const body = { action: "leave_group" as const, reason: "bot_loop" as const, origin: { kind: "accepted_input" as const, assistantInputId: PRIVATE_ASSISTANT_INPUT_ID } };
+    await tool.request(body);
+    expect(request).toHaveBeenCalledExactlyOnceWith(body);
+  });
   it("forwards current-turn cancellation through the neutral current-sender request", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "ask_current_sender",

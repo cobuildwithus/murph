@@ -73,7 +73,7 @@ export const POST = withJsonError(async (request: Request) => {
         || membershipInventoryProtocol
           === HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE,
       memberId,
-      ...(body.action === "read_game" || body.action === "update_game" || body.action === "game_photo" || body.action === "write_recap" || body.action === "game_chat_bootstrap" || body.action === "my_game_reminders"
+      ...(body.action === "leave_group" || body.action === "read_game" || body.action === "update_game" || body.action === "game_photo" || body.action === "write_recap" || body.action === "game_chat_bootstrap" || body.action === "my_game_reminders"
         ? { runtimeIdentity: runtimeAuthority ? { ...runtimeAuthority, userId: memberId } : null }
         : {}),
       request: body,

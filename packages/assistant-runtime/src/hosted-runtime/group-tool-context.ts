@@ -334,6 +334,7 @@ function buildHostedGroupSimpleActionUnavailable(
     HostedGroupEmailRestrictedRequest,
     {
       action:
+        | "leave_group"
         | "prepare_email"
         | "game_chat_bootstrap"
         | "read_game"
@@ -348,6 +349,7 @@ function buildHostedGroupSimpleActionUnavailable(
   >,
   unavailableReason: "authenticated_sender_required",
 ): HostedRuntimeGroupToolResponse {
+  if (request.action === "leave_group") return { action: request.action, result: { status: "unavailable", reason: "source_unavailable" } };
   if (request.action === "game_chat_bootstrap") return { action: request.action, result: { status: "unavailable" } };
   if (request.action === "read_game" || request.action === "update_game" || request.action === "game_photo" || request.action === "write_recap" || request.action === "my_game_reminders") {
     return { action: request.action, result: { status: "unavailable", error: unavailableReason } };

@@ -9,7 +9,7 @@ vi.mock("../src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxConversationWakeByAssistantInputId: m.wake,
 }));
 vi.mock("../src/lib/hosted-groups/group-message-sender", () => ({ resolveHostedGroupMessageSenderMemberId: m.sender }));
-vi.mock("../src/lib/hosted-routing/thread-route-store", () => ({ assertHostedThreadRouteEgressAuthority: m.route }));
+vi.mock("../src/lib/hosted-routing/thread-route-store", () => ({ lockHostedThreadRouteByThreadIdentityTx: vi.fn(), assertHostedThreadRouteEgressAuthority: m.route }));
 vi.mock("../src/lib/game/chat-membership", async (importOriginal) => ({
   ...await importOriginal<object>(), requireExactGameChat: m.exact, readGameChatPlayerIds: m.players,
   readGameChatAudience: m.audience, readGameChatAuthority: m.groupAuthority, readGroupGameNoticeAuthority: m.groupAuthority,

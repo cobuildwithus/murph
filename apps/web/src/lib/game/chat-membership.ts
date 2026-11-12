@@ -2,7 +2,7 @@ import "server-only";
 import { readHostedLinqGroupMoveServicePhones } from "../hosted-routing/linq-group-line-move-store";
 import { reconcileHostedThreadContainerParticipants } from "../hosted-groups/thread-container-participants";
 import type { Prisma } from "@prisma/client";
-import { assertHostedThreadRouteEgressAuthority, readHostedThreadRouteByThreadIdentity } from "../hosted-routing/thread-route-store";
+import { lockHostedThreadRouteByThreadIdentityTx, assertHostedThreadRouteEgressAuthority, readHostedThreadRouteByThreadIdentity } from "../hosted-routing/thread-route-store";
 import { readHostedPublicOrigin } from "../hosted-web/public-url";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { sha256Hex } from "../primitives";
@@ -108,13 +108,32 @@ export async function readPairGameChatTx(tx: Prisma.TransactionClient, players: 
 /** Recheck discovery under the pair lock so simultaneous kickoffs share a room. */
 export async function bindPairGameChat(gameId: string, players: readonly string[], candidate: string | null): Promise<string | null> {
   return getPrisma().$transaction(async (tx) => {
-    const room = await readPairGameChatTx(tx, players) ?? candidate;
+    // Discovery only returns rooms with a provider route. Lock it before pair/game
+    // locks; if it is gone now (for example a group leave), do not bind it.
+    // Existing pair bindings keep their bootstrap/rematch reuse.
+    const candidateCurrent = candidate ? await lockGameChatCandidateTx(tx, candidate) : false;
+    const room = await readPairGameChatTx(tx, players) ?? (candidateCurrent ? candidate : null);
     if (!room) return null;
     const changed = await tx.game.updateMany({ where: { id: gameId, ...gamePairWhere(players), status: { in: ["live", "negotiating"] }, chatContainerMemberId: null }, data: { chatContainerMemberId: room } });
     if (changed.count === 1) return room;
     const game = await tx.game.findUnique({ where: { id: gameId }, select: { chatContainerMemberId: true } });
     return game?.chatContainerMemberId ?? null;
   });
+}
+
+async function lockGameChatCandidateTx(tx: Prisma.TransactionClient, containerMemberId: string): Promise<boolean> {
+  await lockGameChatContainerTx(tx, containerMemberId);
+  const rows = await tx.$queryRaw<{ container_member_id: string }[]>`
+    SELECT container_member_id FROM hosted_thread_route
+    WHERE container_member_id = ${containerMemberId} AND channel = 'linq'
+    ORDER BY thread_identity_lookup_key LIMIT 2 FOR UPDATE
+  `;
+  return rows.length === 1;
+}
+
+/** Take the game's foreign-key lock before the route, matching runtime callbacks. */
+async function lockGameChatContainerTx(tx: Prisma.TransactionClient, containerMemberId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM hosted_member WHERE id = ${containerMemberId} FOR KEY SHARE`;
 }
 
 /** Current exact membership proves access; a stored binding alone never does. */
@@ -343,6 +362,8 @@ export async function prepareGameChat(input: { actor: string; members: readonly 
 
 function preparedGameRoom(room: string, audience: Awaited<ReturnType<typeof readGameChatAudience>>, audienceKeys: readonly string[]) {
   return { room, async revalidate(tx: Prisma.TransactionClient) {
+    await lockGameChatContainerTx(tx, room);
+    await lockHostedThreadRouteByThreadIdentityTx({ authority: audience.route, prisma: tx });
     await assertHostedThreadRouteEgressAuthority({ authority: audience.route, prisma: tx });
     if (!await readGameChatAuthority({ maxPlayers: 10, audienceKey: audienceKeys.find(key => audience.keys.candidates.includes(key)) ?? null,
       chatContainerMemberId: room, status: "invited", previousGameId: null, createdBy: null, players: [], invitees: [] }, room, audience, tx)) throw new Error("Game chat sharing is unavailable.");
@@ -406,6 +427,8 @@ async function bindGameInviteRoomTx(input: Parameters<typeof associateGameChatIn
   const { prepared, tx, containerMemberId, senderMemberId } = input;
   if (!prepared) return;
   if (prepared.threadId !== input.threadId || !prepared.memberIds.includes(senderMemberId)) { inviteFailure("sender_unavailable"); return; }
+  await lockGameChatContainerTx(tx, containerMemberId);
+  await lockHostedThreadRouteByThreadIdentityTx({ authority: { channel: "linq", threadId: input.threadId, containerMemberId }, prisma: tx });
   await tx.$queryRaw`SELECT id FROM game WHERE id = ${prepared.gameId} FOR UPDATE`;
   const current = await tx.game.findUnique({ where: { id: prepared.gameId }, include: { players: true, invitees: { select: { memberId: true, recipientLookupKey: true } } } });
   if (!current || current.inviteTokenHash !== prepared.inviteTokenHash || !["invited", "live"].includes(current.status)

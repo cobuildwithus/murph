@@ -2127,12 +2127,19 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const games = await Promise.all([1, 2].map(() => startGame(a, b)));
     const rooms = [randomUUID(), randomUUID()];
     await getPrisma().hostedMember.createMany({ data: rooms.map(id => ({ id, billingStatus: "not_started" })) }); memberIds.push(...rooms);
+    // Discovery only offers rooms that have a provider route; the third game
+    // then reuses the bound primary without one.
+    await getPrisma().hostedThreadContainer.createMany({ data: rooms.map(memberId => ({ memberId, ownerMemberId: a })) });
+    await getPrisma().hostedThreadRoute.createMany({ data: rooms.map(id => ({ channel: "linq", containerMemberId: id,
+      threadIdentityLookupKey: `synthetic-identity-${id}`, threadLookupKey: `synthetic-thread-${id}`, deliveryRouteEncrypted: "synthetic" })) });
     const bound = await Promise.all(games.map((game, index) => bindPairGameChat(game.gameId, [a, b], rooms[index]!)));
     expect(bound[0]).toBe(bound[1]);
     expect(rooms).toContain(bound[0]);
+    await getPrisma().hostedThreadRoute.deleteMany({ where: { containerMemberId: { in: rooms } } });
     const third = await startGame(a, b);
     expect(await bindPairGameChat(third.gameId, [a, b], null)).toBe(bound[0]);
     expect(await getPrisma().game.count({ where: { id: { in: [...games.map(game => game.gameId), third.gameId] }, chatContainerMemberId: bound[0] } })).toBe(3);
+    await getPrisma().hostedThreadContainer.deleteMany({ where: { memberId: { in: rooms } } });
   });
 
   it("reserves one daily missed-game message for the pair across concurrent sweeps", async () => {

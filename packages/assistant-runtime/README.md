@@ -453,3 +453,14 @@ alongside the original phase signal, including provider cleanup. A batch carryin
 a current-turn reply preserves its delivery priority across scheduling wakes.
 Cancellation before provider entry releases only exact prepared claims; provider
 entry uncertainty and accepted receipts continue to prevent blind resend.
+
+
+Group departure uses the existing group-tool port with accepted-input origin;
+the runtime adds no Linq room context, including on RCS. Web derives the room
+from the persisted input. The marker makes transport replay safe with only one
+provider leave attempt. Deploy Web and its additive reason expansion before
+Cloudflare enables the tool. Older runners already deny revoked route egress
+and durably settle stale notifications; no new egress error is introduced.
+Typing already in flight and poll notifications admitted before the leave can
+still run, but route loss denies their output. See `ARCHITECTURE.md` for the
+sticky local-departure and game-history contracts.

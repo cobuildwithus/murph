@@ -8,7 +8,8 @@ import { createHostedExternalThreadIdentityLookupKey, createHostedExternalThread
 import { acquireHostedLinqChatOwnershipLockTx } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
 import { leaveHostedLinqGroupTx, prepareHostedLinqGroupLeave, readHostedLinqGroupLeave, requestHostedLinqGroupLeaveAfterCommit, rotateHostedLinqGroupLeaveBatch } from "@/src/lib/hosted-routing/linq-group-leave";
 import { attachHostedThreadContainerBootstrapRouteTx, ensureHostedThreadContainerRouteTx, prepareHostedThreadContainerCreation, prepareHostedThreadContainerDeliveryRoute, refreshHostedThreadContainerDeliveryRouteTx } from "@/src/lib/hosted-routing/thread-container-service";
-import { readHostedThreadRouteByThreadIdentity } from "@/src/lib/hosted-routing/thread-route-store";
+import { lockHostedThreadRouteByThreadIdentityTx, readHostedThreadRouteByThreadIdentity } from "@/src/lib/hosted-routing/thread-route-store";
+import { bindPairGameChat } from "@/src/lib/game/chat-membership";
 import { leaveHostedLinqGroup } from "@/src/lib/hosted-ops/linq-group-line-move";
 import { localRosterCrypto, rosterRoute, syntheticPhone } from "./support/roster-postgres";
 
@@ -95,6 +96,60 @@ describe.skipIf(!enabled)("Linq local departure on migrated PostgreSQL", () => {
     await game(status);
     expect(await leave()).toEqual({ status: "unavailable", reason: "active_game" });
     expect(await readHostedLinqGroupLeave({ chatId: chat, prisma: db })).toBeNull();
+  });
+  it.each(["invited", "negotiating", "live", "settled", "void"])("assistant refuses retained %s game history", async status => {
+    await game(status);
+    const route = await expected(), prepared = prepareHostedLinqGroupLeave(chat, "assistant");
+    expect(await db.$transaction(prisma => leaveHostedLinqGroupTx({ expected: route, prepared, prisma }))).toEqual({ status: "unavailable", reason: "game_bound" });
+    expect(await readHostedLinqGroupLeave({ chatId: chat, prisma: db })).toBeNull();
+  });
+  it("serializes a discovered first-game binding behind departure", async () => {
+    const first = await game("negotiating");
+    await db.game.update({ where: { id: first.id }, data: { chatContainerMemberId: null } });
+    await db.gameProfile.create({ data: { memberId: room, firstNameEncrypted: "synthetic", timeZone: "UTC" } });
+    await db.gamePlayer.createMany({ data: [owner, room].map((memberId, seat) => ({ gameId: first.id, memberId, seat, timeZone: "UTC", joinedAt: new Date() })) });
+    const route = await expected(), prepared = prepareHostedLinqGroupLeave(chat, "assistant");
+    let release!: () => void, locked!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const entered = new Promise<void>(resolve => { locked = resolve; });
+    const leaving = db.$transaction(async prisma => {
+      await prisma.$queryRaw`SELECT id FROM hosted_member WHERE id = ${room} FOR UPDATE`;
+      const result = await leaveHostedLinqGroupTx({ expected: route, prepared, prisma });
+      locked(); await gate; return result;
+    });
+    await entered;
+    const binding = bindPairGameChat(first.id, [owner, room], room);
+    release();
+    expect(await leaving).toMatchObject({ status: "left" });
+    expect(await binding).toBeNull();
+    expect((await db.game.findUniqueOrThrow({ where: { id: first.id } })).chatContainerMemberId).toBeNull();
+  });
+  it("sees a first game committed while departure waits on its route lock", async () => {
+    const first = await game("settled");
+    await db.game.update({ where: { id: first.id }, data: { chatContainerMemberId: null } });
+    const route = await expected(), prepared = prepareHostedLinqGroupLeave(chat, "assistant");
+    let release!: () => void, locked!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const entered = new Promise<void>(resolve => { locked = resolve; });
+    const binding = db.$transaction(async prisma => {
+      await prisma.$queryRaw`SELECT id FROM hosted_member WHERE id = ${room} FOR KEY SHARE`;
+      await lockHostedThreadRouteByThreadIdentityTx({ authority: { channel: "linq", threadId: chat, containerMemberId: room }, prisma });
+      locked(); await gate;
+      await prisma.game.update({ where: { id: first.id }, data: { chatContainerMemberId: room } });
+    });
+    await entered;
+    const leaving = db.$transaction(async prisma => {
+      await prisma.$queryRaw`SELECT id FROM hosted_member WHERE id = ${room} FOR UPDATE`;
+      return leaveHostedLinqGroupTx({ expected: route, prepared, prisma });
+    });
+    release(); await binding;
+    expect(await leaving).toEqual({ status: "unavailable", reason: "game_bound" });
+    expect(await readHostedLinqGroupLeave({ chatId: chat, prisma: db })).toBeNull();
+  });
+  it("persists only the assistant marker reason", async () => {
+    const route = await expected(), prepared = prepareHostedLinqGroupLeave(chat, "assistant");
+    expect(await db.$transaction(prisma => leaveHostedLinqGroupTx({ expected: route, prepared, prisma }))).toMatchObject({ status: "left" });
+    expect(await db.hostedLinqGroupLeave.findUnique({ where: { threadIdentityLookupKey: prepared.threadIdentityLookupKey }, select: { reason: true } })).toEqual({ reason: "assistant" });
   });
   it.each(["reserved", "adopted"])("refuses an owning %s move", async status => {
     await db.hostedLinqGroupLineMove.create({ data: { id: randomUUID(), containerMemberId: room, status,
