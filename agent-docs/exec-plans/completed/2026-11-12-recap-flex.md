@@ -24,11 +24,13 @@ No database migration, new scheduler or in-process capacity wait is needed.
 ## Verification and review
 
 Prove initial Flex selection, ordinary-turn isolation, durable retries at and
-around twenty minutes, native continuation without repeated media, canonical
+around twenty minutes, native continuation with per-attempt media authority, canonical
 recovery, slow-generation abort behavior and usage pricing on both tiers. Run
 focused package tests and typechecks, inspect the full diff and complexity report.
-No live provider calls. No push or PR; pushed-head CI and final ReviewGPT remain
-outside this handoff. Parent review owns the local candidate.
+No live provider calls. The original handoff was local-only. The parent rebased
+and pushed PR #4906 at `a691fb3c01`; this follow-up addresses its accepted round-1
+ReviewGPT finding in a new local commit for the parent's round-2 delta review.
+No push or PR mutation is part of this follow-up.
 
 ## Product journeys
 
@@ -49,20 +51,24 @@ selected tier; it adds no member controls, content format or visible billing rul
   an initial recap or retiring a remake while preserving its prior recap. The
   mailbox has no attempt cap, so rethrowing standard capacity errors would extend
   the owner's capacity budget indefinitely. The boundary test now succeeds on
-  the first standard attempt using the same thread and media; focused initial
+  the first standard attempt using the same thread; focused initial
   and remake cases prove `recapRead.failed` settlement without a retry rethrow.
 - Preserved canonical recovery before provider work and the room's session for
   delivery. Missing or incompatible continuation uses existing recap failure
-  recovery instead of starting another media-producing thread.
+  recovery instead of starting another provider thread.
 - Preserved pricing evidence for capacity refusals without token counters on
   both tiers. Tests use real usage extraction, recording and distinct turn IDs;
   accepted recovery performs no further provider or media work.
-- Final review found media provenance existed only in an in-memory map. Replaced
-  it with versioned, portable host-owned assistant runtime receipts keyed by
-  generation and content hash, preserving reference IDs and song timing. A fresh
-  workspace restored from the actual snapshot inventory reuses image/audio files
-  without another provider request; tampered bytes and cross-generation copies
-  are rejected. Image and song provider settings are unchanged.
+- ReviewGPT round 1 HIGH finding: accepted and fixed by deletion. The added
+  durable media provenance receipts were inside the writer-writable vault and
+  therefore could not authenticate source dependencies. Removed the receipt
+  schema, state-file readers/writers and their persistence tests. Restored
+  `recap-files.ts` and the per-turn `recapSources` map in `hosted-tool-context.ts`
+  exactly to `origin/main`. Native thread continuation and all Flex policy and
+  accounting remain. A new attempt rejects media generated in an earlier
+  failed attempt, including audio with song timing; it must regenerate the media
+  it submits. This consequence is owner-accepted. Accepted recap recovery still
+  avoids additional provider work. Image/song provider settings are unchanged.
 - Checked hosted limits: the default processing command budget is twenty
   seconds, while the ten-minute container lease is post-completion warmth.
   Active work keeps the container alive. Checkpoint ownership is fenced by
@@ -101,16 +107,18 @@ Web usage/pricing 186; Web lifecycle 61; media/checkpoint proof 7. After the con
 the three changed engine suites passed again (327 tests). After strengthening
 usage-ID proof, the notification suite passed again (118 tests), followed by
 engine typecheck. Runtime tests and typecheck passed after the retry refactor.
-After versioning the media receipts, media, hosted-tool-context and notification
+Before the round-1 finding, after versioning the media receipts, media, hosted-tool-context and notification
 tests passed together (195 tests), followed by engine typecheck. The prepared
 runtime build, runtime typecheck, complexity and documentation guards passed on
-the final source changes.
+that candidate. The cross-attempt media-reuse proof is superseded by the
+round-1 fix and the rejection/regeneration proof described above.
 
 Parent-review amendment reran all focused files: notification 120, remaining
 eight engine suites 525 (645 total), runtime 213, and Web usage/pricing/lifecycle
 247. Both assistant package typechecks, the prepared runtime build,
 `complexity:diff`, `docs:drift`, and `git diff --check` passed. The notification
-suite proves standard success at exactly twenty minutes without new media, and
+suite proved standard success at exactly twenty minutes; the old media-reuse
+assertion is superseded by the round-1 fix. It also proved
 both initial and remake settlement after standard capacity failure. The grouped
 test commands for this amendment were:
 
@@ -132,10 +140,30 @@ and continuation helpers resolved it without increasing hotspot debt.
 
 ## Handoff limits
 
+Round-1 remediation verification passed: updated notification/media suites 127,
+remaining seven engine suites 518 (645 total), runtime 213, Web pricing/lifecycle
+247. Both assistant package typechecks, `build:test-runtime:prepared`,
+`complexity:diff`, `docs:drift`, and diff/privacy checks passed. A direct diff
+against `origin/main` confirms both affected production media files match it
+exactly, with no receipt reader, writer, schema or state-file path remaining.
+The engine test invocations for this delta were:
+
+```sh
+pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-notification-turn-runtime.test.ts test/recap-media-files.test.ts
+pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-final-coverage.test.ts test/assistant-codex-turn-planning.test.ts test/assistant-codex-runtime-config.test.ts test/assistant-codex-failures.test.ts test/assistant-automation-support.test.ts test/codex-runtime-helpers.test.ts test/assistant-service-runtime.test.ts
+```
+
+Runtime and Web used the grouped commands recorded above. The media proof now
+rejects earlier-attempt files despite their continued presence, then accepts
+audio after a second synthetic provider request in the new attempt. Native
+thread continuity, Flex-to-standard selection, terminal standard capacity
+settlement, and usage pricing remain covered independently.
+
 No live Flex, media or hosted invocation was run. The local proof covers tier
 selection, null resets, capacity classification, budget boundaries, native
 resume planning, actual rollout retention and per-attempt ledger inputs; it does
 not prove live capacity availability or production delivery. Exact-head CI and
-final ReviewGPT require the later pushed candidate and remain for that workflow.
-This task ends with a local scoped commit, with no push or PR, as requested.
+round-2 ReviewGPT remain with the parent's pushed-candidate workflow.
+This follow-up ends with a new local scoped commit, without amending the reviewed
+head, pushing, or changing the PR.
 Completed: 2026-11-12

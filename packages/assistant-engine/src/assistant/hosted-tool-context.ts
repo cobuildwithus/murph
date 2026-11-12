@@ -1,4 +1,4 @@
-import { readRecapFile, readRecapDraftFile, saveRecapMediaFile, readRecapMediaSource, saveRecapMediaSource } from './recap-files.js'
+import { readRecapFile, readRecapDraftFile, saveRecapMediaFile } from './recap-files.js'
 import type { SongWordTimestamp } from '@murphai/contracts/recap-show'
 import { resolveElevenLabsApiKey } from '@murphai/operator-config/elevenlabs-runtime'
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
@@ -279,6 +279,7 @@ export function createAssistantHostedToolContext(input: {
   session: AssistantSession
 }): AssistantHostedToolContext {
   const executionContext = input.executionContext ?? null
+  const recapSources = new Map<string, { referenceIds: string[]; mediaType: 'image/jpeg' | 'audio/mpeg'; wordsTimestamps?: SongWordTimestamp[] }>()
   let recapWorkspace: Awaited<ReturnType<typeof materializeRecapWorkspace>> | null = null
   let ordinaryGameLore: Promise<{ fingerprint: string; guidance: string } | null> | null = null
   const route = input.route ?? null
@@ -647,7 +648,7 @@ export function createAssistantHostedToolContext(input: {
     readGameRecapMedia: async file => {
       if (!executionContext?.gameRecapScope?.show || !recapWorkspace) throw new Error('Read recap material first.')
       const bytes = await readRecapFile({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, recapWorkspace.root), file, maxBytes: 2 * 1024 * 1024 })
-      const source = await readRecapMediaSource({ vault: input.messageInput.vault, eventId: executionContext.gameRecapScope.eventId, bytes })
+      const source = recapSources.get(createHash('sha256').update(bytes).digest('hex'))
       if (!source) throw new Error('Select a file returned by generate_image or generate_song.')
       return { bytes: bytes.toString('base64'), ...source }
     },
@@ -667,8 +668,8 @@ export function createAssistantHostedToolContext(input: {
         })),
         save: async (bytes, mediaType, wordsTimestamps) => {
           const file = await saveRecapMediaFile({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, workspace.root), bytes, mediaType })
-          await saveRecapMediaSource({ vault: input.messageInput.vault, eventId: scope.eventId, bytes,
-            source: { referenceIds, mediaType, ...(wordsTimestamps ? { wordsTimestamps } : {}) } })
+          recapSources.set(createHash('sha256').update(bytes).digest('hex'), { referenceIds, mediaType,
+            ...(wordsTimestamps ? { wordsTimestamps } : {}) })
           return file
         },
       }

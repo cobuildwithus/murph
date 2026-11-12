@@ -2513,9 +2513,11 @@ remaining on Flex indefinitely: its retained first-attempt time permits standard
 service on the next attempt at or after twenty minutes. A standard-tier capacity
 failure settles through existing failed-recap recovery instead of extending the
 retry budget. The existing system mailbox owns re-wakes, and existing session
-snapshots retain the recap's native binding;
-there is no in-process capacity wait or new invocation deadline. Other turns keep
-their existing tier policy. No Web schema or wire change is required. `modelNotFound`
+snapshots retain the recap's native binding. Media authority remains in the
+per-turn host-memory map, so a new attempt regenerates earlier media rather than
+trusting files or metadata retained in the writable vault. There is no durable
+media provenance receipt, in-process capacity wait or new invocation deadline.
+Other turns keep their existing tier policy. No Web schema or wire change is required. `modelNotFound`
 remains terminal even when provider prose contains a retry or rate-limit hint.
 Codex 0.167.1 defaults fresh native memory profiles to v2, but the shared hosted
 config still disables the memory feature, generation, and use. Its newly stable

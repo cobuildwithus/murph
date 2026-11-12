@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
@@ -10,8 +10,6 @@ import { readRecapFile, saveRecapMediaFile } from '../src/assistant/recap-files.
 import { createAssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import { resolveAssistantSession } from '../src/assistant/store.ts'
 import { parseGenerateSongArguments } from '../src/assistant-codex/dynamic-tools/generate-song.ts'
-import { collectHostedWorkspaceSnapshotArchivePlan } from '@murphai/runtime-state/node'
-import { recapTaskDirectory } from '../src/assistant/recap-workspace.ts'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
@@ -75,19 +73,19 @@ test('candidate files reject traversal, symlinks, oversized bytes and tampering'
   await expect(readRecapFile({ vault: root, relativeRoot, file: `${relativeRoot}/media/link.jpg`, maxBytes: 2000 })).rejects.toThrow()
 })
 
-test('recap media and trusted song timing survive a checkpoint and a fresh retry context', async () => {
+test('recap media and trusted song timing belong only to the attempt that generated them', async () => {
   const root = await vault()
   const { session } = await resolveAssistantSession({ vault: root })
   const startedAt = '2026-11-01T00:00:00Z', settledAt = '2026-11-08T00:00:00Z'
   const eventId = 'game-recap:game_synthetic'
-  const createContext = (vaultRoot: string, generation = eventId) => createAssistantHostedToolContext({ session, messageInput: { vault: vaultRoot, prompt: '', channel: 'linq' }, executionContext: {
+  const createContext = () => createAssistantHostedToolContext({ session, messageInput: { vault: root, prompt: '', channel: 'linq' }, executionContext: {
     memberId: 'synthetic-member', userEnvKeys: [],
-    gameRecapScope: { gameId: 'game_synthetic', eventId: generation, pairFingerprint: 'a'.repeat(32), show: true },
+    gameRecapScope: { gameId: 'game_synthetic', eventId, pairFingerprint: 'a'.repeat(32), show: true },
     groupTool: { request: async () => ({ action: 'read_game', result: { status: 'ok', recapGame: {
       messages: [], next: null, through: '0', since: startedAt, until: settledAt, retainedSince: startedAt, incomplete: false,
     } } }) },
   } })
-  const context = createContext(root)
+  const context = createContext()
   const material = { game: { id: 'game_synthetic', days: [] }, players: ['Leo', 'Ava'], entries: [],
     result: [{ memberId: 'leo', name: 'Leo', score: 4 }, { memberId: 'ava', name: 'Ava', score: 3 }], startedAt, settledAt, references: [] }
   await context.prepareGameRecapInputs!(material)
@@ -114,29 +112,19 @@ test('recap media and trusted song timing survive a checkpoint and a fresh retry
   } }, fetchImpl)
   const imageBytes = await sharp({ create: { width: 64, height: 64, channels: 3, background: 'white' } }).jpeg().toBuffer()
   const imageFile = await imageRuntime.save(imageBytes, 'image/jpeg')
-  const snapshot = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot: root, vaultRoot: root })
-  const files = snapshot.entries.filter(entry => entry.kind === 'file')
-  expect(files.map(entry => entry.relativePath)).toEqual(expect.arrayContaining([receipt.path, imageFile]))
-  expect(files.filter(entry => entry.relativePath.includes('/state/recap-media/'))).toHaveLength(3)
-  const restoredRoot = await vault()
-  for (const file of files) {
-    const destination = path.join(restoredRoot, file.relativePath)
-    await mkdir(path.dirname(destination), { recursive: true })
-    await copyFile(file.absolutePath, destination)
-  }
-  const retry = createContext(restoredRoot)
+  expect(await context.readGameRecapMedia!(imageFile)).toEqual({ bytes: imageBytes.toString('base64'), referenceIds: [], mediaType: 'image/jpeg' })
+  const retry = createContext()
   await retry.prepareGameRecapInputs!(material)
-  expect(await retry.readGameRecapMedia!(receipt.path)).toEqual(await context.readGameRecapMedia!(receipt.path))
-  expect(await retry.readGameRecapMedia!(imageFile)).toEqual({ bytes: imageBytes.toString('base64'), referenceIds: [], mediaType: 'image/jpeg' })
-  expect(fetchImpl).toHaveBeenCalledTimes(1)
-  const anotherGeneration = `${eventId}:synthetic_request`
-  const remake = createContext(restoredRoot, anotherGeneration)
-  await remake.prepareGameRecapInputs!(material)
-  const copiedImage = await saveRecapMediaFile({ vault: restoredRoot,
-    relativeRoot: path.relative(restoredRoot, recapTaskDirectory(restoredRoot, anotherGeneration)), bytes: imageBytes, mediaType: 'image/jpeg' })
-  await expect(remake.readGameRecapMedia!(copiedImage)).rejects.toThrow('Select a file')
-  await writeFile(path.join(restoredRoot, receipt.path), 'tampered')
+  // A resumed native thread can remember file paths, but cannot carry media authority.
+  expect(await readFile(path.join(root, receipt.path))).toEqual(bytes)
   await expect(retry.readGameRecapMedia!(receipt.path)).rejects.toThrow('Select a file')
+  await expect(retry.readGameRecapMedia!(imageFile)).rejects.toThrow('Select a file')
+  expect(fetchImpl).toHaveBeenCalledTimes(1)
+  const retryRuntime = await retry.prepareRecapMedia!({ kind: 'song', args }, fetchImpl)
+  const regenerated = await executeGenerateSongTool({ env: { ELEVENLABS_API_KEY: 'synthetic-key' }, args, fileRuntime: retryRuntime })
+  expect(regenerated.rpcSuccess).toBe(true)
+  expect(fetchImpl).toHaveBeenCalledTimes(2)
+  expect(await retry.readGameRecapMedia!(JSON.parse(regenerated.rpcText).path)).toEqual(await context.readGameRecapMedia!(receipt.path))
   await writeFile(path.join(root, receipt.path), 'tampered')
   await expect(context.readGameRecapMedia!(receipt.path)).rejects.toThrow('Select a file')
 })

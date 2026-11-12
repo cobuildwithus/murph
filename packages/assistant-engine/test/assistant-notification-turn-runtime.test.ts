@@ -4450,7 +4450,7 @@ test.each(['send_message', 'skip'] as const)('group missed-day notifications iso
   } }))
 })
 
-test('recap capacity retries retain the generation, media and usage basis across the twenty-minute boundary', async () => {
+test('recap capacity retries retain the generation, native thread and usage basis across the twenty-minute boundary', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'recap-capacity-'))
   vi.useFakeTimers({ toFake: ['Date'] })
   const start = Date.parse('2036-08-25T18:00:00Z')
@@ -4463,20 +4463,14 @@ test('recap capacity retries retain the generation, media and usage basis across
     const nativeThreadId = '00000000-0000-4000-8000-000000000001'
     const rolloutRelativePath = `sessions/2036/08/25/rollout-2036-08-25T18-00-00-${nativeThreadId}.jsonl`
     const error = new VaultCliError('ASSISTANT_CODEX_FAILED', 'Synthetic capacity refusal', { codexErrorInfo: 'flexUnavailable', retryable: true })
-    let mediaGenerations = 0
+    const nativeThreads: Array<string | null> = []
     let complete = false
     const tiers: Array<string | null | undefined> = []
     const { mocks, deliverMessage, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
       providerResult, realUsage: true, turnId: 'recap-attempt',
       onExecuteCodexTurnWithRecovery: async input => {
         tiers.push(input.input.serviceTier)
-        if (!input.resolvedSession.codexResume) {
-          mediaGenerations++
-          await writeFile(path.join(vault, 'synthetic-media.txt'), 'Leo and Ava scene')
-        } else {
-          expect(input.resolvedSession.codexResume.threadId).toBe(nativeThreadId)
-          expect(await readFile(path.join(vault, 'synthetic-media.txt'), 'utf8')).toBe('Leo and Ava scene')
-        }
+        nativeThreads.push(input.resolvedSession.codexResume?.threadId ?? null)
         const usage = extractCodexAssistantProviderUsage({
           providerConfig: normalizeAssistantProviderConfig({ model: 'gpt-6.1-sol', modelProvider: 'hosted-openai' }),
           rawEvents: complete ? [{ method: 'thread/tokenUsage/updated', params: { threadId: 'recap-native-thread', turnId: 'recap-turn',
@@ -4523,7 +4517,7 @@ test('recap capacity retries retain the generation, media and usage basis across
       }
     }
     expect(tiers).toEqual(['flex', 'flex', 'flex'])
-    expect(mediaGenerations).toBe(1)
+    expect(nativeThreads).toEqual([null, nativeThreadId, nativeThreadId])
     expect(recordUsage.mock.calls.map(call => call[0])).toEqual([
       ...Array.from({ length: 3 }, () => expect.objectContaining({ tokenPricingBasis: 'openai-flex', providerRequestOutcome: 'failed' })),
     ])
@@ -4534,12 +4528,12 @@ test('recap capacity retries retain the generation, media and usage basis across
     vi.setSystemTime(start + 20 * 60_000)
     await sendAssistantNotificationLocal(notification)
     expect(tiers).toEqual(['flex', 'flex', 'flex', null])
-    expect(mediaGenerations).toBe(1)
+    expect(nativeThreads).toEqual([null, nativeThreadId, nativeThreadId, nativeThreadId])
     expect(recordUsage).toHaveBeenLastCalledWith(expect.objectContaining({ tokenPricingBasis: 'standard', inputTokens: 100, outputTokens: 20, providerRequestOutcome: 'succeeded' }))
     request.mockResolvedValue({ result: { status: 'ok', chatLine: 'Leo and Ava finished their game.' } })
     await sendAssistantNotificationLocal(notification)
     expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(4)
-    expect(mediaGenerations).toBe(1)
+    expect(nativeThreads).toHaveLength(4)
     // A genuinely new generation has its own budget and native thread.
     request.mockResolvedValue({ result: { status: 'ok', recapGame: { recovered: false } } })
     const remake = { ...scope, eventId: `${scope.eventId}:synthetic_request` }
@@ -4548,7 +4542,7 @@ test('recap capacity retries retain the generation, media and usage basis across
       executionContext: { hosted: { ...notification.executionContext!.hosted!, gameRecapScope: remake } } })
     expect(recordUsage).toHaveBeenLastCalledWith(expect.objectContaining({ tokenPricingBasis: 'openai-flex', inputTokens: 100, outputTokens: 20, providerRequestOutcome: 'succeeded' }))
     expect(new Set(recordUsage.mock.calls.map(([record]) => record.usageId)).size).toBe(5)
-    expect(mediaGenerations).toBe(2)
+    expect(nativeThreads).toEqual([null, nativeThreadId, nativeThreadId, nativeThreadId, null])
   } finally {
     vi.useRealTimers()
     await rm(vault, { recursive: true, force: true })
