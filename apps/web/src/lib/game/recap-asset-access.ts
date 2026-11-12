@@ -6,9 +6,11 @@ import { openGameTexts } from "./crypto";
 import { isRecapMediaVisible } from "./access";
 import { readGame } from "./service";
 import { readRecapMedia } from "./recap-media";
+import { pairGamesWhere } from "./recap-inputs";
 
-/** Current roster, blocks, reports and exact source keys. Used at admission,
- * publication and delivery; uploader ownership never bypasses recap authority. */
+/** Current roster, blocks, reports and exact source keys; a photo may come from
+ * any of the pair's settled games. Used at admission, publication and delivery;
+ * uploader ownership never bypasses recap authority. */
 export async function recapReferencesCurrent(db: Prisma.TransactionClient, gameId: string, assets: readonly Pick<GameRecapEnvelope["assets"][number], "references">[]): Promise<boolean> {
   const game = await db.game.findUnique({ where: { id: gameId }, select: { maxPlayers: true, status: true, players: { select: { memberId: true, leftAt: true }, take: 3 } } });
   if (!game || game.maxPlayers !== 2 || game.status !== "settled" || game.players.length !== 2 || game.players.some(player => !player.memberId || player.leftAt)) return false;
@@ -26,7 +28,7 @@ export async function recapReferencesCurrent(db: Prisma.TransactionClient, gameI
       { ownerMemberId: memberIds[0], subjectMemberId: memberIds[1] },
       { ownerMemberId: memberIds[1], subjectMemberId: memberIds[0] },
     ], photoKey: { not: null } }, select: { subjectMemberId: true, photoKey: true } }) : [],
-    db.gameEntry.findMany({ where: { id: { in: entryIds }, gameId, memberId: { in: memberIds }, withdrawnAt: null, attempt: { gt: 0 } }, select: { id: true, memberId: true, mediaKeys: true } }),
+    db.gameEntry.findMany({ where: { id: { in: entryIds }, player: { game: pairGamesWhere(memberIds) }, memberId: { in: memberIds }, withdrawnAt: null, attempt: { gt: 0 } }, select: { id: true, memberId: true, mediaKeys: true } }),
   ]);
   return references.every(ref => ref.kind === "murph" ? ref.key === "murph-character-sheet-v1"
     : ref.kind === "profile" ? profiles.some(profile => profile.memberId === ref.memberId && profile.photoKey === ref.key)

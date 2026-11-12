@@ -1915,6 +1915,10 @@ label words. Pair show identity references may include the contact photo saved
 by one current player for the other, with only the pictured subject exposed.
 This does not expose its owner, name or relationship, or grant direct media
 access; replacement, removal, departure and blocks invalidate the reference.
+They may also include each player's newest photo posts from the pair's other
+settled games (exactly these two people, neither departed), which both already
+saw: faces only, never prints. Withdrawal, reports, removal, departure and blocks
+invalidate those the same way.
 Group lore keys derive from the stored original audience, not the room
 ID or current seats; a changed audience cannot inherit its notebook. Live lore
 contains only room conversation and shared game state, never app-only captions

@@ -419,6 +419,6 @@ async function readRecapForWriter(input: {
   return { action: "read_game", result: { status: "ok", recapGame: { ...input.material.game,
     material: { game: input.material.game, players: input.material.players, entries: input.material.entries,
       result: input.material.validation.result, startedAt: input.material.validation.startedAt.toISOString(),
-      settledAt: input.material.validation.settledAt.toISOString(), references: publicRecapReferences(references) },
+      settledAt: input.material.validation.settledAt.toISOString(), references: publicRecapReferences(references, input.material) },
   } } };
 }

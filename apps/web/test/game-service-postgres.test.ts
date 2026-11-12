@@ -684,7 +684,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       const read = async () => (await readRecapSourceReferences(material, eventId)).filter(ref => ref.kind === "contact");
       const references = await read();
       expect(references).toHaveLength(2);
-      expect(publicRecapReferences(references)).toEqual(expect.arrayContaining([
+      expect(publicRecapReferences(references, material)).toEqual(expect.arrayContaining([
         { id: expect.any(String), kind: "contact", memberId: b },
         { id: expect.any(String), kind: "contact", memberId: a },
       ]));
@@ -707,6 +707,52 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       await db.gameBlock.delete({ where: { blockerMemberId_blockedMemberId: { blockerMemberId: a, blockedMemberId: b } } });
       await db.gameContactLabel.delete({ where });
       expect(await current()).toBe(false);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("offers the pair's photos from their other settled games as faces and revokes them like this game's", async () => {
+    const a = await member("PastA", "UTC"), b = await member("PastB", "UTC"), c = await member("PastC", "UTC");
+    const room = await member("Room", "UTC"), db = getPrisma();
+    const { gameId } = await startGame(a, b);
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await devStartNow(gameId, a);
+    const post = await photo(a, gameId, "this-week-face");
+    await ok(a, post);
+    await devSettleNow(gameId, a);
+    const eventId = gameChatLifecycleEventId(gameId, "recap");
+    await markGameChatGenerationQueuedTx(eventId, db, room);
+    // Each day b (challenger) then a: day d is entryIds[2d] for b and [2d + 1] for a.
+    const past = await seedSettledGame({ challenger: b, opponent: a, settledAt: new Date("2030-01-08T00:00:00Z"), mediaDays: 6 });
+    const [otherPartner, live, departed] = await Promise.all([[a, c], [a, b], [a, b]].map(([challenger, opponent]) =>
+      seedSettledGame({ challenger, opponent, settledAt: new Date(), mediaDays: 1 })));
+    await db.game.update({ where: { id: live.gameId }, data: { status: "live" } });
+    await db.gamePlayer.updateMany({ where: { gameId: departed.gameId, memberId: b }, data: { leftAt: new Date() } });
+    await db.gameEntry.update({ where: { id: past.entryIds[10] }, data: { withdrawnAt: new Date() } });
+    const report = (entryId: string) => db.gameReport.create({ data: { id: randomUUID(), gameId: past.gameId, entryId, about: "post", reason: "other", reporterMemberId: b, reportedMemberId: a } });
+    await report(past.entryIds[9]);
+    await db.gameEntry.update({ where: { id: past.entryIds[5] }, data: { mediaKeys: [past.mediaKeys[7]] } });
+    vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
+    try {
+      const material = (await readGameRecapMaterial(gameId, room, [a, b], eventId))!;
+      const { readRecapSourceReferences, publicRecapReferences } = await import("@/src/lib/game/recap-inputs");
+      const { recapReferencesCurrent } = await import("@/src/lib/game/recap-asset-access");
+      const read = async () => (await readRecapSourceReferences(material, eventId)).filter(ref => ref.kind === "entry");
+      const [own, ...references] = await read();
+      expect(publicRecapReferences([own!], material)).toEqual([{ id: own!.id, kind: "entry", memberId: a, entryId: post.entryId }]);
+      // Newest four each: a's day 4 is reported and day 2 repeats day 3's photo; b's day 5 is withdrawn.
+      expect(references.map(ref => ref.entryId)).toEqual([...[5, 3, 1].map(day => past.entryIds[2 * day + 1]), ...[4, 3, 2, 1].map(day => past.entryIds[2 * day])]);
+      expect(publicRecapReferences(references, material)).toEqual(references.map(ref => ({ id: ref.id, kind: "entry", memberId: ref.memberId })));
+      const reference = references[0]!;
+      const current = (ref = reference) => recapReferencesCurrent(db, gameId, [{ references: [ref] }]);
+      expect(await current()).toBe(true);
+      await db.gameEntry.update({ where: { id: reference.entryId }, data: { withdrawnAt: new Date() } });
+      expect(await current()).toBe(false);
+      expect((await read()).some(ref => ref.id === reference.id)).toBe(false);
+      await db.gameEntry.update({ where: { id: reference.entryId }, data: { withdrawnAt: null } });
+      expect(await current()).toBe(true);
+      await report(reference.entryId!);
+      expect(await current()).toBe(false);
+      expect(await current({ kind: "entry", memberId: a, entryId: otherPartner.entryIds[0]!, key: otherPartner.mediaKeys[0]!, id: reference.id })).toBe(false);
     } finally { vi.unstubAllEnvs(); }
   });
 
@@ -747,13 +793,16 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       const contactKey = await putGameMedia({ bytes: largePhoto, contentType: "image/jpeg", prefix: mediaKeyPrefixFor(a) });
       const contactWhere = { ownerMemberId_subjectMemberId: { ownerMemberId: a, subjectMemberId: b } };
       await db.gameContactLabel.upsert({ where: contactWhere, create: { ownerMemberId: a, subjectMemberId: b, photoKey: contactKey }, update: { photoKey: contactKey } });
+      await seedSettledGame({ challenger: a, opponent: b, settledAt: new Date("2030-01-08T00:00:00Z"), mediaDays: 1 });
       const material = (await readGameRecapMaterial(gameId, room, [a, b], eventId))!;
       const { readRecapSourceReferences, readRecapReferenceBytes } = await import("@/src/lib/game/recap-inputs");
-      const references = (await readRecapSourceReferences(material, eventId)).filter(ref => ref.kind === 'profile' || ref.kind === 'contact');
+      const available = await readRecapSourceReferences(material, eventId);
+      const references = available.filter(ref => ref.kind === 'profile' || ref.kind === 'contact');
+      const pastPhoto = available.find(ref => ref.kind === "entry")!;
       const normalized = await Promise.all(references.map(async ref => (await readRecapReferenceBytes(ref))!));
       expect(normalized.map(ref => [ref.width, ref.height])).toEqual([[768, 1024], [768, 1024], [768, 1024]]);
       const file = { kind: "upload" as const, slot: "scene-0", mediaType: "image/jpeg" as const,
-        referenceIds: references.map(ref => ref.id), bytes: bytes.toString("base64") };
+        referenceIds: [...references, pastPhoto].map(ref => ref.id), bytes: bytes.toString("base64") };
       const upload = () => uploadRecapMedia({ memberId: room, gameId, eventId, material, beforeMutationTx: async () => {}, file });
       const profile = await db.gameProfile.findUniqueOrThrow({ where: { memberId: a } });
       await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: null } });
@@ -764,6 +813,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       await db.gameContactLabel.update({ where: contactWhere, data: { photoKey: contactKey } });
       const asset = await upload();
       expect(asset.references).toContainEqual({ kind: "contact", memberId: b, key: contactKey });
+      expect(asset.references).toContainEqual({ kind: "entry", memberId: pastPhoto.memberId, entryId: pastPhoto.entryId, key: pastPhoto.key });
       await expect(uploadRecapMedia({ memberId: room, gameId, eventId, material, beforeMutationTx: async () => {},
         file: { ...file, bytes: Buffer.from("not media").toString("base64") } })).rejects.toThrow();
       const assets = [asset];
@@ -795,6 +845,10 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(await readRecapCoverPreview(gameId, accepted.envelope.preview.token)).toBeNull();
       expect((await readGame(gameId, a))?.recap?.chatLine).toBe(recap.chatLine);
       await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: profile.photoKey } });
+      expect((await readAuthorizedRecapAsset(assetInput))?.bytes.length).toBe(bytes.length);
+      await db.gameEntry.update({ where: { id: pastPhoto.entryId }, data: { withdrawnAt: new Date() } });
+      expect(await readAuthorizedRecapAsset(assetInput)).toBeNull();
+      expect(await readRecapCoverPreview(gameId, accepted.envelope.preview.token)).toBeNull();
     } finally {
       fence.mockRestore(); active.mockRestore(); vi.unstubAllEnvs();
       await db.hostedRuntimeOwner.deleteMany({ where: { userId: room } });
