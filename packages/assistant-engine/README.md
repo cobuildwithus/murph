@@ -307,8 +307,10 @@ Optional notifications share accepted outbound context at the notification
 boundary, after audience resolution. The existing outbox route index supplies
 at most 100 candidates across sessions; the prompt includes at most 20 whole
 accepted text messages and 8,000 text characters from the exact destination,
-channel and direct/group scope. Reactions, vault-file deliveries and unaccepted
-output are excluded. This is quoted evidence, never instructions or proof of
+channel and direct/group scope. Times are rendered in the vault's local zone,
+never as bare UTC, because a US evening send carries the next UTC date. Reactions,
+vault-file deliveries and unaccepted output are excluded. Game missed-day notes
+get no history: an earlier reminder never covers a miss. This is quoted evidence, never instructions or proof of
 reading or completion. Omit only an already-covered person/task/occurrence;
 keep uncovered tasks, explicit repeats and necessary safety cues. Required,
 maintenance and special-profile notifications keep their existing contracts.

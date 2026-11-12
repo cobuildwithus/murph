@@ -6657,3 +6657,34 @@ test.each([
   expect(call.profile).toEqual({ promptProfile: scheduled ? 'conversation' : 'system-notification',
     threadScope: 'isolated-thread', toolProfile: scheduled ? 'provider-turn' : 'output-only-turn' })
 })
+
+test.each(['game_missed_check_in', 'game_group_missed_check_in', 'game_evening_check_in'] as const)(
+  '%s gets accepted-message history only when a prior question could cover it', async kind => {
+    const pair = { kind: 'game_missed_check_in' as const, gameId: 'game_synthetic', eventId: 'game-missed:game_synthetic:one:2030-03-04',
+      memberId: 'one', firstMissedDate: '2030-03-04', pairFingerprint: 'a'.repeat(32) }
+    const group = { kind: 'game_group_missed_check_in' as const, eventId: 'game-missed:synthetic-group:group:2030-03-04', roomId: 'synthetic-group',
+      firstMissedDate: '2030-03-04', pairFingerprint: 'a'.repeat(32), conversationLaneSeq: '7',
+      batch: [{ gameId: 'game_synthetic', termsVersion: 1, remainingMemberIds: ['one', 'two'], misses: [{ memberId: 'one', missedDates: ['2030-03-04'] }] }] }
+    const evening = { kind: 'game_evening_check_in' as const, eventId: 'game-evening:synthetic-group:2030-03-05', roomId: 'synthetic-group',
+      date: '2030-03-05', expiresAt: '2030-03-06T01:30:00.000Z', conversationLaneSeq: '7',
+      batch: [{ gameId: 'game_synthetic', termsVersion: 1, memberIds: ['one', 'two'], dayIndex: 1 }] }
+    const policy = kind === 'game_missed_check_in' ? pair : kind === 'game_group_missed_check_in' ? group : evening
+    const hosted = { memberId: 'synthetic-group', userEnvKeys: [],
+      ...(kind === 'game_missed_check_in' ? { gameMissedCheckInScope: pair } : kind === 'game_group_missed_check_in' ? { gameMissedCheckInScope: group } : {}) }
+    const sharedPlan = createSharedPlan()
+    sharedPlan.conversationPolicy.audience = { ...sharedPlan.conversationPolicy.audience,
+      channel: 'linq', threadId: 'synthetic-room', threadIsDirect: false,
+      explicitTarget: 'synthetic-room', deliveryPolicy: 'explicit-target-override' }
+    await import('../src/assistant/notification-history.ts')
+    const harness = await loadNotificationTurnHarness({ sharedPlan, turnId: `history-${kind}`,
+      providerResult: createProviderResult({ response: JSON.stringify({ kind: 'skip', privateSummary: 'Synthetic.' }) }),
+      priorDeliveries: [notificationHistoryIntent()] })
+    await harness.sendAssistantNotificationLocal({ channel: 'linq', threadId: 'synthetic-room', threadIsDirect: false,
+      deliveryTarget: 'synthetic-room', deliveryIdempotencyKey: policy.eventId, responsePolicy: policy,
+      executionContext: { hosted },
+      instructions: 'Synthetic game notice.', vault: '/tmp/synthetic-notification-vault' })
+    const prompt = harness.mocks.executeCodexTurnWithRecovery.mock.calls[0]![0].input.prompt
+    if (kind === 'game_evening_check_in') expect(prompt).toContain('Ava, are you taking your walk today?')
+    else expect(prompt).not.toContain('Accepted messages')
+  },
+)
