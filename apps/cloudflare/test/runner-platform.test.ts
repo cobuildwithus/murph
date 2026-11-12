@@ -677,7 +677,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         durableRoot: path.join(tempRoot, "durable"),
         ref,
       })).rejects.toMatchObject({
-        name: "HostedRuntimeControlPlaneRejectedError",
+        message: expect.stringMatching(/data key unwrap failed with HTTP 403/u),
         status: 403,
       });
 
@@ -6169,13 +6169,15 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("surfaces internal control-plane 403 response codes without stale authority labeling", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+  it("returns internal control-plane 403 responses for the endpoint decoder to read", async () => {
+    const body = JSON.stringify({
       error: {
         code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
         message: "Recipient must reply before another outbound message.",
+        retryable: false,
       },
-    }), {
+    });
+    const fetchMock = vi.fn(async () => new Response(body, {
       headers: {
         "content-type": "application/json; charset=utf-8",
       },
@@ -6195,30 +6197,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       },
     );
 
-    let rejectedError: unknown;
-    try {
-      await hostedFetch(`http://web-control.worker${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`, {
-        body: "{}",
-        method: "POST",
-      });
-    } catch (error) {
-      rejectedError = error;
-    }
-
-    expect(isHostedRuntimeInternalAuthorityRejectedError(rejectedError)).toBe(false);
-    expect(rejectedError).toMatchObject({
-      code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
-      name: "HostedRuntimeControlPlaneRejectedError",
-      reason: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
-      responseStatus: 403,
-      status: 403,
-      statusCode: 403,
+    const response = await hostedFetch(`http://web-control.worker${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`, {
+      body: "{}",
+      method: "POST",
     });
-    expect(rejectedError).toBeInstanceOf(Error);
-    expect((rejectedError as Error).message).toContain(
-      "Recipient must reply before another outbound message.",
-    );
-    expect((rejectedError as Error).message).not.toContain("Hosted invocation is stale");
+
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe(body);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -6247,7 +6232,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       targetKind: "thread",
     })).rejects.toMatchObject({
       code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
-      name: "HostedRuntimeControlPlaneRejectedError",
+      name: "HostedWebControlPlaneResponseError",
       retryable: false,
       status: 403,
     });
@@ -11157,10 +11142,32 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(platform.effectsPort.getTelegramFile!({
       fileId: "telegram_file_123",
     })).rejects.toMatchObject({
-      code: "HOSTED_RUNTIME_CONTROL_PLANE_REJECTED",
-      name: "HostedRuntimeControlPlaneRejectedError",
+      message: "Hosted Telegram file lookup failed with HTTP 403. Forbidden",
       status: 403,
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a provider-effect 403 a refusal when its error body cannot be read", async () => {
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new TypeError("body stream lost"));
+      },
+    }), { status: 403 }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    const error = await platform.effectsPort.getTelegramFile!({
+      fileId: "telegram_file_123",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      message: "Hosted Telegram file lookup failed with HTTP 403.",
+      status: 403,
+    });
+    expect(error).not.toHaveProperty("deliveryMayHaveSucceeded");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
