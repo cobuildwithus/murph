@@ -153,10 +153,7 @@ import {
 import {
   runHostedAssistantAutomationLane,
 } from "./maintenance.ts";
-import {
-  isHostedDeviceSyncMaintenanceModuleLoadError,
-  loadHostedDeviceSyncMaintenanceModule,
-} from "./device-sync-maintenance-import.ts";
+import { resolveHostedDeviceSyncNextWakeAt } from "./device-sync-wake-projection.ts";
 import {
   buildHostedDeviceSyncStatusPrompt,
   type HostedDeviceSyncStatusPromptReconnectTarget,
@@ -2403,10 +2400,9 @@ export async function runHostedWorkspaceAssistantPhase(
     const preForegroundTiming: HostedAssistantPreForegroundTiming = {
       turnTimingPreForegroundPreludeMs: deviceWakeProjectionStartedAt - postAutomationStartedAt,
     };
-    const deviceSyncFollowUpWake = await resolveHostedDeviceSyncFollowUpWake({
+    const deviceSyncFollowUpWake = resolveHostedDeviceSyncFollowUpWake({
       input,
       pendingAssistantInputWakeAt: systemMailboxMaintenance.pendingAssistantInputWakeAt,
-      timing: preForegroundTiming,
     });
     preForegroundTiming.turnTimingDeviceWakeProjectionMs =
       performance.now() - deviceWakeProjectionStartedAt;
@@ -5690,7 +5686,7 @@ async function runSystemMailboxMaintenancePhase(
   initialProviderCleanupCheckpoint = cleanupPlan.checkpoint;
   const deviceSyncFollowUpWake = phaseInput.foregroundCausalOnly === true
     ? null
-    : await resolveHostedDeviceSyncFollowUpWake({
+    : resolveHostedDeviceSyncFollowUpWake({
         input: phaseInput,
         pendingAssistantInputWakeAt,
       });
@@ -7662,27 +7658,11 @@ function resolveSkippedDeviceSyncWake(input: {
   return null;
 }
 
-async function resolveHostedDeviceSyncFollowUpWake(input: {
+function resolveHostedDeviceSyncFollowUpWake(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingAssistantInputWakeAt: string | null;
-  timing?: HostedAssistantPreForegroundTiming;
-}): Promise<HostedRuntimeWakeCandidate | null> {
-  let localDeviceSyncScheduledWake: HostedRuntimeWakeCandidate | null;
-  try {
-    localDeviceSyncScheduledWake = await resolveHostedLocalDeviceSyncScheduledWake(
-      input.input,
-      input.timing,
-    );
-  } catch (error) {
-    if (!isHostedDeviceSyncMaintenanceModuleLoadError(error)) {
-      throw error;
-    }
-    await writeHostedDeviceSyncFollowUpWakeProjectionModuleLoadFailureRuntimeLog({
-      error,
-      input: input.input,
-    });
-    return null;
-  }
+}): HostedRuntimeWakeCandidate | null {
+  let localDeviceSyncScheduledWake = resolveHostedLocalDeviceSyncScheduledWake(input.input);
   const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake(input);
   if (
     skippedDeviceSyncWake?.at
@@ -7737,62 +7717,14 @@ function shouldRescheduleSkippedDeviceSyncWake(
   );
 }
 
-async function writeHostedDeviceSyncFollowUpWakeProjectionModuleLoadFailureRuntimeLog(input: {
-  error: unknown;
-  input: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): Promise<void> {
-  const failure = buildHostedRuntimeFailureDiagnostics(
-    input.error,
-    "Hosted device-sync follow-up wake projection failed to load the maintenance module.",
-  );
-  const moduleLoadErrorCode = isHostedDeviceSyncMaintenanceModuleLoadError(input.error)
-    ? input.error.code
-    : null;
-  await writeHostedRuntimeLogBestEffort({
-    entry: {
-      ...buildHostedRuntimeLogContextFields({
-        attemptId: input.input.request.attemptId,
-        leaseGeneration: input.input.request.leaseGeneration,
-        workspaceVersion: input.input.request.workspaceVersion,
-      }),
-      component: "device-sync",
-      errorCode: moduleLoadErrorCode
-        ? toHostedRuntimeLogCode(moduleLoadErrorCode)
-        : failure.errorCode,
-      eventCode: "device-sync.module_load_failed",
-      level: "warn",
-      phase: "invoke",
-      redactedJson: {
-        ...failure.redactedJson,
-        errorMessagePresent: input.error instanceof Error
-          ? input.error.message.length > 0
-          : input.error !== null && input.error !== undefined,
-        followUpWakeProjection: true,
-        projectionPath: "follow-up-wake",
-      },
-    },
-    platform: input.input.runtime.platform,
-  });
-}
-
-async function resolveHostedLocalDeviceSyncScheduledWake(
+function resolveHostedLocalDeviceSyncScheduledWake(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
-  timing?: HostedAssistantPreForegroundTiming,
-): Promise<HostedRuntimeWakeCandidate | null> {
+): HostedRuntimeWakeCandidate | null {
   if (!hasHostedDeviceSyncRuntimeConfigured(input)) {
     return null;
   }
 
-  const moduleLoadStartedAt = performance.now();
-  let maintenance: Awaited<ReturnType<typeof loadHostedDeviceSyncMaintenanceModule>>;
-  try {
-    maintenance = await loadHostedDeviceSyncMaintenanceModule();
-  } finally {
-    if (timing) {
-      timing.turnTimingDeviceWakeModuleLoadMs = performance.now() - moduleLoadStartedAt;
-    }
-  }
-  const nextWakeAt = maintenance.resolveHostedDeviceSyncNextWakeAt({
+  const nextWakeAt = resolveHostedDeviceSyncNextWakeAt({
     deviceSyncConfig: input.runtime.resolvedConfig.deviceSync,
     platform: input.runtime.platform,
     vaultRoot: input.restored.vaultRoot,
