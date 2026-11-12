@@ -149,6 +149,12 @@ export interface CreateGameBody {
    * addressed to that member; otherwise it's an open link, as without it.
    */
   inviteeRecipient?: GameInviteRecipient;
+  /**
+   * One-on-one only: the member the challenger picked from the people they
+   * have played, when the app has no number for them. Addressed under the
+   * same rule as `inviteeRecipient`; anyone else gets an open link.
+   */
+  inviteeMemberId?: string;
   previousGameId?: string;
 }
 

@@ -4,6 +4,7 @@ import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-ide
 import { getPrisma } from "../prisma";
 import { isGameOn } from "./access";
 import { isHiddenBy, readGameBlocks } from "./blocks";
+import { gamePairWhere } from "./chat-membership";
 
 /**
  * Who Message texts on a live pair game: the other player's verified number.
@@ -13,15 +14,21 @@ import { isHiddenBy, readGameBlocks } from "./blocks";
  * read only when the player taps Message, never with Home, so it is opened
  * only when someone means to text.
  *
+ * The challenger's invite to someone they've already played a game with
+ * (addressed to that member) texts them the same way: the pair shook on a
+ * game before, so it's the number Message gave them then.
+ *
  * `undefined` when the viewer can't see the game. `null` when there's no one
- * to text: a group, an invite or a finished game, a player who left or was
- * suspended, a block either way, or either player without a verified number.
+ * to text: a group, an open invite or a finished game, a player who left or
+ * was suspended, a block either way, or either player without a verified
+ * number.
  */
 export async function readGameMessageRecipient(gameId: string, viewerId: string): Promise<string | null | undefined> {
   const prisma = getPrisma();
   const game = await prisma.game.findUnique({
     where: { id: gameId },
     select: {
+      createdBy: true,
       maxPlayers: true,
       status: true,
       players: { select: { memberId: true, leftAt: true } },
@@ -31,8 +38,10 @@ export async function readGameMessageRecipient(gameId: string, viewerId: string)
   if (!game || !isGameOn(game)) return undefined;
   const me = game.players.find(player => player.memberId === viewerId);
   if (!me || me.leftAt) return undefined;
-  if (game.maxPlayers !== 2 || game.status !== "live" || game.players.length !== 2) return null;
-  const otherId = game.players.find(player => player !== me && !player.leftAt)?.memberId;
+  if (game.maxPlayers !== 2) return null;
+  const otherId = game.status === "live" && game.players.length === 2
+    ? game.players.find(player => player !== me && !player.leftAt)?.memberId
+    : await addressedInvitee(game, viewerId);
   if (!otherId) return null;
   const [blocks, other, mine] = await Promise.all([
     readGameBlocks(prisma, viewerId, [otherId]),
@@ -46,4 +55,19 @@ export async function readGameMessageRecipient(gameId: string, viewerId: string)
   if (!mine?.phoneNumberVerifiedAt || !mine.phoneNumberEncrypted) return null;
   const identity = await readHostedMemberIdentity({ memberId: otherId, prisma });
   return identity?.phoneNumberVerifiedAt && identity.phoneNumber ? identity.phoneNumber : null;
+}
+
+/** The member the viewer's own invite is addressed to, when the pair has shaken on a game before. */
+async function addressedInvitee(
+  game: { createdBy: string | null; status: string; players: unknown[]; invitees: { memberId: string | null }[] },
+  viewerId: string,
+): Promise<string | null> {
+  if (game.status !== "invited" || game.createdBy !== viewerId || game.players.length !== 1) return null;
+  const invitee = game.invitees.find(row => row.memberId !== null && row.memberId !== viewerId)?.memberId;
+  if (!invitee) return null;
+  const shook = await getPrisma().game.findFirst({
+    where: { ...gamePairWhere([viewerId, invitee]), status: { in: ["live", "settled"] } },
+    select: { id: true },
+  });
+  return shook ? invitee : null;
 }

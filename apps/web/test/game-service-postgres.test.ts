@@ -1690,6 +1690,30 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect((await getPrisma().gameInvitee.findUniqueOrThrow({ where: { gameId_seat: { gameId: blocked!.id, seat: 1 } } })).memberId).toBeNull();
   });
 
+  it("addresses a new one-on-one invite to someone you already play, picked by who they are, and leaves anyone else an open link", async () => {
+    const leo = await member("Leo", "America/New_York");
+    const ava = await member("Ava", "Australia/Sydney");
+    const kat = await member("Kat", "Europe/London");
+    // Leo and Ava are mid-game; Leo has never played Kat.
+    await startGame(ava, leo);
+    const invite = (inviteeMemberId: string): GameCommand => ({ gameId: randomUUID(), inviteeFirstName: "Ava", inviteeMemberId, terms: TERMS, type: "createGame" });
+    const inviteeOf = async (id: string) => (await getPrisma().gameInvitee.findUniqueOrThrow({ where: { gameId_seat: { gameId: id, seat: 1 } } })).memberId;
+
+    // Picked from the people Leo has played, with no number: the invite is Ava's.
+    const again = await ok(leo, invite(ava));
+    expect(await inviteeOf(again!.id)).toBe(ava);
+    expect(await readGame(again!.id, leo)).toMatchObject({ status: "invited", players: [{ seat: 0 }, { seat: 1, memberId: ava, firstName: "Ava" }] });
+    const accept = { termsVersion: 1, timeZone: "Europe/London", token: again!.inviteToken!, type: "join" } as const;
+    expect(await run(kat, accept)).toMatchObject({ ok: false, status: 403, error: { code: "NOT_A_PLAYER" } });
+
+    // Someone Leo has never played, Leo himself, or an id that's no one's: an open link, and the invite still goes.
+    for (const id of [kat, leo, "hbm_synthetic_nobody"]) expect(await inviteeOf((await ok(leo, invite(id)))!.id)).toBeNull();
+
+    // Blocked either way: never addressed.
+    await getPrisma().gameBlock.create({ data: { blockerMemberId: ava, blockedMemberId: leo } });
+    expect(await inviteeOf((await ok(leo, invite(ava)))!.id)).toBeNull();
+  });
+
   it("lets only the addressed opponent accept a rematch, and never copies its label onto someone else", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");
