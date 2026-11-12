@@ -5848,7 +5848,18 @@ The runtime-orphan kind constraint is unchanged.
 
 
 Pair shows use the existing recap notification on GPT-6.1 Sol with the normal
-hosted group turn sandbox, cwd and tool surface. `read_game` returns scoped game
+hosted group turn sandbox, cwd and tool surface. Writing uses Flex with a
+twenty-minute capacity budget in an unbound per-generation assistant session;
+the system mailbox retries Flex capacity failures at five-minute intervals,
+resuming that session's native binding. The next attempt at or after twenty
+minutes uses standard service, without interrupting active generation.
+Standard-tier capacity failure settles through existing template or
+remake-retirement recovery. The room session owns context and delivery.
+Media provenance and song timing stay in the per-turn host-memory map. A retry
+resumes the native thread but must regenerate media from an earlier failed
+attempt: existing files and writer-writable metadata cannot confer media
+authority. No durable media provenance receipts are written or read.
+`read_game` returns scoped game
 material, shared chat and lore directly; the host resolves reference-photo IDs.
 Pair recap identity references include each player's own profile photo and the
 contact photo saved by the other player, attributed only to the pictured subject.

@@ -96,7 +96,8 @@ Residual game deletion, the final key-dependency proof and surviving group
 invitation authority are owned by [Weekly Game](product-specs/weekly-game.md)
 and [Architecture](../ARCHITECTURE.md#weekly-game). Local proof is recorded in
 the [execution record](exec-plans/completed/2026-11-06-game-deletion-progress-survivors.md).
-Recap generation retirement and terminal tool responses are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game); the consumer-first activation gate and local proof are recorded in [the execution record](exec-plans/completed/2026-11-06-recap-generation-activation.md).
+Recap generation retirement, Flex capacity fallback and terminal tool responses are owned by [Weekly Game](product-specs/weekly-game.md), the [assistant engine](../packages/assistant-engine/README.md#usage-record-identity) and [Architecture](../ARCHITECTURE.md#weekly-game); the consumer-first activation gate and local proof are recorded in [the execution record](exec-plans/completed/2026-11-06-recap-generation-activation.md).
+The Flex budget, durable retry, standard-tier failure settlement, per-attempt media authority and pricing proof are recorded in [the recap Flex execution record](exec-plans/completed/2026-11-12-recap-flex.md).
 A pair recap generation a block already ended answers the same terminal value, and a block row stays uncertain. A group block keeps the game in its room with its receipts, so waiting notices and the recap send once it lifts; [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game) own that rule. The group block change is recorded in [its plan](exec-plans/completed/2026-11-06-group-block-keeps-room.md).
 
 A second rematch ask never agrees to the first: it gets the open-rematch conflict, and the member answers the offer on Home; [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game) own the rule.

@@ -3709,6 +3709,35 @@ describe('Codex assistant registry helpers', () => {
     expect(serializedDiagnostic).not.toContain('thread-private')
   })
 
+  it.each([
+    { show: true, serviceTier: 'flex' as const, codexErrorInfo: 'flexUnavailable', basis: 'openai-flex' },
+    { show: true, serviceTier: null, codexErrorInfo: 'serverOverloaded', basis: 'standard' },
+    { show: false, serviceTier: 'flex' as const, codexErrorInfo: 'flexUnavailable', basis: null },
+    { show: false, serviceTier: null, codexErrorInfo: 'serverOverloaded', basis: null },
+  ])('retains unbilled capacity refusal pricing only for recap show attempts: $show / $serviceTier', async ({ show, serviceTier, codexErrorInfo, basis }) => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValue(new VaultCliError(
+      'ASSISTANT_CODEX_FAILED', 'Synthetic capacity refusal', { codexErrorInfo, retryable: true },
+    ))
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValue(null)
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({ model: 'gpt-6.1-sol', modelProvider: 'hosted-openai' }),
+      serviceTier, systemPrompt: 'Synthetic recap.', userPrompt: 'Finish the game recap.', workingDirectory: '/tmp/provider-tests',
+      hostedToolContext: {
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        computerToolsAvailable: false,
+        vaultFileSendAvailable: false,
+        sendVaultFile: async () => { throw new Error('Unexpected file delivery') },
+        currentGameRecapScope: () => ({ gameId: 'game_synthetic', eventId: 'game-recap:game_synthetic', pairFingerprint: 'synthetic-pair', ...(show ? { show: true } : {}) }),
+      },
+    })
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledWith(expect.objectContaining({ serviceTier }))
+    expect(attempt.ok).toBe(false)
+    if (attempt.ok) throw new Error('Expected refusal')
+    if (show) expect(attempt.usage).toMatchObject({ requestedModel: 'gpt-6.1-sol', tokenPricingBasis: basis, inputTokens: null, outputTokens: null })
+    else expect(attempt.usage).toBeUndefined()
+  })
+
   it('merges progress activity labels into successful delegated execution attempts', async () => {
     const executionResult: AssistantProviderTurnExecutionResult = {
       provider: 'codex-cli',

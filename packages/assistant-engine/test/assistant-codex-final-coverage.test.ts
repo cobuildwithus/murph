@@ -1424,6 +1424,8 @@ describe('Codex provider routing', () => {
 
   it.each([
     { name: 'Flex stays Flex during onboarding', ageMs: 1, requested: 'flex', expected: 'flex' },
+    { name: 'recap Flex has no generation deadline', ageMs: 1, recap: true, requested: 'flex', expected: 'flex' },
+    { name: 'recap standard fallback ignores onboarding priority', ageMs: 1, recap: true, expected: null },
     { name: 'signup instant', ageMs: 0, expected: 'priority' },
     { name: 'just before 24 hours', ageMs: 86_399_999, expected: 'priority' },
     { name: 'exactly 24 hours', ageMs: 86_400_000, expected: null },
@@ -1478,7 +1480,9 @@ describe('Codex provider routing', () => {
     )
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: 'hosted' in scenario ? { hosted: null } : {
-        hosted: { memberId: 'member-onboarding', userEnvKeys: [] },
+        hosted: { memberId: 'member-onboarding', userEnvKeys: [], ...('recap' in scenario ? {
+          gameRecapScope: { gameId: 'game_synthetic', eventId: 'game-recap:game_synthetic', pairFingerprint: 'synthetic-pair', show: true as const },
+        } : {}) },
       },
       input,
       route,
@@ -1527,7 +1531,7 @@ describe('Codex provider routing', () => {
     const providerInput =
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(providerInput?.serviceTier).toBe(scenario.expected)
-    if (scenario.expected === 'flex') {
+    if (scenario.expected === 'flex' && !('recap' in scenario)) {
       expect(timeoutSpy).toHaveBeenCalledWith(600_000)
       expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
     } else {
