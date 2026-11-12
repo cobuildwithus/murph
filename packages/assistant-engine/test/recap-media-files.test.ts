@@ -13,22 +13,29 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 const relativeRoot = 'tmp/recap/synthetic'
 async function vault() { const root = await mkdtemp(path.join(tmpdir(), 'recap-files-')); roots.push(root); return root }
 
-test('file image uses normal provider accounting and creates no capture or response media', async () => {
+test.each([false, true])('file image uses Sunburst with truthful accounting and no chat media (references=%s)', async withReference => {
   const root = await vault()
   const bytes = await sharp({ create: { width: 64, height: 96, channels: 3, background: '#ddbb77' } }).jpeg().toBuffer()
   const persist = vi.fn()
-  const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ data: [{ b64_json: bytes.toString('base64') }],
-    usage: { input_tokens: 12, output_tokens: 42, total_tokens: 54 } }))
+  const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+    expect(String(url)).toBe(`https://api.openai.com/v1/images/${withReference ? 'edits' : 'generations'}`)
+    const request = init?.body instanceof FormData ? Object.fromEntries(init.body) : JSON.parse(String(init?.body))
+    expect(request.model).toBe('gpt-image-2.6-sunburst')
+    expect(request).not.toHaveProperty('input_fidelity')
+    return Response.json({ data: [{ b64_json: bytes.toString('base64') }],
+      usage: { input_tokens: 12, output_tokens: 42, total_tokens: 54 } })
+  })
   const result = await executeGenerateImageTool({ env: { OPENAI_API_KEY: 'synthetic-key' }, fetchImpl, vaultRoot: root,
     persistGeneratedImageCapture: persist, requireHostedPrivateImageDelivery: true, providerRequestOrdinal: 1,
-    args: { output: 'file', outputFormat: 'jpeg', prompt: 'Synthetic paper theatre.', alt: null, quality: 'medium', size: '1024x1024' },
-    fileRuntime: { fetchImpl, resolveReferences: async () => [], save: (data, mediaType) => saveRecapMediaFile({ vault: root, relativeRoot, bytes: data, mediaType }) } })
+    args: { output: 'file', outputFormat: 'jpeg', referenceImageRefs: withReference ? ['synthetic-reference'] : [], prompt: 'Synthetic paper theatre.', alt: null, quality: 'medium', size: '1024x1024' },
+    fileRuntime: { fetchImpl, resolveReferences: async () => withReference ? [{ bytes, filename: 'reference.jpg', mediaType: 'image/jpeg',
+      sourceRef: 'synthetic-reference', sha256: createHash('sha256').update(bytes).digest('hex'), sourceRefSha256: 'a'.repeat(64) }] : [], save: (data, mediaType) => saveRecapMediaFile({ vault: root, relativeRoot, bytes: data, mediaType }) } })
   expect(result.rpcSuccess).toBe(true)
   expect(result.responseMedia).toBeUndefined()
   expect(result.savedCaptureId).toBeUndefined()
   expect(persist).not.toHaveBeenCalled()
   expect(fetchImpl).toHaveBeenCalledTimes(1)
-  expect(result.usageDraft).toMatchObject({ provider: 'openai-images', providerRequestOutcome: 'succeeded' })
+  expect(result.usageDraft).toMatchObject({ provider: 'openai-images', providerRequestOutcome: 'succeeded', usage: { requestedModel: 'gpt-image-2.6-sunburst' } })
   const receipt = JSON.parse(result.rpcText)
   expect(receipt.path).toContain(createHash('sha256').update(bytes).digest('hex'))
   expect(await readFile(path.join(root, receipt.path))).toEqual(bytes)

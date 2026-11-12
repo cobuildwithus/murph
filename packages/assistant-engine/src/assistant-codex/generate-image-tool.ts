@@ -44,10 +44,10 @@ import {
 } from './image-reference-resolver.js'
 import {
   generateOpenAiImage,
-  OPENAI_IMAGE_GENERATION_MODEL,
   OPENAI_IMAGE_GENERATION_USAGE_EXTRACTION_VERSION,
   OPENAI_IMAGES_BASE_URL,
   type OpenAiImageGenerationUsage,
+  type OpenAiImageModel,
   type OpenAiImageOutputFormat,
   type OpenAiImageQuality,
   type OpenAiImageSize,
@@ -130,7 +130,9 @@ export async function executeGenerateImageTool(input: {
   vaultRoot?: string | null
 }): Promise<GenerateImageToolResult> {
   if (input.args.output === 'file' && !input.fileRuntime) return { rpcSuccess: false, rpcText: 'File output requires an authorized owning flow.' }
-  const fileRuntime = input.args.output === 'file' ? input.fileRuntime : null
+  const { fileRuntime, model } = input.args.output === 'file'
+    ? { fileRuntime: input.fileRuntime, model: 'gpt-image-2.6-sunburst' as const }
+    : { fileRuntime: null, model: 'gpt-image-2.6-flare' as const }
   const apiKey = normalizeNullableString(input.env.OPENAI_API_KEY)
   if (!apiKey) return imageCredentialFailure(fileRuntime)
 
@@ -207,7 +209,7 @@ export async function executeGenerateImageTool(input: {
     generatedImageBytes = existingCapture.bytes
     savedCapture = existingCapture.capture
   } else {
-    const generated = await generateRecapOrChatImageBytes(input, fileRuntime, apiKey, vaultRoot)
+    const generated = await generateRecapOrChatImageBytes(input, fileRuntime, apiKey, vaultRoot, model)
     if ('rpcSuccess' in generated) return generated
     generatedImageBytes = generated.bytes
     referenceImages = generated.references
@@ -220,6 +222,7 @@ export async function executeGenerateImageTool(input: {
           args: input.args,
           bytes: generatedImageBytes,
           captureIdentity,
+          model,
           occurredAt,
           promptHash,
           referenceImages,
@@ -300,7 +303,7 @@ export async function executeGenerateImageTool(input: {
           ref: savedCapture.imageRef,
           sha256: createHash('sha256').update(generatedImageBytes).digest('hex'),
           sizeBytes: generatedImageBytes.byteLength,
-          source: OPENAI_IMAGE_GENERATION_MODEL,
+          source: model,
         },
       ],
       rpcSuccess: true,
@@ -351,6 +354,7 @@ async function saveGeneratedImageCapture(input: {
   args: GenerateImageToolArgs
   bytes: Uint8Array
   captureIdentity: GeneratedImageCaptureIdentity
+  model: OpenAiImageModel
   occurredAt: string
   promptHash: string
   referenceImages: readonly ResolvedGenerateImageReference[]
@@ -389,7 +393,7 @@ async function saveGeneratedImageCapture(input: {
         provenance: {
           family: 'capture',
           generatedImage: {
-            model: OPENAI_IMAGE_GENERATION_MODEL,
+            model: input.model,
             outputFormat: input.args.outputFormat,
             promptHash: input.promptHash,
             quality: input.args.quality,
@@ -424,6 +428,7 @@ async function saveGeneratedImageCapture(input: {
 
 function buildGeneratedImageUsageDraft(input: {
   args: GenerateImageToolArgs
+  model: OpenAiImageModel
   occurredAt: string
   operation: GenerateImageOperation
   providerRequestId: string | null
@@ -469,7 +474,7 @@ function buildGeneratedImageUsageDraft(input: {
         ? hashAssistantProviderStableJson(input.rawUsageJson)
         : null,
       reasoningTokens: input.usage?.output_tokens_details?.reasoning_tokens ?? null,
-      requestedModel: OPENAI_IMAGE_GENERATION_MODEL,
+      requestedModel: input.model,
       servedModel: null,
       totalTokens: input.usage?.total_tokens ?? null,
       usageExtractionSourcePath: input.usageExtractionSourcePath,
@@ -675,7 +680,7 @@ function sumReferenceImageBytes(
 }
 
 async function generateRecapOrChatImageBytes(input: Parameters<typeof executeGenerateImageTool>[0],
-  fileRuntime: GeneratedMediaFileRuntime | null | undefined, apiKey: string, vaultRoot: string | null): Promise<GenerateImageToolResult | {
+  fileRuntime: GeneratedMediaFileRuntime | null | undefined, apiKey: string, vaultRoot: string | null, model: OpenAiImageModel): Promise<GenerateImageToolResult | {
     bytes: Uint8Array; references: ResolvedGenerateImageReference[]; usageDraft: AssistantProviderUsageDraft | null
   }> {
   const referenceImageRefs = input.args.referenceImageRefs ?? []
@@ -722,6 +727,7 @@ async function generateRecapOrChatImageBytes(input: Parameters<typeof executeGen
       openAiResult = await generateOpenAiImage({
         abortSignal: input.abortSignal ?? null,
         apiKey,
+        model,
         fetchImpl: fileRuntime?.fetchImpl ?? input.fetchImpl,
         ...(input.args.outputCompression !== undefined
           ? { outputCompression: input.args.outputCompression }
@@ -748,6 +754,7 @@ async function generateRecapOrChatImageBytes(input: Parameters<typeof executeGen
     })
     usageDraft = buildGeneratedImageUsageDraft({
       args: input.args,
+      model,
       occurredAt: openAiResult.occurredAt,
       operation,
       providerRequestId: openAiResult.providerRequestId,

@@ -5638,10 +5638,13 @@ An exact provider tool-call id distinguishes multiple commands from one accepted
 or scheduled occurrence without becoming authority. Ordinary product feedback and
 verified-private support escalation remain accepted-message capabilities; scheduled
 turns create neither a feedback candidate nor a delivery-linked feedback obligation.
-Image generation and reference edits use `gpt-image-2.6-flare` through the
-existing OpenAI Images API. Exact-reply provenance and retained delivery evidence
-recognize current captures and persisted `gpt-image-2` / `gpt-image-2.5-flare`
-captures. Hosted usage accepts all three models at the documented shared image
+Chat image generation and reference edits use `gpt-image-2.6-flare`; recap
+file output uses `gpt-image-2.6-sunburst` for editing precision. The caller passes
+the model explicitly to the OpenAI Images API and records that model in usage
+and provenance. Recap egress permits both models during runner convergence and
+the same sixteen-reference limit as the image tool. Exact-reply provenance and
+retained delivery evidence recognize current captures and persisted `gpt-image-2` / `gpt-image-2.5-flare`
+captures. Hosted usage accepts all four models at the documented shared image
 token rates; deploy the Web usage reader before runners begin emitting GPT Image
 2.6 records. Keep the 2.6-compatible reader when rolling back the model default.
 Background image completion and its physical-note continuation remain bound to a

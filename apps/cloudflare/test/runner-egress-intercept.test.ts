@@ -1508,7 +1508,12 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock.mock.calls.filter(([target]) => new URL(readFetchTargetUrl(target)).pathname !== "/api/internal/hosted-runtime/log")).toHaveLength(Number(image) + Number(status === 200));
   });
 
-  it.each([true, false])('funds bounded recap images only from native scope (scoped=%s)', async scoped => {
+  it.each([
+    { scoped: true, model: 'gpt-image-2.6-flare' },
+    { scoped: true, model: 'gpt-image-2.6-sunburst' },
+    { scoped: false, model: 'gpt-image-2.6-flare' },
+    { scoped: false, model: 'gpt-image-2.6-sunburst' },
+  ])('funds $model recap images only from native scope (scoped=$scoped)', async ({ scoped, model }) => {
     const consume = vi.fn(async () => true);
     const upstream = vi.fn<typeof fetch>(async target => {
       const url = new URL(target instanceof Request ? target.url : String(target));
@@ -1521,11 +1526,29 @@ describe("hostedRunnerIntercept", () => {
     const response = await hostedRunnerIntercept(new Request('https://api.openai.com/v1/images/generations', {
       method: 'POST', headers: { authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`, 'content-type': 'application/json',
         'x-murph-recap-scope': 'forged', 'x-murph-recap-reservation': 'forged' },
-      body: JSON.stringify({ model: 'gpt-image-2.6-flare', prompt: 'Synthetic stage', quality: 'high', size: '1024x1536', output_format: 'jpeg' }),
+      body: JSON.stringify({ model, prompt: 'Synthetic stage', quality: 'high', size: '1024x1536', output_format: 'jpeg' }),
     }), env, { className: 'RunnerContainer', containerId: 'synthetic-container' });
     expect(response.status).toBe(scoped ? 504 : 403);
     expect(consume).toHaveBeenCalledTimes(Number(scoped));
     expect(upstream.mock.calls.filter(([target]) => new URL(readFetchTargetUrl(target)).hostname !== 'api.openai.com')).toHaveLength(Number(!scoped));
+  });
+
+  it.each([5, 16, 17])('bounds Sunburst multipart reference edits at the tool limit (references=%s)', async count => {
+    const consume = vi.fn(async () => true);
+    const upstream = vi.fn<typeof fetch>(async () => new Response('Synthetic image response'));
+    vi.stubGlobal('fetch', upstream);
+    const form = new FormData();
+    for (const [key, value] of Object.entries({ model: 'gpt-image-2.6-sunburst', prompt: 'Synthetic stage',
+      quality: 'high', size: '1024x1536', output_format: 'jpeg' })) form.set(key, value);
+    for (let index = 0; index < count; index++) form.append('image[]', new Blob(['synthetic'], { type: 'image/jpeg' }), `reference-${index}.jpg`);
+    const response = await hostedRunnerIntercept(new Request('https://api.openai.com/v1/images/edits', {
+      method: 'POST', headers: { authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}` }, body: form,
+    }), createInterceptEnv({ OPENAI_API_KEY: 'synthetic-key', recapMediaScoped: true, consumeRecapMediaRequest: consume,
+      providerContext: async () => ({ owns: true, userId: 'member_123', attemptId: 'attempt_1', leaseGeneration: '7', workspaceVersion: '4', platformAiUsageAllowed: false }) }),
+    { className: 'RunnerContainer', containerId: 'synthetic-container' });
+    expect(response.status).toBe(count <= 16 ? 200 : 400);
+    expect(consume).toHaveBeenCalledTimes(Number(count <= 16));
+    expect(upstream).toHaveBeenCalledTimes(Number(count <= 16));
   });
 
   it.each([true, false])('funds recap music from native scope even during ordinary settlement (scoped=%s)', async scoped => {

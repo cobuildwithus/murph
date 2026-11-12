@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   generateOpenAiImage,
-  OPENAI_IMAGE_GENERATION_MODEL,
   OPENAI_IMAGE_GENERATION_TIMEOUT_MS,
 } from '../src/assistant-codex/openai-image-generation.js'
 
@@ -43,6 +42,7 @@ describe('generateOpenAiImage', () => {
       code: 'MURPH_IMAGE_SUBSCRIPTION_REQUIRED', message: 'untrusted provider prose',
     } }, { status: 403 }))
     await expect(generateOpenAiImage({
+      model: 'gpt-image-2.6-flare',
       apiKey: 'test-key', fetchImpl, outputFormat: 'png',
       prompt: 'Draw a small lighthouse', quality: 'low', size: '1024x1024',
     })).rejects.toMatchObject({
@@ -68,6 +68,7 @@ describe('generateOpenAiImage', () => {
     }
 
     const result = await generateOpenAiImage({
+      model: 'gpt-image-2.6-flare',
       apiKey: 'test-key',
       fetchImpl,
       outputCompression: 40,
@@ -86,7 +87,7 @@ describe('generateOpenAiImage', () => {
     expect(requestHeaders.get('content-type')).toBe('application/json')
     expect(requestHeaders.get('x-stainless-retry-count')).toBe('0')
     expect(JSON.parse(String(capturedInit?.body))).toEqual({
-      model: OPENAI_IMAGE_GENERATION_MODEL,
+      model: 'gpt-image-2.6-flare',
       output_compression: 40,
       output_format: 'webp',
       prompt: 'Draw a clean icon.',
@@ -99,7 +100,7 @@ describe('generateOpenAiImage', () => {
     expect([...result.imageBytes]).toEqual([...RESPONSE_IMAGE_BYTES])
   })
 
-  it('uses the edits endpoint with multipart references when references are present', async () => {
+  it.each(['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'] as const)('uses %s for multipart edits without input_fidelity', async model => {
     let capturedUrl: string | null = null
     let capturedInit: RequestInit | undefined
     let requestCount = 0
@@ -111,6 +112,7 @@ describe('generateOpenAiImage', () => {
     }
 
     await generateOpenAiImage({
+      model,
       apiKey: 'test-key',
       fetchImpl,
       outputCompression: 55,
@@ -137,8 +139,8 @@ describe('generateOpenAiImage', () => {
     expect(capturedInit?.body).toBeInstanceOf(FormData)
 
     const form = capturedInit?.body as FormData
-    expect(form.get('model')).toBe(OPENAI_IMAGE_GENERATION_MODEL)
-    expect(form.get('model')).toBe('gpt-image-2.6-flare')
+    expect(form.get('model')).toBe(model)
+    expect(form.has('input_fidelity')).toBe(false)
     expect(form.get('prompt')).toBe('Use image 1 as the product reference.')
     expect(form.get('quality')).toBe('high')
     expect(form.get('size')).toBe('1024x1536')
@@ -174,6 +176,7 @@ describe('generateOpenAiImage', () => {
 
     await expect(
       generateOpenAiImage({
+        model: 'gpt-image-2.6-flare',
         apiKey: 'test-key',
         fetchImpl,
         outputFormat: 'png',
@@ -220,6 +223,7 @@ describe('generateOpenAiImage', () => {
       }
 
       const generation = generateOpenAiImage({
+        model: 'gpt-image-2.6-flare',
         apiKey: 'test-key',
         fetchImpl,
         outputFormat: 'png',
@@ -272,6 +276,7 @@ describe('generateOpenAiImage', () => {
     }
 
     const generation = generateOpenAiImage({
+      model: 'gpt-image-2.6-flare',
       abortSignal: abortController.signal,
       apiKey: 'test-key',
       fetchImpl,

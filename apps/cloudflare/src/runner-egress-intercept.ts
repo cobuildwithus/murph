@@ -3026,9 +3026,9 @@ async function boundedRecapImage(request: Request): Promise<boolean> {
   const multipart = request.headers.get('content-type')?.includes('multipart/form-data');
   const value = multipart ? await request.formData() : await request.json() as Record<string, unknown>;
   const get = (key: string) => value instanceof FormData ? value.get(key) : value[key];
-  return get('model') === 'gpt-image-2.6-flare' && (get('n') == null || get('n') === 1 || get('n') === '1')
+  return ['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'].includes(String(get('model'))) && (get('n') == null || get('n') === 1 || get('n') === '1')
     && ['1024x1024', '1024x1536', '1536x1024'].includes(String(get('size')))
     && ['low', 'medium', 'high'].includes(String(get('quality'))) && get('output_format') === 'jpeg'
     && String(get('prompt') ?? '').length <= 16_384
-    && (!(value instanceof FormData) || value.getAll('image[]').length + value.getAll('image').length <= 3);
+    && (!(value instanceof FormData) || value.getAll('image[]').length + value.getAll('image').length <= 16);
 }
