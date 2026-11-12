@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-12",
+  "order": 330,
+  "item": {
+    "id": "private-links-unindexed",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Private links stay out of search engines",
+    "summary": "Game invites, recaps, photos and every other private link Murph sends now tell search engines never to list them.",
+    "details": "A game invite that was called off or ran out now just says it isn't available, without naming who sent it.",
+    "relevanceTags": ["games", "privacy"],
+    "sourcePullRequests": [4897, 4901]
+  }
+}

@@ -111,7 +111,6 @@ describe("weekly game invite link", () => {
 
 it.each([
   [{ status: "used" }, "This link is used up.", "Someone already shook on it. Ask for a new one."],
-  [{ status: "expired", reason: "cancelled", inviterFirstName: "Player" }, "Player called this one off.", "Ask for a new one."],
   [{ status: "expired", reason: "cancelled" }, "This invite was called off.", "Ask for a new one."],
   [{ status: "expired" }, "This invite ran out.", "It wasn&#x27;t shaken on in time. Ask for a new one."],
   [null, "This link isn&#x27;t available.", "Check the link, or ask for a new one."],

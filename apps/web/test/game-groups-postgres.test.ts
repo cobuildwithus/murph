@@ -762,7 +762,7 @@ describe.skipIf(!enabled)("multiplayer HTTP contract and privacy", () => {
     const { readInvitePreview } = await import("@/src/lib/game/service");
     expect(await readInvitePreview(game.token, true)).toMatchObject({ status: "open" });
     await entry(game.id, a.id, 9); await entry(game.id, b.id, 9);
-    expect(await readInvitePreview(game.token, true)).toEqual({ status: "used" });
+    expect(await readInvitePreview(game.token, true)).toBeNull();
   });
 
   it("projects authenticated own-profile preview names, addressed task, dayOne and the per-request Home switch", async () => {

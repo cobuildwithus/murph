@@ -269,13 +269,12 @@ stake, titled "<Name> challenged you"; the name the challenger typed for the
 invitee is their private label and never appears, there or in the public
 invite preview (`GET /api/game/v1/invites/<token>`). A used, expired, or missing
 invite share-card previews as "This invite isn't available" and names nobody.
-The API keeps cancellation compatible with older clients: a void game with a
-`cancelled` event returns `{ status: "expired", reason: "cancelled", inviterFirstName }`.
-The optional reason and inviter name are absent for real expiry. The inviter name
-is included only when the cancellation actor is the inviter; other cancellations
-use neutral wording. The opened web
-page names the inviter for cancellation, with a neutral empty-name fallback;
-terms and private invitee labels stay absent. A game's
+Anonymous closed previews return the same null result as missing tokens, so
+the public API returns the same 404 shape and the page and Open Graph image show
+generic unavailable content. Closed previews never decrypt names or terms.
+Authenticated readers retain used/expired status and their own Talk delivery
+receipt; cancellation adds only `reason: "cancelled"`, never an inviter name.
+Open invite previews are unchanged. A game's
 players keep its invite token after it goes live (a spent token can't be
 accepted again), so reopening your own link is recognized as yours.
 Either seated player can cancel an invited or negotiating game with

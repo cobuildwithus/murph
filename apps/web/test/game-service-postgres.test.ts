@@ -1269,11 +1269,11 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(preview.terms.tasks[0].text).toBe("100 pushups");
 
     // Accept (from New York, so Start now below starts today for both); the
-    // invite is single-use and a used invite shows only its status.
+    // invite is single-use and a used invite has no public preview.
     const joined = await ok(ava, { termsVersion: 1, timeZone: "America/New_York", token, type: "join" });
     expect(joined).toMatchObject({ status: "live" });
     expect(await errorCode(kat, { termsVersion: 1, timeZone: "Europe/London", token, type: "join" })).toBe("INVITE_USED");
-    expect(await readInvitePreview(token)).toEqual({ status: "used" });
+    expect(await readInvitePreview(token)).toBeNull();
     const label = await getPrisma().gameContactLabel.findUnique({
       where: { ownerMemberId_subjectMemberId: { ownerMemberId: leo, subjectMemberId: ava } },
     });
@@ -1624,8 +1624,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
 
     const ended = await devAdvanceDays(gameId, leo, 7);
     expect(ended.status).toBe("settled");
-    // Past the invite's 7-day expiry, a link that was taken still reads as used.
-    expect(await readInvitePreview(token)).toEqual({ status: "used" });
+    // A taken link stays unavailable even after its original invite expiry.
+    expect(await readInvitePreview(token)).toBeNull();
   });
 
   it("refuses a rematch only when that chain has an open or settled descendant", async () => {
