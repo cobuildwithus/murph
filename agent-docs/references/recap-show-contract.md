@@ -31,6 +31,22 @@ Every page has `id`, `kind`, `background` and `blocks`. Backgrounds are `night`,
 - `result`: render the surrounding game response's canonical result and prize.
   `scoreLine` is optional copy, never a second score owner.
 
+When word timings exist, `song` also has optional
+`lines: { words: { text: string, startMs: number, endMs: number }[] }[]`.
+There is exactly one entry per lyric line. Its words retain that line's spelling
+and punctuation, split on whitespace; joining `text` with spaces reproduces the
+line with collapsed whitespace. Case and punctuation normalization aligns sung
+words in order, skips sung extras, and interpolates missing lyric words between
+matched neighbors (audio start/end at the edges). Times are non-decreasing integer
+milliseconds from the start of the audio, bounded by its measured duration.
+Historical songs without timings omit `lines`; existing fields remain unchanged.
+
+Explicit `generate_song` lyrics use the existing music_v2 composition plan with
+timestamps. The host keeps the provider timestamps with the generated audio hash,
+then uploads and stores them on the encrypted song asset. Editable draft files
+still select only `{slot,path}`. New authoring caps `treatment` at 40 characters;
+transport, stored reads and accepted replay retain historical longer treatments.
+
 Generated `media.status` is `ready` or `failed`. Media is final at acceptance. Ready media
 has `url`, `mediaType` (`image/jpeg` or `audio/mpeg`) and optional `width`, `height`
 or `durationMs`. A scene's `fallback` is `photo` with one authorized entry ID, or
@@ -47,6 +63,17 @@ capability allows only the composed cover at `/recap/:gameId/cover/:token`, for
 at most thirty days and subject to current authorization. It grants no private
 API, transcript, source-photo or audio access. The media visibility switch hides
 generated media and cover previews while retaining readable text.
+
+An optional cover scene `faceY` in [0,1] records the players' face position as a
+fraction of image height from the top. The preview centers its full-width
+1200:630 band there, clamped to the image bounds. Missing hints retain the
+top-62%-band attention crop. The field is author-supplied image inspection data;
+the preview route runs no face detector.
+
+Deploy compatible Web before Cloudflare Worker egress and the runner bundle.
+Show write/replay/recovery responses omit the optional full-story echo, preserving
+old strict runner decoders; the top-level canonical chat line remains. Keep the
+compatible Web reader once new envelopes with timings or face hints are stored.
 
 The authoring preview tool is removed. Native layout and audio acceptance belong
 to the iOS owner; this refactor preserves the payload and decoder fixtures.

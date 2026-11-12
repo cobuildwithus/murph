@@ -1,4 +1,5 @@
 import type { ElevenLabsClient } from '@elevenlabs/elevenlabs-js'
+import type { SongWordTimestamp } from '@murphai/contracts/recap-show'
 
 import type {
   AssistantVoiceMemoGeneration,
@@ -69,6 +70,7 @@ export interface GenerateElevenLabsAudioResult {
   bytes: Uint8Array
   contentType: 'audio/mpeg'
   filenameExtension: 'mp3'
+  wordsTimestamps?: SongWordTimestamp[]
 }
 
 export type GenerateElevenLabsSpeechResult = GenerateElevenLabsAudioResult
@@ -139,6 +141,7 @@ export async function generateElevenLabsMusic(input: {
   modelId: typeof ELEVENLABS_MUSIC_MODEL_ID
   outputFormat: typeof ELEVENLABS_MUSIC_OUTPUT_FORMAT
   prompt: string
+  lyrics?: string[]
   signal?: AbortSignal
 }): Promise<GenerateElevenLabsAudioResult> {
   const prompt = normalizeRequiredElevenLabsString(input.prompt, 'music prompt')
@@ -167,12 +170,37 @@ export async function generateElevenLabsMusic(input: {
     )
   }
 
-  return await requestElevenLabsAudio({
+  const lyrics = input.lyrics
+  if (lyrics && (input.forceInstrumental || input.durationMs > 120_000 || lyrics.length < 1 || lyrics.length > 20
+    || lyrics.some(line => !line.trim() || line.length > 200 || /[\r\n]/u.test(line)))) {
+    throw createElevenLabsInvalidInputError('Explicit lyrics require vocals, 1–20 non-empty lines of at most 200 characters, and at most 120 seconds.')
+  }
+  let wordsTimestamps: SongWordTimestamp[] | undefined
+  const result = await requestElevenLabsAudio({
     apiKey: input.apiKey,
     fetchImplementation: input.fetchImplementation,
     operation: 'music',
-    request: async (client, requestOptions) =>
-      await client.music.compose(
+    request: async (client, requestOptions) => {
+      if (lyrics) {
+        const [{ alignSongLyrics, songWordTimestampsSchema }, z] = await Promise.all([
+          import('@murphai/contracts/recap-show'), import('@murphai/contracts/zod-runtime'),
+        ])
+        // SDK 2.62's client getter declares a stream, but its music wrapper
+        // actually returns parsed multipart metadata and audio. Validate it.
+        const response: unknown = await client.music.composeDetailed({
+          compositionPlan: { chunks: [{ text: lyrics.join('\n'), durationMs: input.durationMs, positiveStyles: [prompt], negativeStyles: [] }] },
+          modelId: input.modelId, outputFormat: input.outputFormat, withTimestamps: true,
+        }, { ...requestOptions, headers: { accept: 'multipart/mixed' } })
+        const parsed = z.object({ audio: z.custom<Uint8Array>(value => value instanceof Uint8Array),
+          json: z.object({ wordsTimestamps: songWordTimestampsSchema }) }).safeParse(response)
+        if (!parsed.success || !alignSongLyrics(lyrics, parsed.data.json.wordsTimestamps, input.durationMs)) {
+          throw new VaultCliError('ELEVENLABS_INVALID_AUDIO', 'Generated song has no usable lyric timings.',
+            { failureStage: 'response_body', provider: 'elevenlabs', retryable: false })
+        }
+        wordsTimestamps = parsed.data.json.wordsTimestamps
+        return new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(parsed.data.audio); controller.close() } })
+      }
+      return await client.music.compose(
         {
           forceInstrumental: input.forceInstrumental,
           modelId: input.modelId,
@@ -181,10 +209,12 @@ export async function generateElevenLabsMusic(input: {
           prompt,
         },
         requestOptions,
-      ),
+      )
+    },
     signal: input.signal,
     timeoutMs: ELEVENLABS_MUSIC_TIMEOUT_MS,
   })
+  return wordsTimestamps ? { ...result, wordsTimestamps } : result
 }
 
 export async function generateElevenLabsVoiceMemoAudio(input: {
@@ -223,6 +253,7 @@ type ElevenLabsRequestOptions = NonNullable<
 >
 
 interface ElevenLabsRequestDiagnostics {
+  status: number | null
   errorBodyText: string | null
   requestId: string | null
   responseTooLarge: boolean
@@ -239,6 +270,7 @@ async function requestElevenLabsAudio(input: {
   signal?: AbortSignal
   timeoutMs: number
 }): Promise<GenerateElevenLabsAudioResult> {
+  input.signal?.throwIfAborted()
   const apiKey = normalizeRequiredElevenLabsString(input.apiKey, 'api key')
   const fetchImplementation =
     input.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
@@ -254,10 +286,11 @@ async function requestElevenLabsAudio(input: {
   }
 
   // Configuration and ordinary replies do not need the generated audio SDK.
-  const { ElevenLabsClient, ElevenLabsError, ElevenLabsTimeoutError } =
+  const { ElevenLabsClient, ElevenLabsTimeoutError } =
     await import('@elevenlabs/elevenlabs-js')
   const timeout = createTimeoutAbortController(input.signal, input.timeoutMs)
   const diagnostics: ElevenLabsRequestDiagnostics = {
+    status: null,
     errorBodyText: null,
     requestId: null,
     responseTooLarge: false,
@@ -280,7 +313,8 @@ async function requestElevenLabsAudio(input: {
   const startedAtMs = Date.now()
   try {
     const stream = await input.request(client, requestOptions)
-    const bytes = await readElevenLabsAudioStream(stream)
+    const bytes = await readBoundedElevenLabsStream(stream, ELEVENLABS_AUDIO_MAX_BYTES)
+    if (bytes === null) throw new ElevenLabsResponseTooLargeError()
     await assertGeneratedMp3Audio(bytes, timeout.signal)
     return {
       bytes,
@@ -288,9 +322,7 @@ async function requestElevenLabsAudio(input: {
       filenameExtension: 'mp3',
     }
   } catch (error) {
-    if (input.signal?.aborted) {
-      throw timeout.signal.reason ?? error
-    }
+    input.signal?.throwIfAborted()
 
     if (error instanceof VaultCliError && error.code === 'ELEVENLABS_INVALID_AUDIO') {
       throw error
@@ -314,14 +346,9 @@ async function requestElevenLabsAudio(input: {
       )
     }
 
-    if (
-      error instanceof ElevenLabsError &&
-      typeof error.statusCode === 'number'
-    ) {
-      const status = error.statusCode
+    if (diagnostics.status !== null && diagnostics.status >= 400) {
+      const status = diagnostics.status
       const responseBody = readElevenLabsErrorBody({
-        fallbackBody: error.body,
-        fallbackRequestId: error.requestId,
         rawText: diagnostics.errorBodyText,
         requestId: diagnostics.requestId,
       })
@@ -345,6 +372,10 @@ async function requestElevenLabsAudio(input: {
 
     const timedOut = timeout.timedOut() ||
       error instanceof ElevenLabsTimeoutError
+    if (!timedOut && isSuccessfulStatus(diagnostics.status)) {
+      throw new VaultCliError('ELEVENLABS_INVALID_AUDIO', 'Generated audio response could not be decoded.',
+        { failureStage: 'response_body', provider: 'elevenlabs', retryable: false })
+    }
     throw new VaultCliError(
       'ELEVENLABS_API_REQUEST_FAILED',
       timedOut
@@ -367,6 +398,10 @@ async function requestElevenLabsAudio(input: {
   }
 }
 
+function isSuccessfulStatus(status: number | null): boolean {
+  return status !== null && status >= 200 && status < 300
+}
+
 function createElevenLabsSdkFetch(
   fetchImplementation: ElevenLabsFetch,
   diagnostics: ElevenLabsRequestDiagnostics,
@@ -386,6 +421,7 @@ function createElevenLabsSdkFetch(
       },
     )
 
+    diagnostics.status = response.status
     if (response instanceof Response) {
       if (!response.ok) {
         diagnostics.errorBodyText = await readElevenLabsErrorResponseText(
@@ -408,7 +444,7 @@ function createElevenLabsSdkFetch(
         await cancelElevenLabsResponseBody(response)
         throw new ElevenLabsResponseTooLargeError()
       }
-      return response
+      return boundedSdkResponse(response, diagnostics)
     }
 
     const responseHeaders = createSdkResponseHeaders(response.headers)
@@ -437,10 +473,10 @@ function createElevenLabsSdkFetch(
     }
 
     if (response.body) {
-      return new Response(response.body, {
+      return boundedSdkResponse(new Response(response.body, {
         headers: responseHeaders,
         status: response.status,
-      })
+      }), diagnostics)
     }
 
     const bodyBytes = await response.arrayBuffer()
@@ -453,6 +489,16 @@ function createElevenLabsSdkFetch(
       status: response.status,
     })
   }
+}
+
+async function boundedSdkResponse(response: Response, diagnostics: ElevenLabsRequestDiagnostics): Promise<Response> {
+  if (!response.body) return response
+  const bytes = await readBoundedElevenLabsStream(response.body, ELEVENLABS_AUDIO_MAX_BYTES)
+  if (bytes === null) {
+    diagnostics.responseTooLarge = true
+    throw new ElevenLabsResponseTooLargeError()
+  }
+  return new Response(new Uint8Array(bytes), { headers: response.headers, status: response.status, statusText: response.statusText })
 }
 
 function readRequestInput(input: RequestInfo | URL): Request | null {
@@ -524,38 +570,6 @@ function readElevenLabsRequestId(headers: Headers): string | null {
     headers.get('x-request-id') ?? headers.get('request-id'),
     100,
   )
-}
-
-async function readElevenLabsAudioStream(
-  stream: ReadableStream<Uint8Array>,
-): Promise<Uint8Array> {
-  const reader = stream.getReader()
-  const chunks: Uint8Array[] = []
-  let totalLength = 0
-  try {
-    while (true) {
-      const next = await reader.read()
-      if (next.done) {
-        break
-      }
-      totalLength += next.value.byteLength
-      if (totalLength > ELEVENLABS_AUDIO_MAX_BYTES) {
-        await reader.cancel().catch(() => undefined)
-        throw new ElevenLabsResponseTooLargeError()
-      }
-      chunks.push(next.value)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-
-  const bytes = new Uint8Array(totalLength)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return bytes
 }
 
 class ElevenLabsResponseTooLargeError extends Error {
@@ -684,15 +698,11 @@ interface ElevenLabsErrorBody {
 const ELEVENLABS_ERROR_MESSAGE_MAX_LENGTH = 300
 
 function readElevenLabsErrorBody(input: {
-  fallbackBody: unknown
-  fallbackRequestId: string | undefined
   rawText: string | null
   requestId: string | null
 }): ElevenLabsErrorBody {
-  const text = input.rawText ?? stringifyElevenLabsErrorBody(input.fallbackBody)
-  const detail = text === null
-    ? readElevenLabsErrorDetail(input.fallbackBody)
-    : readElevenLabsErrorDetailFromText(text)
+  const text = input.rawText
+  const detail = text === null ? null : readElevenLabsErrorDetailFromText(text)
   return {
     code: readBoundedErrorString(detail?.code ?? detail?.status, 100),
     message: readBoundedErrorString(
@@ -700,21 +710,10 @@ function readElevenLabsErrorBody(input: {
       ELEVENLABS_ERROR_MESSAGE_MAX_LENGTH,
     ),
     requestId: readBoundedErrorString(
-      detail?.request_id ?? input.requestId ?? input.fallbackRequestId,
+      detail?.request_id ?? input.requestId,
       100,
     ),
     textLength: text?.length ?? null,
-  }
-}
-
-function stringifyElevenLabsErrorBody(body: unknown): string | null {
-  if (typeof body === 'string') {
-    return body
-  }
-  try {
-    return JSON.stringify(body) ?? null
-  } catch {
-    return null
   }
 }
 

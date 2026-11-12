@@ -1551,13 +1551,14 @@ describe("hostedRunnerIntercept", () => {
     expect(upstream).toHaveBeenCalledTimes(Number(count <= 16));
   });
 
-  it.each([true, false])('funds recap music from native scope even during ordinary settlement (scoped=%s)', async scoped => {
+  it.each([{ scoped: true, detailed: false }, { scoped: false, detailed: false }, { scoped: true, detailed: true }, { scoped: false, detailed: true }])('funds recap music from native scope even during ordinary settlement ($scoped, $detailed)', async ({ scoped, detailed }) => {
     const consume = vi.fn(async () => true);
     const upstream = vi.fn<typeof fetch>(async () => new Response('Synthetic provider failure', { status: 504 }));
     vi.stubGlobal('fetch', upstream);
-    const response = await hostedRunnerIntercept(new Request('https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192', {
+    const response = await hostedRunnerIntercept(new Request(`https://api.elevenlabs.io/v1/music${detailed ? '/detailed' : ''}?output_format=mp3_48000_192`, {
       method: 'POST', headers: { 'xi-api-key': HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL, 'content-type': 'application/json', 'x-murph-recap-scope': 'forged' },
-      body: JSON.stringify({ prompt: 'Synthetic chorus', music_length_ms: 20_000, model_id: 'music_v2', force_instrumental: false }),
+      body: JSON.stringify(detailed ? { model_id: 'music_v2', with_timestamps: true, composition_plan: { chunks: [{ text: 'Leo goes', duration_ms: 20_000, positive_styles: ['Playful piano'], negative_styles: [] }] } }
+        : { prompt: 'Synthetic chorus', music_length_ms: 20_000, model_id: 'music_v2', force_instrumental: false }),
     }), createInterceptEnv({ ELEVENLABS_API_KEY: 'synthetic-key', recapMediaScoped: scoped, consumeRecapMediaRequest: consume,
       settlementPending: true, providerContext: async () => ({ owns: true, userId: 'member_123', attemptId: 'attempt_1', leaseGeneration: '7', workspaceVersion: '4', platformAiUsageAllowed: false }) }),
     { className: 'RunnerContainer', containerId: 'synthetic-container' });

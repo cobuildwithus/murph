@@ -108,6 +108,84 @@ test('elevenlabs runtime uses the SDK music operation with the exact request sha
   expect(fetchImplementation).toHaveBeenCalledOnce()
 })
 
+const lyricMusicInput = { apiKey: 'synthetic-key', durationMs: 20_000, forceInstrumental: false,
+  modelId: ELEVENLABS_MUSIC_MODEL_ID, outputFormat: ELEVENLABS_MUSIC_OUTPUT_FORMAT,
+  prompt: 'Playful piano', lyrics: ['Leo goes', 'Ava stays'] }
+const providerWords = [{ word: 'Leo', start_ms: 100, end_ms: 300 }, { word: 'goes', start_ms: 400, end_ms: 600 },
+  { word: 'Ava', start_ms: 900, end_ms: 1100 }, { word: 'stays', start_ms: 1200, end_ms: 1400 }]
+function detailedResponse(words: unknown = providerWords, audio: Uint8Array = musicAudio): Response {
+  const boundary = 'synthetic-music-boundary'
+  return new Response(Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({ words_timestamps: words })}\r\n--${boundary}\r\nContent-Type: audio/mpeg\r\nContent-Disposition: attachment; filename="song.mp3"\r\n\r\n`),
+    audio, Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]), { headers: { 'content-type': `multipart/mixed; boundary=${boundary}` } })
+}
+
+test('explicit lyrics use the pinned SDK v2 composition plan and split multipart audio and timestamps', async () => {
+  const fetchImplementation = vi.fn(async (url: string, init) => {
+    expect(url).toBe('https://api.elevenlabs.io/v1/music/detailed?output_format=mp3_48000_192')
+    expect(new Headers(init.headers).get('accept')).toBe('multipart/mixed')
+    expect(JSON.parse(init.body)).toEqual({ model_id: 'music_v2', with_timestamps: true,
+      composition_plan: { chunks: [{ text: 'Leo goes\nAva stays', duration_ms: 20_000, positive_styles: ['Playful piano'], negative_styles: [] }] } })
+    return detailedResponse()
+  })
+  expect(await generateElevenLabsMusic({ ...lyricMusicInput, fetchImplementation })).toEqual({
+    bytes: musicAudio, contentType: 'audio/mpeg', filenameExtension: 'mp3',
+    wordsTimestamps: providerWords.map(word => ({ word: word.word, startMs: word.start_ms, endMs: word.end_ms })),
+  })
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
+test.each([null, [], [{ word: 'unrelated', start_ms: 0, end_ms: 100 }], [{ word: 'Leo', start_ms: 200, end_ms: 100 }]])(
+  'explicit lyric songs reject missing or unusable timing metadata: %j', async words => {
+    const fetchImplementation = vi.fn(async () => detailedResponse(words))
+    await expect(generateElevenLabsMusic({ ...lyricMusicInput, fetchImplementation })).rejects.toMatchObject({
+      code: 'ELEVENLABS_INVALID_AUDIO', context: { failureStage: 'response_body', retryable: false },
+    })
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
+test('detailed songs reject malformed multipart and unplayable MP3 without retries', async () => {
+  for (const response of [new Response('invalid multipart'), detailedResponse(providerWords, new Uint8Array([1, 2, 3]))]) {
+    const fetchImplementation = vi.fn(async () => response)
+    await expect(generateElevenLabsMusic({ ...lyricMusicInput, fetchImplementation })).rejects.toMatchObject({ code: 'ELEVENLABS_INVALID_AUDIO' })
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  }
+})
+
+test.each([undefined, '1', String(ELEVENLABS_AUDIO_MAX_BYTES + 1)])('detailed response bounds precede SDK multipart parsing (length=%s)', async length => {
+  let canceled = false, first = true
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.enqueue(first ? new Uint8Array(ELEVENLABS_AUDIO_MAX_BYTES) : new Uint8Array([1]))
+      first = false
+    }, cancel() { canceled = true },
+  })
+  const fetchImplementation = vi.fn(async () => new Response(body, { headers: {
+    'content-type': 'multipart/mixed; boundary=synthetic', ...(length ? { 'content-length': length } : {}),
+  } }))
+  await expect(generateElevenLabsMusic({ ...lyricMusicInput, fetchImplementation })).rejects.toMatchObject({
+    code: 'ELEVENLABS_API_REQUEST_FAILED', context: { failureStage: 'response_body', maxResponseBytes: ELEVENLABS_AUDIO_MAX_BYTES, retryable: false },
+  })
+  expect(canceled).toBe(true)
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
+test('detailed SDK wrapping preserves bounded HTTP diagnostics', async () => {
+  const fetchImplementation = vi.fn(async () => Response.json({ detail: { code: 'synthetic_rejection', message: 'Invalid composition.' } }, { status: 422 }))
+  await expect(generateElevenLabsMusic({ ...lyricMusicInput, fetchImplementation })).rejects.toMatchObject({
+    code: 'ELEVENLABS_API_REQUEST_FAILED', context: { failureStage: 'http', status: 422, providerErrorCode: 'synthetic_rejection', retryable: false },
+  })
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
+test.each([{ forceInstrumental: true }, { durationMs: 121_000 }, { lyrics: [] }, { lyrics: ['x'.repeat(201)] }, { lyrics: ['Leo\nAva'] }])(
+  'explicit lyric constraints fail before provider generation: %j', async invalid => {
+    const fetchImplementation = vi.fn()
+    await expect(generateElevenLabsMusic({ ...lyricMusicInput, ...invalid, fetchImplementation })).rejects.toMatchObject({ code: 'ELEVENLABS_INVALID_INPUT' })
+    expect(fetchImplementation).not.toHaveBeenCalled()
+  })
+
 test.each([
   ['empty', new Uint8Array()],
   ['ID3 metadata only', speechAudio.subarray(0, 45)],

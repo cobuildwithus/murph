@@ -36,6 +36,11 @@ export const MURPH_GENERATE_SONG_TOOL = {
     type: 'object',
     additionalProperties: false,
     properties: {
+      lyrics: {
+        type: 'array', minItems: 1, maxItems: 20,
+        items: { type: 'string', minLength: 1, maxLength: 200 },
+        description: 'TODO(prompt)',
+      },
       output: { type: 'string', enum: ['chat', 'file'] },
       prompt: {
         type: 'string',
@@ -63,8 +68,11 @@ const generateSongArgumentsSchema = z
     durationSeconds: z.number().int().min(3).max(300).default(30),
     instrumental: z.boolean().default(false),
     prompt: z.string().trim().min(1).max(4100),
+    lyrics: z.array(z.string().trim().min(1).max(200).refine(line => !/[\r\n]/u.test(line), 'Each lyrics item must be one line.')).min(1).max(20).optional(),
   })
   .strict()
+  .refine(args => !args.lyrics || args.output === 'file' && !args.instrumental && args.durationSeconds <= 120,
+    'Explicit lyrics require output=file, instrumental=false and durationSeconds at most 120.')
 
 export function parseGenerateSongArguments(
   value: unknown,

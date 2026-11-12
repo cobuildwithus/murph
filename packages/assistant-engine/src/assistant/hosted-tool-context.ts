@@ -1,4 +1,5 @@
 import { readRecapFile, readRecapDraftFile, saveRecapMediaFile } from './recap-files.js'
+import type { SongWordTimestamp } from '@murphai/contracts/recap-show'
 import { resolveElevenLabsApiKey } from '@murphai/operator-config/elevenlabs-runtime'
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
 import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
@@ -216,7 +217,7 @@ export interface AssistantHostedToolContext {
   prepareRecapMedia?(request: { kind: 'image'; args: GenerateImageToolArgs } | { kind: 'song'; args: GenerateSongToolArgs }, fetchImpl: typeof fetch): Promise<GeneratedMediaFileRuntime>
   prepareGameRecapInputs?(material: unknown): Promise<unknown>
   readGameRecapDraft?(draftPath: string): Promise<unknown>
-  readGameRecapMedia?(file: string): Promise<{ bytes: string; referenceIds: string[]; mediaType: 'image/jpeg' | 'audio/mpeg' }>
+  readGameRecapMedia?(file: string): Promise<{ bytes: string; referenceIds: string[]; mediaType: 'image/jpeg' | 'audio/mpeg'; wordsTimestamps?: SongWordTimestamp[] }>
   currentGameMissedCheckInScope?(): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null
   prepareGameLore?(): Promise<string | null>
   readGameLore?(): Promise<string>
@@ -278,7 +279,7 @@ export function createAssistantHostedToolContext(input: {
   session: AssistantSession
 }): AssistantHostedToolContext {
   const executionContext = input.executionContext ?? null
-  const recapSources = new Map<string, { referenceIds: string[]; mediaType: 'image/jpeg' | 'audio/mpeg' }>()
+  const recapSources = new Map<string, { referenceIds: string[]; mediaType: 'image/jpeg' | 'audio/mpeg'; wordsTimestamps?: SongWordTimestamp[] }>()
   let recapWorkspace: Awaited<ReturnType<typeof materializeRecapWorkspace>> | null = null
   let ordinaryGameLore: Promise<{ fingerprint: string; guidance: string } | null> | null = null
   const route = input.route ?? null
@@ -665,9 +666,10 @@ export function createAssistantHostedToolContext(input: {
           return { bytes: ref.bytes, filename: `${id}.jpg`, mediaType: 'image/jpeg' as const,
             sha256: ref.hash, sourceRef: id, sourceRefSha256: createHash('sha256').update(id).digest('hex') }
         })),
-        save: async (bytes, mediaType) => {
+        save: async (bytes, mediaType, wordsTimestamps) => {
           const file = await saveRecapMediaFile({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, workspace.root), bytes, mediaType })
-          recapSources.set(createHash('sha256').update(bytes).digest('hex'), { referenceIds, mediaType })
+          recapSources.set(createHash('sha256').update(bytes).digest('hex'), { referenceIds, mediaType,
+            ...(wordsTimestamps ? { wordsTimestamps } : {}) })
           return file
         },
       }

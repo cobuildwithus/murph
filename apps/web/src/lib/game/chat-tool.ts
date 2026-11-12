@@ -3,7 +3,7 @@ import { retireGameRecapGenerationTx } from './recap-witness';
 import { buildRecapFallback } from './recap-fallback';
 import { readRecapTranscriptPage } from "./recap-transcript";
 import { readRecapSourceReferences, readRecapReferenceBytes, publicRecapReferences } from "./recap-inputs";
-import { gameRecapWriterSchema, recapShowWriterSchema } from "@murphai/contracts/recap-show";
+import { alignSongLyrics, gameRecapWriterSchema, recapShowWriterSchema } from "@murphai/contracts/recap-show";
 import "server-only";
 
 import { isGameMemberSet } from "./roster";
@@ -260,7 +260,7 @@ async function recoverGameRecap(input: RecapToolInput, context: RecapToolContext
       } else saved = await sealGameRecap({ ...scope, recap: buildRecapFallback(material.validation.result) });
     }
     if (!saved) return { action: 'read_game', result: { status: 'ok', recapGame: { recovered: false } } };
-    return { action: 'read_game', result: { status: 'ok', recap: saved, chatLine: await acceptedGameRecapMessage(gameId, saved.chatLine) } };
+    return { action: 'read_game', result: { status: 'ok', chatLine: await acceptedGameRecapMessage(gameId, saved.chatLine) } };
 }
 async function handleAuthorizedRecapRead(input: RecapToolInput & { request: Extract<RecapToolInput['request'], { action: 'read_game' }> }, context: RecapToolContext): Promise<HostedGameToolResponse> {
   const { gameId, eventId, players, material, authorizeMutation, unavailable } = context;
@@ -272,26 +272,34 @@ async function handleAuthorizedRecapRead(input: RecapToolInput & { request: Extr
   }
   return readRecapForWriter({ material, request: input.request, containerMemberId: input.memberId, playerMemberIds: players, beforeMutationTx: authorizeMutation });
 }
+function recapShowWriteError(request: Extract<HostedGameToolRequest, { action: 'write_recap' }>, material: RecapToolContext['material'], players: string[]): string | null {
+  const parsed = recapShowWriterSchema.safeParse(request.recap);
+  const ids = new Set(material.entries.filter(entry => entry.kind === 'photo' && entry.visibleToBoth).map(entry => entry.entryId));
+  const invalidPhoto = request.recap.pages.some(page => page.blocks.some(block => (block.entryIds ?? []).some(id => !ids.has(id))));
+  const invalidCard = request.recap.superlatives?.some(card => !players.includes(card.memberId));
+  const assets = request.assets ?? [];
+  const invalidSlot = new Set(assets.map(asset => asset.slot)).size !== assets.length || assets.some(asset => asset.slot === 'song'
+    ? asset.kind !== 'song' || !request.recap.song
+    : asset.kind !== 'image' || !/^scene-[0-6]$/u.test(asset.slot) || !request.recap.pages[Number(asset.slot.slice(6))]?.blocks.some(block => block.kind === 'scene'));
+  const invalidTiming = assets.some(asset => asset.wordsTimestamps && (asset.slot !== 'song' || !asset.durationMs || !request.recap.song
+    || !alignSongLyrics(request.recap.song.lyrics, asset.wordsTimestamps, asset.durationMs)));
+  if (invalidTiming) return 'Song timings must match the final lyrics and belong to a song with a measured duration.';
+  if (!parsed.success || invalidPhoto || invalidCard || invalidSlot) return !parsed.success ? parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')
+      : 'Use this game’s visible photo IDs and player IDs, and select one image per scene slot or the song slot.';
+  return null;
+}
+
 async function handleAuthorizedRecapWrite(input: RecapToolInput & { request: Extract<RecapToolInput['request'], { action: 'write_recap' }> }, context: RecapToolContext): Promise<HostedGameToolResponse> {
   const { gameId, eventId, players, material, authorizeMutation, unavailable, audience } = context;
   const prisma = getPrisma();
 
   const replay = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId,
     eventId, gameId, playerMemberIds: players, recap: null });
-  if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: replay, chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, replay.chatLine) : gameRecapMessage(gameId, replay.chatLine) } };
+  if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), ...(!material.validation.show ? { recap: replay } : {}), chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, replay.chatLine) : gameRecapMessage(gameId, replay.chatLine) } };
   if (await isGameRecapGenerationRetired(prisma, eventId, input.memberId)) return { action: "write_recap", result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
   if (material.validation.show) {
-    const parsed = recapShowWriterSchema.safeParse(input.request.recap);
-    const ids = new Set(material.entries.filter(entry => entry.kind === 'photo' && entry.visibleToBoth).map(entry => entry.entryId));
-    const invalidPhoto = input.request.recap.pages.some(page => page.blocks.some(block => (block.entryIds ?? []).some(id => !ids.has(id))));
-    const invalidCard = input.request.recap.superlatives?.some(card => !players.includes(card.memberId));
-    const assets = input.request.assets ?? [];
-    const invalidSlot = new Set(assets.map(asset => asset.slot)).size !== assets.length || assets.some(asset => asset.slot === 'song'
-      ? asset.kind !== 'song' || !input.request.recap.song
-      : asset.kind !== 'image' || !/^scene-[0-6]$/u.test(asset.slot) || !input.request.recap.pages[Number(asset.slot.slice(6))]?.blocks.some(block => block.kind === 'scene'));
-    if (!parsed.success || invalidPhoto || invalidCard || invalidSlot) return { action: 'write_recap', result: { status: 'rejected', recapOutcome:
-      !parsed.success ? parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')
-        : 'Use this game’s visible photo IDs and player IDs, and select one image per scene slot or the song slot.' } };
+    const error = recapShowWriteError(input.request, material, players);
+    if (error) return { action: 'write_recap', result: { status: 'rejected', recapOutcome: error } };
   } else {
     gameRecapWriterSchema.parse(input.request.recap);
     const chatMessages = await readGameRecapChatMessages({ containerMemberId: input.memberId, material });
@@ -302,7 +310,7 @@ async function handleAuthorizedRecapWrite(input: RecapToolInput & { request: Ext
   if (!await refreshGameChatAudience({ ...input, audience }, players)) return { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const saved = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, assets: material.validation.show ? input.request.assets ?? [] : undefined, recap: material.validation.show ? input.request.recap : withValidGameSuperlatives(input.request.recap, material.validation.result.map(player => player.memberId), material.validation.group) });
   return saved
-    ? { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: saved, chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, saved.chatLine) : gameRecapMessage(gameId, saved.chatLine) } }
+    ? { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), ...(!material.validation.show ? { recap: saved } : {}), chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, saved.chatLine) : gameRecapMessage(gameId, saved.chatLine) } }
     : unavailable();
 }
 
