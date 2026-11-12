@@ -832,9 +832,14 @@ PR, production access, real Linq API, dotenv read or ReviewGPT was performed.
    queued add can still take effect after an absence read. It is disarmed and
    reports `add_outcome_unknown` or its preserved `add_unconfirmed` provider code; source admission resumes and target admission
    stays protected. Later positive presence permits verified remove/cancel.
-   This preserves safety under concurrent cancel and add. The requested clean
-   cancellation of every unconfirmed add requires a provider terminal-outcome
-   guarantee that the current API contract does not supply.
+   This preserves safety under concurrent cancel and add. Linq offers no
+   terminal outcome for a queued add, so after a one-hour settle window from
+   `add_started_at` a cancel that still reads absence releases the reservation
+   as `add_abandoned`. Production on 2026-11-11: an accepted add to a dormant
+   group never appeared after two hours, and the unique reserved-target index
+   then blocked every other group on that line. Successful adds appeared within
+   30 seconds. If an abandoned add lands later, the target holds an ordinary
+   unbound copy of that chat; it never gains adoption authority.
 3. Roster equality protects different audiences and bound destinations. It
    cannot distinguish two **unbound** candidates containing identical people
    and both verified service numbers. The first qualifying candidate can win.

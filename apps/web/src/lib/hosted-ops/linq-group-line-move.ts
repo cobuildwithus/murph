@@ -8,7 +8,7 @@ import { adoptDiscoveredHostedLinqGroupMove } from "./linq-group-line-move-disco
 import { openHostedThreadDeliveryRoute } from "../hosted-routing/thread-delivery-route";
 import { openHostedLinqGroupMoveCleanup, prepareHostedLinqGroupMoveCleanup, type HostedLinqGroupMoveCleanup } from "../hosted-routing/linq-group-line-move-store";
 import { activeGroupMoveHandles, assertGroupMoveLinesCanSend, assertGroupMoveQuiet, assertGroupMoveReservationAvailable, assertGroupMoveSourceSelf,
-  GROUP_MOVE_ADOPTION_MS, groupMoveError, groupMoveFailureCode, groupMoveHasPhone, groupMoveOperatorSelect, lockGroupMoveSource,
+  GROUP_MOVE_ADD_SETTLE_MS, GROUP_MOVE_ADOPTION_MS, groupMoveError, groupMoveFailureCode, groupMoveHasPhone, groupMoveOperatorSelect, lockGroupMoveSource,
   readGroupMoveRoster, readOperatorGroupMove, recordGroupMoveError, summarizeOperatorGroupMove, type OperatorGroupMove } from "./linq-group-line-move-state";
 
 export async function startHostedLinqGroupLineMove(input: { containerRef: string; targetLineLookupKey: string; prisma?: PrismaClient }) {
@@ -139,7 +139,13 @@ async function cancelGroupMove(move: OperatorGroupMove, cleanup: HostedLinqGroup
   // Reconciliation absence must be observed after the dispatch receipt.
   let roster = await readGroupMoveRoster(cleanup);
   assertGroupMoveSourceSelf(roster, cleanup);
-  if (!groupMoveHasPhone(roster, cleanup.targetPhone) && current.addStartedAt && !current.addConfirmedAt && !current.lastErrorCode?.startsWith("add_rejected")) {
+  const addStartedAt = current.addStartedAt;
+  const addUnconfirmed = addStartedAt !== null && !current.addConfirmedAt
+    && !current.lastErrorCode?.startsWith("add_rejected") && !groupMoveHasPhone(roster, cleanup.targetPhone);
+  // An accepted add can surface later, so absence alone keeps the reservation.
+  // Once the settle window passes, absence releases it; a later arrival is an
+  // ordinary unbound copy on the target line, never adoption authority.
+  if (addUnconfirmed && Date.now() - addStartedAt.getTime() < GROUP_MOVE_ADD_SETTLE_MS) {
     await recordGroupMoveError(move, current.lastErrorCode?.startsWith("add_") ? current.lastErrorCode : "add_outcome_unknown", prisma); return;
   }
   if (groupMoveHasPhone(roster, cleanup.targetPhone)) {
@@ -165,7 +171,8 @@ async function cancelGroupMove(move: OperatorGroupMove, cleanup: HostedLinqGroup
     await lockGroupMoveSource(cleanup, tx);
     await tx.hostedLinqGroupLineMove.updateMany({ where: { id: move.id, status: "reserved", adoptionDeadlineAt: new Date(0),
       removeStartedAt: current.removeStartedAt, removeAcceptedAt: current.removeAcceptedAt },
-      data: { status: "cancelled", lastErrorCode: current.lastErrorCode?.startsWith("add_") ? current.lastErrorCode : null } });
+      data: { status: "cancelled", lastErrorCode: addUnconfirmed ? "add_abandoned"
+        : current.lastErrorCode?.startsWith("add_") ? current.lastErrorCode : null } });
   });
 }
 
