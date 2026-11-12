@@ -121,10 +121,17 @@ runtime consumers omit their unused JSON Schema conversion work.
 
 ## Route Surface
 
+Every HTTP fetch response, including private media, redirects, HEAD, missing
+routes and mapped errors, receives `X-Robots-Tag: noindex, nofollow, noarchive,
+nosnippet, noimageindex` at the outer Worker boundary. WebSocket upgrades pass
+through untouched. This host has no crawlable content; `GET /robots.txt`
+disallows all crawling. These directives do not replace capability checks.
+
 Public routes:
 
 - `GET /`
 - `GET /health`
+- `GET /robots.txt`
 
 Internal control routes:
 

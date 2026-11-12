@@ -603,7 +603,7 @@ export interface GameBlockedPerson {
   firstName: string;
 }
 
-/** What an invite link shows. Only an open invite carries terms; cancellation may name the inviter. */
+/** Only an open invite carries personal details. Closed statuses are for authenticated readers. */
 export type GameInvitePreview =
   | {
       status: "open";
@@ -631,7 +631,7 @@ export type GameInvitePreview =
       expiresAt: string | null;
     }
   | { status: "used"; talkDelivery?: "pending" | "sent" | "failed" }
-  | { status: "expired"; reason?: "cancelled"; inviterFirstName?: string; talkDelivery?: "pending" | "sent" | "failed" };
+  | { status: "expired"; reason?: "cancelled"; talkDelivery?: "pending" | "sent" | "failed" };
 
 export type GameErrorCode =
   | "REPLY_USED"

@@ -107,7 +107,7 @@ describe("weekly game invite link preview", () => {
   it.each<[string, GameInvitePreview | null]>([
     ["used", { status: "used" }],
     ["expired", { status: "expired" }],
-    ["cancelled", { status: "expired", reason: "cancelled", inviterFirstName: "Leo" }],
+    ["cancelled", { status: "expired", reason: "cancelled" }],
     ["missing or turned off", null],
   ])("names nobody for a %s invite", async (_label, preview) => {
     const metadata = await metadataFor(preview);

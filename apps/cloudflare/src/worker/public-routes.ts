@@ -24,6 +24,16 @@ export const workerPublicRoutes: readonly DeclarativeRoute<{
 }>[] = [
   ...privateMediaRoutes,
   {
+    handle() {
+      return new Response("User-agent: *\nDisallow: /", {
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    },
+    match: matchExactPath("/robots.txt"),
+    methods: ["GET"],
+    name: "robots",
+  },
+  {
     handle(context) {
       return createServiceBannerResponse(context.env);
     },

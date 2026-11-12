@@ -3325,7 +3325,7 @@ async function readBlockedPeople(memberId: string): Promise<{ memberId: string; 
   return ids.map((id) => ({ firstName: labelName.get(id) || ownName.get(id) || "", memberId: id }));
 }
 
-/** Anyone with the link sees an open invite's details; a used or expired one shows only its status. */
+/** Only open invites expose details publicly; closed links look like missing ones. */
 export async function readInvitePreview(token: string, multiplayer = false, memberId?: string): Promise<GameInvitePreview | null> {
   if (!isGameEnabled() || typeof token !== "string" || !token) return null;
   const row = await getPrisma().game.findUnique({
@@ -3334,13 +3334,12 @@ export async function readInvitePreview(token: string, multiplayer = false, memb
   });
   if (!row || (!multiplayer && row.maxPlayers !== 2)) return null;
   if (memberId && row.players.some(player => player.memberId === memberId && player.leftAt)) return null;
-  // Its challenger deleted their account: never open again.
-  if (!row.creator && row.maxPlayers === 2) return { status: "expired" };
   if (!isGameOn(row)) return null;
   const blocks = memberId ? await readGameBlocks(getPrisma(), memberId, gameMemberIds(row.players)) : null;
   if (row.createdBy && blocks && isHiddenBy(blocks, row.createdBy)) return null;
   const now = gameNow(await databaseNow(getPrisma()), row);
   const closed = await closedInvitePreview(row, now);
+  if (closed && !memberId) return null;
   const preview = closed ?? await openInvitePreview(row, multiplayer, memberId, blocks);
   if (row.maxPlayers !== 10) return preview;
   return withGroupTalkPreview(row, preview, memberId, now);
@@ -3376,17 +3375,14 @@ async function canSendGroupTalk(row: GameRow, actor: string, now: Date): Promise
 type PreviewGame = GameRow & { creator: { memberId: string; firstNameEncrypted: string } | null; events: { actor: string }[] };
 
 async function closedInvitePreview(row: PreviewGame, now: Date): Promise<GameInvitePreview | null> {
+  // Its challenger deleted their account: never open again.
+  if (!row.creator && row.maxPlayers === 2) return { status: "expired" };
   // Expired means nobody took it: a void game, or an open invite past its
   // expiry. A taken one stays "used" however long ago that was.
   const expired = row.status === "void"
-    || (row.status === "invited" && row.inviteExpiresAt !== null && row.inviteExpiresAt.getTime() < now.getTime());
+    || (row.status === "invited" && row.inviteExpiresAt !== null && row.inviteExpiresAt.getTime() <= now.getTime());
   if (row.status === "void" && row.events.length > 0) {
-    if (row.events[0].actor !== row.createdBy) return { status: "expired", reason: "cancelled" };
-    if (!row.creator) return { status: "expired", reason: "cancelled" };
-    const [inviterFirstName] = await openGameTexts([
-      { field: "first_name", memberId: row.creator.memberId, rowId: row.creator.memberId, table: "game_profile", value: row.creator.firstNameEncrypted },
-    ]);
-    return { status: "expired", reason: "cancelled", inviterFirstName: inviterFirstName ?? "" };
+    return { status: "expired", reason: "cancelled" };
   }
   const groupOpen = await groupInviteOpen(row, now);
   if ((row.status !== "invited" && !groupOpen) || expired) return { status: expired ? "expired" : "used" };
