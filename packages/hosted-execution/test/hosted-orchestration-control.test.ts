@@ -542,6 +542,16 @@ describe("hosted orchestration control contracts", () => {
 
   });
 
+  it("accepts only a positive autonomous marker without foreground work", () => {
+    const oldRequest = { orchestrationAttemptId: "orchestration_attempt_test" };
+    expect(parseHostedRuntimeEnsureProcessingRequest(oldRequest)).toEqual(oldRequest);
+    expect(parseHostedRuntimeEnsureProcessingRequest({ ...oldRequest, autonomousWake: true }))
+      .toEqual({ ...oldRequest, autonomousWake: true });
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({ ...oldRequest, autonomousWake: false })).toThrow();
+    expect(() => parseHostedRuntimeEnsureProcessingRequest({ ...oldRequest,
+      autonomousWake: true, conversationWorkPending: true })).toThrow();
+  });
+
   it.each([undefined, null, "default"] as const)(
     "preserves a voice reservation for foreground processing mode %s",
     (processingMode) => {

@@ -148,6 +148,8 @@ export interface HostedRuntimeEnsureProcessingRequest {
   admission?: import("./runtime-owner.ts").HostedRuntimeOwnerResponse;
   assistantExecutionBlocked?: true;
   conversationWorkPending?: true;
+  /** Positive autonomous intent from the trusted orchestration caller only. */
+  autonomousWake?: true;
   mailboxWakeHighWater?: import("./runtime-control.ts").HostedMailboxWakeHighWater;
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;

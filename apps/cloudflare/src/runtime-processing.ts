@@ -100,6 +100,9 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
     if (claim.blockedReason === "admission") {
       return retryProcessing(ctx, "admission_blocked", Date.now() + HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS);
     }
+    if (claim.blockedReason === "background_rate_limited" && claim.retryAt) {
+      return retryProcessing(ctx, "background_rate_limited", Date.parse(claim.retryAt));
+    }
     if (!owner || (claim.status !== "claimed" && claim.status !== "existing")) return retryProcessing(ctx, "claim_blocked");
     if (owner.userId !== ctx.input.userId) throw new TypeError("Runtime admission belongs to a different member.");
     if (owner.generation === previousGeneration) return retryProcessing(ctx, "claim_blocked");
@@ -118,7 +121,8 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
       outcome = await startClaimedRuntime(ctx, owner);
     }
     if (outcome) return outcome;
-    if (admission < 2) claim = await ctx.command({ operation: "claim", processingMode: ctx.mode });
+    if (admission < 2) claim = await ctx.command({ operation: "claim", processingMode: ctx.mode,
+      ...(ctx.input.autonomousWake ? { autonomousWake: true } : {}) });
   }
   return retryProcessing(ctx, "claim_blocked");
 }
@@ -130,7 +134,8 @@ async function readRuntimeAdmission(ctx: ProcessingContext) {
   const refresh = isForegroundBehindBackground(ctx, admission?.owner) && admission?.status === "existing"
     && admission.owner?.userId === ctx.input.userId && admission.owner.phase === "starting"
     && admission.owner.workspaceVersion === null;
-  return admission && !refresh ? admission : ctx.command({ operation: "claim", processingMode: ctx.mode });
+  return admission && !refresh ? admission : ctx.command({ operation: "claim", processingMode: ctx.mode,
+    ...(ctx.input.autonomousWake ? { autonomousWake: true } : {}) });
 }
 
 function isForegroundBehindBackground(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot | null | undefined): boolean {
@@ -170,7 +175,7 @@ function createProcessingContext(source: RuntimeProcessingSource, input: Runtime
 }
 
 function retryProcessing(ctx: { diagnostics: RuntimeProcessingDiagnostics }, reason:
-  | "missing_container_binding" | "admission_blocked"
+  | "missing_container_binding" | "admission_blocked" | "background_rate_limited"
   | "claim_blocked" | "retirement_pending" | "completion_unconfirmed" | "starting_fence_preserved"
   | "processing_mode_conflict" | "wake_unconfirmed" | "container_not_ready"
   | "command_budget_exhausted" | "container_rpc_timeout",

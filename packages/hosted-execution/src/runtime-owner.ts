@@ -6,7 +6,7 @@ export const HOSTED_RUNTIME_OWNER_PHASES = ["idle", "starting", "active", "retir
 // Terminal wire field retained for deployed Worker readers. No backend selection.
 export const HOSTED_RUNTIME_CUTOVER_PHASES = ["postgres"] as const;
 /** `admission`: the member is inactive, suspended or withdrew health-data consent. */
-export const HOSTED_RUNTIME_OWNER_BLOCKED_REASONS = ["admission"] as const;
+export const HOSTED_RUNTIME_OWNER_BLOCKED_REASONS = ["admission", "background_rate_limited"] as const;
 
 export interface HostedRuntimeOwnerIdentity {
   attemptId: string;
@@ -35,7 +35,7 @@ export type HostedRuntimeOwnerCommand =
   | { operation: "deletion_ready" }
   | { operation: "target_retired"; runnerContainerName: string }
   | { operation: "authorize_provider"; runnerContainerName: string | null; providerEgressTokenHash: string | null; providerKind: string }
-  | { operation: "claim"; processingMode: HostedWorkspaceInvocationProcessingMode }
+  | { operation: "claim"; processingMode: HostedWorkspaceInvocationProcessingMode; autonomousWake?: true }
   | ({ operation: "select_target"; runnerContainerName: string } & HostedRuntimeOwnerIdentity)
   | ({ operation: "prepare_launch"; runnerContainerName: string; workspaceVersion: string;
       providerEgressTokenHash: string | null;
@@ -54,6 +54,7 @@ export interface HostedRuntimeOwnerResponse {
   owner: HostedRuntimeOwnerSnapshot | null;
   /** Advisory claim detail; absent from older Web releases and other commands. */
   blockedReason?: (typeof HOSTED_RUNTIME_OWNER_BLOCKED_REASONS)[number];
+  retryAt?: string;
 }
 
 export function parseHostedRuntimeOwnerCommand(value: unknown): HostedRuntimeOwnerCommand {
@@ -61,9 +62,15 @@ export function parseHostedRuntimeOwnerCommand(value: unknown): HostedRuntimeOwn
   const operation = requireString(r.operation, "Runtime ownership operation");
   if (operation === "reconcile" || operation === "deletion_ready") return { operation };
   if (operation === "target_retired") return { operation, runnerContainerName: requireString(r.runnerContainerName, "Retired target") };
-  if (operation === "claim") return { operation, processingMode: parseAllowedString(r.processingMode, "Runtime processing mode", HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES) };
+  if (operation === "claim") return { operation, processingMode: parseAllowedString(r.processingMode, "Runtime processing mode", HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES),
+    ...(r.autonomousWake === undefined ? {} : { autonomousWake: parseAutonomousWake(r.autonomousWake) }) };
   if (operation === "authorize_provider") return parseProviderAuthorization(r);
   return parseInvocationCommand(r, operation);
+}
+
+function parseAutonomousWake(value: unknown): true {
+  if (value !== true) throw new TypeError("Autonomous runtime wake must be true when present.");
+  return true;
 }
 
 function parseProviderAuthorization(r: Record<string, unknown>): HostedRuntimeOwnerCommand {
@@ -118,11 +125,18 @@ export function parseHostedRuntimeOwnerResponse(value: unknown): HostedRuntimeOw
   const blockedReason = status === "blocked"
     ? HOSTED_RUNTIME_OWNER_BLOCKED_REASONS.find((reason) => reason === r.blockedReason)
     : undefined;
+  const retryAt = blockedReason === "background_rate_limited"
+    ? requireString(r.retryAt, "Background wake retry time")
+    : undefined;
+  if (retryAt !== undefined && (!Number.isFinite(Date.parse(retryAt)) || new Date(retryAt).toISOString() !== retryAt)) {
+    throw new TypeError("Background wake retry time must be an ISO timestamp.");
+  }
   return {
     cutover: parseAllowedString(r.cutover, "Runtime cutover phase", HOSTED_RUNTIME_CUTOVER_PHASES),
     status,
     owner,
     ...(blockedReason ? { blockedReason } : {}),
+    ...(retryAt ? { retryAt } : {}),
   };
 }
 

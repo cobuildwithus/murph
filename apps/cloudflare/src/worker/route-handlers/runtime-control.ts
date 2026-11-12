@@ -181,6 +181,9 @@ export async function handleRuntimeEnsureProcessingRoute(
     if ((ensureRequest.admission || ensureRequest.voiceCallId) && authorizationKind !== "vercel-oidc") {
       throw new TypeError("Runtime admission may only be supplied by authenticated Web requests.");
     }
+    if (ensureRequest.autonomousWake && authorizationKind === "vercel-oidc") {
+      throw new TypeError("Direct Web ingress cannot mark a wake autonomous.");
+    }
     orchestration = readRuntimeEnsureProcessingOrchestrationDiagnostics(
       context.request.headers,
       cloudflareRouteReceivedAtEpochMs,

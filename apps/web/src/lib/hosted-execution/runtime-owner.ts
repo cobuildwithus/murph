@@ -19,6 +19,9 @@ export interface HostedRuntimeIdentity {
 
 type OwnerTransaction = Prisma.TransactionClient;
 const OWNER_TRANSACTION_OPTIONS = { maxWait: 5_000, timeout: 5_000 };
+const BACKGROUND_WAKE_WINDOW_MS = 60 * 60_000;
+const BACKGROUND_WAKE_BURST = 24;
+const BACKGROUND_WAKE_FLOOR_MS = 5 * 60_000;
 
 /** Retirement disposition for one exact attempt and generation. Retiring is warm
  * with completedAt and cold without it; read phase first because idle rows keep
@@ -39,10 +42,13 @@ export async function claimHostedRuntime(input: {
   prisma: PrismaClient;
   userId: string;
   processingMode: HostedWorkspaceInvocationProcessingMode;
+  autonomousWake?: true;
+  enforceBackgroundWakeGuard?: boolean;
   now?: Date;
 }): Promise<
   | { cutover: "postgres"; status: "claimed" | "existing"; owner: HostedRuntimeOwner }
   | { cutover: "postgres"; status: "blocked"; reason: "admission" }
+  | { cutover: "postgres"; status: "blocked"; reason: "background_rate_limited"; retryAt: string }
 > {
   return input.prisma.$transaction(async (tx) => {
     const cutover = "postgres" as const;
@@ -68,6 +74,11 @@ export async function claimHostedRuntime(input: {
       }
       return { cutover, status: "existing", owner: existing };
     }
+    const backgroundGuard = await readBackgroundGuardForClaim(tx, input, existing);
+    if (backgroundGuard?.enforced && backgroundGuard.retryAt) {
+      return { cutover, status: "blocked", reason: "background_rate_limited",
+        retryAt: backgroundGuard.retryAt.toISOString() };
+    }
     // Attribution belongs to the admitted invocation, not later game/room state.
     // Existing owners above retain their frozen beneficiary on every retry.
     const attemptId = `rt_${randomUUID()}`;
@@ -87,12 +98,62 @@ export async function claimHostedRuntime(input: {
       allowanceBeneficiaryMemberId: admission.allowanceBeneficiaryMemberId,
       workspaceVersion: null,
       providerEgressTokenHash: null,
+      ...(backgroundGuard ? {
+        backgroundWindowStartedAt: backgroundGuard.windowStartedAt,
+        backgroundStartCount: backgroundGuard.count + 1,
+        lastBackgroundStartedAt: backgroundGuard.now,
+      } : {}),
     };
     const owner = existing
       ? await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data })
       : await tx.hostedRuntimeOwner.create({ data: { ...data, userId: input.userId } });
     return { cutover, status: "claimed", owner };
   }, OWNER_TRANSACTION_OPTIONS);
+}
+
+async function readBackgroundGuardForClaim(
+  tx: OwnerTransaction,
+  input: { processingMode: HostedWorkspaceInvocationProcessingMode; autonomousWake?: true;
+    enforceBackgroundWakeGuard?: boolean; now?: Date },
+  owner: HostedRuntimeOwner | null,
+): Promise<(ReturnType<typeof readBackgroundWakeGuardDecision> & { enforced: boolean }) | null> {
+  if (!input.autonomousWake || input.processingMode === "inbox_media_retention") return null;
+  const now = input.now ?? (await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS "now"`)[0]!.now;
+  const decision = readBackgroundWakeGuardDecision({ owner, now });
+  const enforced = input.enforceBackgroundWakeGuard ?? process.env.HOSTED_BACKGROUND_WAKE_GUARD_ENFORCE === "1";
+  console.info("Hosted background wake guard decision.", {
+    enforced, repaired: decision.repaired, count: decision.count, wouldDefer: decision.retryAt !== null,
+  });
+  return { ...decision, enforced };
+}
+
+function readBackgroundWakeGuardDecision(input: {
+  owner: HostedRuntimeOwner | null;
+  now: Date;
+}): { now: Date; windowStartedAt: Date; count: number; retryAt: Date | null; repaired: boolean } {
+  const nowMs = input.now.getTime();
+  if (!Number.isFinite(nowMs)) throw new TypeError("Background wake guard clock is invalid.");
+  const start = input.owner?.backgroundWindowStartedAt ?? null;
+  const last = input.owner?.lastBackgroundStartedAt ?? null;
+  const count = input.owner?.backgroundStartCount ?? 0;
+  const valid = isValidBackgroundTiming({ start, last, count, nowMs });
+  const reset = !valid || start === null || nowMs - start.getTime() >= BACKGROUND_WAKE_WINDOW_MS;
+  const windowStartedAt = reset ? input.now : start;
+  const currentCount = reset ? 0 : count;
+  const retryAtMs = currentCount >= BACKGROUND_WAKE_BURST && last !== null
+    ? last.getTime() + BACKGROUND_WAKE_FLOOR_MS : nowMs;
+  return { now: input.now, windowStartedAt, count: currentCount,
+    retryAt: retryAtMs > nowMs ? new Date(retryAtMs) : null,
+    repaired: !valid };
+}
+
+function isValidBackgroundTiming(input: { start: Date | null; last: Date | null; count: number; nowMs: number }) {
+  const { start, last, count, nowMs } = input;
+  if (count === 0) return start === null && last === null;
+  if (count < 0 || start === null || last === null) return false;
+  const startMs = start.getTime();
+  const lastMs = last.getTime();
+  return Number.isFinite(startMs) && Number.isFinite(lastMs) && startMs <= lastMs && lastMs <= nowMs;
 }
 
 /** Advisory snapshot only. Never claim, lock or write before direct dispatch.
@@ -392,6 +453,9 @@ const runtimeOwnerColumns = Prisma.sql`
   owner.runner_container_name AS "runnerContainerName", owner.workspace_version AS "workspaceVersion",
   owner.provider_egress_token_hash AS "providerEgressTokenHash",
   owner.platform_ai_usage_allowed AS "platformAiUsageAllowed", owner.started_at AS "startedAt",
+  owner.background_window_started_at AS "backgroundWindowStartedAt",
+  owner.background_start_count AS "backgroundStartCount",
+  owner.last_background_started_at AS "lastBackgroundStartedAt",
   owner.allowance_beneficiary_member_id AS "allowanceBeneficiaryMemberId",
   owner.accepted_at AS "acceptedAt", owner.completed_at AS "completedAt",
   owner.failure_count AS "failureCount", owner.last_error_code AS "lastErrorCode", owner.updated_at AS "updatedAt"
