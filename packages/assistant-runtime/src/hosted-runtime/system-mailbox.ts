@@ -88,6 +88,10 @@ import {
 import type { HostedBackgroundMaintenanceYieldReason } from "./background-maintenance-cancellation.ts";
 
 const HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS = 60_000;
+// A failing effect, often a Web 5xx during an outage, doubles its wait from one
+// minute up to 15. A fixed minute woke the container 280 times in five hours.
+const HOSTED_SYSTEM_MAILBOX_EXECUTION_RETRY_MAX_DOUBLINGS = 4;
+const HOSTED_SYSTEM_MAILBOX_EXECUTION_RETRY_MAX_DELAY_MS = 15 * 60_000;
 const HOSTED_VAULT_SHARE_PROJECTION_FAILED_ERROR_CODE =
   "HOSTED_VAULT_SHARE_PROJECTION_FAILED";
 const HOSTED_GROUP_CONTEXT_HANDOFF_MAX_ATTEMPTS = 2;
@@ -661,7 +665,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       };
     }
     const nextWakeAt = new Date(
-      Date.parse(startedAt) + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS,
+      Date.parse(startedAt) + hostedSystemMailboxExecutionRetryDelayMs(prepared),
     ).toISOString();
     await updateHostedSystemMailboxPendingItem({
       item: {
@@ -1934,6 +1938,22 @@ function earliestHostedSystemMailboxWakeAt(left: string | null, right: string | 
   }
 
   return Date.parse(left) <= Date.parse(right) ? left : right;
+}
+
+function hostedSystemMailboxExecutionRetryDelayMs(item: HostedSystemMailboxPendingItem): number {
+  // Resumable background work also counts yielded passes as attempts, so its
+  // count is not a failure streak; it keeps the one-minute retry.
+  if (isHostedResumableBackgroundSystemAction(item.routeAction)) {
+    return HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS;
+  }
+  const doublings = Math.min(
+    Math.max(0, Math.floor(item.attemptCount) - 1),
+    HOSTED_SYSTEM_MAILBOX_EXECUTION_RETRY_MAX_DOUBLINGS,
+  );
+  return Math.min(
+    HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS * 2 ** doublings,
+    HOSTED_SYSTEM_MAILBOX_EXECUTION_RETRY_MAX_DELAY_MS,
+  );
 }
 
 function hostedSystemMailboxRecordRetryDelay(

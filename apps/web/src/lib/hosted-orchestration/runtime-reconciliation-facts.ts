@@ -167,6 +167,7 @@ export async function readHostedRuntimeReconciliationFacts(
   const modelFreeWakeAt = readHostedRuntimeSystemModelFreeWakeAt(workspace);
   const systemMailboxFrontierInput = {
     at: now,
+    defaultProcessingWakeAt: readHostedRuntimeDefaultProcessingWake(projectedWorkspace).at,
     handledThroughSeq: projectedWorkspace.hostedMailboxSystemHandledThroughSeq ?? "0",
     mailboxLag,
     modelFreeWakeAt,
@@ -784,6 +785,7 @@ function readHostedRuntimeDefaultProcessingWake(
 async function readHostedRuntimeSystemMailboxFrontier(input: {
   assistantExecutionBlocked?: boolean;
   at: Date;
+  defaultProcessingWakeAt: string | null;
   handledThroughSeq: string;
   mailboxLag: readonly HostedMailboxLaneLag[];
   modelFreeWakeAt: string | null | undefined;
@@ -824,9 +826,38 @@ async function readHostedRuntimeSystemMailboxFrontier(input: {
     prisma: input.prisma,
     userId: input.userId,
   });
-  return independent
-    ? classifyHostedFirstLiveSystemItemOwnership({ ...independent, assistantExecutionBlocked: input.assistantExecutionBlocked })
-    : executionClass === "default_owned" ? executionClass : null;
+  if (independent) {
+    return classifyHostedFirstLiveSystemItemOwnership({ ...independent, assistantExecutionBlocked: input.assistantExecutionBlocked });
+  }
+  if (executionClass !== "default_owned") return null;
+  if (!isHostedDefaultHeadWaitingOnRuntimeRetry({ ...input, headSeq: frontier.laneSeq, importedSeq, legacyCheckpoint })) {
+    return executionClass;
+  }
+  // Only a later, unimported row can still be default work now.
+  const unimported = await readHostedMailboxFirstLiveSystemItemAfterSeq({
+    afterSeq: importedSeq,
+    at: input.at,
+    prisma: input.prisma,
+    userId: input.userId,
+  });
+  return unimported ? classifyHostedFirstLiveSystemItemOwnership(unimported) : null;
+}
+
+// An imported default head with a future runtime default wake is waiting on
+// the runtime's own retry. Temporal admits default_owned immediately, so
+// reporting it would rerun an idle container every few seconds until that wake.
+function isHostedDefaultHeadWaitingOnRuntimeRetry(input: {
+  assistantExecutionBlocked?: boolean;
+  at: Date;
+  defaultProcessingWakeAt: string | null;
+  headSeq: string;
+  importedSeq: string;
+  legacyCheckpoint: boolean;
+}): boolean {
+  return !input.legacyCheckpoint
+    && !input.assistantExecutionBlocked
+    && BigInt(input.headSeq) <= BigInt(input.importedSeq)
+    && readHostedRuntimeFutureTimestamp(input.defaultProcessingWakeAt, input.at) !== null;
 }
 
 function readHostedRuntimeSystemModelFreeWakeAt(

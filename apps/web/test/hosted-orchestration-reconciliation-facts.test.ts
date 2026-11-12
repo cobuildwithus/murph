@@ -820,6 +820,55 @@ describe("hosted orchestration reconciliation facts", () => {
     },
   );
 
+  it("leaves an imported default head retrying on the runtime's own wake until it is due", async () => {
+    // Production shape from 2026-11-12: a group notification kept failing on a
+    // Web 500, and default_owned made Temporal rerun the idle container every
+    // few seconds between the runtime's one-minute retries.
+    const retryAt = "2026-05-20T12:01:00.000Z";
+    const rows: { dedupeKey: string; kind: string; laneSeq: string }[] = [
+      { dedupeKey: "game-recap:synthetic:sung", kind: "assistant.notification.requested", laneSeq: "5" },
+    ];
+    const workspace = buildWorkspaceRecord({
+      nextWakeAt: retryAt, nextWakeReason: "assistant",
+      nextDefaultProcessingWakeAt: retryAt, nextDefaultProcessingWakeReason: "assistant",
+      systemMailboxProgressGeneration: "7",
+      redactedStatusJson: {
+        hostedMailboxSystemHandledThroughSeq: "4", hostedMailboxSystemImportedSeq: "5",
+        hostedMailboxSystemModelFreeWakeAt: null, hostedMailboxSystemModelFreeWakeVersion: "4",
+      },
+    });
+    mocks.readHostedWorkspace.mockResolvedValue(workspace);
+    mocks.readHostedMailboxMaxSeqByLane.mockImplementation(async () => [
+      { lane: "conversation", maxSeq: "0" }, { lane: "system", maxSeq: rows.at(-1)!.laneSeq },
+    ]);
+    mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockImplementation(async (input) =>
+      rows.find((row) => BigInt(row.laneSeq) > BigInt(input.afterSeq)
+        && (!input.modelFreeOnly || row.kind === "device-sync.wake")) ?? null,
+    );
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
+    const readFacts = async () => parseHostedRuntimeReconciliationFacts(
+      await (await reconciliationRoute.GET(requestForFacts(), routeContext())).json(),
+    );
+
+    const waiting = await readFacts();
+    expect(waiting.workspace?.systemMailboxFrontier).toBeNull();
+    expect(waiting.workspace?.nextDefaultProcessingWakeAt).toBe(retryAt);
+    expect(waiting.workspace?.hostedMailboxSystemHandledThroughSeq).toBe("4");
+
+    // A legacy checkpoint cannot vouch for the retry, so it keeps default_owned.
+    workspace.redactedStatusJson = { ...workspace.redactedStatusJson, hostedMailboxSystemModelFreeWakeVersion: "3" };
+    expect((await readFacts()).workspace?.systemMailboxFrontier).toBe("default_owned");
+    workspace.redactedStatusJson = { ...workspace.redactedStatusJson, hostedMailboxSystemModelFreeWakeVersion: "4" };
+
+    // A fresh default row behind the retrying head is runnable now.
+    rows.push({ dedupeKey: "assistant.ask.completed:synthetic", kind: "assistant.ask.completed", laneSeq: "6" });
+    expect((await readFacts()).workspace?.systemMailboxFrontier).toBe("default_owned");
+    rows.pop();
+
+    vi.setSystemTime(new Date(retryAt));
+    expect((await readFacts()).workspace?.systemMailboxFrontier).toBe("default_owned");
+  });
+
   it.each(["member.action.requested", "member.preferences.updated", "clinical-records.sync-requested"])(
     "only projects fresh %s as independent after a confirmed denial", async (kind) => {
       mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
