@@ -1,6 +1,7 @@
 ---
 title: 'Live journey selection rejects workspace-prefixed pnpm engine warnings'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4882'
 ---
 
 ## Expected Behavior
