@@ -11,6 +11,7 @@ import "./share-preview-fonts.css";
 
 // The study links to the Murph app the way production does.
 const DESIGN_APP_URL = gameInviteAppUrl("design_invite_token", {});
+const DESIGN_INVITE_URL = "https://www.withmurph.ai/g/design_invite_token";
 
 type OpenPreview = Extract<GameInvitePreview, { status: "open" }>;
 
@@ -96,8 +97,17 @@ export function GameInviteStudy() {
       <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
         The production <code>/g/[token]</code> page a texted weekly-game challenge opens: the app&rsquo;s own
         invite card on its night ground, with both tasks, the days, and the stake, then Get the app. Preview only;
-        the buttons are inert here.
+        the buttons are inert here. Given a computer&rsquo;s width, an open invite trades the buttons for a code
+        that carries the same link to the phone; a closed one stays as it is.
       </p>
+      <figure className="flex flex-col gap-3">
+        <figcaption className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
+          Open, on a computer
+        </figcaption>
+        <div className="flex min-h-[760px] flex-col overflow-hidden rounded-3xl" data-design-state="open-wide" id="game-invite-open-wide" inert>
+          <GameInviteView appUrl={DESIGN_APP_URL} inviteUrl={DESIGN_INVITE_URL} preview={OPEN_PREVIEW} />
+        </div>
+      </figure>
       <div className="grid items-start gap-6 md:grid-cols-2">
         {STATES.map((state) => (
           <figure className="flex flex-col gap-3" key={state.id}>
@@ -110,7 +120,7 @@ export function GameInviteStudy() {
               id={`game-invite-${state.id}`}
               inert
             >
-              <GameInviteView appUrl={DESIGN_APP_URL} preview={state.preview} />
+              <GameInviteView appUrl={DESIGN_APP_URL} inviteUrl={DESIGN_INVITE_URL} preview={state.preview} />
             </div>
           </figure>
         ))}

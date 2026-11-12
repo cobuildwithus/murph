@@ -1,4 +1,5 @@
 import Image from "next/image";
+import qrcode from "qrcode-generator";
 import type { ReactNode } from "react";
 
 import { MURPH_IOS_APP_STORE_URL } from "@/src/lib/site-metadata";
@@ -14,19 +15,44 @@ const NIGHT = "#1C1915";
 /**
  * What a texted challenge link shows: the app's own invite card. The headline,
  * when it runs, both tasks, the stake on its ticket, then Get the app. The page
- * supplies `<main>` and the app link; this view paints the night ground.
+ * supplies `<main>`, the app link, and the invite's own link; this view paints
+ * the night ground. Where the view is wide enough to be a computer, an open
+ * invite puts a code for that link beside the card in place of the buttons:
+ * the game is on the phone.
  */
-export function GameInviteView(props: { appUrl: string; preview: GameInvitePreview | null }) {
+export function GameInviteView(props: { appUrl: string; inviteUrl: string; preview: GameInvitePreview | null }) {
   const { preview } = props;
   return (
-    <div className="flex flex-1 flex-col bg-[#1C1915] text-[#FFFCF6]">
-      <div className="mx-auto flex w-full max-w-[26rem] flex-1 flex-col px-6 pb-6 pt-3 sm:my-auto sm:flex-none sm:py-16">
-        <div className="flex h-11 shrink-0 items-center">
-          <Image alt="Murph" className="h-[25px] w-auto" height={25} priority src="/logo-dark.svg" width={112} />
+    <div className="@container flex flex-1 flex-col bg-[#1C1915] text-[#FFFCF6]">
+      <div className="flex flex-1 flex-col @5xl:flex-row @5xl:items-center @5xl:justify-center @5xl:gap-20">
+        <div className="mx-auto flex w-full max-w-[26rem] flex-1 flex-col px-6 pb-6 pt-3 sm:my-auto sm:flex-none sm:py-16 @5xl:mx-0">
+          <div className="flex h-11 shrink-0 items-center">
+            <Image alt="Murph" className="h-[25px] w-auto" height={25} priority src="/logo-dark.svg" width={112} />
+          </div>
+          {preview?.status === "open" ? <OpenInvite appUrl={props.appUrl} preview={preview} /> : <ClosedInvite preview={preview} />}
         </div>
-        {preview?.status === "open" ? <OpenInvite appUrl={props.appUrl} preview={preview} /> : <ClosedInvite preview={preview} />}
+        {preview?.status === "open" ? <ScanCode inviteUrl={props.inviteUrl} /> : null}
       </div>
     </div>
+  );
+}
+
+/** Wide views only: the invite link as a code, drawn here so it needs no script. */
+function ScanCode({ inviteUrl }: { inviteUrl: string }) {
+  const qr = qrcode(0, "M");
+  qr.addData(inviteUrl);
+  qr.make();
+  return (
+    <aside className="hidden w-[17rem] shrink-0 flex-col items-center gap-[18px] text-center @5xl:flex">
+      <div
+        aria-label="A code that opens this invite on your phone."
+        className="size-[17rem] overflow-hidden rounded-[20px] bg-[#FFFCF6] [&_path]:fill-[#1C1915] [&_rect]:fill-[#FFFCF6] [&_svg]:size-full"
+        dangerouslySetInnerHTML={{ __html: qr.createSvgTag({ cellSize: 1, margin: 4, scalable: true }) }}
+        role="img"
+      />
+      <h2 className="font-serif text-3xl font-semibold leading-[34px]">Scan to play.</h2>
+      <p className="text-[15px] font-medium leading-[22px] text-[#FFFCF6]/60">Point your phone&apos;s camera here.</p>
+    </aside>
   );
 }
 
@@ -58,7 +84,7 @@ function OpenInvite({ appUrl, preview }: { appUrl: string; preview: OpenPreview 
           ))}
         </ul>
       </section>
-      <div className="mt-auto flex flex-col items-center gap-4 pt-10 sm:mt-0 sm:pt-12">
+      <div className="mt-auto flex flex-col items-center gap-4 pt-10 sm:mt-0 sm:pt-12 @5xl:hidden">
         <a
           className="flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[#FFFCF6] text-[17px] font-semibold text-[#2D3436] outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-[#FFFCF6]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1C1915]"
           href={MURPH_IOS_APP_STORE_URL}
