@@ -11196,6 +11196,65 @@ describe('assistant cron runtime orchestration', () => {
     },
   )
 
+  it('skips a member managed job before model work when the web refuses its Linq route', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-member-owner-no-home-chat-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-12T16:00:00.000Z',
+      instructions: 'Send the weekly health digest.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'chat-on-retired-line',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+        threadIsDirect: true,
+      },
+      schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
+      slug: 'weekly-health-digest',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Weekly health digest',
+      updatedAt: '2026-04-12T16:00:00.000Z',
+    })
+    // The shape the hosted transport hands over for a web 403: a plain error
+    // carrying the web's code, not a VaultCliError.
+    const resolveScheduledLinqRoute = vi.fn().mockRejectedValueOnce(Object.assign(
+      new Error('Hosted Linq egress authority assertion failed with HTTP 403.'),
+      { code: 'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH', retryable: false, status: 403 },
+    ))
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-owner-no-home-chat',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_owner_scope_mismatch',
+      status: 'skipped',
+    })
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
   it('reuses the admitted static member route and rejects a live-route change before provider work', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-12T18:10:00.000Z'))

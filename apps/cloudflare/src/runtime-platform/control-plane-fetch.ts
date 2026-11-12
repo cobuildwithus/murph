@@ -3,7 +3,10 @@ import {
   type HostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
 
-import { isHostedRuntimeInternalAuthorityRejectedError } from "./authority-headers.ts";
+import {
+  HostedRuntimeControlPlaneRejectedError,
+  isHostedRuntimeInternalAuthorityRejectedError,
+} from "./authority-headers.ts";
 
 export const HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS = 2;
 const HOSTED_REPLAY_SAFE_READ_RETRY_DELAY_MS = 100;
@@ -250,7 +253,12 @@ function classifyHostedRuntimeFetchCause(
 }
 
 export function shouldPreserveHostedRuntimeFetchError(error: unknown): boolean {
-  if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+  // A control-plane 403 is an answer, not a transport failure: keep its code
+  // and retryability so callers can act on the reason it gives.
+  if (
+    isHostedRuntimeInternalAuthorityRejectedError(error)
+    || error instanceof HostedRuntimeControlPlaneRejectedError
+  ) {
     return true;
   }
 

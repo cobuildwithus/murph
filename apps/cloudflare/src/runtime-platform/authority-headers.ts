@@ -44,6 +44,7 @@ export class HostedRuntimeControlPlaneRejectedError extends Error {
   readonly code: string;
   readonly reason: string;
   readonly responseStatus: number;
+  readonly retryable: boolean | undefined;
   readonly status: number;
   readonly statusCode: number;
 
@@ -51,6 +52,7 @@ export class HostedRuntimeControlPlaneRejectedError extends Error {
     code?: string | null;
     description: string;
     message?: string | null;
+    retryable?: boolean | null;
     status: number;
   }) {
     const code = normalizeControlPlaneRejectionText(input.code) ??
@@ -64,6 +66,7 @@ export class HostedRuntimeControlPlaneRejectedError extends Error {
       ? HOSTED_RUNTIME_CONTROL_PLANE_REJECTED_REASON
       : code;
     this.responseStatus = input.status;
+    this.retryable = input.retryable ?? undefined;
     this.status = input.status;
     this.statusCode = input.status;
   }

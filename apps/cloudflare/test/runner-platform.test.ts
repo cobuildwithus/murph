@@ -676,7 +676,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       await expect(platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot: path.join(tempRoot, "durable"),
         ref,
-      })).rejects.toThrow(/data key unwrap request failed/u);
+      })).rejects.toMatchObject({
+        name: "HostedRuntimeControlPlaneRejectedError",
+        status: 403,
+      });
 
       expect(objectFetchCount).toBe(0);
     } finally {
@@ -6219,6 +6222,39 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the web's 403 code and retryability through the proxied egress assertion", async () => {
+    // A member moved to a new line has no chat there yet; the web refuses the
+    // scheduled send for good. Losing the code made every job retry hourly.
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+        message: "Linq egress target does not match the runtime user's Linq route.",
+        retryable: false,
+      },
+    }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 403,
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    await expect(platform.effectsPort.assertLinqRecentInboundEngagement!({
+      authorityCheckOnly: true,
+      homeRouteFallbackAllowed: true,
+      target: "chat_on_retired_line",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      name: "HostedRuntimeControlPlaneRejectedError",
+      retryable: false,
+      status: 403,
+    });
+    expect(requireFetchRequest(fetchMock.mock.calls[0], "proxied egress assertion").url)
+      .toBe(`http://web-control.worker${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`);
+  });
+
   it("routes raw email reads through the Cloudflare internal effects port with the active runtime fence", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const platform = buildTestHostedExecutionRuntimePlatform({
@@ -11121,7 +11157,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await expect(platform.effectsPort.getTelegramFile!({
       fileId: "telegram_file_123",
     })).rejects.toMatchObject({
-      code: "authorization_error",
+      code: "HOSTED_RUNTIME_CONTROL_PLANE_REJECTED",
+      name: "HostedRuntimeControlPlaneRejectedError",
+      status: 403,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

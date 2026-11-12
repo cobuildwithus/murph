@@ -238,13 +238,14 @@ async function buildHostedRuntimeControlPlaneRejectedError(input: {
     code: parsed?.code ?? null,
     description: input.description,
     message: parsed?.message ?? null,
+    retryable: parsed?.retryable ?? null,
     status: input.response.status,
   });
 }
 
 function parseHostedRuntimeControlPlaneErrorBody(
   body: string | null,
-): { code: string | null; message: string | null } | null {
+): { code: string | null; message: string | null; retryable: boolean | null } | null {
   if (!body || body.trim().length === 0) {
     return null;
   }
@@ -270,6 +271,7 @@ function parseHostedRuntimeControlPlaneErrorBody(
   return {
     code: normalizeHostedRuntimeControlPlaneErrorText(errorRecord.code),
     message: normalizeHostedRuntimeControlPlaneErrorText(errorRecord.message),
+    retryable: typeof errorRecord.retryable === "boolean" ? errorRecord.retryable : null,
   };
 }
 
