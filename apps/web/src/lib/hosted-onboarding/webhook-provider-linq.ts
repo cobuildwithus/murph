@@ -1,3 +1,4 @@
+import { leaveHostedLinqGroupTx, prepareHostedLinqGroupLeave, assertHostedLinqGroupNotLeft } from "../hosted-routing/linq-group-leave";
 import { applyHostedLinqGroupMoveIngressTx, type PreparedHostedLinqGroupMoveIngress } from "../hosted-routing/linq-group-line-move-ingress";
 import { replaceHostedLinqGroupLineMoveRouteTx } from "../hosted-routing/thread-container-service";
 import { associateGameChatInviteTx, type prepareGameChatInvite } from "../game/chat-membership";
@@ -950,6 +951,7 @@ export async function planHostedLinqMessageEditedWebhook(input: {
     tx: input.prisma,
   });
 
+  await assertHostedLinqGroupNotLeft({ chatId: event.data.chat.id, prisma: input.prisma });
   const sourceMessageLookupKey = requireHostedLinqSourceMessageLookupKey(
     event.data.id,
   );
@@ -1416,6 +1418,7 @@ export async function planHostedOnboardingLinqWebhook(
   }
 
   await lockHostedLinqMessageChatOwnershipTx({ context, prisma: input.prisma });
+  await assertHostedLinqMessageChatNotLeftTx({ messageEvent, prisma: input.prisma });
 
   const directMailboxPreparationProvided = Object.prototype.hasOwnProperty.call(
     input,
@@ -3844,17 +3847,18 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
  * setup notice, private nudge or bound assistant would repeat in every copy.
  * The distinct response reason also keeps private recovery out.
  */
-function planHostedLinqUnboundGroupChatWebhook(
+async function planHostedLinqUnboundGroupChatWebhook(
   input: Parameters<typeof planHostedLinqGroupChatWebhook>[0],
 ): Promise<HostedOnboardingLinqDirectPlan> {
-  if (input.rosterOversized === true) {
-    return Promise.resolve(buildHostedLinqIgnoredPlan(input.event, input.context, {
-      existingMemberMatch: "none",
-      reason: "group-roster-oversized",
-      routeStage: "new-group-admission-ignored",
-    }, "group-roster-oversized"));
-  }
-  return planHostedLinqGroupChatWebhook(input);
+  if (input.rosterOversized !== true) return planHostedLinqGroupChatWebhook(input);
+  const plan = buildHostedLinqIgnoredPlan(input.event, input.context, {
+    existingMemberMatch: "none", reason: "group-roster-oversized", routeStage: "new-group-admission-ignored",
+  }, "group-roster-oversized");
+  const line = await readHostedLinqIncomingLineState({ phoneNumberLookupKeys: input.threadRouteAccountLookupKeys, prisma: input.prisma });
+  if (!("phoneNumberLookupKey" in line)) return plan;
+  const result = await leaveHostedLinqGroupTx({ expected: null, prisma: input.prisma,
+    prepared: prepareHostedLinqGroupLeave(input.context.summary.chatId, "oversized") });
+  return result.status === "left" ? { ...plan, postCommitLinqGroupLeave: result.postCommitLinqGroupLeave } : plan;
 }
 
 /**
@@ -5046,6 +5050,16 @@ function isLocalHostedDomainRootAuthorityMismatch(error: unknown): boolean {
     && error instanceof Error
     && error.message === "Hosted domain root envelope authority signature verification failed."
   );
+}
+
+// Locked recheck for groups only: markers are never written for 1:1 chats,
+// so the direct reply path skips the read.
+async function assertHostedLinqMessageChatNotLeftTx(input: {
+  messageEvent: HostedLinqMessageReceivedEvent;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  if (isHostedLinqDirectChatAttested(input.messageEvent)) return;
+  await assertHostedLinqGroupNotLeft({ chatId: input.messageEvent.data.chat_id, prisma: input.prisma });
 }
 
 function isHostedLinqGroupChat(messageEvent: HostedLinqMessageReceivedEvent): boolean {

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-const mocks = vi.hoisted(() => ({ access: vi.fn(), start: vi.fn(), operate: vi.fn(), release: vi.fn(), overview: vi.fn() }));
+const mocks = vi.hoisted(() => ({ access: vi.fn(), start: vi.fn(), operate: vi.fn(), release: vi.fn(), leave: vi.fn(), overview: vi.fn() }));
 vi.mock("@/src/lib/hosted-ops/access", () => ({ requireHostedOpsRequestAccess: mocks.access }));
 vi.mock("@/src/lib/hosted-ops/linq-group-line-move", () => ({ startHostedLinqGroupLineMove: mocks.start, operateHostedLinqGroupLineMove: mocks.operate,
-  releaseHostedLinqRemovedLineRoute: mocks.release }));
+  leaveHostedLinqGroup: mocks.leave, releaseHostedLinqRemovedLineRoute: mocks.release }));
 vi.mock("@/src/lib/hosted-ops/linq-group-line-move-overview", () => ({ readHostedLinqGroupLineMoveOverview: mocks.overview }));
 import { GET, POST } from "../app/api/ops/linq-group-line-move/route";
 const origin = "https://ops.example.test";
@@ -36,7 +36,18 @@ describe("group line move ops access and request contract", () => {
     expect(mocks.release).toHaveBeenCalledWith(body);
     expect(mocks.start).not.toHaveBeenCalled(); expect(mocks.operate).not.toHaveBeenCalled();
   });
+  it("returns local departure separately from the unconfirmed provider attempt", async () => {
+    mocks.leave.mockResolvedValue({ local: "left", provider: "unconfirmed" });
+    const body = { operation: "leave_group", containerRef: "hbidx:external-thread-identity:v1:synthetic-full-ref" };
+    const response = await POST(request(body));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ local: "left", provider: "unconfirmed" });
+    expect(mocks.leave).toHaveBeenCalledWith(body);
+    expect(mocks.release).not.toHaveBeenCalled();
+  });
   it.each([
+    { operation: "leave_group" },
+    { operation: "leave_group", containerRef: "opaque-room", force: true },
     { operation: "release_removed_line_route" },
     { operation: "release_removed_line_route", containerRef: "opaque-room", moveId },
     { operation: "start", containerRef: "opaque-room" },

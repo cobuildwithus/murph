@@ -1,3 +1,5 @@
+import { readHostedLinqGroupLeftWebhookResponse, scheduleHostedLinqGroupLeaveAfterCommit } from "./linq-group-leave-webhook";
+import { readHostedLinqGroupLeave } from "../hosted-routing/linq-group-leave";
 import { prepareHostedLinqGroupMoveIngress, type PreparedHostedLinqGroupMoveIngress } from "../hosted-routing/linq-group-line-move-ingress";
 import { prepareGameChatInvite } from "../game/chat-membership";
 import { queueHostedLinqHomeContactCardAfterDelivery } from "./linq-contact-card-delivery";
@@ -271,7 +273,15 @@ function isModelAllowedFirstContactAdmission(
   return decision?.kind === "allow" && decision.source === "model";
 }
 
-export async function handleHostedOnboardingLinqWebhook(input: {
+export async function handleHostedOnboardingLinqWebhook(input: Parameters<typeof handleHostedOnboardingLinqWebhookInternal>[0]): Promise<HostedOnboardingLinqWebhookResponse> {
+  try { return await handleHostedOnboardingLinqWebhookInternal(input); }
+  catch (error) {
+    if (isHostedOnboardingError(error) && error.code === "HOSTED_LINQ_GROUP_LEFT") return { ok: true, ignored: true, reason: "group-left" };
+    throw error;
+  }
+}
+
+async function handleHostedOnboardingLinqWebhookInternal(input: {
   rawBody: string;
   webhookReceivedAt?: Date;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
@@ -318,9 +328,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signature: input.signature,
       timestamp: input.timestamp,
     });
+    input.signal?.throwIfAborted();
     eventId = event.event_id;
     eventType = event.event_type;
     eventWebhookVersion = event.webhook_version ?? null;
+    const earlyResponse = await handleHostedLinqEarlyWebhook(event, input.prisma);
     messagePartsInspection = inspectHostedLinqMessageReceivedParts(event);
     let affirmativeReaction = false;
     finishHostedOnboardingTiming(verifyTiming, "completed", {
@@ -329,7 +341,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signalAbortedAfterVerify: input.signal?.aborted ?? false,
     });
 
-    const earlyResponse = await handleHostedLinqNonMessageWebhook(event);
     if (earlyResponse) {
       const response = earlyResponse;
       responseReason = response.reason ?? null;
@@ -402,7 +413,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       return result.response;
     }
 
-    input.signal?.throwIfAborted();
     const prisma = input.prisma ?? getPrisma();
     if (event.event_type === "message.edited") {
       const { editPlan, wakeHandoffResult } = await handleHostedLinqMessageEditWebhook({
@@ -937,6 +947,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       wakeUserPresent: Boolean(plan.wakeHandoffs?.some((handoff) => handoff.userId)),
     });
 
+    scheduleHostedLinqGroupLeaveAfterCommit({ target: plan.postCommitLinqGroupLeave, scheduleAfterResponse: input.scheduleAfterResponse });
     finishHostedLinqGroupMoveAdoption({ plan, prisma, scheduleAfterResponse: input.scheduleAfterResponse });
     await reconcileHostedLinqGroupRostersAfterCommitBestEffort({
       reconciles: plan.postCommitGroupRosterReconciles ?? [],
@@ -2056,7 +2067,7 @@ async function ingestHostedLinqParticipantEventDirect(input: {
         return providerResult;
       }
 
-      if (!chatId) {
+      if (!chatId || await readHostedLinqGroupLeave({ chatId, prisma: transaction })) {
         return providerResult;
       }
 
@@ -3431,6 +3442,10 @@ export async function runHostedOnboardingWebhookTransaction<TResult>(
       ...buildHostedWebhookDbTimingLogDetails(operations),
     });
   }
+}
+
+async function handleHostedLinqEarlyWebhook(event: HostedLinqWebhookEvent, prisma?: PrismaClient): Promise<HostedOnboardingLinqWebhookResponse | null> {
+  return await readHostedLinqGroupLeftWebhookResponse(event, prisma) ?? await handleHostedLinqNonMessageWebhook(event);
 }
 
 async function handleHostedLinqNonMessageWebhook(event: HostedLinqWebhookEvent): Promise<HostedOnboardingLinqWebhookResponse | null> {

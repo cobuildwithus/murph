@@ -1,3 +1,4 @@
+import { leaveHostedLinqGroupTx, prepareHostedLinqGroupLeave } from "@/src/lib/hosted-routing/linq-group-leave";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { createHmac, randomUUID } from "node:crypto";
@@ -49,6 +50,7 @@ describe.skipIf(!enabled)("Linq group line move consumers on migrated PostgreSQL
     provider.retrieve.mockImplementation(async (id: string) => roster(id));
   });
   afterEach(async () => {
+    await db.hostedLinqGroupLeave.deleteMany({ where: { threadIdentityLookupKey: { in: [fromChat, toChat].map(threadId => createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId })!) } } });
     const rooms = await db.hostedThreadContainer.findMany({ where: { ownerMemberId: { in: ids } }, select: { memberId: true } });
     const allIds = [...new Set([...ids, ...rooms.map(row => row.memberId)])];
     await db.game.deleteMany({ where: { wordsOwnerMemberId: { in: allIds } } });
@@ -126,10 +128,24 @@ describe.skipIf(!enabled)("Linq group line move consumers on migrated PostgreSQL
       await runWithHostedDomainRootProviderCallsDisabled(() => measured.$transaction(prisma => replaceHostedLinqGroupLineMoveRouteTx({ prepared: adoption, prisma })));
       const adoptionStatements = queries.filter(query => !/^\s*(BEGIN|COMMIT|ROLLBACK)\b/u.test(query)).length;
       expect({ heldStatements, adoptionPreparationStatements, adoptionStatements }).toEqual({
-        heldStatements: 6, adoptionPreparationStatements: 6, adoptionStatements: 16,
+        heldStatements: 7, adoptionPreparationStatements: 7, adoptionStatements: 17,
       });
       expect(provider.retrieve).not.toHaveBeenCalled();
     } finally { await measured.$disconnect(); }
+  });
+  it("rejects prepared adoption into a destination left before commit", async () => {
+    await reserve();
+    const prepared = await preparedAdoption();
+    const departure = prepareHostedLinqGroupLeave(toChat, "oversized");
+    expect(await db.$transaction(prisma => leaveHostedLinqGroupTx({ expected: null, prepared: departure, prisma })))
+      .toMatchObject({ status: "left" });
+    await expect(db.$transaction(prisma => replaceHostedLinqGroupLineMoveRouteTx({ prepared, prisma })))
+      .rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_LEFT" });
+    await assertSource();
+    expect((await row()).status).toBe("reserved");
+    expect(provider.send).not.toHaveBeenCalled();
+    expect(await prepareHostedLinqGroupMoveIngress({ service: "iMessage", threadId: toChat, sender: source,
+      recipientPhone: target, isFromMe: false, route: null, prisma: db })).toMatchObject({ action: "consume" });
   });
   it("binds encrypted cleanup to both the move and retained container", async () => {
     const move = await reserve();

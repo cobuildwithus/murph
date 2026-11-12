@@ -1,8 +1,82 @@
 # Murph leaves Linq groups
 
-Status: proposed; plan only, implementation not started
+Status: Phase 1 implemented and locally verified; uncommitted parent handoff; Phase 2 not started
 Created: 2026-11-12
 Updated: 2026-11-12
+
+## Phase 1 implementation notes
+
+- Web owns the marker, purpose-separated encrypted identity, atomic departure,
+  route-writer and webhook fences, source-group recovery fences, oversized
+  auto-leave, and the full-ref Ops action. Provider dispatch remains one
+  request-local post-commit attempt.
+- The current contact-privacy owner explicitly removed its old rotation runner.
+  Phase 1 supplies `rotateHostedLinqGroupLeaveBatch` and documents it in the
+  existing rotation contract; it does not resurrect a general migration service.
+- No package, runtime, game-binding, or poll-notification admission change is
+  included. Those accepted findings retain their Phase 2 ownership.
+- No public changelog: this phase adds internal departure control and provider
+  cleanup; the oversized room's already-silent member experience is unchanged.
+- Commit, push, PR, CI and final ReviewGPT remain with the parent session.
+
+## Phase 1 local verification
+
+Final departure provider-boundary proofs used synthetic mocks. No production
+access, message, commit, push or PR was performed. The isolated loopback test
+database is `murph_test_linq_group_leave`.
+
+The final focused command passed **1,093 tests**, with three existing opt-in
+game bootstrap/skew cases skipped (23 files passed, one skipped):
+
+```sh
+pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage --passWithNoTests --silent=true \
+  hosted-linq-group-leave-webhook hosted-linq-group-line-move.test \
+  hosted-onboarding-linq-dispatch hosted-onboarding-linq-home-route-recovery-service \
+  hosted-onboarding-linq-mailbox-root-prewarm.test \
+  hosted-onboarding-linq-message-edit-preparation-composition \
+  hosted-onboarding-linq-read-receipt-authority hosted-onboarding-linq-route.test \
+  hosted-onboarding-linq-thread-route hosted-onboarding-linq-transport \
+  hosted-onboarding-linq-usage-reset-e2e hosted-onboarding-linq-webhook.test \
+  hosted-onboarding-linq-egress-engagement hosted-visible-secondary- \
+  hosted-thread-delivery-route-repair hosted-ops-linq-group-line-move-route \
+  hosted-onboarding-webhook-idempotency hosted-prepared-thread-container \
+  production-migration-guard game-chat-bootstrap game-chat-delivery
+```
+
+The PostgreSQL command passed **146 tests in three files**. The new departure
+suite also passed all **13 tests** after tightening test cleanup to its own
+markers. This uses the same config and serial settings as the repository's
+automatically discovered PostgreSQL lane:
+
+```sh
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test_linq_group_leave \
+MURPH_TEST_POSTGRES_CONCURRENCY=1 MURPH_VITEST_FILE_PARALLELISM=0 MURPH_VITEST_SUITE_CONCURRENCY=0 \
+pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage --silent=true \
+  hosted-linq-group-leave-postgres hosted-linq-group-line-move-postgres \
+  hosted-linq-group-line-move-producer-postgres
+```
+
+Other completed checks:
+
+| Command | Result |
+| --- | --- |
+| `pnpm --dir apps/web prisma:generate` | Passed. |
+| `MURPH_PRISMA_SKIP_ENV_FILES=1 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test_linq_group_leave pnpm --dir apps/web prisma:migrate:deploy` | Passed all migrations and the hosted schema contract on a fresh local database. |
+| `MURPH_PRISMA_SKIP_ENV_FILES=1 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_test_linq_group_leave pnpm --dir apps/web prisma:validate` | Passed. |
+| `node --test scripts/check-pr-migration-history.test.mjs` | Eight tests passed. A separate working-tree byte comparison confirmed all 286 existing migration-directory files match `origin/main`; only the new additive migration was added. The exact-commit PR guard remains with the parent. |
+| `pnpm --dir apps/web typecheck:prepared` | Passed. |
+| `pnpm --dir apps/web lint` | Passed with existing warnings. |
+| `pnpm complexity:diff` | Passed at threshold 20; no added complexity debt across 12 changed source files. |
+| `pnpm docs:drift` | Passed. |
+| `git diff --check` | Passed; authored additions also passed the identifier and Phase 1 scope scan. |
+
+An earlier broader Web run passed 2,068 cases and exposed four test failures:
+two assertions on a nonexistent fixture spy and two composition fixtures missing
+the new marker delegate. These were fixed; all 183 cases in those two suites
+then passed, followed by the green focused command above. No product fallback
+was added to accommodate incomplete mocks. Phase 2-only runtime/game/poll-lock
+and real-Codex journeys were not run. Exact-head CI and ReviewGPT require the
+parent's committed candidate and remain outside this uncommitted handoff.
 
 ## Problem and goal
 

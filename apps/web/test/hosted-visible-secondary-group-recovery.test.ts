@@ -53,6 +53,30 @@ function requireTestLinqParticipantContact(
 }
 
 describe("Linq group-chat visible access recovery", () => {
+  it("suppresses a prepared private recovery when its source group leaves", async () => {
+    const event = buildGroupLinqEvent("synthetic-held-recovery");
+    let marked = false;
+    const send = vi.fn();
+    const dependencies = buildLinqDependencies({ event,
+      readHostedMemberRoutingState: vi.fn(async () => ({ linqChatId: "synthetic-private", linqIsGroup: false,
+        linqRecipientPhone: "+15550000000", linqRecipientPhoneIsAuthoritative: true }) as never),
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({ handles: MATCHING_PRIVATE_HANDLES, isGroup: false })),
+      resolveHostedRecognizedInboundAccess: vi.fn(async () => {
+        marked = true;
+        return { kind: "access_notice" as const, message: BILLING_INACTIVE_MESSAGE,
+          noticeCode: "billing_inactive" as const, responseReason: "sent-billing-inactive-notice" };
+      }), sendHostedLinqChatMessage: send,
+    });
+    const findFirst = vi.fn(async () => marked ? { threadIdentityLookupKey: "synthetic-marker" } : null);
+    dependencies.getPrisma = () => ({ hostedLinqGroupLeave: { findFirst } }) as never;
+    const response = await withHostedVisibleSecondaryLinqOutcomes(async () => ({ ok: true, ignored: true, reason: "group-chat" }), dependencies)({
+      rawBody: JSON.stringify(event), signature: "synthetic", timestamp: "synthetic",
+    });
+    expect(marked).toBe(true);
+    expect(response).toEqual({ ok: true, ignored: true, reason: "group-left" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("privately explains inactive access after neutral setup guidance is sent", async () => {
     const event = buildGroupLinqEvent("evt_group_setup_private");
     const sendHostedLinqChatMessage = vi.fn(async () => ({
@@ -430,7 +454,7 @@ describe("Linq group-chat visible access recovery", () => {
         suspendedAt: null,
       },
       noticeSeed: expect.stringMatching(PRIVATE_RECOVERY_SEED),
-      prisma: {},
+      prisma: expect.objectContaining({ hostedLinqGroupLeave: expect.any(Object) }),
     });
     expect(readHostedMemberRoutingState).toHaveBeenCalledTimes(2);
     expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
@@ -1312,7 +1336,7 @@ function buildLinqDependencies(input: {
     ...(input.getHostedLinqChatSummary
       ? { getHostedLinqChatSummary: input.getHostedLinqChatSummary }
       : {}),
-    getPrisma: vi.fn(() => ({}) as never),
+    getPrisma: vi.fn(() => ({ hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } }) as never),
     lookupHostedMemberByVerifiedEmailAddress:
       input.lookupHostedMemberByVerifiedEmailAddress
       ?? vi.fn(async () => null),

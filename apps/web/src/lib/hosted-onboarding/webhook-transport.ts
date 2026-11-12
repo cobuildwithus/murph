@@ -1,3 +1,4 @@
+import { readHostedLinqGroupLeave } from "../hosted-routing/linq-group-leave";
 import type {
   Prisma,
   PrismaClient,
@@ -1369,6 +1370,10 @@ async function assertHostedLinqSideEffectRouteAuthority(
     });
   }
 
+  if (effect.payload.chatId && await readHostedLinqGroupLeave({ chatId: effect.payload.chatId, prisma })) {
+    throw hostedOnboardingError({ code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED", httpStatus: 403,
+      retryable: false, message: "External thread route egress is no longer authorized." });
+  }
   const route = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma,
@@ -1465,6 +1470,7 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
     || groupEmailRecoveryEffect !== null;
 
   return await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
+    await assertHostedLinqRecoverySourceGroupTx(input.effect, prisma);
     let dispatchEffect = input.effect;
     let dispatchSourceRef = input.effect.effectId;
     let recoveryCapacityClaimed = false;
@@ -1698,6 +1704,15 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       status: "in_flight",
     };
   });
+}
+
+async function assertHostedLinqRecoverySourceGroupTx(effect: HostedLinqMessageSideEffect, prisma: Prisma.TransactionClient): Promise<void> {
+  if (!("threadId" in effect.payload)) return;
+  await acquireHostedLinqChatOwnershipLockTx({ chatId: effect.payload.threadId, tx: prisma });
+  if (await readHostedLinqGroupLeave({ chatId: effect.payload.threadId, prisma })) {
+    throw hostedOnboardingError({ code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED", httpStatus: 403,
+      retryable: false, message: "External thread route egress is no longer authorized." });
+  }
 }
 
 async function resolveHostedLinqGroupLineRecoveryDispatchIntentTx(input: {

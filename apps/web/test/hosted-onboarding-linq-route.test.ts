@@ -33,6 +33,7 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({
+    hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
     hostedLinqDailyState: { updateMany: mocks.hostedLinqDailyStateUpdateMany },
   }),
 }));

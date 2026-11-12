@@ -804,6 +804,7 @@ type HostedAccountGroupMembershipFixture = {
 };
 
 type PrismaFixtureBase = {
+  hostedLinqGroupLeave?: { findFirst: MockedFunction; createMany: MockedFunction };
   $executeRaw?: MockedFunction;
   $queryRaw?: MockedFunction;
   $transaction?: MockedFunction;
@@ -14084,6 +14085,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   const hostedMember = prisma.hostedMember;
   const hostedMemberEmailAuthorization = prisma.hostedMemberEmailAuthorization;
 
+  prisma.hostedLinqGroupLeave ??= { findFirst: vi.fn().mockResolvedValue(null), createMany: vi.fn().mockResolvedValue({ count: 1 }) };
   prisma.hostedLinqGroupLineMove ??= {
     findMany: vi.fn().mockResolvedValue([]),
     findFirst: vi.fn().mockResolvedValue(null),

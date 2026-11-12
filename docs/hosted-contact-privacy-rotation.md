@@ -34,6 +34,17 @@ Do not stage future or extra historical versions in the runtime keyring. Rotate 
 
 ## Future Rotation Coverage
 
+`HostedLinqGroupLeave` retains its own purpose-separated chat identity envelope,
+independent of containers. Its `rotateHostedLinqGroupLeaveBatch` owner reads at
+most 100 old markers, authenticates their row-bound envelopes, and re-derives
+and reseals each under the new current key. Each short transaction takes the
+same chat lock as departure and compares the old key and ciphertext. Repeat
+while current plus prior are configured, drain old writers, and verify no
+prior-version markers remain before retiring the old key. A dormant unbound
+group must rotate too; webhook-driven lazy rotation is insufficient. This
+bounded helper is a rotation seam, not a background runner or a complete
+rotation command for the other owners below.
+
 The encrypted owner-table fields already preserve the raw values needed to re-derive these canonical lookup-key columns in a future rotation-specific migration:
 
 - `HostedMemberIdentity.phoneLookupKey`
@@ -60,6 +71,8 @@ The encrypted owner-table fields already preserve the raw values needed to re-de
   match could incorrectly classify a previously accepted payment as a loser.
 - `HostedGroupDisclosurePermission.permissionDigest`, re-derived from the
   group-owned encrypted permission text and owning group id
+- `HostedLinqGroupLeave.threadIdentityLookupKey`, re-derived from its
+  authenticated `chatIdEncrypted` envelope and resealed in the same update
 
 ## Current Guidance
 
