@@ -4659,6 +4659,33 @@ describe("Linq explicit external-thread routing", () => {
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  it("stays silent in an unbound Linq group larger than the setup cap", async () => {
+    const prisma = createPrisma();
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockResolvedValue(null);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      pendingGroupRosterOversized: true,
+      prisma: prisma as never,
+    });
+
+    // The same sender in a normal-sized group gets the setup offer above. An
+    // oversized room without an active member gets nothing: no room notice,
+    // no private recovery (its response reason is outside the
+    // visible-secondary set), and no route. An active member can still start
+    // it; see "limits oversized-roster setup matching to the authenticated
+    // sender".
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-roster-oversized",
+    });
+    expect(plan.desiredSideEffects).toEqual([]);
+    expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   async function expectPreparedOwnerAdmission(input: {
     senderKind: "unknown-phone" | "unverified-email" | "inactive-member";
   }): Promise<void> {

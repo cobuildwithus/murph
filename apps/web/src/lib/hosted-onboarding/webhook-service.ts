@@ -586,6 +586,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 preparedGameInvite: preparation.preparedGameInvite,
                 pendingGroupParticipantMemberIds:
                   planningResolution.pendingGroupParticipantMemberIds ?? null,
+                pendingGroupRosterOversized:
+                  planningResolution.pendingGroupRosterOversized ?? false,
                 pendingGroupRosterUnavailable:
                   (planningResolution.pendingGroupRosterUnavailable ?? false)
                   || (planningResolution.requestLocalGroupRoster?.observation.handlesComplete === false
@@ -1447,6 +1449,7 @@ interface HostedLinqPlanningEventResolution {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   initialGroupDisplayName?: string;
   pendingGroupParticipantMemberIds?: readonly string[];
+  pendingGroupRosterOversized?: boolean;
   pendingGroupRosterUnavailable?: boolean;
   requestLocalGroupRoster?: {
     chatId: string;
@@ -1566,6 +1569,9 @@ async function resolveHostedLinqPlanningEvent(input: {
           pendingGroupParticipantMemberIds:
             pendingGroupRoster.participantMemberIds,
         }),
+    ...(pendingGroupRoster?.oversized === true
+      ? { pendingGroupRosterOversized: true }
+      : {}),
     ...(pendingGroupRoster?.unavailable === true
       ? { pendingGroupRosterUnavailable: true }
       : {}),
@@ -1589,6 +1595,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
 }): Promise<{
   observation: HostedLinqChatRosterObservation | null;
   initialGroupDisplayName: string | null;
+  oversized: boolean;
   participantMemberIds: string[] | null;
   unavailable: boolean;
 }> {
@@ -1604,6 +1611,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       return {
         observation: null,
         initialGroupDisplayName: null,
+        oversized: false,
         participantMemberIds: null,
         unavailable: false,
       };
@@ -1616,6 +1624,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       return {
         observation: summary,
         initialGroupDisplayName,
+        oversized: false,
         participantMemberIds: null,
         unavailable: true,
       };
@@ -1637,6 +1646,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       return {
         observation: summary,
         initialGroupDisplayName,
+        oversized: true,
         participantMemberIds: null,
         unavailable: false,
       };
@@ -1653,6 +1663,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     return {
       observation: summary,
       initialGroupDisplayName,
+      oversized: false,
       participantMemberIds: memberIds,
       unavailable: false,
     };
@@ -1664,6 +1675,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     return {
       observation: null,
       initialGroupDisplayName: null,
+      oversized: false,
       participantMemberIds: null,
       unavailable: true,
     };

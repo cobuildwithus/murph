@@ -1323,6 +1323,7 @@ type HostedOnboardingLinqWebhookPlannerInput = {
   initialGroupDisplayName?: string | null;
   instantStartAllowed?: boolean;
   pendingGroupParticipantMemberIds?: readonly string[] | null;
+  pendingGroupRosterOversized?: boolean;
   pendingGroupRosterUnavailable?: boolean;
   preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   directMailboxPreparationFailure?: unknown;
@@ -1456,6 +1457,7 @@ export async function planHostedOnboardingLinqWebhook(
       preparedPendingGroupSetup: input.preparedPendingGroupSetup,
       preparedThreadContainerCreation: input.preparedThreadContainerCreation,
       preparedThreadDeliveryRoute: input.preparedThreadDeliveryRoute,
+      rosterOversized: input.pendingGroupRosterOversized ?? false,
       rosterUnavailable: input.pendingGroupRosterUnavailable ?? false,
       prisma: input.prisma,
       requireFirstContactAdmission: input.requireFirstContactAdmission,
@@ -3807,6 +3809,7 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "blocked-first-contact-content"
   | "contentless-first-contact"
   | "empty-message-parts"
+  | "group-roster-oversized"
   | "local-inbound-not-allowlisted"
   | "own-message"
   | "provision-unavailable"
@@ -3845,6 +3848,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
+  rosterOversized: boolean;
   rosterUnavailable: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
@@ -3944,6 +3948,17 @@ async function planHostedLinqGroupChatWebhook(input: {
       })
     : null;
 
+  // Above the setup cap only an active member can start the group. Anyone
+  // else gets silence: big mixed iMessage/RCS rooms reappear under a new chat
+  // id on each roster change, so a per-chat setup notice repeats in every
+  // copy. The distinct response reason also skips private recovery.
+  if (input.rosterOversized && !activeSenderMemberId) {
+    return ignored(
+      "group-roster-oversized",
+      senderIdentityMatch,
+      "group-roster-oversized",
+    );
+  }
   if (senderSuspended) {
     return ignored("suspended-member", senderIdentityMatch);
   }

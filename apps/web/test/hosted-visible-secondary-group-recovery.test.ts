@@ -19,6 +19,8 @@ const BILLING_INACTIVE_MESSAGE =
 const SIGNUP_MESSAGE =
   "Murph isn't fully set up on this account yet. Finish setup here:\nhttps://withmurph.ai/join/invite-123";
 const GROUP_SENDER_PHONE = "+15551234567";
+const PRIVATE_RECOVERY_KEY = /^visible-secondary-private:[0-9a-f]{32}$/u;
+const PRIVATE_RECOVERY_SEED = /^linq-group-private-recovery-seed:[0-9a-f]{32}$/u;
 
 const GROUP_SENDER_CONTACT = requireTestLinqParticipantContact({
   kind: "phone",
@@ -206,6 +208,74 @@ describe("Linq group-chat visible access recovery", () => {
     }
   });
 
+  it("sends one private recovery per member per day across group chats and messages", async () => {
+    const idempotencyKeys: string[] = [];
+    const run = async (input: {
+      chatId: string;
+      createdAt: string;
+      eventId: string;
+      handlerReason: "group-chat" | "sent-group-setup";
+    }) => {
+      const event = buildGroupLinqEvent(
+        input.eventId,
+        GROUP_SENDER_PHONE,
+        input.createdAt,
+        input.chatId,
+      );
+      const dependencies = buildLinqDependencies({
+        event,
+        getHostedLinqChatSummary: vi.fn(async () => linqRoster({
+          handles: MATCHING_PRIVATE_HANDLES,
+          isGroup: false,
+        })),
+        readHostedMemberRoutingState: vi.fn(async () => ({
+          linqChatId: "chat_private_member",
+          linqRecipientPhone: "+15550000000",
+        }) as never),
+        resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
+          inviteCode: "invite-123",
+          inviteId: "invite_123",
+          joinUrl: "https://withmurph.ai/join/invite-123",
+          kind: "signup" as const,
+          message: SIGNUP_MESSAGE,
+          responseReason: "sent-signup-link" as const,
+        })),
+        sendHostedLinqChatMessage: vi.fn(async (sendInput) => {
+          idempotencyKeys.push(sendInput.idempotencyKey ?? "");
+          return { chatId: "chat_private_member", messageId: "msg_private" };
+        }),
+      });
+      const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () =>
+        input.handlerReason === "sent-group-setup"
+          ? {
+              joinUrl: "https://withmurph.ai/groups/start",
+              ok: true as const,
+              reason: "sent-group-setup",
+            }
+          : { ignored: true, ok: true as const, reason: "group-chat" });
+
+      await withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+        rawBody: JSON.stringify(event),
+        signature: "signature",
+        timestamp: "timestamp",
+      });
+    };
+
+    // A big mixed iMessage/RCS group reappears under a new chat id on each
+    // roster change, and every message in it reaches this path.
+    await run({ chatId: "chat_group_fork_a", createdAt: "2026-07-27T03:00:00.000Z", eventId: "evt_fork_a", handlerReason: "sent-group-setup" });
+    await run({ chatId: "chat_group_fork_b", createdAt: "2026-07-27T03:05:00.000Z", eventId: "evt_fork_b", handlerReason: "sent-group-setup" });
+    await run({ chatId: "chat_group_fork_b", createdAt: "2026-07-27T03:06:00.000Z", eventId: "evt_fork_b_again", handlerReason: "group-chat" });
+    await run({ chatId: "chat_group_fork_c", createdAt: "2026-07-28T03:00:00.000Z", eventId: "evt_fork_next_day", handlerReason: "group-chat" });
+
+    expect(idempotencyKeys).toHaveLength(4);
+    expect(new Set(idempotencyKeys.slice(0, 3)).size).toBe(1);
+    expect(idempotencyKeys[3]).not.toBe(idempotencyKeys[0]);
+    for (const idempotencyKey of idempotencyKeys) {
+      expect(idempotencyKey).toMatch(PRIVATE_RECOVERY_KEY);
+    }
+  });
+
   it("retries private recovery with the same provider key after room completion", async () => {
     const event = buildGroupLinqEvent(
       "evt_group_setup_private_retry",
@@ -359,14 +429,14 @@ describe("Linq group-chat visible access recovery", () => {
         id: "member_group_sender",
         suspendedAt: null,
       },
-      noticeSeed: `evt_private_${reason}`,
+      noticeSeed: expect.stringMatching(PRIVATE_RECOVERY_SEED),
       prisma: {},
     });
     expect(readHostedMemberRoutingState).toHaveBeenCalledTimes(2);
     expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_private_member",
-      idempotencyKey: `visible-secondary-private:evt_private_${reason}`,
+      idempotencyKey: expect.stringMatching(PRIVATE_RECOVERY_KEY),
       message: `${BILLING_INACTIVE_MESSAGE}\n\nOnce that's sorted, send me another message in the group and I'll try again.`,
       replyToMessageId: null,
     }));
@@ -474,7 +544,7 @@ describe("Linq group-chat visible access recovery", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_private_email_member",
-      idempotencyKey: "visible-secondary-private:evt_matching_email",
+      idempotencyKey: expect.stringMatching(PRIVATE_RECOVERY_KEY),
     }));
   });
 
@@ -692,8 +762,7 @@ describe("Linq group-chat visible access recovery", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_pending_member",
-      idempotencyKey:
-        "visible-secondary-private:evt_matching_pending_after_stale_committed",
+      idempotencyKey: expect.stringMatching(PRIVATE_RECOVERY_KEY),
     }));
   });
 
@@ -1121,7 +1190,7 @@ describe("Linq group-chat visible access recovery", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_private_member",
-      idempotencyKey: "visible-secondary-private:evt_retryable_private_route",
+      idempotencyKey: expect.stringMatching(PRIVATE_RECOVERY_KEY),
       replyToMessageId: null,
     }));
   });
@@ -1267,13 +1336,14 @@ function buildGroupLinqEvent(
   eventId: string,
   senderHandle = GROUP_SENDER_PHONE,
   createdAt = "2026-07-27T12:00:00.000Z",
+  chatId = "chat_group_visible",
 ): ReturnType<typeof requireHostedLinqMessageReceivedEvent> {
   return requireHostedLinqMessageReceivedEvent({
     api_version: "v3",
     created_at: createdAt,
     data: {
       chat: {
-        id: "chat_group_visible",
+        id: chatId,
         is_group: true,
         owner_handle: {
           handle: "+15550000000",
