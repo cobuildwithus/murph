@@ -3791,7 +3791,9 @@ adds none. Reservations protect source traffic and affected unbound
 target chats using the existing retryable-error/preparation retry boundary.
 An expired adoption deadline releases the source hold, retaining unbound-target
 admission protection. Cancelled rows grant no authority; the producer must
-verify provider cleanup before cancelling. Their immutable final `updated_at`
+verify provider cleanup before cancelling. An add whose target is still absent
+an hour after `add_started_at` is released as `add_abandoned`, because Linq
+reports no terminal outcome for queued adds. Their immutable final `updated_at`
 fences unbound target-line events created at or before cancellation. The latest
 cancellation read is limited to the last 30 minutes, indexed by target line,
 status and update time, covering Linq's entire

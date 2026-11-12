@@ -16,6 +16,7 @@ import { provisionHostedCryptoDomainRootsForUser } from "@/src/lib/hosted-crypto
 import { createHostedExternalThreadIdentityLookupKey, createHostedExternalThreadLookupKey, createHostedLinqChatLookupKey, createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { encryptHostedLinqLinePhoneNumber } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 import { startHostedLinqGroupLineMove, operateHostedLinqGroupLineMove } from "@/src/lib/hosted-ops/linq-group-line-move";
+import { GROUP_MOVE_ADD_SETTLE_MS } from "@/src/lib/hosted-ops/linq-group-line-move-state";
 import { readHostedLinqGroupLineMoveOverview } from "@/src/lib/hosted-ops/linq-group-line-move-overview";
 import { claimHostedLinqDeliveryProviderDispatchTx, recordHostedLinqRuntimeDeliveryOutcomeTx,
   recordHostedLinqRuntimeProviderDispatchFenceTx } from "@/src/lib/hosted-onboarding/linq-delivery-store";
@@ -358,6 +359,21 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     targetPresent = true;
     expect(await operate(id, "cancel")).toMatchObject({ status: "cancelled" });
     expect(provider.add).not.toHaveBeenCalled();
+  });
+  it("releases a never-arriving add after the settle window so the target line can move the next group", async () => {
+    const id = await reserve("add_started"); targetPresent = false;
+    expect(await operate(id, "cancel")).toMatchObject({ status: "reserved", code: "add_outcome_unknown", adoptionExpired: true });
+    const backdate = (ms: number) => db.hostedLinqGroupLineMove.update({ where: { id }, data: { addStartedAt: new Date(Date.now() - ms) } });
+    await backdate(GROUP_MOVE_ADD_SETTLE_MS - 1_000);
+    expect(await operate(id, "cancel")).toMatchObject({ status: "reserved", code: "add_outcome_unknown" });
+    await backdate(GROUP_MOVE_ADD_SETTLE_MS + 1);
+    expect(await operate(id, "cancel")).toMatchObject({ status: "cancelled", code: "add_abandoned", holdActive: false });
+    expect(await operate(id, "cancel")).toMatchObject({ status: "cancelled", code: "add_abandoned" });
+    expect(provider.add).not.toHaveBeenCalled(); expect(provider.remove).not.toHaveBeenCalled();
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room, accountLookupKey: sourceKey } })).toBe(1);
+    const next = await start();
+    expect(next).toMatchObject({ status: "reserved", code: null }); expect(next.addConfirmedAt).not.toBeNull();
+    expect(provider.add).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
   });
   it("reports a rejected sibling add and releases the reservation after an absence read", async () => {
     provider.add.mockRejectedValue(new APIError(403, {}, "synthetic rejection", new Headers()));

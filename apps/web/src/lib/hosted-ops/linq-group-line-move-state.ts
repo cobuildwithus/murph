@@ -20,6 +20,8 @@ export const groupMoveOperatorSelect = { ...linqGroupMoveSelect, addStartedAt: t
 export type OperatorGroupMove = Prisma.HostedLinqGroupLineMoveGetPayload<{ select: typeof groupMoveOperatorSelect }>;
 export const GROUP_MOVE_QUIET_MS = 60_000;
 export const GROUP_MOVE_ADOPTION_MS = 24 * 60 * 60_000;
+// Linq applies queued participant adds within seconds; an hour is settled.
+export const GROUP_MOVE_ADD_SETTLE_MS = 60 * 60_000;
 // Drain recent provider work; age alone never proves runtime outbox settlement.
 const GROUP_MOVE_DELIVERY_DRAIN_MS = 15 * 60_000;
 
