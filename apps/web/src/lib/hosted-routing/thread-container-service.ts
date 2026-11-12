@@ -146,6 +146,34 @@ export async function replaceHostedLinqGroupLineMoveRouteTx(input: {
   if (adopted.count !== 1) holdHostedLinqGroupLineMove();
 }
 
+/**
+ * Operator repair: detach a group route whose own line the provider reports as
+ * no longer active in the chat. A later re-add of that line then arrives
+ * unbound, so a reserved line move can adopt it instead of a stale container.
+ */
+export async function releaseHostedLinqRemovedLineRouteTx(input: {
+  expected: Pick<Prisma.HostedThreadRouteGetPayload<object>, "containerMemberId" | "threadIdentityLookupKey"
+    | "threadLookupKey" | "accountLookupKey" | "deliveryRouteEncrypted" | "updatedAt">;
+  threadId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const { expected } = input;
+  await acquireHostedLinqChatOwnershipLockTx({ chatId: input.threadId, tx: input.prisma });
+  await acquireHostedThreadContainerRouteWriteLockTx({ channel: "linq", threadId: input.threadId, prisma: input.prisma });
+  const identities = createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId: input.threadId });
+  // A move that owns this chat or container keeps its route.
+  if (await input.prisma.hostedLinqGroupLineMove.findFirst({ where: { OR: [
+    { containerMemberId: expected.containerMemberId, status: { in: ["reserved", "adopted"] } },
+    { fromThreadIdentityLookupKey: { in: identities }, status: { in: ["reserved", "adopted"] } },
+    { toThreadIdentityLookupKey: { in: identities }, status: { in: ["adopted", "left"] } },
+  ] }, select: { id: true } })) return false;
+  const deleted = await input.prisma.hostedThreadRoute.deleteMany({ where: { channel: "linq",
+    threadIdentityLookupKey: expected.threadIdentityLookupKey, containerMemberId: expected.containerMemberId,
+    threadLookupKey: expected.threadLookupKey, accountLookupKey: expected.accountLookupKey,
+    deliveryRouteEncrypted: expected.deliveryRouteEncrypted, updatedAt: expected.updatedAt } });
+  return deleted.count === 1;
+}
+
 export const HOSTED_THREAD_CONTAINER_DEFAULT_MONTHLY_USAGE_LIMIT_USD_MICROS =
   7_500_000n;
 

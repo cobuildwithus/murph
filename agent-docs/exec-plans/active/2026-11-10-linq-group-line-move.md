@@ -4,6 +4,18 @@ Status: active
 Created: 2026-11-10
 Updated: 2026-11-11
 
+## Stale target copy repair
+
+The 2026-11-10 test bound the target line's copy of one group to a separate
+container, then removed the target line from it. Re-adding the line resumes
+that same provider chat, which is already bound, so ingress delivers to the
+stale container and the move cannot adopt. The Ops operation
+`release_removed_line_route` deletes such a route by its opaque container ref
+only when a fresh complete roster shows the route's own line as self and not
+active, and no reserved or adopted move owns the container or chat. The stale
+container keeps its history but has no route. Proof: migrated-PostgreSQL
+release, then a normal move adopting that same chat id.
+
 ## Expired missed-check-in follow-up
 
 The game lifecycle owner deliberately retains published generation receipts

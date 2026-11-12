@@ -3822,7 +3822,10 @@ raw-id order, then their route locks, compares the exact source and reserved
 move, and atomically replaces the route and adopts. It clears pending reaction
 and participant context. Provider reads and envelope preparation stay outside
 the transaction. Occupied or retired destinations fail closed; a previous
-adopted overlap must reach `left` before another move can adopt.
+adopted overlap must reach `left` before another move can adopt. An operator
+may detach an occupied destination's route only when a fresh complete roster
+lists that route's own line as self and no longer active, and no move owns its
+container or chat. A re-added line then reaches that chat unbound.
 
 Web egress alone follows a retired source alias for its owning container,
 before game target validation, returning the current chat and conversation

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-const mocks = vi.hoisted(() => ({ access: vi.fn(), start: vi.fn(), operate: vi.fn(), overview: vi.fn() }));
+const mocks = vi.hoisted(() => ({ access: vi.fn(), start: vi.fn(), operate: vi.fn(), release: vi.fn(), overview: vi.fn() }));
 vi.mock("@/src/lib/hosted-ops/access", () => ({ requireHostedOpsRequestAccess: mocks.access }));
-vi.mock("@/src/lib/hosted-ops/linq-group-line-move", () => ({ startHostedLinqGroupLineMove: mocks.start, operateHostedLinqGroupLineMove: mocks.operate }));
+vi.mock("@/src/lib/hosted-ops/linq-group-line-move", () => ({ startHostedLinqGroupLineMove: mocks.start, operateHostedLinqGroupLineMove: mocks.operate,
+  releaseHostedLinqRemovedLineRoute: mocks.release }));
 vi.mock("@/src/lib/hosted-ops/linq-group-line-move-overview", () => ({ readHostedLinqGroupLineMoveOverview: mocks.overview }));
 import { GET, POST } from "../app/api/ops/linq-group-line-move/route";
 const origin = "https://ops.example.test";
@@ -28,14 +29,23 @@ describe("group line move ops access and request contract", () => {
     expect((await POST(request({ operation, moveId }))).status).toBe(200);
     expect(mocks.operate).toHaveBeenCalledWith({ operation, moveId });
   });
+  it("dispatches a removed-line route release only by opaque container ref", async () => {
+    mocks.release.mockResolvedValue({ containerHint: "synthetic", released: true });
+    const body = { operation: "release_removed_line_route", containerRef: "opaque-room" };
+    expect((await POST(request(body))).status).toBe(200);
+    expect(mocks.release).toHaveBeenCalledWith(body);
+    expect(mocks.start).not.toHaveBeenCalled(); expect(mocks.operate).not.toHaveBeenCalled();
+  });
   it.each([
+    { operation: "release_removed_line_route" },
+    { operation: "release_removed_line_route", containerRef: "opaque-room", moveId },
     { operation: "start", containerRef: "opaque-room" },
     { operation: "start", containerRef: "opaque-room", targetLineLookupKey: "opaque-line", notice: "forbidden" },
     { operation: "cancel", moveId: "invalid" },
     { operation: "unknown", moveId },
   ])("rejects invalid or extra mutation fields", async body => {
     expect((await POST(request(body))).status).toBe(400);
-    expect(mocks.start).not.toHaveBeenCalled(); expect(mocks.operate).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled(); expect(mocks.operate).not.toHaveBeenCalled(); expect(mocks.release).not.toHaveBeenCalled();
   });
   it("guards and passes bounded overview cursors and filters", async () => {
     const input = new Request(`${origin}/api/ops/linq-group-line-move?status=reserved&sourceLineLookupKey=opaque-line&afterMoveId=${moveId}&afterContainerRef=opaque-room`);
