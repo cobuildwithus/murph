@@ -166,13 +166,14 @@ describe("runtime ownership response", () => {
     expect(edges.loaded).not.toHaveBeenCalled();
   });
 
-  it.each(["admission"] as const)("tells the Worker why a claim was blocked (%s)", async (reason) => {
+  it.each(["admission", "start_budget"] as const)("tells the Worker why a claim was blocked (%s)", async (reason) => {
     edges.authenticate.mockResolvedValueOnce({ userId: identity.userId,
       payload: { operation: "claim", processingMode: "system_mailbox" } });
     const cutover = "postgres";
-    edges.claim.mockResolvedValueOnce({ cutover, status: "blocked", reason });
+    const retry = reason === "start_budget" ? { retryAt: "2026-11-12T14:03:00.000Z" } : {};
+    edges.claim.mockResolvedValueOnce({ cutover, status: "blocked", reason, ...retry });
     await expect((await post()).json()).resolves.toEqual({
-      cutover, status: "blocked", owner: null, blockedReason: reason,
+      cutover, status: "blocked", owner: null, blockedReason: reason, ...retry,
     });
     expect(edges.claim).toHaveBeenCalledExactlyOnceWith({ prisma: {}, userId: identity.userId, processingMode: "system_mailbox" });
   });

@@ -1317,6 +1317,8 @@ model HostedRuntimeOwner {
   platformAiUsageAllowed    Boolean  @default(false) @map("platform_ai_usage_allowed")
   // Server-owned allowance attribution, frozen for this exact invocation.
   allowanceBeneficiaryMemberId String? @map("allowance_beneficiary_member_id")
+  // Fresh-attempt debt survives release and retirement.
+  startDebtUntil            DateTime? @map("start_debt_until")
   startedAt                 DateTime? @map("started_at")
   acceptedAt                DateTime? @map("accepted_at")
   completedAt               DateTime? @map("completed_at")

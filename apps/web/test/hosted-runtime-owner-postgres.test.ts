@@ -100,6 +100,97 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     return result;
   }
 
+  it.each([false, true])("charges a first claim with no prior debt (idle row: %s)", async idleRow => {
+    const userId = await member();
+    if (idleRow) await observer.hostedRuntimeOwner.create({ data: { userId } });
+    const now = new Date("2030-01-01T12:00:00Z");
+    const result = await claimHostedRuntime({ prisma: first, userId, processingMode: "default", now });
+    expect(result).toMatchObject({ status: "claimed", owner: {
+      startDebtUntil: new Date("2030-01-01T12:03:00Z"), generation: 1n,
+    } });
+  });
+
+  it("admits twelve fresh attempts, blocks without writes, and refills exactly at retryAt", async () => {
+    const userId = await member();
+    const now = new Date("2030-01-01T12:00:00Z");
+    for (let attempt = 1; attempt <= 12; attempt += 1) {
+      const result = await claimHostedRuntime({ prisma: first, userId, processingMode: "default", now });
+      expect(result.status).toBe("claimed");
+      if (result.status === "blocked") throw new Error("Unexpected budget rejection");
+      expect(result.owner.generation).toBe(BigInt(attempt));
+      const runtime = identity(result.owner);
+      expect(await retireHostedRuntime({ prisma: first, identity: runtime })).toBe(true);
+      expect(await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: runtime, runnerContainerName: null })).toBe(true);
+    }
+    const before = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(before.startDebtUntil).toEqual(new Date("2030-01-01T12:36:00Z"));
+    for (const processingMode of ["default", "system_mailbox", "inbox_media_retention"] as const) {
+      expect(await claimHostedRuntime({ prisma: second, userId, processingMode, now })).toEqual({
+        cutover: "postgres", status: "blocked", reason: "start_budget", retryAt: "2030-01-01T12:03:00.000Z",
+      });
+    }
+    expect(await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      now: new Date("2030-01-01T12:02:59.999Z") })).toMatchObject({ status: "blocked" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(before);
+    expect(await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      now: new Date("2030-01-01T12:03:00Z") })).toMatchObject({ status: "claimed", owner: {
+      generation: 13n, startDebtUntil: new Date("2030-01-01T12:39:00Z"),
+    } });
+  });
+
+  it("lets concurrent callers share one newly charged attempt at the budget boundary", async () => {
+    const userId = await member();
+    const now = new Date("2030-01-01T12:00:00Z");
+    await observer.hostedRuntimeOwner.create({ data: { userId, startDebtUntil: new Date("2030-01-01T12:33:00Z") } });
+    const results = await Promise.all([first, second].map(prisma =>
+      claimHostedRuntime({ prisma, userId, processingMode: "default", now })));
+    expect(results.map(result => result.status).sort()).toEqual(["claimed", "existing"]);
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({
+      generation: 1n, startDebtUntil: new Date("2030-01-01T12:36:00Z"),
+    });
+  });
+
+  it.each([
+    ["starting", "default"], ["active", "default"], ["retiring", "default"], ["starting", "system_mailbox"],
+  ] as const)("does not charge an existing %s / %s owner with exhausted debt", async (phase, processingMode) => {
+    // An active owner needs its launched target; the other phases are set directly.
+    const userId = phase === "active" ? (await launchedRuntime()).userId : await member();
+    if (phase !== "active") await claim(userId);
+    const startDebtUntil = new Date("2030-01-01T12:36:00Z");
+    await observer.hostedRuntimeOwner.update({ where: { userId },
+      data: phase === "active" ? { startDebtUntil } : { phase, processingMode, startDebtUntil } });
+    expect(await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      now: new Date("2030-01-01T12:00:00Z") })).toMatchObject({ status: "existing", owner: { startDebtUntil } });
+    expect((await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).startDebtUntil).toEqual(startDebtUntil);
+  });
+
+  it.each(["cold", "warm", "target_retired"])("preserves exhausted debt through %s release and account deletion", async path => {
+    const { userId, runtime, target, send } = await launchedRuntime();
+    const startDebtUntil = new Date(Date.now() + 36 * 60_000);
+    await observer.hostedRuntimeOwner.update({ where: { userId }, data: { startDebtUntil } });
+    if (path === "target_retired") {
+      expect(await send({ operation: "target_retired", runnerContainerName: target })).toMatchObject({ status: "updated" });
+    } else {
+      expect(await send({ operation: "retire", ...runtime, completed: path === "warm" })).toMatchObject({ status: "updated" });
+      expect((await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).startDebtUntil).toEqual(startDebtUntil);
+      expect(await send({ operation: path === "warm" ? "release_completed" : "release", ...runtime,
+        runnerContainerName: target })).toMatchObject({ status: "updated" });
+    }
+    const before = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(before).toMatchObject({ phase: "idle", startDebtUntil });
+    expect(await send({ operation: "claim", processingMode: "default" })).toEqual({
+      cutover: "postgres", status: "blocked", owner: null, blockedReason: "start_budget",
+      retryAt: new Date(startDebtUntil.getTime() - 33 * 60_000).toISOString(),
+    });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(before);
+    if (path === "warm") {
+      expect(await send({ operation: "target_retired", runnerContainerName: target })).toMatchObject({ status: "updated" });
+    }
+    await observer.hostedMember.delete({ where: { id: userId } });
+    expect(await isHostedRuntimeDeletionReady({ prisma: first, userId })).toBe(true);
+    expect((await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).startDebtUntil).toEqual(startDebtUntil);
+  });
+
   async function launchedRuntime() {
     const userId = await member();
     const owner = (await claim(userId)).owner;
