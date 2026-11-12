@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT drops verified send-model evidence before response validation'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4870'
 ---
 
 ## Expected Behavior
