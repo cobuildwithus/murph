@@ -57,7 +57,11 @@ export async function readGameMessageRecipient(gameId: string, viewerId: string)
   return identity?.phoneNumberVerifiedAt && identity.phoneNumber ? identity.phoneNumber : null;
 }
 
-/** The member the viewer's own invite is addressed to, when the pair has shaken on a game before. */
+/**
+ * The member the viewer's own invite is addressed to, when the pair has shaken
+ * on a one-on-one game before. A group never counts, even one of just the two
+ * of them: a group never gives a number.
+ */
 async function addressedInvitee(
   game: { createdBy: string | null; status: string; players: unknown[]; invitees: { memberId: string | null }[] },
   viewerId: string,
@@ -66,7 +70,7 @@ async function addressedInvitee(
   const invitee = game.invitees.find(row => row.memberId !== null && row.memberId !== viewerId)?.memberId;
   if (!invitee) return null;
   const shook = await getPrisma().game.findFirst({
-    where: { ...gamePairWhere([viewerId, invitee]), status: { in: ["live", "settled"] } },
+    where: { ...gamePairWhere([viewerId, invitee]), maxPlayers: 2, status: { in: ["live", "settled"] } },
     select: { id: true },
   });
   return shook ? invitee : null;

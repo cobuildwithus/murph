@@ -767,7 +767,8 @@ async function knownInvitee(actor: string, { inviteeMemberId, inviteeRecipient }
   const member = inviteeMemberId ?? await memberByAddress(inviteeRecipient);
   if (!member || member === actor) return null;
   const prisma = getPrisma();
-  const played = await prisma.game.findFirst({ where: gamePairWhere([actor, member]), select: { id: true } });
+  // A one-on-one game: a group of just the two of them isn't one.
+  const played = await prisma.game.findFirst({ where: { ...gamePairWhere([actor, member]), maxPlayers: 2 }, select: { id: true } });
   if (!played || await areGamePlayersBlocked(prisma, actor, member)) return null;
   return member;
 }
