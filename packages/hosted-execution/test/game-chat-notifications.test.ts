@@ -362,6 +362,12 @@ it("activates show policy only for an explicitly selected pair", () => {
   expect(show).toContain("Never reuse a treatment the lore lists for this pair");
   expect(show).toContain("Leave the prize off it");
   expect(show).toContain("Leo asked Ava to prove her abs on Thursday");
+  expect(show).toContain("read $MURPH_ASSISTANT_SKILLS_ROOT/groupchat-comedy/SKILL.md");
+  expect(show).toContain("Where the skill and this guide differ, this guide wins.");
+  expect(show).toContain("Write treatment as the premise in a few words");
+  expect(show).toContain("in 40 characters at most");
+  expect(show).toContain("Then look for what nobody noticed.");
+  expect(show).not.toContain("Name it briefly in treatment");
   expect(show).not.toMatch(/kind:"stat"|- stat:|rep tape that|prize kicker/u);
   expect(show).not.toContain("give the best single shot of the week a full-bleed page");
   expect(show).not.toContain('or filling the page ("fullBleed")');
