@@ -71,8 +71,11 @@ it.each([
   { threadIsDirect: true, withMedia: false }, { threadIsDirect: false, withMedia: false },
   { threadIsDirect: true, withMedia: true }, { threadIsDirect: false, withMedia: true },
 ])("claims a text reply in one call and keeps two calls for media (direct=$threadIsDirect, media=$withMedia)", async ({ threadIsDirect, withMedia }) => {
+  // A direct reply to the member's bound thread carries the home-route fallback
+  // flag in production; it must not keep an anchored reply off the one-call path.
   const fixture = await createHostedLinqAttachmentFixture({ imageCount: 0,
-    key: "one-claim", target: "synthetic-current-chat", message: "Synthetic reply." });
+    key: "one-claim", target: "synthetic-current-chat", message: "Synthetic reply.",
+    ...(threadIsDirect ? { homeRoute: { directRecipientPhoneNumber: "+15550000001", fromPhoneNumber: "+15550000002" } } : {}) });
   const replyToMessageId = "synthetic-inbound-message";
   const media: HostedAssistantDeliveryMedia[] = withMedia
     ? [{ kind: "image", url: "https://cdn.example.test/synthetic.png", alt: "Synthetic image", source: "synthetic" }] : [];
@@ -87,7 +90,9 @@ it.each([
     order.push(request.authorityCheckOnly ? "probe" : "claim");
     // A text reply claims with no prior route read; media keeps the route read first.
     expect(request.expectedResolvedRoute === undefined).toBe(!withMedia || request.authorityCheckOnly);
-    expect(request.homeRouteFallbackAllowed).toBe(false);
+    expect(request.homeRouteFallbackAllowed).toBe(
+      threadIsDirect && request.intentId != null && request.expectedResolvedRoute === undefined,
+    );
     monotonicMs += 40;
     return { providerDispatchClaimed: true, resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request, {
       threadIsDirect, directRecipientPhoneNumber: threadIsDirect ? "+15550000001" : null,

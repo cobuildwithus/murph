@@ -21,7 +21,10 @@ egress authority once, before building the provider request. A reply must carry
 its matching inbound message ID; sends without one retain route/alias resolution
 through the existing two calls. The matching context accepts thread and explicit
 targets; participant targets cannot match.
-Home-route fallback, cards, any media, reviewed/private Assistant Ask
+A direct reply carries the home-route fallback flag, and it does not change
+this: Web resolves an anchored reply to its inbound's chat and never re-homes a
+claiming call, so a chat the member no longer owns is rejected before any claim.
+Unanchored home-route fallback sends, cards, any media, reviewed/private Assistant Ask
 completions, progress updates, reactions and voice memos keep their existing
 authority ordering. Web must return the resolved route even for an already
 started claim; legacy already-started errors without a route fail closed.

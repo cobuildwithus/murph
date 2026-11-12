@@ -1,6 +1,6 @@
 # Reply send: one authority call instead of three
 
-Status: active
+Status: completed
 Created: 2026-11-12
 Updated: 2026-11-12
 
@@ -252,6 +252,18 @@ request:
 
 ## Decisions
 
+- 2026-11-12, after the first production replies on the new runner: direct
+  replies did not use the one-call path, because the engine sets the home-route
+  fallback flag on every direct reply to the member's bound thread and the
+  first implementation excluded any send with that flag. For a reply anchored
+  to an inbound, Web resolves to that inbound's chat and a claiming call never
+  re-homes, so the flag is inert there. The exclusion is removed for anchored
+  replies; Web is unchanged. Accepted behavior change: if Web cannot find the
+  inbound being answered and the member no longer owns that chat, the reply is
+  rejected instead of being re-homed to the member's current chat. In retained
+  production data, 0 of 225 direct replies went to a different chat than the
+  message they answered.
+
 - 2026-11-12, parent review of the implementation: the one-call path is
   text-only. A send with any media keeps the route read followed by the claim,
   because media is fetched or loaded after the claim point and before the first
@@ -336,3 +348,4 @@ request:
   merge, deployment, or ReviewGPT. Earlier combined A+B latency estimates and
   Web-first changes are superseded by the revised scope; no numeric latency
   improvement is claimed from local call counts.
+Completed: 2026-11-12
