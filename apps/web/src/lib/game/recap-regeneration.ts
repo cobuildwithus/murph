@@ -8,6 +8,7 @@ import { hasGameChatBlock, sameGamePlayers } from "./chat-membership";
 import { isGameOn } from "./access";
 import { gameChatLifecycleEventId, reserveGameChatLifecycleTx } from "./chat-lifecycle-receipt";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
+import { HOSTED_LINQ_TERMINAL_RETRY_WINDOW_MS } from "../hosted-onboarding/shared";
 
 export interface GameRecapRegenerationRequest {
   gameId: string;
@@ -29,16 +30,26 @@ function recapRosterRefusal(game: RecapRoster | null, expected: readonly string[
   return null;
 }
 
+const SETTLED_RECAP_DELIVERY = ["accepted", "delivered", "read", "sent_no_receipt_expected", "skipped"];
+
+/** A failed text is final once nothing can resend it: Linq's terminal retry
+ * window after acceptance has closed. */
+function recapDeliverySettled(delivery: { status: string; acceptedAt: Date | null }): boolean {
+  if (SETTLED_RECAP_DELIVERY.includes(delivery.status)) return true;
+  return delivery.status === "failed"
+    && (!delivery.acceptedAt || delivery.acceptedAt.getTime() < Date.now() - HOSTED_LINQ_TERMINAL_RETRY_WINDOW_MS);
+}
+
 /** Inspect the previous generation without writing, including for Ops previews. */
 async function recapDeliveryRefusal(tx: Prisma.TransactionClient, game: RecapRoster & { id: string; recapEncrypted: string | null }, latestEventId: string): Promise<string | null> {
   // Do not overlap generations or replace the story while its delivery is
   // uncertain. Accepted/delivered receipts already own their provider identity.
   const key = createHostedLinqDeliveryIdempotencyLookupKey(latestEventId);
-  const delivery = key ? await tx.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key }, select: { status: true, skipReason: true } }) : null;
+  const delivery = key ? await tx.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key }, select: { status: true, skipReason: true, acceptedAt: true } }) : null;
   const stale = delivery?.status === "generation_queued" && await readGameRecapEntryIdsTx(tx, game, latestEventId) === null;
   if (!game.recapEncrypted && !stale && delivery?.skipReason !== GAME_RECAP_RETIRED
     && !await tx.gameEntry.findFirst({ where: { gameId: game.id, withdrawnReason: "removed" }, select: { id: true } })) return "recap_unavailable";
-  if (delivery && !stale && !["accepted", "delivered", "read", "sent_no_receipt_expected", "skipped"].includes(delivery.status)) return "delivery_pending";
+  if (delivery && !stale && !recapDeliverySettled(delivery)) return "delivery_pending";
   if (latestEventId !== gameChatLifecycleEventId(game.id, "recap") && !delivery) return "delivery_unavailable";
   return null;
 }

@@ -141,6 +141,22 @@ describe.skipIf(!enabled)("late settled-game recap PostgreSQL proof", () => {
     await expect(assertGameProposalDeliveryCurrentTx({ tx: db, containerMemberId: room, audience: await readGameChatAudience(room), deliveryIdempotencyKey: eventId })).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 
+  it("regenerates after a failed text only once nothing can resend it", async () => {
+    const { db, room, eventId, key, sealInput, gameId } = await fixture();
+    await reserveGameChatLifecycleTx({ gameId, kind: "recap", now: new Date(), tx: db });
+    await markGameChatGenerationQueuedTx(eventId, db, room);
+    await sealGameRecap(sealInput);
+    const failed = (acceptedAt: Date) => db.hostedLinqDelivery.update({ where: { idempotencyKey: key }, data: {
+      source: "hosted_runtime_linq_delivery", targetKind: "thread", threadIsDirect: false,
+      status: "failed", acceptedAt, failedAt: new Date(), failureCode: "4006",
+    } });
+    deliveries.push((await failed(new Date())).id);
+    const request = { gameId, regenerationId: "after_failed_text", execute: false, operatorMemberId: "system" };
+    expect(await requestGameRecapRegeneration(request)).toMatchObject({ outcome: "delivery_pending" });
+    await failed(new Date(Date.now() - 4 * 60_000));
+    expect(await requestGameRecapRegeneration(request)).toMatchObject({ outcome: "would_regenerate" });
+  });
+
   it.each(["accepted", "sent_no_receipt_expected"])("regenerates after %s once, replacing only on acceptance without touching the rematch", async (sentStatus) => {
     const { db, gameId, newerId, room, players, eventId, key, sealInput } = await fixture();
     await reserveGameChatLifecycleTx({ gameId, kind: "recap", now: new Date(), tx: db });
