@@ -374,6 +374,16 @@ export async function resolveHostedLinqDirectPreparationMemberId(input: {
   return memberId;
 }
 
+// Container preparation needs a usable roster: an unreadable one retries,
+// and one above the setup cap is never admitted.
+function hasHostedLinqGroupAdmissionRoster(input: {
+  pendingGroupRosterOversized?: boolean;
+  pendingGroupRosterUnavailable?: boolean;
+}): boolean {
+  return input.pendingGroupRosterOversized !== true
+    && input.pendingGroupRosterUnavailable !== true;
+}
+
 /**
  * Prepares the request-local pending-setup authority package before BEGIN and
  * independently decides whether this attempt also needs new-container crypto.
@@ -391,8 +401,7 @@ export async function prepareHostedLinqThreadContainerAdmission(input: {
 }> {
   if (
     input.event.event_type !== "message.received"
-    || input.pendingGroupRosterOversized === true
-    || input.pendingGroupRosterUnavailable === true
+    || !hasHostedLinqGroupAdmissionRoster(input)
   ) {
     return { shouldPrepareThreadContainer: false };
   }
@@ -1449,7 +1458,7 @@ export async function planHostedOnboardingLinqWebhook(
   }
 
   if (isHostedLinqGroupChat(messageEvent)) {
-    return planHostedLinqGroupChatWebhook({
+    return planHostedLinqUnboundGroupChatWebhook({
       preparedGameInvite: input.preparedGameInvite,
       ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
       context,
@@ -1460,7 +1469,7 @@ export async function planHostedOnboardingLinqWebhook(
       preparedPendingGroupSetup: input.preparedPendingGroupSetup,
       preparedThreadContainerCreation: input.preparedThreadContainerCreation,
       preparedThreadDeliveryRoute: input.preparedThreadDeliveryRoute,
-      rosterOversized: input.pendingGroupRosterOversized ?? false,
+      rosterOversized: input.pendingGroupRosterOversized,
       rosterUnavailable: input.pendingGroupRosterUnavailable ?? false,
       prisma: input.prisma,
       requireFirstContactAdmission: input.requireFirstContactAdmission,
@@ -3830,6 +3839,25 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "suspended-member";
 
 /**
+ * Murph never starts a group above the setup cap, whoever messages. Big mixed
+ * iMessage/RCS rooms reappear under a new chat id on each roster change, so a
+ * setup notice, private nudge or bound assistant would repeat in every copy.
+ * The distinct response reason also keeps private recovery out.
+ */
+function planHostedLinqUnboundGroupChatWebhook(
+  input: Parameters<typeof planHostedLinqGroupChatWebhook>[0],
+): Promise<HostedOnboardingLinqDirectPlan> {
+  if (input.rosterOversized === true) {
+    return Promise.resolve(buildHostedLinqIgnoredPlan(input.event, input.context, {
+      existingMemberMatch: "none",
+      reason: "group-roster-oversized",
+      routeStage: "new-group-admission-ignored",
+    }, "group-roster-oversized"));
+  }
+  return planHostedLinqGroupChatWebhook(input);
+}
+
+/**
  * An unbound group can be admitted by either one roster-matched pending setup
  * or the existing active-sender fallback when the recipient line is
  * assignable. An AT_RISK or HARD_BLOCKED line retains the stricter recovery
@@ -3851,7 +3879,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
-  rosterOversized: boolean;
+  rosterOversized?: boolean;
   rosterUnavailable: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
@@ -3879,14 +3907,6 @@ async function planHostedLinqGroupChatWebhook(input: {
 
   if (summary.isFromMe) {
     return ignored("own-message");
-  }
-
-  // Murph never starts a group above the setup cap, whoever messages. Big
-  // mixed iMessage/RCS rooms reappear under a new chat id on each roster
-  // change, so a setup notice, private nudge or bound assistant repeats in
-  // every copy. The distinct response reason also skips private recovery.
-  if (input.rosterOversized) {
-    return ignored("group-roster-oversized", "none", "group-roster-oversized");
   }
 
   if (messageEvent.data.message.parts.length === 0) {

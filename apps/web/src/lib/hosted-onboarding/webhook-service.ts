@@ -587,7 +587,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 pendingGroupParticipantMemberIds:
                   planningResolution.pendingGroupParticipantMemberIds ?? null,
                 pendingGroupRosterOversized:
-                  planningResolution.pendingGroupRosterOversized ?? false,
+                  planningResolution.pendingGroupRosterOversized,
                 pendingGroupRosterUnavailable:
                   (planningResolution.pendingGroupRosterUnavailable ?? false)
                   || (planningResolution.requestLocalGroupRoster?.observation.handlesComplete === false
@@ -662,7 +662,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
               pendingGroupRosterOversized:
-                planningResolution.pendingGroupRosterOversized ?? false,
+                planningResolution.pendingGroupRosterOversized,
               pendingGroupRosterUnavailable:
                 planningResolution.pendingGroupRosterUnavailable ?? false,
               prisma,
@@ -1571,12 +1571,7 @@ async function resolveHostedLinqPlanningEvent(input: {
           pendingGroupParticipantMemberIds:
             pendingGroupRoster.participantMemberIds,
         }),
-    ...(pendingGroupRoster?.oversized === true
-      ? { pendingGroupRosterOversized: true }
-      : {}),
-    ...(pendingGroupRoster?.unavailable === true
-      ? { pendingGroupRosterUnavailable: true }
-      : {}),
+    ...readHostedLinqPendingGroupRosterFlags(pendingGroupRoster),
     ...(pendingGroupRoster?.observation == null
       ? {}
       : {
@@ -1586,6 +1581,18 @@ async function resolveHostedLinqPlanningEvent(input: {
           },
         }),
     threadRoute,
+  };
+}
+
+function readHostedLinqPendingGroupRosterFlags(
+  roster: { oversized: boolean; unavailable: boolean } | null,
+): Pick<
+  HostedLinqPlanningEventResolution,
+  "pendingGroupRosterOversized" | "pendingGroupRosterUnavailable"
+> {
+  return {
+    ...(roster?.oversized === true ? { pendingGroupRosterOversized: true } : {}),
+    ...(roster?.unavailable === true ? { pendingGroupRosterUnavailable: true } : {}),
   };
 }
 
@@ -2491,7 +2498,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
-  pendingGroupRosterOversized: boolean;
+  pendingGroupRosterOversized?: boolean;
   pendingGroupRosterUnavailable: boolean;
   prisma: PrismaClient;
   reusableDirectCryptoDomainRoots?: {
