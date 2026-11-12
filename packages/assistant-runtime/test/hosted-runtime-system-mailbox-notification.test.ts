@@ -558,7 +558,11 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("backs off a persistently failing notification from one minute to fifteen", async () => {
+  it.each([
+    { label: "fresh", occurredAt: FIXED_NOW, expected: [...Array<number>(10).fill(1), 15, 15] },
+    // A late import is old before it fails; it still gets ten fast retries.
+    { label: "late-imported", occurredAt: "2026-04-26T23:00:00.000Z", expected: [...Array<number>(9).fill(1), 15, 15, 15] },
+  ])("slows a persistently failing $label notification only after ten attempts and ten minutes", async ({ occurredAt, expected }) => {
     const workspace = await createHostedRuntimeWorkspace(
       "murph-hosted-system-mailbox-retry-backoff-",
     );
@@ -569,7 +573,7 @@ describe("hosted system mailbox notification execution context", () => {
         instructions: "Send the prepared group update.",
         route: DIRECT_LINQ_NOTIFICATION_ROUTE,
       },
-      occurredAt: FIXED_NOW,
+      occurredAt,
     });
     mocks.executeHostedMailboxEvent.mockRejectedValue(
       new Error("Hosted group tool failed with HTTP 500."),
@@ -580,6 +584,7 @@ describe("hosted system mailbox notification execution context", () => {
         item: createResolvedNotificationItem({
           dedupeKey: wake.eventId,
           id: "mailbox_notification_retry_backoff",
+          occurredAt,
         }),
         vaultRoot: workspace.vaultRoot,
         wake,
@@ -587,7 +592,7 @@ describe("hosted system mailbox notification execution context", () => {
       const runtime = createRuntime({});
       let attemptAt = FIXED_NOW;
       const delaysMinutes: number[] = [];
-      for (let attempt = 1; attempt <= 6; attempt += 1) {
+      for (let attempt = 1; attempt <= expected.length; attempt += 1) {
         const startedAt = attemptAt;
         const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
           executionContext: null,
@@ -614,8 +619,53 @@ describe("hosted system mailbox notification execution context", () => {
         })).resolves.toBeNull();
         attemptAt = pending!.nextAttemptAt!;
       }
-      expect(delaysMinutes).toEqual([1, 2, 4, 8, 15, 15]);
-      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(6);
+      expect(delaysMinutes).toEqual(expected);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(expected.length);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("delivers a ten-minute notification that recovers at minute eight", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-retry-window-",
+    );
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:retry-window",
+      memberId: "member_123",
+      notification: {
+        instructions: "Send the operator message.",
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
+      },
+      occurredAt: FIXED_NOW,
+    });
+    const outage = new Error("Temporary provider failure.");
+    for (let failure = 0; failure < 8; failure += 1) {
+      mocks.executeHostedMailboxEvent.mockRejectedValueOnce(outage);
+    }
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          dedupeKey: wake.eventId,
+          id: "mailbox_notification_retry_window",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const runtime = createRuntime({});
+      // Failures at minutes 0 through 7; service is back for minute 8.
+      for (let minute = 0; minute <= 8; minute += 1) {
+        const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
+          executionContext: null,
+          now: () => new Date(Date.parse(FIXED_NOW) + minute * 60_000).toISOString(),
+          runtime,
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        });
+        expect(preparation?.status).toBe(minute < 8 ? "retryable_failed" : "processed");
+      }
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
     } finally {
       await workspace.cleanup();
     }
@@ -6297,11 +6347,10 @@ describe("hosted system mailbox notification execution context", () => {
         };
       });
 
-      // The second failure waits two minutes before the third attempt.
       const retried = await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["apply-member-preferences"],
         executionContext: null,
-        now: () => "2026-04-27T00:03:00.000Z",
+        now: () => "2026-04-27T00:02:00.000Z",
         runtime: createRuntime({}),
         runtimeEnv: {},
         vaultRoot: workspace.vaultRoot,

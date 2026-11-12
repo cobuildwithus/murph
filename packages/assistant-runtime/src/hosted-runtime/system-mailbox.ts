@@ -11,6 +11,7 @@ import {
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
 } from "@murphai/hosted-execution/vault-share";
 import {
+  HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -88,10 +89,14 @@ import {
 import type { HostedBackgroundMaintenanceYieldReason } from "./background-maintenance-cancellation.ts";
 
 const HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS = 60_000;
-// A failing effect, often a Web 5xx during an outage, doubles its wait from one
-// minute up to 15. A fixed minute woke the container 280 times in five hours.
-const HOSTED_SYSTEM_MAILBOX_EXECUTION_RETRY_MAX_DOUBLINGS = 4;
-const HOSTED_SYSTEM_MAILBOX_EXECUTION_RETRY_MAX_DELAY_MS = 15 * 60_000;
+// A failing effect keeps the one-minute retry through its first ten attempts and
+// ten minutes, the authority window of Assistant Ask completions and operator
+// messages. After that it waits 15 minutes: during a Web outage a fixed minute
+// woke one container 280 times in five hours.
+const HOSTED_SYSTEM_MAILBOX_EXECUTION_FAST_RETRY_ATTEMPTS = 10;
+const HOSTED_SYSTEM_MAILBOX_EXECUTION_FAST_RETRY_WINDOW_MS =
+  HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS;
+const HOSTED_SYSTEM_MAILBOX_EXECUTION_SLOW_RETRY_DELAY_MS = 15 * 60_000;
 const HOSTED_VAULT_SHARE_PROJECTION_FAILED_ERROR_CODE =
   "HOSTED_VAULT_SHARE_PROJECTION_FAILED";
 const HOSTED_GROUP_CONTEXT_HANDOFF_MAX_ATTEMPTS = 2;
@@ -665,7 +670,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       };
     }
     const nextWakeAt = new Date(
-      Date.parse(startedAt) + hostedSystemMailboxExecutionRetryDelayMs(prepared),
+      Date.parse(startedAt) + hostedSystemMailboxExecutionRetryDelayMs(prepared, startedAt),
     ).toISOString();
     await updateHostedSystemMailboxPendingItem({
       item: {
@@ -1940,20 +1945,22 @@ function earliestHostedSystemMailboxWakeAt(left: string | null, right: string | 
   return Date.parse(left) <= Date.parse(right) ? left : right;
 }
 
-function hostedSystemMailboxExecutionRetryDelayMs(item: HostedSystemMailboxPendingItem): number {
+function hostedSystemMailboxExecutionRetryDelayMs(
+  item: HostedSystemMailboxPendingItem,
+  startedAt: string,
+): number {
   // Resumable background work also counts yielded passes as attempts, so its
   // count is not a failure streak; it keeps the one-minute retry.
   if (isHostedResumableBackgroundSystemAction(item.routeAction)) {
     return HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS;
   }
-  const doublings = Math.min(
-    Math.max(0, Math.floor(item.attemptCount) - 1),
-    HOSTED_SYSTEM_MAILBOX_EXECUTION_RETRY_MAX_DOUBLINGS,
-  );
-  return Math.min(
-    HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS * 2 ** doublings,
-    HOSTED_SYSTEM_MAILBOX_EXECUTION_RETRY_MAX_DELAY_MS,
-  );
+  // Both bounds must pass: preemptions also count as attempts, and a late
+  // import can be old before its first failure. An unreadable age stays fast.
+  const ageMs = Date.parse(startedAt) - Date.parse(item.occurredAt);
+  return item.attemptCount >= HOSTED_SYSTEM_MAILBOX_EXECUTION_FAST_RETRY_ATTEMPTS
+    && ageMs >= HOSTED_SYSTEM_MAILBOX_EXECUTION_FAST_RETRY_WINDOW_MS
+    ? HOSTED_SYSTEM_MAILBOX_EXECUTION_SLOW_RETRY_DELAY_MS
+    : HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS;
 }
 
 function hostedSystemMailboxRecordRetryDelay(
