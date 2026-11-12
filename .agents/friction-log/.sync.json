@@ -2057,6 +2057,10 @@
       "path": ".agents/friction-log/20261026172108-local-live-runner/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#4386",
+      "path": ".agents/friction-log/20261026181000-live-suite-fixtures/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#4389",
       "path": ".agents/friction-log/20261026221523-hosted-local-startup/friction.md"
     },
@@ -2225,6 +2229,10 @@
       "path": ".agents/friction-log/20261110150916-review-archive-fixtures/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#4813",
+      "path": ".agents/friction-log/20261110150031-concurrent-root-typecheck/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#4836",
       "path": ".agents/friction-log/20261110232635-worktree-storage-guard/friction.md"
     },
@@ -2233,12 +2241,24 @@
       "path": ".agents/friction-log/20261111114337-browser-ci-cannot/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#4842",
+      "path": ".agents/friction-log/20261111135653-large-game-activation/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4844",
+      "path": ".agents/friction-log/20261110220426-live-journey-pass/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#4855",
       "path": ".agents/friction-log/20261111162237-device-admission-proof/friction.md"
     },
     {
       "issue": "cobuildwithus/murph#4858",
       "path": ".agents/friction-log/20261111165435-notification-history-fixture/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#4882",
+      "path": ".agents/friction-log/20261111161031-live-journey-selection/friction.md"
     }
   ],
   "version": 1
