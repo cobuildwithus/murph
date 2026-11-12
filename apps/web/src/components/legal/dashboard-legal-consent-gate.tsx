@@ -17,7 +17,7 @@ import {
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
 /** What the current Terms and Privacy Policy versions added. Update it with the next bump. */
-const TERMS_UPDATE_SUMMARY = "We added rules for games.";
+const TERMS_UPDATE_SUMMARY = "We added how Murph's AI hosts games and makes recaps.";
 
 /** The update dialog's line for a member who agreed before; it names the change only while the Terms step is pending. */
 export function dashboardLegalUpdateDescription(status: HostedConsentStatus): string {
@@ -40,16 +40,8 @@ export function DashboardLegalConsentGate({
 }) {
   const isUpdate = variant === "update";
   const pathname = usePathname();
-  const healthDataExplicitlyWithdrawn = initialStatus.scopes.some(
-    (scope) =>
-      scope.scope === "launch.health-data"
-      && scope.grant?.status === "revoked",
-  );
-
-  if (
-    pathname === "/records/connect"
-    || (pathname === "/settings" && healthDataExplicitlyWithdrawn)
-  ) {
+  // Settings owns its own health-data control, so it never waits on this one.
+  if (pathname === "/records/connect" || pathname === "/settings") {
     return null;
   }
 

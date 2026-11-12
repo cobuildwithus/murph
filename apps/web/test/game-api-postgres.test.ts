@@ -555,6 +555,8 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
 
   it("posts every summary kind through dev days and reveals the untouched partner days only in recap", async () => {
     const poster = await member("Poster");
+    const { recordHostedLaunchRequiredConsent } = await import("@/src/lib/legal/consent");
+    await recordHostedLaunchRequiredConsent({ memberId: tokenMember.get(poster)!, prisma: getPrisma(), scope: "launch.health-data" });
     const viewer = await member("Viewer");
     const id = randomUUID();
     const context = { params: Promise.resolve({ id }) };

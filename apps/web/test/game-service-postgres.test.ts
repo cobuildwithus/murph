@@ -1035,6 +1035,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "America/New_York");
     const stranger = await member("Sam", "UTC");
+    const { recordHostedLaunchRequiredConsent } = await import("@/src/lib/legal/consent");
+    for (const memberId of [leo, ava]) await recordHostedLaunchRequiredConsent({ memberId, prisma: getPrisma(), scope: "launch.health-data" });
     const { gameId } = await startGame(leo, ava, { terms: { ...TERMS, checkInKind: "heart_rate" } });
     // A retained heart-rate-only game still enforces its stored requirement.
     const stored = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } });

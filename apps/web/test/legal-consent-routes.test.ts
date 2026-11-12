@@ -180,9 +180,9 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "health-ai-safety-disclosure": "2026-07-23",
-            "privacy-policy": "2026-10-26",
-            "terms-of-service": "2026-10-26",
+            "health-ai-safety-disclosure": "2026-11-12",
+            "privacy-policy": "2026-11-12",
+            "terms-of-service": "2026-11-12",
           },
           scope: "launch.legal",
           source: "  hosted   onboarding  ",
@@ -199,9 +199,9 @@ describe("legal consent routes", () => {
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.recordHostedLaunchRequiredConsent).toHaveBeenCalledWith({
       acceptedDocumentVersions: {
-        "health-ai-safety-disclosure": "2026-07-23",
-        "privacy-policy": "2026-10-26",
-        "terms-of-service": "2026-10-26",
+        "health-ai-safety-disclosure": "2026-11-12",
+        "privacy-policy": "2026-11-12",
+        "terms-of-service": "2026-11-12",
       },
       memberId: "member_123",
       prisma: mocks.prismaClient,
@@ -228,9 +228,9 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "health-ai-safety-disclosure": "2026-07-23",
-            "privacy-policy": "2026-10-26",
-            "terms-of-service": "2026-10-26",
+            "health-ai-safety-disclosure": "2026-11-12",
+            "privacy-policy": "2026-11-12",
+            "terms-of-service": "2026-11-12",
           },
           inviteCode: "invite_123",
           scope: "launch.legal",
@@ -269,7 +269,7 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
+            "consumer-health-data-notice": "2026-11-12",
           },
           inviteCode: "invite_123",
           scope: "launch.health-data",
@@ -333,7 +333,7 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
+            "consumer-health-data-notice": "2026-11-12",
           },
           inviteCode: "invite_123",
           scope: "launch.health-data",
@@ -368,7 +368,7 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
+            "consumer-health-data-notice": "2026-11-12",
           },
           inviteCode: "invite_123",
           scope: "launch.health-data",
@@ -398,7 +398,7 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
+            "consumer-health-data-notice": "2026-11-12",
           },
           scope: "launch.health-data",
           source: "hosted onboarding",
@@ -414,7 +414,7 @@ describe("legal consent routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.recordHostedLaunchRequiredConsent).toHaveBeenCalledWith({
       acceptedDocumentVersions: {
-        "consumer-health-data-notice": "2026-07-23",
+        "consumer-health-data-notice": "2026-11-12",
       },
       memberId: "member_123",
       prisma: mocks.prismaClient,
@@ -433,7 +433,7 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
+            "consumer-health-data-notice": "2026-11-12",
           },
           scope: "launch.health-data",
           source: "settings-health-data-resume",
@@ -582,9 +582,9 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "health-ai-safety-disclosure": "2026-07-23",
-            "privacy-policy": "2026-10-26",
-            "terms-of-service": "2026-10-26",
+            "health-ai-safety-disclosure": "2026-11-12",
+            "privacy-policy": "2026-11-12",
+            "terms-of-service": "2026-11-12",
           },
           scope: "launch.legal",
         }),
@@ -613,8 +613,8 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-01-01",
-            "privacy-policy": "2026-10-26",
-            "terms-of-service": "2026-10-26",
+            "privacy-policy": "2026-11-12",
+            "terms-of-service": "2026-11-12",
           },
           scope: "launch.legal",
         }),
@@ -647,9 +647,9 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
-            "health-ai-safety-disclosure": "2026-07-23",
-            "privacy-policy": "2026-10-26",
+            "consumer-health-data-notice": "2026-11-12",
+            "health-ai-safety-disclosure": "2026-11-12",
+            "privacy-policy": "2026-11-12",
           },
           scope: "feature.health-ai",
           source: "settings",
@@ -665,9 +665,9 @@ describe("legal consent routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.grantHostedOptionalFeatureConsent).toHaveBeenCalledWith({
       acceptedDocumentVersions: {
-        "consumer-health-data-notice": "2026-07-23",
-        "health-ai-safety-disclosure": "2026-07-23",
-        "privacy-policy": "2026-10-26",
+        "consumer-health-data-notice": "2026-11-12",
+        "health-ai-safety-disclosure": "2026-11-12",
+        "privacy-policy": "2026-11-12",
       },
       memberId: "member_123",
       prisma: mocks.prismaClient,

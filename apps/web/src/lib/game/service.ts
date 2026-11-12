@@ -143,6 +143,7 @@ import {
 import { parseGameTalkPayload, readGroupTalkInvitation } from "./talk";
 import { GAME_ENDED_CHANGE_REASON, GAME_ROSTER_CHANGE_REASON, resolveGroupGameChangeTx } from "./change-resolution";
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
+import { readHostedHealthDataConsentState } from "../legal/consent";
 import { departedLabels } from "./account-deletion";
 import { gameMemberIds, hasGameIdentity } from "./roster";
 import { areGamePlayersBlocked, GAME_BLOCK_LIMIT, isHiddenBy, lockGamePair, readGameBlocks, type GameBlocks } from "./blocks";
@@ -1387,7 +1388,18 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
   ]);
   const captureAgeMs = command.captureAgeMs ?? null;
   let notification: Awaited<ReturnType<typeof claimGamePostNotification>> = [];
-  await runLocked(gameId, context, async ({ clock, loaded, now, tx }) => {
+  const needsHealthData = kind === "heart_rate"
+    || kind === "reps" && command.data && "heartRate" in command.data && command.data.heartRate !== undefined;
+  const postContext = needsHealthData ? { ...context, beforeMutationTx: async (tx: Tx) => {
+    await context.beforeMutationTx?.(tx);
+    // Member before game, as in account deletion. NO KEY UPDATE excludes the
+    // revocation lock without blocking unrelated game foreign-key checks.
+    await lockHostedMemberRow(tx, actor, { noKeyUpdate: true });
+    if (await readHostedHealthDataConsentState({ memberId: actor, prisma: tx }) !== "granted") {
+      reject("HEALTH_DATA_REQUIRED", "Allow health data to post a heart rate.");
+    }
+  } } : context;
+  await runLocked(gameId, postContext, async ({ clock, loaded, now, tx }) => {
     // A repeat of a post that already landed (a retry, or the same tap twice) changes nothing.
     const existing = await tx.gameEntry.findUnique({ select: { memberId: true, gameId: true }, where: { id: entryId } });
     if (existing) {
