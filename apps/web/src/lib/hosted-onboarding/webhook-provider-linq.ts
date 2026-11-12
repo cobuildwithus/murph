@@ -374,6 +374,16 @@ export async function resolveHostedLinqDirectPreparationMemberId(input: {
   return memberId;
 }
 
+// Container preparation needs a usable roster: an unreadable one retries,
+// and one above the setup cap is never admitted.
+function hasHostedLinqGroupAdmissionRoster(input: {
+  pendingGroupRosterOversized?: boolean;
+  pendingGroupRosterUnavailable?: boolean;
+}): boolean {
+  return input.pendingGroupRosterOversized !== true
+    && input.pendingGroupRosterUnavailable !== true;
+}
+
 /**
  * Prepares the request-local pending-setup authority package before BEGIN and
  * independently decides whether this attempt also needs new-container crypto.
@@ -382,6 +392,7 @@ export async function resolveHostedLinqDirectPreparationMemberId(input: {
 export async function prepareHostedLinqThreadContainerAdmission(input: {
   event: HostedLinqWebhookEvent;
   participantMemberIds: readonly string[];
+  pendingGroupRosterOversized?: boolean;
   pendingGroupRosterUnavailable?: boolean;
   prisma: PrismaClient;
 }): Promise<{
@@ -390,7 +401,7 @@ export async function prepareHostedLinqThreadContainerAdmission(input: {
 }> {
   if (
     input.event.event_type !== "message.received"
-    || input.pendingGroupRosterUnavailable === true
+    || !hasHostedLinqGroupAdmissionRoster(input)
   ) {
     return { shouldPrepareThreadContainer: false };
   }
@@ -561,6 +572,7 @@ export async function prepareHostedLinqThreadContainerAdmission(input: {
 export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
   event: HostedLinqWebhookEvent;
   participantMemberIds: readonly string[];
+  pendingGroupRosterOversized?: boolean;
   pendingGroupRosterUnavailable?: boolean;
   prisma: PrismaClient;
 }): Promise<boolean> {
@@ -1323,6 +1335,7 @@ type HostedOnboardingLinqWebhookPlannerInput = {
   initialGroupDisplayName?: string | null;
   instantStartAllowed?: boolean;
   pendingGroupParticipantMemberIds?: readonly string[] | null;
+  pendingGroupRosterOversized?: boolean;
   pendingGroupRosterUnavailable?: boolean;
   preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   directMailboxPreparationFailure?: unknown;
@@ -1445,7 +1458,7 @@ export async function planHostedOnboardingLinqWebhook(
   }
 
   if (isHostedLinqGroupChat(messageEvent)) {
-    return planHostedLinqGroupChatWebhook({
+    return planHostedLinqUnboundGroupChatWebhook({
       preparedGameInvite: input.preparedGameInvite,
       ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
       context,
@@ -1456,6 +1469,7 @@ export async function planHostedOnboardingLinqWebhook(
       preparedPendingGroupSetup: input.preparedPendingGroupSetup,
       preparedThreadContainerCreation: input.preparedThreadContainerCreation,
       preparedThreadDeliveryRoute: input.preparedThreadDeliveryRoute,
+      rosterOversized: input.pendingGroupRosterOversized,
       rosterUnavailable: input.pendingGroupRosterUnavailable ?? false,
       prisma: input.prisma,
       requireFirstContactAdmission: input.requireFirstContactAdmission,
@@ -3807,6 +3821,7 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "blocked-first-contact-content"
   | "contentless-first-contact"
   | "empty-message-parts"
+  | "group-roster-oversized"
   | "local-inbound-not-allowlisted"
   | "own-message"
   | "provision-unavailable"
@@ -3822,6 +3837,25 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "sender-identity-unresolved"
   | "sender-inactive"
   | "suspended-member";
+
+/**
+ * Murph never starts a group above the setup cap, whoever messages. Big mixed
+ * iMessage/RCS rooms reappear under a new chat id on each roster change, so a
+ * setup notice, private nudge or bound assistant would repeat in every copy.
+ * The distinct response reason also keeps private recovery out.
+ */
+function planHostedLinqUnboundGroupChatWebhook(
+  input: Parameters<typeof planHostedLinqGroupChatWebhook>[0],
+): Promise<HostedOnboardingLinqDirectPlan> {
+  if (input.rosterOversized === true) {
+    return Promise.resolve(buildHostedLinqIgnoredPlan(input.event, input.context, {
+      existingMemberMatch: "none",
+      reason: "group-roster-oversized",
+      routeStage: "new-group-admission-ignored",
+    }, "group-roster-oversized"));
+  }
+  return planHostedLinqGroupChatWebhook(input);
+}
 
 /**
  * An unbound group can be admitted by either one roster-matched pending setup
@@ -3845,6 +3879,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
+  rosterOversized?: boolean;
   rosterUnavailable: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;

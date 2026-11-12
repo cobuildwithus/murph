@@ -586,6 +586,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 preparedGameInvite: preparation.preparedGameInvite,
                 pendingGroupParticipantMemberIds:
                   planningResolution.pendingGroupParticipantMemberIds ?? null,
+                pendingGroupRosterOversized:
+                  planningResolution.pendingGroupRosterOversized,
                 pendingGroupRosterUnavailable:
                   (planningResolution.pendingGroupRosterUnavailable ?? false)
                   || (planningResolution.requestLocalGroupRoster?.observation.handlesComplete === false
@@ -659,6 +661,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               event: planningEvent,
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
+              pendingGroupRosterOversized:
+                planningResolution.pendingGroupRosterOversized,
               pendingGroupRosterUnavailable:
                 planningResolution.pendingGroupRosterUnavailable ?? false,
               prisma,
@@ -1447,6 +1451,7 @@ interface HostedLinqPlanningEventResolution {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   initialGroupDisplayName?: string;
   pendingGroupParticipantMemberIds?: readonly string[];
+  pendingGroupRosterOversized?: boolean;
   pendingGroupRosterUnavailable?: boolean;
   requestLocalGroupRoster?: {
     chatId: string;
@@ -1566,9 +1571,7 @@ async function resolveHostedLinqPlanningEvent(input: {
           pendingGroupParticipantMemberIds:
             pendingGroupRoster.participantMemberIds,
         }),
-    ...(pendingGroupRoster?.unavailable === true
-      ? { pendingGroupRosterUnavailable: true }
-      : {}),
+    ...readHostedLinqPendingGroupRosterFlags(pendingGroupRoster),
     ...(pendingGroupRoster?.observation == null
       ? {}
       : {
@@ -1581,6 +1584,18 @@ async function resolveHostedLinqPlanningEvent(input: {
   };
 }
 
+function readHostedLinqPendingGroupRosterFlags(
+  roster: { oversized: boolean; unavailable: boolean } | null,
+): Pick<
+  HostedLinqPlanningEventResolution,
+  "pendingGroupRosterOversized" | "pendingGroupRosterUnavailable"
+> {
+  return {
+    ...(roster?.oversized === true ? { pendingGroupRosterOversized: true } : {}),
+    ...(roster?.unavailable === true ? { pendingGroupRosterUnavailable: true } : {}),
+  };
+}
+
 async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
   chatId: string;
   summary?: HostedLinqChatSummary | null;
@@ -1589,6 +1604,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
 }): Promise<{
   observation: HostedLinqChatRosterObservation | null;
   initialGroupDisplayName: string | null;
+  oversized: boolean;
   participantMemberIds: string[] | null;
   unavailable: boolean;
 }> {
@@ -1604,6 +1620,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       return {
         observation: null,
         initialGroupDisplayName: null,
+        oversized: false,
         participantMemberIds: null,
         unavailable: false,
       };
@@ -1616,6 +1633,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       return {
         observation: summary,
         initialGroupDisplayName,
+        oversized: false,
         participantMemberIds: null,
         unavailable: true,
       };
@@ -1637,6 +1655,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       return {
         observation: summary,
         initialGroupDisplayName,
+        oversized: true,
         participantMemberIds: null,
         unavailable: false,
       };
@@ -1653,6 +1672,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     return {
       observation: summary,
       initialGroupDisplayName,
+      oversized: false,
       participantMemberIds: memberIds,
       unavailable: false,
     };
@@ -1664,6 +1684,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     return {
       observation: null,
       initialGroupDisplayName: null,
+      oversized: false,
       participantMemberIds: null,
       unavailable: true,
     };
@@ -2477,6 +2498,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
+  pendingGroupRosterOversized?: boolean;
   pendingGroupRosterUnavailable: boolean;
   prisma: PrismaClient;
   reusableDirectCryptoDomainRoots?: {
@@ -2535,6 +2557,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     const admission = await prepareHostedLinqThreadContainerAdmission({
       event: input.event,
       participantMemberIds: input.participantMemberIds,
+      pendingGroupRosterOversized: input.pendingGroupRosterOversized,
       pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
       prisma: input.prisma,
     });

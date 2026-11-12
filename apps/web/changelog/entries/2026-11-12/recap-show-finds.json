@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-12",
+  "order": 320,
+  "item": {
+    "id": "recap-show-finds",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Recaps that notice what you didn't",
+    "summary": "Murph looks across the whole week for the habit or pattern neither of you spotted, and writes with the same jokes it uses in your group chat.",
+    "details": "Each show opens on a premise in a few words instead of a paragraph.",
+    "relevanceTags": ["games", "recaps"],
+    "sourcePullRequests": []
+  }
+}
