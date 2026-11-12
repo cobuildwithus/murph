@@ -4951,10 +4951,10 @@ durable pending work. Provider acceptance or failure never changes local success
 Authenticated webhook ingress checks the marker before all fan-out, including
 poll votes, and returns `group-left` without recovery. Database failure retries.
 Ordinary message/edit admission and route creation, refresh and move adoption
-recheck under chat ownership. Game bootstrap attachment reads the marker under
-its game row lock without the chat lock, which would invert the webhook's
-chat-then-game order; leave needs an existing route or an oversized roster, so
-it cannot race a bootstrapping chat. Attested 1:1 chats skip the marker read. Unbound notices and private
+recheck under chat ownership. Game bootstrap attachment rechecks after its
+existing binding demotion takes chat ownership, immediately before it creates
+the route, so a replayed bootstrap for a closed game cannot recreate a left
+room. Attested 1:1 chats skip the marker read. Unbound notices and private
 recovery check the source group before dispatch; bound egress keeps existing
 route authority. Oversized unbound groups on a managed recipient line and the
 Ops `leave_group` action are the Phase 1 producers. Ops uses a full opaque route

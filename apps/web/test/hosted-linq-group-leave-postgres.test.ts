@@ -7,7 +7,7 @@ import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-cryp
 import { createHostedExternalThreadIdentityLookupKey, createHostedExternalThreadIdentityLookupKeyReadCandidates } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { acquireHostedLinqChatOwnershipLockTx } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
 import { leaveHostedLinqGroupTx, prepareHostedLinqGroupLeave, readHostedLinqGroupLeave, requestHostedLinqGroupLeaveAfterCommit, rotateHostedLinqGroupLeaveBatch } from "@/src/lib/hosted-routing/linq-group-leave";
-import { ensureHostedThreadContainerRouteTx, prepareHostedThreadContainerCreation, prepareHostedThreadContainerDeliveryRoute, refreshHostedThreadContainerDeliveryRouteTx } from "@/src/lib/hosted-routing/thread-container-service";
+import { attachHostedThreadContainerBootstrapRouteTx, ensureHostedThreadContainerRouteTx, prepareHostedThreadContainerCreation, prepareHostedThreadContainerDeliveryRoute, refreshHostedThreadContainerDeliveryRouteTx } from "@/src/lib/hosted-routing/thread-container-service";
 import { readHostedThreadRouteByThreadIdentity } from "@/src/lib/hosted-routing/thread-route-store";
 import { leaveHostedLinqGroup } from "@/src/lib/hosted-ops/linq-group-line-move";
 import { localRosterCrypto, rosterRoute, syntheticPhone } from "./support/roster-postgres";
@@ -121,6 +121,19 @@ describe.skipIf(!enabled)("Linq local departure on migrated PostgreSQL", () => {
       route: route!, preparedDeliveryRoute, threadId: chat, prisma }))).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_LEFT" });
     await expect(db.$transaction(prisma => ensureHostedThreadContainerRouteTx({ channel: "linq", accountLookupKey: account,
       ownerMemberId: owner, preparedCreation, occurredAt: new Date(), threadId: chat, prisma }))).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_LEFT" });
+  });
+  it("keeps a replayed bootstrap for a closed game from recreating a left route", async () => {
+    // Bootstrap recovery can replay an accepted receipt after its game ended.
+    // The marker read runs after binding demotion takes chat ownership, so a
+    // leave that committed first is always seen before the route is created.
+    const closed = await game("settled");
+    const prepared = await prepareHostedThreadContainerDeliveryRoute({ channel: "linq", accountLookupKey: account,
+      containerMemberId: room, observedDeliveryRouteEncrypted: null, threadId: chat, prisma: db });
+    await expect(leave()).resolves.toMatchObject({ status: "left" });
+    await expect(db.$transaction(prisma => attachHostedThreadContainerBootstrapRouteTx({ gameId: closed.id, prepared, prisma })))
+      .rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_LEFT" });
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room } })).toBe(0);
+    expect(await readHostedLinqGroupLeave({ chatId: chat, prisma: db })).not.toBeNull();
   });
   it("serializes an overlapping creation behind departure", async () => {
     const route = await expected(), prepared = prepare();

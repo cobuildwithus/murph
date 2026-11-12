@@ -265,11 +265,6 @@ export async function attachHostedThreadContainerBootstrapRouteTx(input: {
   const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({ channel, threadId });
   const threadLookupKey = createHostedExternalThreadLookupKey({ channel, threadId, accountLookupKey });
   if (!threadIdentityLookupKey || !threadLookupKey) throw new TypeError("Game chat receipt has no provider route identity.");
-  // No chat lock here: bootstrap already holds the game row, and webhooks take
-  // the chat lock before game rows. Markers are permanent, and leave needs an
-  // existing route or an oversized roster, so a plain read cannot miss a
-  // concurrent leave of this chat.
-  if (channel === "linq") await assertHostedLinqGroupNotLeft({ chatId: threadId, prisma: input.prisma });
   await acquireHostedThreadContainerRouteWriteLockTx({ channel, threadId, prisma: input.prisma });
   const existing = await input.prisma.hostedThreadRoute.findMany({
     where: { OR: [{ channel, threadIdentityLookupKey: { in: createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel, threadId }) } }, { containerMemberId }] },
@@ -280,6 +275,10 @@ export async function attachHostedThreadContainerBootstrapRouteTx(input: {
     return;
   }
   await demoteHostedMemberLinqGroupChatBindingsTx({ enforceProviderDispatchFence: true, linqChatId: threadId, prisma: input.prisma });
+  // Demotion takes chat ownership, as local leave does, so this read sees any
+  // leave that committed first. A replayed bootstrap for a closed game must not
+  // recreate a left room's route.
+  if (channel === "linq") await assertHostedLinqGroupNotLeft({ chatId: threadId, prisma: input.prisma });
   await createHostedThreadRouteRowTx({ channel, containerMemberId, accountLookupKey, threadIdentityLookupKey, threadLookupKey, deliveryRouteEncrypted: input.prepared.deliveryRouteEncrypted, prisma: input.prisma });
 }
 
