@@ -144,7 +144,7 @@ If you play Murph's game, we collect:
 - **heart rate,** read over Bluetooth from a WHOOP you connect. Your iPhone shows your live heart rate while you get ready and while you record. We receive only the heart rate card for a recording, with its duration and average, low, and peak beats per minute, not each reading;
 - **routes** for a walk or run (see Location below);
 - **missed-day excuses:** the words you give for a missed day. If you explain by voice, your iPhone turns your speech into words and deletes the recording. Only the words are sent to us;
-- **invite details:** if you pick someone from your contacts, their phone number stays on your iPhone and is used only to open a Messages draft that you send. The name, relationship, and photo you give them are kept as a private label that only you see;
+- **invite details:** if you pick someone from your contacts, their phone number is sent to Murph to check whether it belongs to someone you have played. Murph does not store the number. We keep a hashed lookup value with the invite so we can show it to that person if they sign in with the same number. We remove that value when the invite is accepted or ends. The name, relationship, and photo you give them are kept as a private label that only you see;
 - **reports and blocks:** who you report or block, the reason and any note you add, and a copy of what you reported as it was at that moment; and
 - **notifications:** if you turn them on, a device address so we can tell you about new posts. These notifications don't include names, photos, tasks, or words.
 
@@ -165,7 +165,7 @@ We collect information from several sources:
 - **From connected providers or integrations**, when you choose to link them to Murph.
 - **From identity and authentication providers**, when you sign in, verify an account, or complete an onboarding flow through them.
 - **From payment processors**, when you purchase or subscribe to hosted services.
-- **From other Murph users**, such as when someone sends you an invite link, plays a game with you, or reports something you shared.
+- **From other Murph users**, such as when someone sends you an invite link, plays a game with you, or reports something you shared. An invite may be matched to you by a hashed value of the phone number the sender picked.
 - **From recipients, websites, portals, providers, and merchants you ask Murph to contact or use**, when they return status, confirmation, transaction, or result information.
 - **From service providers and security tools**, where needed to operate, support, analyze, or secure Murph.
 

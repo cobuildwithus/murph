@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 
 // Service tests inject provider/route evidence; room integration lives in the group suite.
@@ -91,6 +91,7 @@ import {
   reserveDueGameMissedDayCheckIns,
   sealGameRecap,
   readInvitePreview,
+  readGameInviteForMember,
   runGameCommand,
 } from "@/src/lib/game/service";
 import { buildGameRematchInstructions } from "@murphai/hosted-execution/runtime-control";
@@ -100,6 +101,7 @@ import { addDays, dayStartInstant, gameLocalDate, weekdayOf } from "@/src/lib/ga
 import { getPrisma } from "@/src/lib/prisma";
 import { upsertHostedMemberIdentity } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboarding/member-identity-fields";
+import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { gameChatLifecycleEventId, reserveGameChatLifecycleTx, markGameChatGenerationQueuedTx } from "@/src/lib/game/chat-lifecycle-receipt";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -280,6 +282,158 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds } } });
     delete process.env.MURPH_GAME_MEDIA_DIR;
     await rm(mediaDir, { force: true, recursive: true });
+  });
+
+  describe("invite recovery after install", () => {
+    let phoneOrdinal = 0;
+    beforeEach(() => {
+      vi.stubEnv("MURPH_GAME_ENABLED", "true");
+      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    });
+    afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+
+    async function pickedInvite() {
+      const ava = await member("Ava", "UTC");
+      const leo = await member("Leo", "UTC");
+      const recipient = { kind: "phone" as const, value: `+161755501${String(phoneOrdinal++).padStart(2, "0")}` };
+      await getPrisma().$transaction(tx => upsertHostedMemberIdentity({
+        ...buildHostedMemberPhoneIdentityFields(recipient.value), memberId: ava, prisma: tx,
+        phoneNumberVerifiedAt: new Date(), signupPhoneNumber: null,
+      }));
+      const created = await ok(leo, { type: "createGame", gameId: randomUUID(), terms: TERMS,
+        inviteeFirstName: "Ava", inviteeRecipient: recipient });
+      return { ava, leo, recipient, gameId: created!.id, token: created!.inviteToken! };
+    }
+
+    it("stores only a picked, unaddressed contact key, never the number", async () => {
+      const f = await pickedInvite();
+      const db = getPrisma();
+      const seat = await db.gameInvitee.findFirstOrThrow({ where: { gameId: f.gameId } });
+      expect(seat).toMatchObject({ memberId: null, recipientLookupKey: createHostedLinqParticipantContact(f.recipient)!.lookupKey });
+      const stored = await db.game.findUniqueOrThrow({ where: { id: f.gameId }, include: { invitees: true, events: true } });
+      expect(JSON.stringify(stored, (_key, value) => typeof value === "bigint" ? value.toString() : value)).not.toContain(f.recipient.value);
+      for (const inviteeRecipient of [undefined, { kind: "phone" as const, value: "invalid" }]) {
+        const created = await ok(f.leo, { type: "createGame", gameId: randomUUID(), terms: TERMS, inviteeFirstName: "Ava", inviteeRecipient });
+        expect(await db.gameInvitee.findFirst({ where: { gameId: created!.id } })).toMatchObject({ recipientLookupKey: null });
+      }
+      await startGame(f.leo, f.ava);
+      const addressed = await ok(f.leo, { type: "createGame", gameId: randomUUID(), terms: TERMS,
+        inviteeFirstName: "Ava", inviteeRecipient: f.recipient });
+      expect(await db.gameInvitee.findFirst({ where: { gameId: addressed!.id } })).toMatchObject({ memberId: f.ava, recipientLookupKey: null });
+    });
+
+    it.each(["accept", "negotiate", "cancel", "block", "expire"])("clears a one-on-one key on %s", async action => {
+      const f = await pickedInvite();
+      if (action === "accept") await ok(f.ava, { type: "join", token: f.token, timeZone: "UTC", termsVersion: 1 });
+      if (action === "negotiate") await ok(f.ava, { type: "negotiate", token: f.token, timeZone: "UTC", termsVersion: 1,
+        proposalId: randomUUID(), note: "Can we talk it over?" });
+      if (action === "cancel") await ok(f.leo, { type: "cancelInvite", gameId: f.gameId });
+      if (action === "block") {
+        // An addressed game is called off by a block. Unbound links remain
+        // open for other holders and are excluded from this caller's lookup.
+        await getPrisma().gameInvitee.updateMany({ where: { gameId: f.gameId }, data: { memberId: f.ava } });
+        await ok(f.ava, { type: "block", token: f.token });
+      }
+      if (action === "expire") {
+        await getPrisma().game.update({ where: { id: f.gameId }, data: { inviteExpiresAt: new Date(0) } });
+        await readHome(f.leo);
+      }
+      expect(await getPrisma().gameInvitee.findFirst({ where: { gameId: f.gameId } })).toMatchObject({ recipientLookupKey: null });
+    });
+
+    it("returns the newest invite without writing rows, events, or notifications", async () => {
+      const f = await pickedInvite();
+      const maya = await member("Maya", "UTC");
+      const second = await ok(maya, { type: "createGame", gameId: randomUUID(), terms: TERMS,
+        inviteeFirstName: "Ava", inviteeRecipient: f.recipient });
+      const db = getPrisma();
+      await db.game.update({ where: { id: f.gameId }, data: { createdAt: new Date(Date.now() - 1000) } });
+      const before = await db.game.findMany({ where: { id: { in: [f.gameId, second!.id] } }, orderBy: { id: "asc" }, include: { invitees: true, players: true, events: true } });
+      const writes = [vi.spyOn(db.game, "update"), vi.spyOn(db.game, "updateMany"), vi.spyOn(db.gameEvent, "create"), vi.spyOn(db.gameEvent, "createMany")];
+      push.mockClear(); lifecycleDelivery.mockClear(); proposalDelivery.mockClear();
+      expect(await readGameInviteForMember(f.ava)).toBe(second!.inviteToken);
+      expect(await db.game.findMany({ where: { id: { in: [f.gameId, second!.id] } }, orderBy: { id: "asc" }, include: { invitees: true, players: true, events: true } })).toEqual(before);
+      for (const write of writes) expect(write).not.toHaveBeenCalled();
+      for (const notify of [push, lifecycleDelivery, proposalDelivery]) expect(notify).not.toHaveBeenCalled();
+      await db.game.update({ where: { id: second!.id }, data: { createdAt: before.find(row => row.id === f.gameId)!.createdAt } });
+      const expected = second!.id > f.gameId ? second!.inviteToken : f.token;
+      expect(await readGameInviteForMember(f.ava)).toBe(expected);
+      expect(await readGameInviteForMember(f.ava)).toBe(expected);
+    });
+
+    it.each(["expired", "dev expired", "called off", "blocked", "blocked by", "self", "player", "left player", "deleted challenger", "unverified", "typed name", "bound seat", "group", "game off"])("excludes %s invites", async exclusion => {
+      const f = await pickedInvite();
+      const db = getPrisma();
+      if (exclusion === "expired") await db.game.update({ where: { id: f.gameId }, data: { inviteExpiresAt: new Date(0) } });
+      if (exclusion === "dev expired") await db.game.update({ where: { id: f.gameId }, data: { devClockOffsetMs: BigInt(8 * 86_400_000) } });
+      if (exclusion === "called off") await ok(f.leo, { type: "cancelInvite", gameId: f.gameId });
+      if (exclusion === "blocked" || exclusion === "blocked by") await db.gameBlock.create({ data: {
+        blockerMemberId: exclusion === "blocked" ? f.ava : f.leo, blockedMemberId: exclusion === "blocked" ? f.leo : f.ava,
+      } });
+      if (exclusion === "self") await db.game.update({ where: { id: f.gameId }, data: { createdBy: f.ava } });
+      if (exclusion === "player" || exclusion === "left player") await db.gamePlayer.create({ data: {
+        gameId: f.gameId, memberId: f.ava, seat: 1, timeZone: "UTC", joinedAt: new Date(), leftAt: exclusion === "left player" ? new Date() : null,
+      } });
+      if (exclusion === "deleted challenger") await db.game.update({ where: { id: f.gameId }, data: { createdBy: null } });
+      if (exclusion === "unverified") await db.hostedMemberIdentity.update({ where: { memberId: f.ava }, data: { phoneNumberVerifiedAt: null } });
+      if (exclusion === "typed name") await db.gameInvitee.updateMany({ where: { gameId: f.gameId }, data: { recipientLookupKey: null } });
+      if (exclusion === "bound seat") await db.gameInvitee.updateMany({ where: { gameId: f.gameId }, data: { memberId: f.ava } });
+      if (exclusion === "group") await db.game.update({ where: { id: f.gameId }, data: { maxPlayers: 10 } });
+      if (exclusion === "game off") vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", f.ava);
+      expect(await readGameInviteForMember(f.ava)).toBeNull();
+    });
+
+    it("returns null before reading when the global switch is off", async () => {
+      vi.stubEnv("MURPH_GAME_ENABLED", "false");
+      const read = vi.spyOn(getPrisma().hostedMemberIdentity, "findUnique");
+      const games = vi.spyOn(getPrisma().game, "findMany");
+      expect(await readGameInviteForMember("synthetic-member")).toBeNull();
+      expect(read).not.toHaveBeenCalled();
+      expect(games).not.toHaveBeenCalled();
+    });
+
+    it("filters five newer blocked invites before taking candidates and ignores reports", async () => {
+      const f = await pickedInvite();
+      const db = getPrisma();
+      await db.game.update({ where: { id: f.gameId }, data: { createdAt: new Date(Date.now() - 1000) } });
+      for (let index = 0; index < 5; index += 1) {
+        const sam = await member("Sam", "UTC");
+        await ok(sam, { type: "createGame", gameId: randomUUID(), terms: TERMS, inviteeFirstName: "Ava", inviteeRecipient: f.recipient });
+        await db.gameBlock.create({ data: { blockerMemberId: index % 2 ? f.ava : sam, blockedMemberId: index % 2 ? sam : f.ava } });
+      }
+      await db.gameReport.create({ data: { id: randomUUID(), reporterMemberId: f.ava, reportedMemberId: f.leo, gameId: f.gameId, about: "player", reason: "harassment" } });
+      expect(await readGameInviteForMember(f.ava)).toBe(f.token);
+    });
+
+    it.each(["live", "negotiating"])("skips stored %s pairs without settling them", async status => {
+      const f = await pickedInvite();
+      const maya = await member("Maya", "UTC");
+      const fallback = await ok(maya, { type: "createGame", gameId: randomUUID(), terms: TERMS, inviteeFirstName: "Ava", inviteeRecipient: f.recipient });
+      await getPrisma().game.update({ where: { id: fallback!.id }, data: { createdAt: new Date(Date.now() - 1000) } });
+      const pair = await startGame(f.leo, f.ava);
+      await getPrisma().game.update({ where: { id: pair.gameId }, data: { status, inviteExpiresAt: new Date(0), devClockOffsetMs: BigInt(30 * 86_400_000) } });
+      expect(await readGameInviteForMember(f.ava)).toBe(fallback!.inviteToken);
+      expect(await getPrisma().game.findUnique({ where: { id: pair.gameId } })).toMatchObject({ status });
+    });
+
+    it("signs the inviter's current photo after sign-in and masks reported photos", async () => {
+      const f = await pickedInvite();
+      const photoKey = await upload(f.leo, "invite-profile");
+      await ok(f.leo, { type: "setProfile", photoKey });
+      vi.spyOn(gameMedia, "servesSignedGameMedia").mockReturnValue(true);
+      const url = "https://imagedelivery.net/synthetic/avatar?exp=1&sig=synthetic";
+      const sign = vi.spyOn(gameMedia, "gameMediaDelivery").mockResolvedValue({ url, expiresAt: new Date(Date.now() + 300_000).toISOString() });
+      expect(await readInvitePreview(f.token)).not.toHaveProperty("inviterAvatarUrl");
+      expect(sign).not.toHaveBeenCalled();
+      expect(await readInvitePreview(f.token, false, f.ava)).toMatchObject({ inviterAvatarUrl: url });
+      expect(sign).toHaveBeenCalledWith(photoKey, "avatar");
+      await getPrisma().gameReport.create({ data: { id: randomUUID(), reporterMemberId: f.ava, reportedMemberId: f.leo,
+        gameId: f.gameId, about: "player", reason: "harassment" } });
+      sign.mockClear();
+      expect(await readInvitePreview(f.token, false, f.ava)).toMatchObject({ inviterAvatarUrl: null });
+      expect(sign).not.toHaveBeenCalled();
+      expect(await readGameInviteForMember(f.ava)).toBe(f.token);
+    });
   });
 
   if (process.env.MURPH_RECAP_LIVE_BRIDGE === "1") it("serves synthetic recap publication to the sanctioned live journey", async () => {

@@ -41,7 +41,7 @@ export async function assertGameMemberAuthCurrentTx(auth: HostedNativeMemberAuth
   }
 }
 
-function throwGameAuthError(error: unknown): never {
+export function throwGameAuthError(error: unknown): never {
   if (isHostedOnboardingError(error) && error.httpStatus === 401) {
     throw gameHttpError("UNAUTHENTICATED", 401, "Sign in to continue.");
   }

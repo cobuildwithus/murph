@@ -2,10 +2,11 @@ import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as crypto from "@/src/lib/game/crypto";
+import * as media from "@/src/lib/game/media";
 
 const db = vi.hoisted(() => ({
-  game: { findUnique: vi.fn() },
-  gameBlock: { findMany: vi.fn(async () => []) },
+  game: { findUnique: vi.fn(), findFirst: vi.fn() },
+  gameBlock: { findMany: vi.fn<() => Promise<{ blockerMemberId: string; blockedMemberId: string }[]>>(async () => []) },
   gameEntry: { findMany: vi.fn(async () => []) },
   $queryRaw: vi.fn(async () => [{ now: new Date("2026-11-12T12:00:00Z") }]),
 }));
@@ -39,7 +40,7 @@ const tasks = [{ seat: 0, text: "Read a chapter" }, { seat: 1, text: "Take a wal
 async function invite() {
   return {
     id: "synthetic-game", status: "invited", maxPlayers: 2, createdBy: "member_leo",
-    creator: { memberId: "member_leo", firstNameEncrypted: await crypto.sealGameText({ memberId: "member_leo", table: "game_profile", rowId: "member_leo", field: "first_name" }, "Leo") },
+    creator: { memberId: "member_leo", photoKey: "game/member_leo/synthetic-photo.jpg", firstNameEncrypted: await crypto.sealGameText({ memberId: "member_leo", table: "game_profile", rowId: "member_leo", field: "first_name" }, "Leo") },
     wordsOwnerMemberId: "member_leo", createdAt: now, inviteExpiresAt: later, devClockOffsetMs: null,
     players: [player], invitees: [], events: [], chatContainerMemberId: null, lengthDays: 7, startsOn: null,
     terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 5 }, stakes: [] }] },
@@ -50,6 +51,7 @@ async function invite() {
 describe("public invite preview privacy", () => {
   beforeEach(() => {
     db.game.findUnique.mockReset();
+    db.game.findFirst.mockReset();
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
     vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
   });
@@ -91,14 +93,46 @@ describe("public invite preview privacy", () => {
   });
 
   it("keeps open invite details on the API, page and Open Graph image", async () => {
+    const sign = vi.spyOn(media, "gameMediaDelivery");
     db.game.findUnique.mockResolvedValue(await invite());
     const response = await GET(request(), props);
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, preview: { status: "open", inviterFirstName: "Leo", terms: { tasks } } });
+    const body = await response.json();
+    expect(body).toMatchObject({ ok: true, preview: { status: "open", inviterFirstName: "Leo", terms: { tasks } } });
+    expect(body.preview).not.toHaveProperty("inviterAvatarUrl");
     for (const html of [renderToStaticMarkup(await Page(props)), await (await Image(props)).text()]) {
       expect(html).toContain("Leo");
       expect(html).toContain("Read a chapter");
+      expect(html).not.toContain("synthetic-photo");
     }
+    expect(sign).not.toHaveBeenCalled();
+  });
+
+  it("signs the current inviter photo only for a signed-in open pair preview", async () => {
+    const row = await invite();
+    db.game.findUnique.mockResolvedValue(row);
+    db.game.findFirst.mockResolvedValue(row);
+    vi.spyOn(media, "servesSignedGameMedia").mockReturnValue(true);
+    const url = "https://imagedelivery.net/synthetic/avatar?exp=1&sig=synthetic";
+    const sign = vi.spyOn(media, "gameMediaDelivery").mockResolvedValue({ url, expiresAt: later.toISOString() });
+    expect(await readInvitePreview("synthetic-invite", false, "member_ava")).toMatchObject({ inviterAvatarUrl: url });
+    expect(sign).toHaveBeenCalledWith(row.creator.photoKey, "avatar");
+    expect(db.game.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
+      status: "invited", createdBy: "member_leo", creator: { photoKey: row.creator.photoKey, reportsReceived: { none: { reporterMemberId: "member_ava", about: "player" } } },
+    }) }));
+  });
+
+  it.each(["no photo", "unsigned media", "changed invitation or profile", "expired", "new block", "signing failure"])("returns a null signed-in photo for %s", async reason => {
+    const row = await invite();
+    db.game.findUnique.mockResolvedValue(reason === "no photo" ? { ...row, creator: { ...row.creator, photoKey: null } } : row);
+    db.game.findFirst.mockResolvedValue(reason === "changed invitation or profile" ? null : reason === "expired" ? { ...row, inviteExpiresAt: now } : row);
+    vi.spyOn(media, "servesSignedGameMedia").mockReturnValue(reason !== "unsigned media");
+    const sign = vi.spyOn(media, "gameMediaDelivery").mockRejectedValue(new Error("Unavailable"));
+    if (reason === "new block") db.gameBlock.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { blockerMemberId: "member_leo", blockedMemberId: "member_ava" },
+    ]);
+    expect(await readInvitePreview("synthetic-invite", false, "member_ava")).toMatchObject({ inviterAvatarUrl: null });
+    if (reason !== "signing failure") expect(sign).not.toHaveBeenCalled();
   });
 
   it("keeps authenticated cancellation status without decrypting personal details", async () => {

@@ -564,10 +564,12 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
       .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
     expect(await run(b.id, { type: "cancelInvite", gameId: game.id })).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     await ok(b.id, join(game.token));
+    expect((await gameRow(game.id)).invitees[0].recipientLookupKey).toBe(createHostedEmailLookupKey(b.email));
     expect(await run(a.id, { type: "proposeChange", gameId: game.id, proposalId: randomUUID(), expectedTermsVersion: 1, change: { kind: "start_now" } }))
       .toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     await ok(a.id, { type: "cancelInvite", gameId: game.id });
     expect((await gameRow(game.id)).status).toBe("void");
+    expect((await gameRow(game.id)).invitees[0].recipientLookupKey).toBe(createHostedEmailLookupKey(b.email));
   });
 
   it("voids a waiting game when its starter leaves and refuses later acceptances", async () => {

@@ -618,6 +618,8 @@ export type GameInvitePreview =
       talkDelivery?: "pending" | "sent" | "failed";
       lengthDays?: number;
       inviterFirstName: string;
+      /** Current profile photo, signed briefly and included only after sign-in. */
+      inviterAvatarUrl?: string | null;
       /**
        * Never sent. The name a challenger types for the invitee is their own
        * private label, and this preview is served to anyone holding the link

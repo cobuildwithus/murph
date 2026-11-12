@@ -56,7 +56,6 @@ import {
   type GameHomeView,
   type GameProfileView,
   type GameInvitePreview,
-  type GameInviteRecipient,
   type GameView,
   type CreateGameView,
 } from "./contract";
@@ -731,8 +730,9 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
   if (await isGameCreationReplay(prisma, actor, gameId, chatOther ? chatPlayers : undefined)) return gameId;
   const rematch = await readGameCreationRematch(context, command, chatOther);
   if (chatOther) await maintainPair(actor, chatOther);
-  const addressed = chatOther || rematch ? null : await knownInvitee(actor, command);
-  const data = await prepareGameCreateData(context, command, rematch, chatOther, profile.timeZone, addressed);
+  const contact = pickedContact(command);
+  const addressed = chatOther || rematch ? null : await knownInvitee(actor, command, contact);
+  const data = await prepareGameCreateData(context, command, rematch, chatOther, profile.timeZone, addressed, contact);
   try {
     await commandTransaction(context, async (tx) => {
       const now = context.now ?? await databaseNow(tx);
@@ -763,8 +763,8 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
  * pair stays an open link, so an address never says whether a stranger is on
  * Murph.
  */
-async function knownInvitee(actor: string, { inviteeMemberId, inviteeRecipient }: Extract<GameCommand, { type: "createGame" }>): Promise<string | null> {
-  const member = inviteeMemberId ?? await memberByAddress(inviteeRecipient);
+async function knownInvitee(actor: string, { inviteeMemberId }: Extract<GameCommand, { type: "createGame" }>, contact: ReturnType<typeof createHostedLinqParticipantContact>): Promise<string | null> {
+  const member = inviteeMemberId ?? await memberByAddress(contact);
   if (!member || member === actor) return null;
   const prisma = getPrisma();
   // A one-on-one game: a group of just the two of them isn't one.
@@ -773,15 +773,24 @@ async function knownInvitee(actor: string, { inviteeMemberId, inviteeRecipient }
   return member;
 }
 
-async function memberByAddress(recipient: GameInviteRecipient | undefined): Promise<string | null> {
-  const contact = recipient ? createHostedLinqParticipantContact(recipient) : null;
+/** The number or email picked for the invitee, normalized once; never stored. */
+function pickedContact({ inviteeRecipient }: Extract<GameCommand, { type: "createGame" }>) {
+  return inviteeRecipient ? createHostedLinqParticipantContact(inviteeRecipient) : null;
+}
+
+/** An invite bound to nobody keeps only the picked contact's lookup key, so its owner can find it after signing in. */
+function unboundInviteKey(opponentMemberId: string | null | undefined, contact: ReturnType<typeof pickedContact>): string | null {
+  return opponentMemberId ? null : contact?.lookupKey ?? null;
+}
+
+async function memberByAddress(contact: ReturnType<typeof createHostedLinqParticipantContact>): Promise<string | null> {
   if (!contact) return null;
   const resolved = await lookupHostedGroupParticipantMemberIdsByHandles({ ambiguityPolicy: "unresolved", handles: [contact.value], prisma: getPrisma() });
   return resolved.get(contact.value) ?? null;
 }
 
 /** Prepare encrypted words and immutable row data before taking database locks. */
-async function prepareGameCreateData(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>, rematch: Awaited<ReturnType<typeof readGameCreationRematch>>, chatOther: string | undefined, timeZone: string, addressed: string | null) {
+async function prepareGameCreateData(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>, rematch: Awaited<ReturnType<typeof readGameCreationRematch>>, chatOther: string | undefined, timeZone: string, addressed: string | null, contact: ReturnType<typeof pickedContact>) {
   const { actor } = context;
   const { gameId, inviteeLabel } = command;
   const newTerms = decideNewTerms(command.terms, {
@@ -801,7 +810,8 @@ async function prepareGameCreateData(context: CommandContext, command: Extract<G
     createdBy: actor, wordsOwnerMemberId: actor, id: gameId,
     chatContainerMemberId: context.chatContainerMemberId ?? (opponentMemberId ? rematch?.chatContainerMemberId ?? null : null),
     inviteTokenEncrypted, inviteTokenHash: sha256Hex(token),
-    invitees: { create: { seat: 1, memberId: opponentMemberId, pendingLabel: chatOther ? Prisma.DbNull : { nameEncrypted, photoKey: inviteeLabel?.photoKey ?? null, relationshipEncrypted } } },
+    invitees: { create: { seat: 1, memberId: opponentMemberId, recipientLookupKey: unboundInviteKey(opponentMemberId, contact),
+      pendingLabel: chatOther ? Prisma.DbNull : { nameEncrypted, photoKey: inviteeLabel?.photoKey ?? null, relationshipEncrypted } } },
     lengthDays: newTerms.lengthDays, startsOn: newTerms.startsOn ? toDbDate(newTerms.startsOn) : null,
     previousGameId: command.previousGameId ?? null, round: rematch?.round ?? 1,
     status: chatOther ? "negotiating" as const : "invited" as const,
@@ -1150,7 +1160,8 @@ async function acceptInvitation(tx: Tx, row: GameRow, joinerId: string, seat: nu
   const invitation = row.invitees.find(invitee => invitee.seat === seat);
   if (!invitation) return;
   const label = parsePendingLabel(invitation.pendingLabel);
-  await tx.gameInvitee.update({ where: { gameId_seat: { gameId: row.id, seat } }, data: { memberId: joinerId, pendingLabel: Prisma.DbNull } });
+  await tx.gameInvitee.update({ where: { gameId_seat: { gameId: row.id, seat } }, data: { memberId: joinerId, pendingLabel: Prisma.DbNull,
+    ...(row.maxPlayers === 2 ? { recipientLookupKey: null } : {}) } });
   if (!row.createdBy || (!label.nameEncrypted && !label.relationshipEncrypted && !label.photoKey)) return;
   await tx.$executeRaw`
     INSERT INTO game_contact_label
@@ -1375,6 +1386,9 @@ async function endGame(tx: Tx, gameId: string, data: Prisma.GameUpdateInput): Pr
   const game = await tx.game.findUniqueOrThrow({ where: { id: gameId } });
   await resolveGroupGameChangeTx({ tx, game, actor: SYSTEM_ACTOR, now: new Date(), outcome: "change_expired", reason: GAME_ENDED_CHANGE_REASON });
   await tx.game.update({ data: { ...data, pendingChange: Prisma.DbNull }, where: { id: gameId } });
+  if (game.maxPlayers === 2 && data.status === "void") {
+    await tx.gameInvitee.updateMany({ where: { gameId }, data: { recipientLookupKey: null } });
+  }
 }
 
 async function post(context: CommandContext, command: Extract<GameCommand, { type: "post" }>): Promise<string> {
@@ -3325,6 +3339,40 @@ async function readBlockedPeople(memberId: string): Promise<{ memberId: string; 
   return ids.map((id) => ({ firstName: labelName.get(id) || ownName.get(id) || "", memberId: id }));
 }
 
+/** Read-only recovery of the newest open invite addressed to a verified contact. */
+export async function readGameInviteForMember(memberId: string): Promise<string | null> {
+  if (!isGameEnabled()) return null;
+  const prisma = getPrisma();
+  const contacts = await readGameVerifiedContacts(memberId);
+  const keys = await verifiedGameContactKeys(prisma, memberId, contacts);
+  if (keys.length === 0) return null;
+  const clock = await databaseNow(prisma);
+  const candidates = await prisma.game.findMany({
+    where: {
+      maxPlayers: 2, status: "invited", createdBy: { not: memberId },
+      AND: [gameOnWhere(), { createdBy: { not: null } }],
+      creator: { blocksMade: { none: { blockedMemberId: memberId } }, blocksReceived: { none: { blockerMemberId: memberId } } },
+      players: { none: { memberId } },
+      invitees: { some: { seat: 1, memberId: null, recipientLookupKey: { in: keys } } },
+      // Prisma cannot compare expiry to a per-row dev clock offset. Normal
+      // clocks filter before the cap; time-travel rows repeat expiry below.
+      OR: [{ inviteExpiresAt: null }, { devClockOffsetMs: null, inviteExpiresAt: { gt: clock } }, { devClockOffsetMs: { not: null } }],
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 5,
+    select: { id: true, status: true, createdBy: true, wordsOwnerMemberId: true, inviteTokenEncrypted: true, inviteExpiresAt: true, devClockOffsetMs: true },
+  });
+  for (const row of candidates) {
+    if (!row.createdBy || isGameInviteExpired(row, gameNow(clock, row))) continue;
+    const existing = await prisma.game.findFirst({ where: {
+      ...gamePairWhere([memberId, row.createdBy]), maxPlayers: 2, status: { in: ["live", "negotiating"] },
+    }, select: { id: true } });
+    if (existing) continue;
+    const [token] = await openGameTexts([{ ...gameTarget(row, "invite_token"), value: row.inviteTokenEncrypted }]);
+    if (token) return token;
+  }
+  return null;
+}
+
 /** Only open invites expose details publicly; closed links look like missing ones. */
 export async function readInvitePreview(token: string, multiplayer = false, memberId?: string): Promise<GameInvitePreview | null> {
   if (!isGameEnabled() || typeof token !== "string" || !token) return null;
@@ -3372,7 +3420,7 @@ async function canSendGroupTalk(row: GameRow, actor: string, now: Date): Promise
   return Boolean(audience?.memberIds.includes(actor) && (await verifiedGameContactKeys(db, actor, audience.contacts)).length);
 }
 
-type PreviewGame = GameRow & { creator: { memberId: string; firstNameEncrypted: string } | null; events: { actor: string }[] };
+type PreviewGame = GameRow & { creator: { memberId: string; firstNameEncrypted: string; photoKey: string | null } | null; events: { actor: string }[] };
 
 async function closedInvitePreview(row: PreviewGame, now: Date): Promise<GameInvitePreview | null> {
   // Its challenger deleted their account: never open again.
@@ -3413,6 +3461,7 @@ async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberI
     ...additions,
     expiresAt: row.maxPlayers === 10 ? row.inviteExpiresAt?.toISOString() ?? null : (row.inviteExpiresAt ?? row.createdAt).toISOString(),
     inviterFirstName: inviterFirstName ?? "",
+    ...(memberId !== undefined && row.maxPlayers === 2 ? { inviterAvatarUrl: await inviterAvatar(row, memberId) } : {}),
     startsOn: game.startsOn,
     status: "open",
     supportsNegotiation: row.maxPlayers === 2,
@@ -3420,6 +3469,26 @@ async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberI
     lengthDays: row.lengthDays,
     terms: previewTerms,
   };
+}
+
+/**
+ * The challenger's current profile photo for a signed-in reader of their open
+ * one-on-one invite. The public preview never carries it.
+ */
+async function inviterAvatar(row: PreviewGame, memberId: string): Promise<string | null> {
+  const photoKey = row.creator?.photoKey;
+  if (!row.createdBy || !photoKey || !servesSignedGameMedia()) return null;
+  const prisma = getPrisma();
+  // Recheck the invitation, current profile and viewer masks before signing.
+  const current = await prisma.game.findFirst({ where: {
+    id: row.id, inviteTokenHash: row.inviteTokenHash, status: "invited", maxPlayers: 2, createdBy: row.createdBy,
+    AND: [gameOnWhere()], players: { none: { memberId, leftAt: { not: null } } },
+    creator: { photoKey, reportsReceived: { none: { reporterMemberId: memberId, about: "player" } } },
+  }, select: { status: true, inviteExpiresAt: true, devClockOffsetMs: true } });
+  const currentBlocks = await readGameBlocks(prisma, memberId, [row.createdBy]);
+  if (!current || isHiddenBy(currentBlocks, row.createdBy)
+    || isGameInviteExpired(current, gameNow(await databaseNow(prisma), current))) return null;
+  return (await gameMediaDelivery(photoKey, "avatar").catch(() => null))?.url ?? null;
 }
 
 async function capableInvitePreview(row: PreviewGame, words: TermWords, memberId: string | undefined, blocks: GameBlocks | null) {
