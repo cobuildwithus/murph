@@ -567,6 +567,18 @@ scan. Hosted future history can share the checkpoint-fenced reconcile proof's
 bounded deferral; content changes, dirty work, and proof expiry still admit the
 ordinary runtime path.
 
+Scheduled reconcile content proofs start before profile or daily repair and
+follow the existing summary and timeseries continuations. Broad daily repair
+adds only the exact latest globally closed provider-day collections that Web
+will compare, including empty collections; it publishes the proof only after
+the full timeseries continuation finishes. Unavailable reads, failed imports,
+and expired continuations cannot finish the proof. Temporal repair siblings
+retain their mailbox owners, so an otherwise complete content proof does not
+authorize skipping queued repair. UTC midnight, local midnight, provider day
+closure, and temporal authority expiry remain unchanged. A runner that drops
+the optional carried proof safely loses the optimization until a later full
+reconcile. No additional provider request or persisted owner is introduced.
+
 Hosted passes with admitted dirty work, including retained reconciliation owners
 that absorb webhook hints, can pull a Junction full reconcile
 forward by up to thirty minutes while already awake. The ordinary account-scoped

@@ -26,7 +26,7 @@ const unchanged = {
   requestCount: 3, recordCount: 5, responseBytes: 500, elapsedMs: 20,
 };
 
-function fixture() {
+function fixture(now = new Date("2026-09-10T12:00:00.000Z")) {
   let inTransaction = false;
   let record = {
     id: due.connectionId, userId: due.userId, provider: "junction", status: "active",
@@ -97,6 +97,27 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.access.mockResolvedValue(true);
   mocks.consent.mockResolvedValue("granted");
+});
+
+it.each([
+  ["UTC midnight", "2026-04-03T20:00:00.000Z"],
+  ["New York midnight", "2026-04-04T00:00:00.000Z"],
+  ["provider day closure", "2026-04-03T11:00:00.000Z"],
+])("keeps the boundary wake at %s and accepts only a renewed unchanged proof", async (_boundary, start) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date(Date.parse(start) + 6 * 3_600_000));
+    const now = new Date();
+    const f = fixture(now);
+    const connection = { ...due, nextReconcileAt: now.toISOString() };
+    mocks.probe.mockResolvedValue({ ...unchanged, outcome: "ineligible", reason: "baseline_expired" });
+    expect((await preflightHostedScheduledReconcile({ connection, now, signal: new AbortController().signal })).wakeAvoided).toBe(false);
+    expect(mocks.probe.mock.calls[0]?.[1]).toBe(now.toISOString());
+    expect(f.update).not.toHaveBeenCalled();
+    mocks.probe.mockResolvedValue({ ...unchanged, reason: "content_unchanged", nextReconcileAt: new Date(now.getTime() + 6 * 3_600_000).toISOString() });
+    expect((await preflightHostedScheduledReconcile({ connection, now, signal: new AbortController().signal })).wakeAvoided).toBe(true);
+    expect(f.update).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
 });
 
 it("advances only cadence after unchanged contents and exact authority revalidation", async () => {
