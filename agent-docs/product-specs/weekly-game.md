@@ -593,7 +593,21 @@ resulting avatar. No private photo is shared with the subject or other players.
   source authority; writing preferences stay in the craft guide. An accepted
   event replays its canonical result through the existing outbox.
 
-  Initial generation failure publishes a plain result from canonical facts.
+  Only the show-writing notification runs on OpenAI Flex. Its first attempt
+  starts a twenty-minute capacity budget, retained with the generation's native
+  Codex binding in an unbound assistant execution session. Flex capacity refusals
+  keep that notification pending on the existing five-minute mailbox retry; the first
+  attempt starting at or after twenty minutes uses standard service. If that
+  standard attempt also fails for capacity, it takes the existing failed-recap
+  settlement path rather than extending capacity retries. Retries resume the
+  same thread and media files, and recover an accepted story before provider work.
+  Host-owned media provenance and song timing survive workspace checkpoints,
+  bound to the same generation and file bytes.
+  The budget never interrupts a slow generation. Images and songs retain their
+  separate provider settings, and writing keeps default prompt-cache retention.
+
+  Non-capacity initial generation failure, or capacity failure on the standard
+  fallback attempt, publishes a plain result from canonical facts.
   An interrupted initial generation also has a read-only result projection after
   the existing UI wait. Failed regeneration preserves the prior recap and assets,
   silently retires the queued generation and permits a later regeneration ID.

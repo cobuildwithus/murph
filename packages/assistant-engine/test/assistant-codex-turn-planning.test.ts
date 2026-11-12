@@ -289,6 +289,28 @@ describe('assistant Codex turn planning', () => {
     expect(result.attachmentAllowed).toBe(expected)
   })
 
+  it('resumes an isolated recap binding and refuses an incompatible retry instead of repeating media', async () => {
+    const planInput: Parameters<typeof resolveAssistantRouteTurnPlan>[0] = {
+      executionContext: { hosted: { memberId: 'synthetic-room', userEnvKeys: [], gameRecapScope: {
+        gameId: 'game_synthetic', eventId: 'game-recap:game_synthetic', pairFingerprint: 'synthetic-pair', show: true,
+      } } }, input: createMessageInput(),
+      profile: { promptProfile: 'conversation', threadScope: 'isolated-thread', toolProfile: 'provider-turn' },
+      promptTimeContext: { currentLocalDate: '2026-11-05', currentTimeZone: 'UTC' },
+      route: createRoute(), session: createSession(), sharedPlan: createSharedPlan(),
+    }
+    const first = await resolveAssistantRouteTurnPlan(planInput)
+    const binding = { assistantContractFingerprint: first.assistantContractFingerprint,
+      routeFingerprint: planInput.route.routeFingerprint, threadId: 'recap-native-thread', transcriptSeenThrough: first.transcriptBoundary }
+    const retry = await resolveAssistantRouteTurnPlan({ ...planInput, session: createSession({ resumeState: binding }) })
+    expect(retry.resume?.codexThreadId).toBe(binding.threadId)
+    expect(retry.dynamicTools).toEqual(first.dynamicTools)
+    await expect(resolveAssistantRouteTurnPlan({ ...planInput, session: createSession({ resumeState: {
+      ...binding, assistantContractFingerprint: 'f'.repeat(64),
+    } }) })).rejects.toThrow('Recap continuation is incompatible')
+    const ordinary = await resolveAssistantRouteTurnPlan({ ...planInput, executionContext: null, session: createSession({ resumeState: binding }) })
+    expect(ordinary.resume).toBeNull()
+  })
+
   it('attributes each thread rotation without changing provider declarations', async () => {
     const planInput: Parameters<typeof resolveAssistantRouteTurnPlan>[0] = {
       executionContext: null, input: createMessageInput(),

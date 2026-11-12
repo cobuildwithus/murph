@@ -4,7 +4,10 @@ import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from '../src/assistant/weekly
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.js'
+import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { pruneHostedCodexHomeToSessionReferencedRollouts, resolveAssistantStatePaths } from '@murphai/runtime-state/node'
 import { tmpdir } from 'node:os'
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
@@ -4447,6 +4450,165 @@ test.each(['send_message', 'skip'] as const)('group missed-day notifications iso
   } }))
 })
 
+test('recap capacity retries retain the generation, media and usage basis across the twenty-minute boundary', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'recap-capacity-'))
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const start = Date.parse('2036-08-25T18:00:00Z')
+  vi.setSystemTime(start)
+  try {
+    const scope = { eventId: 'game-recap:game_synthetic', gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const }
+    const request = vi.fn().mockResolvedValue({ result: { status: 'ok', recapGame: { recovered: false } } })
+    const recordUsage = vi.fn(async (_record: import('@murphai/hosted-execution/assistant-usage').AssistantUsageRecord) => undefined)
+    const providerResult = createProviderResult()
+    const nativeThreadId = '00000000-0000-4000-8000-000000000001'
+    const rolloutRelativePath = `sessions/2036/08/25/rollout-2036-08-25T18-00-00-${nativeThreadId}.jsonl`
+    const error = new VaultCliError('ASSISTANT_CODEX_FAILED', 'Synthetic capacity refusal', { codexErrorInfo: 'flexUnavailable', retryable: true })
+    let mediaGenerations = 0
+    let complete = false
+    const tiers: Array<string | null | undefined> = []
+    const { mocks, deliverMessage, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+      providerResult, realUsage: true, turnId: 'recap-attempt',
+      onExecuteCodexTurnWithRecovery: async input => {
+        tiers.push(input.input.serviceTier)
+        if (!input.resolvedSession.codexResume) {
+          mediaGenerations++
+          await writeFile(path.join(vault, 'synthetic-media.txt'), 'Leo and Ava scene')
+        } else {
+          expect(input.resolvedSession.codexResume.threadId).toBe(nativeThreadId)
+          expect(await readFile(path.join(vault, 'synthetic-media.txt'), 'utf8')).toBe('Leo and Ava scene')
+        }
+        const usage = extractCodexAssistantProviderUsage({
+          providerConfig: normalizeAssistantProviderConfig({ model: 'gpt-6.1-sol', modelProvider: 'hosted-openai' }),
+          rawEvents: complete ? [{ method: 'thread/tokenUsage/updated', params: { threadId: 'recap-native-thread', turnId: 'recap-turn',
+            tokenUsage: { total: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cachedInputTokens: 0, reasoningOutputTokens: 0 },
+              last: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cachedInputTokens: 0, reasoningOutputTokens: 0 } } } },
+            { method: 'turn/completed', params: { threadId: 'recap-native-thread', turn: { id: 'recap-turn', status: 'completed' } } }] : [],
+          serviceTier: input.input.serviceTier,
+        })
+        if (complete) {
+          input.hostedToolContext?.recordSavedGameRecapChatLine?.('Leo and Ava finished their game.')
+          return { kind: 'succeeded', providerTurn: { ...providerResult, codexThreadId: nativeThreadId, codexRolloutRelativePath: rolloutRelativePath, transcriptBoundary: 'start', usage } }
+        }
+        return { kind: 'failed_terminal', error, providerRequestOutcome: 'failed',
+          assistantContractFingerprint: 'a'.repeat(64), codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: nativeThreadId, codexRolloutRelativePath: rolloutRelativePath, transcriptBoundary: 'start',
+          acceptedNoReplyDeliveryContextOrdinals: [], reactions: [], rawEvents: [],
+          route: providerResult.route, session: input.resolvedSession, additionalUsages: [], usageAttribution: null,
+          usage,
+        }
+      },
+    })
+    const notification: AssistantNotificationInput = {
+      channel: 'linq', deliveryIdempotencyKey: scope.eventId, deliveryTarget: 'synthetic-game-thread',
+      threadId: 'synthetic-game-thread', threadIsDirect: false, serviceTier: 'flex',
+      executionContext: { hosted: { gameRecapScope: scope, groupTool: { request }, memberId: 'synthetic-group', userEnvKeys: [], usageRecorder: { recordUsage } } },
+      instructions: 'Make the game recap.', responsePolicy: { kind: 'require_game_recap', ...scope }, vault,
+    }
+    for (const elapsed of [0, 5 * 60_000, 20 * 60_000 - 1]) {
+      vi.setSystemTime(start + elapsed)
+      await expect(sendAssistantNotificationLocal(notification)).rejects.toBe(error)
+      if (elapsed === 0) {
+        const operatorHomeRoot = path.join(vault, 'synthetic-operator')
+        const rollout = path.join(operatorHomeRoot, '.codex-hosted', rolloutRelativePath)
+        await mkdir(path.dirname(rollout), { recursive: true })
+        await writeFile(rollout, 'synthetic native history\n')
+        await pruneHostedCodexHomeToSessionReferencedRollouts({ operatorHomeRoot,
+          assistantStateRoot: resolveAssistantStatePaths(vault).assistantStateRoot, nativeMemoryRetention: 'read-artifacts' })
+        expect(await readFile(rollout, 'utf8')).toBe('synthetic native history\n')
+        const { listAssistantSessions } = await import('../src/assistant/store.js')
+        expect(await listAssistantSessions(vault)).toEqual([expect.objectContaining({
+          createdAt: new Date(start).toISOString(), binding: expect.objectContaining({ channel: null, threadId: null }),
+          codexResume: expect.objectContaining({ threadId: nativeThreadId }),
+        })])
+      }
+    }
+    expect(tiers).toEqual(['flex', 'flex', 'flex'])
+    expect(mediaGenerations).toBe(1)
+    expect(recordUsage.mock.calls.map(call => call[0])).toEqual([
+      ...Array.from({ length: 3 }, () => expect.objectContaining({ tokenPricingBasis: 'openai-flex', providerRequestOutcome: 'failed' })),
+    ])
+    expect(request.mock.calls.every(call => call[0].recapRead.failed === undefined)).toBe(true)
+    expect(deliverMessage).not.toHaveBeenCalled()
+    expect(providerResult.session.codexResume).toBeNull()
+    complete = true
+    vi.setSystemTime(start + 20 * 60_000)
+    await sendAssistantNotificationLocal(notification)
+    expect(tiers).toEqual(['flex', 'flex', 'flex', null])
+    expect(mediaGenerations).toBe(1)
+    expect(recordUsage).toHaveBeenLastCalledWith(expect.objectContaining({ tokenPricingBasis: 'standard', inputTokens: 100, outputTokens: 20, providerRequestOutcome: 'succeeded' }))
+    request.mockResolvedValue({ result: { status: 'ok', chatLine: 'Leo and Ava finished their game.' } })
+    await sendAssistantNotificationLocal(notification)
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(4)
+    expect(mediaGenerations).toBe(1)
+    // A genuinely new generation has its own budget and native thread.
+    request.mockResolvedValue({ result: { status: 'ok', recapGame: { recovered: false } } })
+    const remake = { ...scope, eventId: `${scope.eventId}:synthetic_request` }
+    await sendAssistantNotificationLocal({ ...notification, deliveryIdempotencyKey: remake.eventId,
+      responsePolicy: { kind: 'require_game_recap', ...remake },
+      executionContext: { hosted: { ...notification.executionContext!.hosted!, gameRecapScope: remake } } })
+    expect(recordUsage).toHaveBeenLastCalledWith(expect.objectContaining({ tokenPricingBasis: 'openai-flex', inputTokens: 100, outputTokens: 20, providerRequestOutcome: 'succeeded' }))
+    expect(new Set(recordUsage.mock.calls.map(([record]) => record.usageId)).size).toBe(5)
+    expect(mediaGenerations).toBe(2)
+  } finally {
+    vi.useRealTimers()
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
+test.each(['initial', 'remake'] as const)('standard-tier recap capacity failure settles the %s generation after the Flex budget', async generation => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'recap-standard-capacity-'))
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const start = Date.parse('2036-08-25T18:00:00Z')
+  vi.setSystemTime(start)
+  try {
+    const eventId = `game-recap:game_synthetic${generation === 'remake' ? ':synthetic_request' : ''}`
+    const scope = { eventId, gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const }
+    const chatLine = 'Leo and Ava finished their game.'
+    const request = vi.fn().mockResolvedValue({ result: { status: 'ok', recapGame: { recovered: false } } })
+    const flexError = new VaultCliError('ASSISTANT_CODEX_FAILED', 'Synthetic Flex capacity refusal', { codexErrorInfo: 'flexUnavailable', retryable: true })
+    const standardError = new VaultCliError('ASSISTANT_CODEX_FAILED', 'Synthetic standard capacity refusal', { codexErrorInfo: 'serverOverloaded', retryable: true })
+    const tiers: Array<string | null | undefined> = []
+    const { deliverMessage, mocks, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+      providerResult: createProviderResult(), turnId: 'recap-standard-capacity',
+      onExecuteCodexTurnWithRecovery: async input => {
+        tiers.push(input.input.serviceTier)
+        throw input.input.serviceTier === 'flex' ? flexError : standardError
+      },
+    })
+    const notification: AssistantNotificationInput = {
+      channel: 'linq', deliveryIdempotencyKey: eventId, deliveryTarget: 'synthetic-game-thread',
+      threadId: 'synthetic-game-thread', threadIsDirect: false, serviceTier: 'flex',
+      executionContext: { hosted: { gameRecapScope: scope, groupTool: { request }, memberId: 'synthetic-group', userEnvKeys: [] } },
+      instructions: 'Make the game recap.', responsePolicy: { kind: 'require_game_recap', ...scope }, vault,
+    }
+    await expect(sendAssistantNotificationLocal(notification)).rejects.toBe(flexError)
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(deliverMessage).not.toHaveBeenCalled()
+    vi.setSystemTime(start + 20 * 60_000)
+    request.mockResolvedValueOnce({ result: { status: 'ok', recapGame: { recovered: false } } })
+      .mockResolvedValueOnce(generation === 'initial'
+        ? { result: { status: 'ok', chatLine } }
+        : { result: { status: 'unavailable', error: 'recap_generation_retired' } })
+    const result = await sendAssistantNotificationLocal(notification)
+    expect(tiers).toEqual(['flex', null])
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(2)
+    expect(request).toHaveBeenCalledTimes(3)
+    expect(request).toHaveBeenLastCalledWith({ action: 'read_game',
+      origin: { kind: 'game_recap', gameId: scope.gameId, eventId }, recapRead: { kind: 'recover', failed: true } })
+    if (generation === 'initial') {
+      expect(result.response).toBe(chatLine)
+      expect(deliverMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: chatLine }))
+    } else {
+      expect(result.decision.kind).toBe('skip')
+      expect(result.response).toBeNull()
+      expect(deliverMessage).not.toHaveBeenCalled()
+    }
+  } finally {
+    vi.useRealTimers()
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
 test('recap recovery delivers one accepted fallback line and link without another model turn', async () => {
   const eventId = 'game-recap:game_synthetic'
   const chatLine = 'The morning walks made the week.\nWatch the recap: https://recaps.murph.test/recap/game_synthetic'
@@ -4472,6 +4634,8 @@ test('recap recovery delivers one accepted fallback line and link without anothe
 })
 
 test('failed recap regeneration completes silently using the normal turn profile', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'recap-failure-'))
+  try {
   const scope = { eventId: 'game-recap:game_synthetic:replacement', gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const }
   const request = vi.fn().mockResolvedValueOnce({ result: { status: 'ok', recapGame: { recovered: false } } })
     .mockResolvedValueOnce({ result: { status: 'unavailable', error: 'recap_generation_retired' } })
@@ -4482,7 +4646,7 @@ test('failed recap regeneration completes silently using the normal turn profile
   const result = await sendAssistantNotificationLocal({ channel: 'linq', deliveryIdempotencyKey: scope.eventId,
     deliveryTarget: 'synthetic-game-thread', threadId: 'synthetic-game-thread', threadIsDirect: false,
     executionContext: { hosted: { gameRecapScope: scope, groupTool: { request }, memberId: 'synthetic-group', userEnvKeys: [] } },
-    instructions: 'Make the game recap.', responsePolicy: { kind: 'require_game_recap', ...scope }, vault: '/synthetic-vault' })
+    instructions: 'Make the game recap.', responsePolicy: { kind: 'require_game_recap', ...scope }, vault })
   expect(result.decision.kind).toBe('skip')
   expect(result.response).toBeNull()
   expect(deliverMessage).not.toHaveBeenCalled()
@@ -4490,6 +4654,7 @@ test('failed recap regeneration completes silently using the normal turn profile
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     profile: { promptProfile: 'conversation', threadScope: 'isolated-thread', toolProfile: 'provider-turn' },
   }))
+  } finally { await rm(vault, { recursive: true, force: true }) }
 })
 
 test.each(['game-recap:game_synthetic', 'game-recap:game_synthetic:synthetic_request'])('game recap notifications deliver and persist the accepted chat line exactly: %s', async (eventId) => {
@@ -6271,6 +6436,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
 }
 
 async function loadNotificationTurnHarness(input: {
+  realUsage?: boolean
   priorDeliveries?: ReturnType<typeof notificationHistoryIntent>[]
   realChannelTyping?: boolean
   onExecuteCodexTurnWithRecovery?: (
@@ -6364,7 +6530,8 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('@murphai/operator-config/operator-config', () => ({
     resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
   }))
-  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+  vi.doMock('@murphai/operator-config/assistant-backend', async (importOriginal) => ({
+    ...await importOriginal<typeof import('@murphai/operator-config/assistant-backend')>(),
     createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
   }))
   vi.doMock('../src/assistant/runtime-state-service.js', () => ({
@@ -6396,7 +6563,8 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
     executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
-  vi.doMock('../src/assistant/service-usage.js', () => ({
+  vi.doMock('../src/assistant/service-usage.js', async (importOriginal) => input.realUsage
+    ? await importOriginal<typeof import('../src/assistant/service-usage.js')>() : ({
     recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
@@ -6412,7 +6580,7 @@ async function loadNotificationTurnHarness(input: {
     const actual = await importOriginal<typeof import('../src/assistant/turns.js')>()
     return {
       ...actual,
-      createAssistantTurnId: () => input.turnId,
+      createAssistantTurnId: input.realUsage ? actual.createAssistantTurnId : () => input.turnId,
     }
   })
   vi.doMock('../src/assistant/channel-typing.js', async (importOriginal) => input.realChannelTyping

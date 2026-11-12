@@ -1,8 +1,47 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
-import { lstat, mkdir, open, realpath } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, realpath } from 'node:fs/promises'
 import path from 'node:path'
-import { gameRecapDraftSchema } from '@murphai/contracts/recap-show'
+import * as z from '@murphai/contracts/zod-runtime'
+import { gameRecapDraftSchema, songWordTimestampsSchema } from '@murphai/contracts/recap-show'
+import { resolveAssistantStatePaths, writeAssistantStateJson } from '@murphai/runtime-state/node/assistant-state-fs'
+import { isMissingFileError } from './shared.js'
+
+const recapMediaSourceSchema = z.object({
+  referenceIds: z.array(z.string().min(1).max(256)).max(128),
+  mediaType: z.enum(['image/jpeg', 'audio/mpeg']),
+  wordsTimestamps: songWordTimestampsSchema.optional(),
+}).strict()
+type RecapMediaSource = z.infer<typeof recapMediaSourceSchema>
+type RecapMediaSourceKey = { vault: string; eventId: string; bytes: Uint8Array }
+const recapMediaReceiptSchema = z.object({
+  schema: z.literal('murph.recap-media-source.v1'),
+  source: recapMediaSourceSchema,
+}).strict()
+
+// Host-owned state survives checkpoints and is outside the writer's editable
+// workspace. A file's bytes and generation must both match its trusted receipt.
+export async function saveRecapMediaSource(input: RecapMediaSourceKey & { source: RecapMediaSource }): Promise<void> {
+  await writeAssistantStateJson(recapMediaSourcePath(input), recapMediaReceiptSchema.parse({
+    schema: 'murph.recap-media-source.v1', source: input.source,
+  }))
+}
+
+export async function readRecapMediaSource(input: RecapMediaSourceKey): Promise<RecapMediaSource | null> {
+  try {
+    const value = recapMediaReceiptSchema.safeParse(JSON.parse(await readFile(recapMediaSourcePath(input), 'utf8')))
+    return value.success ? value.data.source : null
+  } catch (error) {
+    if (isMissingFileError(error) || error instanceof SyntaxError) return null
+    throw error
+  }
+}
+
+function recapMediaSourcePath(input: RecapMediaSourceKey): string {
+  const generation = createHash('sha256').update(input.eventId).digest('hex')
+  const media = createHash('sha256').update(input.bytes).digest('hex')
+  return path.join(resolveAssistantStatePaths(input.vault).stateDirectory, 'recap-media', generation, `${media}.json`)
+}
 
 /** Refuse symlinks, including intermediate components, before trusted file IO. */
 export async function recapDirectory(vault: string, relative: string): Promise<string> {

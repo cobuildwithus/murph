@@ -31,6 +31,28 @@ notification and Ask continuation turns keep the provider's local ordinal sequen
 The immutable hosted usage ledger and pending-settlement guard remain authoritative;
 this producer rule neither rewrites historical usage nor clears failed settlement.
 
+Recap show notifications request Flex on GPT-6.1 Sol. The existing session store
+holds one unbound execution session per recap event: `createdAt` anchors its
+twenty-minute capacity budget and `codexResume` retains the native thread through
+workspace checkpoints and rollout pruning. The room session still owns context,
+transcript and delivery; the execution session has no route binding. A retry
+resumes that thread or uses canonical recap recovery if continuity is unavailable,
+without starting another media-producing thread. Flex capacity refusals leave
+the same system-mailbox item pending with the existing five-minute capacity delay. An
+attempt beginning at or after twenty minutes sends `serviceTier: null` (standard,
+including during onboarding); earlier attempts send `flex`. A capacity failure on
+that standard attempt takes the existing failed-recap settlement path: initial
+recaps publish the canonical template, while remakes retire and keep the prior
+recap. It does not extend the capacity retry budget. Active writing has
+no Flex-specific abort deadline. Actual per-attempt service tier drives usage
+extraction and recording: `openai-flex` on Flex and `standard` after fallback.
+Unbilled recap capacity refusals retain their pricing basis even without token counters.
+Generated media provenance and song timing use versioned host-owned receipts in
+assistant runtime `state/recap-media`, keyed by generation and content hash.
+Snapshots preserve those receipts alongside the media, so a fresh retry can use
+existing files; copied media from another generation and modified bytes fail closed.
+Image/song usage and default recap prompt-cache retention are unchanged.
+
 ## Route-planning telemetry
 
 Provider-plan diagnostics time follow-up context resolution as

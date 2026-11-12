@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
@@ -10,6 +10,8 @@ import { readRecapFile, saveRecapMediaFile } from '../src/assistant/recap-files.
 import { createAssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import { resolveAssistantSession } from '../src/assistant/store.ts'
 import { parseGenerateSongArguments } from '../src/assistant-codex/dynamic-tools/generate-song.ts'
+import { collectHostedWorkspaceSnapshotArchivePlan } from '@murphai/runtime-state/node'
+import { recapTaskDirectory } from '../src/assistant/recap-workspace.ts'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
@@ -73,19 +75,22 @@ test('candidate files reject traversal, symlinks, oversized bytes and tampering'
   await expect(readRecapFile({ vault: root, relativeRoot, file: `${relativeRoot}/media/link.jpg`, maxBytes: 2000 })).rejects.toThrow()
 })
 
-test('timed song receipts keep provider words bound to selected audio in the host', async () => {
+test('recap media and trusted song timing survive a checkpoint and a fresh retry context', async () => {
   const root = await vault()
   const { session } = await resolveAssistantSession({ vault: root })
   const startedAt = '2026-11-01T00:00:00Z', settledAt = '2026-11-08T00:00:00Z'
-  const context = createAssistantHostedToolContext({ session, messageInput: { vault: root, prompt: '', channel: 'linq' }, executionContext: {
+  const eventId = 'game-recap:game_synthetic'
+  const createContext = (vaultRoot: string, generation = eventId) => createAssistantHostedToolContext({ session, messageInput: { vault: vaultRoot, prompt: '', channel: 'linq' }, executionContext: {
     memberId: 'synthetic-member', userEnvKeys: [],
-    gameRecapScope: { gameId: 'game_synthetic', eventId: 'game-recap:game_synthetic', pairFingerprint: 'a'.repeat(32), show: true },
+    gameRecapScope: { gameId: 'game_synthetic', eventId: generation, pairFingerprint: 'a'.repeat(32), show: true },
     groupTool: { request: async () => ({ action: 'read_game', result: { status: 'ok', recapGame: {
       messages: [], next: null, through: '0', since: startedAt, until: settledAt, retainedSince: startedAt, incomplete: false,
     } } }) },
   } })
-  await context.prepareGameRecapInputs!({ game: { id: 'game_synthetic', days: [] }, players: ['Leo', 'Ava'], entries: [],
-    result: [{ memberId: 'leo', name: 'Leo', score: 4 }, { memberId: 'ava', name: 'Ava', score: 3 }], startedAt, settledAt, references: [] })
+  const context = createContext(root)
+  const material = { game: { id: 'game_synthetic', days: [] }, players: ['Leo', 'Ava'], entries: [],
+    result: [{ memberId: 'leo', name: 'Leo', score: 4 }, { memberId: 'ava', name: 'Ava', score: 3 }], startedAt, settledAt, references: [] }
+  await context.prepareGameRecapInputs!(material)
   const args = { output: 'file' as const, durationSeconds: 20, instrumental: false, prompt: 'Playful piano', lyrics: ['Leo goes', 'Ava stays'] }
   const bytes = await readFile(new URL('../../../fixtures/generated-audio/music.mp3', import.meta.url))
   const words = [{ word: 'Leo', start_ms: 100, end_ms: 300 }, { word: 'goes', start_ms: 400, end_ms: 600 }]
@@ -103,6 +108,35 @@ test('timed song receipts keep provider words bound to selected audio in the hos
   const other = await fileRuntime.save(new Uint8Array([1, 2, 3]), 'audio/mpeg', [{ word: 'Ava', startMs: 900, endMs: 1100 }])
   expect((await context.readGameRecapMedia!(receipt.path)).wordsTimestamps?.[0].word).toBe('Leo')
   expect((await context.readGameRecapMedia!(other)).wordsTimestamps?.[0].word).toBe('Ava')
+  const imageRuntime = await context.prepareRecapMedia!({ kind: 'image', args: {
+    output: 'file', outputFormat: 'jpeg', referenceImageRefs: [], prompt: 'Synthetic paper theatre.',
+    alt: null, quality: 'medium', size: '1024x1024',
+  } }, fetchImpl)
+  const imageBytes = await sharp({ create: { width: 64, height: 64, channels: 3, background: 'white' } }).jpeg().toBuffer()
+  const imageFile = await imageRuntime.save(imageBytes, 'image/jpeg')
+  const snapshot = await collectHostedWorkspaceSnapshotArchivePlan({ durableRoot: root, vaultRoot: root })
+  const files = snapshot.entries.filter(entry => entry.kind === 'file')
+  expect(files.map(entry => entry.relativePath)).toEqual(expect.arrayContaining([receipt.path, imageFile]))
+  expect(files.filter(entry => entry.relativePath.includes('/state/recap-media/'))).toHaveLength(3)
+  const restoredRoot = await vault()
+  for (const file of files) {
+    const destination = path.join(restoredRoot, file.relativePath)
+    await mkdir(path.dirname(destination), { recursive: true })
+    await copyFile(file.absolutePath, destination)
+  }
+  const retry = createContext(restoredRoot)
+  await retry.prepareGameRecapInputs!(material)
+  expect(await retry.readGameRecapMedia!(receipt.path)).toEqual(await context.readGameRecapMedia!(receipt.path))
+  expect(await retry.readGameRecapMedia!(imageFile)).toEqual({ bytes: imageBytes.toString('base64'), referenceIds: [], mediaType: 'image/jpeg' })
+  expect(fetchImpl).toHaveBeenCalledTimes(1)
+  const anotherGeneration = `${eventId}:synthetic_request`
+  const remake = createContext(restoredRoot, anotherGeneration)
+  await remake.prepareGameRecapInputs!(material)
+  const copiedImage = await saveRecapMediaFile({ vault: restoredRoot,
+    relativeRoot: path.relative(restoredRoot, recapTaskDirectory(restoredRoot, anotherGeneration)), bytes: imageBytes, mediaType: 'image/jpeg' })
+  await expect(remake.readGameRecapMedia!(copiedImage)).rejects.toThrow('Select a file')
+  await writeFile(path.join(restoredRoot, receipt.path), 'tampered')
+  await expect(retry.readGameRecapMedia!(receipt.path)).rejects.toThrow('Select a file')
   await writeFile(path.join(root, receipt.path), 'tampered')
   await expect(context.readGameRecapMedia!(receipt.path)).rejects.toThrow('Select a file')
 })
