@@ -15,7 +15,7 @@ import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-cryp
 import { provisionHostedCryptoDomainRootsForUser } from "@/src/lib/hosted-crypto/domain-root-store";
 import { createHostedExternalThreadIdentityLookupKey, createHostedExternalThreadLookupKey, createHostedLinqChatLookupKey, createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { encryptHostedLinqLinePhoneNumber } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
-import { startHostedLinqGroupLineMove, operateHostedLinqGroupLineMove } from "@/src/lib/hosted-ops/linq-group-line-move";
+import { releaseHostedLinqRemovedLineRoute, startHostedLinqGroupLineMove, operateHostedLinqGroupLineMove } from "@/src/lib/hosted-ops/linq-group-line-move";
 import { GROUP_MOVE_ADD_SETTLE_MS } from "@/src/lib/hosted-ops/linq-group-line-move-state";
 import { readHostedLinqGroupLineMoveOverview } from "@/src/lib/hosted-ops/linq-group-line-move-overview";
 import { claimHostedLinqDeliveryProviderDispatchTx, recordHostedLinqRuntimeDeliveryOutcomeTx,
@@ -374,6 +374,54 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     const next = await start();
     expect(next).toMatchObject({ status: "reserved", code: null }); expect(next.addConfirmedAt).not.toBeNull();
     expect(provider.add).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
+  });
+  it("releases a stale target copy whose line was removed, then moves the group onto that same chat", async () => {
+    // An earlier test bound the target line's copy of this group to a separate container, then removed the line.
+    const stray = randomUUID(); extraRooms.push(stray);
+    await db.hostedMember.create({ data: { id: stray, billingStatus: "active" } });
+    await provisionHostedCryptoDomainRootsForUser({ userId: stray, prisma: db });
+    await db.hostedThreadContainer.create({ data: { memberId: stray, ownerMemberId: owner } });
+    const strayRef = createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: targetChat })!;
+    await db.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: stray, accountLookupKey: targetKey,
+      threadIdentityLookupKey: strayRef,
+      threadLookupKey: createHostedExternalThreadLookupKey({ channel: "linq", threadId: targetChat, accountLookupKey: targetKey })!,
+      deliveryRouteEncrypted: await sealHostedThreadDeliveryRoute({ containerMemberId: stray, prisma: db,
+        route: buildHostedThreadDeliveryRoute({ channel: "linq", threadId: targetChat, accountLookupKey: targetKey }) }) } });
+    const read = provider.retrieve.getMockImplementation()!;
+    provider.retrieve.mockImplementation(async (id: string) => {
+      const chat = await read(id);
+      return id === targetChat && !targetPresent ? { ...chat, handles: [...chat.handles, { handle: target, is_me: true, status: "removed" }] } : chat;
+    });
+    const release = () => releaseHostedLinqRemovedLineRoute({ containerRef: strayRef, prisma: db });
+    // While the line is still active in that chat, its route is live and stays.
+    targetPresent = true;
+    await expect(release()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_LINE_STILL_ACTIVE" });
+    await expect(releaseHostedLinqRemovedLineRoute({ containerRef, prisma: db })).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_LINE_STILL_ACTIVE" });
+    targetPresent = false;
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: stray } })).toBe(1);
+    expect(await release()).toEqual({ containerHint: stray.slice(-8), released: true });
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: stray } })).toBe(0);
+    await expect(release()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_ROUTE_REQUIRED" });
+    // Re-adding the line now reaches the same chat unbound, so the real group's move adopts it.
+    const result = await start(); expect(result).toMatchObject({ status: "reserved", code: null });
+    await webhook(); expect((await row(result.moveId)).status).toBe("adopted");
+    for (const callback of callbacks) await callback();
+    expect((await row(result.moveId)).status).toBe("left");
+    const routes = await db.hostedThreadRoute.findMany({ where: { containerMemberId: { in: [room, stray] } } });
+    expect(routes).toHaveLength(1);
+    expect(routes[0]).toMatchObject({ containerMemberId: room, accountLookupKey: targetKey, threadIdentityLookupKey: strayRef });
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+  it("keeps a removed-line route while a move owns its container", async () => {
+    const id = await reserve("add_confirmed"); targetPresent = false; sourcePresent = true;
+    const read = provider.retrieve.getMockImplementation()!;
+    provider.retrieve.mockImplementation(async (chatId: string) => {
+      const chat = await read(chatId);
+      return chatId === sourceChat ? { ...chat, handles: chat.handles.map((handle: { handle: string }) => handle.handle === source ? { ...handle, status: "left" } : handle) } : chat;
+    });
+    await expect(releaseHostedLinqRemovedLineRoute({ containerRef, prisma: db })).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_ROUTE_CHANGED" });
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room } })).toBe(1);
+    expect((await row(id)).status).toBe("reserved");
   });
   it("reports a rejected sibling add and releases the reservation after an absence read", async () => {
     provider.add.mockRejectedValue(new APIError(403, {}, "synthetic rejection", new Headers()));
