@@ -128,7 +128,7 @@ import { deleteEntryReplyTx, readReplyReportedMembers, replyEligibility, replyMe
 import { inspectReplyAudio } from "./reply-audio";
 import { claimGameReplyNotification, sendGameReplyNotificationAfterResponse } from "./reply-notification";
 import { claimGamePostNotification, sendGamePostNotificationAfterResponse } from "./post-notification";
-import { claimGameAcceptNotification, sendGameAcceptNotificationAfterResponse } from "./accept-notification";
+import { prepareGameAcceptNotification, sendGameAcceptNotificationAfterResponse } from "./accept-notification";
 import {
   buildGameHistoryView,
   buildGameView,
@@ -1089,7 +1089,7 @@ async function accept(context: CommandContext, command: AcceptInviteBody, gameId
   const row = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId }, select: { maxPlayers: true } });
   const contacts = row.maxPlayers === 10 ? await readGameVerifiedContacts(actor) : [];
   let expired = false;
-  let notification: Awaited<ReturnType<typeof claimGameAcceptNotification>> = null;
+  let notification: Awaited<ReturnType<typeof prepareGameAcceptNotification>> = null;
   await runLocked(gameId, row.maxPlayers === 2 ? withPairLock(context, creator!) : context, async locked => {
     const { clock, loaded, now, tx } = locked;
     const { row } = loaded;
@@ -1111,7 +1111,7 @@ async function accept(context: CommandContext, command: AcceptInviteBody, gameId
     const activates = decision.activates ?? true;
     if (activates) await tx.game.update({ data: { startedAt: decision.startedAt, status: "live" }, where: { id: row.id } });
     await acceptInvitation(tx, row, actor, decision.seat);
-    if (activates) notification = await claimGameAcceptNotification(tx, { gameId, maxPlayers: row.maxPlayers, actor, schedule: decision, clock });
+    if (activates) notification = await prepareGameAcceptNotification(tx, { gameId, maxPlayers: row.maxPlayers, actor, schedule: decision, clock });
     return [
       ...(!claimed ? [{ payload: { seat: decision.seat }, type: "joined" as const }] : []),
       ...(activates ? [{ payload: { startNow: false }, type: "started" as const }] : []),

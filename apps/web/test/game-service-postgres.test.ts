@@ -969,7 +969,6 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(await ok(leo, accept)).toMatchObject({ status: "live" });
       await ok(leo, accept);
       expect(push).not.toHaveBeenCalled();
-      expect(await getPrisma().gameEvent.count({ where: { commandKey: `game-accept-push:${gameId}` } })).toBe(1);
       const recipient = await getPrisma().gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId, memberId: ava } } });
       expect(recipient.dayOne!.toISOString().slice(0, 10)).toBe(dayOne);
       for (const task of deferredResponse.tasks.splice(0)) await task();
@@ -1372,7 +1371,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     // The history: one row per accepted change, none for repeats or rejections.
     const events = await getPrisma().gameEvent.findMany({ orderBy: { id: "asc" }, where: { gameId } });
     expect(events.map((event) => event.type)).toEqual([
-      "created", "accept_notification", "joined", "started", "started", "posted", "posted", "posted",
+      "created", "joined", "started", "started", "posted", "posted", "posted",
       "withdrew", "posted", "time_shifted", "posted", "time_shifted", "settled", "redeemed",
     ]);
     expect(JSON.stringify(events.map((event) => event.payload))).not.toMatch(/pushups|Breakfast|done|girlfriend/u);

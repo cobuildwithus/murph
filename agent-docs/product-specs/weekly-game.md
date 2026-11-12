@@ -429,7 +429,8 @@ resulting avatar. No private photo is shared with the subject or other players.
   Words use the written Day 1 and real calendar date in the recipient's frozen
   zone; expiry is the following date's 3am. `game_accepted` requires alerts,
   not reminders; live game, participation, blocks and route are rechecked.
-  Claims never retry; kickoff chat and private kickoff remain unchanged.
+  The activating accept runs once under the game lock, so no separate receipt
+  is kept; a send never retries. Kickoff chat and private kickoff are unchanged.
 - **Post notifications.** One notifier owns two recipient-local daily slots:
   the first eligible peer artifact, then completion ("Everyone's in but you."
   or "Everyone's in."). Incomplete artifacts count as submitted; excuses do
