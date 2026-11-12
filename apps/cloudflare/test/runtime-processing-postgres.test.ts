@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildRuntimeProcessingSummaryEntry, type RuntimeProcessingDiagnostics } from "../src/user-runner/diagnostics.ts";
 import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
-import type { HostedRuntimeOwnerResponse, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
+import { HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS, type HostedRuntimeOwnerResponse, type HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ensurePostgresRuntimeProcessing, HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS } from "../src/runtime-processing.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "../src/runtime-owner-completion.ts";
@@ -626,6 +626,27 @@ describe("Postgres runtime orchestration", () => {
     await expect(ensurePostgresRuntimeProcessing(source, request, diagnostics)).resolves.toMatchObject({ kind: "retry_later" });
     expect(diagnostics.details.runtimeProcessingRetryReason).toBe(reason);
     if (scenario === "uncertain-wake") expect(diagnostics).toMatchObject({ attemptId: "attempt-a", leaseGeneration: "1", stage: "active_wake" });
+  });
+
+  it.each([
+    ["2026-01-01T00:01:05.000Z", 60_000],
+    [undefined, HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS],
+    ["unreadable", HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS],
+  ] as const)("defers an exhausted start budget (%s)", async (retryAt, delayMs) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
+    const { source, container } = harness();
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({
+      ...response(null, "blocked"), blockedReason: "start_budget", retryAt,
+    });
+    await expect(ensurePostgresRuntimeProcessing(source, request, diagnostics)).resolves.toEqual({
+      kind: "retry_later", retryAt: new Date(Date.now() + delayMs).toISOString(),
+    });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe("start_budget_exhausted");
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledOnce();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    expect(container.bindStandbySlot).not.toHaveBeenCalled();
   });
 
   it.each([
