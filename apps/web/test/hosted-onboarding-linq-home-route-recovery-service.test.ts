@@ -66,6 +66,7 @@ function buildPrismaStub(): never {
   });
 
   return new Proxy({
+    hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
     $transaction: async (run: (tx: unknown) => unknown) => run(delegate),
   }, {
     get: (target: Record<string, unknown>, property: string) =>

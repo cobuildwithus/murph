@@ -4050,6 +4050,13 @@ remain fail-closed against saved-set loss.
 
 ## Hosted operator tasks
 
+Linq group departure commits its marker and exact route deletion together under
+chat-ownership then route-row locks. Only the winning marker insert requests one
+post-commit provider attempt; failure or a crash between commit and dispatch
+does not undo local silence or create a retry obligation. Web admission and
+unbound notice/source-group recovery fences follow `ARCHITECTURE.md`; runtime
+typing, poll-notification locking and game-room binding remain Phase 2 work.
+
 One Web transaction writes the operator-task audit row and its encrypted
 mailbox item. Stable caller idempotency maps to one task and mailbox identity;
 the persisted request-shape digest makes replay with different authority or

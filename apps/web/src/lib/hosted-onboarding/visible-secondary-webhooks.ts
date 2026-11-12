@@ -1,5 +1,7 @@
 import "server-only";
 
+import { readHostedLinqGroupLeave } from "../hosted-routing/linq-group-leave";
+
 import {
   buildTelegramThreadTarget,
   extractTelegramMessage,
@@ -196,16 +198,8 @@ export function withHostedVisibleSecondaryLinqOutcomes(
     }
 
     const prisma = input.prisma ?? dependencies.getPrisma();
-    const recognizedSender = (
-      groupSetupAlreadySent
-      || HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER.has(reason)
-    )
-      ? await readHostedLinqSender({
-          participantContact: context.participantContact,
-          prisma,
-          dependencies,
-        })
-      : null;
+    if (await readHostedLinqGroupLeave({ chatId: context.summary.chatId, prisma })) return { ok: true, ignored: true, reason: "group-left" };
+    const recognizedSender = await readVisibleSecondarySender({ groupSetupAlreadySent, reason, context, prisma, dependencies });
     const privateRecoveryReason = groupSetupAlreadySent ? "group-chat" : reason;
     // One private recovery per person per UTC day, whichever group or message
     // triggered it. Keying on the chat or the event let a busy group, or one
@@ -232,6 +226,7 @@ export function withHostedVisibleSecondaryLinqOutcomes(
             ...(input.signal ? { signal: input.signal } : {}),
           })
         : null;
+    if (await readHostedLinqGroupLeave({ chatId: context.summary.chatId, prisma })) return { ok: true, ignored: true, reason: "group-left" };
     if (privateRecovery) {
       try {
         await dependencies.sendHostedLinqChatMessage({
@@ -278,6 +273,15 @@ export function withHostedVisibleSecondaryLinqOutcomes(
   };
 }
 
+async function readVisibleSecondarySender(input: {
+  groupSetupAlreadySent: boolean; reason: string;
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  prisma: PrismaClient; dependencies: HostedVisibleSecondaryLinqDependencies;
+}) {
+  return input.groupSetupAlreadySent || HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER.has(input.reason)
+    ? readHostedLinqSender({ participantContact: input.context.participantContact, prisma: input.prisma, dependencies: input.dependencies }) : null;
+}
+
 async function sendHostedLinqVisibleSecondaryReply(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   dependencies: HostedVisibleSecondaryLinqDependencies;
@@ -311,6 +315,7 @@ async function sendHostedLinqVisibleSecondaryReply(input: {
     }
   }
 
+  if (await readHostedLinqGroupLeave({ chatId: context.summary.chatId, prisma })) return { ok: true, ignored: true, reason: "group-left" };
   try {
     await dependencies.sendHostedLinqChatMessage({
       chatId: context.summary.chatId,

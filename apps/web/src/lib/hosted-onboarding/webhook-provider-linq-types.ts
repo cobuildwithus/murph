@@ -32,5 +32,6 @@ export type HostedOnboardingLinqDirectPlan =
     nextRequiredPendingGroupSetupCandidateId?: string | null;
     postCommitGroupRosterReconciles?: readonly HostedOnboardingLinqGroupRosterReconcile[];
     postCommitGroupLineMoveId?: string;
+    postCommitLinqGroupLeave?: import("../hosted-routing/linq-group-leave").HostedLinqGroupLeaveTarget;
   retryAfterGroupLineMoveAdoption?: boolean;
   };

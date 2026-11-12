@@ -7,12 +7,35 @@ import { addHostedLinqChatParticipant, getHostedLinqChatSummary, leaveHostedLinq
 import { readHostedLinqLinePhoneNumberByLookupKey } from "../hosted-onboarding/linq-line-phone-resolver";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { releaseHostedLinqRemovedLineRouteTx } from "../hosted-routing/thread-container-service";
+import { leaveHostedLinqGroupTx, prepareHostedLinqGroupLeave, requestHostedLinqGroupLeaveAfterCommit } from "../hosted-routing/linq-group-leave";
 import { adoptDiscoveredHostedLinqGroupMove } from "./linq-group-line-move-discovery";
 import { openHostedThreadDeliveryRoute } from "../hosted-routing/thread-delivery-route";
 import { openHostedLinqGroupMoveCleanup, prepareHostedLinqGroupMoveCleanup, type HostedLinqGroupMoveCleanup } from "../hosted-routing/linq-group-line-move-store";
 import { activeGroupMoveHandles, assertGroupMoveLinesCanSend, assertGroupMoveQuiet, assertGroupMoveReservationAvailable, assertGroupMoveSourceSelf,
   GROUP_MOVE_ADD_SETTLE_MS, GROUP_MOVE_ADOPTION_MS, groupMoveError, groupMoveFailureCode, groupMoveHasPhone, groupMoveOperatorSelect, lockGroupMoveSource,
   readGroupMoveRoster, readOperatorGroupMove, recordGroupMoveError, summarizeOperatorGroupMove, type OperatorGroupMove } from "./linq-group-line-move-state";
+
+/** Silent local departure, independent of provider roster availability. */
+export async function leaveHostedLinqGroup(input: { containerRef: string; prisma?: PrismaClient }) {
+  const prisma = input.prisma ?? getPrisma();
+  // The full blind route identity is the only selector; hints are never authority.
+  const marker = await prisma.hostedLinqGroupLeave.findUnique({ where: { threadIdentityLookupKey: input.containerRef },
+    select: { threadIdentityLookupKey: true } });
+  if (marker) return { local: "already_left" as const, provider: "not_attempted" as const };
+  const expected = await prisma.hostedThreadRoute.findUnique({ where: {
+    channel_threadIdentityLookupKey: { channel: "linq", threadIdentityLookupKey: input.containerRef },
+  } });
+  if (!expected) groupMoveError("ROUTE_REQUIRED");
+  const route = await openHostedThreadDeliveryRoute({ channel: "linq", containerMemberId: expected.containerMemberId,
+    encrypted: expected.deliveryRouteEncrypted, prisma });
+  if (route.channel !== "linq" || (expected.accountLookupKey !== null && route.accountLookupKey !== expected.accountLookupKey)
+    || !createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId: route.threadId }).includes(expected.threadIdentityLookupKey)
+    || !createHostedExternalThreadLookupKeyReadCandidates({ channel: "linq", threadId: route.threadId, accountLookupKey: route.accountLookupKey }).includes(expected.threadLookupKey)) groupMoveError("ROUTE_CHANGED");
+  const prepared = prepareHostedLinqGroupLeave(route.threadId, "operator_cleanup");
+  const result = await prisma.$transaction(tx => leaveHostedLinqGroupTx({ expected, prepared, prisma: tx }));
+  return { local: result.status, ...(result.status === "unavailable" ? { reason: result.reason } : {}),
+    provider: result.status === "left" ? await requestHostedLinqGroupLeaveAfterCommit(result.postCommitLinqGroupLeave) : "not_attempted" };
+}
 
 /**
  * Detach a group route whose own line Linq reports as removed from that chat.

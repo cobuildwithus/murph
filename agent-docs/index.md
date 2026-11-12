@@ -1,3 +1,5 @@
+[Linq group leave](exec-plans/active/2026-11-12-linq-group-leave.md) tracks silent local departure. Phase 1 implements Web markers, enforcement, oversized auto-leave and Ops; the agent tool and runtime/game changes remain Phase 2. [Architecture](../ARCHITECTURE.md) owns departure authority and the [contact-privacy rotation contract](../docs/hosted-contact-privacy-rotation.md) owns marker rekeying.
+
 The local architecture and test cleanup checkpoint is recorded in [radical simplicity](exec-plans/completed/2026-11-11-radical-simplicity.md), with findings and retained-proof mappings in the [codebase audit](references/codebase-simplicity-audit-2026-11-11.md). The [PR review record](exec-plans/completed/2026-11-11-simplicity-pr-release.md) records implementation and review; [PR #4866](https://github.com/cobuildwithus/murph/pull/4866) tracks remaining merges and the single final Cloudflare deployment. Live game editing remains supported; categorical oxygen screening is retired in favor of numerical summaries.
 
 Repository tooling uses installed registry dependencies, one prepared-runtime

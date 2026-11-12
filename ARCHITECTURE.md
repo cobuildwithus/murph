@@ -4937,6 +4937,36 @@ the join-offer owner before that path runs, so a participant the outreach
 feature declines cannot have their phone and reaction persisted into
 group-owned context.
 
+Hosted Linq local group departure is owned by
+`apps/web/src/lib/hosted-routing/linq-group-leave.ts`. The independent
+`HostedLinqGroupLeave` marker holds a blind thread identity, purpose-separated
+encrypted identity, server timestamp and bounded reason. It survives container
+deletion; contact-privacy rotation re-derives and reseals it before prior-key
+retirement. Chat ownership precedes the route row lock, active game/move checks,
+marker insertion and exact route deletion in one transaction. The removed-line
+repair action keeps its separate policy. Only the winning insert returns an
+ephemeral provider target: one three-second post-commit attempt, no retry or
+durable pending work. Provider acceptance or failure never changes local success.
+
+Authenticated webhook ingress checks the marker before all fan-out, including
+poll votes, and returns `group-left` without recovery. Database failure retries.
+Ordinary message/edit admission and route creation, refresh and move adoption
+recheck under chat ownership. Game bootstrap attachment rechecks after its
+existing binding demotion takes chat ownership, immediately before it creates
+the route, so a replayed bootstrap for a closed game cannot recreate a left
+room. Attested 1:1 chats skip the marker read. Unbound notices and private
+recovery check the source group before dispatch; bound egress keeps existing
+route authority. Oversized unbound groups on a managed recipient line and the
+Ops `leave_group` action are the Phase 1 producers. Ops uses a full opaque route
+ref and reports local and provider outcomes separately. Departure sends no
+announcement or private message. Same-chat re-add remains left.
+
+The additive migration must precede Web deployment, and older route writers
+must drain before the first marker. That first write establishes the compatible
+Web rollback floor. Phase 2 still owns the agent tool, runtime typing fence,
+poll-notification chat lock and common game-binding rule. Phase 1 does not claim
+to cancel accepted work or close those races; its bound producer is operator-only.
+
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the first-contact path. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded

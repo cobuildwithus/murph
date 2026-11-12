@@ -388,6 +388,7 @@ function buildPrewarmPrisma() {
     },
   };
   return {
+    hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
       calls.push("begin");
       rootKeyAtTransactionOpen = issuedRootKeys[0] ? [...issuedRootKeys[0]] : null;

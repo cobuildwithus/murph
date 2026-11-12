@@ -2191,6 +2191,16 @@ model HostedThreadRoute {
   @@map("hosted_thread_route")
 }
 
+// Routing-control authority survives deletion of any former container.
+model HostedLinqGroupLeave {
+  threadIdentityLookupKey String   @id @map("thread_identity_lookup_key")
+  chatIdEncrypted         String   @map("chat_id_encrypted")
+  leftAt                  DateTime @default(now()) @map("left_at")
+  reason                  String   @db.VarChar(32)
+
+  @@map("hosted_linq_group_leave")
+}
+
 model HostedLinqGroupLineMove {
   id                          String @id
   containerMemberId           String @map("container_member_id")

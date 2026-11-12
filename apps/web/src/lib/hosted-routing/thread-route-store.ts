@@ -41,6 +41,21 @@ import {
 
 const HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD =
   "pending-group-reaction-context";
+
+export type HostedLinqExactThreadRoute = Pick<Prisma.HostedThreadRouteGetPayload<object>,
+  "containerMemberId" | "threadIdentityLookupKey" | "threadLookupKey" | "accountLookupKey" | "deliveryRouteEncrypted" | "updatedAt">;
+
+/** Compare and delete only; the caller owns locking and lifecycle policy. */
+export async function deleteExactHostedLinqThreadRouteTx(input: {
+  expected: HostedLinqExactThreadRoute; prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const { expected } = input;
+  const deleted = await input.prisma.hostedThreadRoute.deleteMany({ where: { channel: "linq",
+    threadIdentityLookupKey: expected.threadIdentityLookupKey, containerMemberId: expected.containerMemberId,
+    threadLookupKey: expected.threadLookupKey, accountLookupKey: expected.accountLookupKey,
+    deliveryRouteEncrypted: expected.deliveryRouteEncrypted, updatedAt: expected.updatedAt } });
+  return deleted.count === 1;
+}
 const HOSTED_LINQ_GROUP_REACTION_CRYPTO_TIMEOUT_MS = 500;
 
 interface HostedLinqThreadRoutePendingContext {

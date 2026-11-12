@@ -1,4 +1,6 @@
 import "server-only";
+
+import { readHostedLinqGroupLeave } from "./linq-group-leave";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { createHostedPhoneLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { createHostedLinqParticipantContact } from "../hosted-onboarding/linq-participant-contact";
@@ -93,6 +95,7 @@ export async function prepareVerifiedHostedLinqGroupMoveAdoption(input: {
 export async function prepareHostedLinqGroupMoveIngress(input: Ingress & {
   prisma: PrismaClient; route: HostedThreadRouteSnapshot | null;
 }): Promise<PreparedHostedLinqGroupMoveIngress> {
+  if (await readHostedLinqGroupLeave({ chatId: input.threadId, prisma: input.prisma })) return { fingerprint: fingerprint([]), action: "consume" };
   const rows = await readHostedLinqGroupMovesForIngress(input);
   const prepared: PreparedHostedLinqGroupMoveIngress = { fingerprint: fingerprint(rows), action: "continue" };
   if (!rows.length || input.isFromMe) return prepared;

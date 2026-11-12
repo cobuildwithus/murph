@@ -750,6 +750,7 @@ function createPrismaStub(input: {
         };
       }),
     },
+    hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
     hostedThreadRoute: {
       findFirst: vi.fn(async (findInput: unknown) => {
         expect(findInput).toMatchObject({

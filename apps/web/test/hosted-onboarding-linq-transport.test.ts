@@ -234,6 +234,7 @@ const usageHostedLinqProviderEvent = {
   findMany: vi.fn().mockResolvedValue([]),
 };
 const usageTransactionPrisma = {
+  hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
   hostedLinqDelivery: usageHostedLinqDelivery,
   hostedLinqDeliveryMessage: usageHostedLinqDeliveryMessage,
   hostedLinqProviderEvent: usageHostedLinqProviderEvent,
@@ -391,7 +392,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: { hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } } as never,
         sideEffects: [effect],
       }),
     ).resolves.toBeDefined();
@@ -589,6 +590,7 @@ describe("hosted Linq webhook transport", () => {
       threadId: "chat-group-replay-timeout",
     });
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
@@ -1525,8 +1527,9 @@ describe("hosted Linq webhook transport", () => {
   });
 
   it("rejects a route-less personal side effect after the chat becomes a durable group route", async () => {
-    const transactionClient = {};
+    const transactionClient = { hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } };
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $transaction: vi.fn(async (
         operation: (tx: typeof transactionClient) => Promise<unknown>,
       ) => operation(transactionClient)),
@@ -1731,7 +1734,7 @@ describe("hosted Linq webhook transport", () => {
         });
       }),
     );
-    const prisma = {};
+    const prisma = { hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } };
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
@@ -1774,6 +1777,7 @@ describe("hosted Linq webhook transport", () => {
 
   it("delivers legacy invite_signin side effects as invite signup replies", async () => {
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue({
           inviteCode: "legacy-code",
@@ -2470,6 +2474,7 @@ describe("hosted Linq webhook transport", () => {
     }
     arrangeAuthorizedMemberParticipantLine();
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue({
@@ -2718,6 +2723,7 @@ describe("hosted Linq webhook transport", () => {
     const recoveryPhone = "+15550100042";
     const memberPhone = "+15551234567";
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
@@ -2795,6 +2801,7 @@ describe("hosted Linq webhook transport", () => {
     const memberPhone = "+15551234567";
     const scheduleAfterResponse = vi.fn();
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
@@ -2879,6 +2886,7 @@ describe("hosted Linq webhook transport", () => {
   it("revalidates a verified email participant before private recovery", async () => {
     const participantEmail = "member@example.test";
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
@@ -2929,6 +2937,7 @@ describe("hosted Linq webhook transport", () => {
     const backupPhone = "+15550100042";
     const memberPhone = "+15551234567";
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
@@ -3153,6 +3162,7 @@ describe("hosted Linq webhook transport", () => {
     const backupPhone = "+15550100042";
     const memberPhone = "+15551234567";
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
@@ -3242,6 +3252,7 @@ describe("hosted Linq webhook transport", () => {
       threadContainer: null,
     });
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: memberLock,
       hostedMember: {
         findUnique: memberAccessRead,
@@ -3324,6 +3335,7 @@ describe("hosted Linq webhook transport", () => {
     },
   ])("does not dispatch group-line recovery when $label", async ({ arrange }) => {
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
@@ -3470,7 +3482,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: { hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } } as never,
         sideEffects: [effect],
       }),
     ).rejects.toThrow("send failed");
@@ -3501,11 +3513,11 @@ describe("hosted Linq webhook transport", () => {
     });
 
     await drainHostedLinqSideEffectsDirect({
-      prisma: {} as never,
+      prisma: { hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } } as never,
       sideEffects: [effect],
     });
     await drainHostedLinqSideEffectsDirect({
-      prisma: {} as never,
+      prisma: { hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } } as never,
       sideEffects: [effect],
     });
 
@@ -3575,7 +3587,7 @@ describe("hosted Linq webhook transport", () => {
     try {
       await expect(
         drainHostedLinqSideEffectsDirect({
-          prisma: {} as never,
+          prisma: { hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } } as never,
           sideEffects: [effect],
         }),
       ).rejects.toThrow("send failed");
@@ -3598,12 +3610,12 @@ describe("hosted Linq webhook transport", () => {
       expect(claimHostedLinqQuotaReplyNotice).toHaveBeenCalledWith({
         memberId: "member-1",
         occurredAt: "2026-03-26T12:00:00.000Z",
-        prisma: {},
+        prisma: expect.objectContaining({ hostedLinqGroupLeave: expect.any(Object) }),
       });
       expect(releaseHostedLinqQuotaReplyNoticeClaim).toHaveBeenCalledWith({
         memberId: "member-1",
         occurredAt: "2026-03-26T12:00:00.000Z",
-        prisma: {},
+        prisma: expect.objectContaining({ hostedLinqGroupLeave: expect.any(Object) }),
       });
     } finally {
       errorSpy.mockRestore();
@@ -3616,6 +3628,7 @@ describe("hosted Linq webhook transport", () => {
       throw new Error("Expected test account lookup key.");
     }
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue(null),
       },
@@ -3665,6 +3678,7 @@ describe("hosted Linq webhook transport", () => {
       throw new Error("Expected test account lookup key.");
     }
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       hostedLinqDelivery: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         upsert: vi.fn().mockResolvedValue({ id: "hld_route_current" }),
@@ -3715,6 +3729,7 @@ describe("hosted Linq webhook transport", () => {
       throw new Error("Expected test account lookup key.");
     }
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       hostedLinqDelivery: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         upsert: vi.fn().mockResolvedValue({ id: "hld_route_mismatch" }),
@@ -3820,7 +3835,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
-        prisma: {} as never,
+        prisma: { hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } } as never,
         sideEffects: [effect],
       }),
     ).resolves.toBeDefined();
@@ -3828,7 +3843,7 @@ describe("hosted Linq webhook transport", () => {
     expect(claimHostedLinqQuotaReplyNotice).toHaveBeenCalledWith({
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
-      prisma: {},
+      prisma: expect.objectContaining({ hostedLinqGroupLeave: expect.any(Object) }),
     });
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
@@ -3836,6 +3851,7 @@ describe("hosted Linq webhook transport", () => {
   it("does not mark invite signup notices sent when delivery fails", async () => {
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue({
@@ -3905,6 +3921,7 @@ describe("hosted Linq webhook transport", () => {
       });
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue({
@@ -4004,6 +4021,7 @@ describe("hosted Linq webhook transport", () => {
       transportBoundaryMocks.claimHostedLinqProactiveConversationCapacityTx;
     const lookupKey = createHostedPhoneLookupKey(recoveryLinePhone);
     const prisma = {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedLinqLine: {
         findUnique: vi.fn(),
@@ -4232,6 +4250,20 @@ describe("hosted Linq webhook transport", () => {
         .not.toHaveBeenCalled();
     });
 
+    it.each(["setup", "email recovery"])("suppresses held %s after the source group leaves", async kind => {
+      const effect = kind === "setup" ? createHostedWebhookLinqMessageSideEffect({
+        chatId: "synthetic-left-group", occurredAt: "2026-03-27T11:59:00.000Z",
+        replyToMessageId: null, sourceEventId: "synthetic-held-setup", template: "group_setup",
+      }) : buildGroupEmailRecoveryEffect("synthetic-held-recovery");
+      prisma.hostedLinqGroupLeave.findFirst.mockResolvedValueOnce({ threadIdentityLookupKey: "synthetic-marker" });
+      await expect(drainHostedLinqSideEffectsDirect({ prisma: prisma as never, sideEffects: [effect], scheduleAfterResponse: () => undefined }))
+        .rejects.toMatchObject({ code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED" });
+      expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+      expect(createHostedLinqChat).not.toHaveBeenCalled();
+      expect(claimCapacity).not.toHaveBeenCalled();
+      expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    });
+
     it("still answers in the group without claiming private-conversation capacity", async () => {
       claimCapacity.mockResolvedValue(false);
       const effect = createHostedWebhookLinqMessageSideEffect({
@@ -4332,6 +4364,7 @@ function buildAuthorizedLinqRouteFixture(input: {
       threadId: input.threadId,
     },
     prisma: {
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       hostedThreadRoute: {
         findMany: vi.fn().mockResolvedValueOnce([
           {
@@ -4377,6 +4410,7 @@ function createInviteSignupPrismaFixture(
     ? createHostedPhoneLookupKey("+15550100001")
     : input.assignedLineLookupKey;
   const transactionClient = {
+    hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
     $executeRaw: vi.fn().mockResolvedValue(1),
     $queryRaw: vi.fn().mockResolvedValue([{ id: "member-1" }]),
     hostedInvite: {

@@ -429,6 +429,7 @@ function createRepairHarness(input: MutableHostedThreadRouteRow) {
     return row;
   });
   const prisma = {
+    hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
     // The refresh path takes the container route advisory lock before writing,
     // so the fake must answer $executeRaw the way the sibling route fakes do.
     $executeRaw: vi.fn(async () => 0),

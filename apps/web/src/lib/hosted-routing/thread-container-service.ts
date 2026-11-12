@@ -65,9 +65,11 @@ import {
   type HostedThreadDeliveryRouteChannel,
   type HostedThreadDeliveryRouteV1,
 } from "./thread-delivery-route";
-import type {
-  HostedThreadRouteSnapshot,
+import {
+  deleteExactHostedLinqThreadRouteTx,
+  type HostedThreadRouteSnapshot,
 } from "./thread-route-store";
+import { assertHostedLinqGroupNotLeft } from "./linq-group-leave";
 
 import { acquireHostedLinqChatOwnershipLockTx } from "./linq-chat-ownership-lock";
 import { holdHostedLinqGroupLineMove, linqGroupMoveSelect, type HostedLinqGroupLineMove, type HostedLinqGroupMoveCleanup } from "./linq-group-line-move-store";
@@ -112,6 +114,7 @@ export async function replaceHostedLinqGroupLineMoveRouteTx(input: {
   // which is independent of privacy-key versions. No provider or crypto work follows BEGIN.
   const chats = [cleanup.sourceChatId, route.threadId].sort();
   for (const chatId of chats) await acquireHostedLinqChatOwnershipLockTx({ chatId, tx: input.prisma });
+  await assertHostedLinqGroupNotLeft({ chatId: route.threadId, prisma: input.prisma });
   for (const threadId of chats) await acquireHostedThreadContainerRouteWriteLockTx({ channel: "linq", threadId, prisma: input.prisma });
   const current = await input.prisma.hostedLinqGroupLineMove.findUnique({ where: { id: move.id }, select: linqGroupMoveSelect });
   if (!current || JSON.stringify(current) !== JSON.stringify(move)
@@ -167,11 +170,7 @@ export async function releaseHostedLinqRemovedLineRouteTx(input: {
     { fromThreadIdentityLookupKey: { in: identities }, status: { in: ["reserved", "adopted"] } },
     { toThreadIdentityLookupKey: { in: identities }, status: { in: ["adopted", "left"] } },
   ] }, select: { id: true } })) return false;
-  const deleted = await input.prisma.hostedThreadRoute.deleteMany({ where: { channel: "linq",
-    threadIdentityLookupKey: expected.threadIdentityLookupKey, containerMemberId: expected.containerMemberId,
-    threadLookupKey: expected.threadLookupKey, accountLookupKey: expected.accountLookupKey,
-    deliveryRouteEncrypted: expected.deliveryRouteEncrypted, updatedAt: expected.updatedAt } });
-  return deleted.count === 1;
+  return deleteExactHostedLinqThreadRouteTx(input);
 }
 
 export const HOSTED_THREAD_CONTAINER_DEFAULT_MONTHLY_USAGE_LIMIT_USD_MICROS =
@@ -276,6 +275,10 @@ export async function attachHostedThreadContainerBootstrapRouteTx(input: {
     return;
   }
   await demoteHostedMemberLinqGroupChatBindingsTx({ enforceProviderDispatchFence: true, linqChatId: threadId, prisma: input.prisma });
+  // Demotion takes chat ownership, as local leave does, so this read sees any
+  // leave that committed first. A replayed bootstrap for a closed game must not
+  // recreate a left room's route.
+  if (channel === "linq") await assertHostedLinqGroupNotLeft({ chatId: threadId, prisma: input.prisma });
   await createHostedThreadRouteRowTx({ channel, containerMemberId, accountLookupKey, threadIdentityLookupKey, threadLookupKey, deliveryRouteEncrypted: input.prepared.deliveryRouteEncrypted, prisma: input.prisma });
 }
 
@@ -432,6 +435,7 @@ export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
     prepared: input.preparedDeliveryRoute,
   });
 
+  await lockAndAssertHostedLinqRouteWritableTx({ channel: input.route.channel, threadId, prisma: input.prisma });
   await acquireHostedThreadContainerRouteWriteLockTx({
     channel: input.route.channel,
     prisma: input.prisma,
@@ -616,6 +620,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
   prisma: Prisma.TransactionClient;
   threadId: string | number;
 }): Promise<HostedThreadContainerRouteEnsureResult> {
+  await lockAndAssertHostedLinqRouteWritableTx(input);
   await lockHostedMemberRow(input.prisma, input.ownerMemberId);
   const owner = await readHostedMemberCoreState({
     memberId: input.ownerMemberId,
@@ -1131,6 +1136,14 @@ async function acquireHostedThreadContainerRouteWriteLockTx(input: {
       hashtext(${`${input.channel}:${threadId}`})
     )
   `;
+}
+
+async function lockAndAssertHostedLinqRouteWritableTx(input: {
+  channel: HostedThreadDeliveryRouteChannel; threadId: string | number; prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  if (input.channel !== "linq") return;
+  await acquireHostedLinqChatOwnershipLockTx({ chatId: input.threadId, tx: input.prisma });
+  await assertHostedLinqGroupNotLeft({ chatId: input.threadId, prisma: input.prisma });
 }
 
 function resolveHostedThreadContainerMemberChannels(

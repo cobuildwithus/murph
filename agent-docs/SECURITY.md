@@ -1832,6 +1832,13 @@ model arguments never choose a member or database.
 
 ## Hosted operator tasks
 
+Linq `leave_group` uses the existing Ops authentication and same-origin boundary,
+with one full opaque route reference as its selector. The silent departure
+marker is independent of container retention and stores only a blind identity,
+purpose-separated encrypted chat identity, timestamp and bounded reason. The
+departure authority and key-retirement contract live in `ARCHITECTURE.md` and
+`docs/hosted-contact-privacy-rotation.md`.
+
 Operator-task admission is restricted to the existing hosted Ops allowlist and
 same-origin mutation boundary. Every task is bound to one active target runtime
 and workspace plus the admitting operator, and a stable idempotency key is bound
