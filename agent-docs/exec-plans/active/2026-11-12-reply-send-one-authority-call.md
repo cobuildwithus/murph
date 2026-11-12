@@ -252,6 +252,38 @@ request:
 
 ## Decisions
 
+- 2026-11-12 implementation: the PostgreSQL-backed route proof passes for both
+  direct accepted ingress and a durable group route. A claiming request without
+  `expectedResolvedRoute` returns the requested target, creates one fence, and
+  returns the same route with `providerDispatchClaimed: false` on replay. No Web
+  production code, locks, mismatch rule or turn-commit probe changed.
+- Ordinary eligibility derives from the existing matching delivery context
+  (thread or explicit target; never participant) and matching inbound reply ID,
+  with no home-route fallback, card, vault file, reviewed/private completion
+  or progress purpose. The first
+  call claims; the fetch boundary retains liveness and attempt stamping.
+  Route-authority timing is zero on this path and fence timing starts at the
+  claim. All surviving branches retain their existing calls and timing.
+- Outcome: remove one serial authority round trip from ordinary replies.
+  Reaches: direct/group text and media replies. Proof: real outbox call counts,
+  PostgreSQL route/fence replay, unchanged veto and ordering tests, retry after
+  local liveness loss, and dispatch timing. Product UX verdict: Ready for PR;
+  production latency and provider acceptance remain post-deploy evidence.
+- Candidate review found that prepared delivery contexts can also come from
+  stored group-route authority, including a retired alias with no reply anchor.
+  Require the existing inbound reply ID for the ordinary path: Web only prepares
+  group-move aliases when that ID is absent. Unanchored sends keep two calls,
+  preserving alias resolution without introducing any new state or route rule.
+- The current Web response contract is the compatibility floor. Older runners
+  retain two calls against current Web. A legacy already-started error without
+  a route cannot serve the new ordinary path: roll back the runner before Web
+  if reverting that response contract. No deployment is part of this task.
+- The brief explicitly excludes merging, deployment and ReviewGPT. Keep this
+  plan active for the deployment/measurement task; commit through
+  `scripts/committer` as requested. No new state, schema, config or API fields.
+- Model input, prompts, tools and reply content do not change; deterministic
+  delivery proof applies, so no real-model journey is needed.
+
 - 2026-11-12: plan review findings 1 to 7 accepted as recorded above; scope
   reduced to ordinary message sends with Web unchanged.
 - Open, owner decision: whether to pursue B by changing who wins the rare
@@ -259,7 +291,41 @@ request:
 
 ## Verification
 
-- Commands to run: focused `assistant-runtime` delivery tests, `apps/web`
-  engagement route tests, `pnpm typecheck` for both, `runner:bundle`.
-- Expected outcomes: call-count test shows one engagement call per reply send;
-  all existing veto tests pass unchanged.
+- PostgreSQL migrations applied to an isolated local test database (exit 0).
+- Web: `DATABASE_URL=<LOCAL_TEST_DATABASE> MURPH_TEST_POSTGRES_CONCURRENCY=1
+  pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
+  apps/web/test/hosted-runtime-reply-claim-postgres.test.ts
+  apps/web/test/hosted-onboarding-linq-egress-engagement.test.ts
+  apps/web/test/hosted-runtime-linq-delivery-route.test.ts`: 273 passed, exit 0.
+  Authentication alone is stubbed in the new proof; route resolution, locks,
+  mailbox reads and dispatch writes use migrated PostgreSQL.
+- Focused real-outbox call/retry proof: direct text and media use probe + claim;
+  group text and media use claim only. A retryable local failure after claim
+  preserves the outbox retry, records no early provider attempt, and retries
+  against `providerDispatchClaimed: false` to one Linq message request.
+- Runtime: `pnpm --dir packages/assistant-runtime exec vitest run --no-coverage
+  test/hosted-runtime-callbacks.test.ts
+  test/hosted-runtime-linq-outbox-regression.test.ts
+  test/hosted-runtime-linq-audio-e2e.test.ts
+  test/hosted-runtime-linq-document-preservation-e2e.test.ts
+  test/hosted-runtime-workspace-assistant-phase-scheduling.test.ts`: 412 passed,
+  exit 0. Existing unchanged-path veto/order tests are untouched. The new
+  unanchored alias test asserts authority + claim, and ordinary timing tests
+  include exactly the simulated Web claim duration in the fence metric.
+- `pnpm --dir packages/assistant-runtime typecheck` and
+  `pnpm --dir apps/web typecheck`: both exit 0.
+- `pnpm --dir apps/cloudflare runner:bundle`: exit 0; entry 71,194 bytes,
+  static boot closure 2,035,354 bytes, 24 chunks; all bundle budgets passed.
+- `pnpm --dir apps/web changelog:generate` and
+  `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage
+  apps/web/test/changelog-page.test.tsx`: exit 0; 4 tests passed.
+- `pnpm complexity:diff`: exit 0; source complexity debt 154 to 153 and maximum
+  73 to 72. Repeated optional dependency/media defaults are normalized once in
+  the existing send function; no helper abstraction was added.
+- `pnpm docs:drift` and `git diff --check`: exit 0. Parent review covered
+  the full diff, target provenance, alias exclusion, compatibility, retry,
+  unchanged provider-entry liveness and privacy. No new Frog entry was needed.
+- Not performed: production queries, latency measurements, real provider sends,
+  merge, deployment, or ReviewGPT. Earlier combined A+B latency estimates and
+  Web-first changes are superseded by the revised scope; no numeric latency
+  improvement is claimed from local call counts.

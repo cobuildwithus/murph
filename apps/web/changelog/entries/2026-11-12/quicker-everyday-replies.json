@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-12",
+  "order": 100,
+  "item": {
+    "id": "quicker-everyday-replies",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Quicker everyday replies",
+    "summary": "Ordinary text and image replies in direct and group iMessage chats have less waiting before they send.",
+    "details": "This improves delivery after Murph finishes composing a reply. Cards, secure file sends and voice messages keep their existing delivery flow.",
+    "relevanceTags": ["messaging", "performance"],
+    "sourcePullRequests": []
+  }
+}

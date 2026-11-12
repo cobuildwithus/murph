@@ -4894,8 +4894,9 @@ function createHostedAssistantLinqSendDependency(input: {
   threadIsDirect?: boolean | null;
   vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
+  const { effectsPort = null, intentId = null, vaultRoot = null } = input;
   const onAppCardFallbackError = createHostedLinqAppCardFallbackErrorObserver({
-    intentId: input.intentId ?? null,
+    intentId,
     platform: input.platform ?? null,
   });
   return async (request) => {
@@ -4918,13 +4919,22 @@ function createHostedAssistantLinqSendDependency(input: {
     const candidateFromPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
-    const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
+    const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal) ?? null;
     const persistAppCardTextFallback = request.persistAppCardTextFallback;
     const reviewedAssistantAskCompletion = idempotencyKey?.startsWith(
       HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
     ) === true;
-    const includesVaultFile =
-      request.media?.some((media) => media.kind === "vault_file") === true;
+    const media = request.media ?? [];
+    const answeredMailboxItemIds = request.answeredMailboxItemIds ?? [];
+    const includesVaultFile = media.some((item) => item.kind === "vault_file");
+    const claimBeforeBuild = !!deliveryContext?.target
+      && !!request.replyToMessageId?.trim()
+      && request.homeRouteFallbackAllowed !== true
+      && request.card == null
+      && !includesVaultFile
+      && !reviewedAssistantAskCompletion
+      && !privateAssistantAskCompletion
+      && !input.deliveryPurpose;
     const assertPrivateAssistantAskCompletionRoute = async (route: {
       fromPhoneNumber: string | null;
       kind: HostedExecutionAssistantNotificationRoute["delivery"]["kind"];
@@ -4961,13 +4971,13 @@ function createHostedAssistantLinqSendDependency(input: {
           threadId: routeContext.threadId,
           threadIsDirect: routeContext.threadIsDirect,
         },
-        effectsPort: input.effectsPort ?? null,
-        intentId: input.intentId ?? null,
-        media: request.media ?? [],
+        effectsPort,
+        intentId,
+        media,
         message: request.message,
         now: new Date(),
-        signal: signal ?? null,
-        vaultRoot: input.vaultRoot ?? null,
+        signal,
+        vaultRoot,
       });
     };
     if (privateAssistantAskCompletion) {
@@ -4980,28 +4990,29 @@ function createHostedAssistantLinqSendDependency(input: {
     const routeAuthorityStartedAtMonotonicMs = performance.now();
     const engagement =
       await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-        answeredMailboxItemIds: request.answeredMailboxItemIds,
+        answeredMailboxItemIds,
         assistantAskFallback:
           reviewedAssistantAskCompletion
             ? isHostedReviewedAssistantAskFallbackPayload({
-                media: request.media,
+                media,
                 message: request.message,
               })
             : undefined,
-        authorityCheckOnly: true,
+        authorityCheckOnly: !claimBeforeBuild,
         directRecipientPhoneNumber: candidateDirectRecipientPhoneNumber,
-        effectsPort: input.effectsPort ?? null,
+        effectsPort,
         fromPhoneNumber: candidateFromPhoneNumber,
         homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
         idempotencyKey,
-        intentId: input.intentId ?? null,
+        intentId,
+        providerDispatchRetrySafe: true,
         replyToMessageId: request.replyToMessageId ?? null,
-        signal: signal ?? null,
+        signal,
         target: deliveryContext?.target ?? request.target,
         targetKind: request.targetKind ?? null,
       });
-    const routeAuthorityCheckMs =
-      performance.now() - routeAuthorityStartedAtMonotonicMs;
+    const routeAuthorityCheckMs = claimBeforeBuild
+      ? 0 : performance.now() - routeAuthorityStartedAtMonotonicMs;
     const resolvedRoute = requireHostedAssistantLinqResolvedRoute(engagement);
     const directRecipientPhoneNumber = resolvedRoute.directRecipientPhoneNumber;
     const fromPhoneNumber = resolvedRoute.fromPhoneNumber;
@@ -5033,17 +5044,17 @@ function createHostedAssistantLinqSendDependency(input: {
     const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({
       actionApprovalPort: input.actionApprovalPort ?? null,
       expectedDedupeKey: input.expectedDedupeKey ?? null,
-      intentId: input.intentId ?? null,
-      media: request.media ?? [],
+      intentId,
+      media,
       signal: input.signal,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
-      vaultRoot: input.vaultRoot ?? null,
+      vaultRoot,
     });
     const verifiedVaultImages = await preloadHostedAssistantVaultImages({
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       signal: input.signal,
-      media: request.media ?? [],
-      vaultRoot: input.vaultRoot ?? null,
+      media,
+      vaultRoot,
     });
     let providerAttempt: {
       attemptedAt: Date;
@@ -5053,22 +5064,22 @@ function createHostedAssistantLinqSendDependency(input: {
       verifiedVaultFiles.size > 0 || verifiedVaultImages.size > 0;
     const readProviderAttempt = () => providerAttempt;
     const readResolvedEngagementInput = () => ({
-      answeredMailboxItemIds: request.answeredMailboxItemIds,
+      answeredMailboxItemIds,
       deliveryPurpose: input.deliveryPurpose ?? null,
       assistantAskFallback: reviewedAssistantAskCompletion
         ? isHostedReviewedAssistantAskFallbackPayload({
-            media: request.media,
+            media,
             message: request.message,
           })
         : undefined,
       directRecipientPhoneNumber,
-      effectsPort: input.effectsPort ?? null,
+      effectsPort,
       expectedResolvedRoute: resolvedRoute,
       fromPhoneNumber,
       homeRouteFallbackAllowed: false,
-      intentId: input.intentId ?? null,
+      intentId,
       replyToMessageId: request.replyToMessageId ?? null,
-      signal: signal ?? null,
+      signal,
       target: providerTarget,
       targetKind: providerTargetKind,
     });
@@ -5091,19 +5102,20 @@ function createHostedAssistantLinqSendDependency(input: {
         }
       },
       onProviderDispatchEntered: async () => {
-        const providerEntryFenceStartedAtMonotonicMs = performance.now();
+        const providerEntryFenceStartedAtMonotonicMs = claimBeforeBuild
+          ? routeAuthorityStartedAtMonotonicMs : performance.now();
         try {
           const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
             ? await prepareHostedReviewedAssistantAskProviderEntry({
-                intentId: input.intentId ?? null,
-                media: request.media ?? [],
+                intentId,
+                media,
                 message: request.message,
                 now: new Date(),
-                vaultRoot: input.vaultRoot ?? null,
+                vaultRoot,
               })
             : undefined;
-          const providerEntry =
-            await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+          const providerEntry = claimBeforeBuild ? engagement
+            : await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
               ...readResolvedEngagementInput(),
               assistantAskCompletionExpiresAt: reviewedCompletionExpiresAt,
               authorityCheckOnly: false,
@@ -5202,7 +5214,7 @@ function createHostedAssistantLinqSendDependency(input: {
       ...outcome,
       directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
       fromPhoneNumber,
-      intentId: input.intentId ?? null,
+      intentId,
       providerTarget,
       target: providerTarget,
       targetKind: providerTargetKind,
@@ -5276,7 +5288,7 @@ function createHostedAssistantLinqSendDependency(input: {
                   && providerAttempt.idempotencyKey !== fallback.idempotencyKey
                 ) {
                   await recordHostedAssistantLinqDeliveryOutcomeRequired({
-                    effectsPort: input.effectsPort ?? null,
+                    effectsPort,
                     outcome: buildDeliveryOutcome({
                       attemptedAt: providerAttempt.attemptedAt,
                       answeredMailboxItemIds: [],
@@ -5305,7 +5317,7 @@ function createHostedAssistantLinqSendDependency(input: {
         readHostedAssistantLinqRichLinkPartialDeliveryResult(error);
       if (partialRichLinkResult) {
         await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
-          effectsPort: input.effectsPort ?? null,
+          effectsPort,
           outcome: buildDeliveryOutcome({
             attemptedAt: failedProviderAttempt.attemptedAt,
             answeredMailboxItemIds: [],
@@ -5329,10 +5341,10 @@ function createHostedAssistantLinqSendDependency(input: {
         });
       }
       queueHostedAssistantLinqDeliveryOutcomeWrite({
-        effectsPort: input.effectsPort ?? null,
+        effectsPort,
         outcome: buildDeliveryOutcome({
           attemptedAt: failedProviderAttempt.attemptedAt,
-          answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
+          answeredMailboxItemIds,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
           failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
@@ -5354,13 +5366,13 @@ function createHostedAssistantLinqSendDependency(input: {
       acceptedAt,
     });
     await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
-      effectsPort: input.effectsPort ?? null,
+      effectsPort,
       outcome: buildDeliveryOutcome({
         acceptedAt,
         attemptedAt: requireHostedLinqProviderAttemptedAt(
           acceptedProviderAttempt?.attemptedAt ?? null,
         ),
-        answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
+        answeredMailboxItemIds,
         idempotencyKey: acceptedIdempotencyKey,
         providerThreadId: result.providerThreadId ?? null,
         result,
