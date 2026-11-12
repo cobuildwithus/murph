@@ -85,13 +85,13 @@ now) adds a `product_tests` contaminant-report table joined onto foods/supplemen
 
 ## Source data (already downloaded + unzipped locally)
 
-`/Users/willhay/startup1/fdc-data/full/` — the FULL FDC CSV archive 2026-04-30
+`~/startup1/fdc-data/full/` — the FULL FDC CSV archive 2026-04-30
 (all data types, one consistent set of support files incl. `food_portion.csv`).
 Filter `food.data_type IN ('Branded','Foundation','SR Legacy','Survey (FNDDS)')`
 during import (branded ≈2M products, foundation ≈450, sr_legacy ≈7.8k,
 fndds ≈26k). Inspect the actual CSV
 headers there before writing transforms. The per-dataset zips under
-`/Users/willhay/startup1/fdc-data/{branded,foundation,sr_legacy}/` are
+`~/startup1/fdc-data/{branded,foundation,sr_legacy}/` are
 backup only — do not mix formats. The full archive's `food_nutrient.csv` is tens
 of millions of rows: pre-filter it locally (awk or similar) to the core nutrient
 numbers above before any `\copy` to the DB, and keep DB-side temp usage bounded.

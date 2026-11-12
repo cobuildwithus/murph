@@ -33,7 +33,7 @@
 - None.
 
 ## Working set (files/ids/commands):
-- `/Users/willhay/Downloads/web-fetch-production-followup.patch`
+- `~/Downloads/web-fetch-production-followup.patch`
 - `packages/assistant-engine/src/assistant/web-fetch.ts`
 - `packages/assistant-engine/src/assistant/web-fetch/{content.ts,html.ts,network.ts,response.ts}`
 - `packages/assistant-engine/src/assistant/web-pdf-read.ts`

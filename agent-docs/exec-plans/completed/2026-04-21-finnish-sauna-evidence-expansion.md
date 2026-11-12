@@ -41,7 +41,7 @@ Updated: 2026-04-21
 
 ## Verification
 
-- `git apply --check -p1 /Users/willhay/Downloads/finnish-sauna-evidence.patch`
+- `git apply --check -p1 ~/Downloads/finnish-sauna-evidence.patch`
   failed only on stale `packages/health-commons/generated/{catalog.hash,catalog.json,entities.ndjson}` hunks.
 - `git apply --check -p1 /tmp/finnish-sauna-evidence.content-only.patch`
   passed after stripping the stale generated hunks and the malformed footer hunks that would have collapsed frontmatter closers onto body text.

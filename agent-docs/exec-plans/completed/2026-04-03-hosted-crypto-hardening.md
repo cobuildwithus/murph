@@ -64,8 +64,8 @@
 
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `agent-docs/exec-plans/active/2026-04-03-hosted-crypto-hardening.md`
-- `/Users/willhay/Downloads/hosted-crypto-hardening.patch`
-- `/Users/willhay/Downloads/hosted-crypto-hardening-summary.md`
+- `~/Downloads/hosted-crypto-hardening.patch`
+- `~/Downloads/hosted-crypto-hardening-summary.md`
 - `apps/cloudflare/**`
 - `apps/web/**`
 - `packages/hosted-execution/**`
