@@ -8,6 +8,8 @@ export { maskPhoneNumber, normalizePhoneNumber, normalizePhoneNumberForCountry }
 
 export type HostedOnboardingReadClient = PrismaClient | Prisma.TransactionClient;
 export const HOSTED_ONBOARDING_TRANSACTION_OPTIONS = { maxWait: 5_000 } as const;
+/** A terminally failed Linq send can be resent only this long after acceptance. */
+export const HOSTED_LINQ_TERMINAL_RETRY_WINDOW_MS = 180_000;
 
 export async function lockHostedMemberRow(
   tx: Pick<Prisma.TransactionClient, "$queryRaw">,
