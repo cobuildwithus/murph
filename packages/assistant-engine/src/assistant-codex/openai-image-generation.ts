@@ -14,7 +14,7 @@ import type {
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
-export const OPENAI_IMAGE_GENERATION_MODEL = 'gpt-image-2.6-flare'
+export type OpenAiImageModel = 'gpt-image-2.6-flare' | 'gpt-image-2.6-sunburst'
 export const OPENAI_IMAGES_BASE_URL = 'https://api.openai.com/v1'
 // Image generation is slow but bounded; complex prompts can exceed two minutes,
 // especially reference-image edits. TimeoutError is deliberately not an
@@ -74,6 +74,7 @@ export async function generateOpenAiImage(input: {
   abortSignal?: AbortSignal | null
   apiKey: string
   fetchImpl: typeof fetch
+  model: OpenAiImageModel
   outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
   prompt: string
@@ -94,6 +95,7 @@ async function generateOpenAiImageFromPrompt(input: {
   abortSignal?: AbortSignal | null
   apiKey: string
   fetchImpl: typeof fetch
+  model: OpenAiImageModel
   outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
   prompt: string
@@ -118,6 +120,7 @@ async function editOpenAiImageWithReferences(input: {
   abortSignal?: AbortSignal | null
   apiKey: string
   fetchImpl: typeof fetch
+  model: OpenAiImageModel
   outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
   prompt: string
@@ -345,6 +348,7 @@ async function readOpenAiImageGenerationResult(
 }
 
 function buildOpenAiImageGenerationRequest(input: {
+  model: OpenAiImageModel
   outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
   prompt: string
@@ -352,7 +356,7 @@ function buildOpenAiImageGenerationRequest(input: {
   size: OpenAiImageSize
 }): ImageGenerateParamsNonStreaming {
   const request: ImageGenerateParamsNonStreaming = {
-    model: OPENAI_IMAGE_GENERATION_MODEL,
+    model: input.model,
     output_format: input.outputFormat,
     prompt: input.prompt,
     quality: input.quality,
@@ -365,6 +369,7 @@ function buildOpenAiImageGenerationRequest(input: {
 }
 
 async function buildOpenAiImageEditRequest(input: {
+  model: OpenAiImageModel
   outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
   prompt: string
@@ -379,7 +384,7 @@ async function buildOpenAiImageEditRequest(input: {
           type: reference.mediaType,
         })),
     ),
-    model: OPENAI_IMAGE_GENERATION_MODEL,
+    model: input.model,
     output_format: input.outputFormat,
     prompt: input.prompt,
     quality: input.quality,

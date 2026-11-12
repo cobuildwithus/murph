@@ -6,8 +6,8 @@ import { readHostedExecutionSnapshotBaseRef, readHostedExecutionSnapshotDeltaRef
 import { matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
 import { hostedPrivateMediaUserPrefix, hostedBrowserVaultReplicaUserPrefix, hostedMediaUserPrefix, hostedWorkspaceSnapshotUserPrefix } from "../../storage-paths.ts";
 import { listHostedBrowserVaultReplicaSiblingObjectKeys } from "../../browser-vault-store.ts";
-import { HostedBundleGarbageCollector } from "../../bundle-gc.ts";
-import { RunnerStoreCache } from "../../user-runner/runner-store-cache.ts";
+import { deleteLegacyHostedBundle } from "../../bundle-gc.ts";
+import { loadRunnerStores } from "../../user-runner/runner-stores.ts";
 import { json, readOptionalJsonObject } from "../../json.ts";
 import { readHostedExecutionEnvironment } from "../../env.ts";
 import { asWorkerStringEnvironment } from "../../worker-contracts.ts";
@@ -47,10 +47,22 @@ export async function purgeHostedRuntimeResource(input: {
     return;
   }
   if (resource.kind === "legacy_snapshot") {
-    const stores = await new RunnerStoreCache({ bucket, env: readHostedExecutionEnvironment(asWorkerStringEnvironment(input.source)), runnerRuntimeEnvSource: input.source }).ensure(input.userId);
-    const collector = new HostedBundleGarbageCollector(bucket, stores.crypto.rootKey, stores.crypto.rootKeyId, stores.crypto.keysById);
+    const stores = await loadRunnerStores({
+      bucket,
+      env: readHostedExecutionEnvironment(asWorkerStringEnvironment(input.source)),
+      userId: input.userId,
+    });
     const refs = [readHostedExecutionSnapshotBaseRef(resource.snapshotRef), readHostedExecutionSnapshotHotRef(resource.snapshotRef), readHostedExecutionSnapshotDeltaRef(resource.snapshotRef)];
-    for (const previousBundleRef of refs) if (previousBundleRef) await collector.cleanupBundleTransition({ userId: input.userId, previousBundleRef, nextBundleRef: null });
+    for (const ref of refs) {
+      if (ref) await deleteLegacyHostedBundle({
+        bucket,
+        key: stores.crypto.rootKey,
+        keyId: stores.crypto.rootKeyId,
+        keysById: stores.crypto.keysById,
+        ref,
+        userId: input.userId,
+      });
+    }
     return;
   }
   const prefix = await (resource.kind === "snapshot" ? hostedWorkspaceSnapshotUserPrefix : resource.kind === "media" ? hostedMediaUserPrefix : hostedBrowserVaultReplicaUserPrefix)({ userId: input.userId });

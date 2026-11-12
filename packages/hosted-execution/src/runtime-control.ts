@@ -245,6 +245,7 @@ export const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICED_MODELS = [
   "gpt-image-2",
   "gpt-image-2.5-flare",
   "gpt-image-2.6-flare",
+  "gpt-image-2.6-sunburst",
 ] as const;
 
 export type HostedAiUsageAllowanceOpenAiImagePricedModel =
@@ -278,32 +279,6 @@ const HOSTED_AI_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES = new Set<string>([
 export const HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS = [
   ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
 ] as const;
-
-export const HOSTED_AI_USAGE_ALLOW_DECISION_SCHEMA =
-  "murph.hosted-ai-usage-allow-decision.v1";
-export const HOSTED_AI_USAGE_ALLOW_DECISION_SIGNATURE_ALG = "HMAC-SHA256";
-
-export interface HostedAiUsageAllowDecisionBody {
-  allowed: true;
-  expiresAt: string;
-  issuedAt: string;
-  nonce: string;
-  schema: typeof HOSTED_AI_USAGE_ALLOW_DECISION_SCHEMA;
-  userId: string;
-}
-
-export interface HostedAiUsageAllowDecisionSignature {
-  alg: typeof HOSTED_AI_USAGE_ALLOW_DECISION_SIGNATURE_ALG;
-  keyId: string;
-  signature: string;
-}
-
-export interface HostedAiUsageAllowDecision
-  extends HostedAiUsageAllowDecisionBody {
-  signature: HostedAiUsageAllowDecisionSignature;
-}
-
-export type HostedRunnerNudgeRequest = Record<string, never>;
 
 export function isHostedAiUsageAllowancePricedModelId(
   value: string,
@@ -447,96 +422,6 @@ export function resolveHostedAiUsageTokenPricingBasis(input: {
     : "standard";
 }
 
-export async function signHostedAiUsageAllowDecision(input: {
-  body: HostedAiUsageAllowDecisionBody;
-  keyId?: string | null;
-  secret: string;
-}): Promise<HostedAiUsageAllowDecision> {
-  const keyId = normalizeHostedAiUsageAllowDecisionText(input.keyId) ?? "v1";
-  const signature = await signHostedAiUsageAllowDecisionPayload({
-    payload: buildHostedAiUsageAllowDecisionSigningPayload(input.body),
-    secret: input.secret,
-  });
-
-  return {
-    ...input.body,
-    signature: {
-      alg: HOSTED_AI_USAGE_ALLOW_DECISION_SIGNATURE_ALG,
-      keyId,
-      signature,
-    },
-  };
-}
-
-export async function verifyHostedAiUsageAllowDecision(input: {
-  decision: HostedAiUsageAllowDecision;
-  secret: string;
-}): Promise<boolean> {
-  const expected = await signHostedAiUsageAllowDecisionPayload({
-    payload: buildHostedAiUsageAllowDecisionSigningPayload(input.decision),
-    secret: input.secret,
-  });
-
-  return constantTimeStringEqual(expected, input.decision.signature.signature);
-}
-
-export function parseHostedAiUsageAllowDecision(
-  value: unknown,
-): HostedAiUsageAllowDecision {
-  const record = requireHostedAiUsageAllowDecisionObject(value, "AI usage allow decision");
-  const signature = requireHostedAiUsageAllowDecisionObject(
-    record.signature,
-    "AI usage allow decision signature",
-  );
-
-  return {
-    allowed: requireHostedAiUsageAllowDecisionAllowed(record.allowed),
-    expiresAt: requireHostedAiUsageAllowDecisionIsoDate(record.expiresAt, "expiresAt"),
-    issuedAt: requireHostedAiUsageAllowDecisionIsoDate(record.issuedAt, "issuedAt"),
-    nonce: requireHostedAiUsageAllowDecisionText(record.nonce, "nonce"),
-    schema: requireHostedAiUsageAllowDecisionSchema(record.schema),
-    signature: {
-      alg: requireHostedAiUsageAllowDecisionSignatureAlg(signature.alg),
-      keyId: requireHostedAiUsageAllowDecisionText(signature.keyId, "signature.keyId"),
-      signature: requireHostedAiUsageAllowDecisionText(
-        signature.signature,
-        "signature.signature",
-      ),
-    },
-    userId: requireHostedAiUsageAllowDecisionText(record.userId, "userId"),
-  };
-}
-
-export function parseHostedRunnerNudgeRequest(value: unknown): HostedRunnerNudgeRequest {
-  if (value === null || value === undefined) {
-    return {};
-  }
-
-  const record = requireHostedAiUsageAllowDecisionObject(value, "runner nudge request");
-  const keys = Object.keys(record);
-  if (keys.length === 0) {
-    return {};
-  }
-
-  throw new TypeError("runner nudge request must not include legacy fields.");
-}
-
-export function buildHostedAiUsageAllowDecisionBody(input: {
-  expiresAt: Date | string;
-  issuedAt: Date | string;
-  nonce: string;
-  userId: string;
-}): HostedAiUsageAllowDecisionBody {
-  return {
-    allowed: true,
-    expiresAt: normalizeHostedAiUsageAllowDecisionDate(input.expiresAt, "expiresAt"),
-    issuedAt: normalizeHostedAiUsageAllowDecisionDate(input.issuedAt, "issuedAt"),
-    nonce: requireHostedAiUsageAllowDecisionText(input.nonce, "nonce"),
-    schema: HOSTED_AI_USAGE_ALLOW_DECISION_SCHEMA,
-    userId: requireHostedAiUsageAllowDecisionText(input.userId, "userId"),
-  };
-}
-
 function normalizeHostedAiUsageAllowancePricedModelCandidate(
   value: string,
 ): HostedAiUsageAllowancePricedModel | null {
@@ -547,155 +432,6 @@ function normalizeHostedAiUsageAllowanceOpenAiImageModelCandidate(
   value: string,
 ): HostedAiUsageAllowanceOpenAiImagePricedModel | null {
   return isHostedAiUsageAllowanceOpenAiImagePricedModelId(value) ? value : null;
-}
-
-function buildHostedAiUsageAllowDecisionSigningPayload(
-  body: HostedAiUsageAllowDecisionBody,
-): ArrayBuffer {
-  return encodeHostedAiUsageAllowDecisionUtf8(canonicalHostedAiUsageAllowDecisionJson({
-    allowed: true,
-    expiresAt: body.expiresAt,
-    issuedAt: body.issuedAt,
-    nonce: body.nonce,
-    schema: body.schema,
-    userId: body.userId,
-  }));
-}
-
-async function signHostedAiUsageAllowDecisionPayload(input: {
-  payload: ArrayBuffer;
-  secret: string;
-}): Promise<string> {
-  const secret = requireHostedAiUsageAllowDecisionText(input.secret, "secret");
-  const key = await crypto.subtle.importKey(
-    "raw",
-    encodeHostedAiUsageAllowDecisionUtf8(secret),
-    { hash: "SHA-256", name: "HMAC" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, input.payload);
-  return encodeHostedAiUsageAllowDecisionBase64Url(new Uint8Array(signature));
-}
-
-function canonicalHostedAiUsageAllowDecisionJson(value: unknown): string {
-  if (value === null) {
-    return "null";
-  }
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    if (typeof value === "number" && !Number.isFinite(value)) {
-      throw new TypeError("Cannot canonicalize non-finite number.");
-    }
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((entry) => canonicalHostedAiUsageAllowDecisionJson(entry)).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record)
-      .filter((key) => record[key] !== undefined)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalHostedAiUsageAllowDecisionJson(record[key])}`)
-      .join(",")}}`;
-  }
-  throw new TypeError("Cannot canonicalize unsupported JSON value.");
-}
-
-function encodeHostedAiUsageAllowDecisionUtf8(value: string): ArrayBuffer {
-  const encoded = new TextEncoder().encode(value);
-  const buffer = new ArrayBuffer(encoded.byteLength);
-  new Uint8Array(buffer).set(encoded);
-  return buffer;
-}
-
-function encodeHostedAiUsageAllowDecisionBase64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replace(/\+/gu, "-").replace(/\//gu, "_").replace(/=+$/u, "");
-}
-
-function constantTimeStringEqual(left: string, right: string): boolean {
-  const leftBytes = new TextEncoder().encode(left);
-  const rightBytes = new TextEncoder().encode(right);
-  const maxLength = Math.max(leftBytes.byteLength, rightBytes.byteLength);
-  let diff = leftBytes.byteLength ^ rightBytes.byteLength;
-
-  for (let index = 0; index < maxLength; index += 1) {
-    diff |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
-  }
-
-  return diff === 0;
-}
-
-function normalizeHostedAiUsageAllowDecisionText(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function requireHostedAiUsageAllowDecisionObject(
-  value: unknown,
-  label: string,
-): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function requireHostedAiUsageAllowDecisionText(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.trim().length === 0 || value !== value.trim()) {
-    throw new TypeError(`AI usage allow decision ${label} must be a non-empty trimmed string.`);
-  }
-  return value;
-}
-
-function requireHostedAiUsageAllowDecisionIsoDate(value: unknown, label: string): string {
-  const text = requireHostedAiUsageAllowDecisionText(value, label);
-  if (!Number.isFinite(Date.parse(text))) {
-    throw new TypeError(`AI usage allow decision ${label} must be an ISO date string.`);
-  }
-  return text;
-}
-
-function normalizeHostedAiUsageAllowDecisionDate(value: Date | string, label: string): string {
-  const date = value instanceof Date ? value : new Date(value);
-  if (!Number.isFinite(date.getTime())) {
-    throw new TypeError(`AI usage allow decision ${label} must be a valid date.`);
-  }
-  return date.toISOString();
-}
-
-function requireHostedAiUsageAllowDecisionAllowed(value: unknown): true {
-  if (value !== true) {
-    throw new TypeError("AI usage allow decision allowed must be true.");
-  }
-  return true;
-}
-
-function requireHostedAiUsageAllowDecisionSchema(
-  value: unknown,
-): typeof HOSTED_AI_USAGE_ALLOW_DECISION_SCHEMA {
-  if (value !== HOSTED_AI_USAGE_ALLOW_DECISION_SCHEMA) {
-    throw new TypeError("AI usage allow decision schema is invalid.");
-  }
-  return HOSTED_AI_USAGE_ALLOW_DECISION_SCHEMA;
-}
-
-function requireHostedAiUsageAllowDecisionSignatureAlg(
-  value: unknown,
-): typeof HOSTED_AI_USAGE_ALLOW_DECISION_SIGNATURE_ALG {
-  if (value !== HOSTED_AI_USAGE_ALLOW_DECISION_SIGNATURE_ALG) {
-    throw new TypeError("AI usage allow decision signature alg is invalid.");
-  }
-  return HOSTED_AI_USAGE_ALLOW_DECISION_SIGNATURE_ALG;
 }
 
 export const HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA = "murph.hosted-mailbox-item.v1";
@@ -1445,13 +1181,8 @@ export const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX =
 export const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS = 4_000;
 export const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS = 10 * 60 * 1_000;
 export const HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS = 512;
-// JSON can escape one code point to six bytes. One KiB covers the fixed
-// request envelope, projection scopes, quotes, and commas.
-export const HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES = 1_024
-  + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS * 6
-  + HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
-    * HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS
-    * 6;
+// Vercel Functions request ceiling: https://vercel.com/docs/functions/limitations#request-body-size
+export const HOSTED_WEB_REQUEST_MAX_BYTES = 4.5 * 1024 * 1024;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES = 3;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS = 200;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_RECORDS_PER_PROJECTION =

@@ -1,3 +1,4 @@
+import { snapshotHostedWorkspaceFixture, restoreHostedWorkspaceFixture } from "./hosted-workspace-snapshot-fixture.ts";
 import assert from "node:assert/strict";
 
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -11,10 +12,6 @@ import {
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
 import { sanitizeHostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
-import {
-  restoreHostedExecutionContext,
-  snapshotHostedExecutionContext,
-} from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
 import {
@@ -3478,11 +3475,11 @@ describe("runHostedDeviceSyncPass", () => {
       assert.equal(result.nextWakeAt, "2026-04-08T00:00:30.000Z");
       await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z", vaultRoot);
 
-      const snapshot = await snapshotHostedExecutionContext({
+      const snapshot = await snapshotHostedWorkspaceFixture({
         operatorHomeRoot,
         vaultRoot,
       });
-      const restored = await restoreHostedExecutionContext({
+      const restored = await restoreHostedWorkspaceFixture({
         bundle: snapshot.bundle,
         workspaceRoot: restoredWorkspaceRoot,
       });
@@ -4414,8 +4411,8 @@ describe("runHostedDeviceSyncPass", () => {
     providerRequestStage: "response_body",
     providerResponseHeadersPresent: true,
   };
-  // Known optional metadata pushes the final record past the shared 64-key cap.
-  const crowdedRequestDetails = {
+  // Optional request metadata must not displace the finite timeout evidence.
+  const requestDetails = {
     providerRequestAuthKind: "provider_config_api_key_header",
     providerRequestAuthPlacement: "headers",
     providerRequestBodyFieldNames: "none",
@@ -4427,13 +4424,10 @@ describe("runHostedDeviceSyncPass", () => {
     providerRequestQueryParameterNames: "none",
     providerResponseErrorCode: "temporarily_unavailable",
     providerResponseShapeKind: "json_object",
-    providerOAuthErrorCode: "invalid_grant",
-    providerOAuthGrantType: "refresh_token",
   };
 
   it.each<{
     code: string;
-    crowded?: boolean;
     expectedReason?: string;
     exhausted?: boolean;
     label: string;
@@ -4443,38 +4437,55 @@ describe("runHostedDeviceSyncPass", () => {
   }>([
     { label: "ordinary failure", code: "SYNC_JOB_FAILED" },
     {
-      label: "timeout evidence survives crowded metadata",
+      label: "timeout evidence survives request metadata",
       code: "JUNCTION_API_REQUEST_TIMEOUT",
-      crowded: true,
-      extraDetails: { ...crowdedRequestDetails, ...timeoutDetails },
-      expectedExtra: { ...crowdedRequestDetails, ...timeoutDetails },
+      extraDetails: { ...requestDetails, ...timeoutDetails },
+      expectedExtra: { ...requestDetails, ...timeoutDetails },
     },
     {
       label: "unbounded timeout evidence is rejected",
       code: "JUNCTION_API_REQUEST_TIMEOUT",
-      crowded: true,
-      extraDetails: { ...crowdedRequestDetails,
+      extraDetails: { ...requestDetails,
         providerRequestTimeoutMs: 300_001, providerRequestElapsedMs: Infinity,
         providerRequestAttempt: 101, providerRequestStage: "synthetic-private-stage",
         providerResponseHeadersPresent: "true" },
-      expectedExtra: crowdedRequestDetails,
+      expectedExtra: requestDetails,
     },
     {
       label: "malformed timeout evidence is rejected",
       code: "JUNCTION_API_REQUEST_TIMEOUT",
-      crowded: true,
-      extraDetails: { ...crowdedRequestDetails,
+      extraDetails: { ...requestDetails,
         providerRequestTimeoutMs: "12000", providerRequestElapsedMs: NaN,
         providerRequestAttempt: 1.5, providerRequestStage: ["response_body"],
         providerResponseHeadersPresent: 1 },
-      expectedExtra: crowdedRequestDetails,
+      expectedExtra: requestDetails,
     },
     {
       label: "timeout evidence on another failure is rejected",
       code: "SYNC_JOB_FAILED",
-      crowded: true,
-      extraDetails: { ...crowdedRequestDetails, ...timeoutDetails },
-      expectedExtra: crowdedRequestDetails,
+      extraDetails: { ...requestDetails, ...timeoutDetails },
+      expectedExtra: requestDetails,
+    },
+    ...[false, true].map((shape) => ({
+      label: `calendar record shape ${shape}`, code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      extraDetails: { normalizationRecordExpanded: shape }, expectedExtra: { normalizationRecordExpanded: shape },
+    })),
+    ...["explicit_calendar", "timestamp_calendar", "source_offset", "vault_timezone", "utc", "missing"].map((basis) => ({
+      label: `calendar day basis ${basis}`, code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      extraDetails: { normalizationDayBasis: basis }, expectedExtra: { normalizationDayBasis: basis },
+    })),
+    ...["before", "equal", "after", "missing"].map((relation) => ({
+      label: `calendar day relation ${relation}`, code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      extraDetails: { normalizationUtcDayRelation: relation, normalizationResolvedDayRelation: relation },
+      expectedExtra: { normalizationUtcDayRelation: relation, normalizationResolvedDayRelation: relation },
+    })),
+    {
+      label: "private calendar details are omitted", code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
+      extraDetails: { normalizationRecordExpanded: "synthetic-private-shape", normalizationDayBasis: "synthetic-private-timezone", normalizationUtcDayRelation: "2026-04-21", normalizationResolvedDayRelation: -14400 },
+    },
+    {
+      label: "calendar details on another failure are omitted", code: "SYNC_JOB_FAILED",
+      extraDetails: { normalizationRecordExpanded: true, normalizationDayBasis: "source_offset", normalizationUtcDayRelation: "equal", normalizationResolvedDayRelation: "before" },
     },
     {
       label: "oxygen classification", code: "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION",
@@ -4526,7 +4537,7 @@ describe("runHostedDeviceSyncPass", () => {
       { label: "object reason", reason: { reason: "sample_count_mismatch" } },
     ].map((entry) => ({ ...entry, code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE" })),
     { label: "reason on another failure", code: "SYNC_JOB_FAILED", reason: "sample_count_mismatch" },
-  ])("emits exactly one sanitized job-failed event: $label", async ({ code, crowded = false, expectedReason, exhausted = false, reason, extraDetails = {}, expectedExtra = {} }) => {
+  ])("emits exactly one sanitized job-failed event: $label", async ({ code, expectedReason, exhausted = false, reason, extraDetails = {}, expectedExtra = {} }) => {
     const ecgFailure = code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE";
     const provider = ecgFailure || code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"
       || code === "JUNCTION_API_REQUEST_TIMEOUT" ? "junction" : "whoop";
@@ -4577,27 +4588,7 @@ describe("runHostedDeviceSyncPass", () => {
             normalizationTimestampKind: "invalid",
             normalizationTimestampSemantics: "unknown",
             providerHttpStatus: 503,
-            providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
-            providerOAuthRequestBodyBuilderKind: "url_search_params_record",
-            providerOAuthRequestClientAuthPlacement: "body_parameters",
-            providerOAuthRequestClientCredentialPresent: true,
-            providerOAuthRequestClientIdPresent: true,
-            providerOAuthRequestContentType: "application_x_www_form_urlencoded",
-            providerOAuthRequestDuplicateParameterCount: 0,
-            providerOAuthRequestEncodingKind: "form_urlencoded",
-            providerOAuthRequestHasDuplicateParameters: false,
-            providerOAuthRequestMethod: "POST",
-            providerOAuthRequestOfflineScopePresent: true,
-            providerOAuthRequestParameterCount: 5,
-            providerOAuthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-            providerOAuthRequestRefreshCredentialPresent: true,
-            providerOAuthRequestScopeCount: 1,
-            providerOAuthRequestScopePresent: true,
-            providerOAuthRequestScopeValue: "offline",
-            providerOAuthRequestTokenEndpointKind: "whoop_oauth_token",
-            providerOAuthResponseErrorDescriptionFieldPresent: true,
-            providerOAuthResponseErrorFieldPresent: true,
-            providerOAuthResponseShapeKind: "json_object",
+            providerResponseErrorDescription: "Provider temporarily unavailable.",
           },
           jobDisposition: exhausted ? "dead" : "queued",
           jobKind: "reconcile",
@@ -4725,27 +4716,7 @@ describe("runHostedDeviceSyncPass", () => {
       nextReconcileAt: "2026-04-08T02:00:00.000Z",
       processedJobs: 1,
       providerHttpStatus: 503,
-      providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
-      providerOAuthRequestBodyBuilderKind: "url_search_params_record",
-      providerOAuthRequestClientAuthPlacement: "body_parameters",
-      providerOAuthRequestClientCredentialPresent: true,
-      providerOAuthRequestClientIdPresent: true,
-      providerOAuthRequestContentType: "application_x_www_form_urlencoded",
-      providerOAuthRequestDuplicateParameterCount: 0,
-      providerOAuthRequestEncodingKind: "form_urlencoded",
-      providerOAuthRequestHasDuplicateParameters: false,
-      providerOAuthRequestMethod: "POST",
-      providerOAuthRequestOfflineScopePresent: true,
-      providerOAuthRequestParameterCount: 5,
-      providerOAuthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-      providerOAuthRequestRefreshCredentialPresent: true,
-      providerOAuthRequestScopeCount: 1,
-      providerOAuthRequestScopePresent: true,
-      providerOAuthRequestScopeValue: "offline",
-      providerOAuthRequestTokenEndpointKind: "whoop_oauth_token",
-      providerOAuthResponseErrorDescriptionFieldPresent: true,
-      providerOAuthResponseErrorFieldPresent: true,
-      providerOAuthResponseShapeKind: "json_object",
+      providerResponseErrorDescription: "Provider temporarily unavailable.",
       provider,
       setupPhase: null,
       status: "active",
@@ -4761,10 +4732,7 @@ describe("runHostedDeviceSyncPass", () => {
     // Exercise the shared bounded sanitizer with the fully populated diagnostic.
     expect(Object.keys(entry.redactedJson).length).toBeGreaterThan(32);
     const sharedDetails = sanitizeHostedExecutionStructuredLogDetails(entry.redactedJson);
-    if (crowded) {
-      expect(Object.keys(entry.redactedJson).length).toBeGreaterThan(64);
-      expect(Object.keys(sharedDetails ?? {}).length).toBeLessThanOrEqual(64);
-    }
+    expect(Object.keys(sharedDetails ?? {}).length).toBeLessThanOrEqual(64);
     for (const field of Object.keys(timeoutDetails)) {
       if (field in expectedExtra) {
         expect(entry.redactedJson).toHaveProperty(field, expectedExtra[field]);
@@ -4825,7 +4793,7 @@ describe("runHostedDeviceSyncPass", () => {
         accountStatus: null,
         code: "UNSAFE_FALLBACK_FAILED",
         details: {
-          providerOAuthErrorDescription: '{"accountId":"member_unsafe_123456"}',
+          providerResponseErrorDescription: '{"accountId":"member_unsafe_123456"}',
         },
         retryable: true,
       },
@@ -4941,7 +4909,7 @@ describe("runHostedDeviceSyncPass", () => {
       "Hosted device-sync job failed.",
     );
     assert.equal(
-      unsafeFallbackEntry.redactedJson.providerOAuthErrorDescription,
+      unsafeFallbackEntry.redactedJson.providerResponseErrorDescription,
       "Hosted device-sync job failed.",
     );
 

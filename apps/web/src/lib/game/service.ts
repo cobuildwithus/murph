@@ -261,7 +261,7 @@ export async function runGameCommand(input: {
 }
 
 async function activatePrivateAfterGameCommand(command: GameCommand, gameId: string | null, now: Date): Promise<void> {
-  if (!gameId || !["join", "respondChange", "negotiate", "editTerms", "proposeChange"].includes(command.type)) return;
+  if (!gameId || !["respondChange", "negotiate", "editTerms", "proposeChange"].includes(command.type)) return;
   try { await (await import("./private-kickoff")).activatePrivateGamePlayers(gameId, now); }
   catch { /* The lifecycle sweep recovers an unmarked activation. */ }
 }
@@ -276,13 +276,19 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
     if (!saved.count) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
     await recordGameReminderPreferencesTx(tx, actor, command.everyDayGameIds !== undefined);
     // A seat admitted after the recorded choice keeps its own activation defaults.
-    const where = { memberId: actor, game: { status: "live", events: { some: { actor, type: GAME_REMINDER_OFF_CHOICE_EVENT } } } };
-    await tx.gamePlayer.updateMany({ where: { ...where, gameId: { in: command.offGameIds } }, data: { reminderOff: true } });
-    await tx.gamePlayer.updateMany({ where: { ...where, gameId: { notIn: command.offGameIds } }, data: { reminderOff: false } });
-    if (command.everyDayGameIds) {
-      await tx.gamePlayer.updateMany({ where: { ...where, gameId: { in: command.everyDayGameIds } }, data: { reminderEveryDay: true } });
-      await tx.gamePlayer.updateMany({ where: { ...where, gameId: { notIn: command.everyDayGameIds } }, data: { reminderEveryDay: false } });
-    }
+    // Keep choice lists out of the row lookup: sparse event statistics can otherwise
+    // make PostgreSQL repeat a large ID-list bitmap scan for every admitted seat.
+    await tx.$executeRaw`
+      UPDATE game_player AS seat
+      SET reminder_off = seat.game_id = ANY(${command.offGameIds}::text[]),
+        reminder_every_day = CASE WHEN ${command.everyDayGameIds !== undefined}
+          THEN seat.game_id = ANY(${command.everyDayGameIds ?? []}::text[])
+          ELSE seat.reminder_every_day END
+      FROM game
+      WHERE game.id = seat.game_id AND game.status = 'live' AND seat.member_id = ${actor}
+        AND EXISTS (SELECT 1 FROM game_event choice WHERE choice.game_id = game.id
+          AND choice.actor = ${actor} AND choice.type = ${GAME_REMINDER_OFF_CHOICE_EVENT})
+    `;
     return readGameReminders(actor, tx);
   });
 }
@@ -1225,13 +1231,14 @@ async function editTerms(context: CommandContext, command: Extract<GameCommand, 
   const prepared = decideNewTerms(inputTerms, { maxPlayers: 10, inviteeSeats: taskSeats,
     today, allowToday: true, currentStartsOn: before.state.game.startsOn, newKey: () => generateHostedRandomPrefixedId("gsk") });
   const n = command.expectedTermsVersion + 1;
-  words.versions.push({ ...prepared.words.versions[0], n });
+  // Unaccepted drafts have no played days or tickets. Keep the revision, not their obsolete contents.
+  words.versions = [{ ...prepared.words.versions[0], n }];
   const encrypted = await seal(gameTarget(before.row, "terms_words"), JSON.stringify(words));
   await runLocked(command.gameId, context, async ({ tx, loaded, now }) => {
     if (loaded.row.status !== "invited") reject("TERMS_CHANGED", "Someone joined. Refresh the game to request a change.");
     assertGroupTermsOpen(loaded.state, context.actor, now, command.expectedTermsVersion);
     if (loaded.row.termsWordsEncrypted !== before.row.termsWordsEncrypted || loaded.row.wordsOwnerMemberId !== before.row.wordsOwnerMemberId) reject("TERMS_CHANGED", "The terms changed. Take another look.");
-    const terms = { ...loaded.state.game.terms, versions: [...loaded.state.game.terms.versions, { ...prepared.terms.versions[0], n }] };
+    const terms = { ...loaded.state.game.terms, versions: [{ ...prepared.terms.versions[0], n }] };
     await tx.game.update({ where: { id: command.gameId }, data: { terms: toPrismaJsonObject(terms), termsWordsEncrypted: encrypted,
       lengthDays: prepared.lengthDays, startsOn: prepared.startsOn ? toDbDate(prepared.startsOn) : null } });
     return [{ type: "terms_edited", payload: { termsVersion: n } }];
@@ -1376,9 +1383,9 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
   let notification: Awaited<ReturnType<typeof claimGamePostNotification>> = [];
   await runLocked(gameId, context, async ({ clock, loaded, now, tx }) => {
     // A repeat of a post that already landed (a retry, or the same tap twice) changes nothing.
-    const existing = await tx.gameEntry.findUnique({ select: { memberId: true }, where: { id: entryId } });
+    const existing = await tx.gameEntry.findUnique({ select: { memberId: true, gameId: true }, where: { id: entryId } });
     if (existing) {
-      if (existing.memberId !== actor) reject("INVALID_REQUEST", "That entry id is taken.");
+      if (existing.memberId !== actor || existing.gameId !== gameId) reject("INVALID_REQUEST", "That entry id is taken.");
       return [];
     }
     const decision = decidePost(loaded.state, {

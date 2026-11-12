@@ -124,10 +124,6 @@ describe("hosted Linq audio conversation ingestion", () => {
 
     const abortingAudioProvider: ParserProvider = {
       id: "fake-hosted-audio-parser-abort",
-      locality: "local",
-      openness: "open_source",
-      priority: 500,
-      runtime: "node",
       async discover() {
         return {
           available: true,
@@ -323,10 +319,6 @@ describe("hosted Linq audio conversation ingestion", () => {
 
     const audioProvider: ParserProvider = {
       id: "fake-hosted-audio-parser-pre-drain-abort",
-      locality: "local",
-      openness: "open_source",
-      priority: 500,
-      runtime: "node",
       async discover() {
         return {
           available: true,
@@ -492,10 +484,6 @@ describe("hosted Linq audio conversation ingestion", () => {
 
     const fakeAudioProvider: ParserProvider = {
       id: "fake-hosted-audio-parser",
-      locality: "local",
-      openness: "open_source",
-      priority: 500,
-      runtime: "node",
       async discover() {
         return {
           available: true,

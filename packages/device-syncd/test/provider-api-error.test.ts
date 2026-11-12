@@ -56,18 +56,18 @@ test("shared API errors preserve retry, status, account policy and bounded diagn
     "{}",
     {
       diagnostics: {
-        oauthErrorDescription: "Refresh token expired at https://api.example.test/token?access_token=secret",
-        oauthErrorCode: "invalid_grant",
-        oauthGrantType: "refresh_token",
+        responseErrorDescription: "Refresh token expired at https://api.example.test/token?access_token=secret",
+        responseErrorCode: "invalid_request",
+        requestMethod: "POST",
         unsafeText: "contains spaces",
       },
     },
   );
   assert.deepEqual(withDiagnostics.details, {
     accountStatus: null,
-    oauthErrorDescription: "Refresh token expired at <redacted-url>",
-    oauthErrorCode: "invalid_grant",
-    oauthGrantType: "refresh_token",
+    responseErrorDescription: "Refresh token expired at <redacted-url>",
+    responseErrorCode: "invalid_request",
+    requestMethod: "POST",
     responseErrorDescriptionFieldPresent: false,
     responseErrorFieldPresent: false,
     responseShapeKind: "json_object",
@@ -82,14 +82,14 @@ test("shared API errors preserve retry, status, account policy and bounded diagn
     "{}",
     {
       diagnostics: {
-        oauthErrorDescription: '{"refresh_token":"fixture-secret","user_id":"user-sensitive"}',
-        oauthErrorCode: "invalid_grant",
+        responseErrorDescription: '{"refresh_token":"fixture-secret","user_id":"user-sensitive"}',
+        responseErrorCode: "invalid_request",
       },
     },
   );
   assert.deepEqual(withUnsafeDiagnostics.details, {
     accountStatus: null,
-    oauthErrorCode: "invalid_grant",
+    responseErrorCode: "invalid_request",
     responseErrorDescriptionFieldPresent: false,
     responseErrorFieldPresent: false,
     responseShapeKind: "json_object",

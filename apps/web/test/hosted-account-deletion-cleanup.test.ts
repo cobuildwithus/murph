@@ -51,11 +51,17 @@ beforeEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
   mocks.kmsEncrypt.mockImplementation(async (input: {
+    additionalAuthenticatedData: string;
     plaintext: Uint8Array;
-  }) => ({
-    ciphertext: Buffer.from(input.plaintext).toString("base64"),
-    keyName: KMS_KEY_NAME,
-  }));
+  }) => {
+    if (input.plaintext.byteLength + Buffer.byteLength(input.additionalAuthenticatedData) > 64 * 1024) {
+      throw new Error("KMS plaintext exceeds 64 KiB.");
+    }
+    return {
+      ciphertext: Buffer.from(input.plaintext).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    };
+  });
   mocks.kmsDecrypt.mockImplementation(async (input: {
     ciphertext: string;
   }) => ({
@@ -120,7 +126,6 @@ describe("hosted account deletion cleanup", () => {
       schema: "murph.hosted-account-deletion-cleanup.v1",
     });
     expect(JSON.parse(new TextDecoder().decode(captured.plaintextSnapshot))).toEqual({
-
       runtimeMemberIds: ["member_1", "member_group_1"],
       schema: "murph.hosted-account-deletion-cleanup.v1",
       stripeCustomerIds: ["cus_1"],
@@ -283,7 +288,7 @@ describe("hosted account deletion cleanup", () => {
     mocks.deleteHostedRunnerUserDataBestEffort
       .mockResolvedValueOnce(makeCloudflareDeletionResult({ configured: false, deleted: false }))
       .mockResolvedValueOnce(makeCloudflareDeletionResult({ deleted: true }));
-    const prepared = await createCleanup(store, now, { privyUserId: null, stripeCustomerIds: [] });
+    const prepared = await createCleanup(store, now, { stripeCustomerIds: [] });
     if (!store.row) throw new Error("Expected a persisted cleanup receipt.");
     store.row.runtimeLogsCompletedAt = now;
 
@@ -673,6 +678,128 @@ describe("hosted account deletion cleanup", () => {
     expect(store.row).toBeNull();
   });
 
+  it.each(["cloudflare", "stripe"] as const)(
+    "converges %s cleanup across deadlines without repeating confirmed targets",
+    async (provider) => {
+      const store = new CleanupStore();
+      const now = new Date("2026-07-26T18:00:00.000Z");
+      const runtimeIds = Array.from({ length: 1_024 }, (_, index) => `hbm_${String(index).padStart(24, "0")}`);
+      const stripeIds = Array.from({ length: 1_024 }, (_, index) => `cus_${String(index).padStart(14, "0")}`);
+      const ids = provider === "cloudflare" ? runtimeIds : stripeIds;
+      let clockMs = now.getTime();
+      let callsThisAttempt = 0;
+      const calls: string[] = [];
+      vi.spyOn(Date, "now").mockImplementation(() => clockMs);
+      const record = (id: string) => {
+        calls.push(id);
+        if (++callsThisAttempt === 20) clockMs += 100;
+      };
+      if (provider === "cloudflare") {
+        mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async ({ userId }) => {
+          record(userId);
+          return makeCloudflareDeletionResult({ deleted: true });
+        });
+      } else {
+        mocks.getHostedOnboardingStripe.mockReturnValue({ customers: { del: vi.fn(async (id: string) => {
+          record(id);
+          return { deleted: true };
+        }) } });
+      }
+      const prepared = await prepareHostedAccountDeletionCleanup({
+        now,
+        runtimeMemberIds: runtimeIds,
+        stripeCustomerIds: stripeIds,
+      });
+      await persistHostedAccountDeletionCleanupTx({ cleanup: prepared, prisma: store.prisma as never });
+      store.row = { ...store.row!, runtimeLogsCompletedAt: now, temporalCompletedAt: now,
+        ...(provider === "stripe" ? { cloudflareCompletedAt: now } : { stripeCompletedAt: now }) };
+      let attempts = 0;
+      while (store.row && attempts++ < 60) {
+        callsThisAttempt = 0;
+        await runHostedAccountDeletionCleanup({ attemptTimeoutMs: 100, cleanupId: prepared.id, now, prisma: store.prisma as never });
+      }
+      expect(attempts).toBeGreaterThan(1);
+      expect(store.row).toBeNull();
+      expect(calls).toEqual(ids);
+    },
+  );
+
+  it("shrinks a near-limit legacy payload only after its shared runtime consumers finish", async () => {
+    const store = new CleanupStore();
+    const now = new Date("2026-07-26T18:00:00.000Z");
+    const runtimeMemberIds = Array.from({ length: 1_024 }, (_, index) => `member_${String(index).padStart(53, "0")}`);
+    const prepared = await prepareHostedAccountDeletionCleanup({ now, runtimeMemberIds, stripeCustomerIds: [] });
+    await persistHostedAccountDeletionCleanupTx({ cleanup: prepared, prisma: store.prisma as never });
+    store.row!.runtimeLogsCompletedAt = now;
+    const originalBytes = Buffer.from(store.row!.payloadCiphertext, "base64").byteLength;
+    expect(originalBytes).toBeGreaterThan(64_000);
+    mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async ({ userId }) =>
+      makeCloudflareDeletionResult({ deleted: userId !== runtimeMemberIds[0] }));
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
+      configured: true, errorCode: "TEMPORAL_UNAVAILABLE", notFound: false, terminated: false,
+    });
+    await runHostedAccountDeletionCleanup({ cleanupId: prepared.id, now, prisma: store.prisma as never });
+    expect(store.row!.payloadCiphertext).toBe(prepared.payloadCiphertext);
+    store.row!.nextAttemptAt = now;
+    mocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
+      configured: true, errorCode: null, notFound: false, terminated: true,
+    });
+    await runHostedAccountDeletionCleanup({ cleanupId: prepared.id, now, prisma: store.prisma as never });
+    expect(JSON.parse(Buffer.from(store.row!.payloadCiphertext, "base64").toString())).toEqual({
+      runtimeMemberIds: [runtimeMemberIds[0]],
+      schema: "murph.hosted-account-deletion-cleanup.v1",
+      stripeCustomerIds: [],
+    });
+    expect(store.row!.temporalCompletedAt).toEqual(now);
+    expect(store.row!.temporalNextRuntimeIndex).toBe(1);
+    expect(Buffer.from(store.row!.payloadCiphertext, "base64").byteLength).toBeLessThan(originalBytes);
+    mocks.deleteHostedRunnerUserDataBestEffort.mockClear();
+    mocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue(makeCloudflareDeletionResult({ deleted: true }));
+    await runHostedAccountDeletionCleanup({ cleanupId: prepared.id, now, prisma: store.prisma as never });
+    expect(mocks.deleteHostedRunnerUserDataBestEffort).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ userId: runtimeMemberIds[0] }));
+    expect(store.row).toBeNull();
+  });
+
+  it.each(["saved", "lease_lost", "kms_failed"] as const)(
+    "retries only uncertain Cloudflare targets when the checkpoint is %s",
+    async (checkpoint) => {
+      const store = new CleanupStore();
+      const now = new Date("2026-07-26T18:00:00.000Z");
+      const prepared = await prepareHostedAccountDeletionCleanup({
+        now,
+        runtimeMemberIds: ["member_a", "member_b", "member_c"],
+        stripeCustomerIds: [],
+      });
+      await persistHostedAccountDeletionCleanupTx({ cleanup: prepared, prisma: store.prisma as never });
+      store.row = { ...store.row!, runtimeLogsCompletedAt: now, temporalCompletedAt: now };
+      mocks.deleteHostedRunnerUserDataBestEffort.mockImplementation(async ({ userId }) =>
+        makeCloudflareDeletionResult({ deleted: userId !== "member_b" }));
+      if (checkpoint === "kms_failed") {
+        mocks.kmsEncrypt.mockRejectedValueOnce(new Error("KMS unavailable"));
+      } else if (checkpoint === "lease_lost") {
+        mocks.kmsEncrypt.mockImplementationOnce(async ({ plaintext }) => {
+          store.row!.leaseToken = "new_claimant";
+          return { ciphertext: Buffer.from(plaintext).toString("base64"), keyName: KMS_KEY_NAME };
+        });
+      }
+      const attempt = runHostedAccountDeletionCleanup({ cleanupId: prepared.id, now, prisma: store.prisma as never });
+      if (checkpoint === "kms_failed") await expect(attempt).rejects.toThrow("KMS unavailable");
+      else await attempt;
+      const payload = JSON.parse(Buffer.from(store.row!.payloadCiphertext, "base64").toString());
+      expect(payload.runtimeMemberIds).toEqual(checkpoint === "saved" ? ["member_b"] : ["member_a", "member_b", "member_c"]);
+      if (checkpoint === "lease_lost") expect(store.row!.leaseToken).toBe("new_claimant");
+      // Let the next claimant run after the simulated lease/backoff expires.
+      store.row!.leaseExpiresAt = null;
+      store.row!.nextAttemptAt = now;
+      mocks.deleteHostedRunnerUserDataBestEffort.mockClear();
+      mocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue(makeCloudflareDeletionResult({ deleted: true }));
+      await runHostedAccountDeletionCleanup({ cleanupId: prepared.id, now, prisma: store.prisma as never });
+      expect(mocks.deleteHostedRunnerUserDataBestEffort.mock.calls.map(([input]) => input.userId))
+        .toEqual(checkpoint === "saved" ? ["member_b"] : ["member_a", "member_b", "member_c"]);
+      expect(store.row).toBeNull();
+    },
+  );
+
   it("does not report completion after losing the receipt lease", async () => {
     const store = new CleanupStore();
     const now = new Date("2026-07-26T18:00:00.000Z");
@@ -715,7 +842,7 @@ describe("hosted account deletion cleanup", () => {
 
   it.each([
     { delayMs: 6_000, cleanupPending: false },
-    { delayMs: 8_000, cleanupPending: true },
+    { delayMs: 8_000, cleanupPending: false },
   ])("settles cleanup after $delayMs ms with pending=$cleanupPending", async ({
     delayMs,
     cleanupPending,
@@ -919,7 +1046,6 @@ async function createCleanup(
   store: CleanupStore,
   now: Date,
   input: {
-    privyUserId?: string | null;
     stripeCustomerIds?: string[];
   } = {},
 ) {
@@ -970,15 +1096,9 @@ type CleanupUpdate = Partial<Omit<CleanupRow, "attemptCount">> & {
 
 class CleanupStore {
   blockReceiptDelete = false;
-  livePrivyMemberId: string | null = null;
   row: CleanupRow | null = null;
 
   readonly prisma = {
-    hostedMemberIdentity: {
-      findFirst: async () => this.livePrivyMemberId
-        ? { memberId: this.livePrivyMemberId }
-        : null,
-    },
     hostedAccountDeletionCleanup: {
       create: async ({ data }: {
         data: Omit<CleanupRow,

@@ -262,17 +262,12 @@ function createHostedProviderEffectError(input: {
       ? `${input.description} failed with HTTP ${input.status}. ${providerError.error}`
       : `${input.description} failed with HTTP ${input.status}.`,
   ) as Error & {
-    cleanupMessages?: unknown;
-    cleanupTargetAliases?: unknown;
     code?: string;
     context?: unknown;
     deliveryMayHaveSucceeded?: boolean;
-    providerMessageId?: string | null;
-    providerMessageIds?: unknown;
     retryable?: boolean;
     status: number;
     statusCode: number;
-    target?: string;
   };
   error.status = input.status;
   error.statusCode = input.status;
@@ -285,25 +280,8 @@ function createHostedProviderEffectError(input: {
   if (providerError?.deliveryMayHaveSucceeded !== undefined) {
     error.deliveryMayHaveSucceeded = providerError.deliveryMayHaveSucceeded;
   }
-  if (providerError?.providerMessageIds) {
-    error.providerMessageIds = providerError.providerMessageIds;
-  }
-  if (providerError?.providerMessageId !== undefined) {
-    error.providerMessageId = providerError.providerMessageId;
-  } else if (providerError?.providerMessageIds) {
-    error.providerMessageId = providerError.providerMessageIds.at(-1) ?? null;
-  }
-  if (providerError?.cleanupMessages) {
-    error.cleanupMessages = providerError.cleanupMessages;
-  }
-  if (providerError?.cleanupTargetAliases) {
-    error.cleanupTargetAliases = providerError.cleanupTargetAliases;
-  }
   if (providerError?.retryable !== undefined) {
     error.retryable = providerError.retryable;
-  }
-  if (providerError?.target) {
-    error.target = providerError.target;
   }
   return error;
 }

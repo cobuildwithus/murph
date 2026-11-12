@@ -1951,6 +1951,34 @@ Current product admission, delivery and native runtime safety rules remain.
   `sparse_interval.*` reason: source context, value, start/end presence or
   validity, interval ordering, day, provider, source type, or source instance.
   Historical producers may still report `sparse_interval.row_incomplete`.
+  Strict sparse calendar refreshes collect the previous, requested and next UTC
+  days with exact datetime bounds before selecting the requested source-local day
+  with the importer resolver.
+  Each collection is bounded to three single-attempt pages at 12 seconds per page;
+  the three days run serially, yielding between days without publishing a partial
+  replacement. Their existing job is available only after the full envelope closes
+  (requested UTC midnight plus 48 hours), covering the normalizer's accepted
+  offsets up to 24 hours. Source lifecycle is rechecked before canonical writes.
+  Missing or malformed intervals remain strict failures; only valid neighboring
+  days are excluded. A failed collection cannot produce an authoritative empty day.
+  Source-day selection accepts the SDK's decoded Date endpoints through the
+  existing timestamp normalizer before snapshot sanitization; string endpoints
+  keep their original timezone semantics and malformed rows remain strict.
+  Day mismatches additionally report the selected `normalizationDayBasis`
+  (explicit calendar, timestamp calendar, source offset, vault timezone, UTC,
+  or missing) and UTC/resolved-day relations (before, equal, after, or missing)
+  to the requested day. These are finite categories derived by the existing
+  day resolver, never dates, timezone names, offsets, or health values. Both
+  service and hosted boundaries allowlist them on the existing failure event;
+  event frequency and retention stay unchanged. `normalizationRecordExpanded` adds
+  only a boolean (`false` for direct, `true` for expanded), derived from the importer entry iterator, to
+  distinguish a direct rejected row from a nested-envelope expansion after
+  source-day selection. It does not expose the envelope key or contents.
+  Missing old fields mean unknown.
+  Compare these categories over 24–72 hours of natural retries after convergence
+  to distinguish window errors from calendar interpretation. Retain them only
+  if they resolve that diagnostic question; otherwise remove them in a later
+  reviewed change. The signal does not change acceptance or authorize replay.
   Value failures reuse the same fields: `below_range`,
   `above_range_up_to_10x`, `above_range_10x_to_1000x`, and
   `above_range_over_1000x` compare finite rejected values against the existing
@@ -2094,7 +2122,11 @@ Current product admission, delivery and native runtime safety rules remain.
 - A successful hosted checkpoint gets one best-effort, wake-raced vault-share
   projection opportunity before device-sync dirty acknowledgement or the next
   complete device-sync-only maintenance prefix. A conversation wake preempts
-  immediately and leaves acknowledgement replayable. Projection errors remain
+  immediately and leaves acknowledgement replayable. On a cold start that
+  restored ready durable effects, a pending durable effect whose publication
+  deadline has passed preempts the same way, so the dirty runtime publishes
+  before the projection restores and captures a snapshot; the restored replay
+  still runs before that publication. Projection errors remain
   fail-soft to the completed personal import and foreground reply, but they do
   not consume the existing dirty or system-mailbox recording obligation; that
   owner reuses its bounded device-sync continuation before acknowledgement.

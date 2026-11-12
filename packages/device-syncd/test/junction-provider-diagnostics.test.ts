@@ -660,7 +660,7 @@ test("Junction sparse calendar refresh threads strict completeness before canoni
     executeJunctionJob(
       provider,
       createJunctionJobContext({
-        now: "2026-04-03T12:00:00.000Z",
+        now: "2026-04-04T00:00:00.000Z",
         importSnapshot: async (snapshot) => {
           canonicalImportCalls += 1;
           normalizeJunctionSnapshot(snapshot as Parameters<typeof normalizeJunctionSnapshot>[0]);
@@ -749,7 +749,7 @@ test("Junction sparse calendar refresh rejects lossy collection parsing before c
       executeJunctionJob(
         provider,
         createJunctionJobContext({
-          now: "2026-04-03T12:00:00.000Z",
+          now: "2026-04-04T00:00:00.000Z",
           importSnapshot: async () => {
             canonicalImportCalls += 1;
             return { durableDeliveryAccepted: true };
@@ -845,7 +845,7 @@ test("Junction sparse calendar refresh admits the Apple Health alias cross-produ
         }),
         connectionSourceAdmissionMode: "listed_only",
         listConnectionSources: () => [establishedSource],
-        now: "2026-04-03T12:00:00.000Z",
+        now: "2026-04-04T00:00:00.000Z",
         importSnapshot: async (snapshot) => {
           importedSnapshots.push(snapshot);
           const normalized = normalizeJunctionSnapshot(
@@ -1213,12 +1213,13 @@ test.each([
     status: "connected",
   });
   sources = orderSources(establishedSource, reconnectedAlias);
+  context.now = "2026-04-04T00:00:00.000Z";
   responseKind = "empty";
   await executeJunctionJob(provider, context, job);
   responseKind = "nonempty";
   await executeJunctionJob(provider, context, job);
 
-  assert.equal(providerCalls, 4);
+  assert.equal(providerCalls, 8);
   assert.equal(importedSnapshots.length, 2);
   assert.equal(projectedSources.length, 2);
   assert.ok(projectedSources.every((source) =>
@@ -1387,6 +1388,7 @@ test("Junction routine, precise, and retained calendar writers share persisted s
     }),
   );
   phase = "repair";
+  context.now = "2026-04-04T00:00:00.000Z";
   for (const [index, scheduledJob] of (preciseResult.scheduledJobs ?? []).entries()) {
     await executeJunctionJob(
       provider,

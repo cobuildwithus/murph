@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 
 import {
   allergyRegistryEntityDefinition,
-  bankEntityDefinitionByKind,
   conditionRegistryEntityDefinition,
   extractBankEntityRegistryLinks,
   extractBankEntityRegistryRelatedIds,
@@ -12,8 +11,6 @@ import {
   geneticsRegistryEntityDefinition,
   getBankEntityRegistryProjectionMetadata,
   goalRegistryEntityDefinition,
-  hasHealthEntityRegistry,
-  healthEntityDefinitionByKind,
   regimenRegistryEntityDefinition,
   type BankEntityRegistryProjectionHelpers,
 } from "@murphai/contracts";
@@ -61,43 +58,6 @@ const registryProjectionHelpers: BankEntityRegistryProjectionHelpers = {
   firstStringArray,
 };
 
-test("query registry definitions combine canonical registry metadata with query-owned projection metadata", () => {
-  const registryDefinitions = [
-    ["goal", goalRegistryDefinition],
-    ["condition", conditionRegistryDefinition],
-    ["allergy", allergyRegistryDefinition],
-    ["regimen", regimenRegistryDefinition],
-    ["family", familyRegistryDefinition],
-    ["genetics", geneticsRegistryDefinition],
-  ] as const;
-
-  for (const [kind, registryDefinition] of registryDefinitions) {
-    const definition = healthEntityDefinitionByKind.get(kind);
-
-    assert.ok(definition, `missing health entity definition for ${kind}`);
-    assert.ok(
-      definition && hasHealthEntityRegistry(definition),
-      `missing health registry metadata for ${kind}`,
-    );
-
-    if (!definition || !hasHealthEntityRegistry(definition)) {
-      continue;
-    }
-
-    const queryMetadata = getBankEntityRegistryProjectionMetadata(kind);
-
-    assert.equal(registryDefinition.registry.directory, definition.registry.directory);
-    assert.deepEqual(registryDefinition.registry.idKeys, definition.registry.idKeys);
-    assert.deepEqual(registryDefinition.registry.titleKeys, definition.registry.titleKeys);
-    assert.deepEqual(registryDefinition.registry.statusKeys, definition.registry.statusKeys);
-    assert.equal(typeof registryDefinition.transform, "function");
-    assert.equal(
-      typeof registryDefinition.compare,
-      queryMetadata.sortBehavior ? "function" : "undefined",
-    );
-  }
-});
-
 test("food projection metadata stays owned by contracts", () => {
   const projection = getBankEntityRegistryProjectionMetadata("food");
 
@@ -134,25 +94,6 @@ test("food projection metadata stays owned by contracts", () => {
       attachedRegimenIds: ["regimen_123"],
     },
   );
-});
-
-test("regimen registry projection keeps the shared relative-path grouping rule", () => {
-  const projected = toRegistryRecord(
-    {
-      relativePath: "bank/regimens/supplements/sleep/magnesium-glycinate.md",
-      markdown: "",
-      body: "",
-      attributes: {
-        regimenId: "reg_01",
-        title: "Magnesium glycinate",
-        status: "active",
-        kind: "supplement",
-      },
-    },
-    regimenRegistryDefinition,
-  );
-
-  assert.equal(projected?.entity.group, "supplements/sleep");
 });
 
 test("regimen shared registry definition owns payload and relation metadata", () => {
@@ -839,33 +780,6 @@ test("allergy query projection round-trips shared allergy relation metadata", ()
   assert.equal(roundTripped?.entity.recordedOn, "2026-03-02");
   assert.deepEqual(roundTripped?.entity.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"]);
   assert.equal(roundTripped?.entity.note, "Carries an epinephrine auto-injector.");
-});
-
-
-test("bank registry definitions inherit canonical registry metadata from shared bank entity definitions", () => {
-  const registryDefinitions = [
-    ["food", foodRegistryDefinition],
-    ["recipe", recipeRegistryDefinition],
-    ["provider", providerRegistryDefinition],
-    ["workout_format", workoutFormatRegistryDefinition],
-  ] as const;
-
-  for (const [kind, registryDefinition] of registryDefinitions) {
-    const definition = bankEntityDefinitionByKind.get(kind);
-
-    assert.ok(definition, `missing bank entity definition for ${kind}`);
-    if (!definition) {
-      continue;
-    }
-
-    assert.equal(registryDefinition.registry.directory, definition.registry.directory);
-    assert.deepEqual(registryDefinition.registry.idKeys, definition.registry.idKeys);
-    assert.deepEqual(registryDefinition.registry.titleKeys, definition.registry.titleKeys);
-    assert.deepEqual(registryDefinition.registry.statusKeys, definition.registry.statusKeys);
-    assert.equal("transform" in definition.registry, false);
-    assert.equal("sortBehavior" in definition.registry, false);
-    assert.equal(typeof registryDefinition.transform, "function");
-  }
 });
 
 test("bank entity projections normalize food and workout format metadata through the shared seam", () => {

@@ -1,3 +1,4 @@
+import { createAskGrokTurnState } from '../assistant-codex/ask-grok-tool.js'
 import { AssistantWorkspaceArtifactMaterializationError } from './execution-context.js'
 import {
   assistantAskResultSchema,
@@ -756,6 +757,7 @@ export async function sendAssistantMessageLocal(
           string,
           ConversationAttachmentAuthority
         >()
+        const askGrokTurnState = createAskGrokTurnState()
         const analyzeVideoTurnState = createAnalyzeVideoTurnState()
         const snapshottedAnalyzeVideoInputIds = new Set<string>()
         const snapshotAnalyzeVideoAuthorities = (
@@ -1753,6 +1755,7 @@ export async function sendAssistantMessageLocal(
             allocateUsageRecordOrdinal: () => nextUsageRecordOrdinal++,
             acceptedInputItems: providerRequestAcceptedInputItems,
             activeTurnSteering,
+            askGrokTurnState,
             analyzeVideoTurnState,
             authorizeAcceptedMessageTarget,
             input: currentInput,
@@ -2003,7 +2006,6 @@ export async function sendAssistantMessageLocal(
                 route: providerOutcome.route,
                 session: failedNoReplySession,
                 stderr: '',
-                stdout: '',
                 transcriptResponse: null,
                 usage: providerOutcome.usage,
                 usageAttribution: providerOutcome.usageAttribution,

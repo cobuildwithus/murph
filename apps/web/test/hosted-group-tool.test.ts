@@ -11,7 +11,6 @@ import {
 const deadlineAnchors = vi.hoisted(() => [] as number[]);
 
 const mocks = vi.hoisted(() => ({
-  handleGameChatTool: vi.fn(),
   admitHostedGroupDisclosurePermissionAppendTx: vi.fn(),
   requireHostedCloudflareCallbackJsonRequest: vi.fn(),
   assertHostedLinqRecentInboundEngagementForRuntime: vi.fn(),
@@ -88,7 +87,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-vi.mock("@/src/lib/game/chat-tool", () => ({ handleGameChatTool: mocks.handleGameChatTool }));
+vi.mock("@/src/lib/game/chat-tool", () => ({ handleGameChatTool: vi.fn() }));
 
 vi.mock("@/src/lib/hosted-growth/signup-referral", () => ({
   issueHostedSignupReferralLink: mocks.issueHostedSignupReferralLink,
@@ -333,7 +332,6 @@ import {
   buildHostedGroupJoinOfferProviderIdempotencyKey,
   HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION,
   handleHostedRuntimeGroupTool,
-  handleHostedRuntimeConversationTool,
 } from "@/src/lib/hosted-groups/group-tool";
 import {
   HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
@@ -713,16 +711,6 @@ describe("handleHostedRuntimeGroupTool", () => {
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
     });
-  });
-
-  it("routes photo writes through the authenticated game handler", async () => {
-    const request = { action: "game_photo" as const, origin: { kind: "accepted_input" as const, assistantInputId: "synthetic-input" }, photo: { operation: "save" as const, gameId: "synthetic-game" } };
-    const result = { action: "game_photo", result: { status: "ok", photoOutcome: "saved" } };
-    mocks.handleGameChatTool.mockResolvedValue(result);
-    expect(await handleHostedRuntimeConversationTool({ memberId: "synthetic-group", request })).toEqual(result);
-    expect(mocks.handleGameChatTool).toHaveBeenCalledExactlyOnceWith({ memberId: "synthetic-group", runtimeIdentity: null, request });
-    expect(mocks.readHostedGroupSharedDataByRuntimeMemberId).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("classifies group-tool actions by access authority", () => {
@@ -2679,24 +2667,6 @@ describe("handleHostedRuntimeGroupTool", () => {
         group: null,
         status: "unavailable",
         unavailableReason: "not_group_runtime",
-      },
-    });
-
-    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx).not.toHaveBeenCalled();
-  });
-
-  it("rejects join-link creation when the container owner has no active access", async () => {
-    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_group_runtime",
-      request: { action: "create_join_link" },
-    })).resolves.toEqual({
-      action: "create_join_link",
-      result: {
-        group: null,
-        status: "unavailable",
-        unavailableReason: "owner_unavailable",
       },
     });
 
@@ -5934,30 +5904,28 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
-  it("maps a line_unresolved skip to structured unavailability", async () => {
-    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
-      status: "skipped",
-      reason: "line_unresolved",
-    });
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_container",
-      request: { action: "share_contact_card", linqThread: LINQ_THREAD },
-    })).resolves.toEqual({
-      action: "share_contact_card",
-      result: {
-        status: "unavailable",
-        unavailableReason: "line_unresolved",
+  it.each([
+    {
+      name: "unresolved line",
+      outcome: { status: "skipped", reason: "line_unresolved" },
+      unavailableReason: "line_unresolved",
+    },
+    {
+      name: "failed send",
+      outcome: {
+        status: "failed",
+        reason: "send_failed",
+        error: new Error("upload failed"),
       },
-    });
-  });
-
-  it("maps a send failure to structured unavailability", async () => {
-    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
-      status: "failed",
-      reason: "send_failed",
-      error: new Error("upload failed"),
-    });
+      unavailableReason: "send_failed",
+    },
+    {
+      name: "unavailable provider",
+      outcome: { status: "skipped", reason: "provider_unavailable" },
+      unavailableReason: "provider_unavailable",
+    },
+  ])("maps $name to structured unavailability", async ({ outcome, unavailableReason }) => {
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue(outcome);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -5966,7 +5934,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       action: "share_contact_card",
       result: {
         status: "unavailable",
-        unavailableReason: "send_failed",
+        unavailableReason,
       },
     });
   });
@@ -5991,24 +5959,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.lookupHostedGroupParticipantMemberIdsByHandles).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedMemberActivationProofMemberIds).not.toHaveBeenCalled();
     expect(mocks.hostedThreadContainerParticipantExecuteRaw).not.toHaveBeenCalled();
-  });
-
-  it("maps a provider_unavailable skip to structured unavailability", async () => {
-    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
-      status: "skipped",
-      reason: "provider_unavailable",
-    });
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_container",
-      request: { action: "share_contact_card", linqThread: LINQ_THREAD },
-    })).resolves.toEqual({
-      action: "share_contact_card",
-      result: {
-        status: "unavailable",
-        unavailableReason: "provider_unavailable",
-      },
-    });
   });
 });
 

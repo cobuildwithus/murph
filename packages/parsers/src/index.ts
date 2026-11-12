@@ -26,14 +26,9 @@ export type {
 export { decodeParserOutput } from "./contracts/parser-output.js";
 export type {
   ParserProvider,
-  ParserProviderLocality,
-  ParserProviderOpenness,
-  ParserProviderRuntime,
   ProviderAvailability,
   ProviderSelection,
 } from "./contracts/provider.js";
-export type { ProviderRankingPolicy } from "./registry/policy.js";
-export { DEFAULT_PROVIDER_RANKING_POLICY, scoreProvider } from "./registry/policy.js";
 export type { ParserRegistry } from "./registry/registry.js";
 export { createParserRegistry } from "./registry/registry.js";
 export type {

@@ -39,7 +39,6 @@ async function setup() {
     },
     session,
     stderr: '',
-    stdout: '',
     transcriptBoundary,
     transcriptResponse: 'Both messages answered.',
     workingDirectory: vaultRoot,

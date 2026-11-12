@@ -37,6 +37,7 @@ import {
   resolveJunctionBoundedFeatureRecords,
   resolveJunctionWeightProviderRecordIdentity,
   selectJunctionWorkoutStreamCandidates,
+  selectJunctionSparseCalendarDayRecords,
   type JunctionSnapshotInput,
   type JunctionSummaryNormalizationEvidence,
 } from "@murphai/importers/device-providers/junction";
@@ -123,7 +124,7 @@ import {
   buildJunctionDeviceSyncRuntimeDescriptor,
   normalizeJunctionClientUserIdNamespace,
   normalizeJunctionDeviceSyncRuntimeConfig,
-} from "../configured-provider-runtime-descriptors.ts";
+} from "../config/provider-manifests.ts";
 import {
   addMilliseconds,
   normalizeString,
@@ -3063,6 +3064,15 @@ export function createJunctionDeviceSyncProvider(
         retryable: true,
       });
     }
+    const collectionClosedAt = addMilliseconds(`${calendarRefreshDay}T00:00:00.000Z`, 2 * TIMESERIES_CHUNK_MS);
+    if (Date.parse(context.now) < Date.parse(collectionClosedAt)) {
+      return {
+        scheduledJobs: [buildJunctionSparseCalendarRefreshJob({
+          dayKey: calendarRefreshDay, priority: job.priority, resource, ...queuedCalendarSourceIdentity,
+        })],
+        nextReconcileAt: clampWebhookJobNextReconcileAt(context),
+      };
+    }
     const sourceProviders = await inventory.loadAndProjectSourceProviders();
     const calendarSourceIdentity = {
       ...queuedCalendarSourceIdentity,
@@ -5045,6 +5055,36 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
+  async function fetchSparseCalendarDaySnapshots(
+    context: ProviderJobContext,
+    dayStart: string,
+    skipped: JunctionSkippedOptionalResource[],
+    resources: readonly string[],
+    sourceProviderSlug?: string | null,
+  ): Promise<Record<string, unknown[]> | null> {
+    const snapshots: Record<string, unknown[]> = {};
+    // The normalizer accepts offsets up to 24 hours in either direction.
+    // Collect the complete envelope before selecting its source-local day.
+    for (const offset of [-1, 0, 1]) {
+      if (context.shouldYield?.()) return null;
+      const start = addMilliseconds(dayStart, offset * TIMESERIES_CHUNK_MS);
+      const skippedBefore = skipped.length;
+      const fetched = await fetchTimeseriesSnapshots(
+        context, start, addMilliseconds(start, TIMESERIES_CHUNK_MS), skipped, resources, sourceProviderSlug,
+        { dateQueryFormat: "datetime", requireStructurallyCompleteCollection: true,
+          collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT },
+      );
+      if (skipped.length > skippedBefore) {
+        throw deviceSyncError({ code: "JUNCTION_CALENDAR_REFRESH_UNAVAILABLE",
+          message: "Junction calendar refresh is temporarily unavailable.", retryable: true });
+      }
+      for (const resource of resources) {
+        (snapshots[resource] ??= []).push(...(fetched[resource] ?? []));
+      }
+    }
+    return context.shouldYield?.() ? null : snapshots;
+  }
+
   async function importTimeseriesDailyAggregateSnapshots(
     context: ProviderJobContext,
     sourceProviders: readonly JunctionProviderConnection[],
@@ -5085,8 +5125,9 @@ export function createJunctionDeviceSyncProvider(
           yieldedAt: window.windowStart,
         };
       }
-      const skippedResourceCountBeforeFetch = skippedOptionalResources.length;
-      const timeseries = await fetchTimeseriesSnapshots(
+      const timeseries = emptySparseCalendarSource
+        ? await fetchSparseCalendarDaySnapshots(context, window.windowStart, skippedOptionalResources, windowResources, sourceProviderSlug)
+        : await fetchTimeseriesSnapshots(
         context,
         window.windowStart,
         window.windowEnd,
@@ -5095,31 +5136,27 @@ export function createJunctionDeviceSyncProvider(
         sourceProviderSlug,
         {
           dateQueryFormat: "date",
-          requireStructurallyCompleteCollection: Boolean(emptySparseCalendarSource),
         },
       );
-      onFetchedSnapshot(timeseries);
-      if (
-        emptySparseCalendarSource
-        && skippedOptionalResources.length > skippedResourceCountBeforeFetch
-      ) {
-        throw deviceSyncError({
-          code: "JUNCTION_CALENDAR_REFRESH_UNAVAILABLE",
-          message: "Junction calendar refresh is temporarily unavailable.",
-          retryable: true,
-        });
+      if (!timeseries) {
+        return { appliedDailyAggregateResourceIds: [...appliedDailyAggregateResourceIds], yieldedAt: window.windowStart };
       }
+      onFetchedSnapshot(timeseries);
       if (emptySparseCalendarSource) {
         for (const resource of windowResources) {
-          timeseries[resource] = filterJunctionSparseCalendarRecordsToSource(
+          const sourceRecords = filterJunctionSparseCalendarRecordsToSource(
             timeseries[resource] ?? [],
             {
               sourceProviderSlug: emptySparseCalendarSource.sourceProviderSlug,
-              ...(emptySparseCalendarSource.sourceType
-                ? { sourceType: emptySparseCalendarSource.sourceType }
-                : {}),
+              ...(emptySparseCalendarSource.sourceType ? { sourceType: emptySparseCalendarSource.sourceType } : {}),
             },
           );
+          const dayRecords = selectJunctionSparseCalendarDayRecords(sourceRecords, {
+            dayKey: window.windowStart.slice(0, 10),
+            sourceProviderSlug: emptySparseCalendarSource.sourceProviderSlug,
+            defaultTimeZone: context.vaultTimeZone,
+          });
+          timeseries[resource] = dedupeJunctionTimeseriesRecords(resource, dayRecords);
         }
       }
       if (!hasJunctionSnapshotRecords(timeseries) && emptySparseCalendarSource) {
@@ -12150,6 +12187,7 @@ function buildJunctionSparseCalendarRefreshJob(input: {
       windowStart,
     } satisfies JunctionDeviceSyncJobPayloads["resource"],
     priority: input.priority,
+    availableAt: addMilliseconds(windowEnd, TIMESERIES_CHUNK_MS),
     dedupeKey: sha256Text(JSON.stringify([
       "junction",
       "sparse-calendar-refresh",

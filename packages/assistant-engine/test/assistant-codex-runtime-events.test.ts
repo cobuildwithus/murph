@@ -76,9 +76,7 @@ describe('assistant codex event shaping', () => {
     const onFirstAssistantResponseCompleted = vi.fn()
     const traces: unknown[] = []
     mockWarmCodexProcess([], 31_979, async (child) => {
-      const initialize = await waitForRpcMethod(child, 'initialize')
-      child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-      await writeWarmTurnStarted({ child, requestCount: 1, threadId: 'thread-final', turnId: 'turn-final' })
+      await initializeWarmTurn(child, 'thread-final', 'turn-final')
       for (const [turnId, phase] of [['turn-stale', 'final_answer'], ['turn-final', 'commentary'], ['turn-final', undefined], ['turn-final', 'final_answer']]) {
         child.stdout.write(jsonLine({ method: 'item/started', params: {
           threadId: 'thread-final', turnId, item: { type: 'agentMessage', id: 'signal-only', phase, text: '' },
@@ -1011,109 +1009,97 @@ describe('assistant codex event shaping', () => {
       const reportedUsage = createDeferred<
         Parameters<NonNullable<CodexAppServerTurnInput['onAdditionalUsage']>>[0]
       >()
-      mockProcessGroupSignalsForChildren(spawnedChildren)
+      mockWarmCodexProcess(spawnedChildren, 31_050, async (child) => {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+        const parentResume = await waitForRpcMethod(child, 'thread/resume')
+        child.stdout.write(jsonLine({
+          id: parentResume.id,
+          result: {
+            approvalPolicy: 'never',
+            cwd: workingDirectory,
+            model: 'gpt-6.1-sol',
+            modelProvider: 'openai',
+            sandbox: codexSandboxPolicyForMode('workspace-write'),
+            serviceTier: 'flex',
+            thread: { id: 'thread-subagent-terminal-parent' },
+          },
+        }))
+        const parentTurn = await waitForRpcMethod(child, 'turn/start')
+        child.stdout.write(jsonLine({
+          id: parentTurn.id,
+          result: { turn: { id: 'turn-subagent-terminal-parent' } },
+        }))
 
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_050 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            const parentResume = await waitForRpcMethod(child, 'thread/resume')
-            child.stdout.write(jsonLine({
-              id: parentResume.id,
-              result: {
-                approvalPolicy: 'never',
-                cwd: workingDirectory,
-                model: 'gpt-6.1-sol',
-                modelProvider: 'openai',
-                sandbox: codexSandboxPolicyForMode('workspace-write'),
-                serviceTier: 'flex',
-                thread: { id: 'thread-subagent-terminal-parent' },
-              },
-            }))
-            const parentTurn = await waitForRpcMethod(child, 'turn/start')
-            child.stdout.write(jsonLine({
-              id: parentTurn.id,
-              result: { turn: { id: 'turn-subagent-terminal-parent' } },
-            }))
-
-            // The owned process is the trust boundary. A foreign-thread turn
-            // notification correlates the child without parsing a parent
-            // collab item as billing authorization.
-            writeStartedTurn(
-              child,
-              'thread-subagent-terminal-child',
-              'turn-subagent-terminal-child',
-            )
-            writeCodexV2AssistantEventTurn({
-              child,
-              finalMessage: 'Parent replied before child usage',
-              threadId: 'thread-subagent-terminal-parent',
-              turnId: 'turn-subagent-terminal-parent',
-            })
-
-            await releaseChildUsage.promise
-            writeTokenUsage({
-              child,
-              last: {
-                cacheWriteInputTokens: 8,
-                cachedInputTokens: 40,
-                inputTokens: 120,
-                outputTokens: 30,
-                reasoningOutputTokens: 7,
-                totalTokens: 150,
-              },
-              threadId: 'thread-subagent-terminal-child',
-              total: {
-                cacheWriteInputTokens: 8,
-                cachedInputTokens: 40,
-                inputTokens: 120,
-                outputTokens: 30,
-                reasoningOutputTokens: 7,
-                totalTokens: 150,
-              },
-              turnId: 'turn-subagent-terminal-child',
-            })
-            writeCompletedTurn(
-              child,
-              'thread-subagent-terminal-child',
-              'turn-subagent-terminal-child',
-              childStatus,
-            )
-            writeCompletedTurn(
-              child,
-              'thread-subagent-terminal-child',
-              'turn-subagent-terminal-child',
-              childStatus,
-            )
-
-            const metadataResume = await waitForRpcMethodCount(
-              child,
-              'thread/resume',
-              2,
-            )
-            expect(asRecord(metadataResume.params)).toEqual({
-              excludeTurns: true,
-              threadId: 'thread-subagent-terminal-child',
-            })
-            child.stdout.write(jsonLine({
-              id: metadataResume.id,
-              result: {
-                model: 'gpt-6.1-sol',
-                modelProvider: 'openai',
-                reasoningEffort: 'high',
-                serviceTier: childServiceTier,
-                thread: { id: 'thread-subagent-terminal-child' },
-              },
-            }))
-          })()
+        // The owned process is the trust boundary. A foreign-thread turn
+        // notification correlates the child without parsing a parent
+        // collab item as billing authorization.
+        writeStartedTurn(
+          child,
+          'thread-subagent-terminal-child',
+          'turn-subagent-terminal-child',
+        )
+        writeCodexV2AssistantEventTurn({
+          child,
+          finalMessage: 'Parent replied before child usage',
+          threadId: 'thread-subagent-terminal-parent',
+          turnId: 'turn-subagent-terminal-parent',
         })
 
-        return child
+        await releaseChildUsage.promise
+        writeTokenUsage({
+          child,
+          last: {
+            cacheWriteInputTokens: 8,
+            cachedInputTokens: 40,
+            inputTokens: 120,
+            outputTokens: 30,
+            reasoningOutputTokens: 7,
+            totalTokens: 150,
+          },
+          threadId: 'thread-subagent-terminal-child',
+          total: {
+            cacheWriteInputTokens: 8,
+            cachedInputTokens: 40,
+            inputTokens: 120,
+            outputTokens: 30,
+            reasoningOutputTokens: 7,
+            totalTokens: 150,
+          },
+          turnId: 'turn-subagent-terminal-child',
+        })
+        writeCompletedTurn(
+          child,
+          'thread-subagent-terminal-child',
+          'turn-subagent-terminal-child',
+          childStatus,
+        )
+        writeCompletedTurn(
+          child,
+          'thread-subagent-terminal-child',
+          'turn-subagent-terminal-child',
+          childStatus,
+        )
+
+        const metadataResume = await waitForRpcMethodCount(
+          child,
+          'thread/resume',
+          2,
+        )
+        expect(asRecord(metadataResume.params)).toEqual({
+          excludeTurns: true,
+          threadId: 'thread-subagent-terminal-child',
+        })
+        child.stdout.write(jsonLine({
+          id: metadataResume.id,
+          result: {
+            model: 'gpt-6.1-sol',
+            modelProvider: 'openai',
+            reasoningEffort: 'high',
+            serviceTier: childServiceTier,
+            thread: { id: 'thread-subagent-terminal-child' },
+          },
+        }))
       })
 
       const result = await executeCodexAppServerTurn({
@@ -1245,63 +1231,44 @@ describe('assistant codex event shaping', () => {
       )
       const spawnedChildren: MockChildProcess[] = []
       const onAdditionalUsage = vi.fn()
-      mockProcessGroupSignalsForChildren(spawnedChildren)
+      mockWarmCodexProcess(spawnedChildren, 31_060, async (child) => {
+        await initializeWarmTurn(child, 'thread-subagent-metadata-parent', 'turn-subagent-metadata-parent')
+        writeStartedTurn(
+          child,
+          'thread-subagent-metadata-child',
+          'turn-subagent-metadata-child',
+        )
 
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_060 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-subagent-metadata-parent',
-              turnId: 'turn-subagent-metadata-parent',
-            })
-            writeStartedTurn(
-              child,
-              'thread-subagent-metadata-child',
-              'turn-subagent-metadata-child',
-            )
-
-            writeTokenUsage({
-              child,
-              last: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
-              threadId: 'thread-subagent-metadata-child',
-              total: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
-              turnId: 'turn-subagent-metadata-child',
-            })
-            writeCompletedTurn(
-              child,
-              'thread-subagent-metadata-child',
-              'turn-subagent-metadata-child',
-            )
-            const metadataResume = await waitForRpcMethod(child, 'thread/resume')
-            child.stdout.write(jsonLine({
-              id: metadataResume.id,
-              result: {
-                // Missing modelProvider: the parent identity is deliberately
-                // not used as a billing fallback.
-                model: 'gpt-6.1-sol',
-                reasoningEffort: 'high',
-                serviceTier: null,
-                thread: { id: 'thread-subagent-metadata-child' },
-              },
-            }))
-            writeCodexV2AssistantEventTurn({
-              child,
-              finalMessage: 'Metadata failure stayed best effort',
-              threadId: 'thread-subagent-metadata-parent',
-              turnId: 'turn-subagent-metadata-parent',
-            })
-          })()
+        writeTokenUsage({
+          child,
+          last: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+          threadId: 'thread-subagent-metadata-child',
+          total: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+          turnId: 'turn-subagent-metadata-child',
         })
-
-        return child
+        writeCompletedTurn(
+          child,
+          'thread-subagent-metadata-child',
+          'turn-subagent-metadata-child',
+        )
+        const metadataResume = await waitForRpcMethod(child, 'thread/resume')
+        child.stdout.write(jsonLine({
+          id: metadataResume.id,
+          result: {
+            // Missing modelProvider: the parent identity is deliberately
+            // not used as a billing fallback.
+            model: 'gpt-6.1-sol',
+            reasoningEffort: 'high',
+            serviceTier: null,
+            thread: { id: 'thread-subagent-metadata-child' },
+          },
+        }))
+        writeCodexV2AssistantEventTurn({
+          child,
+          finalMessage: 'Metadata failure stayed best effort',
+          threadId: 'thread-subagent-metadata-parent',
+          turnId: 'turn-subagent-metadata-parent',
+        })
       })
 
       const result = await executeCodexAppServerTurn({
@@ -1335,97 +1302,85 @@ describe('assistant codex event shaping', () => {
         'assistant-codex-subagent-cold-resume-home-',
       )
       const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
+      mockWarmCodexProcess(spawnedChildren, 31_075, async (child) => {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_075 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-            const threadResume = await waitForRpcMethod(child, 'thread/resume')
-            expect(asRecord(threadResume.params)).toEqual({
-              approvalPolicy: 'never',
-              cwd: workingDirectory,
-              excludeTurns: true,
-              model: 'gpt-6.1-sol',
-              modelProvider: 'openai',
-              sandbox: 'workspace-write',
-              threadId: 'thread-subagent-cold-parent',
-            })
-            child.stdout.write(jsonLine({
-              id: threadResume.id,
-              result: {
-                approvalPolicy: 'never',
-                cwd: workingDirectory,
-                model: 'gpt-6.1-sol',
-                modelProvider: 'openai',
-                sandbox: codexSandboxPolicyForMode('workspace-write'),
-                thread: { id: 'thread-subagent-cold-parent' },
-              },
-            }))
-
-            const turnStart = await waitForRpcMethod(child, 'turn/start')
-            child.stdout.write(jsonLine({
-              id: turnStart.id,
-              result: { turn: { id: 'turn-subagent-cold-parent' } },
-            }))
-            child.stdout.write(jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'collab-spawn-cold-child',
-                  type: 'collabAgentToolCall',
-                  tool: 'spawnAgent',
-                  status: 'completed',
-                  senderThreadId: 'thread-subagent-cold-parent',
-                  receiverThreadIds: ['thread-subagent-cold-child'],
-                  model: 'gpt-6.1-sol-mini',
-                },
-                threadId: 'thread-subagent-cold-parent',
-                turnId: 'turn-subagent-cold-parent',
-              },
-            }))
-            writeStartedTurn(
-              child,
-              'thread-subagent-cold-child',
-              'turn-subagent-cold-child',
-            )
-            writeTokenUsage({
-              child,
-              last: {
-                cacheWriteInputTokens: 0,
-                cachedInputTokens: 20,
-                inputTokens: 70,
-                outputTokens: 30,
-                reasoningOutputTokens: 4,
-                totalTokens: 100,
-              },
-              threadId: 'thread-subagent-cold-child',
-              total: {
-                cacheWriteInputTokens: 0,
-                cachedInputTokens: 20,
-                inputTokens: 70,
-                outputTokens: 30,
-                reasoningOutputTokens: 4,
-                totalTokens: 100,
-              },
-              turnId: 'turn-subagent-cold-child',
-            })
-            writeCodexV2AssistantEventTurn({
-              child,
-              finalMessage: 'Cold child usage recorded',
-              threadId: 'thread-subagent-cold-parent',
-              turnId: 'turn-subagent-cold-parent',
-            })
-          })()
+        const threadResume = await waitForRpcMethod(child, 'thread/resume')
+        expect(asRecord(threadResume.params)).toEqual({
+          approvalPolicy: 'never',
+          cwd: workingDirectory,
+          excludeTurns: true,
+          model: 'gpt-6.1-sol',
+          modelProvider: 'openai',
+          sandbox: 'workspace-write',
+          threadId: 'thread-subagent-cold-parent',
         })
+        child.stdout.write(jsonLine({
+          id: threadResume.id,
+          result: {
+            approvalPolicy: 'never',
+            cwd: workingDirectory,
+            model: 'gpt-6.1-sol',
+            modelProvider: 'openai',
+            sandbox: codexSandboxPolicyForMode('workspace-write'),
+            thread: { id: 'thread-subagent-cold-parent' },
+          },
+        }))
 
-        return child
+        const turnStart = await waitForRpcMethod(child, 'turn/start')
+        child.stdout.write(jsonLine({
+          id: turnStart.id,
+          result: { turn: { id: 'turn-subagent-cold-parent' } },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'collab-spawn-cold-child',
+              type: 'collabAgentToolCall',
+              tool: 'spawnAgent',
+              status: 'completed',
+              senderThreadId: 'thread-subagent-cold-parent',
+              receiverThreadIds: ['thread-subagent-cold-child'],
+              model: 'gpt-6.1-sol-mini',
+            },
+            threadId: 'thread-subagent-cold-parent',
+            turnId: 'turn-subagent-cold-parent',
+          },
+        }))
+        writeStartedTurn(
+          child,
+          'thread-subagent-cold-child',
+          'turn-subagent-cold-child',
+        )
+        writeTokenUsage({
+          child,
+          last: {
+            cacheWriteInputTokens: 0,
+            cachedInputTokens: 20,
+            inputTokens: 70,
+            outputTokens: 30,
+            reasoningOutputTokens: 4,
+            totalTokens: 100,
+          },
+          threadId: 'thread-subagent-cold-child',
+          total: {
+            cacheWriteInputTokens: 0,
+            cachedInputTokens: 20,
+            inputTokens: 70,
+            outputTokens: 30,
+            reasoningOutputTokens: 4,
+            totalTokens: 100,
+          },
+          turnId: 'turn-subagent-cold-child',
+        })
+        writeCodexV2AssistantEventTurn({
+          child,
+          finalMessage: 'Cold child usage recorded',
+          threadId: 'thread-subagent-cold-parent',
+          turnId: 'turn-subagent-cold-parent',
+        })
       })
 
       const result = await executeCodexAppServerTurn({
@@ -1464,167 +1419,148 @@ describe('assistant codex event shaping', () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-usage-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-usage-home-')
       const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
-
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_100 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-subagent-parent',
-              turnId: 'turn-subagent-parent',
-            })
-            // The exact activity item has no model field, so the child
-            // inherits the parent model.
-            child.stdout.write(jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'spawn-v2-terra',
-                  type: 'subAgentActivity',
-                  kind: 'started',
-                  agentThreadId: 'thread-subagent-child-a',
-                  agentPath: 'root/terra_check',
-                },
-                threadId: 'thread-subagent-parent',
-                turnId: 'turn-subagent-parent',
+      mockWarmCodexProcess(spawnedChildren, 31_100, async (child) => {
+        await initializeWarmTurn(child, 'thread-subagent-parent', 'turn-subagent-parent')
+        // The exact activity item has no model field, so the child
+        // inherits the parent model.
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'spawn-v2-terra',
+              type: 'subAgentActivity',
+              kind: 'started',
+              agentThreadId: 'thread-subagent-child-a',
+              agentPath: 'root/terra_check',
+            },
+            threadId: 'thread-subagent-parent',
+            turnId: 'turn-subagent-parent',
+          },
+        }))
+        // Child-thread events interleave on the same connection with
+        // foreign thread and turn ids.
+        child.stdout.write(jsonLine({
+          method: 'turn/started',
+          params: {
+            threadId: 'thread-subagent-child-a',
+            turn: {
+              id: 'turn-subagent-child-a',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-subagent-child-a',
+            turnId: 'turn-subagent-child-a',
+            tokenUsage: {
+              total: { cacheWriteInputTokens: 0,
+                totalTokens: 1_000,
+                inputTokens: 800,
+                cachedInputTokens: 0,
+                outputTokens: 200,
+                reasoningOutputTokens: 0,
               },
-            }))
-            // Child-thread events interleave on the same connection with
-            // foreign thread and turn ids.
-            child.stdout.write(jsonLine({
-              method: 'turn/started',
-              params: {
-                threadId: 'thread-subagent-child-a',
-                turn: {
-                  id: 'turn-subagent-child-a',
-                },
+              last: { cacheWriteInputTokens: 0,
+                totalTokens: 1_000,
+                inputTokens: 800,
+                cachedInputTokens: 0,
+                outputTokens: 200,
+                reasoningOutputTokens: 0,
               },
-            }))
-            child.stdout.write(jsonLine({
-              method: 'thread/tokenUsage/updated',
-              params: {
-                threadId: 'thread-subagent-child-a',
-                turnId: 'turn-subagent-child-a',
-                tokenUsage: {
-                  total: { cacheWriteInputTokens: 0,
-                    totalTokens: 1_000,
-                    inputTokens: 800,
-                    cachedInputTokens: 0,
-                    outputTokens: 200,
-                    reasoningOutputTokens: 0,
-                  },
-                  last: { cacheWriteInputTokens: 0,
-                    totalTokens: 1_000,
-                    inputTokens: 800,
-                    cachedInputTokens: 0,
-                    outputTokens: 200,
-                    reasoningOutputTokens: 0,
-                  },
-                },
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'child-cmd-1',
+              type: 'commandExecution',
+              command: 'true',
+            },
+            threadId: 'thread-subagent-child-a',
+            turnId: 'turn-subagent-child-a',
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-subagent-child-a',
+            turnId: 'turn-subagent-child-a',
+            tokenUsage: {
+              total: { cacheWriteInputTokens: 0,
+                totalTokens: 5_000,
+                inputTokens: 4_000,
+                cachedInputTokens: 2_000,
+                outputTokens: 1_000,
+                reasoningOutputTokens: 120,
               },
-            }))
-            child.stdout.write(jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'child-cmd-1',
-                  type: 'commandExecution',
-                  command: 'true',
-                },
-                threadId: 'thread-subagent-child-a',
-                turnId: 'turn-subagent-child-a',
+              last: { cacheWriteInputTokens: 0,
+                totalTokens: 4_000,
+                inputTokens: 3_200,
+                cachedInputTokens: 2_000,
+                outputTokens: 800,
+                reasoningOutputTokens: 120,
               },
-            }))
-            child.stdout.write(jsonLine({
-              method: 'thread/tokenUsage/updated',
-              params: {
-                threadId: 'thread-subagent-child-a',
-                turnId: 'turn-subagent-child-a',
-                tokenUsage: {
-                  total: { cacheWriteInputTokens: 0,
-                    totalTokens: 5_000,
-                    inputTokens: 4_000,
-                    cachedInputTokens: 2_000,
-                    outputTokens: 1_000,
-                    reasoningOutputTokens: 120,
-                  },
-                  last: { cacheWriteInputTokens: 0,
-                    totalTokens: 4_000,
-                    inputTokens: 3_200,
-                    cachedInputTokens: 2_000,
-                    outputTokens: 800,
-                    reasoningOutputTokens: 120,
-                  },
-                },
+            },
+          },
+        }))
+        // A V1 child whose spawn item carries no model inherits the
+        // parent's model and still bills without a lookup.
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'collab-spawn-2',
+              type: 'collabAgentToolCall',
+              tool: 'spawnAgent',
+              status: 'completed',
+              senderThreadId: 'thread-subagent-parent',
+              receiverThreadIds: ['thread-subagent-child-b'],
+            },
+            threadId: 'thread-subagent-parent',
+            turnId: 'turn-subagent-parent',
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/started',
+          params: {
+            threadId: 'thread-subagent-child-b',
+            turn: {
+              id: 'turn-subagent-child-b',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-subagent-child-b',
+            turnId: 'turn-subagent-child-b',
+            tokenUsage: {
+              total: { cacheWriteInputTokens: 0,
+                totalTokens: 700,
+                inputTokens: 600,
+                cachedInputTokens: 100,
+                outputTokens: 100,
+                reasoningOutputTokens: 0,
               },
-            }))
-            // A V1 child whose spawn item carries no model inherits the
-            // parent's model and still bills without a lookup.
-            child.stdout.write(jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'collab-spawn-2',
-                  type: 'collabAgentToolCall',
-                  tool: 'spawnAgent',
-                  status: 'completed',
-                  senderThreadId: 'thread-subagent-parent',
-                  receiverThreadIds: ['thread-subagent-child-b'],
-                },
-                threadId: 'thread-subagent-parent',
-                turnId: 'turn-subagent-parent',
+              last: { cacheWriteInputTokens: 0,
+                totalTokens: 700,
+                inputTokens: 600,
+                cachedInputTokens: 100,
+                outputTokens: 100,
+                reasoningOutputTokens: 0,
               },
-            }))
-            child.stdout.write(jsonLine({
-              method: 'turn/started',
-              params: {
-                threadId: 'thread-subagent-child-b',
-                turn: {
-                  id: 'turn-subagent-child-b',
-                },
-              },
-            }))
-            child.stdout.write(jsonLine({
-              method: 'thread/tokenUsage/updated',
-              params: {
-                threadId: 'thread-subagent-child-b',
-                turnId: 'turn-subagent-child-b',
-                tokenUsage: {
-                  total: { cacheWriteInputTokens: 0,
-                    totalTokens: 700,
-                    inputTokens: 600,
-                    cachedInputTokens: 100,
-                    outputTokens: 100,
-                    reasoningOutputTokens: 0,
-                  },
-                  last: { cacheWriteInputTokens: 0,
-                    totalTokens: 700,
-                    inputTokens: 600,
-                    cachedInputTokens: 100,
-                    outputTokens: 100,
-                    reasoningOutputTokens: 0,
-                  },
-                },
-              },
-            }))
-            writeCodexV2AssistantEventTurn({
-              child,
-              finalMessage: 'Done with subagents',
-              threadId: 'thread-subagent-parent',
-              turnId: 'turn-subagent-parent',
-            })
-          })()
+            },
+          },
+        }))
+        writeCodexV2AssistantEventTurn({
+          child,
+          finalMessage: 'Done with subagents',
+          threadId: 'thread-subagent-parent',
+          turnId: 'turn-subagent-parent',
         })
-
-        return child
       })
 
       const result = await executeCodexAppServerTurn({
@@ -1706,14 +1642,7 @@ describe('assistant codex event shaping', () => {
 
             queueMicrotask(() => {
               void (async () => {
-                const initialize = await waitForRpcMethod(child, 'initialize')
-                child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-                await writeWarmTurnStarted({
-                  child,
-                  requestCount: 1,
-                  threadId: 'thread-subagent-reset-parent',
-                  turnId: 'turn-subagent-reset-parent',
-                })
+                await initializeWarmTurn(child, 'thread-subagent-reset-parent', 'turn-subagent-reset-parent')
                 child.stdout.write(jsonLine({
                   method: 'item/completed',
                   params: {
@@ -1903,51 +1832,34 @@ describe('assistant codex event shaping', () => {
         'assistant-codex-subagent-missing-start-home-',
       )
       const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
-
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_175 + spawnedChildren.length
-        spawnedChildren.push(child)
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-subagent-missing-start-parent',
-              turnId: 'turn-subagent-missing-start-parent',
-            })
-            child.stdout.write(jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'collab-spawn-missing-start',
-                  type: 'collabAgentToolCall',
-                  tool: 'spawnAgent',
-                  receiverThreadIds: ['thread-subagent-missing-start-child'],
-                },
-                threadId: 'thread-subagent-missing-start-parent',
-                turnId: 'turn-subagent-missing-start-parent',
-              },
-            }))
-            writeTokenUsage({
-              child,
-              last: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
-              threadId: 'thread-subagent-missing-start-child',
-              total: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
-              turnId: 'turn-subagent-missing-start-child',
-            })
-            writeCodexV2AssistantEventTurn({
-              child,
-              finalMessage: 'Missing child start stayed unbilled',
-              threadId: 'thread-subagent-missing-start-parent',
-              turnId: 'turn-subagent-missing-start-parent',
-            })
-          })()
+      mockWarmCodexProcess(spawnedChildren, 31_175, async (child) => {
+        await initializeWarmTurn(child, 'thread-subagent-missing-start-parent', 'turn-subagent-missing-start-parent')
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'collab-spawn-missing-start',
+              type: 'collabAgentToolCall',
+              tool: 'spawnAgent',
+              receiverThreadIds: ['thread-subagent-missing-start-child'],
+            },
+            threadId: 'thread-subagent-missing-start-parent',
+            turnId: 'turn-subagent-missing-start-parent',
+          },
+        }))
+        writeTokenUsage({
+          child,
+          last: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+          threadId: 'thread-subagent-missing-start-child',
+          total: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+          turnId: 'turn-subagent-missing-start-child',
         })
-        return child
+        writeCodexV2AssistantEventTurn({
+          child,
+          finalMessage: 'Missing child start stayed unbilled',
+          threadId: 'thread-subagent-missing-start-parent',
+          turnId: 'turn-subagent-missing-start-parent',
+        })
       })
 
       const result = await executeCodexAppServerTurn({
@@ -1966,53 +1878,34 @@ describe('assistant codex event shaping', () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-deny-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-deny-home-')
       const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
-
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_200 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-subagent-deny-parent',
-              turnId: 'turn-subagent-deny-parent',
-            })
-            child.stdout.write(jsonLine({
-              id: 99,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'generate_image',
-                arguments: {
-                  prompt: 'a child should not be able to call this',
-                },
-                threadId: 'thread-subagent-deny-child',
-                turnId: 'turn-subagent-deny-child',
-              },
-            }))
-            const denial = await waitForRpcResponse(child, 99)
-            expect(denial).toMatchObject({
-              id: 99,
-              error: {
-                code: -32000,
-              },
-            })
-            writeCodexV2AssistantEventTurn({
-              child,
-              finalMessage: 'Parent unaffected',
-              threadId: 'thread-subagent-deny-parent',
-              turnId: 'turn-subagent-deny-parent',
-            })
-          })()
+      mockWarmCodexProcess(spawnedChildren, 31_200, async (child) => {
+        await initializeWarmTurn(child, 'thread-subagent-deny-parent', 'turn-subagent-deny-parent')
+        child.stdout.write(jsonLine({
+          id: 99,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'generate_image',
+            arguments: {
+              prompt: 'a child should not be able to call this',
+            },
+            threadId: 'thread-subagent-deny-child',
+            turnId: 'turn-subagent-deny-child',
+          },
+        }))
+        const denial = await waitForRpcResponse(child, 99)
+        expect(denial).toMatchObject({
+          id: 99,
+          error: {
+            code: -32000,
+          },
         })
-
-        return child
+        writeCodexV2AssistantEventTurn({
+          child,
+          finalMessage: 'Parent unaffected',
+          threadId: 'thread-subagent-deny-parent',
+          turnId: 'turn-subagent-deny-parent',
+        })
       })
 
       const result = await executeCodexAppServerTurn({
@@ -2034,83 +1927,64 @@ describe('assistant codex event shaping', () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-fail-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-fail-home-')
       const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
-
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_400 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-subagent-fail-parent',
-              turnId: 'turn-subagent-fail-parent',
-            })
-            child.stdout.write(jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'collab-spawn-fail-1',
-                  type: 'collabAgentToolCall',
-                  tool: 'spawnAgent',
-                  status: 'completed',
-                  senderThreadId: 'thread-subagent-fail-parent',
-                  receiverThreadIds: ['thread-subagent-fail-child'],
-                  model: 'gpt-6.1-sol-mini',
-                },
-                threadId: 'thread-subagent-fail-parent',
-                turnId: 'turn-subagent-fail-parent',
+      mockWarmCodexProcess(spawnedChildren, 31_400, async (child) => {
+        await initializeWarmTurn(child, 'thread-subagent-fail-parent', 'turn-subagent-fail-parent')
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'collab-spawn-fail-1',
+              type: 'collabAgentToolCall',
+              tool: 'spawnAgent',
+              status: 'completed',
+              senderThreadId: 'thread-subagent-fail-parent',
+              receiverThreadIds: ['thread-subagent-fail-child'],
+              model: 'gpt-6.1-sol-mini',
+            },
+            threadId: 'thread-subagent-fail-parent',
+            turnId: 'turn-subagent-fail-parent',
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'turn/started',
+          params: {
+            threadId: 'thread-subagent-fail-child',
+            turn: {
+              id: 'turn-subagent-fail-child',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-subagent-fail-child',
+            turnId: 'turn-subagent-fail-child',
+            tokenUsage: {
+              total: { cacheWriteInputTokens: 0,
+                totalTokens: 1_000,
+                inputTokens: 800,
+                cachedInputTokens: 0,
+                outputTokens: 200,
+                reasoningOutputTokens: 0,
               },
-            }))
-            child.stdout.write(jsonLine({
-              method: 'turn/started',
-              params: {
-                threadId: 'thread-subagent-fail-child',
-                turn: {
-                  id: 'turn-subagent-fail-child',
-                },
+              last: { cacheWriteInputTokens: 0,
+                totalTokens: 1_000,
+                inputTokens: 800,
+                cachedInputTokens: 0,
+                outputTokens: 200,
+                reasoningOutputTokens: 0,
               },
-            }))
-            child.stdout.write(jsonLine({
-              method: 'thread/tokenUsage/updated',
-              params: {
-                threadId: 'thread-subagent-fail-child',
-                turnId: 'turn-subagent-fail-child',
-                tokenUsage: {
-                  total: { cacheWriteInputTokens: 0,
-                    totalTokens: 1_000,
-                    inputTokens: 800,
-                    cachedInputTokens: 0,
-                    outputTokens: 200,
-                    reasoningOutputTokens: 0,
-                  },
-                  last: { cacheWriteInputTokens: 0,
-                    totalTokens: 1_000,
-                    inputTokens: 800,
-                    cachedInputTokens: 0,
-                    outputTokens: 200,
-                    reasoningOutputTokens: 0,
-                  },
-                },
-              },
-            }))
-            // The parent turn fails AFTER child usage was observed: the
-            // billed child usage must survive into the failure context.
-            writeCompletedTurn(
-              child,
-              'thread-subagent-fail-parent',
-              'turn-subagent-fail-parent',
-              'failed',
-            )
-          })()
-        })
-
-        return child
+            },
+          },
+        }))
+        // The parent turn fails AFTER child usage was observed: the
+        // billed child usage must survive into the failure context.
+        writeCompletedTurn(
+          child,
+          'thread-subagent-fail-parent',
+          'turn-subagent-fail-parent',
+          'failed',
+        )
       })
 
       const error: unknown = await executeCodexAppServerTurn({
@@ -2163,74 +2037,55 @@ describe('assistant codex event shaping', () => {
       const onFinishWithoutReplyRecorded = vi.fn()
       const messageRef = `ain_${'d'.repeat(32)}`
       const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
-
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_450 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-reaction-fail-parent',
-              turnId: 'turn-reaction-fail-parent',
-            })
-            child.stdout.write(jsonLine({
-              id: 41,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'react_to_message',
-                arguments: {
-                  message_ref: messageRef,
-                  reaction: 'heart',
-                },
-                threadId: 'thread-reaction-fail-parent',
-                turnId: 'turn-reaction-fail-parent',
-              },
-            }))
-            await expect(waitForRpcResponse(child, 41)).resolves.toMatchObject({
-              id: 41,
-              result: {
-                success: true,
-              },
-            })
-            child.stdout.write(jsonLine({
-              id: 42,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'finish_without_reply',
-                arguments: {},
-                threadId: 'thread-reaction-fail-parent',
-                turnId: 'turn-reaction-fail-parent',
-              },
-            }))
-            await expect(waitForRpcResponse(child, 42)).resolves.toMatchObject({
-              id: 42,
-              result: {
-                success: true,
-              },
-            })
-            child.stdout.write(jsonLine({ method: 'item/started', params: {
-              threadId: 'thread-reaction-fail-parent', turnId: 'turn-reaction-fail-parent',
-              item: { type: 'agentMessage', id: 'suppressed-final', phase: 'final_answer', text: '' },
-            } }))
-            writeCompletedTurn(
-              child,
-              'thread-reaction-fail-parent',
-              'turn-reaction-fail-parent',
-              'failed',
-            )
-          })()
+      mockWarmCodexProcess(spawnedChildren, 31_450, async (child) => {
+        await initializeWarmTurn(child, 'thread-reaction-fail-parent', 'turn-reaction-fail-parent')
+        child.stdout.write(jsonLine({
+          id: 41,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'react_to_message',
+            arguments: {
+              message_ref: messageRef,
+              reaction: 'heart',
+            },
+            threadId: 'thread-reaction-fail-parent',
+            turnId: 'turn-reaction-fail-parent',
+          },
+        }))
+        await expect(waitForRpcResponse(child, 41)).resolves.toMatchObject({
+          id: 41,
+          result: {
+            success: true,
+          },
         })
-
-        return child
+        child.stdout.write(jsonLine({
+          id: 42,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'finish_without_reply',
+            arguments: {},
+            threadId: 'thread-reaction-fail-parent',
+            turnId: 'turn-reaction-fail-parent',
+          },
+        }))
+        await expect(waitForRpcResponse(child, 42)).resolves.toMatchObject({
+          id: 42,
+          result: {
+            success: true,
+          },
+        })
+        child.stdout.write(jsonLine({ method: 'item/started', params: {
+          threadId: 'thread-reaction-fail-parent', turnId: 'turn-reaction-fail-parent',
+          item: { type: 'agentMessage', id: 'suppressed-final', phase: 'final_answer', text: '' },
+        } }))
+        writeCompletedTurn(
+          child,
+          'thread-reaction-fail-parent',
+          'turn-reaction-fail-parent',
+          'failed',
+        )
       })
 
       const error: unknown = await executeCodexAppServerTurn({
@@ -2296,100 +2151,81 @@ describe('assistant codex event shaping', () => {
       const onFinishWithoutReplyRecorded = vi.fn()
       const messageRef = `ain_${'e'.repeat(32)}`
       const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
-
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_550 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-cross-context-reaction',
-              turnId: 'turn-cross-context-reaction',
-            })
-            child.stdout.write(jsonLine({
-              id: 45,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'react_to_message',
-                arguments: {
-                  message_ref: messageRef,
-                  reaction: 'heart',
-                },
-                threadId: 'thread-cross-context-reaction',
-                turnId: 'turn-cross-context-reaction',
-              },
-            }))
-            await expect(waitForRpcResponse(child, 45)).resolves.toMatchObject({
-              id: 45,
-              result: {
-                success: true,
-              },
-            })
-            child.stdout.write(jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'user-cross-context-initial',
-                  type: 'userMessage',
-                  content: [{ type: 'text', text: 'react to my earlier message' }],
-                },
-              },
-            }))
-            child.stdout.write(jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'assistant-cross-context-initial',
-                  text: 'Earlier answer.',
-                  type: 'agentMessage',
-                },
-              },
-            }))
-            child.stdout.write(jsonLine({
-              method: 'item/completed',
-              params: {
-                item: {
-                  id: 'user-cross-context-steered',
-                  type: 'userMessage',
-                  content: [{ type: 'text', text: 'steered follow up' }],
-                },
-              },
-            }))
-            child.stdout.write(jsonLine({
-              id: 46,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'finish_without_reply',
-                arguments: {},
-                threadId: 'thread-cross-context-reaction',
-                turnId: 'turn-cross-context-reaction',
-              },
-            }))
-            await expect(waitForRpcResponse(child, 46)).resolves.toMatchObject({
-              id: 46,
-              result: {
-                success: true,
-              },
-            })
-            writeCompletedTurn(
-              child,
-              'thread-cross-context-reaction',
-              'turn-cross-context-reaction',
-              'failed',
-            )
-          })()
+      mockWarmCodexProcess(spawnedChildren, 31_550, async (child) => {
+        await initializeWarmTurn(child, 'thread-cross-context-reaction', 'turn-cross-context-reaction')
+        child.stdout.write(jsonLine({
+          id: 45,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'react_to_message',
+            arguments: {
+              message_ref: messageRef,
+              reaction: 'heart',
+            },
+            threadId: 'thread-cross-context-reaction',
+            turnId: 'turn-cross-context-reaction',
+          },
+        }))
+        await expect(waitForRpcResponse(child, 45)).resolves.toMatchObject({
+          id: 45,
+          result: {
+            success: true,
+          },
         })
-
-        return child
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'user-cross-context-initial',
+              type: 'userMessage',
+              content: [{ type: 'text', text: 'react to my earlier message' }],
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'assistant-cross-context-initial',
+              text: 'Earlier answer.',
+              type: 'agentMessage',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          method: 'item/completed',
+          params: {
+            item: {
+              id: 'user-cross-context-steered',
+              type: 'userMessage',
+              content: [{ type: 'text', text: 'steered follow up' }],
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          id: 46,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'finish_without_reply',
+            arguments: {},
+            threadId: 'thread-cross-context-reaction',
+            turnId: 'turn-cross-context-reaction',
+          },
+        }))
+        await expect(waitForRpcResponse(child, 46)).resolves.toMatchObject({
+          id: 46,
+          result: {
+            success: true,
+          },
+        })
+        writeCompletedTurn(
+          child,
+          'thread-cross-context-reaction',
+          'turn-cross-context-reaction',
+          'failed',
+        )
       })
 
       const error: unknown = await executeCodexAppServerTurn({
@@ -2451,64 +2287,52 @@ describe('assistant codex event shaping', () => {
         throw markerFailure
       })
       const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
-
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_475 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            const thread = await waitForRpcMethod(child, 'thread/start')
-            child.stdout.write(jsonLine({
-              id: thread.id,
-              result: {
-                thread: {
-                  id: threadId,
-                  path: path.join(codexHome, rolloutRelativePath),
-                },
-              },
-            }))
-            const turn = await waitForRpcMethod(child, 'turn/start')
-            child.stdout.write(jsonLine({
-              id: turn.id,
-              result: {
-                turn: {
-                  id: 'turn-no-reply-recorded-fail',
-                },
-              },
-            }))
-            child.stdout.write(jsonLine({
-              id: 43,
-              method: 'item/tool/call',
-              params: {
-                namespace: 'murph',
-                tool: 'finish_without_reply',
-                arguments: {},
-                threadId,
-                turnId: 'turn-no-reply-recorded-fail',
-              },
-            }))
-            await expect(waitForRpcResponse(child, 43)).resolves.toMatchObject({
-              id: 43,
-              result: { success: true },
-            })
-            child.stdout.write(jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-no-reply-recorded-fail',
-                  status: 'completed',
-                },
-              },
-            }))
-          })()
+      mockWarmCodexProcess(spawnedChildren, 31_475, async (child) => {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+        const thread = await waitForRpcMethod(child, 'thread/start')
+        child.stdout.write(jsonLine({
+          id: thread.id,
+          result: {
+            thread: {
+              id: threadId,
+              path: path.join(codexHome, rolloutRelativePath),
+            },
+          },
+        }))
+        const turn = await waitForRpcMethod(child, 'turn/start')
+        child.stdout.write(jsonLine({
+          id: turn.id,
+          result: {
+            turn: {
+              id: 'turn-no-reply-recorded-fail',
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          id: 43,
+          method: 'item/tool/call',
+          params: {
+            namespace: 'murph',
+            tool: 'finish_without_reply',
+            arguments: {},
+            threadId,
+            turnId: 'turn-no-reply-recorded-fail',
+          },
+        }))
+        await expect(waitForRpcResponse(child, 43)).resolves.toMatchObject({
+          id: 43,
+          result: { success: true },
         })
-
-        return child
+        child.stdout.write(jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-no-reply-recorded-fail',
+              status: 'completed',
+            },
+          },
+        }))
       })
 
       const error: unknown = await executeCodexAppServerTurn({
@@ -2566,14 +2390,7 @@ describe('assistant codex event shaping', () => {
 
         queueMicrotask(() => {
           void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-subagent-cap-parent',
-              turnId: 'turn-subagent-cap-parent',
-            })
+            await initializeWarmTurn(child, 'thread-subagent-cap-parent', 'turn-subagent-cap-parent')
             child.stdout.write(jsonLine({
               method: 'item/completed',
               params: {
@@ -2752,14 +2569,7 @@ describe('assistant codex event shaping', () => {
 
         queueMicrotask(() => {
           void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-subagent-ordinal-parent',
-              turnId: 'turn-subagent-ordinal-parent',
-            })
+            await initializeWarmTurn(child, 'thread-subagent-ordinal-parent', 'turn-subagent-ordinal-parent')
             // Child usage interleaves with a parent dynamic tool call: the
             // image draft takes ordinal 1, so the subagent draft must take 2.
             child.stdout.write(jsonLine({
@@ -2889,45 +2699,25 @@ describe('assistant codex event shaping', () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-idle-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-idle-home-')
       const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
+      mockWarmCodexProcess(spawnedChildren, 31_700, async (child) => {
+        await initializeWarmTurn(child, 'thread-subagent-idle-parent', 'turn-subagent-idle-one')
+        writeCompletedTurn(
+          child,
+          'thread-subagent-idle-parent',
+          'turn-subagent-idle-one',
+        )
 
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_700 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-subagent-idle-parent',
-              turnId: 'turn-subagent-idle-one',
-            })
-            writeCompletedTurn(
-              child,
-              'thread-subagent-idle-parent',
-              'turn-subagent-idle-one',
-            )
-
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 2,
-              threadId: 'thread-subagent-idle-parent-2',
-              turnId: 'turn-subagent-idle-two',
-            })
-            writeCompletedTurn(
-              child,
-              'thread-subagent-idle-parent-2',
-              'turn-subagent-idle-two',
-            )
-          })()
+        await writeWarmTurnStarted({
+          child,
+          requestCount: 2,
+          threadId: 'thread-subagent-idle-parent-2',
+          turnId: 'turn-subagent-idle-two',
         })
-
-        return child
+        writeCompletedTurn(
+          child,
+          'thread-subagent-idle-parent-2',
+          'turn-subagent-idle-two',
+        )
       })
 
       const stableInput = {
@@ -4017,84 +3807,64 @@ describe('assistant codex event shaping', () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-prestart-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-prestart-home-')
       const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
+      mockWarmCodexProcess(spawnedChildren, 31_900, async (child) => {
+        await initializeWarmTurn(child, 'thread-subagent-prestart-one', 'turn-subagent-prestart-one')
+        writeCompletedTurn(
+          child,
+          'thread-subagent-prestart-one',
+          'turn-subagent-prestart-one',
+        )
 
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_900 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-subagent-prestart-one',
-              turnId: 'turn-subagent-prestart-one',
-            })
-            writeCompletedTurn(
-              child,
-              'thread-subagent-prestart-one',
-              'turn-subagent-prestart-one',
-            )
-
-            // The second turn has bound the warm process, but its
-            // thread/start response has not been written yet: a late child
-            // event lands in that window and must stay out of the parent
-            // turn's output/tool path.
-            const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-            child.stdout.write(jsonLine({
-              method: 'thread/tokenUsage/updated',
-              params: {
-                threadId: 'thread-subagent-prestart-child',
-                turnId: 'turn-subagent-prestart-child',
-                tokenUsage: {
-                  total: { cacheWriteInputTokens: 0,
-                    totalTokens: 600,
-                    inputTokens: 500,
-                    cachedInputTokens: 0,
-                    outputTokens: 100,
-                    reasoningOutputTokens: 0,
-                  },
-                  last: { cacheWriteInputTokens: 0,
-                    totalTokens: 600,
-                    inputTokens: 500,
-                    cachedInputTokens: 0,
-                    outputTokens: 100,
-                    reasoningOutputTokens: 0,
-                  },
-                },
+        // The second turn has bound the warm process, but its
+        // thread/start response has not been written yet: a late child
+        // event lands in that window and must stay out of the parent
+        // turn's output/tool path.
+        const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+        child.stdout.write(jsonLine({
+          method: 'thread/tokenUsage/updated',
+          params: {
+            threadId: 'thread-subagent-prestart-child',
+            turnId: 'turn-subagent-prestart-child',
+            tokenUsage: {
+              total: { cacheWriteInputTokens: 0,
+                totalTokens: 600,
+                inputTokens: 500,
+                cachedInputTokens: 0,
+                outputTokens: 100,
+                reasoningOutputTokens: 0,
               },
-            }))
-            child.stdout.write(jsonLine({
-              id: secondThread.id,
-              result: {
-                thread: {
-                  id: 'thread-subagent-prestart-two',
-                },
+              last: { cacheWriteInputTokens: 0,
+                totalTokens: 600,
+                inputTokens: 500,
+                cachedInputTokens: 0,
+                outputTokens: 100,
+                reasoningOutputTokens: 0,
               },
-            }))
-            const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-            child.stdout.write(jsonLine({
-              id: secondTurn.id,
-              result: {
-                turn: {
-                  id: 'turn-subagent-prestart-two',
-                },
-              },
-            }))
-            writeCompletedTurn(
-              child,
-              'thread-subagent-prestart-two',
-              'turn-subagent-prestart-two',
-            )
-          })()
-        })
-
-        return child
+            },
+          },
+        }))
+        child.stdout.write(jsonLine({
+          id: secondThread.id,
+          result: {
+            thread: {
+              id: 'thread-subagent-prestart-two',
+            },
+          },
+        }))
+        const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+        child.stdout.write(jsonLine({
+          id: secondTurn.id,
+          result: {
+            turn: {
+              id: 'turn-subagent-prestart-two',
+            },
+          },
+        }))
+        writeCompletedTurn(
+          child,
+          'thread-subagent-prestart-two',
+          'turn-subagent-prestart-two',
+        )
       })
 
       const stableInput = {

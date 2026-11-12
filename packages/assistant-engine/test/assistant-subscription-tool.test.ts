@@ -64,7 +64,7 @@ describe("assistant subscription tool", () => {
         namespace: "murph",
         tool: "subscription",
       },
-    })?.kind).toBe("invalid-subscription-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
     expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -72,7 +72,7 @@ describe("assistant subscription tool", () => {
         namespace: "murph",
         tool: "subscription",
       },
-    })?.kind).toBe("invalid-subscription-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
   });
 
   it("injects the current accepted input ID and returns server-owned plan facts", async () => {

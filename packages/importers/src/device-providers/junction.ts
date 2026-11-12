@@ -2358,6 +2358,41 @@ function normalizeTimeseries(
   }
 }
 
+/** Select only after the provider has collected the adjacent UTC days completely.
+ * Keep malformed intervals for the strict repair validator; never turn them
+ * into an authoritative empty day by filtering them out here. */
+export function selectJunctionSparseCalendarDayRecords(
+  records: readonly unknown[],
+  input: { dayKey: string; sourceProviderSlug: string; defaultTimeZone?: string },
+): unknown[] {
+  return records.filter((record) => {
+    const entry = asPlainObject(record);
+    if (!entry) return true;
+    // The SDK decodes endpoints as Dates before snapshot sanitization. Resolve
+    // them here too so valid adjacent rows cannot bypass day selection.
+    const startRaw = firstJunctionCalendarSelectionTimestamp(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS);
+    const startAt = resolveSafeTimestamp(startRaw);
+    const endRaw = firstJunctionCalendarSelectionTimestamp(entry, JUNCTION_INTERVAL_END_TIMESTAMP_PATHS);
+    const endAt = resolveSafeTimestamp(endRaw);
+    if (!startRaw || !startAt || !endAt || Date.parse(endAt) < Date.parse(startAt)) return true;
+    const timestamp = resolveJunctionSparseIntervalTimestamp(entry, startRaw, {}, input.sourceProviderSlug);
+    const { dayKey } = resolveJunctionTimeseriesAggregateDay(entry, timestamp, startAt, input.defaultTimeZone);
+    // Only a neighboring calendar day is covered by the collected envelope.
+    // Contradictory distant calendar metadata must still fail strict validation.
+    const calendarShift = dayKey ? Math.abs(Date.parse(dayKey) - Date.parse(startAt.slice(0, 10))) : Number.NaN;
+    return !dayKey || calendarShift > 86_400_000 || dayKey === input.dayKey;
+  });
+}
+
+function firstJunctionCalendarSelectionTimestamp(entry: PlainObject, paths: readonly string[]): string | undefined {
+  for (const path of paths) {
+    const value = readPath(entry, path);
+    const raw = value instanceof Date ? normalizeTimestamp(value) : stringId(value);
+    if (raw) return raw;
+  }
+  return undefined;
+}
+
 function assertJunctionSparseCalendarRepairRowsValid(input: {
   context: NormalizationContext;
   descriptor: JunctionDailyTimeseriesDescriptor;
@@ -2415,14 +2450,15 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
           resourceContext.sourceProviderSlug,
         )
       : null;
-    const dayKey = timestamp && startAt
-      ? resolveJunctionTimeseriesAggregateDayKey(
+    const calendarDay = timestamp && startAt
+      ? resolveJunctionTimeseriesAggregateDay(
           entry,
           timestamp,
           startAt,
           input.context.defaultTimeZone,
         )
-      : undefined;
+      : { dayKey: undefined, basis: "missing" as const };
+    const { dayKey } = calendarDay;
     const reason = junctionSparseCalendarRowFailureReason({
       resourceContext, startRaw, endRaw, startAt, endAt, dayKey, expectation,
       valueReason: valueDiagnostic.reason,
@@ -2452,11 +2488,13 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
         {
           ...valueDiagnostic,
           rowOrdinal: index + 1,
+          recordExpanded: Boolean(originFallback),
           sourceProvider: normalizeKnownJunctionSourceProviderSlug(
             resourceContext?.sourceProviderSlug,
           ),
           timestampKind: classifyJunctionNormalizationTimestampKind(startRaw),
           timestampSemantics: timestamp?.timestampSemantics,
+          ...junctionCalendarDayDiagnostic(reason, calendarDay, startRaw, startAt, expectation.dayKey),
         },
       );
     }
@@ -2561,9 +2599,13 @@ export type JunctionNormalizationTimestampKind =
 export interface JunctionCalendarRefreshNormalizationDiagnostic {
   reason: JunctionCalendarRefreshNormalizationFailureReason;
   rowOrdinal?: number;
+  recordExpanded?: boolean;
   sourceProvider?: string;
   timestampKind?: JunctionNormalizationTimestampKind;
   timestampSemantics?: TimestampSemantics;
+  dayBasis?: "explicit_calendar" | "timestamp_calendar" | "source_offset" | "vault_timezone" | "utc" | "missing";
+  utcDayRelation?: "before" | "equal" | "after" | "missing";
+  resolvedDayRelation?: "before" | "equal" | "after" | "missing";
   valueKind?: "missing" | "non_numeric" | "non_finite" | "numeric_string" | "number";
   valueRange?: "negative" | "zero" | "fraction" | "percentage" | "above_percentage"
     | "below_range" | "above_range_up_to_10x" | "above_range_10x_to_1000x" | "above_range_over_1000x";
@@ -5729,7 +5771,7 @@ function pushJunctionSparseIntervalReadings(
 function resolveJunctionSparseIntervalTimestamp(
   entry: PlainObject,
   startRaw: string,
-  context: NormalizationContext,
+  context: Pick<NormalizationContext, "importedAt" | "windowEnd" | "windowStart">,
   sourceProviderSlug: string,
 ): ReturnType<typeof resolveRecordTimestamp> {
   const startAt = resolveSafeTimestamp(startRaw);
@@ -10367,8 +10409,45 @@ function resolveJunctionTimeseriesAggregateDayKey(
   sampleAt: string | undefined,
   defaultTimeZone: string | undefined,
 ): string | undefined {
+  return resolveJunctionTimeseriesAggregateDay(entry, timestamp, sampleAt, defaultTimeZone).dayKey;
+}
+
+function junctionCalendarDayRelation(
+  dayKey: string | undefined,
+  expectedDay: string,
+): NonNullable<JunctionCalendarRefreshNormalizationDiagnostic["utcDayRelation"]> {
+  return !dayKey ? "missing" : dayKey === expectedDay ? "equal" : dayKey < expectedDay ? "before" : "after";
+}
+
+function junctionCalendarDayDiagnostic(
+  reason: JunctionCalendarRefreshNormalizationFailureReason,
+  calendarDay: ReturnType<typeof resolveJunctionTimeseriesAggregateDay>,
+  startRaw: string | undefined,
+  startAt: string | undefined,
+  expectedDay: string,
+): Pick<JunctionCalendarRefreshNormalizationDiagnostic, "dayBasis" | "utcDayRelation" | "resolvedDayRelation"> {
+  if (reason !== "sparse_interval.day_mismatch") return {};
+  const utcDay = classifyJunctionNormalizationTimestampKind(startRaw) === "absolute"
+    ? startAt?.slice(0, 10) : undefined;
+  return {
+    dayBasis: calendarDay.basis,
+    utcDayRelation: junctionCalendarDayRelation(utcDay, expectedDay),
+    resolvedDayRelation: junctionCalendarDayRelation(calendarDay.dayKey, expectedDay),
+  };
+}
+
+function resolveJunctionTimeseriesAggregateDay(
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  sampleAt: string | undefined,
+  defaultTimeZone: string | undefined,
+): { dayKey: string | undefined; basis: JunctionCalendarRefreshNormalizationDiagnostic["dayBasis"] } {
+  const timestampBasis = firstIsoDateFromPaths(entry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS)
+    ? "explicit_calendar" : "timestamp_calendar";
   if (timestamp.timestampSemantics === "offset") {
-    return timestamp.dayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+    return timestamp.dayKey
+      ? { dayKey: timestamp.dayKey, basis: timestampBasis }
+      : { dayKey: extractIsoDatePrefix(sampleAt) ?? undefined, basis: sampleAt ? "utc" : "missing" };
   }
 
   const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
@@ -10382,14 +10461,17 @@ function resolveJunctionTimeseriesAggregateDayKey(
   ) {
     const offsetDayKey = extractLocalDayKeyFromUtcOffset(sampleAt, offsetSeconds);
     if (offsetDayKey) {
-      return offsetDayKey;
+      return { dayKey: offsetDayKey, basis: "source_offset" };
     }
   }
 
   const vaultDayKey = sampleAt
     ? resolveVaultLocalDayKey(sampleAt, defaultTimeZone)
     : undefined;
-  return timestamp.dayKey ?? vaultDayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+  if (timestamp.dayKey) return { dayKey: timestamp.dayKey, basis: timestampBasis };
+  if (vaultDayKey) return { dayKey: vaultDayKey, basis: "vault_timezone" };
+  const dayKey = extractIsoDatePrefix(sampleAt) ?? undefined;
+  return { dayKey, basis: dayKey ? "utc" : "missing" };
 }
 
 function hasValidJunctionExplicitTimeseriesTimestamp(

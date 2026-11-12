@@ -99,7 +99,7 @@ export type JunctionTemporalFeatureResult =
     };
 
 // This is the only clinical-looking threshold in this reducer. It reuses the
-// repository-owned oxygen-night screening contract in sample-series-summary;
+// numerical oxygen-night thresholds in sample-series-summary;
 // the output describes sample shape and is not a diagnosis.
 const BLOOD_OXYGEN_THRESHOLD_PERCENT = 90;
 const BLOOD_OXYGEN_MAX_ADJACENT_GAP_SECONDS = 5 * 60;

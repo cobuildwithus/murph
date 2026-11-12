@@ -39,6 +39,7 @@ and animated GIF storyboard encoding keeps its separate settings.
 ## Current scope
 
 - generic parsed-email normalization for hosted ingress and shared Telegram/Linq normalization primitives
+- email receipt time comes from trusted hosted ingress, independently of the sender's Date header; MIME transfer decoding preserves source bytes until each part's charset is applied, and mixed multipart bodies retain sequential text sections
 - capture checkpoints for persisted hosted message projections
 - capture pipeline with atomic raw persistence, inbox-capture ledger append, dedupe, FTS, and a durable local capture mutation cursor for downstream inbox/query projections
 - rebuilds and replay dedupe treat raw envelopes as source evidence, not a legacy persistence lane, except for the narrow current-format crash-recovery path gated by unresolved `inbox_capture_persist` metadata

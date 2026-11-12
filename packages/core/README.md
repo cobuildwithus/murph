@@ -40,6 +40,10 @@ over 70,000 valid synthetic rows.
 See [the Docker CPU benchmark](bench/README.md) for synthetic import profiling
 and one-/two-vCPU comparisons without production credentials.
 
+Scheduled meals inherit a saved food's title when it satisfies the meal-name
+contract. Older food titles that do not satisfy that contract retain the default
+meal name and the full food title in the note, so existing schedules still run.
+
 ## Device publication receipts
 
 Automatic `importDeviceBatch` publication writes the ingest, events and samples

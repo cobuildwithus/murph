@@ -84,15 +84,9 @@ export function inspectRunnerBundleBudgetWorkflow(source) {
     );
     requireText(
       budgetJob,
-      "missing-budget-needs",
-      "needs: markdown-docs-scope",
-      "The bundle budget must retain its documentation-scope dependency.",
-    );
-    requireText(
-      budgetJob,
       "missing-budget-if",
-      "if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}",
-      "The bundle budget must retain the Markdown-only fast-path contract.",
+      "if: ${{ !cancelled() }}",
+      "The bundle budget must honor cancellation without skipping ordinary candidates.",
     );
     requireText(
       budgetJob,

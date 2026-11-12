@@ -1747,12 +1747,10 @@ test("registry prefers built-in text parsing for markdown documents", async () =
   const directory = await makeTempDirectory("murph-parser-registry");
   const filePath = await writeExternalFile(directory, "note.md", "# Breakfast\n\nEggs and toast");
   const registry = createParserRegistry([
+    createTextFileProvider(),
     {
       id: "fallback-doc-parser",
-      locality: "local",
-      openness: "open_source",
-      runtime: "cli",
-      priority: 50,
+
       async discover() {
         return {
           available: true,
@@ -1768,7 +1766,6 @@ test("registry prefers built-in text parsing for markdown documents", async () =
         };
       },
     },
-    createTextFileProvider(),
   ]);
 
   const selection = await registry.select({
@@ -1789,16 +1786,13 @@ test("registry prefers built-in text parsing for markdown documents", async () =
   assert.equal(selection.provider.id, "text-file");
 });
 
-test("registry falls through to the next available provider when a higher-ranked provider fails", async () => {
+test("registry falls through to the next available provider when an earlier provider fails", async () => {
   const directory = await makeTempDirectory("murph-parser-fallback");
   const filePath = await writeExternalFile(directory, "scan.pdf", "pdf-placeholder");
   const registry = createParserRegistry([
     {
       id: "native-pdf",
-      locality: "local",
-      openness: "open_source",
-      runtime: "cli",
-      priority: 900,
+
       async discover() {
         return { available: true, reason: "available" };
       },
@@ -1811,10 +1805,7 @@ test("registry falls through to the next available provider when a higher-ranked
     },
     {
       id: "ocr-fallback",
-      locality: "local",
-      openness: "open_source",
-      runtime: "python",
-      priority: 500,
+
       async discover() {
         return { available: true, reason: "available" };
       },
@@ -1855,10 +1846,7 @@ test("parseAttachment uses isolated scratch directories across reruns", async ()
   const registry = createParserRegistry([
     {
       id: "scratch-sensitive-provider",
-      locality: "local",
-      openness: "open_source",
-      runtime: "node",
-      priority: 500,
+
       async discover() {
         return {
           available: true,
@@ -1921,10 +1909,7 @@ test("parseAttachment rejects unsafe or malformed attachment IDs before using sc
   const registry = createParserRegistry([
     {
       id: "fake-image",
-      locality: "local",
-      openness: "open_source",
-      runtime: "node",
-      priority: 100,
+
       async discover() {
         return {
           available: true,
@@ -2009,10 +1994,7 @@ test("parseAttachment accepts CSV-sized provider output within the raised text g
   const registry = createParserRegistry([
     {
       id: "fake-csv",
-      locality: "local",
-      openness: "open_source",
-      runtime: "node",
-      priority: 100,
+
       async discover() {
         return {
           available: true,
@@ -2065,10 +2047,7 @@ test("parseAttachment rejects provider output above the raised text guardrail", 
   const registry = createParserRegistry([
     {
       id: "fake-image",
-      locality: "local",
-      openness: "open_source",
-      runtime: "node",
-      priority: 100,
+
       async discover() {
         return {
           available: true,
@@ -2562,10 +2541,7 @@ test("attachment parse worker fails closed on malformed attachment IDs", async (
     registry: createParserRegistry([
       {
         id: "unexpected-success-provider",
-        locality: "local",
-        openness: "open_source",
-        runtime: "node",
-        priority: 100,
+
         async discover() {
           return {
             available: true,
@@ -2636,10 +2612,7 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
 
   const fakeImageProvider: ParserProvider = {
     id: "fake-image-parser",
-    locality: "local",
-    openness: "open_source",
-    runtime: "node",
-    priority: 500,
+
     async discover() {
       return {
         available: true,
@@ -2748,10 +2721,7 @@ test("capture replay preserves a recovered success while the worker drains anoth
     const providerCalls: string[] = [];
     const registry = createParserRegistry([{
       id: "recovered-success-parser",
-      locality: "local",
-      openness: "open_source",
-      runtime: "node",
-      priority: 500,
+
       async discover() {
         return { available: true, reason: "available for recovery test" };
       },
@@ -2878,10 +2848,7 @@ test("attachment parse worker requeues its claimed job when provider parsing abo
     registry: createParserRegistry([
       {
         id: "aborted-provider",
-        locality: "remote",
-        openness: "closed",
-        runtime: "remote_api",
-        priority: 500,
+
         async discover() {
           return {
             available: true,
@@ -2980,10 +2947,7 @@ test.each(["completion", "abort"] as const)("stale running parser %s does not ov
   const registry = createParserRegistry([
     {
       id: "race-parser",
-      locality: "local",
-      openness: "open_source",
-      runtime: "node",
-      priority: 500,
+
       async discover() {
         return {
           available: true,
@@ -3129,10 +3093,7 @@ test("attachment parse worker removes published attempts when completion fails a
     registry: createParserRegistry([
       {
         id: "post-publish-provider",
-        locality: "local",
-        openness: "open_source",
-        runtime: "node",
-        priority: 500,
+
         async discover() {
           return {
             available: true,
@@ -3234,10 +3195,7 @@ test("attachment parse worker removes published attempts when failure finalizati
       registry: createParserRegistry([
         {
           id: "post-publish-provider",
-          locality: "local",
-          openness: "open_source",
-          runtime: "node",
-          priority: 500,
+
           async discover() {
             return {
               available: true,
@@ -3449,10 +3407,7 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
   const registry = createParserRegistry([
     {
       id: "fake-image-parser",
-      locality: "local",
-      openness: "open_source",
-      runtime: "node",
-      priority: 500,
+
       async discover() {
         return {
           available: true,
@@ -3625,10 +3580,7 @@ test("attachment parse worker stores audio output as transcript text", async () 
 
   const fakeAudioProvider: ParserProvider = {
     id: "fake-audio-parser",
-    locality: "local",
-    openness: "open_source",
-    runtime: "node",
-    priority: 500,
+
     async discover() {
       return {
         available: true,
@@ -3708,10 +3660,7 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
   const registry = createParserRegistry([
     {
       id: "fake-derived-only-parser",
-      locality: "local",
-      openness: "open_source",
-      runtime: "node",
-      priority: 500,
+
       async discover() {
         return {
           available: true,
@@ -3819,10 +3768,7 @@ test("attachment parse worker redacts local paths from stored failure messages",
 
   const failingProvider: ParserProvider = {
     id: "failing-image-parser",
-    locality: "local",
-    openness: "open_source",
-    runtime: "node",
-    priority: 500,
+
     async discover() {
       return {
         available: true,

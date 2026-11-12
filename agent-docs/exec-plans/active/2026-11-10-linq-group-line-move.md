@@ -4,6 +4,18 @@ Status: active
 Created: 2026-11-10
 Updated: 2026-11-11
 
+## Stale target copy repair
+
+The 2026-11-10 test bound the target line's copy of one group to a separate
+container, then removed the target line from it. Re-adding the line resumes
+that same provider chat, which is already bound, so ingress delivers to the
+stale container and the move cannot adopt. The Ops operation
+`release_removed_line_route` deletes such a route by its opaque container ref
+only when a fresh complete roster shows the route's own line as self and not
+active, and no reserved or adopted move owns the container or chat. The stale
+container keeps its history but has no route. Proof: migrated-PostgreSQL
+release, then a normal move adopting that same chat id.
+
 ## Expired missed-check-in follow-up
 
 The game lifecycle owner deliberately retains published generation receipts
@@ -832,9 +844,14 @@ PR, production access, real Linq API, dotenv read or ReviewGPT was performed.
    queued add can still take effect after an absence read. It is disarmed and
    reports `add_outcome_unknown` or its preserved `add_unconfirmed` provider code; source admission resumes and target admission
    stays protected. Later positive presence permits verified remove/cancel.
-   This preserves safety under concurrent cancel and add. The requested clean
-   cancellation of every unconfirmed add requires a provider terminal-outcome
-   guarantee that the current API contract does not supply.
+   This preserves safety under concurrent cancel and add. Linq offers no
+   terminal outcome for a queued add, so after a one-hour settle window from
+   `add_started_at` a cancel that still reads absence releases the reservation
+   as `add_abandoned`. Production on 2026-11-11: an accepted add to a dormant
+   group never appeared after two hours, and the unique reserved-target index
+   then blocked every other group on that line. Successful adds appeared within
+   30 seconds. If an abandoned add lands later, the target holds an ordinary
+   unbound copy of that chat; it never gains adoption authority.
 3. Roster equality protects different audiences and bound destinations. It
    cannot distinguish two **unbound** candidates containing identical people
    and both verified service numbers. The first qualifying candidate can win.
@@ -1195,3 +1212,52 @@ Final-head CI found one additional narrow fixture in the dispatch suite that
 omitted `findFirst` for the latest cancellation lookup. Adding its empty-history
 response restores all 234 dispatch tests; no production behavior changes.
 The other Web shards passed. Fresh exact-head CI remains the merge gate.
+
+
+### Queued participant-add reconciliation
+
+The provider's documented successful add response acknowledges queued work;
+an immediate complete roster can still omit the destination. A synthetic SDK
+fixture reproduces premature disarming and cleanup after a successful response.
+Keep the existing reservation and report `add_pending` until a later explicit
+Ops resume sees destination presence. Never repeat a claimed add, renew the
+adoption deadline, or treat absence as terminal failure. Existing explicit
+cancel, provider error, incomplete roster, source fallback, and expiry boundaries
+remain authoritative. This deletes premature cancellation rather than adding a
+poller, state column, or alternate provider mutation path.
+
+Product UX proof covers queued add, repeated pending reads, later confirmation,
+normal adoption and verified departure, plus interrupted claim, expiry and
+explicit cleanup. Operator receipt assertions and the real database/ingress
+composition cover this change; assistant prompts and reply decisions are
+untouched. Production canary remains required after the Web change converges.
+
+Focused verification: the delayed-visibility regression fails on the baseline;
+all 133 producer, consumer, audience and Ops route tests pass after the fix.
+Web typecheck, docs drift and diff whitespace checks pass. Source complexity
+remains zero debt with maximum 18. Final review, exact-head CI and production
+canary are pending.
+
+
+### Explicit provider discovery without a handoff message
+
+Outcome: migrate a quiet group without requiring a person or operator to post.
+The existing reservation, sealed cleanup context and locked route replacement
+remain the only state owners. Add one explicit Ops `adopt` action: discover a
+unique destination through the provider's documented from/to chat inventory,
+require creation after the add claim and exact audience, re-read both rosters,
+then reuse canonical adoption and verified departure. Missing or ambiguous
+inventory cannot change routing. The provider may not materialize a target chat
+before the first message; live proof must distinguish that limit from local proof.
+
+No schema, scheduler, provider mutation primitive or foreground reply work is
+added. Existing ingress remains the fallback for a naturally arriving message.
+Legacy account-null routes must be visible in the paginated operator inventory;
+resolve sealed identity without rewriting state, and advance the raw cursor.
+
+Product UX proof: no-message adoption through the real database, unchanged
+container, target route and verified leave; missing/old/future/ambiguous inventory,
+truncation, wrong audience/self, changed roster and concurrent cancellation all
+retain source authority. Existing message adoption and cancellation paths remain
+covered. The original canary is complete; remaining production migration and
+retirement verification remain open. Public artifacts contain synthetic proof only.

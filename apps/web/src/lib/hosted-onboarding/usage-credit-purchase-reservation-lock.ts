@@ -16,24 +16,19 @@ export function readHostedUsageCreditTargetMemberLockOrder(
   return targetKind === "family" ? "payer_first" : "beneficiary_first";
 }
 
-export function readHostedUsageCreditPurchaseMemberLockOrder(input: {
+export async function readHostedUsageCreditPurchaseMemberLockOrder(input: {
   beneficiaryMemberId: string;
-  checkoutSuccessUrl: string;
   payerMemberId: string;
-}): HostedUsageCreditMemberLockOrder {
-  if (input.beneficiaryMemberId === input.payerMemberId) {
-    return "beneficiary_first";
-  }
-  try {
-    const successUrl = new URL(input.checkoutSuccessUrl);
-    return successUrl.pathname === "/settings"
-        && successUrl.searchParams.has("usageFamily")
-        && successUrl.searchParams.get("usageMember") === input.beneficiaryMemberId
-      ? "payer_first"
-      : "beneficiary_first";
-  } catch {
-    return "beneficiary_first";
-  }
+  prisma: Pick<Prisma.TransactionClient, "hostedThreadContainer">;
+}): Promise<HostedUsageCreditMemberLockOrder> {
+  if (input.beneficiaryMemberId === input.payerMemberId) return "beneficiary_first";
+  // Family recipients are people; group recipients are canonical thread
+  // containers. Redirect URLs are presentation and cannot choose lock order.
+  const container = await input.prisma.hostedThreadContainer.findUnique({
+    where: { memberId: input.beneficiaryMemberId },
+    select: { memberId: true },
+  });
+  return container ? "beneficiary_first" : "payer_first";
 }
 
 export async function lockHostedUsageCreditPurchaseReservationOwnersTx(input: {

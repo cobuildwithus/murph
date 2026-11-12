@@ -103,6 +103,11 @@ describe.skipIf(!enabled)("post reply PostgreSQL contract", () => {
     expect(await snapshot()).toEqual(before);
     expect(await runGameCommand({ actorMemberId: owner, command: { ...command, entryId } })).toMatchObject({ ok: true });
     expect(await snapshot()).toEqual(before);
+    const other = await pair({ owner, peer }, false);
+    expect(await runGameCommand({ actorMemberId: owner, command: { ...command, gameId: other.gameId, entryId } }))
+      .toMatchObject({ ok: false, status: 400, error: { code: "INVALID_REQUEST" } });
+    expect(await getPrisma().gameEntry.count({ where: { gameId: other.gameId, memberId: owner } })).toBe(0);
+    expect(await snapshot()).toEqual(before);
   });
 
   it.each([false, true])("accepts a guarded empty slot, including an explicit withdrawal retake=%s", async retake => {

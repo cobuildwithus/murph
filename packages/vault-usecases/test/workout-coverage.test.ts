@@ -52,16 +52,13 @@ import {
   workoutLookupSchema,
 } from "../src/usecases/workout-read.ts";
 import * as workoutModule from "../src/usecases/workout.ts";
+import { logWorkoutFormat } from "../src/usecases/workout-format.ts";
+import { setWorkoutCapturePreferences } from "../src/usecases/workout-measurement.ts";
 import { importWithMocks, mockActualModule } from "./mock-import.ts";
 
 const mockedModuleSpecifiers = [
-  "../src/json-input.js",
   "../src/runtime-import.js",
-  "../src/usecases/workout-core.js",
-  "../src/usecases/workout-read.js",
   "../src/usecases/event-record-mutations.js",
-  "../src/usecases/workout.js",
-  "../src/usecases/workout-format.js",
   "@murphai/core",
 ];
 
@@ -660,291 +657,74 @@ describe("workout", () => {
       },
     );
   });
+});
 
-  test("adds, edits, and deletes workout records through the shared runtime seams", async () => {
-    const addActivitySession = vi.fn(async (_input: { vaultRoot: string }) => ({
-      eventId: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      ledgerFile: "journal/workout.md",
-      created: true,
-      manifestPath: "bank/raw/workout/manifest.json",
-      event: {
-        occurredAt: "2026-04-08T10:00:00.000Z",
-        title: "45-minute run",
-        activityType: "running",
-        durationMinutes: 45,
-        distanceKm: 4.8,
-        workout: null,
-        note: "45 minute run",
-      },
-    }));
-    const loadWorkoutCoreRuntime = vi.fn(async () => ({
-      addActivitySession,
-    }));
-    const addJsonInputObject = vi.fn<() => Promise<JsonObject>>(async () => ({
-      note: "45 minute trail run 3 mi",
-      rawRefs: ["bank/raw/workout.csv"],
-      tags: ["run"],
-      relatedIds: [],
-      timeZone: "UTC",
-    }));
-    const editEventRecord = vi.fn(async (_input: Record<string, unknown>) => ({
-      lookupId: "evt_edited",
-      entity: { id: "evt_edited" },
-    }));
-    const deleteEventRecord = vi.fn(async (_input: Record<string, unknown>) => ({
-      deleted: true,
-    }));
-    const showWorkoutRecord = vi.fn(async () => ({
-      vault: "./vault",
-      entity: { id: "evt_edited" },
-    }));
-
-    const workoutModule = await importWithMocks<typeof import("../src/usecases/workout.ts")>(
-      "../src/usecases/workout.ts",
-      {
-        "../src/usecases/workout-core.js": () => ({
-          loadWorkoutCoreRuntime,
-        }),
-        "../src/json-input.js": () => ({
-          loadJsonInputObject: addJsonInputObject,
-        }),
-        "../src/usecases/event-record-mutations.js": () => ({
-          editEventRecord,
-          deleteEventRecord,
-        }),
-        "../src/usecases/workout-read.js": () => ({
-          showWorkoutRecord,
-        }),
-      },
-    );
-
-    const added = await workoutModule.addWorkoutRecord({
-      vault: "./vault",
-      text: "45 minute trail run 3 mi",
+test("workout deletion rejects stale revisions and other event kinds without writing", async () => {
+  await withTempDir(async (vault) => {
+    await initializeVault({ vaultRoot: vault, timezone: "UTC" });
+    const workout = await workoutModule.addWorkoutRecord({
+      vault,
+      title: "Synthetic run",
       source: "manual",
-      durationMinutes: 45,
       activityType: "running",
-      distanceKm: 4.828032,
-    });
-    assert.equal(added.eventId, "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV");
-    assert.equal(addActivitySession.mock.calls.length, 1);
-    const addActivitySessionFirstCall = addActivitySession.mock.calls.at(0);
-    assert.ok(addActivitySessionFirstCall);
-    const [addActivitySessionInput] = addActivitySessionFirstCall;
-    assert.ok(addActivitySessionInput);
-    assert.equal(addActivitySessionInput.vaultRoot, "./vault");
-
-    const writesBeforeNoteLessAdd = addActivitySession.mock.calls.length;
-    await workoutModule.addWorkoutRecord({
-      vault: "./vault",
-      title: "Morning track session",
-      source: "manual",
       durationMinutes: 30,
-      activityType: "running",
+      occurredAt: "2026-04-08T10:00:00.000Z",
     });
-    assert.equal(
-      addActivitySession.mock.calls.length,
-      writesBeforeNoteLessAdd + 1,
-    );
-    const noteLessAddInput = addActivitySession.mock.calls.at(-1)?.[0] as {
-      draft?: {
-        note?: string;
-        title?: string;
-        workout?: { sessionNote?: string };
-      };
-    } | undefined;
-    assert.equal(noteLessAddInput?.draft?.title, "Morning track session");
-    assert.equal(noteLessAddInput?.draft?.note, undefined);
-    assert.equal(noteLessAddInput?.draft?.workout?.sessionNote, undefined);
-
-    const writesBeforeMissingDuration = addActivitySession.mock.calls.length;
-    await assert.rejects(
-      workoutModule.addWorkoutRecord({
-        vault: "./vault",
-        title: "Missing duration",
+    const note = await coreRuntime.upsertEvent({
+      vaultRoot: vault,
+      payload: {
+        kind: "note",
+        occurredAt: "2026-04-08T11:00:00.000Z",
+        title: "Unrelated note",
+        note: "Preserve this non-workout event.",
         source: "manual",
-        activityType: "running",
-      }),
-      {
-        name: "VaultCliError",
-        code: "invalid_option",
-        message: "Workout duration is missing. Pass --duration <minutes> to record it explicitly.",
-      },
-    );
-    assert.equal(addActivitySession.mock.calls.length, writesBeforeMissingDuration);
-
-    const structuredAdded = await workoutModule.addWorkoutRecord({
-      vault: "./vault",
-      inputFile: "@payload.json",
-      source: "import",
-      workout: createWorkoutSession(),
-    });
-    assert.equal(structuredAdded.created, true);
-    assert.equal(addJsonInputObject.mock.calls.length, 1);
-    addJsonInputObject.mockResolvedValueOnce({
-      title: "No duration",
-      workout: {
-        sourceApp: "strong",
-        routineName: "No duration",
-        exercises: [{
-          name: "Squat",
-          order: 1,
-          sets: [{ order: 1, reps: 5 }],
-        }],
       },
     });
-    const writesBeforeRejectedStructuredAdd = addActivitySession.mock.calls.length;
-    await assert.rejects(
-      workoutModule.addWorkoutRecord({
-        vault: "./vault",
-        inputFile: "@payload.json",
-        source: "import",
-      }),
-      /Workout duration is missing/u,
-    );
-    assert.equal(addActivitySession.mock.calls.length, writesBeforeRejectedStructuredAdd);
+    const ledger = { vaultRoot: vault, relativePath: note.ledgerFile };
+    const before = await coreRuntime.readJsonlRecords(ledger);
+    const auditRows = await countAuditRows(vault);
 
-    const edited = await workoutModule.editWorkoutRecord({
-      vault: "./vault",
-      lookup: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-    });
-    assert.equal(edited.entity.id, "evt_edited");
-    assert.equal(editEventRecord.mock.calls.length, 1);
-    assert.equal(showWorkoutRecord.mock.calls.length, 0);
+    await assert.rejects(workoutModule.deleteWorkoutRecord({
+      vault,
+      lookup: workout.eventId,
+      expectedRevision: 2,
+    }), { code: "conflict" });
+    await assert.rejects(workoutModule.deleteWorkoutRecord({
+      vault,
+      lookup: note.eventId,
+      expectedRevision: 1,
+    }), { code: "not_found" });
 
-    const deleted = await workoutModule.deleteWorkoutRecord({
-      vault: "./vault",
-      lookup: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      expectedRevision: 3,
-    });
-    assert.equal(deleted.deleted, true);
-    assert.equal(deleteEventRecord.mock.calls.length, 1);
-    assert.deepEqual(deleteEventRecord.mock.calls.at(0)?.[0], {
-      vault: "./vault",
-      lookup: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      expectedRevision: 3,
-      expectedKinds: ["activity_session"],
-      entityLabel: "workout",
-    });
+    assert.deepEqual(await coreRuntime.readJsonlRecords(ledger), before);
+    assert.equal(await countAuditRows(vault), auditRows);
   });
 });
 
-describe("workout-format", () => {
-  test("saves, shows, and lists workout formats", async () => {
-    const upsertWorkoutFormat = vi.fn(async () => ({
-      created: true,
-      record: {
-        workoutFormatId: "wfmt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-        slug: "full-body",
-        title: "Full Body",
-        relativePath: "bank/workout-formats/full-body.md",
-        markdown: "# Full Body",
-      },
-    }));
-    const readWorkoutFormat = vi.fn(async () => ({
-      workoutFormatId: "wfmt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      slug: "full-body",
-      title: "Full Body",
-      status: "active",
-      summary: "Weekly strength work",
-      activityType: "strength-training",
-      durationMinutes: 45,
-      distanceKm: 8,
-      template: createWorkoutTemplate(),
-      tags: ["strength"],
-      note: "Train hard.",
-      templateText: "Train hard.",
-      markdown: "# Full Body",
-      relativePath: "bank/workout-formats/full-body.md",
-    }));
-    const listWorkoutFormats = vi.fn(async () => [await readWorkoutFormat()]);
-
-    const workoutFormatModule = (await importWithMocks(
-      "../src/usecases/workout-format.ts",
-      {
-        "@murphai/core": () => ({
-          isVaultError: () => false,
-          listWorkoutFormats,
-          readWorkoutFormat,
-          upsertWorkoutFormat,
-        }),
-      },
-    )) as typeof import("../src/usecases/workout-format.ts");
-
-    const saved = await workoutFormatModule.saveWorkoutFormat({
-      vault: "./vault",
-      name: "Full Body",
-      text: "45 minute trail run 3 mi",
-      durationMinutes: 45,
+test("format logging does not borrow the manual capture duration default", async () => {
+  await withTempDir(async (vault) => {
+    await initializeVault({ vaultRoot: vault, timezone: "UTC" });
+    const preferences = await setWorkoutCapturePreferences({
+      vault,
+      durationMinutes: 60,
     });
-    assert.equal(saved.created, true);
-    assert.equal(upsertWorkoutFormat.mock.calls.length, 1);
-
-    const shown = await workoutFormatModule.showWorkoutFormat("./vault", "full-body");
-    assert.equal(shown.entity.id, "wfmt_01ARZ3NDEKTSV4RRFFQ69G5FAV");
-
-    const listed = await workoutFormatModule.listWorkoutFormats({
-      vault: "./vault",
-      limit: 1,
-    });
-    assert.equal(listed.items.length, 1);
-  });
-
-  test("logs workout formats through the workout record seam", async () => {
-    const addWorkoutRecord = vi.fn(async (_input: unknown) => ({
-      vault: "./vault",
-      created: true,
-    }));
-    const readWorkoutFormat = vi.fn(async () => ({
-      workoutFormatId: "wfmt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      slug: "full-body",
-      title: "Full Body",
-      status: "active",
-      summary: "Weekly strength work",
+    assert.equal(preferences.captureDefaults.durationMinutes, 60);
+    const saved = await coreRuntime.upsertWorkoutFormat({
+      vaultRoot: vault,
+      title: "Undated strength format",
       activityType: "strength-training",
-      durationMinutes: 45,
-      distanceKm: 8,
       template: createWorkoutTemplate(),
-      tags: ["strength"],
-      note: "Train hard.",
-      templateText: "Train hard.",
-      markdown: "# Full Body",
-      relativePath: "bank/workout-formats/full-body.md",
-    }));
+    });
+    const auditRows = await countAuditRows(vault);
 
-    const workoutFormatModule = (await importWithMocks(
-      "../src/usecases/workout-format.ts",
-      {
-        "@murphai/core": () => ({
-          isVaultError: () => false,
-          listWorkoutFormats: vi.fn(),
-          readWorkoutFormat,
-          upsertWorkoutFormat: vi.fn(),
-        }),
-        "../src/usecases/workout.js": mockActualModule(
-          "../src/usecases/workout.js",
-          (actual) => ({
-            ...actual,
-            addWorkoutRecord,
-          }),
-        ),
-      },
-    )) as typeof import("../src/usecases/workout-format.ts");
-
-    const logged = await workoutFormatModule.logWorkoutFormat({
-      vault: "./vault",
-      name: "wfmt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    await assert.rejects(logWorkoutFormat({
+      vault,
+      name: saved.record.workoutFormatId,
       source: "manual",
+    }), {
+      code: "invalid_option",
+      message: "Workout duration is missing. Pass --duration <minutes> to record it explicitly.",
     });
-    assert.equal(logged.vault, "./vault");
-    assert.equal(addWorkoutRecord.mock.calls.length, 1);
-    const addInput = addWorkoutRecord.mock.calls[0]?.[0];
-    assert.equal(
-      typeof addInput === "object"
-        && addInput !== null
-        && "applyWorkoutDurationDefault" in addInput,
-      false,
-    );
+    assert.equal(await countAuditRows(vault), auditRows);
   });
 });
 

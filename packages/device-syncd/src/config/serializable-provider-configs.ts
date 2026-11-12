@@ -1,12 +1,7 @@
-import {
-  configuredDeviceSyncProviderKeys,
-  listConfiguredDeviceSyncProviderNames,
-} from "./provider-keys.ts";
+import { configuredDeviceSyncProviderKeys } from "./provider-keys.ts";
 
 import type {
-  ConfiguredDeviceSyncProviderConfigByKey,
   ConfiguredDeviceSyncProviderConfigs,
-  ConfiguredDeviceSyncProviderKey,
   SerializableConfiguredDeviceSyncProviderConfigByKey,
   SerializableConfiguredDeviceSyncProviderConfigs,
 } from "./provider-types.ts";
@@ -18,23 +13,17 @@ export type {
 
 export type SerializableConfigFieldKind = "boolean" | "number" | "string" | "string[]";
 
-export interface SerializableConfiguredDeviceSyncProviderSchema<
-  TProvider extends ConfiguredDeviceSyncProviderKey = ConfiguredDeviceSyncProviderKey,
-> {
+interface SerializableConfiguredDeviceSyncProviderSchema {
   disallowedSerializableFields?: Readonly<Record<string, string>>;
   serializableFields: Readonly<Record<
-    Extract<keyof SerializableConfiguredDeviceSyncProviderConfigByKey[TProvider], string>,
+    Extract<keyof SerializableConfiguredDeviceSyncProviderConfigByKey["junction"], string>,
     SerializableConfigFieldKind
   >>;
 }
 
-const DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS = Object.freeze({
-  fetchImpl: "is not supported in serialized runtime config.",
-});
-
 export const JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA =
-  defineSerializableConfiguredDeviceSyncProviderSchema<"junction">({
-    serializableFields: {
+  Object.freeze({
+    serializableFields: Object.freeze({
       allowedLinkHosts: "string[]",
       apiBaseUrl: "string",
       clientUserIdNamespace: "string",
@@ -49,9 +38,9 @@ export const JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA =
       summaryResources: "string[]",
       timeseriesBackfillDays: "number",
       webhookTimestampToleranceMs: "number",
-    },
-    disallowedSerializableFields: {
-      ...DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
+    }),
+    disallowedSerializableFields: Object.freeze({
+      fetchImpl: "is not supported in serialized runtime config.",
       apiKey:
         "is a provider-owned API secret and is not supported in serialized runtime config.",
       clientUserIdSecret:
@@ -60,39 +49,17 @@ export const JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA =
         "is code-owned and is not supported in serialized runtime config.",
       webhookSecret:
         "is a provider-owned webhook secret and is not supported in serialized runtime config.",
-    },
-  });
-
-export const serializableConfiguredDeviceSyncProviderSchemaByKey = Object.freeze({
-  junction: JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA,
-});
-
-export function getSerializableConfiguredDeviceSyncProviderSchema<
-  TProvider extends ConfiguredDeviceSyncProviderKey,
->(
-  provider: TProvider,
-): (typeof serializableConfiguredDeviceSyncProviderSchemaByKey)[TProvider] {
-  return serializableConfiguredDeviceSyncProviderSchemaByKey[provider];
-}
+    }),
+  } satisfies SerializableConfiguredDeviceSyncProviderSchema);
 
 // Hosted runner envelopes keep only the serializable runtime subset of provider config.
 // Provider-owned admin secrets such as webhook verification tokens stay on the control plane.
 export function cloneSerializableConfiguredDeviceSyncProviderConfigs(
   configs: ConfiguredDeviceSyncProviderConfigs,
 ): SerializableConfiguredDeviceSyncProviderConfigs {
-  const cloned: SerializableConfiguredDeviceSyncProviderConfigs = {};
-
-  for (const provider of listConfiguredDeviceSyncProviderNames(configs)) {
-    const config = configs[provider];
-
-    if (!config) {
-      continue;
-    }
-
-    cloned[provider] = cloneSerializableConfiguredDeviceSyncProviderConfig(provider, config) as never;
-  }
-
-  return cloned;
+  return configs.junction
+    ? { junction: cloneSerializableProviderConfig(configs.junction) }
+    : {};
 }
 
 export function parseSerializableConfiguredDeviceSyncProviderConfigs(
@@ -100,23 +67,9 @@ export function parseSerializableConfiguredDeviceSyncProviderConfigs(
   label: string,
 ): SerializableConfiguredDeviceSyncProviderConfigs {
   const record = requireSerializableConfiguredDeviceSyncProviderConfigsRecord(value, label);
-  const configs: SerializableConfiguredDeviceSyncProviderConfigs = {};
-
-  for (const provider of configuredDeviceSyncProviderKeys) {
-    const providerValue = record[provider];
-
-    if (providerValue === undefined) {
-      continue;
-    }
-
-    configs[provider] = parseSerializableConfiguredDeviceSyncProviderConfig(
-      provider,
-      providerValue,
-      `${label}.${provider}`,
-    ) as never;
-  }
-
-  return configs;
+  return record.junction === undefined
+    ? {}
+    : { junction: parseSerializableProviderConfig(record.junction, `${label}.junction`) };
 }
 
 export function requireSerializableConfigObject(value: unknown, label: string): Record<string, unknown> {
@@ -135,40 +88,13 @@ export function requireSerializableString(value: unknown, label: string): string
   return value;
 }
 
-function cloneSerializableConfiguredDeviceSyncProviderConfig<
-  TProvider extends ConfiguredDeviceSyncProviderKey,
->(
-  provider: TProvider,
-  config: ConfiguredDeviceSyncProviderConfigByKey[TProvider],
-): SerializableConfiguredDeviceSyncProviderConfigByKey[TProvider] {
-  return cloneSerializableProviderConfig(
-    getSerializableConfiguredDeviceSyncProviderSchema(provider),
-    config,
-  ) as SerializableConfiguredDeviceSyncProviderConfigByKey[TProvider];
-}
-
-function parseSerializableConfiguredDeviceSyncProviderConfig<
-  TProvider extends ConfiguredDeviceSyncProviderKey,
->(
-  provider: TProvider,
-  value: unknown,
-  label: string,
-): SerializableConfiguredDeviceSyncProviderConfigByKey[TProvider] {
-  return parseSerializableProviderConfig(
-    getSerializableConfiguredDeviceSyncProviderSchema(provider),
-    value,
-    label,
-  ) as SerializableConfiguredDeviceSyncProviderConfigByKey[TProvider];
-}
-
 function cloneSerializableProviderConfig(
-  schema: SerializableConfiguredDeviceSyncProviderSchema,
   config: object,
-): Record<string, unknown> {
+): SerializableConfiguredDeviceSyncProviderConfigByKey["junction"] {
   const record = Object.fromEntries(Object.entries(config));
   const cloned: Record<string, unknown> = {};
 
-  for (const key of Object.keys(schema.serializableFields)) {
+  for (const key of Object.keys(JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields)) {
     const value = record[key];
 
     if (value === undefined) {
@@ -178,18 +104,17 @@ function cloneSerializableProviderConfig(
     cloned[key] = Array.isArray(value) ? [...value] : value;
   }
 
-  return cloned;
+  return cloned as SerializableConfiguredDeviceSyncProviderConfigByKey["junction"];
 }
 
 function parseSerializableProviderConfig(
-  schema: SerializableConfiguredDeviceSyncProviderSchema,
   value: unknown,
   label: string,
-): Record<string, unknown> {
-  const record = requireSerializableProviderConfigRecord(schema, value, label);
+): SerializableConfiguredDeviceSyncProviderConfigByKey["junction"] {
+  const record = requireSerializableProviderConfigRecord(value, label);
   const parsed: Record<string, unknown> = {};
 
-  for (const [key, kind] of Object.entries(schema.serializableFields)) {
+  for (const [key, kind] of Object.entries(JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields)) {
     const fieldValue = record[key];
 
     if (fieldValue === undefined) {
@@ -197,13 +122,13 @@ function parseSerializableProviderConfig(
     }
 
     parsed[key] = parseSerializableFieldValue(
-      kind as SerializableConfigFieldKind,
+      kind,
       fieldValue,
       `${label}.${key}`,
     );
   }
 
-  return parsed;
+  return parsed as SerializableConfiguredDeviceSyncProviderConfigByKey["junction"];
 }
 
 // Web builds from before the direct WHOOP, Oura and Strava removal can still
@@ -233,14 +158,13 @@ function requireSerializableConfiguredDeviceSyncProviderConfigsRecord(
 }
 
 function requireSerializableProviderConfigRecord(
-  schema: SerializableConfiguredDeviceSyncProviderSchema,
   value: unknown,
   label: string,
 ): Record<string, unknown> {
   const record = requireSerializableConfigObject(value, label);
-  const supportedKeys = new Set(Object.keys(schema.serializableFields));
+  const supportedKeys = new Set(Object.keys(JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.serializableFields));
 
-  for (const [key, message] of Object.entries(schema.disallowedSerializableFields ?? {})) {
+  for (const [key, message] of Object.entries(JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields)) {
     if (record[key] !== undefined) {
       throw new TypeError(`${label}.${key} ${message}`);
     }
@@ -294,17 +218,4 @@ function requireSerializableStringArray(value: unknown, label: string): string[]
   }
 
   return value.map((entry, index) => requireSerializableString(entry, `${label}[${index}]`));
-}
-
-function defineSerializableConfiguredDeviceSyncProviderSchema<
-  TProvider extends ConfiguredDeviceSyncProviderKey,
->(
-  input: SerializableConfiguredDeviceSyncProviderSchema<TProvider>,
-): SerializableConfiguredDeviceSyncProviderSchema<TProvider> {
-  return Object.freeze({
-    disallowedSerializableFields: input.disallowedSerializableFields
-      ? Object.freeze({ ...input.disallowedSerializableFields })
-      : undefined,
-    serializableFields: Object.freeze({ ...input.serializableFields }),
-  });
 }

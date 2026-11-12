@@ -45,7 +45,6 @@ import {
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
   buildHostedMailboxPayloadScope,
   buildHostedMailboxPayloadSecureBoxAad,
-  buildHostedAiUsageAllowDecisionBody,
   isHostedMailboxKind,
   isHostedMailboxLane,
   isHostedRetiredMailboxKind,
@@ -54,13 +53,10 @@ import {
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   normalizeHostedAiUsageAllowanceOpenAiImageModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
-  parseHostedRunnerNudgeRequest,
   readHostedIngressLatencySource,
   resolveHostedAiUsageTokenPricingBasis,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
   sanitizeHostedRuntimeOrchestrationLatencyDiagnostics,
-  signHostedAiUsageAllowDecision,
-  verifyHostedAiUsageAllowDecision,
 } from "../src/runtime-control.ts";
 import {
   parseHostedMailboxFetchRequest,
@@ -202,31 +198,6 @@ describe("hosted runtime control contracts", () => {
     }, nowMs)).toBe(true);
   });
 
-  it("signs hosted AI usage allow decisions over the canonical decision body", async () => {
-    const body = buildHostedAiUsageAllowDecisionBody({
-      expiresAt: "2026-04-27T00:00:30.000Z",
-      issuedAt: "2026-04-27T00:00:00.000Z",
-      nonce: "0123456789abcdef0123456789abcdef",
-      userId: "member_123",
-    });
-    const decision = await signHostedAiUsageAllowDecision({
-      body,
-      keyId: "test",
-      secret: "test-ai-usage-allow-secret",
-    });
-
-    await expect(verifyHostedAiUsageAllowDecision({
-      decision,
-      secret: "test-ai-usage-allow-secret",
-    })).resolves.toBe(true);
-    await expect(verifyHostedAiUsageAllowDecision({
-      decision: {
-        ...decision,
-        userId: "member_other",
-      },
-      secret: "test-ai-usage-allow-secret",
-    })).resolves.toBe(false);
-  });
 
   it("freezes the mailbox lanes, item kinds, checkpoint reasons, and log codes", () => {
     expect(HOSTED_MAILBOX_LANES).toEqual([
@@ -653,7 +624,7 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/unknownSetting is not allowed/u);
   });
 
-  it.each(["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.6-flare"])("normalizes %s image usage aliases separately", (model) => {
+  it.each(["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst"])("normalizes %s image usage aliases separately", (model) => {
     expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId(model))
       .toBe(model);
     expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId(`openai/${model}`))
@@ -2934,15 +2905,6 @@ describe("hosted runtime control contracts", () => {
     });
   });
 
-  it("rejects legacy runner nudge allow decisions", () => {
-    expect(parseHostedRunnerNudgeRequest({})).toEqual({});
-    expect(() => parseHostedRunnerNudgeRequest({
-      aiUsageAllowDecision: {
-        allowed: false,
-        schema: "murph.hosted-ai-usage-allow-decision.v1",
-      },
-    })).toThrow("runner nudge request must not include legacy fields.");
-  });
 
   it("publishes the runtime-control subpath without restoring removed client surfaces", async () => {
     const packageJsonPath = path.resolve(

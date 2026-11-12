@@ -576,7 +576,10 @@ export async function listAssistantCronRuns(input: {
   } else {
     try {
       jobId = (await projectResolvedAssistantCronJob(input.vault, input.job)).job.jobId
-    } catch {
+    } catch (error) {
+      if (!(error instanceof VaultCliError) || error.code !== 'ASSISTANT_CRON_JOB_NOT_FOUND') {
+        throw error
+      }
       jobId = normalizeRequiredAssistantCronText(input.job, 'job')
     }
   }

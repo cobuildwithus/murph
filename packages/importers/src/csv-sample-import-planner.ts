@@ -8,8 +8,6 @@ import type {
   SampleImportPayload,
   SampleImportRecord,
 } from "./core-port.ts";
-import type { SamplePresetRegistry } from "./preset-registry.ts";
-import { resolveSampleImportConfig } from "./preset-registry.ts";
 import {
   summarizeSampleSeries,
   type SampleSummaryProfile,
@@ -27,7 +25,6 @@ import {
 export interface CsvSampleImportInput {
   filePath: string;
   vaultRoot?: string;
-  presetId?: string;
   source?: string;
   stream?: string;
   tsColumn?: string;
@@ -275,11 +272,19 @@ interface ImportCollector extends PlannedImportColumn {
 
 export async function prepareCsvSampleImport(
   input: unknown,
-  { presetRegistry }: { presetRegistry?: Pick<SamplePresetRegistry, "get"> } = {},
 ): Promise<CsvSampleImportPlan> {
   const request = assertPlainObject(input, "sample import input");
-  const config = resolveSampleImportConfig(request, presetRegistry);
-  const delimiter = normalizeRequiredString(config.delimiter, "delimiter");
+  const config = {
+    source: normalizeOptionalString(request.source, "source"),
+    stream: normalizeOptionalString(request.stream, "stream"),
+    tsColumn: normalizeOptionalString(request.tsColumn, "tsColumn"),
+    valueColumn: normalizeOptionalString(request.valueColumn, "valueColumn"),
+    unit: normalizeOptionalString(request.unit, "unit"),
+  };
+  const delimiter = request.delimiter ?? ",";
+  if (typeof delimiter !== "string" || delimiter.length !== 1) {
+    throw new TypeError("delimiter must be a single character");
+  }
   const vaultRoot = normalizeOptionalString(request.vaultRoot, "vaultRoot");
   const rawArtifact = await inspectFileAsset(request.filePath);
   const csvText = await readUtf8File(rawArtifact.sourcePath);
@@ -300,7 +305,11 @@ export async function prepareCsvSampleImport(
   const timeZone = await resolveCsvImportTimeZone(vaultRoot);
   const recognizedSampleColumns = detectRecognizedSampleColumns(header);
   const tsColumn = resolveTimestampColumnName(header, config.tsColumn);
-  const metadataColumns = config.metadataColumns;
+  const rawMetadataColumns = request.metadataColumns ?? [];
+  if (!Array.isArray(rawMetadataColumns)) {
+    throw new TypeError("metadataColumns must be an array of strings when provided");
+  }
+  const metadataColumns = rawMetadataColumns.map((column) => normalizeRequiredString(column, "metadataColumns"));
   const plannedImports = resolvePlannedImports(config, header, recognizedSampleColumns);
   const tsIndex = requireColumn(header, tsColumn);
   for (const column of metadataColumns) {
@@ -315,7 +324,6 @@ export async function prepareCsvSampleImport(
       importConfig: {
         delimiter,
         metadataColumns: metadataColumns.length === 0 ? undefined : metadataColumns,
-        presetId: config.presetId,
         tsColumn,
         valueColumn: entry.valueColumn,
       },
@@ -385,14 +393,13 @@ export async function prepareCsvSampleImport(
 
 export async function profileCsvSampleFile(
   input: unknown,
-  { presetRegistry }: { presetRegistry?: Pick<SamplePresetRegistry, "get"> } = {},
 ): Promise<CsvSampleFileProfile> {
   const request = assertPlainObject(input, "sample CSV profile input");
   const includeSummary = Boolean(request.includeSummary);
   const summaryProfile = normalizeSummaryProfile(request.summaryProfile);
   const thresholdBelow = normalizeNumberList(request.thresholdBelow, "thresholdBelow");
   const gapSeconds = normalizeOptionalFiniteNumber(request.gapSeconds, "gapSeconds");
-  const plan = await prepareCsvSampleImport(request, { presetRegistry });
+  const plan = await prepareCsvSampleImport(request);
   const summaries = includeSummary
     ? plan.imports.map((entry) =>
       summarizeSampleSeries({

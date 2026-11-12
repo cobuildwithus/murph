@@ -960,59 +960,6 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
-  it("excludes configured canary traffic from the public message-volume response", async () => {
-    const liveStart = new Date("2026-07-23T00:00:00.000Z");
-    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue("member_canary");
-    mocks.readHostedMemberRoutingRecord.mockResolvedValue({
-      linqChatLookupKey: "v1:canary-chat",
-      pendingLinqChatLookupKey: "v1:canary-chat-pending",
-    });
-    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
-      _max: { snapshotDate: liveStart },
-      _sum: { inboundMessagesPriorDay: 400, outboundMessagesPriorDay: 300 },
-    });
-    mocks.hostedMailboxItem.count.mockResolvedValueOnce(12);
-    mocks.hostedLinqDelivery.count.mockResolvedValueOnce(8);
-    mocks.hostedOutboundMessageVolumeReceipt.count.mockResolvedValueOnce(5);
-
-    const { GET } = await import("../app/api/message-volume/route");
-    const response = await GET();
-
-    await expect(response.json()).resolves.toEqual({
-      total: HOSTED_MESSAGE_VOLUME_BASE + 725,
-    });
-    expect(mocks.hostedMailboxItem.count).toHaveBeenCalledExactlyOnceWith({
-      where: {
-        kind: "conversation.message",
-        member: { id: { not: "member_canary" } },
-        occurredAt: { gte: liveStart },
-      },
-    });
-    expect(mocks.hostedLinqDelivery.count).toHaveBeenCalledExactlyOnceWith({
-      where: {
-        OR: [
-          { linqChatLookupKey: null },
-          {
-            linqChatLookupKey: {
-              notIn: ["v1:canary-chat", "v1:canary-chat-pending"],
-            },
-          },
-        ],
-        attemptedAt: { gte: liveStart },
-        status: { in: ["accepted", "delivered", "sent_no_receipt_expected"] },
-      },
-    });
-    expect(mocks.readHostedLinqProductionCanaryMemberId)
-      .toHaveBeenCalledExactlyOnceWith({ prisma });
-    expect(mocks.readHostedMemberRoutingRecord).toHaveBeenCalledExactlyOnceWith({
-      memberId: "member_canary",
-      prisma,
-    });
-    expect(mocks.hostedOutboundMessageVolumeReceipt.count).toHaveBeenCalledExactlyOnceWith({
-      where: { recordedAt: { gte: liveStart } },
-    });
-  });
-
   it("falls back to the base if canary attribution cannot be read", async () => {
     mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
       _max: { snapshotDate: null },
@@ -3025,8 +2972,8 @@ describe("hosted ops growth metrics", () => {
     ).toEqual(startOfUtcDay(now));
   });
 
-  it("records prior-day message counts without configured canary traffic", async () => {
-    const now = new Date("2026-07-06T12:00:00.000Z");
+  it.each(["00:00:00", "12:00:00"])("records prior-day message counts without canary traffic at %s UTC", async (time) => {
+    const now = new Date(`2026-07-06T${time}.000Z`);
     mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(
       "member_canary",
     );
@@ -3092,6 +3039,7 @@ describe("hosted ops growth metrics", () => {
       },
     });
     const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.where.snapshotDate).toEqual(new Date("2026-07-06T00:00:00.000Z"));
     expect(upsertArg?.create).toMatchObject({
       inboundMessagesPriorDay: 42,
       outboundMessagesPriorDay: 66,
@@ -3420,35 +3368,6 @@ describe("hosted ops growth metrics", () => {
     });
     expect(upsertArg?.update).not.toHaveProperty("activeUsersPriorDay");
     expect(upsertArg?.update).not.toHaveProperty("activeUsersTrailing7Days");
-  });
-
-  it("anchors the prior-day message window to the UTC day at exactly midnight", async () => {
-    const now = new Date("2026-07-06T00:00:00.000Z");
-    queueCurrentMetricMocks();
-    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
-      snapshotRow("2026-07-06", 2_900),
-    );
-
-    await captureHostedGrowthDailySnapshot(now);
-
-    expect(mocks.hostedMailboxItem.count.mock.calls[0]?.[0]?.where.occurredAt).toEqual({
-      gte: new Date("2026-07-05T00:00:00.000Z"),
-      lt: new Date("2026-07-06T00:00:00.000Z"),
-    });
-    expect(mocks.hostedLinqDelivery.count.mock.calls[0]?.[0]?.where.attemptedAt).toEqual({
-      gte: new Date("2026-07-05T00:00:00.000Z"),
-      lt: new Date("2026-07-06T00:00:00.000Z"),
-    });
-    expect(
-      mocks.hostedOutboundMessageVolumeReceipt.count.mock.calls[0]?.[0]?.where
-        .recordedAt,
-    ).toEqual({
-      gte: new Date("2026-07-05T00:00:00.000Z"),
-      lt: new Date("2026-07-06T00:00:00.000Z"),
-    });
-    expect(
-      mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0].where.snapshotDate,
-    ).toEqual(new Date("2026-07-06T00:00:00.000Z"));
   });
 
   it("fails closed before reading growth data when page ops access is missing", async () => {

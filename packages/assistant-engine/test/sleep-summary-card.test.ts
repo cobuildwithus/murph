@@ -49,7 +49,7 @@ describe('host-built sleep summary attachment', () => {
     expect(resolveMurphDynamicTools({ responseCardsAvailable: true })).toContain(MURPH_ATTACH_SLEEP_CARD_TOOL)
     expect(resolveMurphDynamicTools({ responseCardsAvailable: false })).not.toContain(MURPH_ATTACH_SLEEP_CARD_TOOL)
     expect(readTestMurphDynamicToolRequest({ method: 'item/tool/call', params: { tool: 'attach_sleep_card', namespace: 'murph', arguments: { date: '2026-11-03' } } })).toEqual({ kind: 'attach-sleep-card', date: '2026-11-03' })
-    expect(readTestMurphDynamicToolRequest({ method: 'item/tool/call', params: { tool: 'attach_sleep_card', namespace: 'murph', arguments: { date: '2026-11-03', score: 99 } } })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+    expect(readTestMurphDynamicToolRequest({ method: 'item/tool/call', params: { tool: 'attach_sleep_card', namespace: 'murph', arguments: { date: '2026-11-03', score: 99 } } })).toMatchObject({ kind: 'invalid-tool-arguments', errorCode: 'invalid_response_card_arguments' })
   })
   it('uses the existing audience, single-card and media guards and safe missing-data result', async () => {
     const root = await seed('oura', values)

@@ -1454,6 +1454,11 @@ type MurphGroupToolRequest =
     }
 
 export type MurphDynamicToolRequest =
+  | {
+      kind: 'invalid-tool-arguments'
+      errorCode: string
+      validationDigest: SafeToolCallValidationDigest
+    }
   | ConnectedAppsDynamicToolRequest
   | AutomationDynamicToolRequest
   | DeviceDynamicToolRequest
@@ -1537,39 +1542,7 @@ export type MurphDynamicToolRequest =
       toolCallId?: string
     }
   | {
-      kind: 'invalid-send-vault-file-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
       kind: 'invalid-computer-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-generate-image-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-generate-voice-memo-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-generate-song-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-conversation-attachments-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-analyze-video-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-calendar-link-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-ask-grok-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -1577,20 +1550,8 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
-      kind: 'invalid-response-card-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
       card: CompactTableWorkoutResponseCardV1
       kind: 'response-card-envelope-too-large'
-    }
-  | {
-      kind: 'invalid-response-media-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-progress-arguments'
-      validationDigest: SafeToolCallValidationDigest
     }
   | {
       kind: 'invalid-reaction-arguments'
@@ -1601,48 +1562,11 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
-      kind: 'invalid-product-feedback-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-family-plan-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-personalization-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-usage-diagnostics-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-plan-usage-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
       kind: 'invalid-poll-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | { kind: 'poll'; request: ConversationPollAction }
   | { kind: 'game'; request: GameDynamicRequest }
-  | { kind: 'invalid-game-arguments'; validationDigest: SafeToolCallValidationDigest }
-  | {
-      kind: 'invalid-imessage-contact-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-subscription-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-assistant-configuration-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
-  | {
-      kind: 'invalid-group-arguments'
-      validationDigest: SafeToolCallValidationDigest
-    }
   | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
@@ -1762,7 +1686,8 @@ function readSleepCardDynamicToolRequest(request: { tool: string | null; argumen
   const parsed = sleepSummaryCardRequestSchema.safeParse(request.arguments)
   if (!parsed.success) {
     return {
-      kind: 'invalid-response-card-arguments',
+      kind: 'invalid-tool-arguments',
+      errorCode: 'invalid_response_card_arguments',
       validationDigest: buildDynamicToolValidationDigest({
         error: parsed.error,
         rawInput: request.arguments,
@@ -1834,7 +1759,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseSendProgressUpdateArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-progress-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_progress_update_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -1857,7 +1783,8 @@ export function readMurphDynamicToolRequest(
           }
         }
         return {
-          kind: 'invalid-response-card-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_response_card_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -1876,7 +1803,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseAttachExerciseRoutineCardArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-response-card-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_response_card_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -1890,7 +1818,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseAttachTelegramRichContentArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-response-card-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_response_card_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -1904,7 +1833,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseAttachResponseMediaArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-response-media-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_response_media_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -1918,7 +1848,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseGenerateImageArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-generate-image-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_generate_image_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -1934,7 +1865,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseGenerateVoiceMemoArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-generate-voice-memo-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_generate_voice_memo_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -1948,7 +1880,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseGenerateSongArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-generate-song-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_generate_song_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -1966,7 +1899,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseCreateCalendarLinkArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-calendar-link-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_calendar_link_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -1979,7 +1913,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseAskGrokArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-ask-grok-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_ask_grok_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -1993,7 +1928,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseSendVaultFileArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-send-vault-file-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_send_vault_file_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -2010,7 +1946,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseSubmitProductFeedbackArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-product-feedback-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_product_feedback_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -2023,7 +1960,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseFamilyPlanArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-family-plan-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_family_plan_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -2039,7 +1977,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseIMessageContactArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-imessage-contact-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_imessage_contact_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -2051,7 +1990,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseSubscriptionArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-subscription-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_subscription_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -2064,7 +2004,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parsePersonalizationArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-personalization-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_personalization_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -2079,7 +2020,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseAssistantConfigurationArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-assistant-configuration-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_assistant_configuration_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -2098,7 +2040,8 @@ export function readMurphDynamicToolRequest(
       const parsed = parseGroupArguments(request.arguments, request.tool)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-group-arguments',
+          kind: 'invalid-tool-arguments',
+          errorCode: 'invalid_group_arguments',
           validationDigest: parsed.validationDigest,
         }
       }
@@ -3711,13 +3654,6 @@ function isUnavailableComputerTool(request: MurphDynamicToolRequest, context: As
   return isExecutableComputerDynamicToolRequest(request) && !canExecuteComputerDynamicTools(context)
 }
 
-function isInvalidOrdinaryToolRequest(request: MurphDynamicToolRequest): request is Exclude<
-  Extract<MurphDynamicToolRequest, { validationDigest: SafeToolCallValidationDigest }>,
-  { kind: 'invalid-automation-arguments' }
-> {
-  return 'validationDigest' in request && request.kind !== 'invalid-automation-arguments'
-}
-
 function currentAcceptedInputIds(
   context: AssistantHostedToolContext | null | undefined,
 ): readonly string[] | undefined {
@@ -3750,10 +3686,11 @@ async function dispatchMurphDynamicToolRequest(
       'unavailable',
     )
   }
-  if (isInvalidOrdinaryToolRequest(input.request)) {
+  if ('validationDigest' in input.request
+    && input.request.kind !== 'invalid-automation-arguments') {
     return invalidDynamicToolArgumentsResult(
-      input.request.kind === 'invalid-progress-arguments'
-        ? 'invalid_progress_update_arguments'
+      input.request.kind === 'invalid-tool-arguments'
+        ? input.request.errorCode
         : input.request.kind.replaceAll('-', '_'),
       input.request.validationDigest,
     )
@@ -4011,7 +3948,7 @@ async function dispatchMurphDynamicToolRequest(
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         askGrokRuntime: input.askGrokRuntime ?? null,
-        askGrokTurnState: input.askGrokTurnState ?? null,
+        askGrokTurnState: input.askGrokTurnState,
       })
     }
     case 'connected-apps-manage':
@@ -7668,12 +7605,12 @@ function parsePrivateUsageToolRequest(
     })
     return parsed.ok
       ? { kind: 'usage-diagnostics', request: parsed.args }
-      : { kind: 'invalid-usage-diagnostics-arguments', validationDigest: parsed.validationDigest }
+      : { kind: 'invalid-tool-arguments', errorCode: 'invalid_usage_diagnostics_arguments', validationDigest: parsed.validationDigest }
   }
   const parsed = parsePlanUsageArguments(value)
   return parsed.ok
     ? { kind: 'plan-usage', request: parsed.request }
-    : { kind: 'invalid-plan-usage-arguments', validationDigest: parsed.validationDigest }
+    : { kind: 'invalid-tool-arguments', errorCode: 'invalid_plan_usage_arguments', validationDigest: parsed.validationDigest }
 }
 
 function parsePlanUsageArguments(
@@ -8684,7 +8621,7 @@ function phoneCallStartFailureReason(status: string): ToolFailureReason {
 function readAnalyzeVideoDynamicToolRequest(value: unknown): MurphDynamicToolRequest {
   const parsed = parseAnalyzeVideoArguments(value)
   return parsed.ok ? { kind: 'analyze-video', args: parsed.args }
-    : { kind: 'invalid-analyze-video-arguments', validationDigest: parsed.validationDigest }
+    : { kind: 'invalid-tool-arguments', errorCode: 'invalid_analyze_video_arguments', validationDigest: parsed.validationDigest }
 }
 
 async function maybeExecuteRecapImage(input: ExecuteMurphDynamicToolRequestInput,

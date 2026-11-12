@@ -1,416 +1,85 @@
-import { HostedStripeEventStatus } from "@prisma/client";
 import type Stripe from "stripe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  after: vi.fn<(task: () => Promise<void>) => void>(),
   constructEvent: vi.fn(),
-  recordHostedStripeEvent: vi.fn(),
-  runtime: {
-    webhookSecret: "whsec_test_123" as string | null,
-  },
-  scheduleHostedStripePaymentFailureEventAlert: vi.fn(),
-  startHostedStripeWebhookReconciliationWorkflow: vi.fn(),
+  record: vi.fn(),
+  start: vi.fn(),
+  alert: vi.fn(),
+  config: { webhookSecret: "whsec_fixture" as string | null },
 }));
-
+vi.mock("next/server", () => ({ after: mocks.after }));
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeWebhookVerificationConfig: () => ({
-    stripe: {
-      webhooks: {
-        constructEvent: mocks.constructEvent,
-      },
-    },
-    webhookSecret: mocks.runtime.webhookSecret,
+    stripe: { webhooks: { constructEvent: mocks.constructEvent } },
+    webhookSecret: mocks.config.webhookSecret,
   }),
 }));
-
 vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
-  recordHostedStripeEvent: mocks.recordHostedStripeEvent,
+  recordHostedStripeEvent: mocks.record,
 }));
-
-vi.mock("@/src/lib/hosted-onboarding/stripe-alert-email", () => ({
-  scheduleHostedStripePaymentFailureEventAlert:
-    mocks.scheduleHostedStripePaymentFailureEventAlert,
-}));
-
 vi.mock("@/src/lib/hosted-onboarding/stripe-webhook-workflow-start", () => ({
-  startHostedStripeWebhookReconciliationWorkflow:
-    mocks.startHostedStripeWebhookReconciliationWorkflow,
+  startHostedStripeWebhookReconciliationWorkflow: mocks.start,
 }));
-
+vi.mock("@/src/lib/hosted-onboarding/stripe-alert-email", () => ({
+  scheduleHostedStripePaymentFailureEventAlert: mocks.alert,
+}));
 import { handleHostedStripeWebhook } from "@/src/lib/hosted-onboarding/webhook-service-stripe";
 
-describe("hosted Stripe webhook service", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.runtime.webhookSecret = "whsec_test_123";
-    mocks.constructEvent.mockReturnValue(makeStripeEvent());
-    mocks.recordHostedStripeEvent.mockResolvedValue({
-      duplicate: false,
-      type: "invoice.paid",
-    });
-    mocks.startHostedStripeWebhookReconciliationWorkflow.mockResolvedValue({
-      runId: "run_123",
-    });
-  });
-
-  it("records the event first and starts pointer-only reconciliation workflow", async () => {
-    const prisma = createPrisma();
-
-    await expect(handleHostedStripeWebhook({
-      prisma: prisma as never,
-      rawBody: "{}",
-      signature: "sig_test_123",
-    })).resolves.toEqual({
-      ok: true,
-      type: "invoice.paid",
-    });
-
-    expect(mocks.recordHostedStripeEvent).toHaveBeenCalledWith({
-      event: makeStripeEvent(),
-      prisma,
-    });
-
-    expect(mocks.startHostedStripeWebhookReconciliationWorkflow).toHaveBeenCalledWith({
-      eventId: "evt_123",
-    });
-    expect(mocks.scheduleHostedStripePaymentFailureEventAlert).toHaveBeenCalledWith({
-      eventId: "evt_123",
-      eventType: "invoice.paid",
-      livemode: false,
-    });
-  });
-
-  it("alerts once when a new verified payment-failure event is recorded", async () => {
-    const prisma = createPrisma();
-    const event = makeStripeEvent({
-      livemode: true,
-      type: "payment_intent.payment_failed",
-    });
-    mocks.constructEvent.mockReturnValueOnce(event);
-    mocks.recordHostedStripeEvent.mockResolvedValueOnce({
-      duplicate: false,
-      type: event.type,
-    });
-
-    await expect(handleHostedStripeWebhook({
-      prisma: prisma as never,
-      rawBody: "{}",
-      signature: "sig_test_123",
-    })).resolves.toMatchObject({
-      ok: true,
-      type: "payment_intent.payment_failed",
-    });
-
-    expect(mocks.scheduleHostedStripePaymentFailureEventAlert).toHaveBeenCalledWith({
-      eventId: "evt_123",
-      eventType: "payment_intent.payment_failed",
-      livemode: true,
-    });
-  });
-
-  it("does not alert again for a duplicate payment-failure event", async () => {
-    const prisma = createPrisma({
-      status: HostedStripeEventStatus.completed,
-    });
-    const event = makeStripeEvent({
-      type: "invoice.payment_failed",
-    });
-    mocks.constructEvent.mockReturnValueOnce(event);
-    mocks.recordHostedStripeEvent.mockResolvedValueOnce({
-      duplicate: true,
-      type: event.type,
-    });
-
-    await expect(handleHostedStripeWebhook({
-      prisma: prisma as never,
-      rawBody: "{}",
-      signature: "sig_test_123",
-    })).resolves.toMatchObject({
-      duplicate: true,
-      ok: true,
-    });
-
-    expect(mocks.scheduleHostedStripePaymentFailureEventAlert).not.toHaveBeenCalled();
-  });
-
-  it("starts duplicate failed receipts without resetting stored DB backoff", async () => {
-    const prisma = createPrisma({
-      nextAttemptAt: new Date(Date.now() + 60_000),
-      status: HostedStripeEventStatus.failed,
-    });
-    mocks.recordHostedStripeEvent.mockResolvedValueOnce({
-      duplicate: true,
-      type: "invoice.paid",
-    });
-
-    await expect(handleHostedStripeWebhook({
-      prisma: prisma as never,
-      rawBody: "{}",
-      signature: "sig_test_123",
-    })).resolves.toEqual({
-      duplicate: true,
-      ok: true,
-      type: "invoice.paid",
-    });
-
-    expect(mocks.recordHostedStripeEvent).toHaveBeenCalledWith({
-      event: makeStripeEvent(),
-      prisma,
-    });
-    expect(prisma.hostedStripeEvent.findUnique).toHaveBeenCalledWith({
-      select: {
-        activationResultJson: true,
-        claimExpiresAt: true,
-        nextAttemptAt: true,
-        status: true,
-        type: true,
-        updatedAt: true,
-      },
-      where: {
-        eventId: "evt_123",
-      },
-    });
-    expect(prisma.hostedStripeEvent.updateMany).not.toHaveBeenCalled();
-    expect(mocks.startHostedStripeWebhookReconciliationWorkflow).toHaveBeenCalledWith({
-      eventId: "evt_123",
-    });
-  });
-
-  it("starts pending duplicate receipts without resetting stored DB backoff", async () => {
-    const prisma = createPrisma({
-      nextAttemptAt: new Date(Date.now() + 60_000),
-      status: HostedStripeEventStatus.pending,
-    });
-    mocks.recordHostedStripeEvent.mockResolvedValueOnce({
-      duplicate: true,
-      type: "invoice.paid",
-    });
-
-    await expect(handleHostedStripeWebhook({
-      prisma: prisma as never,
-      rawBody: "{}",
-      signature: "sig_test_123",
-    })).resolves.toEqual({
-      duplicate: true,
-      ok: true,
-      type: "invoice.paid",
-    });
-
-    expect(prisma.hostedStripeEvent.updateMany).not.toHaveBeenCalled();
-    expect(mocks.startHostedStripeWebhookReconciliationWorkflow).toHaveBeenCalledWith({
-      eventId: "evt_123",
-    });
-  });
-
-  it("starts duplicate poisoned receipts without mutating them back to retryable", async () => {
-    const prisma = createPrisma({
-      status: HostedStripeEventStatus.poisoned,
-    });
-    mocks.recordHostedStripeEvent.mockResolvedValueOnce({
-      duplicate: true,
-      type: "invoice.paid",
-    });
-
-    await expect(handleHostedStripeWebhook({
-      prisma: prisma as never,
-      rawBody: "{}",
-      signature: "sig_test_123",
-    })).resolves.toEqual({
-      duplicate: true,
-      ok: true,
-      type: "invoice.paid",
-    });
-
-    expect(prisma.hostedStripeEvent.updateMany).not.toHaveBeenCalled();
-    expect(mocks.startHostedStripeWebhookReconciliationWorkflow).toHaveBeenCalledWith({
-      eventId: "evt_123",
-    });
-  });
-
-  it("starts duplicate completed receipts so activation runtime wakes can be retried", async () => {
-    const prisma = createPrisma({
-      status: HostedStripeEventStatus.completed,
-    });
-    mocks.recordHostedStripeEvent.mockResolvedValueOnce({
-      duplicate: true,
-      type: "invoice.paid",
-    });
-
-    await expect(handleHostedStripeWebhook({
-      prisma: prisma as never,
-      rawBody: "{}",
-      signature: "sig_test_123",
-    })).resolves.toEqual({
-      duplicate: true,
-      ok: true,
-      type: "invoice.paid",
-    });
-
-    expect(mocks.startHostedStripeWebhookReconciliationWorkflow).toHaveBeenCalledWith({
-      eventId: "evt_123",
-    });
-    expect(prisma.hostedStripeEvent.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("skips duplicate workflow start when another worker holds a fresh processing lease", async () => {
-    const prisma = createPrisma({
-      claimExpiresAt: new Date(Date.now() + 60_000),
-      status: HostedStripeEventStatus.processing,
-    });
-    mocks.recordHostedStripeEvent.mockResolvedValueOnce({
-      duplicate: true,
-      type: "invoice.paid",
-    });
-
-    await expect(handleHostedStripeWebhook({
-      prisma: prisma as never,
-      rawBody: "{}",
-      signature: "sig_test_123",
-    })).resolves.toEqual({
-      duplicate: true,
-      ok: true,
-      type: "invoice.paid",
-    });
-
-    expect(mocks.startHostedStripeWebhookReconciliationWorkflow).not.toHaveBeenCalled();
-    expect(prisma.hostedStripeEvent.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("rejects webhook requests without a Stripe signature", async () => {
-    await expect(handleHostedStripeWebhook({
-      prisma: {} as never,
-      rawBody: "{}",
-      signature: null,
-    })).rejects.toMatchObject({
-      code: "STRIPE_SIGNATURE_REQUIRED",
-      httpStatus: 401,
-      retryable: false,
-    });
-
-    expect(mocks.recordHostedStripeEvent).not.toHaveBeenCalled();
-    expect(mocks.startHostedStripeWebhookReconciliationWorkflow).not.toHaveBeenCalled();
-  });
-
-  it("rejects webhook requests when the Stripe webhook secret is missing", async () => {
-    mocks.runtime.webhookSecret = null;
-
-    await expect(handleHostedStripeWebhook({
-      prisma: {} as never,
-      rawBody: "{}",
-      signature: "sig_test_123",
-    })).rejects.toMatchObject({
-      code: "STRIPE_WEBHOOK_SECRET_REQUIRED",
-      httpStatus: 500,
-      retryable: false,
-    });
-
-    expect(mocks.constructEvent).not.toHaveBeenCalled();
-    expect(mocks.recordHostedStripeEvent).not.toHaveBeenCalled();
-    expect(mocks.startHostedStripeWebhookReconciliationWorkflow).not.toHaveBeenCalled();
-  });
-
-  it("rejects webhook requests with an invalid Stripe signature", async () => {
-    mocks.constructEvent.mockImplementationOnce(() => {
-      throw new Error("Bad Stripe signature");
-    });
-
-    await expect(handleHostedStripeWebhook({
-      prisma: {} as never,
-      rawBody: "{}",
-      signature: "sig_bad",
-    })).rejects.toMatchObject({
-      code: "STRIPE_SIGNATURE_INVALID",
-      httpStatus: 401,
-      retryable: false,
-    });
-
-    expect(mocks.recordHostedStripeEvent).not.toHaveBeenCalled();
-    expect(mocks.startHostedStripeWebhookReconciliationWorkflow).not.toHaveBeenCalled();
-  });
-
-  it("keeps workflow start failures retryable instead of acknowledging success", async () => {
-    const prisma = createPrisma({
-      nextAttemptAt: new Date(Date.now() - 60_000),
-      status: HostedStripeEventStatus.failed,
-    });
-    mocks.recordHostedStripeEvent.mockResolvedValueOnce({
-      duplicate: true,
-      type: "invoice.paid",
-    });
-    mocks.startHostedStripeWebhookReconciliationWorkflow.mockRejectedValueOnce({
-      code: "HOSTED_STRIPE_WEBHOOK_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED",
-      httpStatus: 503,
-      retryable: true,
-    });
-
-    await expect(handleHostedStripeWebhook({
-      prisma: prisma as never,
-      rawBody: "{}",
-      signature: "sig_test_123",
-    })).rejects.toMatchObject({
-      code: "HOSTED_STRIPE_WEBHOOK_RECONCILIATION_WORKFLOW_START_RETRY_REQUIRED",
-      httpStatus: 503,
-      retryable: true,
-    });
-
-    expect(mocks.recordHostedStripeEvent).toHaveBeenCalledWith({
-      event: makeStripeEvent(),
-      prisma,
-    });
-    expect(mocks.startHostedStripeWebhookReconciliationWorkflow).toHaveBeenCalledWith({
-      eventId: "evt_123",
-    });
-  });
+const event = { id: "evt_fixture", type: "invoice.paid", livemode: false } as Stripe.Event;
+const prisma = {} as never;
+const receive = (signature: string | null = "signature") => handleHostedStripeWebhook({
+  prisma, rawBody: "verified-raw-body", signature,
 });
 
-function createPrisma(
-  storedEvent?: Partial<{
-    claimExpiresAt: Date | null;
-    nextAttemptAt: Date;
-    status: HostedStripeEventStatus;
-    updatedAt: Date;
-  }>,
-) {
-  const receipt = storedEvent
-    ? {
-      claimExpiresAt: storedEvent.claimExpiresAt ?? null,
-      nextAttemptAt: storedEvent.nextAttemptAt ?? new Date(Date.now() - 60_000),
-      status: storedEvent.status ?? HostedStripeEventStatus.failed,
-      type: "invoice.paid",
-      updatedAt: storedEvent.updatedAt ?? new Date("2026-04-23T00:00:00.000Z"),
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.config.webhookSecret = "whsec_fixture";
+  mocks.constructEvent.mockReturnValue(event);
+  mocks.record.mockResolvedValue({ duplicate: false, type: event.type });
+  mocks.start.mockResolvedValue({ status: "completed" });
+});
+
+describe("Stripe receipt admission", () => {
+  it("acknowledges persisted work and runs its first receipt-owned attempt after the response", async () => {
+    await expect(receive()).resolves.toEqual({ ok: true, type: event.type });
+    expect(mocks.constructEvent).toHaveBeenCalledWith("verified-raw-body", "signature", "whsec_fixture");
+    expect(mocks.record).toHaveBeenCalledWith({ event, prisma });
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.after).toHaveBeenCalledOnce();
+    await mocks.after.mock.calls[0]![0]();
+    expect(mocks.start).toHaveBeenCalledWith({ eventId: event.id });
+    expect(mocks.alert).toHaveBeenCalledWith({ eventId: event.id, eventType: event.type, livemode: false });
+  });
+
+  it("does not create a second retry owner or another alert for duplicate receipts", async () => {
+    mocks.record.mockResolvedValue({ duplicate: true, type: event.type });
+    await expect(receive()).resolves.toMatchObject({ duplicate: true, ok: true });
+    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.alert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [null, "whsec_fixture", false, "STRIPE_SIGNATURE_REQUIRED"],
+    ["signature", null, false, "STRIPE_WEBHOOK_SECRET_REQUIRED"],
+    ["signature", "whsec_fixture", true, "STRIPE_SIGNATURE_INVALID"],
+  ] as const)("rejects unauthenticated ingress before recording or scheduling (%s, %s)", async (signature, secret, invalid, code) => {
+    mocks.config.webhookSecret = secret;
+    if (invalid) {
+      mocks.constructEvent.mockImplementation(() => { throw new Error("invalid signature"); });
+      vi.spyOn(console, "error").mockImplementation(() => {});
     }
-    : null;
+    await expect(receive(signature)).rejects.toMatchObject({ code });
+    expect(mocks.record).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.alert).not.toHaveBeenCalled();
+  });
 
-  return {
-    __tag: "prisma",
-    hostedStripeEvent: {
-      findUnique: vi.fn().mockResolvedValue(receipt),
-      updateMany: vi.fn().mockResolvedValue({
-        count: 1,
-      }),
-    },
-  };
-}
-
-function makeStripeEvent(
-  overrides: Partial<Pick<Stripe.Event, "livemode" | "type">> = {},
-): Stripe.Event {
-  return {
-    api_version: "2025-03-31.basil",
-    created: 1_774_708_800,
-    data: {
-      object: {
-        id: "in_123",
-      },
-    },
-    id: "evt_123",
-    livemode: overrides.livemode ?? false,
-    object: "event",
-    pending_webhooks: 0,
-    request: {
-      id: null,
-      idempotency_key: null,
-    },
-    type: overrides.type ?? "invoice.paid",
-  } as Stripe.Event;
-}
+  it("cannot acknowledge a failed durable append", async () => {
+    mocks.record.mockRejectedValue(new Error("database unavailable"));
+    await expect(receive()).rejects.toThrow("database unavailable");
+    expect(mocks.after).not.toHaveBeenCalled();
+    expect(mocks.alert).not.toHaveBeenCalled();
+  });
+});

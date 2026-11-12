@@ -1633,7 +1633,6 @@ export interface ImportersRuntime {
     unit?: string
     delimiter?: string
     metadataColumns?: string[]
-    presetId?: string
     requestId?: string | null
     source?: string
   }): Promise<{
@@ -1698,7 +1697,6 @@ export interface ImportersRuntimeModule {
     unit?: string
     delimiter?: string
     metadataColumns?: string[]
-    presetId?: string
     requestId?: string | null
     source?: string
   }): Promise<{

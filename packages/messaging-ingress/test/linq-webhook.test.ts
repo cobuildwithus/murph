@@ -123,12 +123,13 @@ test("verifyAndParseLinqWebhookRequest rejects invalid signatures", () => {
   );
 });
 
-test("verifyAndParseLinqWebhookRequest rejects signatures with trailing junk after a valid digest", () => {
-  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
-    eventId: "evt_trailing_junk",
-  }));
+test.each([
+  { label: "trailing non-hex junk", suffix: "zz" },
+  { label: "a dangling final nibble", suffix: "f" },
+])("verifyAndParseLinqWebhookRequest rejects $label after a valid digest", ({ suffix }) => {
+  const payload = JSON.stringify(buildV2026MessageReceivedWebhook());
   const timestamp = "1711360800";
-  const signature = `${signLinqWebhook("secret-123", payload, timestamp)}zz`;
+  const signature = `${signLinqWebhook("secret-123", payload, timestamp)}${suffix}`;
 
   assert.throws(
     () =>
@@ -145,71 +146,28 @@ test("verifyAndParseLinqWebhookRequest rejects signatures with trailing junk aft
   );
 });
 
-test("verifyAndParseLinqWebhookRequest rejects signatures with a dangling final nibble", () => {
-  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
-    eventId: "evt_dangling_nibble",
-  }));
-  const timestamp = "1711360800";
-  const signature = `${signLinqWebhook("secret-123", payload, timestamp)}f`;
+test.each(["repeated", "blank first"])(
+  "verifyAndParseLinqWebhookRequest rejects duplicate signature arrays: %s",
+  (duplicate) => {
+    const payload = JSON.stringify(buildV2026MessageReceivedWebhook());
+    const timestamp = "1711360800";
+    const signature = signLinqWebhook("secret-123", payload, timestamp);
 
-  assert.throws(
-    () =>
-      verifyAndParseLinqWebhookRequest({
-        headers: {
-          "x-webhook-signature": signature,
-          "x-webhook-timestamp": timestamp,
-        },
-        now: 1711360800_000,
-        rawBody: payload,
-        webhookSecret: "secret-123",
-      }),
-    /Invalid Linq webhook signature/u,
-  );
-});
-
-test("verifyAndParseLinqWebhookRequest rejects duplicate signature headers instead of guessing", () => {
-  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
-    eventId: "evt_duplicate_signature",
-  }));
-  const timestamp = "1711360800";
-  const signature = signLinqWebhook("secret-123", payload, timestamp);
-
-  assert.throws(
-    () =>
-      verifyAndParseLinqWebhookRequest({
-        headers: {
-          "x-webhook-signature": [signature, signature],
-          "x-webhook-timestamp": timestamp,
-        },
-        now: 1711360800_000,
-        rawBody: payload,
-        webhookSecret: "secret-123",
-      }),
-    /Duplicate Linq webhook x-webhook-signature header/u,
-  );
-});
-
-test("verifyAndParseLinqWebhookRequest rejects duplicate signature arrays even when one entry is blank", () => {
-  const payload = JSON.stringify(buildV2026MessageReceivedWebhook({
-    eventId: "evt_duplicate_signature_blank",
-  }));
-  const timestamp = "1711360800";
-  const signature = signLinqWebhook("secret-123", payload, timestamp);
-
-  assert.throws(
-    () =>
-      verifyAndParseLinqWebhookRequest({
-        headers: {
-          "x-webhook-signature": [" ", signature],
-          "x-webhook-timestamp": timestamp,
-        },
-        now: 1711360800_000,
-        rawBody: payload,
-        webhookSecret: "secret-123",
-      }),
-    /Duplicate Linq webhook x-webhook-signature header/u,
-  );
-});
+    assert.throws(
+      () =>
+        verifyAndParseLinqWebhookRequest({
+          headers: {
+            "x-webhook-signature": [duplicate === "repeated" ? signature : " ", signature],
+            "x-webhook-timestamp": timestamp,
+          },
+          now: 1711360800_000,
+          rawBody: payload,
+          webhookSecret: "secret-123",
+        }),
+      /Duplicate Linq webhook x-webhook-signature header/u,
+    );
+  },
+);
 
 test("verifyAndParseLinqWebhookRequest rejects duplicate timestamp headers instead of guessing", () => {
   const payload = JSON.stringify(buildV2026MessageReceivedWebhook({

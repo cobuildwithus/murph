@@ -20,3 +20,7 @@ Sleep and readiness/recovery scores use a 100-point scale. Provider percentages
 normalize to the same numeric score while retaining their source unit; unrelated
 units remain unsupported. Journal may retain a provider's Recovery label even
 when its canonical metric identity is readiness-score.
+
+Sample summaries report numerical counts, ranges, threshold durations and gaps. The
+`oxygen-night` profile selects numerical thresholds only; summaries do not assign
+normal, borderline or concerning health categories.

@@ -1,3 +1,4 @@
+import type { AskGrokTurnState } from '../../assistant-codex/ask-grok-tool.js'
 import type {
   AssistantChatProvider,
   AssistantMessageReaction,
@@ -106,6 +107,7 @@ export interface AssistantProviderTurn {
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
   allowFinishWithoutReply?: boolean | null
+  askGrokTurnState?: AskGrokTurnState | null
   analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
@@ -277,7 +279,6 @@ export interface AssistantProviderTurnExecutionResult {
   followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
   responseCard?: AssistantResponseCard | null
   stderr: string
-  stdout: string
   usage?: AssistantProviderUsage | null
 }
 

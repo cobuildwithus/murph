@@ -9,9 +9,7 @@ import {
 import type Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 
-const workflowBoundary = vi.hoisted(() => ({
-  start: vi.fn(async () => ({ runId: "run_hosted_stripe_fixture" })),
-}));
+const requestBoundary = vi.hoisted(() => ({ after: vi.fn() }));
 const runtimeRecheckBoundary = vi.hoisted(() => ({
   signal: vi.fn(async () => ({
     signalAccepted: true,
@@ -31,12 +29,10 @@ const directPreparationBoundary = vi.hoisted(() => ({
   prepare: vi.fn(async () => new Map()),
 }));
 
-vi.mock(
-  "@/src/lib/hosted-onboarding/stripe-webhook-workflow-start",
-  () => ({
-    startHostedStripeWebhookReconciliationWorkflow: workflowBoundary.start,
-  }),
-);
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  after: requestBoundary.after,
+}));
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async () => {
   const actual = await vi.importActual<
@@ -109,10 +105,8 @@ import {
   lockHostedMemberRow,
 } from "@/src/lib/hosted-onboarding/shared";
 import {
-  processRecordedHostedStripeWebhookEvent,
-} from "@/src/lib/hosted-onboarding/stripe-webhook-reconciliation";
-import {
   recordHostedStripeEvent,
+  reconcileHostedStripeEventById,
 } from "@/src/lib/hosted-onboarding/stripe-event-reconciliation";
 import {
   claimHostedMailboxConversationSubscriptionAction,
@@ -610,11 +604,10 @@ describe.skipIf(!runPostgresProof)(
 
       try {
         await recordHostedStripeEvent({ event, prisma });
-        await expect(processRecordedHostedStripeWebhookEvent({
+        await expect(reconcileHostedStripeEventById({
           eventId,
           prisma,
-          timeoutMs: 5_000,
-        })).rejects.toBeDefined();
+        })).resolves.toMatchObject({ status: "failed" });
 
         expect(directStatus).toBe("canceled");
         expect(cancel).toHaveBeenCalledOnce();
@@ -645,11 +638,10 @@ describe.skipIf(!runPostgresProof)(
         )).resolves.toBe(true);
         await makeStripeReceiptImmediatelyRetryable({ eventId, prisma });
 
-        await expect(processRecordedHostedStripeWebhookEvent({
+        await expect(reconcileHostedStripeEventById({
           eventId,
           prisma,
-          timeoutMs: 5_000,
-        })).resolves.toEqual({ accepted: true, required: false });
+        })).resolves.toMatchObject({ status: "completed" });
 
         expect(cancel).toHaveBeenCalledOnce();
         expect(listInvoices).toHaveBeenCalledTimes(2);
@@ -758,11 +750,10 @@ describe.skipIf(!runPostgresProof)(
         );
         await recordHostedStripeEvent({ event, prisma });
 
-        await expect(processRecordedHostedStripeWebhookEvent({
+        await expect(reconcileHostedStripeEventById({
           eventId,
           prisma,
-          timeoutMs: 5_000,
-        })).resolves.toEqual({ accepted: true, required: false });
+        })).resolves.toMatchObject({ status: "completed" });
 
         expect(retrieve).toHaveBeenCalledOnce();
         expect(cancel).not.toHaveBeenCalled();
@@ -948,7 +939,7 @@ describe.skipIf(!runPostgresProof)(
         __murphHostedOnboardingStripe?: Stripe | null;
       };
 
-      workflowBoundary.start.mockClear();
+      requestBoundary.after.mockClear();
       vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://join.example.test");
       vi.stubEnv(
         "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
@@ -993,19 +984,13 @@ describe.skipIf(!runPostgresProof)(
           ok: true,
           type: "customer.subscription.updated",
         });
-        expect(workflowBoundary.start).toHaveBeenCalledTimes(1);
-        expect(workflowBoundary.start).toHaveBeenCalledWith({
-          eventId: stripeEventId,
-        });
+        expect(requestBoundary.after).toHaveBeenCalledTimes(1);
 
-        await expect(processRecordedHostedStripeWebhookEvent({
+
+        await expect(reconcileHostedStripeEventById({
           eventId: stripeEventId,
           prisma,
-          timeoutMs: 5_000,
-        })).resolves.toEqual({
-          accepted: true,
-          required: false,
-        });
+        })).resolves.toMatchObject({ status: "completed" });
 
         const billing = await readHostedMemberBillingSnapshot({
           memberId,
@@ -1068,10 +1053,8 @@ describe.skipIf(!runPostgresProof)(
           ok: true,
           type: "customer.subscription.updated",
         });
-        expect(workflowBoundary.start).toHaveBeenCalledTimes(2);
-        expect(workflowBoundary.start).toHaveBeenLastCalledWith({
-          eventId: stripeEventId,
-        });
+        expect(requestBoundary.after).toHaveBeenCalledTimes(1);
+
         await expect(prisma.hostedStripeEvent.count({
           where: { eventId: stripeEventId },
         })).resolves.toBe(1);
@@ -1123,7 +1106,7 @@ describe.skipIf(!runPostgresProof)(
       });
       const runtimeGlobals = readHostedStripeRuntimeGlobals();
 
-      workflowBoundary.start.mockClear();
+      requestBoundary.after.mockClear();
       runtimeRecheckBoundary.signal.mockReset();
       runtimeRecheckBoundary.signal.mockRejectedValue(
         new Error("Temporal fixture unavailable"),
@@ -1169,11 +1152,10 @@ describe.skipIf(!runPostgresProof)(
           stripe: stripeFixture.stripe,
           webhookSecret,
         });
-        await expect(processRecordedHostedStripeWebhookEvent({
+        await expect(reconcileHostedStripeEventById({
           eventId: stripeEventId,
           prisma,
-          timeoutMs: 5_000,
-        })).rejects.toBeDefined();
+        })).resolves.toMatchObject({ status: "failed" });
 
         await expect(readUsageResetProof({ memberId, periodStart, prisma }))
           .resolves.toEqual({
@@ -1211,11 +1193,10 @@ describe.skipIf(!runPostgresProof)(
           eventId: stripeEventId,
           prisma,
         });
-        await expect(processRecordedHostedStripeWebhookEvent({
+        await expect(reconcileHostedStripeEventById({
           eventId: stripeEventId,
           prisma,
-          timeoutMs: 5_000,
-        })).resolves.toEqual({ accepted: true, required: false });
+        })).resolves.toMatchObject({ status: "completed" });
 
         await expect(readUsageResetProof({ memberId, periodStart, prisma }))
           .resolves.toEqual({
@@ -1283,7 +1264,7 @@ describe.skipIf(!runPostgresProof)(
       });
       const runtimeGlobals = readHostedStripeRuntimeGlobals();
 
-      workflowBoundary.start.mockClear();
+      requestBoundary.after.mockClear();
       activationWakeBoundary.signal.mockClear();
       runtimeRecheckBoundary.signal.mockReset();
       runtimeRecheckBoundary.signal.mockRejectedValue(
@@ -1335,11 +1316,10 @@ describe.skipIf(!runPostgresProof)(
           stripe: stripeFixture.stripe,
           webhookSecret,
         });
-        await expect(processRecordedHostedStripeWebhookEvent({
+        await expect(reconcileHostedStripeEventById({
           eventId: stripeEventId,
           prisma,
-          timeoutMs: 5_000,
-        })).rejects.toBeDefined();
+        })).resolves.toMatchObject({ status: "failed" });
 
         await expect(readHostedMemberBillingSnapshot({ memberId, prisma }))
           .resolves.toMatchObject({
@@ -1390,11 +1370,10 @@ describe.skipIf(!runPostgresProof)(
           eventId: stripeEventId,
           prisma,
         });
-        await expect(processRecordedHostedStripeWebhookEvent({
+        await expect(reconcileHostedStripeEventById({
           eventId: stripeEventId,
           prisma,
-          timeoutMs: 5_000,
-        })).resolves.toEqual({ accepted: true, required: false });
+        })).resolves.toMatchObject({ status: "completed" });
 
         await expect(readUsageResetProof({
           memberId,
@@ -1427,7 +1406,7 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
-    it("resets an exhausted sponsored member and replays the Family tier-increase wake", async () => {
+    it.each([false, true])("replays the Family tier-increase wake with member removal during retry: %s", async (removeDuringRetry) => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
       const fixtureId = randomUUID();
       const ownerMemberId = `hbm_family_owner_${fixtureId}`;
@@ -1464,7 +1443,7 @@ describe.skipIf(!runPostgresProof)(
       });
       const runtimeGlobals = readHostedStripeRuntimeGlobals();
 
-      workflowBoundary.start.mockClear();
+      requestBoundary.after.mockClear();
       runtimeRecheckBoundary.signal.mockReset();
       runtimeRecheckBoundary.signal.mockRejectedValue(
         new Error("Temporal fixture unavailable"),
@@ -1553,11 +1532,10 @@ describe.skipIf(!runPostgresProof)(
           stripe: stripeFixture.stripe,
           webhookSecret,
         });
-        await expect(processRecordedHostedStripeWebhookEvent({
+        await expect(reconcileHostedStripeEventById({
           eventId: stripeEventId,
           prisma,
-          timeoutMs: 5_000,
-        })).rejects.toBeDefined();
+        })).resolves.toMatchObject({ status: "failed" });
 
         await expect(prisma.hostedAccountGroupMembership.findUniqueOrThrow({
           select: {
@@ -1601,6 +1579,35 @@ describe.skipIf(!runPostgresProof)(
           expect.objectContaining({ userId: memberId }),
         );
 
+        if (removeDuringRetry) {
+          // The first replay creates exact activation obligations; none is yet
+          // acknowledged when the owner removes a still-active Starter member.
+          activationWakeBoundary.signal.mockRejectedValue(new Error("Temporal fixture unavailable"));
+          await makeStripeReceiptImmediatelyRetryable({ eventId: stripeEventId, prisma });
+          await expect(reconcileHostedStripeEventById({ eventId: stripeEventId, prisma }))
+            .resolves.toMatchObject({ status: "failed" });
+          const retained = await readStripeReceiptProof({ eventId: stripeEventId, prisma });
+          expect(readStripeActivationMailboxItemIds(retained.activationResultJson)).toHaveLength(2);
+          await prisma.$transaction((tx) => removeHostedFamilyMemberTx({
+            groupId, memberId, ownerMemberId, tx,
+          }));
+          await expect(prisma.hostedMember.findUniqueOrThrow({
+            select: { billingStatus: true }, where: { id: memberId },
+          })).resolves.toEqual({ billingStatus: HostedBillingStatus.active });
+          await makeStripeReceiptImmediatelyRetryable({ eventId: stripeEventId, prisma });
+          await expect(reconcileHostedStripeEventById({ eventId: stripeEventId, prisma }))
+            .resolves.toMatchObject({ status: "failed" });
+          const stillPending = await readStripeReceiptProof({ eventId: stripeEventId, prisma });
+          expect(stillPending.activationResultJson).toEqual(retained.activationResultJson);
+          activationWakeBoundary.signal.mockClear();
+          activationWakeBoundary.signal.mockResolvedValue({ signalAccepted: true, workflowId: "hosted-user-runtime:fixture" });
+          await makeStripeReceiptImmediatelyRetryable({ eventId: stripeEventId, prisma });
+          await expect(reconcileHostedStripeEventById({ eventId: stripeEventId, prisma }))
+            .resolves.toMatchObject({ status: "completed" });
+          expect(activationWakeBoundary.signal).toHaveBeenCalledWith(expect.objectContaining({ expectedUserId: memberId }));
+          return;
+        }
+
         runtimeRecheckBoundary.signal.mockResolvedValue({
           signalAccepted: true,
           workflowId: `hosted-user-runtime:${memberId}`,
@@ -1609,11 +1616,10 @@ describe.skipIf(!runPostgresProof)(
           eventId: stripeEventId,
           prisma,
         });
-        await expect(processRecordedHostedStripeWebhookEvent({
+        await expect(reconcileHostedStripeEventById({
           eventId: stripeEventId,
           prisma,
-          timeoutMs: 5_000,
-        })).resolves.toEqual({ accepted: true, required: true });
+        })).resolves.toMatchObject({ status: "completed" });
 
         await expect(readUsageResetProof({ memberId, periodStart, prisma }))
           .resolves.toEqual({
@@ -1644,7 +1650,7 @@ describe.skipIf(!runPostgresProof)(
         expect(activationMailboxItemIds).toEqual(expect.arrayContaining(
           activationMailboxItems.map((item) => item.id),
         ));
-        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(2);
+        expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(1);
         expect(runtimeRecheckBoundary.signal).toHaveBeenLastCalledWith(
           expect.objectContaining({ userId: memberId }),
         );
@@ -1722,7 +1728,7 @@ describe.skipIf(!runPostgresProof)(
       });
       const runtimeGlobals = readHostedStripeRuntimeGlobals();
 
-      workflowBoundary.start.mockClear();
+      requestBoundary.after.mockClear();
       activationWakeBoundary.signal.mockReset();
       activationWakeBoundary.signal.mockRejectedValue(
         new Error("Temporal fixture unavailable"),
@@ -1802,11 +1808,10 @@ describe.skipIf(!runPostgresProof)(
           stripe: stripeFixture.stripe,
           webhookSecret,
         });
-        await expect(processRecordedHostedStripeWebhookEvent({
+        await expect(reconcileHostedStripeEventById({
           eventId: stripeEventId,
           prisma,
-          timeoutMs: 5_000,
-        })).resolves.toEqual({ accepted: false, required: true });
+        })).resolves.toMatchObject({ status: "failed" });
 
         await expect(readHostedMemberBillingSnapshot({
           memberId: ownerMemberId,
@@ -1873,8 +1878,8 @@ describe.skipIf(!runPostgresProof)(
         });
         expect(completedReceipt).toMatchObject({
           attemptCount: 1,
-          processedAt: expect.any(Date),
-          status: HostedStripeEventStatus.completed,
+          processedAt: null,
+          status: HostedStripeEventStatus.failed,
         });
         expect(readStripeActivationMailboxItemIds(
           completedReceipt.activationResultJson,
@@ -1893,11 +1898,10 @@ describe.skipIf(!runPostgresProof)(
           stripe: stripeFixture.stripe,
           webhookSecret,
         });
-        await expect(processRecordedHostedStripeWebhookEvent({
+        await expect(reconcileHostedStripeEventById({
           eventId: newerStripeEventId,
           prisma,
-          timeoutMs: 5_000,
-        })).resolves.toEqual({ accepted: true, required: false });
+        })).resolves.toMatchObject({ status: "completed" });
         await expect(readStripeReceiptProof({
           eventId: newerStripeEventId,
           prisma,
@@ -1915,15 +1919,15 @@ describe.skipIf(!runPostgresProof)(
         expect(runtimeRecheckBoundary.signal).not.toHaveBeenCalled();
         expect(activationWakeBoundary.signal).toHaveBeenCalledTimes(1);
 
+        await makeStripeReceiptImmediatelyRetryable({ eventId: stripeEventId, prisma });
         activationWakeBoundary.signal.mockResolvedValue({
           signalAccepted: true,
           workflowId: `hosted-user-runtime:${ownerMemberId}`,
         });
-        await expect(processRecordedHostedStripeWebhookEvent({
+        await expect(reconcileHostedStripeEventById({
           eventId: stripeEventId,
           prisma,
-          timeoutMs: 5_000,
-        })).resolves.toEqual({ accepted: true, required: true });
+        })).resolves.toMatchObject({ status: "completed" });
 
         await expect(readUsageResetProof({
           memberId: ownerMemberId,
@@ -1940,7 +1944,7 @@ describe.skipIf(!runPostgresProof)(
           eventId: stripeEventId,
           prisma,
         })).resolves.toMatchObject({
-          attemptCount: 1,
+          attemptCount: 2,
           processedAt: expect.any(Date),
           status: HostedStripeEventStatus.completed,
         });

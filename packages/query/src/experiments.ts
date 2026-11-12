@@ -2284,6 +2284,8 @@ function collectAnchoredMetricWindow(
   );
   const points = selectExperimentOutcomeSeries({
     ...(aggregation !== undefined ? { aggregation } : {}),
+    // Explicit anchors select their source; canonical unit checks still apply.
+    duplicatePolicy: "latest-observed",
     outcome,
     points: anchoredPoints,
   }).flatMap((point) =>
@@ -2302,11 +2304,13 @@ function collectAnchoredMetricWindow(
 
 function selectExperimentOutcomeSeries(input: {
   aggregation?: ExperimentOutcomeStatistic;
+  duplicatePolicy?: "latest-observed";
   outcome: ResolvedExperimentMetricOutcome;
   points: readonly MetricPoint[];
 }): MetricSeriesPoint[] {
   const rows = selectMetricSeries({
     ...(input.aggregation !== undefined ? { aggregation: input.aggregation } : {}),
+    duplicatePolicy: input.duplicatePolicy,
     metricKey: input.outcome.metricKey,
     points: input.points,
   }).rows;

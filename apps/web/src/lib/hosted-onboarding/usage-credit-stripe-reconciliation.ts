@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { coerceStripeObjectId } from "./billing";
@@ -177,7 +177,7 @@ export async function reconcileHostedUsageCreditStripeEvent(input: {
         }
         if (
           purchase.reconciliationVersion !== prepared.reconciliationVersion ||
-          readStripeReconciliationFirstMemberId(input.event, purchase) !== firstMemberId
+          await readStripeReconciliationFirstMemberId(input.event, purchase, tx) !== firstMemberId
         ) {
           throw buildHostedUsageCreditStripeRetryableError(
             new Error(
@@ -232,16 +232,17 @@ export async function reconcileHostedUsageCreditStripeEvent(input: {
 
 // Choose before the transaction wrapper takes its first member lock. A nested
 // reservation helper cannot reorder a beneficiary lock already held by Stripe.
-function readStripeReconciliationFirstMemberId(
+async function readStripeReconciliationFirstMemberId(
   event: Stripe.Event,
   purchase: HostedUsageCreditPurchaseForReconciliation,
-): string {
+  prisma: PrismaClient | Prisma.TransactionClient,
+): Promise<string> {
   if (
     event.type === "checkout.session.expired" &&
     purchase.payerMemberId &&
-    readHostedUsageCreditPurchaseMemberLockOrder({
+    await readHostedUsageCreditPurchaseMemberLockOrder({
       beneficiaryMemberId: purchase.beneficiaryMemberId,
-      checkoutSuccessUrl: purchase.checkoutSuccessUrl,
+      prisma,
       payerMemberId: purchase.payerMemberId,
     }) === "payer_first"
   ) {
@@ -293,7 +294,7 @@ async function prepareHostedUsageCreditStripeReconciliation(input: {
     return {
       candidate,
       kind: "prepared",
-      firstMemberId: readStripeReconciliationFirstMemberId(input.event, purchase),
+      firstMemberId: await readStripeReconciliationFirstMemberId(input.event, purchase, input.prisma),
       prepared,
     };
   }

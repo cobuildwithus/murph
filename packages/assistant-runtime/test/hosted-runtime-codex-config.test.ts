@@ -1836,10 +1836,10 @@ async function runHostedCodexAutocompactionE2e(
       true,
       "Expected real Codex app-server to issue a compaction Responses API request.",
     );
-    assert.equal(firstResult.stdout.includes('"method":"rawResponse'), false);
-    assert.equal(secondResult.stdout.includes('"method":"rawResponse'), false);
-    assert.equal(secondResult.jsonEvents.some((event) =>
-      String(parseJsonObject(JSON.stringify(event))?.method).startsWith("rawResponse")), false);
+    for (const result of [firstResult, secondResult]) {
+      assert.equal(result.jsonEvents.some((event) =>
+        String(parseJsonObject(JSON.stringify(event))?.method).startsWith("rawResponse")), false);
+    }
     const firstCompactionRequestIndex = Math.min(...compactionRequestIndexes);
     const modelRequestIndexes = requestUrls
       .map((requestUrl, index) => ({ index: index + 1, requestUrl }))
@@ -1919,7 +1919,8 @@ async function runHostedCodexAutocompactionE2e(
       inputTokens: 300, cachedInputTokens: 0, cacheWriteInputTokens: 0,
       outputTokens: 80, reasoningOutputTokens: 0, totalTokens: 380,
     }]);
-    assert.equal(afterIdle.stdout.includes('"method":"rawResponse'), false);
+    assert.equal(afterIdle.jsonEvents.some((event) =>
+      String(parseJsonObject(JSON.stringify(event))?.method).startsWith("rawResponse")), false);
     // Cold resume has no raw-event opt-in in pinned Codex. Preserve the
     // explicitly estimated path instead of treating missing evidence as zero.
     await stopWarmCodexAppServer("native-compaction-cold-resume");

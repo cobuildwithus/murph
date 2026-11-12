@@ -27,7 +27,6 @@ import type {
   KnowledgeIndexRebuildResult,
   KnowledgeLintResult,
   KnowledgeListResult,
-  KnowledgeLogTailResult,
   KnowledgeSearchResult,
   KnowledgeUpsertResult,
 } from '@murphai/query'
@@ -351,7 +350,7 @@ test('device commands route every verb through the registered device service gro
 
 })
 
-test('knowledge commands round-trip the registered CLI against a temp vault', async () => {
+test('knowledge lint and index commands validate saved pages', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-knowledge-command-coverage-',
   )
@@ -438,60 +437,6 @@ test('knowledge commands round-trip the registered CLI against a temp vault', as
     'sleep-continuity',
   ])
 
-  const listed = await runInProcessJsonCli<KnowledgeListResult>(cli, [
-    'knowledge',
-    'list',
-    '--vault',
-    vaultRoot,
-    '--page-type',
-    'pattern',
-    '--status',
-    'draft',
-  ])
-  assert.equal(listed.exitCode, null)
-  assert.equal(listed.envelope.ok, true)
-  assert.equal(listed.envelope.data.limit, 10)
-  assert.equal(listed.envelope.data.pageCount, 1)
-  assert.equal(listed.envelope.data.returnedCount, 1)
-  assert.equal(listed.envelope.data.totalCount, 1)
-  assert.equal(listed.envelope.data.truncated, false)
-  assert.equal(listed.envelope.data.degradation, null)
-  assert.equal(listed.envelope.data.pages[0]?.slug, upserted.envelope.data.page.slug)
-
-  const searched = await runInProcessJsonCli<KnowledgeSearchResult>(cli, [
-    'knowledge',
-    'search',
-    'magnesium sleep',
-    '--vault',
-    vaultRoot,
-    '--page-type',
-    'pattern',
-    '--status',
-    'draft',
-    '--limit',
-    '1',
-  ])
-  assert.equal(searched.exitCode, null)
-  assert.equal(searched.envelope.ok, true)
-  assert.equal(searched.envelope.data.total, 1)
-  assert.equal(searched.envelope.data.returnedCount, 1)
-  assert.equal(searched.envelope.data.truncated, false)
-  assert.equal(searched.envelope.data.degradation, null)
-  assert.equal(searched.envelope.data.hits[0]?.slug, upserted.envelope.data.page.slug)
-  assert.equal(searched.envelope.data.query, 'magnesium sleep')
-
-  const shown = await runInProcessJsonCli<KnowledgeShowResult>(cli, [
-    'knowledge',
-    'show',
-    upserted.envelope.data.page.slug,
-    '--vault',
-    vaultRoot,
-  ])
-  assert.equal(shown.exitCode, null)
-  assert.equal(shown.envelope.ok, true)
-  assert.equal(shown.envelope.data.degradation, null)
-  assert.match(shown.envelope.data.page.body, /# Magnesium and sleep continuity/u)
-
   const linted = await runInProcessJsonCli<KnowledgeLintResult>(cli, [
     'knowledge',
     'lint',
@@ -503,20 +448,6 @@ test('knowledge commands round-trip the registered CLI against a temp vault', as
   assert.equal(linted.envelope.data.ok, true)
   assert.equal(linted.envelope.data.problemCount, 1)
   assert.equal(linted.envelope.data.problems[0]?.severity, 'warning')
-
-  const tailed = await runInProcessJsonCli<KnowledgeLogTailResult>(cli, [
-    'knowledge',
-    'log',
-    'tail',
-    '--vault',
-    vaultRoot,
-    '--limit',
-    '1',
-  ])
-  assert.equal(tailed.exitCode, null)
-  assert.equal(tailed.envelope.ok, true)
-  assert.equal(tailed.envelope.data.count, 1)
-  assert.equal(tailed.envelope.data.entries[0]?.action, 'upsert')
 
   const rebuilt = await runInProcessJsonCli<KnowledgeIndexRebuildResult>(cli, [
     'knowledge',

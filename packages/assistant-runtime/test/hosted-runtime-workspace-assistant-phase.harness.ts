@@ -430,32 +430,7 @@ async function setPendingAutomationDeliveryIntentForTest(input: {
   await writeFile(runtimeStatePath, `${JSON.stringify(runtimeStore, null, 2)}\n`);
 }
 
-function extractTopLevelFunctionBody(source: string, functionName: string): string {
-  const declarationIndex = source.indexOf(`function ${functionName}`);
-  if (declarationIndex < 0) {
-    throw new Error(`Missing function ${functionName}.`);
-  }
-  const signatureEnd = source.indexOf("): Promise", declarationIndex);
-  const bodyStart = source.indexOf("{", signatureEnd >= 0 ? signatureEnd : declarationIndex);
-  if (bodyStart < 0) {
-    throw new Error(`Missing function body for ${functionName}.`);
-  }
 
-  let depth = 0;
-  for (let index = bodyStart; index < source.length; index += 1) {
-    const character = source[index];
-    if (character === "{") {
-      depth += 1;
-    } else if (character === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return source.slice(bodyStart + 1, index);
-      }
-    }
-  }
-
-  throw new Error(`Unclosed function body for ${functionName}.`);
-}
 
 function createNoDirtyRuntimeDeviceSyncPortMethods(): Pick<
   RuntimeDeviceSyncPort,
@@ -2126,7 +2101,6 @@ export {
   createTerminalFailureOutboxIntent,
   createVaultShareProjectionSystemMailboxItem,
   expectAssistantLaneCallWithoutDeviceSyncOptions,
-  extractTopLevelFunctionBody,
   isUnknownRecord,
   loadHostedSystemMailboxRealImplementation,
   mocks,

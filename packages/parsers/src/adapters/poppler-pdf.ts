@@ -65,10 +65,8 @@ export function createPopplerPdfProvider(
 
   return {
     id: "poppler.pdf",
-    locality: "local",
-    openness: "open_source",
-    priority: 950,
-    runtime: "cli",
+
+
     async discover() {
       if (resolvedToolState) {
         return buildResolvedAvailability(resolvedToolState);

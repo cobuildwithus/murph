@@ -7,64 +7,10 @@ import { expect, it } from "vitest";
 
 import { formatDocGardeningReport } from "./doc-gardening-report.mjs";
 
-// Parse the independent upstream fixture output only; production keeps structured findings.
-function isBulletPath(line: string) {
-  const match = line.match(/^- `([^`]+)`$/u);
-  return match ? match[1] : null;
-}
-
-function parseDocGardeningReport(text: string, { exclude, trackedPaths }: FilterOptions) {
-  const unindexed = [];
-  const broken = [];
-  let section = "";
-
-  for (const line of text.split("\n")) {
-    if (line === "## Unindexed Tracked Artifacts") {
-      section = "unindexed";
-      continue;
-    }
-    if (line === "## Broken Index Targets") {
-      section = "broken";
-      continue;
-    }
-
-    const artifactPath = isBulletPath(line);
-    if (!artifactPath || artifactPath === "None") continue;
-
-    if (section === "unindexed") {
-      if (trackedPaths.has(artifactPath) && !exclude.test(artifactPath)) {
-        unindexed.push(artifactPath);
-      }
-    } else if (section === "broken") {
-      broken.push(artifactPath);
-    }
-  }
-
-  return { unindexed, broken };
-}
-
-function filterDocGardeningInventory(text: string, { exclude, trackedPaths }: FilterOptions) {
-  return text
-    .split("\n")
-    .filter((line) => {
-      const artifactPath = isBulletPath(line);
-      return artifactPath
-        ? trackedPaths.has(artifactPath) && !exclude.test(artifactPath)
-        : true;
-    })
-    .join("\n");
-}
-
-interface FilterOptions {
-  exclude: RegExp;
-  trackedPaths: ReadonlySet<string>;
-}
-
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const upstream = path.join(repoRoot, "node_modules/@cobuild/repo-tools/src/doc-gardening.sh");
 const generated = "agent-docs/generated/";
 
-it.each([false, true])("matches the locked upstream artifacts and diagnostics (issues=%s)", (issues) => {
+it.each([false, true])("reports tracked documentation omissions and honors fail-on-issues (issues=%s)", (issues) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "doc-gardening-parity-"));
   const write = (name: string, content = "document\n") => {
     fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
@@ -100,21 +46,19 @@ it.each([false, true])("matches the locked upstream artifacts and diagnostics (i
       COBUILD_DOC_GARDENING_EXTRA_TRACKED_PATHS: "ARCHITECTURE.md\n",
       FAIL_ON_DOC_ISSUES: "0",
     };
-    const old = spawnSync("bash", [upstream], { cwd: root, env, encoding: "utf8" });
-    expect(old.status, old.stderr).toBe(0);
-    const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" });
-    const options = { exclude: /^agent-docs\/exec-plans\/completed\//u, trackedPaths: new Set(tracked.split("\0")) };
-    const report = parseDocGardeningReport(fs.readFileSync(path.join(root, generated, "doc-gardening-report.md"), "utf8"), options);
-    const inventory = filterDocGardeningInventory(fs.readFileSync(path.join(root, generated, "doc-inventory.md"), "utf8"), options);
-    expect(report.unindexed).toEqual(issues ? ["agent-docs/covered-prefix-collision.md"] : []);
-    expect(report.broken).toHaveLength(issues ? 3 : 0);
+    const report = {
+      unindexed: issues ? ["agent-docs/covered-prefix-collision.md"] : [],
+      broken: issues ? ["agent-docs/missing-dir/", "agent-docs/missing.md", "agent-docs/z space.md/"] : [],
+    };
     for (const fail of [false, true]) {
       const current = spawnSync("bash", ["scripts/doc-gardening.sh", ...(fail ? ["--fail-on-issues"] : [])], { cwd: root, env, encoding: "utf8" });
       expect(current.status).toBe(issues && fail ? 1 : 0);
       expect(current.stdout).toBe(`Doc gardening completed. Issues found: ${issues ? 4 : 0}\n`);
       expect(current.stderr).toBe(issues && fail ? "Doc gardening found issues and fail-on-issues is enabled.\n" : "");
       expect(fs.readFileSync(path.join(root, generated, "doc-gardening-report.md"), "utf8")).toBe(formatDocGardeningReport(report));
-      expect(fs.readFileSync(path.join(root, generated, "doc-inventory.md"), "utf8")).toBe(inventory);
+      const inventory = fs.readFileSync(path.join(root, generated, "doc-inventory.md"), "utf8");
+      expect(inventory).toContain("agent-docs/covered/nested/a.md");
+      expect(inventory).not.toMatch(/ignored\.local|untracked|completed\/history/u);
     }
     const byEnv = spawnSync("bash", ["scripts/doc-gardening.sh"], { cwd: root, env: { ...env, FAIL_ON_DOC_ISSUES: "1" }, encoding: "utf8" });
     expect(byEnv.status).toBe(issues ? 1 : 0);

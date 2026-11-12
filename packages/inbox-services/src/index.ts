@@ -4,7 +4,6 @@
 export { createIntegratedInboxServices } from './inbox-app/service.js'
 
 export type {
-  CanonicalAttachmentPromotionResult,
   CanonicalPromotionLookupSpec,
   CanonicalPromotionLookupTarget,
   CanonicalPromotionManifest,

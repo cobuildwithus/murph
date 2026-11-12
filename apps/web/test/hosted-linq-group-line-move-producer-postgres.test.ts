@@ -15,7 +15,8 @@ import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-cryp
 import { provisionHostedCryptoDomainRootsForUser } from "@/src/lib/hosted-crypto/domain-root-store";
 import { createHostedExternalThreadIdentityLookupKey, createHostedExternalThreadLookupKey, createHostedLinqChatLookupKey, createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { encryptHostedLinqLinePhoneNumber } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
-import { startHostedLinqGroupLineMove, operateHostedLinqGroupLineMove } from "@/src/lib/hosted-ops/linq-group-line-move";
+import { releaseHostedLinqRemovedLineRoute, startHostedLinqGroupLineMove, operateHostedLinqGroupLineMove } from "@/src/lib/hosted-ops/linq-group-line-move";
+import { GROUP_MOVE_ADD_SETTLE_MS } from "@/src/lib/hosted-ops/linq-group-line-move-state";
 import { readHostedLinqGroupLineMoveOverview } from "@/src/lib/hosted-ops/linq-group-line-move-overview";
 import { claimHostedLinqDeliveryProviderDispatchTx, recordHostedLinqRuntimeDeliveryOutcomeTx,
   recordHostedLinqRuntimeProviderDispatchFenceTx } from "@/src/lib/hosted-onboarding/linq-delivery-store";
@@ -24,9 +25,9 @@ import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/w
 import { buildHostedThreadDeliveryRoute, sealHostedThreadDeliveryRoute } from "@/src/lib/hosted-routing/thread-delivery-route";
 import { localRosterCrypto, rosterPhoneIdentity, rosterRoute, syntheticPhone } from "./support/roster-postgres";
 
-const provider = vi.hoisted(() => ({ retrieve: vi.fn(), add: vi.fn(), remove: vi.fn(), leave: vi.fn(), send: vi.fn(), signal: vi.fn() }));
+const provider = vi.hoisted(() => ({ retrieve: vi.fn(), list: vi.fn(), add: vi.fn(), remove: vi.fn(), leave: vi.fn(), send: vi.fn(), signal: vi.fn() }));
 vi.mock("@linqapp/sdk", async original => ({ ...await original<typeof import("@linqapp/sdk")>(),
-  default: class { chats = { retrieve: provider.retrieve, participants: { add: provider.add, remove: provider.remove },
+  default: class { chats = { retrieve: provider.retrieve, listChats: provider.list, participants: { add: provider.add, remove: provider.remove },
     leaveChat: provider.leave, messages: { send: provider.send } }; },
 }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: provider.signal }));
@@ -52,6 +53,7 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
       { handle: person, is_me: false, status: "active" },
       ...(humans > 1 ? [{ handle: "synthetic-person@example.test", is_me: false, status: "active" }] : []),
     ] }));
+    provider.list.mockResolvedValue({ chats: [], next_cursor: null });
     provider.add.mockImplementation(async () => { targetPresent = true; return { status: "queued" }; });
     provider.remove.mockImplementation(async () => { targetPresent = false; return { status: "queued" }; });
     provider.leave.mockImplementation(async () => { sourcePresent = false; return { status: "queued" }; });
@@ -81,7 +83,7 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     vi.useRealTimers(); vi.unstubAllEnvs();
   });
   const start = () => startHostedLinqGroupLineMove({ containerRef, targetLineLookupKey: targetKey, prisma: db });
-  const operate = (moveId: string, operation: "resume" | "cancel" | "retry_leave" = "resume") => operateHostedLinqGroupLineMove({ moveId, operation, prisma: db });
+  const operate = (moveId: string, operation: "resume" | "cancel" | "retry_leave" | "adopt" = "resume") => operateHostedLinqGroupLineMove({ moveId, operation, prisma: db });
   const row = (id: string) => db.hostedLinqGroupLineMove.findUniqueOrThrow({ where: { id } });
   async function admissionCounts() {
     const containers = await db.hostedThreadContainer.findMany({ where: { ownerMemberId: { in: [owner, sender] } }, select: { memberId: true } });
@@ -127,6 +129,8 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
   }
   it.each([false, true])("starts, holds, adopts and leaves with missing account projection=%s", async missingProjection => {
     if (missingProjection) await db.hostedThreadRoute.updateMany({ where: { containerMemberId: room }, data: { accountLookupKey: null } });
+    const overview = await readHostedLinqGroupLineMoveOverview({ sourceLineLookupKey: sourceKey, prisma: db });
+    expect(overview.candidates.some(candidate => candidate.containerRef === containerRef)).toBe(true);
     const result = await start(); expect(result.status).toBe("reserved"); expect(result.addConfirmedAt).not.toBeNull();
     expect((await db.hostedThreadRoute.findFirstOrThrow({ where: { containerMemberId: room } })).accountLookupKey).toBe(sourceKey);
     expect(result.adoptionDeadlineAt).toBeDefined();
@@ -140,6 +144,49 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect((await row(result.moveId)).status).toBe("left"); expect(provider.leave).toHaveBeenCalledOnce();
     expect((await operate(result.moveId, "retry_leave")).status).toBe("left"); expect(provider.leave).toHaveBeenCalledOnce();
     expect(provider.add).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
+  });
+  async function discoverableChat(id = targetChat, createdAt = new Date().toISOString()) {
+    return { ...await provider.retrieve(id), id, created_at: createdAt };
+  }
+  it("discovers and adopts the new line without any inbound or outbound message", async () => {
+    const result = await start();
+    provider.list.mockResolvedValue({ chats: [await discoverableChat()], next_cursor: null });
+    expect(await operate(result.moveId, "adopt")).toMatchObject({ status: "left", code: null });
+    expect(await operate(result.moveId, "adopt")).toMatchObject({ status: "left" });
+    expect(provider.list).toHaveBeenCalledWith({ from: target, to: source, limit: 100 });
+    expect(provider.add).toHaveBeenCalledOnce(); expect(provider.leave).toHaveBeenCalledOnce();
+    expect(provider.send).not.toHaveBeenCalled();
+    expect(await db.hostedMailboxItem.count({ where: { userId: room, kind: "conversation.message" } })).toBe(0);
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room, accountLookupKey: targetKey } })).toBe(1);
+  });
+  it.each(["missing", "old", "future", "ambiguous", "truncated", "wrong-audience", "wrong-self", "stale-roster", "cancel-race"])("refuses unsafe discovery: %s", async scenario => {
+    const result = await start();
+    const candidate = await discoverableChat();
+    let chats = [candidate]; let next_cursor: string | null = null;
+    if (scenario === "missing") chats = [];
+    if (scenario === "old") candidate.created_at = new Date(0).toISOString();
+    if (scenario === "future") candidate.created_at = new Date(Date.now() + 60_000).toISOString();
+    if (scenario === "ambiguous") chats.push({ ...candidate, id: randomUUID() });
+    if (scenario === "truncated") next_cursor = "next-page";
+    if (scenario === "wrong-audience") candidate.handles.push({ handle: "outside@example.test", is_me: false, status: "active" });
+    provider.list.mockImplementation(async () => {
+      if (scenario === "cancel-race") await db.hostedLinqGroupLineMove.update({ where: { id: result.moveId }, data: { adoptionDeadlineAt: new Date(0) } });
+      if (scenario === "wrong-self" || scenario === "stale-roster") {
+        const retrieve = provider.retrieve.getMockImplementation()!;
+        provider.retrieve.mockImplementation(async (id: string) => {
+          const chat = await retrieve(id);
+          if (id === targetChat) return { ...chat, handles: scenario === "wrong-self"
+            ? chat.handles.map((h: { is_me: boolean }) => ({ ...h, is_me: false }))
+            : [...chat.handles, { handle: "outside@example.test", is_me: false, status: "active" }] };
+          return chat;
+        });
+      }
+      return { chats, next_cursor };
+    });
+    const outcome = await operate(result.moveId, "adopt");
+    expect(outcome.status).toBe("reserved"); expect(outcome.code).not.toBeNull();
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room, accountLookupKey: sourceKey } })).toBe(1);
+    expect(provider.leave).not.toHaveBeenCalled(); expect(provider.remove).not.toHaveBeenCalled(); expect(provider.send).not.toHaveBeenCalled();
   });
   it("adopts a person's photo as the first event and preserves it for normal redelivery", async () => {
     const result = await start(), eventId = randomUUID();
@@ -305,13 +352,76 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect(provider.add).toHaveBeenCalledTimes(step === "reserved" ? 1 : 0);
     expect((await row(id)).status).toBe("reserved");
   });
-  it("disarms an interrupted unknown add without repeating or falsely settling it", async () => {
+  it("reconciles an interrupted add without repeating it and still permits explicit cancellation", async () => {
     const id = await reserve("add_started"); targetPresent = false;
-    expect(await operate(id)).toMatchObject({ status: "reserved", code: "add_unconfirmed", adoptionExpired: true });
-    expect(await operate(id, "cancel")).toMatchObject({ status: "reserved", code: "add_unconfirmed" });
+    expect(await operate(id)).toMatchObject({ status: "reserved", code: "add_pending", addConfirmedAt: null, adoptionExpired: false });
+    expect(await operate(id, "cancel")).toMatchObject({ status: "reserved", code: "add_pending", adoptionExpired: true });
     targetPresent = true;
     expect(await operate(id, "cancel")).toMatchObject({ status: "cancelled" });
     expect(provider.add).not.toHaveBeenCalled();
+  });
+  it("releases a never-arriving add after the settle window so the target line can move the next group", async () => {
+    const id = await reserve("add_started"); targetPresent = false;
+    expect(await operate(id, "cancel")).toMatchObject({ status: "reserved", code: "add_outcome_unknown", adoptionExpired: true });
+    const backdate = (ms: number) => db.hostedLinqGroupLineMove.update({ where: { id }, data: { addStartedAt: new Date(Date.now() - ms) } });
+    await backdate(GROUP_MOVE_ADD_SETTLE_MS - 1_000);
+    expect(await operate(id, "cancel")).toMatchObject({ status: "reserved", code: "add_outcome_unknown" });
+    await backdate(GROUP_MOVE_ADD_SETTLE_MS + 1);
+    expect(await operate(id, "cancel")).toMatchObject({ status: "cancelled", code: "add_abandoned", holdActive: false });
+    expect(await operate(id, "cancel")).toMatchObject({ status: "cancelled", code: "add_abandoned" });
+    expect(provider.add).not.toHaveBeenCalled(); expect(provider.remove).not.toHaveBeenCalled();
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room, accountLookupKey: sourceKey } })).toBe(1);
+    const next = await start();
+    expect(next).toMatchObject({ status: "reserved", code: null }); expect(next.addConfirmedAt).not.toBeNull();
+    expect(provider.add).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
+  });
+  it("releases a stale target copy whose line was removed, then moves the group onto that same chat", async () => {
+    // An earlier test bound the target line's copy of this group to a separate container, then removed the line.
+    const stray = randomUUID(); extraRooms.push(stray);
+    await db.hostedMember.create({ data: { id: stray, billingStatus: "active" } });
+    await provisionHostedCryptoDomainRootsForUser({ userId: stray, prisma: db });
+    await db.hostedThreadContainer.create({ data: { memberId: stray, ownerMemberId: owner } });
+    const strayRef = createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: targetChat })!;
+    await db.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: stray, accountLookupKey: targetKey,
+      threadIdentityLookupKey: strayRef,
+      threadLookupKey: createHostedExternalThreadLookupKey({ channel: "linq", threadId: targetChat, accountLookupKey: targetKey })!,
+      deliveryRouteEncrypted: await sealHostedThreadDeliveryRoute({ containerMemberId: stray, prisma: db,
+        route: buildHostedThreadDeliveryRoute({ channel: "linq", threadId: targetChat, accountLookupKey: targetKey }) }) } });
+    const read = provider.retrieve.getMockImplementation()!;
+    provider.retrieve.mockImplementation(async (id: string) => {
+      const chat = await read(id);
+      return id === targetChat && !targetPresent ? { ...chat, handles: [...chat.handles, { handle: target, is_me: true, status: "removed" }] } : chat;
+    });
+    const release = () => releaseHostedLinqRemovedLineRoute({ containerRef: strayRef, prisma: db });
+    // While the line is still active in that chat, its route is live and stays.
+    targetPresent = true;
+    await expect(release()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_LINE_STILL_ACTIVE" });
+    await expect(releaseHostedLinqRemovedLineRoute({ containerRef, prisma: db })).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_LINE_STILL_ACTIVE" });
+    targetPresent = false;
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: stray } })).toBe(1);
+    expect(await release()).toEqual({ containerHint: stray.slice(-8), released: true });
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: stray } })).toBe(0);
+    await expect(release()).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_ROUTE_REQUIRED" });
+    // Re-adding the line now reaches the same chat unbound, so the real group's move adopts it.
+    const result = await start(); expect(result).toMatchObject({ status: "reserved", code: null });
+    await webhook(); expect((await row(result.moveId)).status).toBe("adopted");
+    for (const callback of callbacks) await callback();
+    expect((await row(result.moveId)).status).toBe("left");
+    const routes = await db.hostedThreadRoute.findMany({ where: { containerMemberId: { in: [room, stray] } } });
+    expect(routes).toHaveLength(1);
+    expect(routes[0]).toMatchObject({ containerMemberId: room, accountLookupKey: targetKey, threadIdentityLookupKey: strayRef });
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+  it("keeps a removed-line route while a move owns its container", async () => {
+    const id = await reserve("add_confirmed"); targetPresent = false; sourcePresent = true;
+    const read = provider.retrieve.getMockImplementation()!;
+    provider.retrieve.mockImplementation(async (chatId: string) => {
+      const chat = await read(chatId);
+      return chatId === sourceChat ? { ...chat, handles: chat.handles.map((handle: { handle: string }) => handle.handle === source ? { ...handle, status: "left" } : handle) } : chat;
+    });
+    await expect(releaseHostedLinqRemovedLineRoute({ containerRef, prisma: db })).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_MOVE_ROUTE_CHANGED" });
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room } })).toBe(1);
+    expect((await row(id)).status).toBe("reserved");
   });
   it("reports a rejected sibling add and releases the reservation after an absence read", async () => {
     provider.add.mockRejectedValue(new APIError(403, {}, "synthetic rejection", new Headers()));
@@ -376,10 +486,31 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect(await start()).toMatchObject({ status: "reserved", code: "add_unconfirmed", adoptionExpired: true });
     expect(provider.add).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
   });
-  it("does not falsely settle a queued add whose complete confirmation read is absent", async () => {
-    provider.add.mockResolvedValue({ status: "queued" });
-    expect(await start()).toMatchObject({ status: "reserved", code: "add_unconfirmed", adoptionExpired: true });
-    expect(provider.add).toHaveBeenCalledOnce(); expect(provider.send).not.toHaveBeenCalled();
+  it("waits for a queued add across resumes, then adopts without repeating or undoing the add", async () => {
+    provider.add.mockResolvedValue({ status: "accepted", message: "Participant addition queued" });
+    const result = await start();
+    expect(result).toMatchObject({ status: "reserved", code: "add_pending", addConfirmedAt: null, adoptionExpired: false });
+    expect(await operate(result.moveId)).toMatchObject({ code: "add_pending", addConfirmedAt: null, adoptionDeadlineAt: result.adoptionDeadlineAt });
+    expect(provider.remove).not.toHaveBeenCalled();
+    targetPresent = true;
+    expect(await operate(result.moveId)).toMatchObject({ status: "reserved", code: null, adoptionExpired: false });
+    expect((await row(result.moveId)).addConfirmedAt).not.toBeNull();
+    await webhook();
+    for (const callback of callbacks) await callback();
+    expect((await row(result.moveId)).status).toBe("left");
+    expect(await db.hostedThreadRoute.count({ where: { containerMemberId: room, accountLookupKey: targetKey } })).toBe(1);
+    expect(provider.add).toHaveBeenCalledOnce(); expect(provider.remove).not.toHaveBeenCalled();
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+  it("does not renew a queued add after its adoption deadline and cleans up its late arrival", async () => {
+    provider.add.mockResolvedValue({ status: "accepted" });
+    const result = await start();
+    await db.hostedLinqGroupLineMove.update({ where: { id: result.moveId }, data: { adoptionDeadlineAt: new Date(0) } });
+    targetPresent = true;
+    expect(await operate(result.moveId)).toMatchObject({ code: "adoption_deadline_elapsed", adoptionExpired: true });
+    expect((await row(result.moveId)).addConfirmedAt).toBeNull();
+    expect(await operate(result.moveId, "cancel")).toMatchObject({ status: "cancelled" });
+    expect(provider.add).toHaveBeenCalledOnce(); expect(provider.remove).toHaveBeenCalledOnce();
   });
   it.each(["unavailable", "incomplete"])("disarms adoption when the add confirmation roster is %s", async failure => {
     const read = provider.retrieve.getMockImplementation()!;
@@ -679,5 +810,25 @@ describe.skipIf(!enabled)("group move producer on migrated PostgreSQL with a fak
     expect(overview.moves[0]?.moveId).toBe(result.moveId);
     expect(overview.candidates).toEqual([{ containerRef, containerHint: room.slice(-8), lastActivityAt: null, hasLiveGame: false }]);
     for (const raw of [room, owner, sender, sourceChat, targetChat, source, target, person]) expect(JSON.stringify(overview)).not.toContain(raw);
+  });
+  it("reports missing legacy delivery routes without hiding usable candidates", async () => {
+    const missingRoom = randomUUID(); extraRooms.push(missingRoom);
+    await db.hostedMember.create({ data: { id: missingRoom, billingStatus: "active" } });
+    await db.hostedThreadContainer.create({ data: { memberId: missingRoom, ownerMemberId: owner } });
+    const missingChat = randomUUID();
+    const missingRef = createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: missingChat })!;
+    await db.hostedThreadRoute.create({ data: { channel: "linq", containerMemberId: missingRoom,
+      threadIdentityLookupKey: missingRef,
+      threadLookupKey: createHostedExternalThreadLookupKey({ channel: "linq", threadId: missingChat, accountLookupKey: sourceKey })!,
+      accountLookupKey: null, deliveryRouteEncrypted: null } });
+    const overview = await readHostedLinqGroupLineMoveOverview({ sourceLineLookupKey: sourceKey, prisma: db });
+    expect(overview.candidates.map(candidate => candidate.containerRef)).toContain(containerRef);
+    expect(overview.unresolvedCandidates).toEqual([{ containerRef: missingRef,
+      containerHint: missingRoom.slice(-8), code: "delivery_route_missing" }]);
+    expect(provider.retrieve).not.toHaveBeenCalled();
+    expect(provider.add).not.toHaveBeenCalled();
+    expect((await db.hostedThreadRoute.findUniqueOrThrow({ where: {
+      channel_threadIdentityLookupKey: { channel: "linq", threadIdentityLookupKey: missingRef },
+    } })).deliveryRouteEncrypted).toBeNull();
   });
 });

@@ -593,40 +593,6 @@ describe('assistant cron store filesystem edges', () => {
     })
   })
 
-  it('quarantines corrupted cron stores and records a runtime event', async () => {
-    const paths = await createAssistantPaths('assistant-cron-schedule-store-corrupt-')
-
-    await mkdir(path.dirname(paths.cronJobsPath), {
-      recursive: true,
-    })
-    await writeFile(paths.cronJobsPath, '{not-valid-json', 'utf8')
-
-    await expect(readAssistantCronStore(paths)).resolves.toEqual({
-      jobs: [],
-      version: 1,
-    })
-    await expect(readFile(paths.cronJobsPath, 'utf8')).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-
-    const quarantines = await listAssistantQuarantineEntriesAtPaths(paths, {
-      artifactKind: 'cron-store',
-    })
-    expect(quarantines).toHaveLength(1)
-    expect(quarantines[0]).toMatchObject({
-      artifactKind: 'cron-store',
-      originalPath: paths.cronJobsPath,
-    })
-
-    const runtimeEvents = await listAssistantRuntimeEventsAtPath(paths.runtimeEventsPath)
-    expect(runtimeEvents[0]).toMatchObject({
-      entityId: 'jobs.json',
-      entityType: 'cron-store',
-      kind: 'cron.store.quarantined',
-      level: 'warn',
-    })
-  })
-
   it('appends and reads cron runs in reverse started-at order', async () => {
     const paths = await createAssistantPaths('assistant-cron-schedule-store-runs-append-')
     const older = createCronRun({

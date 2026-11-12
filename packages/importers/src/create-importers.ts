@@ -1,6 +1,5 @@
 import * as coreRuntime from "@murphai/core";
 
-import type { SamplePresetRegistry } from "./preset-registry.ts";
 import { importAssessmentResponse } from "./assessment/import-assessment-response.ts";
 import { importCsvSamples, profileCsvSampleFile } from "./csv-sample-importer.ts";
 import { importDocument } from "./document-importer.ts";
@@ -11,27 +10,22 @@ import {
   resolveDeviceProviderSnapshotDefaultTimeZone,
 } from "./device-providers/index.ts";
 import { addMeal } from "./meal-importer.ts";
-import { createSamplePresetRegistry } from "./preset-registry.ts";
 
 import type { DeviceProviderRegistry } from "./device-providers/index.ts";
 
 export interface CreateImportersOptions {
   corePort?: unknown;
-  presetRegistry?: SamplePresetRegistry;
   deviceProviderRegistry?: DeviceProviderRegistry;
 }
 
 export function createImporters({
   corePort,
-  presetRegistry,
   deviceProviderRegistry,
 }: CreateImportersOptions = {}) {
-  const registry = presetRegistry ?? createSamplePresetRegistry();
   const providers = deviceProviderRegistry ?? createDeviceProviderRegistry(defaultDeviceProviderAdapters);
   const writer = corePort ?? coreRuntime;
 
   return {
-    presetRegistry: registry,
     deviceProviderRegistry: providers,
     withDeviceImportPass<T>(work: () => Promise<T>): Promise<T> {
       return coreRuntime.withDeviceBatchImportPass(work);
@@ -46,15 +40,10 @@ export function createImporters({
       return importAssessmentResponse(input, { corePort: writer });
     },
     importCsvSamples(input: unknown) {
-      return importCsvSamples(input, {
-        corePort: writer,
-        presetRegistry: registry,
-      });
+      return importCsvSamples(input, { corePort: writer });
     },
     profileCsvSampleFile(input: unknown) {
-      return profileCsvSampleFile(input, {
-        presetRegistry: registry,
-      });
+      return profileCsvSampleFile(input);
     },
     importDeviceProviderSnapshot(
       input: unknown,

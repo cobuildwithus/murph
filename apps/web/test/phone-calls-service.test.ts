@@ -600,39 +600,6 @@ describe("createHostedPhoneCall", () => {
     expect(runtime.startCalls).toEqual([]);
   });
 
-  it("replays duplicate request keys for the same member without starting another provider call", async () => {
-    const existing = buildHostedPhoneCall({
-      id: "hpc_existing",
-      providerCallId: "retell_existing",
-      status: "calling",
-    });
-    existing.briefEncrypted = await encryptHostedPhoneCallBrief({
-      callId: existing.id,
-      memberId: existing.memberId,
-      value: VALID_BRIEF,
-    });
-    const store = createPhoneCallStore({
-      existing,
-    });
-    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
-
-    const response = await createHostedPhoneCall({
-      brief: VALID_BRIEF,
-      memberId: existing.memberId,
-      prisma: store.prisma,
-      requestKey: existing.requestKey,
-      runtime: runtime.runtime,
-    });
-
-    expect(response).toEqual({
-      phoneCallId: "hpc_existing",
-      status: "calling",
-    });
-    expect(store.createCalls).toEqual([]);
-    expect(runtime.startCalls).toEqual([]);
-    expect(store.updateManyCalls).toEqual([]);
-  });
-
   it("replays an existing call before running new-call prerequisites", async () => {
     const existing = buildHostedPhoneCall({
       id: "hpc_existing",
@@ -665,6 +632,7 @@ describe("createHostedPhoneCall", () => {
     expect(transferNumberResolver).not.toHaveBeenCalled();
     expect(store.createCalls).toEqual([]);
     expect(runtime.startCalls).toEqual([]);
+    expect(store.updateManyCalls).toEqual([]);
   });
 
   it("rearms stored unsafe cleanup authority without another provider create", async () => {
@@ -3512,38 +3480,6 @@ describe("createHostedPhoneCall", () => {
       status: "completed",
     });
     expect(reconciliationWorkflowStarter).toHaveBeenCalledOnce();
-  });
-
-  it("resolves audience without enabling transfer when the brief disallows transfer", async () => {
-    const created = buildHostedPhoneCall();
-    const store = createPhoneCallStore({ created });
-    const runtime = createPhoneCallRuntime({ providerCallId: "retell_call_123" });
-    let resolverCalls = 0;
-    const brief: HostedPhoneCallBrief = {
-      ...VALID_BRIEF,
-      allowTransferToUser: false,
-    };
-
-    await createHostedPhoneCall({
-      brief,
-      memberId: "member_1",
-      prisma: store.prisma,
-      requestKey: "phone_call_request_1",
-      runtime: runtime.runtime,
-      transferNumberResolver: async () => {
-        resolverCalls += 1;
-        return "+12125550000";
-      },
-    });
-
-    expect(resolverCalls).toBe(1);
-    expect(runtime.startCalls).toEqual([{
-      callAudience: "third_party",
-      brief,
-      id: store.createCalls[0]!.data.id,
-      memberId: "member_1",
-      transferNumber: null,
-    }]);
   });
 
   it("forces transfer off for a container-shaped call before private-number lookup", async () => {

@@ -51,10 +51,11 @@ describe("bounded game collections", () => {
 
   it("keeps pair hash bytes and gives each bounded member set a stable identity", () => {
     expect(gamePairLoreFingerprint(["member-a", "member-b"])).toBe("78886ef1c33c23273f9cdab32323e051");
-    for (const count of [3, 10]) {
+    for (const count of [2, 3, 10]) {
       const ids = stateFor(count).players.map(({ memberId }) => memberId);
       expect(gamePairLoreFingerprint(ids)).toBe(gamePairLoreFingerprint([...ids].reverse()));
-      expect(gamePairLoreFingerprint(ids)).not.toBe(gamePairLoreFingerprint(ids.slice(1)));
+      expect(gamePairLoreFingerprint(ids)).not.toBe(gamePairLoreFingerprint([...ids.slice(1), "outsider"]));
+      if (count > 2) expect(gamePairLoreFingerprint(ids)).not.toBe(gamePairLoreFingerprint(ids.slice(1)));
     }
   });
 

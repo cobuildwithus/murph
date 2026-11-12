@@ -144,6 +144,7 @@ type MutableUsageCreditPurchase = ReturnType<typeof makeUsageCreditPurchase>;
 type UsageCreditStripeLookupFilter = string | { in: string[] };
 
 type UsageCreditStripePrismaHarnessClient = {
+  hostedThreadContainer: { findUnique: () => Promise<{ memberId: string } | null> };
   $queryRaw: () => Promise<unknown[]>;
   $transaction: <T>(
     callback: (tx: UsageCreditStripePrismaHarnessClient) => Promise<T>,
@@ -825,6 +826,7 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     const harness = createUsageCreditStripePrismaHarness({
       checkoutSuccessUrl: successUrl,
     }, {
+      beneficiaryIsContainer: false,
       beforeTransaction: () => {
         harness.purchase.payerMemberId = null;
       },
@@ -1921,6 +1923,7 @@ function createUsageCreditStripePrismaHarness(
   options?: {
     beforeTransaction?: (call: number) => Promise<void> | void;
     purchaseExists?: boolean;
+    beneficiaryIsContainer?: boolean;
   },
 ): {
   client: UsageCreditStripePrismaHarnessClient;
@@ -1930,6 +1933,7 @@ function createUsageCreditStripePrismaHarness(
   const purchaseExists = options?.purchaseExists ?? true;
   let transactionCall = 0;
   const client: UsageCreditStripePrismaHarnessClient = {
+    hostedThreadContainer: { findUnique: vi.fn(async () => options?.beneficiaryIsContainer === false ? null : { memberId: purchase.beneficiaryMemberId }) },
     $queryRaw: vi.fn(async () => []),
     $transaction: vi.fn(async (callback) => {
       transactionCall += 1;

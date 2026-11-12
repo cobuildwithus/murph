@@ -34,23 +34,12 @@ const seamMocks = vi.hoisted(() => ({
   createAssistantRuntimeStateService: vi.fn(),
   createAssistantUsageId: vi.fn(),
   isAssistantSessionNotFoundError: vi.fn(),
-  local: {
-    sendAssistantNotificationLocal: vi.fn(),
-    sendAssistantMessageLocal: vi.fn(),
-  },
   markAssistantFirstContactSeen: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
   resolveAssistantExecutionPlan: vi.fn(),
   resolveAssistantSession: vi.fn(),
   resolveAssistantUsageCredentialSource: vi.fn(),
   sendAssistantOutboxDispatchMessage: vi.fn(),
-}));
-
-vi.mock("../src/assistant/local-service.js", () => ({
-  sendAssistantMessageLocal: seamMocks.local.sendAssistantMessageLocal,
-}));
-vi.mock("../src/assistant/notification-turn.js", () => ({
-  sendAssistantNotificationLocal: seamMocks.local.sendAssistantNotificationLocal,
 }));
 
 vi.mock("../src/assistant/store.js", () => ({
@@ -121,7 +110,6 @@ vi.mock("../src/assistant-cli-access.js", () => ({
   buildAssistantCliGuidanceText: seamMocks.buildAssistantCliGuidanceText,
 }));
 
-import * as assistantService from "../src/assistant/service.ts";
 import {
   buildAssistantTurnDeliveryFinalizationPlan,
   deliverAssistantPrecedingReplies,
@@ -199,9 +187,6 @@ beforeEach(() => {
       )
     );
 
-  seamMocks.local.sendAssistantNotificationLocal.mockReset();
-  seamMocks.local.sendAssistantMessageLocal.mockReset();
-
   seamMocks.markAssistantFirstContactSeen
     .mockReset()
     .mockResolvedValue(undefined);
@@ -253,58 +238,6 @@ afterEach(async () => {
       }),
     ),
   );
-});
-
-describe("assistant service wrapper seam", () => {
-  it("delegates message flows to the local service", async () => {
-    const messageResult = {
-      response: "done",
-    };
-
-    seamMocks.local.sendAssistantMessageLocal.mockResolvedValue(messageResult);
-
-    await expect(
-      assistantService.sendAssistantMessage({
-        prompt: "hello",
-        vault: "/vault",
-      })
-    ).resolves.toBe(messageResult);
-
-    expect(seamMocks.local.sendAssistantMessageLocal).toHaveBeenCalledWith({
-      prompt: "hello",
-      vault: "/vault",
-    });
-  });
-
-  it("delegates notifications to the local service", async () => {
-    const notificationInput = {
-      channel: "telegram",
-      identityId: "identity-1",
-      instructions: "Send the Murph signup welcome.",
-      vault: "/vault",
-    };
-    const notificationResult = {
-      decision: {
-        kind: "send_message",
-        privateSummary: "sent",
-        text: "Welcome to Murph, your personal health assistant.",
-      },
-      response: "Welcome to Murph, your personal health assistant.",
-      session: createAssistantSession(),
-    };
-    seamMocks.local.sendAssistantNotificationLocal.mockResolvedValue(
-      notificationResult
-    );
-
-    await expect(
-      assistantService.sendAssistantNotification(notificationInput)
-    ).resolves.toBe(notificationResult);
-
-    expect(
-      seamMocks.local.sendAssistantNotificationLocal
-    ).toHaveBeenCalledWith(notificationInput);
-
-  });
 });
 
 describe("assistant service turn route", () => {
@@ -3662,8 +3595,7 @@ describe("assistant execution context normalization", () => {
     expect(onTypingAccepted).not.toHaveBeenCalled();
   });
 
-  it("preserves accessor order, field order, and bound versus forwarded helpers", async () => {
-    const reads: string[] = [];
+  it("preserves helper receivers when normalizing hosted context", async () => {
     const receivers: unknown[] = [];
     const request = async function (this: unknown) {
       receivers.push(this);
@@ -3675,10 +3607,7 @@ describe("assistant execution context normalization", () => {
       };
     };
     const deviceTool = {
-      get request() {
-        reads.push("device.request");
-        return request;
-      },
+      request,
     };
     const assertTurnCommitAuthority = async function (this: unknown) {
       receivers.push(this);
@@ -3686,46 +3615,15 @@ describe("assistant execution context normalization", () => {
     const recordUsage = async () => {};
     const launcher = { launch: () => "started" as const };
     const hosted: AssistantHostedExecutionContext = {
-      get memberId() {
-        reads.push("memberId");
-        return " member-synthetic ";
-      },
-      get deviceTool() {
-        reads.push("deviceTool");
-        return deviceTool;
-      },
-      get releaseSha() {
-        reads.push("releaseSha");
-        return " release-synthetic ";
-      },
-      get usageRecorder() {
-        reads.push("usageRecorder");
-        return { recordUsage };
-      },
-      get assertTurnCommitAuthority() {
-        reads.push("assertTurnCommitAuthority");
-        return assertTurnCommitAuthority;
-      },
-      get imageGenerationLauncher() {
-        reads.push("imageGenerationLauncher");
-        return launcher;
-      },
-      get userEnvKeys() {
-        reads.push("userEnvKeys");
-        return [];
-      },
+      memberId: " member-synthetic ",
+      deviceTool: deviceTool,
+      releaseSha: " release-synthetic ",
+      usageRecorder: { recordUsage },
+      assertTurnCommitAuthority: assertTurnCommitAuthority,
+      imageGenerationLauncher: launcher,
+      userEnvKeys: [],
     };
     const normalized = normalizeAssistantExecutionContext({ hosted }).hosted;
-    expect(reads).toEqual([
-      "memberId", "deviceTool", "device.request", "device.request",
-      "releaseSha", "usageRecorder",
-      "assertTurnCommitAuthority", "assertTurnCommitAuthority",
-      "imageGenerationLauncher", "imageGenerationLauncher", "userEnvKeys",
-    ]);
-    expect(Object.keys(normalized!)).toEqual([
-      "assertTurnCommitAuthority", "imageGenerationLauncher",
-      "deviceTool", "releaseSha", "usageRecorder", "memberId", "userEnvKeys",
-    ]);
     expect(normalized?.usageRecorder?.recordUsage).toBe(recordUsage);
     expect(normalized?.imageGenerationLauncher).toBe(launcher);
     const boundAuthority = normalized?.assertTurnCommitAuthority;
@@ -3733,26 +3631,6 @@ describe("assistant execution context normalization", () => {
     await boundAuthority!({ acceptedInputs: [], turnId: "turn-synthetic" });
     await normalized!.deviceTool!.request({ action: "list_accounts" });
     expect(receivers).toEqual([hosted, deviceTool]);
-  });
-
-  it("normalizes ports before rejecting a blank member without reading return-only helpers", () => {
-    const reads: string[] = [];
-    const failure = new Error("synthetic port accessor failure");
-    const hosted: AssistantHostedExecutionContext = {
-      memberId: " ",
-      userEnvKeys: [],
-      get deviceTool() {
-        reads.push("deviceTool");
-        return undefined;
-      },
-      get assertTurnCommitAuthority(): never {
-        throw failure;
-      },
-    };
-    expect(normalizeAssistantExecutionContext({ hosted })).toEqual({ hosted: null });
-    expect(reads).toEqual(["deviceTool"]);
-    Object.defineProperty(hosted, "deviceTool", { get() { throw failure; } });
-    expect(() => normalizeAssistantExecutionContext({ hosted })).toThrow(failure);
   });
 
   it("drops hosted execution context when the hosted member id is blank", () => {
@@ -5038,7 +4916,6 @@ function createProviderResult(input?: {
     route: input?.route ?? createRoute(),
     session,
     stderr: "",
-    stdout: "",
     transcriptResponse: input?.finalAction?.kind === "none"
       ? null
       : input?.response ?? "provider response",

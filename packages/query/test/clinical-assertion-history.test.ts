@@ -12,7 +12,7 @@ import {
 import { archiveClosedEventLedgerShards } from "@murphai/core";
 
 import { readVault } from "../src/index.ts";
-import { readHealthContext } from "../src/export-pack-health.ts";
+import { buildExportPack } from "../src/export-pack.ts";
 import { projectHistoryEntity } from "../src/health/projectors/history.ts";
 
 test("clinical assertion events project as health history entities", () => {
@@ -98,11 +98,10 @@ test("readVault includes clinical assertion ledger rows in the event read model"
     assert.equal(entity.attributes.sourceLabel, "Onboarding medical context");
     assert.equal(vault.byFamily.event?.includes(entity), true);
 
-    const health = (await readHealthContext(vaultRoot, {
+    const health = buildExportPack(vault, {
       from: "2026-03-01",
       to: "2026-03-31",
-      experimentSlug: null,
-    })).health;
+    }).health;
     const healthEvent = health.healthEvents.find(
       (candidate) => candidate.id === "evt_01JNV45RHN0TQ9ZXE0A7YSE1YV",
     );

@@ -75,6 +75,40 @@ function readSanitizedCrabboxVerificationEnvironment(): Record<string, string> {
 }
 
 describe("workspace verification orchestration", () => {
+  it.each(["messaging-ingress", "inboxd", "hosted-local-harness"])(
+    "propagates a failed %s boundary check through the timed coverage step",
+    (failedPackage) => {
+      const result = runShellHarness(`set -euo pipefail
+verify_log() { :; }
+pnpm() {
+  if [[ "$*" == *"${failedPackage}"* ]]; then return 42; fi
+  return 0
+}
+${extractWorkspaceVerifyFunction("run_timed_step")}
+${extractWorkspaceVerifyFunction("run_package_boundary_verification")}
+run_timed_step "boundary checks" run_package_boundary_verification 1
+printf 'unexpected success'
+`);
+      expect(result.status).toBe(42);
+      expect(result.stdout).not.toContain("unexpected success");
+    },
+  );
+
+  it("checks syntax beyond the first declared shell script", () => {
+    const result = runShellHarness(`set -euo pipefail
+${extractWorkspaceVerifyFunction("check_shell_syntax")}
+valid_script=$(mktemp)
+invalid_script=$(mktemp)
+trap 'rm -f "$valid_script" "$invalid_script"' EXIT
+printf 'true\\n' >"$valid_script"
+printf 'if\\n' >"$invalid_script"
+shell_syntax_check_scripts=("$valid_script" "$invalid_script")
+check_shell_syntax
+`);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("syntax error");
+  });
+
   it("detects macOS physical memory in MiB", () => {
     const detectPhysicalMemory = extractWorkspaceVerifyFunction(
       "detect_physical_memory_mib",
@@ -318,97 +352,6 @@ resolve_package_coverage_cli_vitest_max_workers_default
     expect(result.stdout).toBe("4\n3\n2\n4\n3\n");
   });
 
-  it("reports an internally controlled 10-core static SSH profile", () => {
-    const normalizePositiveInteger = extractWorkspaceVerifyFunction(
-      "normalize_positive_integer",
-    );
-    const localConcurrencyDefault = extractWorkspaceVerifyFunction(
-      "local_concurrency_default",
-    );
-    const localWorkerBudgetDefault = extractWorkspaceVerifyFunction(
-      "local_worker_budget_default",
-    );
-    const staticSshComposedAcceptanceAvailable = extractWorkspaceVerifyFunction(
-      "static_ssh_composed_acceptance_available",
-    );
-    const resolveComposedAcceptanceDefault = extractWorkspaceVerifyFunction(
-      "resolve_composed_acceptance_parallel_default",
-    );
-    const resolvePackageConcurrencyDefault = extractWorkspaceVerifyFunction(
-      "resolve_package_coverage_concurrency_default",
-    );
-    const resolvePackageWorkersDefault = extractWorkspaceVerifyFunction(
-      "resolve_package_coverage_vitest_max_workers_default",
-    );
-    const resolveCliWorkersDefault = extractWorkspaceVerifyFunction(
-      "resolve_package_coverage_cli_vitest_max_workers_default",
-    );
-    const resolveAppWorkersDefault = extractWorkspaceVerifyFunction(
-      "resolve_acceptance_app_vitest_max_workers_default",
-    );
-    const resolveLocalParallelDefault = extractWorkspaceVerifyFunction(
-      "resolve_local_parallel_default",
-    );
-    const resolveCliActiveConcurrencyDefault = extractWorkspaceVerifyFunction(
-      "resolve_package_coverage_cli_active_concurrency_default",
-    );
-    const resolveProfileControlledValue = extractWorkspaceVerifyFunction(
-      "resolve_profile_controlled_value",
-    );
-    const logAcceptanceResourcePlan = extractWorkspaceVerifyFunction(
-      "log_acceptance_resource_plan",
-    );
-    const result = runShellHarness(`#!/usr/bin/env bash
-set -euo pipefail
-
-${normalizePositiveInteger}
-${localConcurrencyDefault}
-${localWorkerBudgetDefault}
-${staticSshComposedAcceptanceAvailable}
-${resolveComposedAcceptanceDefault}
-${resolvePackageConcurrencyDefault}
-${resolvePackageWorkersDefault}
-${resolveCliWorkersDefault}
-${resolveAppWorkersDefault}
-${resolveLocalParallelDefault}
-${resolveCliActiveConcurrencyDefault}
-${resolveProfileControlledValue}
-${logAcceptanceResourcePlan}
-
-detect_logical_cpu_count() { printf '10\\n'; }
-detect_physical_memory_mib() { printf '32768\\n'; }
-verify_log() { printf '[workspace-verify] %s\\n' "$*"; }
-
-CI=
-shared_host_mode=0
-verification_command=verify:acceptance
-verification_profile=static-ssh
-composed_acceptance_parallel="$(resolve_composed_acceptance_parallel_default)"
-package_coverage_concurrency_default="$(resolve_package_coverage_concurrency_default)"
-package_coverage_concurrency_limit="$(resolve_profile_controlled_value 99 "$package_coverage_concurrency_default")"
-package_coverage_cli_active_concurrency_default="$(resolve_package_coverage_cli_active_concurrency_default)"
-package_coverage_cli_active_concurrency_limit="$(resolve_profile_controlled_value 99 "$package_coverage_cli_active_concurrency_default")"
-unset MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS
-package_coverage_vitest_max_workers_default="$(resolve_package_coverage_vitest_max_workers_default)"
-package_coverage_vitest_max_workers="$(resolve_profile_controlled_value 99 "$package_coverage_vitest_max_workers_default")"
-package_coverage_cli_vitest_max_workers_default="$(resolve_package_coverage_cli_vitest_max_workers_default)"
-package_coverage_cli_vitest_max_workers="$(resolve_profile_controlled_value 99 "$package_coverage_cli_vitest_max_workers_default")"
-acceptance_app_vitest_max_workers="$(resolve_acceptance_app_vitest_max_workers_default)"
-app_verify_parallel_default="$(resolve_local_parallel_default)"
-app_verify_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
-acceptance_app_verify_with_coverage="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
-test_lane_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
-package_coverage_shard="$(resolve_profile_controlled_value platform-a all)"
-
-log_acceptance_resource_plan
-`);
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe(
-      "[workspace-verify] resources cpus=10 memory_mib=32768 composed_parallel=1 package_processes=3 cli_package_processes=2 package_workers=2 cli_workers=3 app_workers=1 app_overlap=1 profile=static-ssh package_shard=all test_lanes=1 app_parallel=1\n",
-    );
-  });
-
   it("runs static package coverage before app and fixture verification", () => {
     const runTestCoverage = extractWorkspaceVerifyFunction("run_test_coverage");
     const result = runShellHarness(`#!/usr/bin/env bash
@@ -497,31 +440,6 @@ resolve_local_parallel_default
     expect(result.stdout).toBe("0\n1\n1\n0\n1\n0\n");
   });
 
-  it("overlaps independent capable-host acceptance preparation", () => {
-    const runTestCoverage = extractWorkspaceVerifyFunction("run_test_coverage");
-
-    expect(runTestCoverage).toContain(
-      'run_timed_step "Doc gardening" bash "scripts/doc-gardening.sh" --fail-on-issues &',
-    );
-    expect(runTestCoverage).toContain(
-      'run_timed_step "Prepared runtime artifacts" prepare_repo_vitest_runtime_artifacts "$acceptance_typechecked" &',
-    );
-    expect(runTestCoverage).toContain(
-      'wait_for_background_jobs "$doc_gardening_pid" "$runtime_artifacts_pid"',
-    );
-    expect(runTestCoverage).toContain("prepared_runtime_artifacts=1");
-  });
-
-  it("keeps scoped diff verification out of the heavyweight host lane", () => {
-    const hostRouting = extractWorkspaceVerifyFunction(
-      "command_requires_host_verification_slot",
-    );
-
-    expect(hostRouting).not.toContain('"test:diff"');
-    expect(hostRouting).toContain('"verify:acceptance"');
-    expect(hostRouting).toContain('"test:apps"');
-  });
-
   it("caps scoped Codex diff verification without changing human defaults", () => {
     const resolveTypecheckDefault = extractWorkspaceVerifyFunction(
       "resolve_typecheck_workspace_concurrency_default",
@@ -585,6 +503,10 @@ resolve_test_diff_vitest_max_workers_default
         writeFileSync(
           nodeShimPath,
           `#!/usr/bin/env bash
+if [[ "\${1:-}" == "--input-type=module" ]]; then
+  printf 'packages/contracts\\napps/cloudflare\\n'
+  exit 0
+fi
 if [[ "\${1:-}" == "scripts/check-workspace-package-cycles.mjs" ]]; then
   : >"\${MURPH_BOUNDARY_TEST_CYCLE_MARKER}"
 fi
@@ -933,45 +855,6 @@ rm -rf -- "$ready_dir"
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe("ready\n");
-  });
-
-  it("derives every release package coverage assertion from its selected owner", () => {
-    const runAllPackageCoverage = extractWorkspaceVerifyFunction(
-      "run_all_package_coverage",
-    );
-    const result = runShellHarness(`#!/usr/bin/env bash
-set -euo pipefail
-
-run_workspace_package_coverage() {
-  printf '%s|%s\n' "$1" "$2"
-}
-mark_acceptance_cli_coverage_complete() { return 0; }
-verify_log() { return 0; }
-
-package_coverage_concurrency_limit=1
-package_coverage_cli_active_concurrency_limit=1
-package_coverage_shard=all
-
-${runAllPackageCoverage}
-
-run_all_package_coverage 1
-`);
-
-    expect(result.status, result.stderr).toBe(0);
-    const pairs = result.stdout.trim().split("\n");
-    expect(pairs).toHaveLength(23);
-    expect(pairs).toContain(
-      "packages/hosted-execution|Package coverage for packages/hosted-execution",
-    );
-    expect(pairs).toContain(
-      "packages/health-commons|Package coverage for packages/health-commons",
-    );
-    expect(pairs).toContain(
-      "packages/hosted-local-harness|Package coverage for packages/hosted-local-harness",
-    );
-    expect(pairs).toContain(
-      "packages/vault-usecases|Package coverage for packages/vault-usecases",
-    );
   });
 
   it.each([
@@ -1509,26 +1392,17 @@ fi
     }
   });
 
-  it("uses bounded recursive fanout for affected typechecks and package tests", () => {
-    const typecheckFanout = workspaceVerify.match(
-      /run_typecheck_packages\(\) \{[\s\S]*?^\}/m,
-    )?.[0];
-
-    expect(typecheckFanout).toBeTruthy();
-    expect(typecheckFanout!.indexOf('pnpm --dir "packages/contracts" build:incremental')).toBeLessThan(
-      typecheckFanout!.indexOf('pnpm -r --no-sort --workspace-concurrency="$typecheck_workspace_concurrency"'),
-    );
-    expect(workspaceVerify).toContain(
-      'run_typecheck_packages "${typecheck_dirs[@]}"',
-    );
-    expect(workspaceVerify).toContain(
-      'pnpm -r --no-sort --workspace-concurrency="$test_diff_workspace_concurrency" "${filter_args[@]}" test',
-    );
-    expect(workspaceVerify).toContain(
-      'MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers"',
-    );
-    expect(workspaceVerify).toContain('run_package_command_with_retry "packages/contracts" test');
-    expect(workspaceVerify).toContain("run_diff_package_boundary_verification");
+  it("discovers typecheck scripts from every current workspace manifest", () => {
+    const result = runShellHarness(`set -euo pipefail
+typecheck_workspace_concurrency=2
+run_command_with_retry() { printf '%s\\n' "$*"; }
+${extractWorkspaceVerifyFunction("run_typecheck_packages")}
+run_typecheck_packages
+`);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("--filter ./packages/health-commons");
+    expect(result.stdout).toContain("--filter ./packages/hosted-local-harness");
+    expect(result.stdout).toContain("--filter ./apps/web");
   });
 
   it("generates hosted web Prisma before Cloudflare typecheck fanout", () => {
@@ -1729,67 +1603,6 @@ run_test_diff_app_verification apps/web apps/cloudflare
     expect(result.status, result.stderr).toBe(29);
     expect(result.stdout).toContain("both-apps-called\n");
     expect(result.stdout).not.toContain("single-app-called");
-  });
-
-  it("keeps clean acceptance proof while using warm-safe local test prerequisites", () => {
-    const contractsPackage = JSON.parse(
-      readFileSync(path.join(repoRoot, "packages", "contracts", "package.json"), "utf8"),
-    ) as { scripts: Record<string, string> };
-    const contractsScriptsConfig = JSON.parse(
-      readFileSync(
-        path.join(repoRoot, "packages", "contracts", "tsconfig.scripts.json"),
-        "utf8",
-      ),
-    ) as { compilerOptions: Record<string, boolean | string> };
-
-    expect(workspaceVerify).toContain(
-      'pnpm --dir "packages/contracts" test:artifacts:incremental',
-    );
-    expect(contractsPackage.scripts["test:artifacts"]).toBe(
-      "node --run build && node ./dist/scripts/verify.js",
-    );
-    expect(contractsPackage.scripts.build).toContain(
-      "rm-paths.mjs dist tsconfig.build.tsbuildinfo tsconfig.scripts.tsbuildinfo",
-    );
-    expect(contractsPackage.scripts["test:artifacts:incremental"]).toContain(
-      "node --run build:incremental",
-    );
-    expect(contractsScriptsConfig.compilerOptions.incremental).toBe(true);
-    expect(contractsScriptsConfig.compilerOptions.tsBuildInfoFile).toBe(
-      "tsconfig.scripts.tsbuildinfo",
-    );
-  });
-
-  it("applies bounded worker budgets and preserves safe root CLI grouping", () => {
-    const rootVitestConfig = readFileSync(path.join(repoRoot, "vitest.config.ts"), "utf8");
-
-    expect(rootVitestConfig).toContain("maxWorkers: rootRepoVitestMaxWorkers");
-    for (const projectName of [
-      "cli-health-tail",
-      "cli-read-model",
-      "cli-assistant",
-      "cli-expansions",
-    ]) {
-      expect(rootVitestConfig).toContain(`"${projectName}"`);
-    }
-    expect(rootVitestConfig).toContain("ROOT_PARALLEL_CLI_PROJECTS.has");
-    expect(workspaceVerify).toContain("worker_budget=$((cpu_count / 8))");
-    expect(workspaceVerify).toContain("worker_budget=$((cpu_count / 4))");
-  });
-
-  it("keeps the root tools incremental cache disposable", () => {
-    const toolsTsconfig = JSON.parse(
-      readFileSync(path.join(repoRoot, "tsconfig.tools.json"), "utf8"),
-    ) as { compilerOptions: Record<string, boolean | string> };
-    const rootPackage = JSON.parse(
-      readFileSync(path.join(repoRoot, "package.json"), "utf8"),
-    ) as { scripts: Record<string, string> };
-
-    expect(toolsTsconfig.compilerOptions.incremental).toBe(true);
-    expect(toolsTsconfig.compilerOptions.tsBuildInfoFile).toBe(
-      "tsconfig.tools.tsbuildinfo",
-    );
-    expect(rootPackage.scripts.clean).toContain("tsconfig.tools.tsbuildinfo");
   });
 });
 

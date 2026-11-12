@@ -42,6 +42,7 @@ import {
   DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_LIMIT,
   resolveDeviceSyncStoreNextJobWakeAt,
   resolveDeviceSyncStoreNextWakeAt,
+  readSafeJunctionNormalizationDiagnostics,
 } from "../src/service.ts";
 import {
   createJunctionDeviceSyncProvider,
@@ -1952,7 +1953,13 @@ test("device sync service reports canonical counts separately from durable deliv
         importerInputs.push(input);
         importAttempt += 1;
         return importAttempt === 1
-          ? { events: [{ kind: "activity" }, { kind: "sleep" }] }
+          ? {
+              events: [
+                { dayKey: "2026-04-02", kind: "activity" },
+                { dayKey: "2026-04-03", kind: "sleep" },
+              ],
+              affectedEventDayKeys: ["2026-04-01", "2026-04-03"],
+            }
           : { applied: false, events: [] };
       },
     },
@@ -1988,7 +1995,7 @@ test("device sync service reports canonical counts separately from durable deliv
     assert.deepEqual(importReceipts, [
       {
         canonicalEventCount: 2,
-        canonicalEventDayKeys: [],
+        canonicalEventDayKeys: ["2026-04-01", "2026-04-02", "2026-04-03"],
         canonicalEventExternalRefResourceIds: [],
         durableDeliveryAccepted: true,
       },
@@ -3859,67 +3866,6 @@ test("hosted listed-only projection cannot publish connected before explicit rec
       "blood_pressure",
       historyCoverageVersion("blood_pressure"),
     ), false);
-  } finally {
-    close();
-  }
-});
-
-test("device sync service reports canonical counts separately from durable delivery acceptance", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-syncd-import-receipt");
-  const importReceipts: unknown[] = [];
-  let importAttempt = 0;
-  const { service, close, seedConnection } = createServiceFixture({
-    secret: "secret-for-tests",
-    config: {
-      vaultRoot,
-      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
-    },
-    importer: {
-      async importDeviceProviderSnapshot() {
-        importAttempt += 1;
-        return importAttempt === 1
-          ? {
-              events: [
-                { dayKey: "2026-04-02", kind: "activity" },
-                { dayKey: "2026-04-03", kind: "sleep" },
-              ],
-              affectedEventDayKeys: ["2026-04-01", "2026-04-03"],
-            }
-          : { applied: false, events: [] };
-      },
-    },
-    providers: [createFakeProvider({
-      async executeJob(context) {
-        importReceipts.push(await context.importSnapshot({ provider: "demo" }));
-        return {};
-      },
-    })],
-  });
-
-  try {
-
-    const connected = await seedConnection({
-      provider: "demo",
-      code: "import-receipt",
-    });
-    await service.runWorkerOnce();
-    service.queueManualReconcile(connected.account.id);
-    await service.runWorkerOnce();
-
-    assert.deepEqual(importReceipts, [
-      {
-        canonicalEventCount: 2,
-        canonicalEventDayKeys: ["2026-04-01", "2026-04-02", "2026-04-03"],
-        canonicalEventExternalRefResourceIds: [],
-        durableDeliveryAccepted: true,
-      },
-      {
-        canonicalEventCount: 0,
-        canonicalEventDayKeys: [],
-        canonicalEventExternalRefResourceIds: [],
-        durableDeliveryAccepted: true,
-      },
-    ]);
   } finally {
     close();
   }
@@ -11658,6 +11604,10 @@ test.each([
             valueKind: "numeric_string",
             valueRange,
             unitKind,
+            recordExpanded: true,
+            dayBasis: "source_offset",
+            utcDayRelation: "equal",
+            resolvedDayRelation: "before",
           });
         },
       }),
@@ -11685,6 +11635,10 @@ test.each([
       normalizationValueKind: "numeric_string",
       normalizationValueRange: valueRange,
       normalizationUnitKind: unitKind,
+      normalizationRecordExpanded: true,
+      normalizationDayBasis: "source_offset",
+      normalizationUtcDayRelation: "equal",
+      normalizationResolvedDayRelation: "before",
     });
   } finally {
     close();
@@ -11966,51 +11920,28 @@ test("device sync service exposes safe structured diagnostics for provider failu
       createFakeProvider({
         async executeJob() {
           throw deviceSyncError({
-            code: "WHOOP_TOKEN_REQUEST_FAILED",
-            message: "WHOOP token request failed.",
+            code: "JUNCTION_API_REQUEST_FAILED",
+            message: "Junction link token request failed.",
             retryable: false,
             httpStatus: 400,
             details: {
               status: 400,
               retryable: false,
               accountStatus: null,
-              oauthErrorCode: "invalid_request",
-              oauthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
-              oauthGrantType: "refresh_token",
-              oauthRequestBodyBuilderKind: "url_search_params_record",
-              oauthRequestClientAuthPlacement: "body_parameters",
-              oauthRequestClientCredentialPresent: true,
-              oauthRequestClientIdPresent: true,
-              oauthRequestContentType: "application_x_www_form_urlencoded",
-              oauthRequestDuplicateParameterCount: 0,
-              oauthRequestEncodingKind: "form_urlencoded",
-              oauthRequestHasDuplicateParameters: false,
-              oauthRequestMethod: "POST",
-              oauthRequestOfflineScopePresent: true,
-              oauthRequestParameterCount: 5,
-              oauthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-              oauthRequestRefreshCredentialPresent: true,
-              oauthRequestScopeCount: 1,
-              oauthRequestScopePresent: true,
-              oauthRequestScopeValue: "offline",
-              oauthRequestTokenEndpointKind: "whoop_oauth_token",
-              oauthResponseErrorDescriptionFieldPresent: true,
-              oauthResponseErrorFieldPresent: true,
-              oauthResponseShapeKind: "json_object",
               responseBody: "access_token=secret",
-              requestAuthKind: "oauth_client_secret_body",
-              requestAuthPlacement: "body_parameters",
-              requestBodyFieldCount: 5,
-              requestBodyFieldNames: "client_id.client_secret.grant_type.refresh_token.scope",
-              requestBodyKind: "form_urlencoded",
-              requestContentType: "application_x_www_form_urlencoded",
+              requestAuthKind: "provider_config_api_key_header",
+              requestAuthPlacement: "headers",
+              requestBodyFieldCount: 2,
+              requestBodyFieldNames: "redirect_url.user_id",
+              requestBodyKind: "json_object",
+              requestContentType: "application_json",
               requestCredentialPresent: true,
-              requestEndpointKind: "whoop_oauth_token",
+              requestEndpointKind: "junction_link_token_create",
               requestMethod: "POST",
               requestQueryParameterCount: 0,
               requestQueryParameterNames: null,
               responseErrorCode: "invalid_request",
-              responseErrorDescription: "Refresh token expired. Reconnect WHOOP.",
+              responseErrorDescription: "The link token request is missing a provider selection.",
               responseErrorDescriptionFieldPresent: true,
               responseErrorFieldPresent: true,
               responseShapeKind: "json_object",
@@ -12031,7 +11962,7 @@ test("device sync service exposes safe structured diagnostics for provider failu
   const diagnostics = service.listJobFailureDiagnostics();
   assert.equal(diagnostics.length, 1);
   assert.equal(diagnostics[0]?.accountId, connected.account.id);
-  assert.equal(diagnostics[0]?.code, "WHOOP_TOKEN_REQUEST_FAILED");
+  assert.equal(diagnostics[0]?.code, "JUNCTION_API_REQUEST_FAILED");
   assert.equal(diagnostics[0]?.retryable, false);
   assert.equal(diagnostics[0]?.provider, "demo");
   assert.equal(diagnostics[0]?.jobKind, "backfill");
@@ -12042,101 +11973,55 @@ test("device sync service exposes safe structured diagnostics for provider failu
   assert.equal(typeof diagnostics[0]?.at, "string");
   assert.equal(
     diagnostics[0]?.summary,
-    "WHOOP token request failed. Provider reason: Refresh token expired. Reconnect WHOOP.",
+    "Junction link token request failed. Provider reason: The link token request is missing a provider selection.",
   );
   assert.deepEqual(diagnostics[0]?.details, {
     providerHttpStatus: 400,
-    providerRequestAuthKind: "oauth_client_secret_body",
-    providerRequestAuthPlacement: "body_parameters",
-    providerRequestBodyFieldCount: 5,
-    providerRequestBodyFieldNames: "client_id.client_secret.grant_type.refresh_token.scope",
-    providerRequestBodyKind: "form_urlencoded",
-    providerRequestContentType: "application_x_www_form_urlencoded",
+    providerRequestAuthKind: "provider_config_api_key_header",
+    providerRequestAuthPlacement: "headers",
+    providerRequestBodyFieldCount: 2,
+    providerRequestBodyFieldNames: "redirect_url.user_id",
+    providerRequestBodyKind: "json_object",
+    providerRequestContentType: "application_json",
     providerRequestCredentialPresent: true,
-    providerRequestEndpointKind: "whoop_oauth_token",
+    providerRequestEndpointKind: "junction_link_token_create",
     providerRequestMethod: "POST",
     providerRequestQueryParameterCount: 0,
     providerResponseErrorCode: "invalid_request",
-    providerResponseErrorDescription: "Refresh token expired. Reconnect WHOOP.",
+    providerResponseErrorDescription: "The link token request is missing a provider selection.",
     providerResponseErrorDescriptionFieldPresent: true,
     providerResponseErrorFieldPresent: true,
     providerResponseShapeKind: "json_object",
-    providerOAuthErrorCode: "invalid_request",
-    providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
-    providerOAuthGrantType: "refresh_token",
-    providerOAuthRequestBodyBuilderKind: "url_search_params_record",
-    providerOAuthRequestClientAuthPlacement: "body_parameters",
-    providerOAuthRequestClientCredentialPresent: true,
-    providerOAuthRequestClientIdPresent: true,
-    providerOAuthRequestContentType: "application_x_www_form_urlencoded",
-    providerOAuthRequestDuplicateParameterCount: 0,
-    providerOAuthRequestEncodingKind: "form_urlencoded",
-    providerOAuthRequestHasDuplicateParameters: false,
-    providerOAuthRequestMethod: "POST",
-    providerOAuthRequestOfflineScopePresent: true,
-    providerOAuthRequestParameterCount: 5,
-    providerOAuthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-    providerOAuthRequestRefreshCredentialPresent: true,
-    providerOAuthRequestScopeCount: 1,
-    providerOAuthRequestScopePresent: true,
-    providerOAuthRequestScopeValue: "offline",
-    providerOAuthRequestTokenEndpointKind: "whoop_oauth_token",
-    providerOAuthResponseErrorDescriptionFieldPresent: true,
-    providerOAuthResponseErrorFieldPresent: true,
-    providerOAuthResponseShapeKind: "json_object",
   });
 
-  diagnostics[0]!.details.providerOAuthErrorCode = "mutated";
-  assert.equal(service.listJobFailureDiagnostics()[0]?.details.providerOAuthErrorCode, "invalid_request");
+  diagnostics[0]!.details.providerResponseErrorCode = "mutated";
+  assert.equal(service.listJobFailureDiagnostics()[0]?.details.providerResponseErrorCode, "invalid_request");
 
   assert.equal(warnEvents.length, 1);
   const { jobId, ...warnContext } = warnEvents[0]?.context ?? {};
   assert.equal(typeof jobId, "string");
   assert.deepEqual(warnContext, {
     provider: "demo",
-    code: "WHOOP_TOKEN_REQUEST_FAILED",
-    failureSummary: "WHOOP token request failed. Provider reason: Refresh token expired. Reconnect WHOOP.",
+    code: "JUNCTION_API_REQUEST_FAILED",
+    failureSummary: "Junction link token request failed. Provider reason: The link token request is missing a provider selection.",
     retryable: false,
     accountStatus: null,
     providerHttpStatus: 400,
-    providerRequestAuthKind: "oauth_client_secret_body",
-    providerRequestAuthPlacement: "body_parameters",
-    providerRequestBodyFieldCount: 5,
-    providerRequestBodyFieldNames: "client_id.client_secret.grant_type.refresh_token.scope",
-    providerRequestBodyKind: "form_urlencoded",
-    providerRequestContentType: "application_x_www_form_urlencoded",
+    providerRequestAuthKind: "provider_config_api_key_header",
+    providerRequestAuthPlacement: "headers",
+    providerRequestBodyFieldCount: 2,
+    providerRequestBodyFieldNames: "redirect_url.user_id",
+    providerRequestBodyKind: "json_object",
+    providerRequestContentType: "application_json",
     providerRequestCredentialPresent: true,
-    providerRequestEndpointKind: "whoop_oauth_token",
+    providerRequestEndpointKind: "junction_link_token_create",
     providerRequestMethod: "POST",
     providerRequestQueryParameterCount: 0,
     providerResponseErrorCode: "invalid_request",
-    providerResponseErrorDescription: "Refresh token expired. Reconnect WHOOP.",
+    providerResponseErrorDescription: "The link token request is missing a provider selection.",
     providerResponseErrorDescriptionFieldPresent: true,
     providerResponseErrorFieldPresent: true,
     providerResponseShapeKind: "json_object",
-    providerOAuthErrorCode: "invalid_request",
-    providerOAuthErrorDescription: "Refresh token expired. Reconnect WHOOP.",
-    providerOAuthGrantType: "refresh_token",
-    providerOAuthRequestBodyBuilderKind: "url_search_params_record",
-    providerOAuthRequestClientAuthPlacement: "body_parameters",
-    providerOAuthRequestClientCredentialPresent: true,
-    providerOAuthRequestClientIdPresent: true,
-    providerOAuthRequestContentType: "application_x_www_form_urlencoded",
-    providerOAuthRequestDuplicateParameterCount: 0,
-    providerOAuthRequestEncodingKind: "form_urlencoded",
-    providerOAuthRequestHasDuplicateParameters: false,
-    providerOAuthRequestMethod: "POST",
-    providerOAuthRequestOfflineScopePresent: true,
-    providerOAuthRequestParameterCount: 5,
-    providerOAuthRequestParameterNames: "client_id.client_secret.grant_type.refresh_token.scope",
-    providerOAuthRequestRefreshCredentialPresent: true,
-    providerOAuthRequestScopeCount: 1,
-    providerOAuthRequestScopePresent: true,
-    providerOAuthRequestScopeValue: "offline",
-    providerOAuthRequestTokenEndpointKind: "whoop_oauth_token",
-    providerOAuthResponseErrorDescriptionFieldPresent: true,
-    providerOAuthResponseErrorFieldPresent: true,
-    providerOAuthResponseShapeKind: "json_object",
   });
   assert.equal(JSON.stringify(warnEvents).includes(connected.account.id), false);
 
@@ -12252,14 +12137,13 @@ test("device sync service omits unsafe free-form provider diagnostic reasons", a
       createFakeProvider({
         async executeJob() {
           throw deviceSyncError({
-            code: "WHOOP_TOKEN_REQUEST_FAILED",
-            message: "WHOOP token request failed.",
+            code: "JUNCTION_API_REQUEST_FAILED",
+            message: "Junction API request failed.",
             retryable: false,
             httpStatus: 400,
             details: {
-              oauthErrorCode: "invalid_grant",
-              oauthErrorDescription: '{"access_token":"fixture-secret","account_id":"account-sensitive"}',
-              oauthGrantType: "refresh_token",
+              responseErrorCode: "invalid_request",
+              responseErrorDescription: '{"access_token":"fixture-secret","account_id":"account-sensitive"}',
             },
           });
         },
@@ -12276,8 +12160,7 @@ test("device sync service omits unsafe free-form provider diagnostic reasons", a
 
   assert.deepEqual(service.listJobFailureDiagnostics()[0]?.details, {
     providerHttpStatus: 400,
-    providerOAuthErrorCode: "invalid_grant",
-    providerOAuthGrantType: "refresh_token",
+    providerResponseErrorCode: "invalid_request",
   });
 
   close();
@@ -14004,4 +13887,24 @@ test.each([false, true])("retained snapshot gets an uninterrupted retry after 30
     close();
     await rm(vaultRoot, { recursive: true, force: true });
   }
+});
+
+
+test("Junction calendar diagnostics allow only finite day categories", () => {
+  for (const shape of [false, true]) {
+    assert.deepEqual(readSafeJunctionNormalizationDiagnostics({ normalizationRecordExpanded: shape }), { normalizationRecordExpanded: shape });
+  }
+  for (const basis of ["explicit_calendar", "timestamp_calendar", "source_offset", "vault_timezone", "utc", "missing"]) {
+    assert.deepEqual(readSafeJunctionNormalizationDiagnostics({ normalizationDayBasis: basis }), { normalizationDayBasis: basis });
+  }
+  for (const relation of ["before", "equal", "after", "missing"]) {
+    const details = { normalizationUtcDayRelation: relation, normalizationResolvedDayRelation: relation };
+    assert.deepEqual(readSafeJunctionNormalizationDiagnostics(details), details);
+  }
+  for (const value of ["2026-04-21", "synthetic-private-timezone", -14400, null, {}, []]) {
+    assert.deepEqual(readSafeJunctionNormalizationDiagnostics({
+      normalizationRecordExpanded: value, normalizationDayBasis: value, normalizationUtcDayRelation: value, normalizationResolvedDayRelation: value,
+    }), {});
+  }
+  assert.deepEqual(readSafeJunctionNormalizationDiagnostics({}), {});
 });

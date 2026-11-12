@@ -124,6 +124,7 @@ export async function executeCodexAssistantTurnAttempt(
     ...codexProcessLaunchInput,
     abortSignal: input.abortSignal,
     allowFinishWithoutReply: input.allowFinishWithoutReply ?? true,
+    askGrokTurnState: input.askGrokTurnState,
     analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
     automationRelativeDateReferenceWindow:
       input.automationRelativeDateReferenceWindow ?? null,
@@ -349,7 +350,6 @@ export async function executeCodexAssistantTurnAttempt(
         ? {}
         : { responseCard: result.responseCard }),
       stderr: result.stderr,
-      stdout: result.stdout,
       rawEvents: result.jsonEvents,
       codexRolloutRelativePath: result.rolloutRelativePath,
       usage,

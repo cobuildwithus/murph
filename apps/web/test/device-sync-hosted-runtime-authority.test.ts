@@ -582,6 +582,32 @@ function createAuthorityHarness(input: {
   };
 }
 
+async function applyRuntimeUpdates(updates: readonly unknown[], occurredAt?: string) {
+  const { applyHostedDeviceSyncRuntimeResult } = await import(
+    "@/src/lib/device-sync/hosted-runtime-authority"
+  );
+  return applyHostedDeviceSyncRuntimeResult({
+    request: new Request("https://example.test/device-sync/runtime/apply", {
+      body: JSON.stringify({ updates, occurredAt, userId: "user_123" }),
+      method: "POST",
+    }),
+    trustedUserId: "user_123",
+  });
+}
+
+async function readRuntimeSnapshot(options: Record<string, unknown> = {}) {
+  const { readHostedDeviceSyncRuntimeState } = await import(
+    "@/src/lib/device-sync/hosted-runtime-authority"
+  );
+  return readHostedDeviceSyncRuntimeState({
+    request: new Request("https://example.test/device-sync/runtime/snapshot", {
+      body: JSON.stringify({ ...options, userId: "user_123" }),
+      method: "POST",
+    }),
+    trustedUserId: "user_123",
+  });
+}
+
 function createRuntimeApplyFanoutHarness() {
   const records = Array.from({ length: 100 }, (_, index) =>
     buildHostedRecord({
@@ -1067,25 +1093,13 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       });
       const updated = store.getAccountById(account.id);
       expect(updated).not.toBeNull();
-      const { applyHostedDeviceSyncRuntimeResult } = await import(
-        "@/src/lib/device-sync/hosted-runtime-authority"
-      );
-      const apply = (observedUpdatedAt: string) => applyHostedDeviceSyncRuntimeResult({
-        request: new Request("https://example.test/device-sync/runtime/apply", {
-          method: "POST",
-          body: JSON.stringify({
-            userId: "user_123",
-            updates: [{
-              connectionId: "conn_123",
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt,
-              connection: { metadata: updated?.metadata },
-              localState: { nextReconcileAt: "2026-04-06T11:00:00.000Z" },
-            }],
-          }),
-        }),
-        trustedUserId: "user_123",
-      });
+      const apply = (observedUpdatedAt: string) => applyRuntimeUpdates([{
+        connectionId: "conn_123",
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt,
+        connection: { metadata: updated?.metadata },
+        localState: { nextReconcileAt: "2026-04-06T11:00:00.000Z" },
+      }]);
       const stale = await apply("2026-04-06T09:59:00.000Z");
       expect(stale.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
       expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
@@ -1110,9 +1124,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
   });
 
   it("rejects a 65-source update before control-plane, KMS, or transaction work", async () => {
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
     const sources = Array.from({ length: 65 }, (_, index) => ({
       lastSeenAt: "2026-04-06T10:00:00.000Z",
       observedLastSeenAt: null,
@@ -1121,16 +1132,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       status: "connected",
     }));
 
-    await expect(applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{ connectionId: "conn_123", sources }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    })).rejects.toThrow(/updates\[0\]\.sources must include no more than 64 entries/u);
+    await expect(applyRuntimeUpdates([{ connectionId: "conn_123", sources }])).rejects.toThrow(/updates\[0\]\.sources must include no more than 64 entries/u);
 
     expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
   });
@@ -1171,23 +1173,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         withConnectionMutationLock,
       },
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            { connectionId: "conn_first" },
-            { connectionId: "conn_second" },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      { connectionId: "conn_first" },
+      { connectionId: "conn_second" },
+    ]);
 
     expect(maxActiveLocks).toBe(1);
     expect(withConnectionMutationLock).toHaveBeenNthCalledWith(
@@ -1223,20 +1213,8 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         sourceProviderSlug,
       }],
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{ connectionId: "conn_123" }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    await applyRuntimeUpdates([{ connectionId: "conn_123" }]);
 
     expect(mocks.scheduleHostedSourceDeliveryStallNotices).toHaveBeenCalledWith({
       candidates: [{
@@ -1262,20 +1240,8 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         sourceProviderSlug: "garmin",
       }],
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{ connectionId: "conn_123" }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    await applyRuntimeUpdates([{ connectionId: "conn_123" }]);
 
     expect(mocks.scheduleHostedSourceDeliveryStallNotices).toHaveBeenCalledWith({
       candidates: [],
@@ -1286,20 +1252,8 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("bounds an N=100 no-op apply to one set read and 100 serial transactions", async () => {
     const harness = createRuntimeApplyFanoutHarness();
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: harness.records.map((record) => ({ connectionId: record.id })),
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates(harness.records.map((record) => ({ connectionId: record.id })));
 
     expect(response.updates).toHaveLength(100);
     expect(response.updates.every((update) =>
@@ -1328,34 +1282,22 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("prepares an N=100 token incident outside BEGIN and uses one DB-only write per transaction", async () => {
     const harness = createRuntimeApplyFanoutHarness();
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: harness.records.map((record) => ({
-            connectionId: record.id,
-            credential: {
-              kind: "oauth_tokens",
-              tokenBundle: {
-                accessToken: `new-access:${record.id}`,
-                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-                keyVersion: "kv_runtime",
-                refreshToken: `new-refresh:${record.id}`,
-                tokenVersion: 3,
-              },
-            },
-            observedConnectedAt: record.connectedAt,
-            observedTokenVersion: 3,
-          })),
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates(harness.records.map((record) => ({
+      connectionId: record.id,
+      credential: {
+        kind: "oauth_tokens",
+        tokenBundle: {
+          accessToken: `new-access:${record.id}`,
+          accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+          keyVersion: "kv_runtime",
+          refreshToken: `new-refresh:${record.id}`,
+          tokenVersion: 3,
+        },
+      },
+      observedConnectedAt: record.connectedAt,
+      observedTokenVersion: 3,
+    })));
 
     expect(response.updates).toHaveLength(100);
     expect(response.updates.every((update) =>
@@ -1387,30 +1329,18 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("bounds the composed N=100 by 64-source apply to 6,400 serial source writes", async () => {
     const harness = createRuntimeApplyFanoutHarness();
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: harness.records.map((record) => ({
-            connectionId: record.id,
-            observedConnectedAt: record.connectedAt,
-            sources: Array.from({ length: 64 }, (_, index) => ({
-              lastSeenAt: "2026-04-06T10:00:00.000Z",
-              observedLastSeenAt: null,
-              sourceInstanceKey: `${record.id}:source:${index}`,
-              sourceProviderSlug: `source_${index}`,
-              status: "connected",
-            })),
-          })),
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates(harness.records.map((record) => ({
+      connectionId: record.id,
+      observedConnectedAt: record.connectedAt,
+      sources: Array.from({ length: 64 }, (_, index) => ({
+        lastSeenAt: "2026-04-06T10:00:00.000Z",
+        observedLastSeenAt: null,
+        sourceInstanceKey: `${record.id}:source:${index}`,
+        sourceProviderSlug: `source_${index}`,
+        status: "connected",
+      })),
+    })));
 
     expect(response.updates).toHaveLength(100);
     expect(response.updates.every((update) =>
@@ -1482,34 +1412,22 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     const harness = createAuthorityHarness({
       beforeConnectionMutationLock: mutate,
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{
-            connectionId: "conn_123",
-            credential: {
-              kind: "oauth_tokens",
-              tokenBundle: {
-                accessToken: "fresh-access-token",
-                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-                keyVersion: "kv_runtime",
-                refreshToken: "fresh-refresh-token",
-                tokenVersion: 3,
-              },
-            },
-            observedConnectedAt: "2026-04-06T09:00:00.000Z",
-            observedTokenVersion: 3,
-          }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([{
+      connectionId: "conn_123",
+      credential: {
+        kind: "oauth_tokens",
+        tokenBundle: {
+          accessToken: "fresh-access-token",
+          accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+          keyVersion: "kv_runtime",
+          refreshToken: "fresh-refresh-token",
+          tokenVersion: 3,
+        },
+      },
+      observedConnectedAt: "2026-04-06T09:00:00.000Z",
+      observedTokenVersion: 3,
+    }]);
 
     expect(response.updates[0]).toMatchObject({
       connectionId: "conn_123",
@@ -1529,34 +1447,22 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
       preparedTokenRootKeyId: "device-root-active",
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{
-            connectionId: "conn_123",
-            credential: {
-              kind: "oauth_tokens",
-              tokenBundle: {
-                accessToken: "fresh-access-token",
-                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-                keyVersion: "kv_runtime",
-                refreshToken: "fresh-refresh-token",
-                tokenVersion: 3,
-              },
-            },
-            observedConnectedAt: "2026-04-06T09:00:00.000Z",
-            observedTokenVersion: 3,
-          }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([{
+      connectionId: "conn_123",
+      credential: {
+        kind: "oauth_tokens",
+        tokenBundle: {
+          accessToken: "fresh-access-token",
+          accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+          keyVersion: "kv_runtime",
+          refreshToken: "fresh-refresh-token",
+          tokenVersion: 3,
+        },
+      },
+      observedConnectedAt: "2026-04-06T09:00:00.000Z",
+      observedTokenVersion: 3,
+    }]);
 
     expect(response.updates[0]).toMatchObject({
       connectionId: "conn_123",
@@ -1578,20 +1484,8 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("reports missing when a connection appears only after bounded preparation", async () => {
     const harness = createAuthorityHarness({ omitPreparedRecord: true });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{ connectionId: "conn_123" }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([{ connectionId: "conn_123" }]);
 
     expect(response.updates[0]).toEqual({
       connection: null,
@@ -1619,34 +1513,22 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       activeTokenRootKeyId,
       preparedTokenRootKeyId: "device-root-old",
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{
-            connectionId: "conn_123",
-            credential: {
-              kind: "oauth_tokens",
-              tokenBundle: {
-                accessToken: "fresh-access-token",
-                accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-                keyVersion: "kv_runtime",
-                refreshToken: "fresh-refresh-token",
-                tokenVersion: 3,
-              },
-            },
-            observedConnectedAt: "2026-04-06T09:00:00.000Z",
-            observedTokenVersion: 3,
-          }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([{
+      connectionId: "conn_123",
+      credential: {
+        kind: "oauth_tokens",
+        tokenBundle: {
+          accessToken: "fresh-access-token",
+          accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+          keyVersion: "kv_runtime",
+          refreshToken: "fresh-refresh-token",
+          tokenVersion: 3,
+        },
+      },
+      observedConnectedAt: "2026-04-06T09:00:00.000Z",
+      observedTokenVersion: 3,
+    }]);
 
     expect(harness.activeTokenRootRead).toHaveBeenCalledOnce();
     expect(response.updates[0]).toMatchObject({
@@ -1670,30 +1552,18 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       ],
       connectionSources: [buildConnectionSource()],
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{
-            connectionId: "conn_123",
-            observedConnectedAt: "2026-04-06T09:00:00.000Z",
-            sources: [{
-              lastSeenAt: "2026-04-06T10:10:00.000Z",
-              observedLastSeenAt: "2026-04-06T10:05:00.000Z",
-              sourceInstanceKey: "whoop",
-              sourceProviderSlug: "whoop",
-              status: "connected",
-            }],
-          }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([{
+      connectionId: "conn_123",
+      observedConnectedAt: "2026-04-06T09:00:00.000Z",
+      sources: [{
+        lastSeenAt: "2026-04-06T10:10:00.000Z",
+        observedLastSeenAt: "2026-04-06T10:05:00.000Z",
+        sourceInstanceKey: "whoop",
+        sourceProviderSlug: "whoop",
+        status: "connected",
+      }],
+    }]);
 
     expect(response.updates[0]).toMatchObject({
       tokenUpdate: "unchanged",
@@ -1703,63 +1573,39 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
   });
 
   it("rejects omitted observedUpdatedAt fences for connection and local-state mutations", async () => {
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
     await expect(
-      applyHostedDeviceSyncRuntimeResult({
-        request: new Request("https://example.test/device-sync/runtime/apply", {
-          body: JSON.stringify({
-            updates: [
-              {
-                connectionId: "conn_123",
-                localState: {
-                  lastSyncStartedAt: "2026-04-06T10:05:00.000Z",
-                },
-              },
-            ],
-            userId: "user_123",
-          }),
-          method: "POST",
-        }),
-        trustedUserId: "user_123",
-      }),
+      applyRuntimeUpdates([
+        {
+          connectionId: "conn_123",
+          localState: {
+            lastSyncStartedAt: "2026-04-06T10:05:00.000Z",
+          },
+        },
+      ]),
     ).rejects.toThrow(/observedUpdatedAt is required when connection or localState mutations are present/u);
 
     expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
   });
 
   it("rejects omitted observedTokenVersion fences for token mutations", async () => {
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
     await expect(
-      applyHostedDeviceSyncRuntimeResult({
-        request: new Request("https://example.test/device-sync/runtime/apply", {
-          body: JSON.stringify({
-            updates: [
-              {
-                connectionId: "conn_123",
-                credential: {
-                  kind: "oauth_tokens",
-                  tokenBundle: {
-                    accessToken: "fresh-access-token",
-                    accessTokenExpiresAt: null,
-                    keyVersion: "kv_runtime",
-                    refreshToken: "fresh-refresh-token",
-                    tokenVersion: 1,
-                  },
-                },
-              },
-            ],
-            userId: "user_123",
-          }),
-          method: "POST",
-        }),
-        trustedUserId: "user_123",
-      }),
+      applyRuntimeUpdates([
+        {
+          connectionId: "conn_123",
+          credential: {
+            kind: "oauth_tokens",
+            tokenBundle: {
+              accessToken: "fresh-access-token",
+              accessTokenExpiresAt: null,
+              keyVersion: "kv_runtime",
+              refreshToken: "fresh-refresh-token",
+              tokenVersion: 1,
+            },
+          },
+        },
+      ]),
     ).rejects.toThrow(/observedTokenVersion is required when credential mutations are present/u);
 
     expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
@@ -1767,43 +1613,31 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("skips stale observed fences without mutating hosted durable state", async () => {
     const harness = createAuthorityHarness();
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connection: {
-                displayName: "Local Replay",
-              },
-              connectionId: "conn_123",
-              localState: {
-                lastSyncCompletedAt: "2026-04-06T10:05:00.000Z",
-              },
-              observedTokenVersion: 2,
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T09:59:00.000Z",
-              credential: {
-                kind: "oauth_tokens",
-                tokenBundle: {
-                  accessToken: "replayed-access-token",
-                  accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-                  keyVersion: "kv_runtime",
-                  refreshToken: "replayed-refresh-token",
-                  tokenVersion: 2,
-                },
-              },
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connection: {
+          displayName: "Local Replay",
+        },
+        connectionId: "conn_123",
+        localState: {
+          lastSyncCompletedAt: "2026-04-06T10:05:00.000Z",
+        },
+        observedTokenVersion: 2,
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-04-06T09:59:00.000Z",
+        credential: {
+          kind: "oauth_tokens",
+          tokenBundle: {
+            accessToken: "replayed-access-token",
+            accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+            keyVersion: "kv_runtime",
+            refreshToken: "replayed-refresh-token",
+            tokenVersion: 2,
+          },
+        },
+      },
+    ]);
 
     expect(response.updates[0]).toMatchObject({
       connection: expect.objectContaining({
@@ -1840,27 +1674,15 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         updatedAt: "2026-04-06T10:01:00.000Z",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{
-            connection: {
-              metadata: staleMetadata,
-            },
-            connectionId: "conn_junction_weight_reconnect",
-            observedConnectedAt: "2026-04-06T09:00:00.000Z",
-            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-          }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([{
+      connection: {
+        metadata: staleMetadata,
+      },
+      connectionId: "conn_junction_weight_reconnect",
+      observedConnectedAt: "2026-04-06T09:00:00.000Z",
+      observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+    }]);
 
     expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
     expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
@@ -1874,52 +1696,40 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         updatedAt: "2026-04-06T10:31:00.000Z",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connection: {
-                status: "disconnected",
-              },
-              connectionId: "conn_123",
-              credential: {
-                clearTokens: true,
-                kind: "oauth_tokens",
-              },
-              localState: {
-                nextReconcileAt: null,
-              },
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedTokenVersion: 3,
-              observedUpdatedAt: "2026-04-06T10:31:00.000Z",
-              sources: [
-                {
-                  displayName: "Stale source",
-                  firstSeenAt: "2026-04-06T09:00:00.000Z",
-                  lastDataAt: "2026-04-06T10:29:00.000Z",
-                  lastErrorCode: null,
-                  lastErrorMessage: null,
-                  lastSeenAt: "2026-04-06T10:30:00.000Z",
-                  observedLastSeenAt: null,
-                  resourceAvailabilitySummary: { sleep: true },
-                  sourceInstanceKey: "oura_primary",
-                  sourceProviderSlug: "oura",
-                  status: "connected",
-                },
-              ],
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connection: {
+          status: "disconnected",
+        },
+        connectionId: "conn_123",
+        credential: {
+          clearTokens: true,
+          kind: "oauth_tokens",
+        },
+        localState: {
+          nextReconcileAt: null,
+        },
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedTokenVersion: 3,
+        observedUpdatedAt: "2026-04-06T10:31:00.000Z",
+        sources: [
+          {
+            displayName: "Stale source",
+            firstSeenAt: "2026-04-06T09:00:00.000Z",
+            lastDataAt: "2026-04-06T10:29:00.000Z",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T10:30:00.000Z",
+            observedLastSeenAt: null,
+            resourceAvailabilitySummary: { sleep: true },
+            sourceInstanceKey: "oura_primary",
+            sourceProviderSlug: "oura",
+            status: "connected",
+          },
+        ],
+      },
+    ]);
 
     expect(response.updates[0]).toMatchObject({
       connection: expect.objectContaining({
@@ -1945,28 +1755,16 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("treats a deploy-skewed apply without observedConnectedAt as superseded", async () => {
     const harness = createAuthorityHarness();
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              localState: {
-                nextReconcileAt: null,
-              },
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connectionId: "conn_123",
+        localState: {
+          nextReconcileAt: null,
+        },
+        observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+      },
+    ]);
 
     expect(response.updates[0]).toMatchObject({
       connectionId: "conn_123",
@@ -1984,27 +1782,15 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         status: "reauthorization_required",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              localState: { clearError: true },
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connectionId: "conn_123",
+        localState: { clearError: true },
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+      },
+    ]);
 
     expect(response.updates[0]).toMatchObject({
       connectionId: "conn_123",
@@ -2038,40 +1824,28 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           },
         ],
       });
-      const { applyHostedDeviceSyncRuntimeResult } = await import(
-        "@/src/lib/device-sync/hosted-runtime-authority"
-      );
 
-      await applyHostedDeviceSyncRuntimeResult({
-        request: new Request("https://example.test/device-sync/runtime/apply", {
-          body: JSON.stringify({
-            updates: [
-              {
-                connectionId: "conn_123",
-                observedConnectedAt: "2026-04-06T09:00:00.000Z",
-                sources: [
-                  {
-                    displayName: null,
-                    firstSeenAt: "2026-04-06T09:00:00.000Z",
-                    lastDataAt,
-                    lastErrorCode: null,
-                    lastErrorMessage: null,
-                    lastSeenAt: "2026-04-06T10:05:00.000Z",
-                    observedLastSeenAt: "2026-04-06T10:00:00.000Z",
-                    resourceAvailabilitySummary: { activity: true },
-                    sourceInstanceKey: "junction_garmin",
-                    sourceProviderSlug: "garmin",
-                    status: "connected",
-                  },
-                ],
-              },
-            ],
-            userId: "user_123",
-          }),
-          method: "POST",
-        }),
-        trustedUserId: "user_123",
-      });
+      await applyRuntimeUpdates([
+        {
+          connectionId: "conn_123",
+          observedConnectedAt: "2026-04-06T09:00:00.000Z",
+          sources: [
+            {
+              displayName: null,
+              firstSeenAt: "2026-04-06T09:00:00.000Z",
+              lastDataAt,
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: "2026-04-06T10:05:00.000Z",
+              observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+              resourceAvailabilitySummary: { activity: true },
+              sourceInstanceKey: "junction_garmin",
+              sourceProviderSlug: "garmin",
+              status: "connected",
+            },
+          ],
+        },
+      ]);
 
       return harness.upsertConnectionSource;
     };
@@ -2128,40 +1902,28 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         updatedAt: "2026-08-11T01:00:00.000Z",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{
-            connectionId,
-            observedConnectedAt: "2026-04-06T09:00:00.000Z",
-            observedUpdatedAt: "2026-08-11T01:00:00.000Z",
-            sources: [{
-              displayName: "Google Health",
-              firstSeenAt: "2026-08-10T01:00:00.000Z",
-              lastDataAt: "2026-08-10T02:00:00.000Z",
-              lastErrorCode: null,
-              lastErrorMessage: null,
-              lastSeenAt: "2026-08-11T01:05:00.000Z",
-              observedLastSeenAt: "2026-08-11T01:00:00.000Z",
-              resourceAvailabilitySummary: {
-                activity: true,
-                historicalBackfillCompletedAt: "2026-08-10T02:00:00.000Z",
-              },
-              sourceInstanceKey: runtimeSourceInstanceKey,
-              sourceProviderSlug: "google_health",
-              status: "connected",
-            }],
-          }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([{
+      connectionId,
+      observedConnectedAt: "2026-04-06T09:00:00.000Z",
+      observedUpdatedAt: "2026-08-11T01:00:00.000Z",
+      sources: [{
+        displayName: "Google Health",
+        firstSeenAt: "2026-08-10T01:00:00.000Z",
+        lastDataAt: "2026-08-10T02:00:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-08-11T01:05:00.000Z",
+        observedLastSeenAt: "2026-08-11T01:00:00.000Z",
+        resourceAvailabilitySummary: {
+          activity: true,
+          historicalBackfillCompletedAt: "2026-08-10T02:00:00.000Z",
+        },
+        sourceInstanceKey: runtimeSourceInstanceKey,
+        sourceProviderSlug: "google_health",
+        status: "connected",
+      }],
+    }]);
 
     expect(response.updates[0]).toMatchObject({
       connectionId,
@@ -2170,33 +1932,24 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
     expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
 
-    const currentEpochResponse = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{
-            connectionId,
-            observedConnectedAt: "2026-04-06T09:00:00.000Z",
-            observedUpdatedAt: "2026-08-11T01:00:00.000Z",
-            sources: [{
-              displayName: "Google Health",
-              firstSeenAt: "2026-08-11T01:00:00.000Z",
-              lastDataAt: "2026-08-11T01:10:00.000Z",
-              lastErrorCode: null,
-              lastErrorMessage: null,
-              lastSeenAt: "2026-08-11T01:10:00.000Z",
-              observedLastSeenAt: "2026-08-11T01:00:00.000Z",
-              resourceAvailabilitySummary: { activity: true },
-              sourceInstanceKey: runtimeSourceInstanceKey,
-              sourceProviderSlug: "google_health",
-              status: "connected",
-            }],
-          }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const currentEpochResponse = await applyRuntimeUpdates([{
+      connectionId,
+      observedConnectedAt: "2026-04-06T09:00:00.000Z",
+      observedUpdatedAt: "2026-08-11T01:00:00.000Z",
+      sources: [{
+        displayName: "Google Health",
+        firstSeenAt: "2026-08-11T01:00:00.000Z",
+        lastDataAt: "2026-08-11T01:10:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-08-11T01:10:00.000Z",
+        observedLastSeenAt: "2026-08-11T01:00:00.000Z",
+        resourceAvailabilitySummary: { activity: true },
+        sourceInstanceKey: runtimeSourceInstanceKey,
+        sourceProviderSlug: "google_health",
+        status: "connected",
+      }],
+    }]);
 
     expect(currentEpochResponse.updates[0]).toMatchObject({
       connectionId,
@@ -2301,43 +2054,31 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         updatedAt: "2026-04-06T10:00:00.000Z",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{
-            connectionId,
-            observedConnectedAt: "2026-04-06T09:00:00.000Z",
-            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-            sources: [{
-              displayName: null,
-              firstSeenAt: "2026-04-06T09:00:00.000Z",
-              lastErrorCode: null,
-              lastErrorMessage: null,
-              lastSeenAt: "2026-04-06T10:05:00.000Z",
-              observedLifecycleEpoch,
-              observedLastSeenAt: "2026-04-06T10:00:00.000Z",
-              resourceAvailabilitySummary: { sleep: true },
-              sourceInstanceKey: "projectedSourceInstanceKey" in scenario
-                && typeof scenario.projectedSourceInstanceKey === "string"
-                ? scenario.projectedSourceInstanceKey
-                : sourceInstanceKey,
-              sourceProviderSlug: "projectedSourceProviderSlug" in scenario
-                && typeof scenario.projectedSourceProviderSlug === "string"
-                ? scenario.projectedSourceProviderSlug
-                : currentSourceProviderSlug,
-              status: projectedStatus,
-            }],
-          }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([{
+      connectionId,
+      observedConnectedAt: "2026-04-06T09:00:00.000Z",
+      observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+      sources: [{
+        displayName: null,
+        firstSeenAt: "2026-04-06T09:00:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-06T10:05:00.000Z",
+        observedLifecycleEpoch,
+        observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+        resourceAvailabilitySummary: { sleep: true },
+        sourceInstanceKey: "projectedSourceInstanceKey" in scenario
+          && typeof scenario.projectedSourceInstanceKey === "string"
+          ? scenario.projectedSourceInstanceKey
+          : sourceInstanceKey,
+        sourceProviderSlug: "projectedSourceProviderSlug" in scenario
+          && typeof scenario.projectedSourceProviderSlug === "string"
+          ? scenario.projectedSourceProviderSlug
+          : currentSourceProviderSlug,
+        status: projectedStatus,
+      }],
+    }]);
 
     expect(response.updates[0]).toMatchObject({
       connectionId,
@@ -2364,42 +2105,30 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         },
       ],
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              sources: [
-                {
-                  // Every field matches the current row except the arrival, which
-                  // is exactly the shape a live carrier produces.
-                  displayName: null,
-                  firstSeenAt: "2026-04-06T09:00:00.000Z",
-                  lastDataAt: "2026-04-09T00:00:00.000Z",
-                  lastErrorCode: null,
-                  lastErrorMessage: null,
-                  lastSeenAt: "2026-04-06T10:05:00.000Z",
-                  observedLastSeenAt: "2026-04-06T10:05:00.000Z",
-                  resourceAvailabilitySummary: { activity: true },
-                  sourceInstanceKey: "junction_garmin",
-                  sourceProviderSlug: "garmin",
-                  status: "connected",
-                },
-              ],
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    await applyRuntimeUpdates([
+      {
+        connectionId: "conn_123",
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        sources: [
+          {
+            // Every field matches the current row except the arrival, which
+            // is exactly the shape a live carrier produces.
+            displayName: null,
+            firstSeenAt: "2026-04-06T09:00:00.000Z",
+            lastDataAt: "2026-04-09T00:00:00.000Z",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T10:05:00.000Z",
+            observedLastSeenAt: "2026-04-06T10:05:00.000Z",
+            resourceAvailabilitySummary: { activity: true },
+            sourceInstanceKey: "junction_garmin",
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
+      },
+    ]);
 
     // Dropping lastDataAt from the no-op comparison would silently discard this
     // and leave the stale timestamp behind as a false stall.
@@ -2452,37 +2181,25 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         updatedAt: "2026-04-06T10:00:00.000Z",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [{
-            connectionId,
-            observedConnectedAt: "2026-04-06T09:00:00.000Z",
-            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-            sources: [{
-              displayName: null,
-              firstSeenAt: "2026-04-06T09:00:00.000Z",
-              lastErrorCode: null,
-              lastErrorMessage: null,
-              lastSeenAt: "2026-04-06T10:05:00.000Z",
-              observedLifecycleEpoch: 2,
-              observedLastSeenAt: "2026-04-06T10:00:00.000Z",
-              resourceAvailabilitySummary: { activity: true, workouts: true },
-              sourceInstanceKey: canonicalSourceInstanceKey,
-              sourceProviderSlug: "apple_health_kit",
-              status: "connected",
-            }],
-          }],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([{
+      connectionId,
+      observedConnectedAt: "2026-04-06T09:00:00.000Z",
+      observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+      sources: [{
+        displayName: null,
+        firstSeenAt: "2026-04-06T09:00:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-06T10:05:00.000Z",
+        observedLifecycleEpoch: 2,
+        observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+        resourceAvailabilitySummary: { activity: true, workouts: true },
+        sourceInstanceKey: canonicalSourceInstanceKey,
+        sourceProviderSlug: "apple_health_kit",
+        status: "connected",
+      }],
+    }]);
 
     expect(response.updates[0]?.writeUpdate).toBe("applied");
     expect(harness.upsertConnectionSource).toHaveBeenCalledWith(
@@ -2516,39 +2233,27 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       ],
     });
     harness.store.hasPendingDirtyConnection.mockResolvedValue(dirty);
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        method: "POST",
-        body: JSON.stringify({
-          userId: "user_123",
-          updates: [{
-            connectionId: "conn_123",
-            observedConnectedAt: "2026-04-06T09:00:00.000Z",
-            observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-            sources: [
-              {
-                sourceInstanceKey: "fitbit",
-                sourceProviderSlug: "fitbit",
-                observedLastSeenAt: "2026-04-06T10:00:00.000Z",
-                lastSeenAt: "2026-04-06T10:05:00.000Z",
-                status: "disconnected",
-              },
-              ...(google === "pending" ? [{
-                sourceInstanceKey: "google_health",
-                sourceProviderSlug: "google_health",
-                observedLastSeenAt: null,
-                lastSeenAt: "2026-04-06T10:05:00.000Z",
-                status: "connected",
-              }] : []),
-            ],
-          }],
-        }),
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([{
+      connectionId: "conn_123",
+      observedConnectedAt: "2026-04-06T09:00:00.000Z",
+      observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+      sources: [
+        {
+          sourceInstanceKey: "fitbit",
+          sourceProviderSlug: "fitbit",
+          observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+          lastSeenAt: "2026-04-06T10:05:00.000Z",
+          status: "disconnected",
+        },
+        ...(google === "pending" ? [{
+          sourceInstanceKey: "google_health",
+          sourceProviderSlug: "google_health",
+          observedLastSeenAt: null,
+          lastSeenAt: "2026-04-06T10:05:00.000Z",
+          status: "connected",
+        }] : []),
+      ],
+    }]);
 
     expect(harness.store.hasPendingDirtyConnection).toHaveBeenCalledTimes(google === "absent" ? 0 : 1);
     const writes = harness.upsertConnectionSource.mock.calls.map(([write]) => write);
@@ -2574,42 +2279,30 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         status: "connected",
       }],
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              sources: [
-                {
-                  displayName: null,
-                  firstSeenAt: "2026-04-06T09:00:00.000Z",
-                  lastErrorCode: null,
-                  lastErrorMessage: null,
-                  lastSeenAt: "2026-04-06T10:05:00.000Z",
-                  observedLastSeenAt: "2026-04-06T10:00:00.000Z",
-                  resourceAvailabilitySummary: {
-                    activity: true,
-                    heartrate: true,
-                  },
-                  sourceInstanceKey: "junction_garmin",
-                  sourceProviderSlug: "garmin",
-                  status: "connected",
-                },
-              ],
+    const response = await applyRuntimeUpdates([
+      {
+        connectionId: "conn_123",
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        sources: [
+          {
+            displayName: null,
+            firstSeenAt: "2026-04-06T09:00:00.000Z",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T10:05:00.000Z",
+            observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+            resourceAvailabilitySummary: {
+              activity: true,
+              heartrate: true,
             },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+            sourceInstanceKey: "junction_garmin",
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
+      },
+    ]);
 
     expect(response.updates[0]).toMatchObject({
       connectionId: "conn_123",
@@ -2675,44 +2368,32 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         updatedAt: "2026-05-26T17:35:33.451Z",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: hostedConnectionId,
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-05-26T17:35:33.451Z",
-              sources: [
-                {
-                  displayName: null,
-                  firstSeenAt: "2026-05-26T17:34:31.976Z",
-                  lastErrorCode: null,
-                  lastErrorMessage: null,
-                  lastSeenAt: "2026-05-26T17:37:45.454Z",
-                  observedLastSeenAt: null,
-                  resourceAvailabilitySummary: {
-                    sleep: true,
-                    steps: true,
-                    workouts: true,
-                  },
-                  sourceInstanceKey: runtimeSourceInstanceKey,
-                  sourceProviderSlug: "garmin",
-                  status: "connected",
-                },
-              ],
+    const response = await applyRuntimeUpdates([
+      {
+        connectionId: hostedConnectionId,
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-05-26T17:35:33.451Z",
+        sources: [
+          {
+            displayName: null,
+            firstSeenAt: "2026-05-26T17:34:31.976Z",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-05-26T17:37:45.454Z",
+            observedLastSeenAt: null,
+            resourceAvailabilitySummary: {
+              sleep: true,
+              steps: true,
+              workouts: true,
             },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+            sourceInstanceKey: runtimeSourceInstanceKey,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
+      },
+    ]);
 
     expect(response.updates[0]).toMatchObject({
       connectionId: hostedConnectionId,
@@ -2786,49 +2467,37 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         provider: "junction",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connection: {
-                metadata: {
-                  junctionHistoricalBackfillEmptyAttempts: 0,
-                  junctionHistoricalBackfillLastEmptyAt: null,
-                  junctionHistoricalBackfillStatus: "complete",
-                  junctionHistoricalBackfillWindowEnd: windowEnd,
-                  junctionHistoricalBackfillWindowStart: windowStart,
-                },
-              },
-              connectionId: hostedConnectionId,
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-              sources: [
-                {
-                  displayName: "Garmin",
-                  firstSeenAt: "2026-04-01T09:00:00.000Z",
-                  lastErrorCode: null,
-                  lastErrorMessage: null,
-                  lastSeenAt: "2026-04-04T09:05:00.000Z",
-                  observedLastSeenAt: null,
-                  resourceAvailabilitySummary: { activity: true, sleep: true },
-                  sourceInstanceKey: runtimeSourceInstanceKey,
-                  sourceProviderSlug: "garmin",
-                  status: "connected",
-                },
-              ],
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connection: {
+          metadata: {
+            junctionHistoricalBackfillEmptyAttempts: 0,
+            junctionHistoricalBackfillLastEmptyAt: null,
+            junctionHistoricalBackfillStatus: "complete",
+            junctionHistoricalBackfillWindowEnd: windowEnd,
+            junctionHistoricalBackfillWindowStart: windowStart,
+          },
+        },
+        connectionId: hostedConnectionId,
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+        sources: [
+          {
+            displayName: "Garmin",
+            firstSeenAt: "2026-04-01T09:00:00.000Z",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-04T09:05:00.000Z",
+            observedLastSeenAt: null,
+            resourceAvailabilitySummary: { activity: true, sleep: true },
+            sourceInstanceKey: runtimeSourceInstanceKey,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
+      },
+    ]);
 
     expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
     expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
@@ -2876,35 +2545,23 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         provider: "junction",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connection: {
-                metadata: {
-                  junctionHistoricalBackfillEmptyAttempts: 5,
-                  junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:05:00.000Z",
-                  junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
-                  junctionHistoricalBackfillWindowEnd: windowEnd,
-                  junctionHistoricalBackfillWindowStart: windowStart,
-                },
-              },
-              connectionId: hostedConnectionId,
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connection: {
+          metadata: {
+            junctionHistoricalBackfillEmptyAttempts: 5,
+            junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:05:00.000Z",
+            junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
+            junctionHistoricalBackfillWindowEnd: windowEnd,
+            junctionHistoricalBackfillWindowStart: windowStart,
+          },
+        },
+        connectionId: hostedConnectionId,
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+      },
+    ]);
 
     expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
     expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
@@ -2946,9 +2603,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       sourceProviderSlug: "garmin",
       status: resetRequired ? "error" as const : "connected" as const,
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
     const cases = [
       {
@@ -3042,13 +2696,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           provider: "junction",
         }),
       });
-      const response = await applyHostedDeviceSyncRuntimeResult({
-        request: new Request("https://example.test/device-sync/runtime/apply", {
-          body: JSON.stringify({ updates: [scenario.update], userId: "user_123" }),
-          method: "POST",
-        }),
-        trustedUserId: "user_123",
-      });
+      const response = await applyRuntimeUpdates([scenario.update]);
 
       expect(response.updates[0]?.writeUpdate, scenario.name).toBe(scenario.expectedWrite);
       if (scenario.expectedWrite === "applied") {
@@ -3081,34 +2729,22 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         provider: "junction",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connection: {
-                metadata: {
-                  ...baselineMetadata,
-                  junctionHistoricalBackfillEvidence:
-                    `e2|${windowStart}|${windowEnd}|oura:2`,
-                  providerCursor: "cursor-next",
-                },
-              },
-              connectionId: "conn_junction_evidence_union",
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connection: {
+          metadata: {
+            ...baselineMetadata,
+            junctionHistoricalBackfillEvidence:
+              `e2|${windowStart}|${windowEnd}|oura:2`,
+            providerCursor: "cursor-next",
+          },
+        },
+        connectionId: "conn_junction_evidence_union",
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+      },
+    ]);
 
     expect(response.updates[0]?.writeUpdate).toBe("applied");
     expect(harness.syncDurableConnectionState).toHaveBeenCalledTimes(1);
@@ -3178,40 +2814,28 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         provider: "junction",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: hostedConnectionId,
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-              sources: [
-                {
-                  displayName: "Garmin",
-                  firstSeenAt: "2026-04-01T09:00:00.000Z",
-                  lastErrorCode: null,
-                  lastErrorMessage: null,
-                  lastSeenAt: "2026-04-06T10:05:00.000Z",
-                  observedLastSeenAt: "2026-04-06T10:00:00.000Z",
-                  resourceAvailabilitySummary: { activity: true, sleep: true },
-                  sourceInstanceKey,
-                  sourceProviderSlug: "garmin",
-                  status: "connected",
-                },
-              ],
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connectionId: hostedConnectionId,
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+        sources: [
+          {
+            displayName: "Garmin",
+            firstSeenAt: "2026-04-01T09:00:00.000Z",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T10:05:00.000Z",
+            observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+            resourceAvailabilitySummary: { activity: true, sleep: true },
+            sourceInstanceKey,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
+      },
+    ]);
 
     expect(response.updates[0]?.writeUpdate).toBe("applied");
     expect(harness.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
@@ -3250,40 +2874,28 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         updatedAt: "2026-04-06T10:10:00.000Z",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: hostedConnectionId,
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-              sources: [
-                {
-                  displayName: "Garmin",
-                  firstSeenAt: "2026-04-06T09:00:00.000Z",
-                  lastErrorCode: null,
-                  lastErrorMessage: null,
-                  lastSeenAt: "2026-04-06T10:15:00.000Z",
-                  observedLastSeenAt: "2026-04-06T10:05:00.000Z",
-                  resourceAvailabilitySummary: { activity: true, sleep: true },
-                  sourceInstanceKey,
-                  sourceProviderSlug: "garmin",
-                  status: "connected",
-                },
-              ],
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connectionId: hostedConnectionId,
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+        sources: [
+          {
+            displayName: "Garmin",
+            firstSeenAt: "2026-04-06T09:00:00.000Z",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T10:15:00.000Z",
+            observedLastSeenAt: "2026-04-06T10:05:00.000Z",
+            resourceAvailabilitySummary: { activity: true, sleep: true },
+            sourceInstanceKey,
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
+      },
+    ]);
 
     expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
     expect(harness.upsertConnectionSource).not.toHaveBeenCalled();
@@ -3330,49 +2942,37 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         provider: "junction",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connection: {
-                metadata: {
-                  junctionHistoricalBackfillEmptyAttempts: 5,
-                  junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:05:00.000Z",
-                  junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
-                  junctionHistoricalBackfillWindowEnd: windowEnd,
-                  junctionHistoricalBackfillWindowStart: windowStart,
-                },
-              },
-              connectionId: hostedConnectionId,
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-              sources: [
-                {
-                  displayName: "Garmin",
-                  firstSeenAt: "2026-04-01T09:00:00.000Z",
-                  lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
-                  lastErrorMessage: "Historical data remained incomplete.",
-                  lastSeenAt: "2026-04-06T10:05:00.000Z",
-                  observedLastSeenAt: "2026-04-06T10:00:00.000Z",
-                  resourceAvailabilitySummary: { activity: true },
-                  sourceInstanceKey,
-                  sourceProviderSlug: "garmin",
-                  status: "error",
-                },
-              ],
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connection: {
+          metadata: {
+            junctionHistoricalBackfillEmptyAttempts: 5,
+            junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:05:00.000Z",
+            junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
+            junctionHistoricalBackfillWindowEnd: windowEnd,
+            junctionHistoricalBackfillWindowStart: windowStart,
+          },
+        },
+        connectionId: hostedConnectionId,
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+        sources: [
+          {
+            displayName: "Garmin",
+            firstSeenAt: "2026-04-01T09:00:00.000Z",
+            lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
+            lastErrorMessage: "Historical data remained incomplete.",
+            lastSeenAt: "2026-04-06T10:05:00.000Z",
+            observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+            resourceAvailabilitySummary: { activity: true },
+            sourceInstanceKey,
+            sourceProviderSlug: "garmin",
+            status: "error",
+          },
+        ],
+      },
+    ]);
 
     expect(response.updates[0]?.writeUpdate).toBe("skipped_version_mismatch");
     expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
@@ -3400,41 +3000,29 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         },
       ],
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              sources: [
-                {
-                  displayName: null,
-                  firstSeenAt: "2026-04-06T09:00:00.000Z",
-                  lastErrorCode: null,
-                  lastErrorMessage: null,
-                  lastSeenAt: "2026-04-06T10:05:00.000Z",
-                  observedLastSeenAt: "2026-04-06T10:00:00.000Z",
-                  resourceAvailabilitySummary: {
-                    activity: true,
-                  },
-                  sourceInstanceKey: "junction_garmin",
-                  sourceProviderSlug: "garmin",
-                  status: "connected",
-                },
-              ],
+    const response = await applyRuntimeUpdates([
+      {
+        connectionId: "conn_123",
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        sources: [
+          {
+            displayName: null,
+            firstSeenAt: "2026-04-06T09:00:00.000Z",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T10:05:00.000Z",
+            observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+            resourceAvailabilitySummary: {
+              activity: true,
             },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+            sourceInstanceKey: "junction_garmin",
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
+      },
+    ]);
 
     expect(response.updates[0]).toMatchObject({
       connectionId: "conn_123",
@@ -3453,37 +3041,25 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         refreshLeaseTokenVersion: 3,
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              observedTokenVersion: 3,
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-              credential: {
-                kind: "oauth_tokens",
-                tokenBundle: {
-                  accessToken: "runtime-access-token",
-                  accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-                  keyVersion: "kv_runtime",
-                  refreshToken: "runtime-refresh-token",
-                  tokenVersion: 3,
-                },
-              },
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connectionId: "conn_123",
+        observedTokenVersion: 3,
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+        credential: {
+          kind: "oauth_tokens",
+          tokenBundle: {
+            accessToken: "runtime-access-token",
+            accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+            keyVersion: "kv_runtime",
+            refreshToken: "runtime-refresh-token",
+            tokenVersion: 3,
+          },
+        },
+      },
+    ]);
 
     expect(response.updates[0]).toMatchObject({
       connectionId: "conn_123",
@@ -3514,39 +3090,26 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         updatedAt: "2026-05-19T22:00:44.000Z",
       }),
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          occurredAt: "2026-05-19T22:03:28.000Z",
-          updates: [
-            {
-              connectionId: "conn_whoop",
-              failureDiagnostic: {
-                accountStatus: "reauthorization_required",
-                code: "WHOOP_TOKEN_REQUEST_FAILED",
-                retryable: false,
-              },
-              localState: {
-                lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
-                lastErrorMessage:
-                  "WHOOP token request failed. Provider reason: Refresh token expired. Reconnect WHOOP.",
-                lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
-                nextReconcileAt: "2026-05-20T04:03:27.376Z",
-              },
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-05-19T22:00:44.000Z",
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connectionId: "conn_whoop",
+        failureDiagnostic: {
+          accountStatus: "reauthorization_required",
+          code: "WHOOP_TOKEN_REQUEST_FAILED",
+          retryable: false,
+        },
+        localState: {
+          lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+          lastErrorMessage:
+            "WHOOP token request failed. Provider reason: Refresh token expired. Reconnect WHOOP.",
+          lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
+          nextReconcileAt: "2026-05-20T04:03:27.376Z",
+        },
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-05-19T22:00:44.000Z",
+      },
+    ], "2026-05-19T22:03:28.000Z");
 
     expect(response.updates[0]).toMatchObject({
       connectionId: "conn_whoop",
@@ -3583,37 +3146,24 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
     const originalError = new Error("failure state persistence failed");
     harness.syncDurableConnectionState.mockRejectedValueOnce(originalError);
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    await expect(applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          occurredAt: "2026-05-19T22:03:28.000Z",
-          updates: [
-            {
-              connectionId: "conn_whoop",
-              failureDiagnostic: {
-                accountStatus: "reauthorization_required",
-                code: "WHOOP_TOKEN_REQUEST_FAILED",
-                retryable: false,
-              },
-              localState: {
-                lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
-                lastErrorMessage: "WHOOP token request failed.",
-                lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
-              },
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-05-19T22:00:44.000Z",
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    })).rejects.toBe(originalError);
+    await expect(applyRuntimeUpdates([
+      {
+        connectionId: "conn_whoop",
+        failureDiagnostic: {
+          accountStatus: "reauthorization_required",
+          code: "WHOOP_TOKEN_REQUEST_FAILED",
+          retryable: false,
+        },
+        localState: {
+          lastErrorCode: "WHOOP_TOKEN_REQUEST_FAILED",
+          lastErrorMessage: "WHOOP token request failed.",
+          lastSyncErrorAt: "2026-05-19T22:03:27.378Z",
+        },
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-05-19T22:00:44.000Z",
+      },
+    ], "2026-05-19T22:03:28.000Z")).rejects.toBe(originalError);
 
     expect(harness.syncDurableConnectionState).toHaveBeenCalledTimes(1);
     expect(mocks.writeHostedRuntimeLogs).not.toHaveBeenCalled();
@@ -3621,29 +3171,17 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("does not clear OAuth tokens from a disconnected status update without a credential mutation", async () => {
     const harness = createAuthorityHarness();
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connection: {
-                status: "disconnected",
-              },
-              connectionId: "conn_123",
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connection: {
+          status: "disconnected",
+        },
+        connectionId: "conn_123",
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+      },
+    ]);
 
     expect(response.updates[0]).toMatchObject({
       connection: expect.objectContaining({
@@ -3676,30 +3214,18 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
       storedAccount: null,
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const clearResponse = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedTokenVersion: null,
-              credential: {
-                clearTokens: true,
-                kind: "oauth_tokens",
-              },
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const clearResponse = await applyRuntimeUpdates([
+      {
+        connectionId: "conn_123",
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedTokenVersion: null,
+        credential: {
+          clearTokens: true,
+          kind: "oauth_tokens",
+        },
+      },
+    ]);
 
     expect(clearResponse.updates[0]).toMatchObject({
       connection: expect.objectContaining({
@@ -3727,32 +3253,23 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.store.getConnectionForUser).not.toHaveBeenCalled();
     expect(harness.storedAccount).toBeNull();
 
-    const retokenizedResponse = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedTokenVersion: null,
-              credential: {
-                kind: "oauth_tokens",
-                tokenBundle: {
-                  accessToken: "fresh-access-token",
-                  accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
-                  keyVersion: "kv_runtime",
-                  refreshToken: "fresh-refresh-token",
-                  tokenVersion: 1,
-                },
-              },
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const retokenizedResponse = await applyRuntimeUpdates([
+      {
+        connectionId: "conn_123",
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedTokenVersion: null,
+        credential: {
+          kind: "oauth_tokens",
+          tokenBundle: {
+            accessToken: "fresh-access-token",
+            accessTokenExpiresAt: "2026-04-07T00:00:00.000Z",
+            keyVersion: "kv_runtime",
+            refreshToken: "fresh-refresh-token",
+            tokenVersion: 1,
+          },
+        },
+      },
+    ]);
 
     expect(retokenizedResponse.updates[0]).toMatchObject({
       connection: expect.objectContaining({
@@ -3803,9 +3320,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
       storedAccount: null,
     });
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
     const records = Array.from(
       { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT },
       (_, index) => buildHostedRecord({
@@ -3820,15 +3334,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
 
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await readRuntimeSnapshot();
 
     expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3868,9 +3374,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("uses one set-based source read and no connection re-reads for unscoped snapshots", async () => {
     const harness = createAuthorityHarness();
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
     const records = [
       buildHostedRecord({ id: "conn_a", updatedAt: "2026-04-06T10:03:00.000Z" }),
       buildHostedRecord({ id: "conn_b", updatedAt: "2026-04-06T10:02:00.000Z" }),
@@ -3895,15 +3398,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
     harness.store.listBoundedConnectionSourcesForConnections.mockResolvedValue(sources);
 
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await readRuntimeSnapshot();
 
     expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledTimes(1);
     expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledTimes(1);
@@ -3934,9 +3429,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("uses a hard 32-row stable keyset page regardless of the caller limit", async () => {
     const harness = createAuthorityHarness();
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
     const baseTime = Date.parse("2026-04-06T12:00:00.000Z");
     const records = Array.from(
       { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT + 1 },
@@ -3948,15 +3440,8 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     );
     harness.store.prisma.deviceConnection.findMany.mockResolvedValueOnce(records);
 
-    const firstPage = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          limit: 10_000,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    const firstPage = await readRuntimeSnapshot({
+      limit: 10_000,
     });
 
     expect(firstPage.connections).toHaveLength(
@@ -3981,16 +3466,9 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     );
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValueOnce([records[32]!]);
-    const secondPage = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          cursor: firstPage.nextCursor,
-          limit: 10_000,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    const secondPage = await readRuntimeSnapshot({
+      cursor: firstPage.nextCursor,
+      limit: 10_000,
     });
 
     expect(secondPage.connections.map((entry) => entry.connection.id)).toEqual([
@@ -4019,23 +3497,13 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("filters hosted snapshots by direct providers and aggregator-backed source aliases", async () => {
     const harness = createAuthorityHarness();
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
 
-    await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          limit: 4,
-          provider: "whoop",
-          sourceProviderSlug: "fitbit",
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    await readRuntimeSnapshot({
+      limit: 4,
+      provider: "whoop",
+      sourceProviderSlug: "fitbit",
     });
 
     expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledWith(
@@ -4081,20 +3549,10 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }],
       record: buildHostedRecord({ id: connectionId, provider: "junction" }),
     });
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
 
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          sourceProviderSlug: "apple_health_kit",
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    const response = await readRuntimeSnapshot({
+      sourceProviderSlug: "apple_health_kit",
     });
 
     expect(response.connections).toHaveLength(1);
@@ -4139,23 +3597,13 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }],
       record: buildHostedRecord({ id: connectionId, provider: "junction" }),
     });
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
     // The outer query may still return this physical candidate because a lower
     // legacy alias row is connected. The collapsed source projection owns the
     // final semantic decision.
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
 
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          sourceProviderSlug: "apple_health_kit",
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    const response = await readRuntimeSnapshot({
+      sourceProviderSlug: "apple_health_kit",
     });
 
     expect(response.connections).toEqual([]);
@@ -4190,22 +3638,12 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         provider: "junction",
       }),
     });
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
 
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          limit: 4,
-          sourceProviderSlug: "whoop",
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    const response = await readRuntimeSnapshot({
+      limit: 4,
+      sourceProviderSlug: "whoop",
     });
 
     expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
@@ -4225,21 +3663,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("keeps explicit blank hosted snapshot filters fail-closed", async () => {
     const harness = createAuthorityHarness();
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([]);
 
-    await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          provider: "   ",
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    await readRuntimeSnapshot({
+      provider: "   ",
     });
 
     expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledWith(
@@ -4254,21 +3682,10 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("omits stored OAuth token bundles from snapshot responses unless runtime credential material is requested", async () => {
     const harness = createAuthorityHarness();
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
 
-    const tokenlessResponse = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const tokenlessResponse = await readRuntimeSnapshot();
 
     expect(tokenlessResponse.connections[0]?.credential).toEqual({
       credentialMetadata: {},
@@ -4285,15 +3702,8 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
     );
 
-    const runtimeResponse = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: true,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    const runtimeResponse = await readRuntimeSnapshot({
+      includeCredentialMaterial: true,
     });
 
     expect(runtimeResponse.connections[0]?.credential).toMatchObject({
@@ -4326,20 +3736,10 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     const harness = createAuthorityHarness();
     const secretError = new Error("kms unavailable");
     harness.readRuntimeConnectionSecretMaterial.mockRejectedValue(secretError);
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
 
-    await expect(readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: true,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    await expect(readRuntimeSnapshot({
+      includeCredentialMaterial: true,
     })).rejects.toBe(secretError);
   });
 
@@ -4351,20 +3751,10 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
       storedAccount: null,
     });
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
 
-    await expect(readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: true,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    await expect(readRuntimeSnapshot({
+      includeCredentialMaterial: true,
     })).rejects.toThrow(/missing its external account identity/u);
 
     expect(harness.readRuntimeConnectionSecretMaterial).not.toHaveBeenCalled();
@@ -4377,9 +3767,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
       storedAccount: null,
     });
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
     harness.readRuntimeConnectionSecretMaterial.mockResolvedValue(new Map([
       ["conn_123", {
@@ -4388,15 +3775,8 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }],
     ]));
 
-    await expect(readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: true,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    await expect(readRuntimeSnapshot({
+      includeCredentialMaterial: true,
     })).rejects.toThrow(/missing its external account identity/u);
 
     expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledOnce();
@@ -4410,21 +3790,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         refreshLeaseTokenVersion: 3,
       }),
     });
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
 
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: true,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    const response = await readRuntimeSnapshot({
+      includeCredentialMaterial: true,
     });
 
     expect(response.connections[0]?.credential).toEqual({
@@ -4445,21 +3815,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         status: "reauthorization_required",
       })),
     });
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
 
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          includeCredentialMaterial: true,
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
+    const response = await readRuntimeSnapshot({
+      includeCredentialMaterial: true,
     });
 
     expect(response.connections[0]?.credential).toEqual({
@@ -4495,20 +3855,9 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
       storedAccount: null,
     });
-    const { readHostedDeviceSyncRuntimeState } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
     harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
-    const response = await readHostedDeviceSyncRuntimeState({
-      request: new Request("https://example.test/device-sync/runtime/snapshot", {
-        body: JSON.stringify({
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await readRuntimeSnapshot();
 
     expect(response.connections[0]).not.toHaveProperty("tokenBundle");
     expect(response.connections[0]).toMatchObject({
@@ -4544,30 +3893,18 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
       storedAccount: null,
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connection: {
-                setupExpiresAt: null,
-                setupPhase: "source_confirmed",
-              },
-              connectionId: "conn_123",
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedUpdatedAt: "2026-04-06T10:00:00.000Z",
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connection: {
+          setupExpiresAt: null,
+          setupPhase: "source_confirmed",
+        },
+        connectionId: "conn_123",
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedUpdatedAt: "2026-04-06T10:00:00.000Z",
+      },
+    ]);
 
     expect(response.updates[0]).toMatchObject({
       connection: expect.objectContaining({
@@ -4599,35 +3936,23 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
       storedAccount: null,
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              credential: {
-                kind: "provider_config",
-                providerConfigKey: "junction",
-                credentialMetadata: {
-                  client_user_id: "raw-client-user",
-                  hmacSecret: "do-not-store",
-                  region: "us",
-                },
-              },
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedTokenVersion: null,
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connectionId: "conn_123",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+          credentialMetadata: {
+            client_user_id: "raw-client-user",
+            hmacSecret: "do-not-store",
+            region: "us",
+          },
+        },
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedTokenVersion: null,
+      },
+    ]);
 
     expect(response.updates[0]).toMatchObject({
       connectionId: "conn_123",
@@ -4661,30 +3986,18 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
   it("rejects provider-config runtime credential replacement for OAuth manifest providers", async () => {
     const harness = createAuthorityHarness();
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    await expect(applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              credential: {
-                kind: "provider_config",
-                providerConfigKey: "junction",
-              },
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedTokenVersion: null,
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    })).rejects.toThrow(/credential.*oauth_tokens|provider-config.*profile/u);
+    await expect(applyRuntimeUpdates([
+      {
+        connectionId: "conn_123",
+        credential: {
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedTokenVersion: null,
+      },
+    ])).rejects.toThrow(/credential.*oauth_tokens|provider-config.*profile/u);
     expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
     expect(harness.updateConnectionRecord).not.toHaveBeenCalled();
   });
@@ -4700,37 +4013,25 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
       storedAccount: null,
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    const response = await applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              credential: {
-                kind: "none",
-                credentialMetadata: {
-                  authHeader: "Bearer drop-me",
-                  client: "raw-client",
-                  reason: "manual_disconnect",
-                  owner: "raw-owner",
-                  sourceCount: 2,
-                  user: "raw-user",
-                },
-              },
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedTokenVersion: null,
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    });
+    const response = await applyRuntimeUpdates([
+      {
+        connectionId: "conn_123",
+        credential: {
+          kind: "none",
+          credentialMetadata: {
+            authHeader: "Bearer drop-me",
+            client: "raw-client",
+            reason: "manual_disconnect",
+            owner: "raw-owner",
+            sourceCount: 2,
+            user: "raw-user",
+          },
+        },
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedTokenVersion: null,
+      },
+    ]);
 
     expect(response.updates[0]).toMatchObject({
       connectionId: "conn_123",
@@ -4767,30 +4068,18 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       }),
       storedAccount: null,
     });
-    const { applyHostedDeviceSyncRuntimeResult } = await import(
-      "@/src/lib/device-sync/hosted-runtime-authority"
-    );
 
-    await expect(applyHostedDeviceSyncRuntimeResult({
-      request: new Request("https://example.test/device-sync/runtime/apply", {
-        body: JSON.stringify({
-          updates: [
-            {
-              connectionId: "conn_123",
-              observedConnectedAt: "2026-04-06T09:00:00.000Z",
-              observedTokenVersion: null,
-              credential: {
-                clearTokens: true,
-                kind: "oauth_tokens",
-              },
-            },
-          ],
-          userId: "user_123",
-        }),
-        method: "POST",
-      }),
-      trustedUserId: "user_123",
-    })).rejects.toThrow(/credential update for junction must match/u);
+    await expect(applyRuntimeUpdates([
+      {
+        connectionId: "conn_123",
+        observedConnectedAt: "2026-04-06T09:00:00.000Z",
+        observedTokenVersion: null,
+        credential: {
+          clearTokens: true,
+          kind: "oauth_tokens",
+        },
+      },
+    ])).rejects.toThrow(/credential update for junction must match/u);
     expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
   });
 

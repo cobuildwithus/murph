@@ -2,6 +2,7 @@ import { recapGenerationId } from '@/src/lib/game/recap-media';
 import { claimHostedRuntimeResourceCleanup } from '@/src/lib/hosted-execution/runtime-resource-cleanup';
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { registerRecapAssetsTx } from "@/src/lib/game/recap-retirement";
+import { recapReferencesCurrent } from "@/src/lib/game/recap-asset-access";
 import { randomUUID } from "node:crypto";
 
 import { afterAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
@@ -114,6 +115,27 @@ async function deleteAccount(memberId: string) {
 }
 
 describe.skipIf(!runPostgresProof)("weekly game when a player deletes their account", () => {
+  it.each(["owner", "subject"] as const)("revokes contact-photo recaps and retires their media when the %s deletes", async role => {
+    const owner = await member("Owner"), subject = await member("Subject"), db = getPrisma();
+    const gameId = await live(owner, subject);
+    await devSettleNow(gameId, owner);
+    const key = "synthetic-contact-photo";
+    const where = { ownerMemberId_subjectMemberId: { ownerMemberId: owner, subjectMemberId: subject } };
+    await db.gameContactLabel.update({ where, data: { photoKey: key } });
+    const assets = [{ references: [{ kind: "contact" as const, memberId: subject, key }] }];
+    expect(await recapReferencesCurrent(db, gameId, assets)).toBe(true);
+    const generationId = recapGenerationId(`synthetic-contact:${gameId}`);
+    await db.$transaction(tx => registerRecapAssetsTx(tx, { gameId, generationId, ownerMemberId: owner,
+      storageKeys: [`recap/${generationId}/${"a".repeat(64)}.jpg`], acceptedAt: new Date(), recoveryUntil: new Date(Date.now() + 600_000) }));
+    await deleteAccount(role === "owner" ? owner : subject);
+    expect(await recapReferencesCurrent(db, gameId, assets)).toBe(false);
+    expect(await db.gameContactLabel.findUnique({ where })).toBeNull();
+    const receipts = await db.gameRecapAsset.findMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].retiredAt).not.toBeNull();
+    await db.gameRecapAsset.deleteMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
+  });
+
   it("uses the actor and type index for the paged note selector", async () => {
     const owner = await member("Planner");
     const [gameId] = await seedHistory(owner, 1);

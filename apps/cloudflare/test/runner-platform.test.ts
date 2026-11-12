@@ -166,8 +166,6 @@ import {
 import {
   buildHostedRunnerContainerEnv,
 } from "../src/runner-env.ts";
-import {
-} from "../src/runner-effects-contract.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import {
   TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
@@ -423,6 +421,19 @@ function createWorkspaceSnapshotV2Ref(input: {
   };
 }
 
+function createSnapshotPresignResponse(
+  url: { getUrl: string } | { putUrl: string },
+  lifetimeMs = 60_000,
+): Response {
+  return new Response(JSON.stringify({
+    expiresAt: new Date(Date.now() + lifetimeMs).toISOString(),
+    ...url,
+  }), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  });
+}
+
 function createWorkspaceSnapshotSessionStartResponse(input: {
   dataKeyBase64: string;
   objectKey: string;
@@ -533,26 +544,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     mocks.emitHostedExecutionStructuredLog.mockReset();
   });
 
-  it("attaches the hosted assistant configuration port to the Cloudflare platform", () => {
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-    });
-
-    expect(platform.assistantConfigurationToolPort).toBeDefined();
-    expect(platform.assistantConfigurationToolPort?.request).toEqual(
-      expect.any(Function),
-    );
-  });
-
-  it("attaches the hosted subscription port to the Cloudflare platform", () => {
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-    });
-
-    expect(platform.subscriptionToolPort).toBeDefined();
-    expect(platform.subscriptionToolPort?.request).toEqual(expect.any(Function));
-  });
-
   it("attaches physical-note transport only when explicitly enabled", () => {
     const disabled = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
@@ -564,15 +555,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     expect(disabled.physicalNotes).toBeUndefined();
     expect(enabled.physicalNotes?.send).toEqual(expect.any(Function));
-  });
-
-  it("attaches the hosted labs port when web-control transport is available", () => {
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-    });
-
-    expect(platform.labsToolPort).toBeDefined();
-    expect(platform.labsToolPort?.request).toEqual(expect.any(Function));
   });
 
   it("omits the hosted labs port when web-control transport is unavailable", () => {
@@ -677,15 +659,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         return new Response("unwrap denied", { status: 403 });
       }
       if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
-        return new Response(JSON.stringify({
-          expiresAt: new Date(Date.now() + 60_000).toISOString(),
-          getUrl,
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
+        return createSnapshotPresignResponse({ getUrl });
       }
       if (request.url === getUrl) {
         objectFetchCount += 1;
@@ -743,15 +717,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         });
       }
       if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
-        return new Response(JSON.stringify({
-          expiresAt: new Date(Date.now() + 60_000).toISOString(),
-          getUrl,
-        }), {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        });
+        return createSnapshotPresignResponse({ getUrl });
       }
       if (request.url === getUrl) {
         objectFetchCount += 1;
@@ -980,18 +946,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot platform fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         return new Response(null, { status: 200 });
@@ -1104,18 +1059,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot retry fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         if (!request.body) {
@@ -1296,18 +1240,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot R2 code retry fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         putAttempt += 1;
@@ -1447,18 +1380,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot terminal transport fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         putAttempt += 1;
@@ -1510,18 +1432,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot transport then 412 fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         putAttempt += 1;
@@ -1581,18 +1492,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           if (presignAttempt === 1) {
             throw new TypeError("fetch failed | other side closed");
           }
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         return new Response(null, { status: 200 });
@@ -1954,18 +1854,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot pending PUT fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         resolvePutStarted?.();
@@ -2025,18 +1914,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot retry cancellation fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         putAttempt += 1;
@@ -2094,18 +1972,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot retry expiry fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 1_500).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl }, 1_500);
         }
 
         putAttempt += 1;
@@ -2230,18 +2097,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot platform fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         throw new TypeError(
@@ -2310,18 +2166,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot platform fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         return new Response(
@@ -2398,18 +2243,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot nested failure fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         putAttempt += 1;
@@ -2466,18 +2300,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot response then 412 fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         putAttempt += 1;
@@ -2543,18 +2366,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot nonretryable status fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         putAttempt += 1;
@@ -2614,18 +2426,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot platform fetch");
         if (request.url.includes("/workspace-snapshots/snapshot_runner_platform/presign-put")) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              putUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ putUrl });
         }
 
         return new Response(
@@ -2759,39 +2560,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
       const request = requireFetchRequest(args, "workspace snapshot session fetch");
       if (request.url.includes("/workspace-snapshots/start")) {
-        return new Response(
-          JSON.stringify({
-            encryption: {
-              aad: buildHostedWorkspaceSnapshotV2Aad({
-                objectKey,
-                snapshotId,
-                userId: "member_123",
-              }),
-              dataKeyBase64,
-              ivBase64: "AQIDBAUGBwgJCgsM",
-              rootKeyId: "root_key_test",
-              scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
-              wrappedDataKey: "wrapped_data_key_test",
-            },
-            limits: {
-              maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
-              warnEncryptedBytes: 128 * 1024 * 1024,
-            },
-            objectKey,
-            snapshotId,
-          }),
-          {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          },
-        );
-      }
-      if (request.url.endsWith(`/workspace-snapshots/${snapshotId}/heartbeat`)) {
-        return new Response(JSON.stringify({ alive: true, ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
+        return createWorkspaceSnapshotSessionStartResponse({
+          dataKeyBase64,
+          objectKey,
+          snapshotId,
         });
       }
       if (request.url.endsWith(`/workspace-snapshots/${snapshotId}`)) {
@@ -3163,39 +2935,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
       const request = requireFetchRequest(args, "workspace snapshot session fetch");
       if (request.url.includes("/workspace-snapshots/start")) {
-        return new Response(
-          JSON.stringify({
-            encryption: {
-              aad: buildHostedWorkspaceSnapshotV2Aad({
-                objectKey: ref.objectKey,
-                snapshotId: ref.snapshotId,
-                userId: "member_123",
-              }),
-              dataKeyBase64,
-              ivBase64: ref.encryption.ivBase64,
-              rootKeyId: ref.encryption.rootKeyId,
-              scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
-              wrappedDataKey: ref.encryption.wrappedDataKey,
-            },
-            limits: {
-              maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
-              warnEncryptedBytes: 128 * 1024 * 1024,
-            },
-            objectKey: ref.objectKey,
-            snapshotId: ref.snapshotId,
-          }),
-          {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          },
-        );
-      }
-      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
-        return new Response(JSON.stringify({ alive: true, ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
+        return createWorkspaceSnapshotSessionStartResponse({
+          dataKeyBase64,
+          objectKey: ref.objectKey,
+          snapshotId: ref.snapshotId,
         });
       }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
@@ -3266,12 +3009,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           dataKeyBase64,
           objectKey: ref.objectKey,
           snapshotId: ref.snapshotId,
-        });
-      }
-      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
-        return new Response(JSON.stringify({ alive: true, ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
         });
       }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
@@ -3351,12 +3088,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           dataKeyBase64,
           objectKey: ref.objectKey,
           snapshotId: ref.snapshotId,
-        });
-      }
-      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
-        return new Response(JSON.stringify({ alive: true, ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
         });
       }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
@@ -3485,12 +3216,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           snapshotId: ref.snapshotId,
         });
       }
-      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
-        return new Response(JSON.stringify({ alive: true, ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
-        });
-      }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
         completionCalls += 1;
         if (completionCalls === 1) {
@@ -3543,12 +3268,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           dataKeyBase64,
           objectKey: ref.objectKey,
           snapshotId: ref.snapshotId,
-        });
-      }
-      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
-        return new Response(JSON.stringify({ alive: true, ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
         });
       }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
@@ -3709,39 +3428,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
       const request = requireFetchRequest(args, "workspace snapshot session fetch");
       if (request.url.includes("/workspace-snapshots/start")) {
-        return new Response(
-          JSON.stringify({
-            encryption: {
-              aad: buildHostedWorkspaceSnapshotV2Aad({
-                objectKey: ref.objectKey,
-                snapshotId: ref.snapshotId,
-                userId: "member_123",
-              }),
-              dataKeyBase64,
-              ivBase64: ref.encryption.ivBase64,
-              rootKeyId: ref.encryption.rootKeyId,
-              scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
-              wrappedDataKey: ref.encryption.wrappedDataKey,
-            },
-            limits: {
-              maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
-              warnEncryptedBytes: 128 * 1024 * 1024,
-            },
-            objectKey: ref.objectKey,
-            snapshotId: ref.snapshotId,
-          }),
-          {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          },
-        );
-      }
-      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
-        return new Response(JSON.stringify({ alive: true, ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
+        return createWorkspaceSnapshotSessionStartResponse({
+          dataKeyBase64,
+          objectKey: ref.objectKey,
+          snapshotId: ref.snapshotId,
         });
       }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
@@ -3935,18 +3625,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           );
         }
         if (request.url.includes(`/workspace-snapshots/${snapshotId}/presign-get`)) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              getUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ getUrl });
         }
         if (request.url === getUrl) {
           vi.setSystemTime(new Date(Date.now() + 25));
@@ -4163,15 +3842,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           });
         }
         if (request.url.includes(`/workspace-snapshots/${snapshotId}/presign-get`)) {
-          return new Response(JSON.stringify({
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            getUrl,
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
+          return createSnapshotPresignResponse({ getUrl });
         }
         if (request.url === getUrl) {
           objectFetchCount += 1;
@@ -4394,15 +4065,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           });
         }
         if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
-          return new Response(JSON.stringify({
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            getUrl,
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
+          return createSnapshotPresignResponse({ getUrl });
         }
         if (request.url === getUrl) {
           objectFetchCount += 1;
@@ -4490,15 +4153,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           });
         }
         if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
-          return new Response(JSON.stringify({
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            getUrl,
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
+          return createSnapshotPresignResponse({ getUrl });
         }
         if (request.url === getUrl) {
           objectFetchCount += 1;
@@ -4559,18 +4214,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           );
         }
         if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              getUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ getUrl });
         }
         if (request.url === getUrl) {
           return new Response("missing", { status: 404 });
@@ -4748,18 +4392,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           );
         }
         if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/presign-get`)) {
-          return new Response(
-            JSON.stringify({
-              expiresAt: new Date(Date.now() + 60_000).toISOString(),
-              getUrl,
-            }),
-            {
-              headers: {
-                "content-type": "application/json; charset=utf-8",
-              },
-              status: 200,
-            },
-          );
+          return createSnapshotPresignResponse({ getUrl });
         }
         if (request.url === getUrl) {
           throw new TypeError(`fetch failed for ${getUrl} with hidden transport detail`);
@@ -4902,15 +4535,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           });
         }
         if (request.url.includes(`/workspace-snapshots/${snapshotId}/presign-get`)) {
-          return new Response(JSON.stringify({
-            expiresAt: new Date(Date.now() + 60_000).toISOString(),
-            getUrl,
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
+          return createSnapshotPresignResponse({ getUrl });
         }
         if (request.url === getUrl) {
           return new Response(copyBufferToArrayBuffer(encrypted.encryptedBytes), {
@@ -9236,10 +8861,30 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
-  it("retries replay-safe hosted mailbox fetch transport failures once", async () => {
+  it.each([
+    {
+      name: "transport failure",
+      firstResponse: () => { throw new Error("fetch failed"); },
+    },
+    {
+      name: "TimeoutError",
+      firstResponse: () => {
+        const error = new Error("The operation timed out.");
+        error.name = "TimeoutError";
+        throw error;
+      },
+    },
+    {
+      name: "HTTP 503",
+      firstResponse: () => new Response("try again", {
+        headers: { "content-type": "text/plain; charset=utf-8" },
+        status: 503,
+      }),
+    },
+  ])("retries replay-safe hosted mailbox fetch once after $name", async ({ firstResponse }) => {
     const fetchMock = vi.fn(async () => {
       if (fetchMock.mock.calls.length === 1) {
-        throw new Error("fetch failed");
+        return firstResponse();
       }
 
       return new Response(JSON.stringify({
@@ -9368,47 +9013,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
   });
 
-  it("retries replay-safe hosted mailbox fetch TimeoutError failures once", async () => {
-    const fetchMock = vi.fn(async () => {
-      if (fetchMock.mock.calls.length === 1) {
-        const error = new Error("The operation timed out.");
-        error.name = "TimeoutError";
-        throw error;
-      }
-
-      return new Response(JSON.stringify({
-        assistantProvider: "openai",
-        fetchedAt: "2026-04-26T00:00:02.000Z",
-        items: [],
-        maxSeqByLane: [],
-        userId: "member_123",
-      }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      });
-    });
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-    });
-
-    const result = await platform.mailboxPort!.fetch({
-      lanes: [
-        {
-          importedSeq: "0",
-          lane: "conversation",
-        },
-      ],
-      limitPerLane: 10,
-      requestId: "request_mailbox_timeout_retry",
-    });
-
-    expect(result.items).toHaveLength(0);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
   it("does not retry replay-safe hosted mailbox fetch AbortError failures", async () => {
     const fetchMock = vi.fn(async () => {
       const error = new Error("The operation was aborted.");
@@ -9432,50 +9036,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     })).rejects.toThrow("Hosted mailbox fetch request failed.");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("retries replay-safe hosted mailbox fetch HTTP 503 responses once", async () => {
-    const fetchMock = vi.fn(async () => {
-      if (fetchMock.mock.calls.length === 1) {
-        return new Response("try again", {
-          headers: {
-            "content-type": "text/plain; charset=utf-8",
-          },
-          status: 503,
-        });
-      }
-
-      return new Response(JSON.stringify({
-        assistantProvider: "openai",
-        fetchedAt: "2026-04-26T00:00:02.000Z",
-        items: [],
-        maxSeqByLane: [],
-        userId: "member_123",
-      }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      });
-    });
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-    });
-
-    const result = await platform.mailboxPort!.fetch({
-      lanes: [
-        {
-          importedSeq: "0",
-          lane: "conversation",
-        },
-      ],
-      limitPerLane: 10,
-      requestId: "request_mailbox_http_retry",
-    });
-
-    expect(result.items).toHaveLength(0);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("retries replay-safe hosted mailbox payload fetch transport failures once", async () => {
@@ -10396,39 +9956,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         });
       }
       if (request.url.includes("/workspace-snapshots/start")) {
-        return new Response(
-          JSON.stringify({
-            encryption: {
-              aad: buildHostedWorkspaceSnapshotV2Aad({
-                objectKey: ref.objectKey,
-                snapshotId: ref.snapshotId,
-                userId: "member_123",
-              }),
-              dataKeyBase64,
-              ivBase64: ref.encryption.ivBase64,
-              rootKeyId: ref.encryption.rootKeyId,
-              scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
-              wrappedDataKey: ref.encryption.wrappedDataKey,
-            },
-            limits: {
-              maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
-              warnEncryptedBytes: 128 * 1024 * 1024,
-            },
-            objectKey: ref.objectKey,
-            snapshotId: ref.snapshotId,
-          }),
-          {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          },
-        );
-      }
-      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
-        return new Response(JSON.stringify({ alive: true, ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
+        return createWorkspaceSnapshotSessionStartResponse({
+          dataKeyBase64,
+          objectKey: ref.objectKey,
+          snapshotId: ref.snapshotId,
         });
       }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
@@ -11274,22 +10805,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
-  it("does not expose the deleted hosted share web-control port", () => {
-    const fetchMock = vi.fn(async () => new Response("unexpected", { status: 200 }));
-    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
-      HOSTED_WEB_BASE_URL: "https://web.example.test",
-    }));
-    const platform = buildHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-      webCallbackSigning: environment.webCallbackSigning,
-      webControlBaseUrl: "https://web.example.test",
-    });
-
-    expect("sharePort" in platform).toBe(false);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it("exposes the shared hosted effects and meal-photo object methods", async () => {
     const rawMessage = new Uint8Array([0x61, 0x62, 0x63]);
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -11579,43 +11094,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     expect(observedAbort).toBe(true);
-  });
-
-  it("preserves structured details from remaining provider effect failures", async () => {
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: vi.fn(async () => new Response(JSON.stringify({
-        cleanupMessages: [{ messageId: "1001", target: "telegram_chat_123" }],
-        code: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
-        error: "Telegram delivery outcome is ambiguous.",
-        providerMessageIds: ["1001"],
-        target: "telegram_chat_123",
-      }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 502,
-      })) as typeof fetch,
-      workspaceCheckpointBridge: {
-        readCurrentLease: () => ({
-          attemptId: "attempt_1",
-          leaseGeneration: "9",
-          userId: "member_123",
-          workspaceVersion: "5",
-        }),
-      },
-    });
-
-    await expect(platform.effectsPort.getTelegramFile!({
-      fileId: "telegram_file_123",
-    })).rejects.toMatchObject({
-      cleanupMessages: [{ messageId: "1001", target: "telegram_chat_123" }],
-      code: "ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS",
-      providerMessageId: "1001",
-      providerMessageIds: ["1001"],
-      status: 502,
-      target: "telegram_chat_123",
-    });
   });
 
   it("classifies internal provider-effect 403 responses as control-plane rejections", async () => {

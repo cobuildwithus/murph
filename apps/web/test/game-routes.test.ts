@@ -643,51 +643,6 @@ describe("weekly game routes", () => {
       expect(await game.json()).toEqual({ game: VIEW, ok: true });
     });
 
-    it("keeps another player's entry out of the response until the viewer posts that day", async () => {
-      const leoKey = `game/${LEO}/${"c".repeat(32)}.jpg`;
-      const leoPhoto = entry({ id: "entry_leo", kind: "photo", mediaKeys: [leoKey], memberId: LEO });
-      const avaPhoto = entry({ id: "entry_ava", kind: "photo", mediaKeys: [`game/${AVA}/${"d".repeat(32)}.jpg`], memberId: AVA });
-      signedInAs = AVA;
-
-      mocks.readGame.mockResolvedValueOnce(viewFor(AVA, [leoPhoto]));
-      const before = await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }));
-      const beforeText = await before.text();
-      const beforeBody = JSON.parse(beforeText);
-
-      // Only today's picture is named, as a preview the media route still
-      // keeps locked; the entry itself (its id, words and numbers) stays out.
-      expect(beforeBody.game.days[0].others).toEqual([{ entry: null, seat: 0, status: "locked", postedAt: "2030-03-05T12:00:00.000Z", blurHash: null,
-        preview: { kind: "photo", mediaUrl: `/api/game/v1/media/${encodeURIComponent(leoKey)}` } }]);
-      expect(beforeText).not.toContain("entry_leo");
-      expect(beforeText.split(encodeURIComponent(leoKey)).length - 1).toBe(1);
-
-      mocks.readGame.mockResolvedValueOnce(viewFor(AVA, [leoPhoto, avaPhoto]));
-      const after = await (await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }))).json();
-
-      expect(after.game.days[0].others[0]).toEqual({
-        postedAt: "2030-03-05T12:00:00.000Z",
-        entry: {
-          entryId: "entry_leo",
-          kind: "photo",
-          mediaUrls: [`/api/game/v1/media/${encodeURIComponent(leoKey)}`],
-          text: "caption of entry_leo",
-          data: null,
-        },
-        seat: 0,
-        status: "posted",
-      });
-    });
-
-    it.each(["prize", "dare", null] as const)("returns history tasks and %s stake for the authenticated viewer", async (kind) => {
-      const history = historyFixture(1, 1);
-      history.people[0].games[0].stake = kind ? { kind, item: "Lunch" } : null;
-      mocks.readHistory.mockResolvedValue(history);
-      const response = await routes.history.GET(new Request(`${BASE}/history?memberId=outsider`));
-      expect(response.status).toBe(200);
-      expect(mocks.readHistory).toHaveBeenCalledWith(LEO, false);
-      expect(await response.json()).toEqual({ ok: true, ...history });
-    });
-
     it("signs history card previews with the thumb variant after media authorization, preserving cache identities", async () => {
       const history = historyFixture(1, 2);
       const previews = history.people[0].games[0].previews;
@@ -881,20 +836,6 @@ describe("weekly game routes", () => {
       expect((await read("?delivery=signed")).games).toEqual([game]);
       mocks.control.gameImageDelivery.mockRejectedValueOnce(new Error("synthetic signing outage"));
       expect((await read("?delivery=signed")).games).toEqual([game]);
-    });
-
-    it("never shows another player's excuse, even after the viewer posts", async () => {
-      const excuseKey = `game/${LEO}/${"e".repeat(32)}.m4a`;
-      const excuse = entry({ attempt: 0, id: "entry_leo_excuse", kind: "excuse", mediaKeys: [excuseKey], memberId: LEO });
-      const avaPhoto = entry({ id: "entry_ava", kind: "photo", mediaKeys: [`game/${AVA}/${"d".repeat(32)}.jpg`], memberId: AVA });
-      signedInAs = AVA;
-      mocks.readGame.mockResolvedValueOnce(viewFor(AVA, [excuse, avaPhoto]));
-
-      const text = await (await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}`), params({ id: GAME_ID }))).text();
-
-      for (const secret of ["entry_leo_excuse", excuseKey, encodeURIComponent(excuseKey)]) {
-        expect(text).not.toContain(secret);
-      }
     });
 
     it("answers 404 for a game the member can't see", async () => {

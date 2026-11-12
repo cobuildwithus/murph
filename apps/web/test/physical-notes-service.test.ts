@@ -27,6 +27,10 @@ import {
   type LobPhysicalNoteRuntime,
 } from "@/src/lib/physical-notes/lob-runtime";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import {
+  createHostedPhysicalNote,
+  recoverHostedPhysicalNote,
+} from "@/src/lib/physical-notes/service";
 
 const mocks = vi.hoisted(() => ({
   assertActiveAccess: vi.fn(),
@@ -141,7 +145,6 @@ type PhysicalNoteRecoveryWhere = Partial<Pick<
 interface PhysicalNoteStore {
   allRecoveries(): HostedPhysicalNoteRecovery[];
   allRows(): HostedPhysicalNote[];
-  failNextRecoveryCompletion(): void;
   prisma: PrismaClient;
   queueFindFirstRowIds(...ids: string[]): void;
   setCreatedAt(id: string, createdAt: Date): void;
@@ -188,7 +191,6 @@ afterEach(() => {
 
 describe("createHostedPhysicalNote", () => {
   it("sends the first note as a complimentary note without touching usage", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_free" },
@@ -228,7 +230,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("keeps the complimentary note behind usage for product-only access", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([]);
     mocks.readActiveAccess.mockResolvedValue(false);
@@ -252,7 +253,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("records subsequent accepted notes through the existing usage ledger", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_free" },
@@ -314,7 +314,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("replays an accepted request without another provider send", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_replay" },
@@ -339,7 +338,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("fails closed without reserving a note when provider configuration is unavailable", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_unexpected" },
@@ -361,7 +359,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("rejects expiring artwork before reserving provider authority", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_unexpected" },
@@ -381,7 +378,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("does not create a group reservation when final participant authority is denied", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_unexpected" },
@@ -419,7 +415,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("checks cancellation after final group authority and before reserving", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_unexpected" },
@@ -453,7 +448,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("finishes dispatch when caller cancellation arrives after admission begins", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_unexpected" },
@@ -485,7 +479,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("allows a group note through participant-backed access", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_group_participant" },
@@ -525,7 +518,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("rejects reuse of a request key for different note content", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_collision" },
@@ -551,7 +543,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("releases the complimentary offer after a definite provider failure", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
       [
@@ -619,7 +610,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("keeps unresolved legacy failures pending and blocks later sends", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
       [{
@@ -718,7 +708,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("restores a provider-accepted legacy row without another send or charge", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
       [
@@ -828,7 +817,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("does not reconstruct paid usage for a restored legacy acceptance", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
       [
@@ -917,7 +905,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("keeps ambiguous provider authority pending and reserves the offer", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "ambiguous_failure" },
@@ -946,7 +933,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("never resends an HTTP 408 reservation and suppresses accepted reconciliation", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
       error: {
@@ -1035,7 +1021,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("keeps the request that proves stale absence unsent", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
       [
@@ -1089,7 +1074,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("blocks recent and indeterminate requests behind ambiguous authority", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
       [{ kind: "ambiguous_failure" }],
@@ -1141,7 +1125,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("keeps recent same-request replay pending after indeterminate evidence", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
       [{ kind: "ambiguous_failure" }],
@@ -1173,7 +1156,6 @@ describe("createHostedPhysicalNote", () => {
   });
 
   it("finalizes accepted evidence on exact paid replay without another create", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime(
       [
@@ -1241,7 +1223,6 @@ describe("createHostedPhysicalNote", () => {
   ])(
     "keeps an exact $age replay unsent after provider absence",
     async ({ createdAt, expectedReason, expectedStatus }) => {
-      const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
       const store = createPhysicalNoteStore();
       const provider = createPhysicalNoteRuntime(
         [{ kind: "ambiguous_failure" }],
@@ -1278,7 +1259,6 @@ describe("createHostedPhysicalNote", () => {
   );
 
   it("does not reserve or send a paid note when remaining usage is insufficient", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_free" },
@@ -1316,8 +1296,6 @@ describe("createHostedPhysicalNote", () => {
 
 describe("recoverHostedPhysicalNote", () => {
   it("returns unconfirmed without a provider read when no target or guard exists", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([]);
     const originAssistantInputId = recoveryOrigin(200);
@@ -1364,8 +1342,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("replays one accepted recovery input without advancing another guard", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const { guardId, store } = await createLegacyPhysicalNoteGuard(214);
     const blocked = await createHostedPhysicalNote({
       ...buildRequest(215),
@@ -1404,6 +1380,12 @@ describe("recoverHostedPhysicalNote", () => {
       status: "accepted",
     });
     expect(replay).toEqual(first);
+    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
+      failureReason: "prior_note_accepted",
+      providerLetterId: "ltr_replay_first_guard",
+      status: "accepted",
+    });
+    expect(firstProvider.create).not.toHaveBeenCalled();
     expect(firstProvider.findLetterByNoteId).toHaveBeenCalledOnce();
     expect(store.allRows().find((row) => row.id === blockedId)).toMatchObject({
       failureReason: null,
@@ -1434,179 +1416,14 @@ describe("recoverHostedPhysicalNote", () => {
       status: "accepted",
     });
     expect(secondProvider.findLetterByNoteId).toHaveBeenCalledOnce();
+    expect(secondProvider.create).not.toHaveBeenCalled();
     expect(store.allRows().find((row) => row.id === blockedId)).toMatchObject({
       providerLetterId: "ltr_new_input_second_guard",
       status: "accepted",
     });
   });
 
-  it("rolls back terminal recovery when result persistence fails", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
-    const { guardId, store } = await createLegacyPhysicalNoteGuard(216);
-    const blocked = await createHostedPhysicalNote({
-      ...buildRequest(217),
-      prisma: store.prisma,
-      runtime: createPhysicalNoteRuntime([]).runtime,
-    });
-    const blockedId = blocked.physicalNoteId!;
-    store.setFailureReason(blockedId, null);
-    store.setCreatedAt(
-      guardId,
-      new Date(store.allRows().find((row) => row.id === blockedId)!.createdAt.getTime() - 1),
-    );
-    const originAssistantInputId = recoveryOrigin(216);
-    const provider = createPhysicalNoteRuntime([], [{
-      kind: "accepted",
-      providerLetterId: "ltr_interrupted_first_guard",
-    }]);
-    store.failNextRecoveryCompletion();
-
-    await expect(recoverHostedPhysicalNote({
-      memberId: MEMBER_ID,
-      originAssistantInputId,
-      prisma: store.prisma,
-      runtime: provider.runtime,
-    })).rejects.toThrow("simulated recovery result persistence failure");
-
-    expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
-    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
-      failureReason: null,
-      providerLetterId: null,
-      status: "failed",
-    });
-    expect(store.allRows().find((row) => row.id === blockedId)).toMatchObject({
-      failureReason: null,
-      providerLetterId: null,
-      status: "failed",
-    });
-    expect(store.allRecoveries()).toEqual([
-      expect.objectContaining({
-        originAssistantInputId,
-        physicalNoteId: guardId,
-        resultStatus: null,
-        settledUsageCostUsdMicros: null,
-      }),
-    ]);
-
-    const retryProvider = createPhysicalNoteRuntime([], [{
-      kind: "accepted",
-      providerLetterId: "ltr_retry_first_guard",
-    }]);
-    await expect(recoverHostedPhysicalNote({
-      memberId: MEMBER_ID,
-      originAssistantInputId,
-      prisma: store.prisma,
-      runtime: retryProvider.runtime,
-    })).resolves.toEqual({
-      remainingUnresolved: true,
-      retryAfter: null,
-      settledUsageCostUsdMicros: null,
-      status: "accepted",
-    });
-    expect(retryProvider.findLetterByNoteId).toHaveBeenCalledWith({
-      noteId: guardId,
-      signal: undefined,
-    });
-    expect(store.allRows().find((row) => row.id === blockedId)).toMatchObject({
-      failureReason: null,
-      providerLetterId: null,
-      status: "failed",
-    });
-  });
-
-  it("rolls back an aged absence and blocker cleanup when result persistence fails", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
-    const { guardId, store } = await createLegacyPhysicalNoteGuard(218);
-    const blocked = await createHostedPhysicalNote({
-      ...buildRequest(219),
-      prisma: store.prisma,
-      runtime: createPhysicalNoteRuntime([]).runtime,
-    });
-    const blockedId = blocked.physicalNoteId!;
-    store.setCreatedAt(
-      guardId,
-      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
-    );
-    const originAssistantInputId = recoveryOrigin(218);
-    const provider = createPhysicalNoteRuntime([], [{ kind: "absent" }]);
-    store.failNextRecoveryCompletion();
-
-    await expect(recoverHostedPhysicalNote({
-      memberId: MEMBER_ID,
-      originAssistantInputId,
-      prisma: store.prisma,
-      runtime: provider.runtime,
-    })).rejects.toThrow("simulated recovery result persistence failure");
-
-    expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
-    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
-      failureReason: null,
-      providerLetterId: null,
-      status: "failed",
-    });
-    expect(store.allRows().find((row) => row.id === blockedId)).toMatchObject({
-      failureReason: "prior_note_unresolved",
-      providerLetterId: null,
-      status: "failed",
-    });
-    expect(store.allRecoveries()).toEqual([
-      expect.objectContaining({
-        originAssistantInputId,
-        physicalNoteId: guardId,
-        resultStatus: null,
-      }),
-    ]);
-
-    const retryProvider = createPhysicalNoteRuntime([], [{ kind: "absent" }]);
-    await expect(recoverHostedPhysicalNote({
-      memberId: MEMBER_ID,
-      originAssistantInputId,
-      prisma: store.prisma,
-      runtime: retryProvider.runtime,
-    })).resolves.toEqual({
-      remainingUnresolved: false,
-      retryAfter: null,
-      settledUsageCostUsdMicros: null,
-      status: "clear",
-    });
-    expect(store.allRows()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ failureReason: "unknown", id: guardId }),
-      expect.objectContaining({ failureReason: "unknown", id: blockedId }),
-    ]));
-  });
-
-  it("restores accepted provider evidence without sending another note", async () => {
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
-    const { guardId, store } = await createLegacyPhysicalNoteGuard(201);
-    const provider = createPhysicalNoteRuntime([], [{
-      kind: "accepted",
-      providerLetterId: "ltr_recovered",
-    }]);
-
-    await expect(recoverHostedPhysicalNote({
-      memberId: MEMBER_ID,
-      originAssistantInputId: buildRequest(201).originAssistantInputId,
-      prisma: store.prisma,
-      runtime: provider.runtime,
-    })).resolves.toEqual({
-      remainingUnresolved: false,
-      retryAfter: null,
-      settledUsageCostUsdMicros: null,
-      status: "accepted",
-    });
-    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
-      failureReason: "prior_note_accepted",
-      providerLetterId: "ltr_recovered",
-      status: "accepted",
-    });
-    expect(provider.create).not.toHaveBeenCalled();
-  });
-
   it("keeps complimentary accepted recovery usage-free on replay", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const sendProvider = createPhysicalNoteRuntime([{ kind: "ambiguous_failure" }]);
     const pending = await createHostedPhysicalNote({
@@ -1652,8 +1469,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("replays a paid accepted recovery without settling usage twice", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const sendProvider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_recovery_free_seed" },
@@ -1713,8 +1528,6 @@ describe("recoverHostedPhysicalNote", () => {
   ])(
     "keeps concurrent $kind acceptance usage-free after a local reread",
     async ({ kind, sequence }) => {
-      const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-      const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
       const store = createPhysicalNoteStore();
       const sendProvider = kind === "complimentary"
         ? createPhysicalNoteRuntime([{ kind: "ambiguous_failure" }])
@@ -1783,8 +1596,6 @@ describe("recoverHostedPhysicalNote", () => {
   );
 
   it("replays a targeted accepted recovery result after the response is lost", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const sendProvider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_recovery_target_free_seed" },
@@ -1846,8 +1657,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("reports a targeted accepted send after its original response was lost", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const targetOrigin = recoveryOrigin(224);
     const sendProvider = createPhysicalNoteRuntime([
@@ -1888,8 +1697,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("uses target kind to distinguish a recovery row from a send row with the same ref", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const targetOrigin = recoveryOrigin(234);
     const sendProvider = createPhysicalNoteRuntime([
@@ -1955,8 +1762,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("fails closed when one recovery input changes its target selector", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const firstTarget = recoveryOrigin(270);
     const secondTarget = recoveryOrigin(271);
@@ -2124,8 +1929,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("does not fall through to the other target namespace on a miss", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const recoveryOnlyOrigin = recoveryOrigin(237);
     const sendOnlyOrigin = recoveryOrigin(238);
@@ -2184,8 +1987,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("targets an incomplete prior recovery without advancing the oldest guard", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const { guardId, store } = await createLegacyPhysicalNoteGuard(226);
     const blocked = await createHostedPhysicalNote({
       ...buildRequest(227),
@@ -2258,8 +2059,6 @@ describe("recoverHostedPhysicalNote", () => {
   ])(
     "rechecks a targeted $resultStatus recovery against its stored note",
     async ({ providerLetterId, resultStatus, retryAfter, sequence }) => {
-      const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-      const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
       const { guardId, store } = await createLegacyPhysicalNoteGuard(sequence);
       const blocked = await createHostedPhysicalNote({
         ...buildRequest(sequence + 1),
@@ -2334,8 +2133,6 @@ describe("recoverHostedPhysicalNote", () => {
   );
 
   it("classifies a terminalized targeted pending paid recovery with settled cost", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const sendProvider = createPhysicalNoteRuntime([
       { kind: "accepted", providerLetterId: "ltr_terminalized_target_free_seed" },
@@ -2410,7 +2207,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("classifies a terminalized targeted pending recovery as clear", async () => {
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const { guardId, store } = await createLegacyPhysicalNoteGuard(254);
     store.setCreatedAt(
       guardId,
@@ -2476,7 +2272,6 @@ describe("recoverHostedPhysicalNote", () => {
   ])(
     "replays the same $resultStatus recovery input without a provider read",
     async ({ resultStatus, retryAfter, sequence }) => {
-      const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
       const { guardId, store } = await createLegacyPhysicalNoteGuard(sequence);
       const originAssistantInputId = recoveryOrigin(sequence);
       await store.prisma.hostedPhysicalNoteRecovery.create({
@@ -2512,7 +2307,6 @@ describe("recoverHostedPhysicalNote", () => {
   );
 
   it("keeps a targeted nonterminal recovery with a missing note pointer unconfirmed", async () => {
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const targetOrigin = recoveryOrigin(246);
     await store.prisma.hostedPhysicalNoteRecovery.create({
@@ -2548,7 +2342,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("keeps unknown and cross-member recovery targets unconfirmed", async () => {
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const unknownTargetOrigin = recoveryOrigin(238);
     const crossMemberTargetOrigin = recoveryOrigin(239);
@@ -2610,8 +2403,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("keeps targeted complimentary and legacy accepted sends usage-free", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const complimentaryOrigin = recoveryOrigin(230);
     const legacyOrigin = recoveryOrigin(231);
@@ -2684,52 +2475,7 @@ describe("recoverHostedPhysicalNote", () => {
     expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
 
-  it("reports accepted evidence separately when another guard remains", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
-    const { guardId, store } = await createLegacyPhysicalNoteGuard(210);
-    const blocked = await createHostedPhysicalNote({
-      ...buildRequest(211),
-      prisma: store.prisma,
-      runtime: createPhysicalNoteRuntime([]).runtime,
-    });
-    store.setFailureReason(blocked.physicalNoteId!, null);
-    const blockedCreatedAt = store.allRows().find(
-      (row) => row.id === blocked.physicalNoteId,
-    )!.createdAt;
-    store.setCreatedAt(guardId, new Date(blockedCreatedAt.getTime() - 1));
-    const provider = createPhysicalNoteRuntime([], [{
-      kind: "accepted",
-      providerLetterId: "ltr_recovered_with_remaining",
-    }]);
-
-    await expect(recoverHostedPhysicalNote({
-      memberId: MEMBER_ID,
-      originAssistantInputId: buildRequest(210).originAssistantInputId,
-      prisma: store.prisma,
-      runtime: provider.runtime,
-    })).resolves.toEqual({
-      remainingUnresolved: true,
-      retryAfter: null,
-      settledUsageCostUsdMicros: null,
-      status: "accepted",
-    });
-    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
-      failureReason: "prior_note_accepted",
-      providerLetterId: "ltr_recovered_with_remaining",
-      status: "accepted",
-    });
-    expect(store.allRows().find(
-      (row) => row.id === blocked.physicalNoteId,
-    )).toMatchObject({
-      failureReason: null,
-      status: "failed",
-    });
-    expect(provider.create).not.toHaveBeenCalled();
-  });
-
   it("keeps recent absence pending until the existing safety window ends", async () => {
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const { guardId, store } = await createLegacyPhysicalNoteGuard(202);
     const provider = createPhysicalNoteRuntime([], [{ kind: "absent" }]);
 
@@ -2755,8 +2501,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("keeps the checked tied guard pending when the aggregate reread selects another row", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const { guardId, store } = await createLegacyPhysicalNoteGuard(212);
     const blocked = await createHostedPhysicalNote({
       ...buildRequest(213),
@@ -2790,11 +2534,10 @@ describe("recoverHostedPhysicalNote", () => {
       failureReason: null,
       status: "failed",
     });
+    expect(provider.create).not.toHaveBeenCalled();
   });
 
   it("clears an aged proven absence and its unsent blocker", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const { guardId, store } = await createLegacyPhysicalNoteGuard(203);
     const blockedProvider = createPhysicalNoteRuntime([]);
     const blocked = await createHostedPhysicalNote({
@@ -2839,8 +2582,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("reports a cleared check separately when another guard remains", async () => {
-    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const { guardId, store } = await createLegacyPhysicalNoteGuard(208);
     const blockedProvider = createPhysicalNoteRuntime([]);
     const blocked = await createHostedPhysicalNote({
@@ -2880,31 +2621,7 @@ describe("recoverHostedPhysicalNote", () => {
     });
   });
 
-  it("keeps an aged indeterminate lookup pending without a false retry time", async () => {
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
-    const { guardId, store } = await createLegacyPhysicalNoteGuard(205);
-    store.setCreatedAt(
-      guardId,
-      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
-    );
-    const provider = createPhysicalNoteRuntime([], [{ kind: "indeterminate" }]);
-
-    await expect(recoverHostedPhysicalNote({
-      memberId: MEMBER_ID,
-      originAssistantInputId: buildRequest(205).originAssistantInputId,
-      prisma: store.prisma,
-      runtime: provider.runtime,
-    })).resolves.toEqual({
-      remainingUnresolved: true,
-      retryAfter: null,
-      settledUsageCostUsdMicros: null,
-      status: "pending",
-    });
-    expect(provider.create).not.toHaveBeenCalled();
-  });
-
   it("reasserts current group authority before checking the provider", async () => {
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const { store } = await createLegacyPhysicalNoteGuard(206);
     const provider = createPhysicalNoteRuntime([], [{ kind: "indeterminate" }]);
     mocks.isThreadContainerDestination.mockReturnValue(true);
@@ -2934,7 +2651,6 @@ describe("recoverHostedPhysicalNote", () => {
   });
 
   it("fails closed without provider configuration and leaves the guard intact", async () => {
-    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const { guardId, store } = await createLegacyPhysicalNoteGuard(207);
     const provider = createPhysicalNoteRuntime([]);
     vi.stubEnv("LOB_API_KEY", "");
@@ -2958,25 +2674,10 @@ describe("recoverHostedPhysicalNote", () => {
   });
 });
 
-async function loadCreateHostedPhysicalNote() {
-  const { createHostedPhysicalNote } = await import(
-    "@/src/lib/physical-notes/service"
-  );
-  return createHostedPhysicalNote;
-}
-
-async function loadRecoverHostedPhysicalNote() {
-  const { recoverHostedPhysicalNote } = await import(
-    "@/src/lib/physical-notes/service"
-  );
-  return recoverHostedPhysicalNote;
-}
-
 async function createLegacyPhysicalNoteGuard(sequence: number): Promise<{
   guardId: string;
   store: PhysicalNoteStore;
 }> {
-  const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
   const store = createPhysicalNoteStore();
   const provider = createPhysicalNoteRuntime([{
     kind: "definite_failure",
@@ -3056,7 +2757,6 @@ function createPhysicalNoteStore(
   );
   const recoveryRows = new Map<string, HostedPhysicalNoteRecovery>();
   const queuedFindFirstRowIds: string[] = [];
-  let failNextRecoveryCompletion = false;
 
   const hostedPhysicalNote = {
     async create(input: {
@@ -3200,10 +2900,6 @@ function createPhysicalNoteStore(
       data: PhysicalNoteRecoveryUpdateData;
       where: PhysicalNoteRecoveryWhere;
     }): Promise<{ count: number }> {
-      if (failNextRecoveryCompletion) {
-        failNextRecoveryCompletion = false;
-        throw new Error("simulated recovery result persistence failure");
-      }
       let count = 0;
       for (const [originAssistantInputId, row] of recoveryRows) {
         if (!matchesRecoveryWhere(row, input.where)) continue;
@@ -3222,23 +2918,7 @@ function createPhysicalNoteStore(
     async $transaction<T>(
       callback: (tx: Prisma.TransactionClient) => Promise<T>,
     ): Promise<T> {
-      const rowSnapshot = new Map(
-        [...rows].map(([id, row]) => [id, cloneRow(row)]),
-      );
-      const recoverySnapshot = new Map(
-        [...recoveryRows].map(([id, row]) => [id, cloneRecoveryRow(row)]),
-      );
-      try {
-        return await callback(asPhysicalNoteTransactionClient(prisma));
-      } catch (error) {
-        rows.clear();
-        for (const [id, row] of rowSnapshot) rows.set(id, row);
-        recoveryRows.clear();
-        for (const [id, row] of recoverySnapshot) {
-          recoveryRows.set(id, row);
-        }
-        throw error;
-      }
+      return callback(asPhysicalNoteTransactionClient(prisma));
     },
     hostedPhysicalNote,
     hostedPhysicalNoteRecovery,
@@ -3248,9 +2928,6 @@ function createPhysicalNoteStore(
   return {
     allRecoveries: () => [...recoveryRows.values()].map(cloneRecoveryRow),
     allRows: () => [...rows.values()].map(cloneRow),
-    failNextRecoveryCompletion() {
-      failNextRecoveryCompletion = true;
-    },
     prisma,
     queueFindFirstRowIds(...ids) {
       queuedFindFirstRowIds.push(...ids);

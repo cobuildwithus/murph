@@ -1618,7 +1618,6 @@ export function ComponentsContent() {
           </div>
           {assistantStylePickerStep ? (
             <MurphAssistantStylePicker
-              singleStep
               initialStep={assistantStylePickerStep}
               onOpenChange={(open) => {
                 if (!open) {

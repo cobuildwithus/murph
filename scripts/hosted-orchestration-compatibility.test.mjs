@@ -831,7 +831,7 @@ test("job proof is one bounded page and fails closed on incomplete totals", () =
 
 test("controller dispatches main only after exact private-head, workflow, and public-head proof", async () => {
   const calls = [];
-  await withCompatibilityEnv(async () => withFetch(async (url, init = {}) => {
+  await withFetch(async (url, init = {}) => {
     if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
       calls.push("main");
       assert.equal(init.headers.authorization, "Bearer private-token");
@@ -892,7 +892,7 @@ test("controller dispatches main only after exact private-head, workflow, and pu
       "head",
       "main",
     ]);
-  }));
+  });
 });
 
 for (const releaseScope of [HOSTED_RELEASE_SCOPE_NONE, HOSTED_RELEASE_SCOPE_PRODUCTION_CORE]) {
@@ -993,7 +993,7 @@ for (const releaseScope of [HOSTED_RELEASE_SCOPE_FOREGROUND, HOSTED_RELEASE_SCOP
     test(`deployment controller preserves ${releaseScope} candidate when main advances at read ${advanceAt}`, async () => {
       let privateMainReads = 0;
       let publicMainReads = 0;
-      await withCompatibilityEnv(async () => withFetch(async (url, init = {}) => {
+      await withFetch(async (url, init = {}) => {
         if (
           url.includes(`/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/`)
           && url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)
@@ -1051,253 +1051,78 @@ for (const releaseScope of [HOSTED_RELEASE_SCOPE_FOREGROUND, HOSTED_RELEASE_SCOP
         assert.equal(proof.readerCount, 3);
         assert.equal(publicMainReads, 2);
         assert.equal(privateMainReads, 2);
-      }));
+      });
     });
   }
 }
 
 test("controller rejects a dispatch race that runs a different private main head", async () => {
-  const controls = [];
-  let mainReads = 0;
-  await withCompatibilityEnv(async () => withFetch(async (url) => {
-    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
-      mainReads += 1;
-      return jsonResponse(privateMainRef());
-    }
-    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
-      return jsonResponse({
-        id: WORKFLOW_ID,
-        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
-        state: "active",
-      });
-    }
-    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
-    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
-    if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)) {
-      controls.push(url);
-      return new Response(null, { status: 202 });
-    }
-    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
-      return jsonResponse(privateRun({
-        conclusion: null,
-        head_sha: MOVED_PRIVATE_SHA,
-        status: "in_progress",
+  await withTimedController({
+    respond(call) {
+      if (call.kind === "run") return jsonResponse(privateRun({
+        conclusion: null, head_sha: MOVED_PRIVATE_SHA, status: "in_progress",
       }));
-    }
-    throw new Error(`unexpected URL ${url}`);
-  }, async () => {
-    await assert.rejects(
-      () => runTemporalCompatibility(compatibilityArgs({ sleepFn: async () => undefined })),
-      (error) => {
-        assert.ok(error instanceof AggregateError);
-        assert.match(error.message, /could not be proven terminal/u);
-        assert.ok(error.errors.some((cause) =>
-          cause instanceof Error && /run identity is invalid/u.test(cause.message)));
-        return true;
-      },
-    );
-    assert.equal(mainReads, 1);
-    assert.deepEqual(controls, [
+    },
+  }, async ({ run, clock }) => {
+    await assert.rejects(run, (error) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(error.message, /could not be proven terminal/u);
+      assert.ok(error.errors.some((cause) =>
+        cause instanceof Error && /run identity is invalid/u.test(cause.message)));
+      return true;
+    });
+    assert.equal(clock.calls.filter(({ kind }) => kind === "private").length, 1);
+    assert.deepEqual(clock.calls.filter(({ kind }) => kind === "cancel").map(({ url }) => url), [
       `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
     ]);
-  }));
+  });
 });
 
 test("controller fails closed when private main moves before success is accepted", async () => {
-  let mainReads = 0;
-  await withCompatibilityEnv(async () => withFetch(async (url) => {
-    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
-      mainReads += 1;
-      return jsonResponse(privateMainRef(mainReads === 1 ? PRIVATE_SHA : MOVED_PRIVATE_SHA));
-    }
-    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
-      return jsonResponse({
-        id: WORKFLOW_ID,
-        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
-        state: "active",
-      });
-    }
-    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
-    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
-    if (url.endsWith(`/actions/runs/${RUN_ID}`)) return jsonResponse(privateRun());
-    if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
-      return jsonResponse({ jobs: proofJobs(), total_count: 4 });
-    }
-    throw new Error(`unexpected URL ${url}`);
-  }, async () => {
-    await assert.rejects(
-      () => runTemporalCompatibility(compatibilityArgs({ sleepFn: async () => undefined })),
-      /Private main changed during Temporal compatibility proof/u,
-    );
-    assert.equal(mainReads, 2);
-  }));
+  await withTimedController({
+    respond(call) {
+      if (call.kind === "private" && call.occurrence === 2) return jsonResponse(privateMainRef(MOVED_PRIVATE_SHA));
+    },
+  }, async ({ run, clock }) => {
+    await assert.rejects(run, /Private main changed during Temporal compatibility proof/u);
+    assert.equal(clock.calls.filter(({ kind }) => kind === "private").length, 2);
+  });
 });
 
-test("controller waits for its accepted exact run to become visible", async () => {
-  let runReads = 0;
-  const sleepDurations = [];
-  await withCompatibilityEnv(async () => withFetch(async (url) => {
-    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
-      return jsonResponse(privateMainRef());
-    }
-    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
-      return jsonResponse({
-        id: WORKFLOW_ID,
-        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
-        state: "active",
-      });
-    }
-    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
-    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
-    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
-      runReads += 1;
-      return runReads === 1
-        ? new Response("not yet visible", { status: 404 })
-        : jsonResponse(privateRun());
-    }
-    if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
-      return jsonResponse({ jobs: proofJobs(), total_count: 4 });
-    }
-    throw new Error(`unexpected URL ${url}`);
-  }, async () => {
-    const proof = await runTemporalCompatibility(compatibilityArgs({
-      sleepFn: async (duration) => {
-        sleepDurations.push(duration);
+for (const { name, responses, failure, elapsed } of [
+  { name: "waits for its accepted exact run to become visible", responses: [404, {}], elapsed: 15_000 },
+  { name: "does not reopen visibility recovery after the run is visible", responses: [
+    { conclusion: null, status: "in_progress" }, 404, { conclusion: "cancelled" },
+  ], failure: /run lookup failed with HTTP 404/u, elapsed: 15_000 },
+  { name: "bounds exact-run visibility recovery before cancellation", responses: [
+    404, 404, 404, 404, 404, { conclusion: "cancelled" },
+  ], failure: /run lookup failed with HTTP 404/u, elapsed: 60_000 },
+  { name: "cancels only its accepted run when status polling becomes uncertain", responses: [
+    503, { conclusion: "cancelled" },
+  ], failure: /run lookup failed with HTTP 503/u, elapsed: 0 },
+]) {
+  test(`controller ${name}`, async () => {
+    await withTimedController({
+      respond(call) {
+        if (call.kind !== "run") return;
+        assert.ok(call.occurrence <= responses.length, "unexpected extra run lookup");
+        const response = responses[call.occurrence - 1];
+        return typeof response === "number"
+          ? new Response("unavailable", { status: response })
+          : jsonResponse(privateRun(response));
       },
-    }));
-    assert.equal(proof.readerCount, 3);
-    assert.equal(runReads, 2);
-    assert.deepEqual(sleepDurations, [15_000]);
-  }));
-});
-
-test("controller does not reopen visibility recovery after the run is visible", async () => {
-  const controls = [];
-  let runReads = 0;
-  const sleepDurations = [];
-  await withCompatibilityEnv(async () => withFetch(async (url) => {
-    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
-      return jsonResponse(privateMainRef());
-    }
-    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
-      return jsonResponse({
-        id: WORKFLOW_ID,
-        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
-        state: "active",
-      });
-    }
-    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
-    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
-    if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)) {
-      controls.push(url);
-      return new Response(null, { status: 202 });
-    }
-    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
-      runReads += 1;
-      if (runReads === 1) {
-        return jsonResponse(privateRun({ conclusion: null, status: "in_progress" }));
-      }
-      if (runReads === 2) return new Response("uncertain after visibility", { status: 404 });
-      return jsonResponse(privateRun({ conclusion: "cancelled" }));
-    }
-    throw new Error(`unexpected URL ${url}`);
-  }, async () => {
-    await assert.rejects(() => runTemporalCompatibility(compatibilityArgs({
-      sleepFn: async (duration) => {
-        sleepDurations.push(duration);
-      },
-    })), /run lookup failed with HTTP 404/u);
-    assert.equal(runReads, 3);
-    assert.deepEqual(sleepDurations, [15_000]);
-    assert.deepEqual(controls, [
-      `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
-    ]);
-  }));
-});
-
-test("controller bounds exact-run visibility recovery before cancellation", async () => {
-  const controls = [];
-  let runReads = 0;
-  const sleepDurations = [];
-  await withCompatibilityEnv(async () => withFetch(async (url) => {
-    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
-      return jsonResponse(privateMainRef());
-    }
-    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
-      return jsonResponse({
-        id: WORKFLOW_ID,
-        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
-        state: "active",
-      });
-    }
-    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
-    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
-    if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)) {
-      controls.push(url);
-      return new Response(null, { status: 202 });
-    }
-    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
-      runReads += 1;
-      return runReads <= 5
-        ? new Response("not yet visible", { status: 404 })
-        : jsonResponse(privateRun({ conclusion: "cancelled" }));
-    }
-    throw new Error(`unexpected URL ${url}`);
-  }, async () => {
-    await assert.rejects(() => runTemporalCompatibility(compatibilityArgs({
-      sleepFn: async (duration) => {
-        sleepDurations.push(duration);
-      },
-    })), /run lookup failed with HTTP 404/u);
-    assert.equal(runReads, 6);
-    assert.deepEqual(sleepDurations, [15_000, 15_000, 15_000, 15_000]);
-    assert.deepEqual(controls, [
-      `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
-    ]);
-  }));
-});
-
-test("controller cancels only its accepted run when status polling becomes uncertain", async () => {
-  const controlUrls = [];
-  let runReads = 0;
-  await withCompatibilityEnv(async () => withFetch(async (url) => {
-    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
-      return jsonResponse(privateMainRef());
-    }
-    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
-      return jsonResponse({
-        id: WORKFLOW_ID,
-        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
-        state: "active",
-      });
-    }
-    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
-    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
-    if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)) {
-      controlUrls.push(url);
-      return new Response(null, { status: 202 });
-    }
-    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
-      runReads += 1;
-      if (runReads === 1) return new Response("unavailable", { status: 503 });
-      return jsonResponse(privateRun({ conclusion: "cancelled" }));
-    }
-    throw new Error(`unexpected URL ${url}`);
-  }, async () => {
-    await assert.rejects(() => runTemporalCompatibility(compatibilityArgs({
-      sleepFn: async () => undefined,
-    })), /run lookup failed with HTTP 503/u);
-    assert.deepEqual(controlUrls, [
-      `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
-    ]);
-  }));
-});
+    }, async ({ run, clock }) => {
+      if (failure) await assert.rejects(run, failure);
+      else assert.equal((await run()).readerCount, 3);
+      assert.equal(clock.calls.filter(({ kind }) => kind === "run").length, responses.length);
+      assert.equal(clock.ms, elapsed);
+      assert.deepEqual(clock.calls.filter(({ kind }) => kind === "cancel" || kind === "force-cancel")
+        .map(({ url }) => url), failure ? [
+          `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
+        ] : []);
+    });
+  });
+}
 
 for (const settles of [true, false]) {
   test(`controller exhausts the shared budget and ${settles ? "settles" : "fails closed on"} its exact run`, async () => {
@@ -1483,30 +1308,14 @@ for (const lateKind of ["cancel", "force-cancel", "settlement"]) {
 }
 
 test("missing dispatch identity never issues a broad or guessed cancellation", async () => {
-  const controls = [];
-  await withCompatibilityEnv(async () => withFetch(async (url) => {
-    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
-      return jsonResponse(privateMainRef());
-    }
-    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
-      return jsonResponse({
-        id: WORKFLOW_ID,
-        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
-        state: "active",
-      });
-    }
-    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
-    if (url.endsWith("/dispatches")) return jsonResponse({});
-    if (url.includes("/cancel")) controls.push(url);
-    throw new Error(`unexpected URL ${url}`);
-  }, async () => {
-    await assert.rejects(
-      () => runTemporalCompatibility(compatibilityArgs()),
-      /did not return workflow_run_id/u,
-    );
-    assert.deepEqual(controls, []);
-  }));
+  await withTimedController({
+    respond(call) {
+      if (call.kind === "dispatch") return jsonResponse({});
+    },
+  }, async ({ run, clock }) => {
+    await assert.rejects(run, /did not return workflow_run_id/u);
+    assert.deepEqual(clock.calls.filter(({ kind }) => kind === "cancel" || kind === "force-cancel"), []);
+  });
 });
 
 test("accepted-run cancellation force-cancels only after ordinary cancellation stays nonterminal", async () => {
@@ -1962,14 +1771,6 @@ fi
   }
 });
 
-test("Repo Hygiene owns the focused controller contract test", async () => {
-  const workflow = await readFile(
-    path.join(REPO_ROOT, ".github", "workflows", "repo-hygiene.yml"),
-    "utf8",
-  );
-  assert.match(workflow, /node --test scripts\/hosted-orchestration-compatibility\.test\.mjs/u);
-});
-
 // Fake only HTTP and time; all admission, polling, proof and settlement run in
 // the real controller. Record the actual AbortSignal timeout of every request.
 async function withTimedController({
@@ -2040,10 +1841,6 @@ async function withTimedController({
   } finally {
     AbortSignal.timeout = originalTimeout;
   }
-}
-
-async function withCompatibilityEnv(fn) {
-  return fn();
 }
 
 async function withFetch(fetchImpl, fn) {

@@ -1,8 +1,8 @@
 import { RECAP_SHOW_CRAFT } from '@murphai/hosted-execution/runtime-control'
 import { recapDirectory } from './recap-files.js'
 import { createHash } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { access } from 'node:fs/promises'
+import { constants, createReadStream } from 'node:fs'
+import { access, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -48,8 +48,23 @@ export async function materializeRecapWorkspace(input: {
   const replies = await readCommittedRecapReplies(input.vault, input.sessionId, material.startedAt, material.settledAt)
   chat.push(...replies.messages)
   chat.sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || (a.laneSeq && b.laneSeq ? Number(BigInt(a.laneSeq) - BigInt(b.laneSeq)) : a.id.localeCompare(b.id)))
+  const references: (RecapMaterial['references'][number] & { path?: string })[] = []
+  for (const reference of material.references) {
+    let photoPath: string | undefined
+    if (reference.kind !== 'murph') {
+      try {
+        const { bytes } = await fetchRecapReference({ ...input, material, id: reference.id })
+        const directory = await recapDirectory(input.vault, `${relativeRoot}/refs`)
+        await writeFile(path.join(directory, `${reference.id}.jpg`), bytes, {
+          flag: constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode: 0o600,
+        })
+        photoPath = `${relativeRoot}/refs/${reference.id}.jpg`
+      } catch { /* An unavailable photo must not prevent the recap. */ }
+    }
+    references.push({ ...reference, ...(photoPath ? { path: photoPath } : {}) })
+  }
   const manifest = { directory: relativeRoot, instructions: RECAP_SHOW_CRAFT,
-    material, chat, lore: input.lore, coverage: { retainedSince, throughConversationLaneSeq: through, incomplete: incomplete || replies.incomplete } }
+    material: { ...material, references }, chat, lore: input.lore, coverage: { retainedSince, throughConversationLaneSeq: through, incomplete: incomplete || replies.incomplete } }
   return { root, material, chat, manifest }
 }
 

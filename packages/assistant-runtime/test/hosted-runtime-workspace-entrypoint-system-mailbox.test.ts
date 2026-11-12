@@ -1,4 +1,5 @@
 import {
+  createWorkspaceRunRequest,
   TEST_NOW,
   TEST_USER_ID,
   createBrowserVaultReplicaRef,
@@ -50,37 +51,32 @@ import {
 
 import assert from "node:assert/strict";
 import { listCanonicalEntities } from "@murphai/query";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  addCaptureWithLookup,
-  CURRENT_VAULT_FORMAT_VERSION,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  buildIntegrationEvidencePart,
-  buildIntegrationIngestRecord,
-  findCaptureByLookup,
   findEventByExternalRef,
   initializeVault,
   applyCanonicalWriteBatch,
   patchAutomation,
-  readJsonlRecords,
-  repairVault,
   runCanonicalWrite,
   showAutomation,
   upsertAutomation,
-  validateVault,
 } from "@murphai/core";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionGroupJournalFactRecordedWake,
-  buildHostedExecutionLinqConversationMessageWake,
-  buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionRuntimeControlWake,
-  deriveHostedExecutionErrorCode,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
@@ -88,81 +84,44 @@ import {
   type HostedVaultShareDeliverRequest,
 } from "@murphai/hosted-execution/vault-share";
 import {
-  appendAssistantTranscriptEntries,
   createAssistantOutboxIntent,
   ensureAutomaticMealCloseoutAutomation,
   getAssistantCronStatus,
-  listAssistantTranscriptEntries,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentSentById,
-  readAssistantContextSnapshotState,
-  refreshAssistantContextSnapshotBestEffort,
-  recordHostedMailboxAssistantInputItem,
   saveAssistantOutboxIntent,
-  saveAssistantSession,
-  type AssistantHostedImageGenerationLauncher,
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import {
   resolveAssistantStatePaths,
   sha256HostedBundleHex,
-  createHostedPortableWorkspaceManifestFromBundle,
   listPendingAssistantRuntimeIssueRecords,
   restoreHostedBundleRoots,
-  restoreHostedExecutionContext,
-  snapshotHostedPortableWorkspaceDelta,
-  snapshotHostedBundleRoots,
   writePendingAssistantRuntimeIssueRecord,
-  writeHostedBundleTextFile,
 } from "@murphai/runtime-state/node";
 import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
-  readHostedRuntimeFailurePhaseCode,
   type HostedMailboxFetchRequest,
-  type HostedMailboxFetchResponse,
   type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
-  type HostedMailboxPayloadFetchResponse,
-  type HostedRuntimeRedactedJson,
-  type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceCheckpointResponse,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedWorkspaceSnapshotV2Aad,
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
-  HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
-  HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
   HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
-  HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA,
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
-  buildHostedExecutionLayeredSnapshotRef,
-  buildHostedExecutionWorkingSnapshotRef,
   isHostedWorkspaceSnapshotV2Ref,
-  readHostedExecutionSnapshotBaseRef,
 } from "@murphai/hosted-execution/parsers";
 import { describe, expect, test, vi } from "vitest";
 import * as hostedExecution from "@murphai/hosted-execution";
 import {
   createCoalescingRuntimeWakeSignal,
-  HostedRuntimeCheckpointInterruptedByWakeError,
-  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
-  HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  parseHostedAssistantWorkspaceRuntimeJobInput,
-  type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
   runHostedWorkspaceAssistantPhase,
@@ -172,17 +131,11 @@ import {
   type HostedWorkspaceSnapshotArchiveBuilder,
 } from "../src/hosted-runtime/snapshot-bridge.ts";
 import {
-  restoreHostedWorkspaceRuntimeJobWorkspace,
   writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
   createEmptyHostedMailboxImportState,
-  HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
-  HOSTED_MAILBOX_IMPORT_STATE_SCHEMA_VERSION,
-  HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH,
   readHostedMailboxImportState,
-  writeHostedMailboxImportState,
-  type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
 import type {
   HostedMailboxResolvedImportItem,
@@ -201,9 +154,7 @@ import {
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
-  HostedRuntimeArtifactReadError,
   type HostedRuntimeDeviceSyncPort,
-  type HostedRuntimePlatform,
   type HostedRuntimeWorkspacePort,
   type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
@@ -213,10 +164,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const items = [
-      createMailboxItem({
-        id: "mailbox_item_entrypoint_001",
-        laneSeq: "1",
-      }),
+      createMailboxItem({}),
     ];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
@@ -249,8 +197,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               maxMailboxItems: 10,
             },
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -436,8 +382,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               maxMailboxItems: 10,
             },
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -535,9 +479,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
 
     const conversationItem = createMailboxItem({
       id: "mailbox_item_entrypoint_image_only_001",
-      kind: "conversation.message",
-      lane: "conversation",
-      laneSeq: "1",
     });
     const systemItem = createMailboxItem({
       id: "mailbox_item_entrypoint_member_activated_001",
@@ -554,10 +495,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             budget: {
               maxMailboxItems: 10,
             },
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -867,9 +805,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                 mealPhotoItem,
                 createMailboxItem({
                   id: "mailbox_item_system_mailbox_only_conversation",
-                  kind: "conversation.message",
-                  lane: "conversation",
-                  laneSeq: "1",
                 }),
               ],
             }),
@@ -4443,9 +4378,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const events: string[] = [];
     const conversationItem = createMailboxItem({
       id: "mailbox_item_default_browser_vault_foreground",
-      kind: "conversation.message",
-      lane: "conversation",
-      laneSeq: "1",
     });
     const refreshItem = createMailboxItem({
       dedupeKey: "runtime.browser-vault-refresh-requested:default-timeout-retry",
@@ -6895,8 +6827,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const deviceSyncPort = createEmptyDeviceSyncPort();
     const pendingInputItem = createMailboxItem({
       id: "mailbox_item_restored_reply_before_ask",
-      lane: "conversation",
-      laneSeq: "1",
       occurredAt: "2026-04-27T00:00:01.000Z",
     });
     const firstAsk = createMailboxItem({
@@ -7173,8 +7103,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const deviceSyncPort = createEmptyDeviceSyncPort();
     const pendingInputItem = createMailboxItem({
       id: "mailbox_item_same_key_reply",
-      lane: "conversation",
-      laneSeq: "1",
       occurredAt: "2026-04-27T00:00:01.000Z",
     });
     const firstAsk = createMailboxItem({
@@ -7397,9 +7325,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_pre_barrier_approved_asks",
-            runnerIdleTtlMs: 1,
             processingMode: "system_mailbox",
-            workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
         }),
@@ -7562,8 +7488,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     });
     const conversationItem = createMailboxItem({
       id: "mailbox_item_pre_watcher_conversation",
-      lane: "conversation",
-      laneSeq: "1",
       occurredAt: "2026-04-27T00:00:01.000Z",
     });
     const followUpConversationItem = createMailboxItem({
@@ -7904,9 +7828,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_exact_assistant_ask_owner",
-            runnerIdleTtlMs: 1,
             processingMode: "system_mailbox",
-            workspaceVersion: "0",
           },
           resolvedConfig: createDeviceSyncResolvedConfig(),
         }),
@@ -8062,8 +7984,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     });
     const conversationItem = createMailboxItem({
       id: "mailbox_item_foreground_requeue_conversation",
-      lane: "conversation",
-      laneSeq: "1",
       occurredAt: "2026-04-27T00:00:01.000Z",
     });
     const approvedAsk = createMailboxItem({
@@ -8430,8 +8350,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     });
     const pendingInputItem = createMailboxItem({
       id: "mailbox_item_system_mailbox_pending_assistant_source",
-      lane: "conversation",
-      laneSeq: "1",
       occurredAt: "2026-04-27T00:00:01.000Z",
     });
 
@@ -8795,8 +8713,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         await stagePendingLinqAssistantInputForMailboxItem({
           item: createMailboxItem({
             id: "mailbox_item_system_mailbox_pending_dirty_ack_follow_up",
-            lane: "conversation",
-            laneSeq: "1",
           }),
           vaultRoot,
         });
@@ -9153,7 +9069,6 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
 
         const firstCheckpoint = checkpointRequests.at(-1);
         assert.ok(firstCheckpoint);
-
 
         assert.equal(
           events.filter((event) =>

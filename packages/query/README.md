@@ -2,6 +2,10 @@
 
 Workspace-private read-helper, filter, derived-retrieval, and export-pack surface over canonical vault state. Query code must not mutate canonical vault data. It owns the rebuildable local query projection in three write-once files under `.runtime/projections/`, which backs cross-family, aggregate, derived, and lexical-search reads.
 
+Canonical source collection has asynchronous strict and tolerant modes. Export
+packs derive health context from the supplied vault read model; they do not
+perform a separate filesystem read.
+
 Stale projection readers acquire the existing reentrant canonical write lock,
 recheck freshness, and rebuild only when needed. Source capture and publication
 stay inside that boundary. Ordinary fresh indexed reads take no lock (the

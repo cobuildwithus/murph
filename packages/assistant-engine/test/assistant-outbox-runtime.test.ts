@@ -3613,32 +3613,6 @@ describe('assistant outbox runtime', () => {
     expect(retry.media).toEqual(stableIntent.media)
   })
 
-  it('keeps same-text assistant segments distinct when their dedupe tokens differ', async () => {
-    const { vaultRoot } = await createAssistantVault('assistant-outbox-segment-dedupe-')
-
-    const firstSegment = await createIntent(vaultRoot, {
-      dedupeToken: 'assistant-segment:turn-segment-dedupe:0',
-      message: 'Same final text.',
-      sessionId: 'session-segment-dedupe',
-      turnId: 'turn-segment-dedupe',
-    })
-    const secondSegment = await createIntent(vaultRoot, {
-      dedupeToken: 'assistant-segment:turn-segment-dedupe:1',
-      message: 'Same final text.',
-      sessionId: 'session-segment-dedupe',
-      turnId: 'turn-segment-dedupe',
-    })
-    const retryFirstSegment = await createIntent(vaultRoot, {
-      dedupeToken: 'assistant-segment:turn-segment-dedupe:0',
-      message: 'Same final text.',
-      sessionId: 'session-segment-dedupe',
-      turnId: 'turn-segment-dedupe',
-    })
-
-    expect(secondSegment.intentId).not.toBe(firstSegment.intentId)
-    expect(retryFirstSegment.intentId).toBe(firstSegment.intentId)
-  })
-
   it('lists intents oldest-first and quarantines malformed inventory files', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T12:00:00.000Z'))
@@ -5243,7 +5217,27 @@ describe('assistant outbox runtime', () => {
     expect(setLinqMessageReaction).not.toHaveBeenCalled()
   })
 
-  it('keeps deduped Linq reaction updates non-idempotent', async () => {
+  it.each([
+    {
+      name: 'updated reaction and target',
+      reaction: 'laugh',
+      targetMessageId: 'linq-message-new',
+      legacyIdempotent: false,
+      answeredMailboxItemIds: ['mailbox-linq-reaction-update'],
+    },
+    {
+      name: 'unchanged legacy intent',
+      reaction: 'heart',
+      targetMessageId: 'linq-message-old',
+      legacyIdempotent: true,
+      answeredMailboxItemIds: [],
+    },
+  ] as const)('keeps Linq reaction non-idempotent for $name', async ({
+    reaction,
+    targetMessageId,
+    legacyIdempotent,
+    answeredMailboxItemIds,
+  }) => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-linq-reaction-update-',
     )
@@ -5275,6 +5269,7 @@ describe('assistant outbox runtime', () => {
     const retryable = await saveAssistantOutboxIntent(vaultRoot, {
       ...queued.intent,
       attemptCount: 1,
+      deliveryTransportIdempotent: legacyIdempotent,
       lastAttemptAt: '2026-04-08T01:00:00.000Z',
       lastError: {
         code: 'ASSISTANT_LINQ_REACTION_FAILED',
@@ -5286,113 +5281,39 @@ describe('assistant outbox runtime', () => {
     })
 
     const sent = await deliverAssistantOutboxReaction({
-      answeredMailboxItemIds: ['mailbox-linq-reaction-update'],
+      answeredMailboxItemIds,
       channel: 'linq',
       dedupeToken: 'linq-reaction-slot',
       dependencies: {
         setLinqMessageReaction,
       },
       explicitTarget: 'linq-chat-update',
-      reaction: 'laugh',
+      reaction,
       sessionId: retryable.sessionId,
-      targetMessageId: 'linq-message-new',
+      targetMessageId,
       turnId: retryable.turnId,
       vault: vaultRoot,
     })
 
     expect(sent.kind).toBe('sent')
     expect(sent.intent.intentId).toBe(queued.intent.intentId)
-    expect(sent.intent.answeredMailboxItemIds).toEqual([
-      'mailbox-linq-reaction-update',
-    ])
+    expect(sent.intent.answeredMailboxItemIds).toEqual(answeredMailboxItemIds)
     expect(sent.intent.deliveryTransportIdempotent).toBe(false)
     expect(sent.intent.operation).toEqual({
       kind: 'message-reaction',
-      reaction: 'laugh',
+      reaction,
     })
-    expect(sent.intent.replyToMessageId).toBe('linq-message-new')
+    expect(sent.intent.replyToMessageId).toBe(targetMessageId)
     await expect(
       readAssistantOutboxIntent(vaultRoot, queued.intent.intentId),
     ).resolves.toMatchObject({
-      answeredMailboxItemIds: ['mailbox-linq-reaction-update'],
+      answeredMailboxItemIds,
       deliveryTransportIdempotent: false,
       operation: {
         kind: 'message-reaction',
-        reaction: 'laugh',
+        reaction,
       },
-      replyToMessageId: 'linq-message-new',
-    })
-    expect(setLinqMessageReaction).toHaveBeenCalledTimes(1)
-  })
-
-  it('rederives Linq reaction idempotency on unchanged dedupe hits', async () => {
-    const { vaultRoot } = await createAssistantVault(
-      'assistant-outbox-linq-reaction-dedupe-idempotency-',
-    )
-    const setLinqMessageReaction = vi.fn(async (input: {
-      reaction: 'heart' | 'thumbs_up' | 'laugh'
-      target: string
-      targetMessageId: string
-    }) => ({
-      reaction: input.reaction,
-      target: input.target,
-      targetKind: 'thread' as const,
-      targetMessageId: input.targetMessageId,
-    }))
-
-    const queued = await deliverAssistantOutboxReaction({
-      channel: 'linq',
-      dedupeToken: 'linq-reaction-same-slot',
-      dispatchMode: 'queue-only',
-      explicitTarget: 'linq-chat-same',
-      reaction: 'heart',
-      sessionId: 'session-linq-reaction-same',
-      targetMessageId: 'linq-message-same',
-      turnId: 'turn-linq-reaction-same',
-      vault: vaultRoot,
-    })
-    expect(queued.kind).toBe('queued')
-
-    const retryable = await saveAssistantOutboxIntent(vaultRoot, {
-      ...queued.intent,
-      attemptCount: 1,
-      deliveryTransportIdempotent: true,
-      lastAttemptAt: '2026-04-08T01:00:00.000Z',
-      lastError: {
-        code: 'ASSISTANT_LINQ_REACTION_FAILED',
-        message: 'legacy idempotency flag',
-      },
-      nextAttemptAt: '2099-01-01T00:00:00.000Z',
-      status: 'retryable',
-      updatedAt: '2026-04-08T01:00:00.000Z',
-    })
-
-    const sent = await deliverAssistantOutboxReaction({
-      channel: 'linq',
-      dedupeToken: 'linq-reaction-same-slot',
-      dependencies: {
-        setLinqMessageReaction,
-      },
-      explicitTarget: 'linq-chat-same',
-      reaction: 'heart',
-      sessionId: retryable.sessionId,
-      targetMessageId: 'linq-message-same',
-      turnId: retryable.turnId,
-      vault: vaultRoot,
-    })
-
-    expect(sent.kind).toBe('sent')
-    expect(sent.intent.intentId).toBe(queued.intent.intentId)
-    expect(sent.intent.deliveryTransportIdempotent).toBe(false)
-    await expect(
-      readAssistantOutboxIntent(vaultRoot, queued.intent.intentId),
-    ).resolves.toMatchObject({
-      deliveryTransportIdempotent: false,
-      operation: {
-        kind: 'message-reaction',
-        reaction: 'heart',
-      },
-      replyToMessageId: 'linq-message-same',
+      replyToMessageId: targetMessageId,
     })
     expect(setLinqMessageReaction).toHaveBeenCalledTimes(1)
   })
@@ -5705,7 +5626,7 @@ describe('assistant outbox runtime', () => {
       'assistant-segment-outbox-dedupe-',
     )
 
-    await deliverAssistantOutboxMessage({
+    const first = await deliverAssistantOutboxMessage({
       channel: 'telegram',
       dedupeToken: 'assistant-segment:turn-duplicate-text:0',
       dispatchMode: 'queue-only',
@@ -5716,7 +5637,7 @@ describe('assistant outbox runtime', () => {
       turnId: 'turn-duplicate-text',
       vault: vaultRoot,
     })
-    await deliverAssistantOutboxMessage({
+    const second = await deliverAssistantOutboxMessage({
       channel: 'telegram',
       dedupeToken: 'assistant-segment:turn-duplicate-text:1',
       dispatchMode: 'queue-only',
@@ -5727,7 +5648,7 @@ describe('assistant outbox runtime', () => {
       turnId: 'turn-duplicate-text',
       vault: vaultRoot,
     })
-    await deliverAssistantOutboxMessage({
+    const replayed = await deliverAssistantOutboxMessage({
       channel: 'telegram',
       dedupeToken: 'assistant-segment:turn-duplicate-text:1',
       dispatchMode: 'queue-only',
@@ -5739,50 +5660,53 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
 
+    expect(first.kind).toBe('queued')
+    expect(second.kind).toBe('queued')
+    expect(replayed.kind).toBe('queued')
+    expect(second.intent.intentId).not.toBe(first.intent.intentId)
+    expect(replayed.intent.intentId).toBe(second.intent.intentId)
     const intents = await listAssistantOutboxIntentsLocal(vaultRoot)
     expect(intents.map((intent) => intent.message)).toEqual(['Done.', 'Done.'])
     expect(new Set(intents.map((intent) => intent.intentId)).size).toBe(2)
   })
 
-  it('persists inferred Linq thread delivery on queue-only intents before dispatch', async () => {
+  it.each(['linq', 'telegram'] as const)('persists inferred %s thread delivery before queued dispatch', async (channel) => {
     const { vaultRoot } = await createAssistantVault(
-      'assistant-outbox-linq-thread-inferred-',
+      `assistant-outbox-${channel}-thread-inferred-`,
     )
 
+    const answeredMailboxItemIds = channel === 'linq'
+      ? ['mailbox_item_prepared_retry_1', 'mailbox_item_prepared_retry_2']
+      : []
+    const threadId = `${channel}-thread-inferred`
     const queued = await deliverAssistantOutboxMessage({
-      answeredMailboxItemIds: [
-        'mailbox_item_prepared_retry_1',
-        'mailbox_item_prepared_retry_2',
-      ],
-      channel: 'linq',
+      answeredMailboxItemIds,
+      channel,
       dispatchMode: 'queue-only',
-      message: 'queue the Linq reminder',
-      sessionId: 'session-linq-thread-inferred',
-      threadId: 'linq-thread-inferred',
+      message: 'queue the reminder',
+      sessionId: `session-${channel}-thread-inferred`,
+      threadId,
       threadIsDirect: true,
-      turnId: 'turn-linq-thread-inferred',
+      turnId: `turn-${channel}-thread-inferred`,
       vault: vaultRoot,
     })
 
     expect(queued.kind).toBe('queued')
-    expect(queued.intent.answeredMailboxItemIds).toEqual([
-      'mailbox_item_prepared_retry_1',
-      'mailbox_item_prepared_retry_2',
-    ])
+    expect(queued.intent.answeredMailboxItemIds).toEqual(answeredMailboxItemIds)
     expect(queued.intent.bindingDelivery).toEqual({
       kind: 'thread',
-      target: 'linq-thread-inferred',
+      target: threadId,
     })
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
 
     mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
       delivery: createDelivery({
-        channel: 'linq',
+        channel,
         idempotencyKey: queued.intent.deliveryIdempotencyKey,
-        providerMessageId: 'provider-linq-thread-inferred',
-        providerThreadId: 'linq-thread-inferred',
+        providerMessageId: `provider-${channel}-thread-inferred`,
+        ...(channel === 'linq' ? { providerThreadId: threadId } : {}),
         sentAt: '2026-04-08T03:03:00.000Z',
-        target: 'linq-thread-inferred',
+        target: threadId,
         targetKind: 'thread',
       }),
       deliveryDeduplicated: false,
@@ -5800,81 +5724,15 @@ describe('assistant outbox runtime', () => {
     expect(dispatched.intent.status).toBe('sent')
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
       expect.objectContaining({
-        answeredMailboxItemIds: [
-          'mailbox_item_prepared_retry_1',
-          'mailbox_item_prepared_retry_2',
-        ],
+        answeredMailboxItemIds,
         session: {
           binding: expect.objectContaining({
-            channel: 'linq',
+            channel,
             delivery: {
               kind: 'thread',
-              target: 'linq-thread-inferred',
+              target: threadId,
             },
-            threadId: 'linq-thread-inferred',
-            threadIsDirect: true,
-          }),
-        },
-      }),
-      undefined,
-    )
-  })
-
-  it('persists inferred Telegram thread delivery on queue-only intents before dispatch', async () => {
-    const { vaultRoot } = await createAssistantVault(
-      'assistant-outbox-telegram-thread-inferred-',
-    )
-
-    const queued = await deliverAssistantOutboxMessage({
-      channel: 'telegram',
-      dispatchMode: 'queue-only',
-      message: 'queue the Telegram reminder',
-      sessionId: 'session-telegram-thread-inferred',
-      threadId: 'telegram-thread-inferred',
-      threadIsDirect: true,
-      turnId: 'turn-telegram-thread-inferred',
-      vault: vaultRoot,
-    })
-
-    expect(queued.kind).toBe('queued')
-    expect(queued.intent.bindingDelivery).toEqual({
-      kind: 'thread',
-      target: 'telegram-thread-inferred',
-    })
-    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
-
-    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
-      delivery: createDelivery({
-        channel: 'telegram',
-        idempotencyKey: queued.intent.deliveryIdempotencyKey,
-        providerMessageId: 'provider-telegram-thread-inferred',
-        sentAt: '2026-04-08T03:03:00.000Z',
-        target: 'telegram-thread-inferred',
-        targetKind: 'thread',
-      }),
-      deliveryDeduplicated: false,
-      deliveryTransportIdempotent: true,
-      outboxIntentId: null,
-      session: undefined,
-    })
-
-    const dispatched = await dispatchAssistantOutboxIntent({
-      intentId: queued.intent.intentId,
-      vault: vaultRoot,
-    })
-
-    expect(dispatched.deliveryError).toBeNull()
-    expect(dispatched.intent.status).toBe('sent')
-    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
-      expect.objectContaining({
-        session: {
-          binding: expect.objectContaining({
-            channel: 'telegram',
-            delivery: {
-              kind: 'thread',
-              target: 'telegram-thread-inferred',
-            },
-            threadId: 'telegram-thread-inferred',
+            threadId,
             threadIsDirect: true,
           }),
         },

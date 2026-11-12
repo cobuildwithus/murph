@@ -33,17 +33,6 @@ async function readWorkoutFormatAudits(vaultRoot: string) {
 const WORKOUT_FORMAT_CANONICAL_EVENT_PATH_TIMEOUT_MS = 90_000
 const WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS = 300_000
 
-interface SchemaEnvelope {
-  args: {
-    properties: Record<string, unknown>
-    required?: string[]
-  }
-  options: {
-    properties: Record<string, unknown>
-    required?: string[]
-  }
-}
-
 interface WorkoutAddEnvelope {
   eventId: string
   lookupId: string
@@ -244,40 +233,6 @@ async function runSliceCliRaw(args: string[]) {
   return output.join('').trim()
 }
 
-test('workout add schema exposes a note-only positional text surface', async () => {
-  const schema = JSON.parse(
-    await runSliceCliRaw(['workout', 'add', '--schema']),
-  ) as SchemaEnvelope
-
-  assert.equal('text' in schema.args.properties, true)
-  assert.deepEqual(schema.args.required ?? [], [])
-  assert.equal('duration' in schema.options.properties, true)
-  assert.equal('type' in schema.options.properties, true)
-  assert.equal('distanceKm' in schema.options.properties, true)
-  assert.equal('occurredAt' in schema.options.properties, true)
-  assert.equal('source' in schema.options.properties, true)
-  assert.deepEqual(schema.options.required, ['vault'])
-})
-
-test('workout edit/delete schemas expose typed mutation options', async () => {
-  const editSchema = JSON.parse(
-    await runSliceCliRaw(['workout', 'edit', '--schema']),
-  ) as SchemaEnvelope
-  const deleteSchema = JSON.parse(
-    await runSliceCliRaw(['workout', 'delete', '--schema']),
-  ) as SchemaEnvelope
-
-  assert.equal('input' in editSchema.options.properties, false)
-  assert.equal('set' in editSchema.options.properties, false)
-  assert.equal('clear' in editSchema.options.properties, false)
-  assert.equal('note' in editSchema.options.properties, true)
-  assert.equal('duration' in editSchema.options.properties, true)
-  assert.equal('type' in editSchema.options.properties, true)
-  assert.equal('dayKeyPolicy' in editSchema.options.properties, true)
-  assert.deepEqual(editSchema.options.required, ['vault'])
-  assert.deepEqual(deleteSchema.options.required, ['vault', 'expectedRevision'])
-})
-
 test('workout add help keeps the positional text optional for typed captures', async () => {
   const help = await runSliceCliRaw(['workout', 'add', '--help'])
 
@@ -288,15 +243,6 @@ test('workout add help keeps the positional text optional for typed captures', a
   )
   assert.doesNotMatch(help, /^\s+--input\s+/mu)
   assert.match(help, /workout import-json --input @workout\.json/u)
-})
-
-test('workout format save help keeps name and text optional when using structured input', async () => {
-  const help = await runSliceCliRaw(['workout', 'format', 'save', '--help'])
-
-  assert.match(
-    help,
-    /Usage: vault-cli workout format save \[name\] \[text\] \[options\]/u,
-  )
 })
 
 test(

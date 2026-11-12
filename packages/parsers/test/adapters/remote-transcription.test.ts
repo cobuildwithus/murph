@@ -50,7 +50,6 @@ describe("createRemoteTranscriptionProvider", () => {
       endpoint: ENDPOINT,
     });
     expect(provider.id).toBe("remote-transcription");
-    expect(provider.locality).toBe("remote");
     await expect(provider.discover()).resolves.toMatchObject({
       available: true,
       details: { endpoint: ENDPOINT },

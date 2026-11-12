@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 310,
+  "item": {
+    "id": "recap-player-likeness",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More familiar faces in recap scenes",
+    "summary": "Pair recap scenes start from each player's clearest photos, use a more precise image model and ask it to preserve their own face and hair.",
+    "details": "Costumes and props still follow the show's setting. Ordinary chat images are unchanged.",
+    "relevanceTags": ["games", "recaps"],
+    "sourcePullRequests": []
+  }
+}

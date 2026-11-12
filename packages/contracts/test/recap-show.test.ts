@@ -41,6 +41,12 @@ describe("recap presentation compatibility", () => {
     expect(presentGameRecap({ ...input, stored }).show?.treatment).toBe(treatment);
     expect(gameRecapWriterSchema.safeParse(draft.story).success).toBe(false);
   });
+
+  it("drops a trailing full stop so the app's starring line reads cleanly", () => {
+    const draft = gameRecapDraftSchema.parse({ story: { ...story, treatment: "A polar-expedition comedy." }, files: [] });
+    const stored = storedGameRecapEnvelopeSchema.parse({ ...envelope, story: draft.story });
+    expect(presentGameRecap({ ...input, stored }).show?.treatment).toBe("A polar-expedition comedy");
+  });
   it("accepts selected local files but rejects host authority and duplicate slots", () => {
     const selected = { slot: "scene-0", path: "media/one.jpg" };
     expect(gameRecapDraftSchema.safeParse({ story, files: [selected] }).success).toBe(true);

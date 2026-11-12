@@ -117,7 +117,6 @@ test('samples import-csv schema exposes the expansion-only import options', asyn
     }
   }
 
-  assert.equal('preset' in schema.options.properties, true)
   assert.equal('delimiter' in schema.options.properties, true)
   assert.equal('metadataColumns' in schema.options.properties, true)
   assert.equal('source' in schema.options.properties, true)

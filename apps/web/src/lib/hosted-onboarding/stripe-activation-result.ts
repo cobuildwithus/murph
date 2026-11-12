@@ -1,9 +1,6 @@
 import { type Prisma, type PrismaClient } from "@prisma/client";
 
 import { HOSTED_FAMILY_MAX_SEATS } from "./billing-plans";
-import type {
-  HostedStripeActivatedMemberOutcome,
-} from "./stripe-billing-events";
 
 const HOSTED_STRIPE_ACTIVATION_RESULT_SCHEMA =
   "hosted.stripe.activation-result.v1";
@@ -19,38 +16,10 @@ export type HostedStripeActivationMailboxItem = {
   userId: string;
 };
 
-export function buildHostedStripeActivationResultJson(result: {
-  activatedMemberId: string | null;
-  activatedMembers?: HostedStripeActivatedMemberOutcome[];
-  hostedExecutionEventId: string | null;
-  hostedExecutionMailboxItemId?: string | null;
-}): HostedStripeActivationResultJson {
-  const explicitActivations = (result.activatedMembers ?? []).filter(
-    (activation): activation is HostedStripeActivatedMemberOutcome & {
-      activatedMemberId: string;
-      hostedExecutionEventId: string;
-    } => Boolean(activation.activatedMemberId && activation.hostedExecutionEventId),
-  );
-  const activations = explicitActivations.length > 0
-    ? explicitActivations
-    : result.activatedMemberId && result.hostedExecutionEventId
-    ? [{
-        activatedMemberId: result.activatedMemberId,
-        hostedExecutionEventId: result.hostedExecutionEventId,
-        hostedExecutionMailboxItemId:
-          result.hostedExecutionMailboxItemId,
-      }]
-    : [];
-
-  const activationMailboxItemIds = activations.map((activation) => {
-    const mailboxItemId = activation.hostedExecutionMailboxItemId;
-    if (!mailboxItemId) {
-      throw new Error(
-        "Stripe activation completion requires an exact mailbox pointer.",
-      );
-    }
-    return mailboxItemId;
-  });
+export function buildHostedStripeActivationResultJson(
+  activations: HostedStripeActivationMailboxItem[],
+): HostedStripeActivationResultJson {
+  const activationMailboxItemIds = activations.map((activation) => activation.id);
   if (activationMailboxItemIds.length > HOSTED_FAMILY_MAX_SEATS) {
     throw new Error("Stripe activation completion exceeds the Family seat limit.");
   }

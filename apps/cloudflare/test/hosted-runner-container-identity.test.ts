@@ -27,9 +27,6 @@ import {
   readHostedExecutionEnvironment,
 } from "../src/env.js";
 import type {
-  R2BucketLike,
-} from "../src/bundle-store.js";
-import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.js";
@@ -43,9 +40,6 @@ import {
 import { RunnerSlotBindingStore } from "../src/runner-slot-binding.js";
 
 import {
-  RunnerSecretsService,
-} from "../src/user-runner/runner-secrets.js";
-import {
   type RunnerWriteFenceToken,
 } from "../src/runtime-invocation-token.ts";
 import {
@@ -54,9 +48,8 @@ import {
 
 import { HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL } from "../src/runner-injected-credential.ts";
 import {
-  RunnerStoreCache,
   type RunnerUserStores,
-} from "../src/user-runner/runner-store-cache.js";
+} from "../src/user-runner/runner-stores.js";
 
 import {
   createHostedExecutionTestEnv,
@@ -97,13 +90,12 @@ describe("hosted runner container identity", () => {
     const workspaceGate = createVoidGate();
     const cryptoGate = createVoidGate();
     const started: string[] = [];
-    const originalEnsure = TestRunnerStoreCache.prototype.ensure;
-    vi.spyOn(TestRunnerStoreCache.prototype, "ensure").mockImplementation(async function(this: TestRunnerStoreCache, userId) {
-      started.push("crypto");
-      await cryptoGate.promise;
-      return originalEnsure.call(this, userId);
-    });
     const service = createRuntimeInvocationPreparation({
+      loadRunnerStores: async (userId) => {
+        started.push("crypto");
+        await cryptoGate.promise;
+        return createTestRunnerStores(userId);
+      },
       beforeWorkspaceRead: async () => {
         started.push("workspace");
         await workspaceGate.promise;
@@ -138,14 +130,14 @@ describe("hosted runner container identity", () => {
         runnerContainerName: TEST_USER_ID,
         userId: TEST_USER_ID,
       });
-      const stores = await new TestRunnerStoreCache({}).ensure(TEST_USER_ID);
-      vi.spyOn(TestRunnerStoreCache.prototype, "ensure").mockImplementation(async () => {
-        if (scenario === "crypto failure") throw new Error("Synthetic crypto unavailable.");
-        return scenario === "foreign crypto" ? { ...stores, userId: "member_other" } : stores;
-      });
+      const stores = await createTestRunnerStores(TEST_USER_ID);
       const budget = { deadlineAtMs: Date.now() + 1_000 };
       const invokedContainerNames: string[] = [];
       const service = createRuntimeInvocationPreparation({
+        loadRunnerStores: async () => {
+          if (scenario === "crypto failure") throw new Error("Synthetic crypto unavailable.");
+          return scenario === "foreign crypto" ? { ...stores, userId: "member_other" } : stores;
+        },
         beforeWorkspaceRead: async () => {
           if (scenario === "workspace failure") throw new Error("Synthetic workspace unavailable.");
           if (scenario === "expired budget") budget.deadlineAtMs = Date.now() - 1;
@@ -794,70 +786,29 @@ describe("hosted runner container identity", () => {
 
 });
 
-class TestRunnerStoreCache extends RunnerStoreCache {
-  private readonly source: Readonly<Record<string, unknown>>;
-  private readonly runnerSecrets = new EmptyRunnerSecretsService();
-
-  constructor(source: Readonly<Record<string, unknown>>) {
-    super({
-      bucket: createEmptyR2Bucket(),
-      env: createHostedExecutionEnvironment(),
-      runnerRuntimeEnvSource: source,
-    });
-    this.source = source;
-  }
-
-  override async ensure(userId: string): Promise<RunnerUserStores> {
-    const cryptoContext = await createTestHostedRuntimeCryptoContext(userId);
-    const rootKeyId = "udrk:runtime:test-root";
-    const rootKey = getTestHostedRuntimeRootKey("runtime");
-    return {
-      crypto: {
-        cacheMaxAgeMs: 60_000,
-        cryptoContextVersion: null,
-        domain: "runtime",
-        envelope: cryptoContext.envelopes.runtime,
-        fetchedAtMs: Date.now(),
-        keysById: {
-          [rootKeyId]: rootKey,
-        },
-        resolveKeyById: async (keyId) => keyId === rootKeyId ? rootKey : null,
-        rootKey,
-        rootKeyId,
-      },
-      runnerSecrets: this.runnerSecrets,
-      userId,
-    };
-  }
-
-  override readRuntimeConfigSource(): Readonly<Record<string, string | undefined>> {
-    return Object.fromEntries(
-      Object.entries(this.source).flatMap(([key, value]) =>
-        typeof value === "string" ? [[key, value]] : []
-      ),
-    );
-  }
-}
-
-class EmptyRunnerSecretsService extends RunnerSecretsService {
-  constructor() {
-    const rootKey = new Uint8Array(32);
-    super(
-      createEmptyR2Bucket(),
+async function createTestRunnerStores(userId: string): Promise<RunnerUserStores> {
+  const cryptoContext = await createTestHostedRuntimeCryptoContext(userId);
+  const rootKeyId = "udrk:runtime:test-root";
+  const rootKey = getTestHostedRuntimeRootKey("runtime");
+  return {
+    crypto: {
+      cacheMaxAgeMs: 60_000,
+      cryptoContextVersion: null,
+      domain: "runtime",
+      envelope: cryptoContext.envelopes.runtime,
+      fetchedAtMs: Date.now(),
+      keysById: { [rootKeyId]: rootKey },
+      resolveKeyById: async (keyId) => keyId === rootKeyId ? rootKey : null,
       rootKey,
-      "test-root",
-      { "test-root": rootKey },
-      async () => null,
-      {},
-    );
-  }
-
-  override async readRunnerSecrets(): Promise<Record<string, string>> {
-    return {};
-  }
+      rootKeyId,
+    },
+    readRunnerSecrets: async () => ({}),
+    userId,
+  };
 }
 
 function createRuntimeInvocationPreparation(input: {
+  loadRunnerStores?: (userId: string) => Promise<RunnerUserStores>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
   beforeWorkspaceRead?: () => Promise<void>;
   hostedAssistantPriorityUntil?: string;
@@ -911,7 +862,7 @@ function createRuntimeInvocationPreparation(input: {
       STANDBY_RUNNER_CONTAINER: input.standbyContainerNamespace ?? null,
     }),
     runnerRuntimeEnvSource: input.runnerRuntimeEnvSource,
-    runnerStoreCache: new TestRunnerStoreCache(input.runnerRuntimeEnvSource),
+    loadRunnerStores: input.loadRunnerStores ?? createTestRunnerStores,
     bindInvocation: input.stateStore.bindInvocation,
   });
 }
@@ -1087,12 +1038,6 @@ function createRunnerContainerStub(input: {
   };
 }
 
-function createEmptyR2Bucket(): R2BucketLike {
-  return {
-    get: async () => null,
-    put: async () => {},
-  };
-}
 
 function createVoidGate(): { promise: Promise<void>; resolve(): void } {
   let resolve!: () => void;

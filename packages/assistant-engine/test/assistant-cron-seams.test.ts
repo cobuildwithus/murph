@@ -18,8 +18,8 @@ import {
   upsertAssistantCronCanonicalRuntimeRecord,
   writeAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
-import { listAssistantQuarantineEntriesAtPaths } from '../src/assistant/quarantine.ts'
-import { listAssistantRuntimeEventsAtPath } from '../src/assistant/runtime-events.ts'
+import { appendAssistantCronRun, readAssistantCronStore } from '../src/assistant/cron/store.ts'
+import { listAssistantCronRuns } from '../src/assistant/cron.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.js'
 
@@ -398,88 +398,63 @@ describe('assistant cron canonical runtime store seams', () => {
     })
   })
 
-  it('quarantines corrupted runtime stores and falls back to an empty store', async () => {
-    const paths = await createAssistantPaths('murph-assistant-cron-store-corrupt-')
-
-    await mkdir(path.dirname(paths.cronAutomationStatePath), {
-      recursive: true,
+  it('reads historical runs by raw id when the job no longer exists', async () => {
+    const paths = await createAssistantPaths('assistant-cron-archived-history-')
+    await appendAssistantCronRun(paths, {
+      error: null,
+      finishedAt: '2026-04-08T10:01:00.000Z',
+      jobId: 'cron_archived',
+      outcome: 'delivered',
+      reason: 'sent',
+      response: null,
+      responseLength: 0,
+      runId: 'cronrun_archived',
+      schema: 'murph.assistant-cron-run.v1',
+      sessionId: null,
+      startedAt: '2026-04-08T10:00:00.000Z',
+      trigger: 'scheduled',
     })
-    await writeFile(paths.cronAutomationStatePath, '{not-valid-json', 'utf8')
-
-    await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
-      jobs: [],
-      version: 1,
-    })
-    await expect(readFile(paths.cronAutomationStatePath, 'utf8')).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-
-    const quarantines = await listAssistantQuarantineEntriesAtPaths(paths, {
-      artifactKind: 'cron-store',
-    })
-    expect(quarantines).toHaveLength(1)
-    expect(quarantines[0]).toMatchObject({
-      artifactKind: 'cron-store',
-      metadataPath: `${quarantines[0]?.quarantinedPath}.meta.json`,
-      originalPath: paths.cronAutomationStatePath,
-    })
-    await expect(readFile(quarantines[0]!.quarantinedPath, 'utf8')).resolves.toBe(
-      '{not-valid-json',
-    )
-
-    const runtimeEvents = await listAssistantRuntimeEventsAtPath(paths.runtimeEventsPath)
-    expect(runtimeEvents).toHaveLength(1)
-    expect(runtimeEvents[0]).toMatchObject({
-      component: 'state',
-      entityId: 'automation-runtime.json',
-      entityType: 'cron-store',
-      kind: 'cron.store.quarantined',
-      level: 'warn',
+    await expect(listAssistantCronRuns({
+      job: ' cron_archived ', vault: paths.absoluteVaultRoot,
+    })).resolves.toMatchObject({
+      jobId: 'cron_archived',
+      runs: [{ runId: 'cronrun_archived', outcome: 'delivered' }],
     })
   })
 
-  it('quarantines unsupported legacy runtime store shapes instead of migrating them', async () => {
-    const paths = await createAssistantPaths('murph-assistant-cron-store-legacy-')
-
-    await mkdir(path.dirname(paths.cronAutomationStatePath), {
-      recursive: true,
-    })
-    await writeFile(
-      paths.cronAutomationStatePath,
-      JSON.stringify({
-        automations: [
-          {
-            alias: null,
-            automationId: 'legacy-job',
-            createdAt: '2026-04-08T11:00:00.000Z',
-            schema: 'murph.assistant-automation-runtime-state.v1',
-            sessionId: null,
-            state: {
-              consecutiveFailures: 0,
-              lastError: null,
-              lastFailedAt: null,
-              lastRunAt: null,
-              lastSucceededAt: null,
-              nextRunAt: '2026-04-09T08:00:00.000Z',
-              runningAt: null,
-              runningPid: null,
-            },
-            updatedAt: '2026-04-08T11:00:00.000Z',
-          },
-        ],
-        version: 1,
-      }),
-      'utf8',
+  for (const [name, readStore, fileName] of [
+    ['canonical runtime', readAssistantCronCanonicalRuntimeStore, 'cronAutomationStatePath'],
+    ['queued occurrence', readAssistantCronStore, 'cronJobsPath'],
+  ] as const) {
+    it.each(['{not-valid-json', JSON.stringify({ version: 2, jobs: [] })])(
+      `preserves unreadable ${name} evidence across repeated reads: %s`,
+      async (raw) => {
+        const paths = await createAssistantPaths('assistant-cron-preserved-')
+        const filePath = paths[fileName]
+        await mkdir(path.dirname(filePath), { recursive: true })
+        await writeFile(filePath, raw, 'utf8')
+        // Failure must remain failure on the next pass, never a fresh empty store.
+        await expect(readStore(paths)).rejects.toThrow()
+        await expect(readStore(paths)).rejects.toThrow()
+        await expect(listAssistantCronRuns({
+          job: 'morning-check-in', vault: paths.absoluteVaultRoot,
+        })).rejects.toThrow()
+        expect(await readFile(filePath, 'utf8')).toBe(raw)
+      },
     )
 
-    await expect(readAssistantCronCanonicalRuntimeStore(paths)).resolves.toEqual({
-      jobs: [],
-      version: 1,
+    it(`propagates ${name} I/O failures without moving the evidence`, async () => {
+      const paths = await createAssistantPaths('assistant-cron-unreadable-')
+      const filePath = paths[fileName]
+      await mkdir(filePath, { recursive: true })
+      await expect(readStore(paths)).rejects.toMatchObject({ code: 'EISDIR' })
+      await expect(readStore(paths)).rejects.toMatchObject({ code: 'EISDIR' })
+      await expect(listAssistantCronRuns({
+        job: 'morning-check-in', vault: paths.absoluteVaultRoot,
+      })).rejects.toMatchObject({ code: 'EISDIR' })
     })
-    await expect(readFile(paths.cronAutomationStatePath, 'utf8')).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-  })
+  }
+
 })
 
 async function createAssistantPaths(prefix: string) {

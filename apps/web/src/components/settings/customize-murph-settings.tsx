@@ -60,12 +60,23 @@ export function CustomizeMurphSettings({
   // member straight back into their Murph chat so the reply arrives in it.
   voiceTestContactOption?: MurphContactOption | null;
 }) {
-  const [style, setStyle] = useState<MurphAssistantStylePreferences>(
-    assistant ?? DEFAULT_ASSISTANT_STYLE,
-  );
-  const [personality, setPersonality] = useState<AssistantPersonalitySnapshot | null>(
-    assistant?.personality ?? null,
-  );
+  const [savedAssistant, setSavedAssistant] = useState<{
+    source: typeof assistant;
+    value: CustomizeMurphAssistant;
+  }>({ source: assistant, value: assistant ?? DEFAULT_ASSISTANT_STYLE });
+  // A save updates the current snapshot immediately. Fresh server props own
+  // subsequent reads; open editors retain their own in-progress drafts.
+  if (savedAssistant.source !== assistant) {
+    setSavedAssistant({ source: assistant, value: assistant ?? DEFAULT_ASSISTANT_STYLE });
+  }
+  const style = savedAssistant.value;
+  const personality = style.personality ?? null;
+  function applySavedPreferences(update: Partial<CustomizeMurphAssistant>) {
+    setSavedAssistant((current) => ({
+      source: current.source,
+      value: { ...current.value, ...update },
+    }));
+  }
   const [pickerStep, setPickerStep] = useState<AssistantStyleStep | null>(
     openVoiceLink ? "voice" : null,
   );
@@ -138,14 +149,15 @@ export function CustomizeMurphSettings({
       </SettingsRowList>
       {pickerStep ? (
         <MurphAssistantStylePicker
-          singleStep
           initialStep={pickerStep}
           initialTone={effectiveStyle.tone}
           initialVoice={effectiveStyle.voice}
           // The successful save owns the chat handoff; closing the picker any
           // other way never navigates.
           onSaved={(preferences) => {
-            setStyle(preferences);
+            applySavedPreferences(pickerStep === "voice"
+              ? { voice: preferences.voice }
+              : { tone: preferences.tone });
             if (pickerStep === "voice" && voiceTestContactOption) {
               window.location.assign(voiceTestContactOption.href);
             }
@@ -161,7 +173,19 @@ export function CustomizeMurphSettings({
       {styleLevelsOpen ? (
         <MurphPersonalitySettingsDialog
           personality={personality}
-          onSaved={setPersonality}
+          onSaved={(savedDials) => setSavedAssistant((current) => ({
+            source: current.source,
+            value: {
+              ...current.value,
+              personality: {
+                detail: null,
+                humor: null,
+                push: null,
+                ...current.value.personality,
+                ...savedDials,
+              },
+            },
+          }))}
           onOpenChange={(open) => {
             if (!open) {
               setStyleLevelsOpen(false);

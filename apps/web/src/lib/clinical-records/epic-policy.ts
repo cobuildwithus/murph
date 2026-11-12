@@ -513,7 +513,6 @@ export function buildEpicBetaRetrievalPlan(input: {
     slices: (input.hospitalApprovedImports ? QUERIES : EPIC_AUTOMATIC_QUERIES)
       .filter((query) => requestedResourceTypes.has(query.resourceType)).map((query) =>
       buildActiveRetrievalSlice({
-        frozenAt: input.frozenAt,
         pageCount: input.pageCount,
         query,
       }),
@@ -531,7 +530,10 @@ export function buildEpicDailyRetrievalPlan(input: {
     schemaVersion: input.previous.schemaVersion,
     slices: input.previous.slices.map((slice) => {
       const query = requireActiveQueryForScope(slice.queryScopeId);
-      const identity = { resourceType: slice.resourceType, queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint };
+      const identity = buildActiveRetrievalSlice({
+        pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
+        query,
+      });
       return query.legacyWindowParameter && input.generation % 7 !== 0
         ? { ...identity, coverage: "bounded-window", sliceId: `daily-${input.now.toISOString().slice(0, 10)}`, from, to }
         : { ...identity, coverage: "whole-family", sliceId: "whole" };
@@ -683,7 +685,6 @@ function requireActiveQueryForScope(queryScopeId: string): EpicQuery {
 }
 
 function buildActiveRetrievalSlice(input: {
-  frozenAt: Date;
   pageCount: string;
   query: EpicQuery;
 }): ClinicalFhirRetrievalSlice {

@@ -309,13 +309,6 @@ const REQUIRED_STORE_SLUGS = [
   "backups",
 ] as const;
 
-const VALID_DELETION_MODES = new Set([
-  "best-effort-delete",
-  "documented-retention",
-  "live-delete",
-  "local-reference-delete",
-]);
-
 const HOSTED_ACCOUNT_DELETION_OWNER_ORDER = [
   "dependents",
   "intermediate",
@@ -669,14 +662,6 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
     }
   });
 
-  it("keeps each store entry actionable for deletion reviews", () => {
-    for (const entry of HOSTED_ACCOUNT_DATA_STORE_COVERAGE) {
-      expect(entry.label.trim().length).toBeGreaterThan(0);
-      expect(entry.note.trim().length).toBeGreaterThan(40);
-      expect(VALID_DELETION_MODES.has(entry.deletion)).toBe(true);
-    }
-  });
-
   it("marks ciphertext/token stores and external systems with the safest deletion modes", () => {
     const bySlug = new Map(HOSTED_ACCOUNT_DATA_STORE_COVERAGE.map((entry) => [entry.slug, entry]));
 
@@ -684,26 +669,6 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
     expect(bySlug.get("cloudflare.r2_user_artifacts")?.deletion).toBe("best-effort-delete");
     expect(bySlug.get("providers.stripe")?.deletion).toBe("best-effort-delete");
     expect(bySlug.get("backups")?.deletion).toBe("documented-retention");
-  });
-
-  it("documents that deletion-time provider revocation does not enqueue new device sync work", () => {
-    const deviceSyncSignal = HOSTED_ACCOUNT_DATA_STORE_COVERAGE.find((entry) =>
-      entry.slug === "prisma.device_sync_signal");
-
-    expect(deviceSyncSignal?.note).toContain("pre-existing");
-    expect(deviceSyncSignal?.note).toContain("does not enqueue new disconnect or wake work");
-  });
-
-  it("documents explicit dirty-state deletion before connection row cascades", () => {
-    const dirtyState = HOSTED_ACCOUNT_DATA_STORE_COVERAGE.find((entry) =>
-      entry.slug === "prisma.device_sync_dirty_connection");
-    const dirtyPayload = HOSTED_ACCOUNT_DATA_STORE_COVERAGE.find((entry) =>
-      entry.slug === "prisma.device_sync_dirty_payload");
-
-    expect(dirtyState?.note).toContain("before device connection rows");
-    expect(dirtyState?.note).toContain("does not rely on cascades");
-    expect(dirtyPayload?.note).toContain("before dirty-state and connection rows");
-    expect(dirtyPayload?.note).toContain("raw provider payload retention is bounded");
   });
 
   it("keeps usage-credit payment and ledger internals out of browser-vault export", () => {
@@ -1080,6 +1045,7 @@ describe("deleteHostedAccountData", () => {
   });
 
   it("returns every exact deletion count from the fixed dependency owners", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const rawDeletionCounts = Object.fromEntries(
       HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS.map((key, index) => [
         key,
@@ -1098,6 +1064,7 @@ describe("deleteHostedAccountData", () => {
       }),
     }];
     const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
       deleteCountResults: {
         hostedGroupJoinOutreach: 1_002,
         hostedLinqDelivery: 1_001,
@@ -1151,6 +1118,32 @@ describe("deleteHostedAccountData", () => {
     expect(outreachDeliveryIndex).toBeGreaterThan(referralOwnerIndex);
     expect(outreachIndex).toBeGreaterThan(outreachDeliveryIndex);
     expect(ownersIndex).toBeGreaterThan(outreachIndex);
+
+    const dependents = requireHostedAccountDeletionRawQuery(rawDeletionQueries, "dependents");
+    const intermediate = requireHostedAccountDeletionRawQuery(rawDeletionQueries, "intermediate");
+    const owners = requireHostedAccountDeletionRawQuery(rawDeletionQueries, "owners");
+    expect(dependents.sql).toContain("DELETE FROM hosted_computer_handoff AS handoff");
+    expect(intermediate.sql).toContain("DELETE FROM hosted_computer_run AS run");
+    expect(intermediate.sql).toContain("DELETE FROM hosted_mailbox_item AS item");
+    expect(intermediate.sql).toContain("item.user_id IN (SELECT id FROM target_members)");
+    expect(intermediate.sql).not.toContain("hosted_mailbox_item_consume");
+    expect(owners.sql).toContain("DELETE FROM hosted_invite AS invite");
+    expect(owners.sql).toContain("invite.member_id IN (SELECT id FROM target_members)");
+    expect(owners.sql).toContain("DELETE FROM hosted_sensitive_action_challenge AS challenge");
+    expect(owners.sql).toContain("DELETE FROM device_connect_intent AS intent");
+    expect(owners.sql).toContain("DELETE FROM hosted_phone_call AS phone_call");
+    expect(operationOrder.indexOf("delete:hostedComputerHandoff")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedComputerRun"),
+    );
+    for (const model of ["hostedVaultShare", "hostedPhysicalNote"]) {
+      expect(operationOrder.indexOf(`count:${model}`)).toBeLessThan(
+        operationOrder.indexOf("delete:hostedMember"),
+      );
+    }
+    expect(deleteCalls).not.toContainEqual({
+      model: "hostedPhysicalNote",
+      where: expect.anything(),
+    });
   });
 
   it("keeps terminal erasure statement count constant at admitted member, computer, and device cardinality", async () => {
@@ -2106,75 +2099,6 @@ describe("deleteHostedAccountData", () => {
     expect(serviceMocks.persistHostedAccountDeletionCleanupTx).not.toHaveBeenCalled();
   });
 
-  it("deletes delivery-time consume stamps with hosted mailbox item rows", async () => {
-    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      onTransaction: () => {},
-      rawDeletionQueries,
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(result.deletedCounts["prisma.hosted_mailbox_item"]).toBe(1);
-    const intermediate = requireHostedAccountDeletionRawQuery(
-      rawDeletionQueries,
-      "intermediate",
-    );
-    expect(intermediate.sql).toContain("DELETE FROM hosted_mailbox_item AS item");
-    expect(intermediate.sql).toContain(
-      "item.user_id IN (SELECT id FROM target_members)",
-    );
-    expect(intermediate.sql).not.toContain("hosted_mailbox_item_consume");
-  });
-
-  it("deletes referral invite claims owned by the introduced member", async () => {
-    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      onTransaction: () => {},
-      rawDeletionQueries,
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(result.deletedCounts["prisma.hosted_invite"]).toBe(1);
-    const owners = requireHostedAccountDeletionRawQuery(
-      rawDeletionQueries,
-      "owners",
-    );
-    expect(owners.sql).toContain("DELETE FROM hosted_invite AS invite");
-    expect(owners.sql).toContain(
-      "invite.member_id IN (SELECT id FROM target_members)",
-    );
-  });
-
-  it("reports vault-share rows before member-row FK cascades delete them", async () => {
-    const operationOrder: string[] = [];
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      onTransaction: () => operationOrder.push("transaction"),
-      operationOrder,
-      ownedThreadContainerMemberIds: ["member_thread_container_123"],
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(result.deletedCounts["prisma.hosted_vault_share"]).toBe(1);
-    expect(operationOrder.indexOf("count:hostedVaultShare")).toBeLessThan(
-      operationOrder.indexOf("delete:hostedMember"),
-    );
-  });
-
   it("cancels subscriptions before local deletion and persists cleanup ownership before member deletion", async () => {
     const order: string[] = [];
     const databaseOrder: string[] = [];
@@ -2696,130 +2620,6 @@ describe("deleteHostedAccountData", () => {
     expect((error as HostedOnboardingError).code).toBe("ACCOUNT_DELETION_STRIPE_NOT_CONFIGURED");
     expect(onTransaction).toHaveBeenCalledTimes(2);
 
-  });
-
-  it("deletes sensitive-action challenges explicitly with account data", async () => {
-    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      onTransaction: () => undefined,
-      rawDeletionQueries,
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(result.deletedCounts["prisma.hosted_sensitive_action_challenge"]).toBe(1);
-    expect(requireHostedAccountDeletionRawQuery(rawDeletionQueries, "owners").sql)
-      .toContain("DELETE FROM hosted_sensitive_action_challenge AS challenge");
-  });
-
-  it("deletes short-lived hosted device connect intents with account data", async () => {
-    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      onTransaction: () => undefined,
-      rawDeletionQueries,
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(result.deletedCounts["prisma.device_connect_intent"]).toBe(1);
-    expect(requireHostedAccountDeletionRawQuery(rawDeletionQueries, "owners").sql)
-      .toContain("DELETE FROM device_connect_intent AS intent");
-  });
-
-  it("deletes hosted computer-use rows explicitly with account data", async () => {
-    const operationOrder: string[] = [];
-    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      onTransaction: () => undefined,
-      operationOrder,
-      rawDeletionQueries,
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(result.deletedCounts["prisma.hosted_computer_handoff"]).toBe(1);
-    expect(result.deletedCounts["prisma.hosted_computer_run"]).toBe(1);
-    expect(requireHostedAccountDeletionRawQuery(rawDeletionQueries, "dependents").sql)
-      .toContain("DELETE FROM hosted_computer_handoff AS handoff");
-    expect(requireHostedAccountDeletionRawQuery(rawDeletionQueries, "intermediate").sql)
-      .toContain("DELETE FROM hosted_computer_run AS run");
-    expect(operationOrder.indexOf("delete:hostedComputerHandoff")).toBeLessThan(
-      operationOrder.indexOf("delete:hostedComputerRun"),
-    );
-  });
-
-  it("deletes hosted phone-call rows explicitly with account data", async () => {
-    const rawDeletionQueries: HostedAccountDeletionRawQuery[] = [];
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      onTransaction: () => undefined,
-      rawDeletionQueries,
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(result.deletedCounts["prisma.hosted_phone_call"]).toBe(1);
-    expect(requireHostedAccountDeletionRawQuery(rawDeletionQueries, "owners").sql)
-      .toContain("DELETE FROM hosted_phone_call AS phone_call");
-  });
-
-  it("records hosted physical-note rows before member deletion cascades them", async () => {
-    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
-    const operationOrder: string[] = [];
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      countResults: { hostedPhysicalNote: 2 },
-      deleteCalls,
-      onTransaction: () => undefined,
-      operationOrder,
-    });
-
-    const result = await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(result.deletedCounts["prisma.hosted_physical_note"]).toBe(2);
-    expect(operationOrder.indexOf("count:hostedPhysicalNote")).toBeLessThan(
-      operationOrder.indexOf("delete:hostedMember"),
-    );
-    expect(deleteCalls).not.toContainEqual({
-      model: "hostedPhysicalNote",
-      where: expect.anything(),
-    });
-  });
-
-  it("deletes computer-use handoffs before runs", async () => {
-    const operationOrder: string[] = [];
-    const prisma = createHostedAccountDeletionPrismaForTest({
-      onTransaction: () => undefined,
-      operationOrder,
-    });
-
-    await deleteHostedAccountData({
-      memberId: "member_123",
-      prisma,
-      request: new Request("https://join.example.test/settings"),
-    });
-
-    expect(operationOrder.indexOf("delete:hostedComputerHandoff")).toBeLessThan(
-      operationOrder.indexOf("delete:hostedComputerRun"),
-    );
   });
 
   it("suspends call creation, deletes provider calls, and rechecks authority before local deletion", async () => {

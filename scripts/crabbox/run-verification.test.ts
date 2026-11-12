@@ -165,45 +165,55 @@ describe("Crabbox verification environment", () => {
     );
   });
 
-  it("fails closed on an absent static tar before installation", () => {
+  it.each([
+    {
+      name: "an absent tar",
+      tools: { tarMode: "absent" },
+      error: "tar is unavailable on the non-interactive PATH",
+      events: null,
+    },
+    {
+      name: "a zstd output without a frame",
+      tools: { zstdMode: "passthrough" },
+      error: "zstd compression did not produce a standard zstd frame",
+      events: "tar:--format=pax --no-recursion --null -T /dev/null -cvvf -\n"
+        + "zstd:-3 --no-progress -T2\n",
+    },
+    {
+      name: "incompatible zstd arguments",
+      tools: { zstdMode: "incompatible" },
+      error: "zstd could not compress stdin with Murph's snapshot arguments (-3 --no-progress -T2) (exit 17)",
+      events: "tar:--format=pax --no-recursion --null -T /dev/null -cvvf -\n"
+        + "zstd:-3 --no-progress -T2\n",
+    },
+  ] as const)("fails closed on $name before installation", ({ tools, error, events }) => {
     const tempRoot = makeTempRoot();
     const binDir = path.join(tempRoot, "bin");
     const childMarkerPath = path.join(tempRoot, "candidate-command-started");
     const eventLogPath = path.join(tempRoot, "events.txt");
-
-    writeStaticArchiveCapabilityTools(binDir, {
-      eventLogPath,
-      tarMode: "absent",
-    });
+    writeStaticArchiveCapabilityTools(binDir, { eventLogPath, ...tools });
     for (const command of ["corepack", "bash"]) {
-      writeExecutable(
-        path.join(binDir, command),
-        [
-          "#!/bin/sh",
-          `: > ${shellQuote(childMarkerPath)}`,
-          "exit 0",
-        ].join("\n"),
-      );
+      writeExecutable(path.join(binDir, command), [
+        "#!/bin/sh",
+        `: > ${shellQuote(childMarkerPath)}`,
+        "exit 0",
+      ].join("\n"));
     }
 
-    const result = spawnSync(
-      process.execPath,
-      [sshRunnerPath, "verify:acceptance"],
-      {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env: {
-          HOME: path.join(tempRoot, "home"),
-          PATH: binDir,
-        },
-      },
-    );
+    const result = spawnSync(process.execPath, [sshRunnerPath, "verify:acceptance"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { HOME: path.join(tempRoot, "home"), PATH: binDir },
+    });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      "tar is unavailable on the non-interactive PATH",
-    );
-    expect(existsSync(eventLogPath)).toBe(false);
+    expect(result.stderr).toContain(error);
+    expect(result.stderr).not.toContain("worker-local-detail");
+    if (events === null) {
+      expect(existsSync(eventLogPath)).toBe(false);
+    } else {
+      expect(readFileSync(eventLogPath, "utf8")).toBe(events);
+    }
     expect(existsSync(childMarkerPath)).toBe(false);
   });
 
@@ -262,97 +272,6 @@ describe("Crabbox verification environment", () => {
     );
     expect(existsSync(childMarkerPath)).toBe(false);
     expect(existsSync(runDirectory)).toBe(false);
-  });
-
-  it("fails closed when static zstd does not emit a zstd frame", () => {
-    const tempRoot = makeTempRoot();
-    const binDir = path.join(tempRoot, "bin");
-    const childMarkerPath = path.join(tempRoot, "candidate-command-started");
-    const eventLogPath = path.join(tempRoot, "events.txt");
-
-    writeStaticArchiveCapabilityTools(binDir, {
-      eventLogPath,
-      zstdMode: "passthrough",
-    });
-    for (const command of ["corepack", "bash"]) {
-      writeExecutable(
-        path.join(binDir, command),
-        [
-          "#!/bin/sh",
-          `: > ${shellQuote(childMarkerPath)}`,
-          "exit 0",
-        ].join("\n"),
-      );
-    }
-
-    const result = spawnSync(
-      process.execPath,
-      [sshRunnerPath, "verify:acceptance"],
-      {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env: {
-          HOME: path.join(tempRoot, "home"),
-          PATH: binDir,
-        },
-      },
-    );
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      "zstd compression did not produce a standard zstd frame",
-    );
-    expect(readFileSync(eventLogPath, "utf8")).toBe(
-      "tar:--format=pax --no-recursion --null -T /dev/null -cvvf -\n" +
-        "zstd:-3 --no-progress -T2\n",
-    );
-    expect(existsSync(childMarkerPath)).toBe(false);
-  });
-
-  it("fails closed on incompatible static zstd arguments before installation", () => {
-    const tempRoot = makeTempRoot();
-    const binDir = path.join(tempRoot, "bin");
-    const childMarkerPath = path.join(tempRoot, "candidate-command-started");
-    const eventLogPath = path.join(tempRoot, "events.txt");
-
-    writeStaticArchiveCapabilityTools(binDir, {
-      eventLogPath,
-      zstdMode: "incompatible",
-    });
-    for (const command of ["corepack", "bash"]) {
-      writeExecutable(
-        path.join(binDir, command),
-        [
-          "#!/bin/sh",
-          `: > ${shellQuote(childMarkerPath)}`,
-          "exit 0",
-        ].join("\n"),
-      );
-    }
-
-    const result = spawnSync(
-      process.execPath,
-      [sshRunnerPath, "verify:acceptance"],
-      {
-        cwd: repoRoot,
-        encoding: "utf8",
-        env: {
-          HOME: path.join(tempRoot, "home"),
-          PATH: binDir,
-        },
-      },
-    );
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      "zstd could not compress stdin with Murph's snapshot arguments (-3 --no-progress -T2) (exit 17)",
-    );
-    expect(result.stderr).not.toContain("worker-local-detail");
-    expect(readFileSync(eventLogPath, "utf8")).toBe(
-      "tar:--format=pax --no-recursion --null -T /dev/null -cvvf -\n" +
-        "zstd:-3 --no-progress -T2\n",
-    );
-    expect(existsSync(childMarkerPath)).toBe(false);
   });
 
   it("preserves the first signal and exact cleanup during static archive readiness", async () => {

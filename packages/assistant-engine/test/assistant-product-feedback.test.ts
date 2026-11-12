@@ -314,7 +314,7 @@ describe("assistant product feedback", () => {
         tool: "submit_product_feedback",
       },
     });
-    expect(oversizedRequest?.kind).toBe("invalid-product-feedback-arguments");
+    expect(oversizedRequest?.kind).toBe("invalid-tool-arguments");
     if (!oversizedRequest) {
       throw new Error("Expected an oversized product feedback request.");
     }
@@ -673,7 +673,7 @@ describe("assistant product feedback", () => {
         namespace: "murph",
         tool: "submit_product_feedback",
       },
-    })?.kind).toBe("invalid-product-feedback-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
 
     expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
@@ -686,7 +686,7 @@ describe("assistant product feedback", () => {
         namespace: "murph",
         tool: "submit_product_feedback",
       },
-    })?.kind).toBe("invalid-product-feedback-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
 
     expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
@@ -697,7 +697,7 @@ describe("assistant product feedback", () => {
         namespace: "murph",
         tool: "submit_product_feedback",
       },
-    })?.kind).toBe("invalid-product-feedback-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
 
     expect(readTestMurphDynamicToolRequest({
       method: "item/tool/call",
@@ -709,6 +709,6 @@ describe("assistant product feedback", () => {
         namespace: "murph",
         tool: "submit_product_feedback",
       },
-    })?.kind).toBe("invalid-product-feedback-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
   });
 });

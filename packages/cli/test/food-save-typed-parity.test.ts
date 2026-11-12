@@ -6,7 +6,7 @@ import { parseFrontmatterDocument } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
-import { test, vi } from 'vitest'
+import { onTestFinished, test, vi } from 'vitest'
 
 vi.mock('node:fs/promises', async () => {
   const actual = await vi.importActual<typeof import('node:fs/promises')>(
@@ -82,6 +82,24 @@ function setHostedDataApiEnv(): () => void {
     } else {
       process.env.MURPH_DATA_API_KEY = previousDataApiKey
     }
+  }
+}
+
+async function createFoodVault() {
+  const context = await createTempVaultContext('murph-food-typed-')
+  onTestFinished(() => rm(context.parentRoot, { force: true, recursive: true }))
+  const cli = createFoodCli()
+  const initialized = await runInProcessJsonCli<{ created: boolean }>(cli, [
+    'init', '--vault', context.vaultRoot,
+  ])
+  assert.equal(initialized.exitCode, null)
+  assert.equal(requireData(initialized.envelope).created, true)
+  return {
+    ...context,
+    cli,
+    food: <T = Record<string, unknown>>(args: string[]) => runInProcessJsonCli<T>(cli, [
+      'food', ...args, '--vault', context.vaultRoot,
+    ]),
   }
 }
 
@@ -782,74 +800,62 @@ test('food save validation exposes a repair field without echoing the submitted 
 })
 
 test('food import-json validation preserves nested repair fields without payload echoes', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-food-import-repair-',
-  )
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-food-import-repair-')
+  onTestFinished(() => rm(parentRoot, { force: true, recursive: true }))
+  const cli = createFoodCli()
+  const food = <T = Record<string, unknown>>(args: string[]) => runInProcessJsonCli<T>(cli, [
+    'food', ...args, '--vault', vaultRoot,
+  ])
   const payloadPath = path.join(parentRoot, 'private-food-payload.json')
 
-  try {
-    await writeFile(payloadPath, JSON.stringify({
-      title: 'Private Imported Food',
-      tags: ['PrivateImportedTag'],
-    }))
+  await writeFile(payloadPath, JSON.stringify({
+    title: 'Private Imported Food',
+    tags: ['PrivateImportedTag'],
+  }))
 
-    const result = await runInProcessJsonCli(createFoodCli(), [
-      'food',
-      'import-json',
-      '--input',
-      `@${payloadPath}`,
-      '--vault',
-      vaultRoot,
-    ])
+  const result = await runInProcessJsonCli(createFoodCli(), [
+    'food',
+    'import-json',
+    '--input',
+    `@${payloadPath}`,
+    '--vault',
+    vaultRoot,
+  ])
 
-    assert.equal(result.exitCode, 1)
-    assert.equal(result.envelope.ok, false)
-    if (!result.envelope.ok) {
-      assert.equal(result.envelope.error.code, 'contract_invalid')
-      assert.equal(result.envelope.error.stage, 'validation')
-      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
-      assert.equal(result.envelope.error.hint, undefined)
-    }
-    const serialized = JSON.stringify(result.envelope)
-    assert.doesNotMatch(serialized, /Private Imported Food|PrivateImportedTag/u)
-    assert.equal(serialized.includes(payloadPath), false)
-
-    const cli = createFoodCli()
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      'init',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(initResult.exitCode, null)
-    const saved = requireData((await runInProcessJsonCli<FoodSaveResult>(cli, [
-      'food',
-      'save',
-      'Repairable Food',
-      '--slug',
-      'repairable-food',
-      '--vault',
-      vaultRoot,
-    ])).envelope)
-    const editResult = await runInProcessJsonCli(cli, [
-      'food',
-      'edit',
-      saved.foodId,
-      '--tag',
-      'PrivateEditedFoodTag',
-      '--vault',
-      vaultRoot,
-    ])
-
-    assert.equal(editResult.exitCode, 1)
-    assert.equal(editResult.envelope.ok, false)
-    if (!editResult.envelope.ok) {
-      assert.equal(editResult.envelope.error.code, 'contract_invalid')
-      assert.equal(editResult.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
-    }
-    assert.doesNotMatch(JSON.stringify(editResult.envelope), /PrivateEditedFoodTag/u)
-  } finally {
-    await rm(parentRoot, { force: true, recursive: true })
+  assert.equal(result.exitCode, 1)
+  assert.equal(result.envelope.ok, false)
+  if (!result.envelope.ok) {
+    assert.equal(result.envelope.error.code, 'contract_invalid')
+    assert.equal(result.envelope.error.stage, 'validation')
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+    assert.equal(result.envelope.error.hint, undefined)
   }
+  const serialized = JSON.stringify(result.envelope)
+  assert.doesNotMatch(serialized, /Private Imported Food|PrivateImportedTag/u)
+  assert.equal(serialized.includes(payloadPath), false)
+
+  const initialized = await runInProcessJsonCli(cli, ['init', '--vault', vaultRoot])
+  assert.equal(initialized.exitCode, null)
+  const saved = requireData((await food<FoodSaveResult>([
+    'save',
+    'Repairable Food',
+    '--slug',
+    'repairable-food',
+  ])).envelope)
+  const editResult = await food([
+    'edit',
+    saved.foodId,
+    '--tag',
+    'PrivateEditedFoodTag',
+  ])
+
+  assert.equal(editResult.exitCode, 1)
+  assert.equal(editResult.envelope.ok, false)
+  if (!editResult.envelope.ok) {
+    assert.equal(editResult.envelope.error.code, 'contract_invalid')
+    assert.equal(editResult.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+  }
+  assert.doesNotMatch(JSON.stringify(editResult.envelope), /PrivateEditedFoodTag/u)
 })
 
 test('food save payload builder maps every raw food import-json payload field', () => {
@@ -936,296 +942,221 @@ test('food save payload builder omits status when the caller omits status', () =
 })
 
 test('food save writes its temporary payload file with 0o600 permissions', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-food-save-mode-',
+  const { vaultRoot, food } = await createFoodVault()
+
+  vi.mocked(writeFile).mockClear()
+
+  const saveResult = await food<FoodSaveResult>([
+    'save',
+    'Regular Acai Bowl',
+    '--slug',
+    'regular-acai-bowl',
+  ])
+
+  assert.equal(saveResult.exitCode, null)
+  const saved = requireData(saveResult.envelope)
+  const markdown = await readFile(path.join(vaultRoot, saved.path), 'utf8')
+  const document = parseFrontmatterDocument(markdown)
+  assert.equal(document.attributes.status, 'active')
+
+  const payloadWriteCall = vi.mocked(writeFile).mock.calls.find(
+    ([filePath]) =>
+      typeof filePath === 'string' &&
+      filePath.includes('murph-food-save-') &&
+      filePath.endsWith('payload.json'),
   )
+  assert.ok(payloadWriteCall)
 
-  try {
-    vi.mocked(writeFile).mockClear()
-
-    const cli = createFoodCli()
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      'init',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(initResult.exitCode, null)
-
-    vi.mocked(writeFile).mockClear()
-
-    const saveResult = await runInProcessJsonCli<FoodSaveResult>(cli, [
-      'food',
-      'save',
-      'Regular Acai Bowl',
-      '--slug',
-      'regular-acai-bowl',
-      '--vault',
-      vaultRoot,
-    ])
-
-    assert.equal(saveResult.exitCode, null)
-    const saved = requireData(saveResult.envelope)
-    const markdown = await readFile(path.join(vaultRoot, saved.path), 'utf8')
-    const document = parseFrontmatterDocument(markdown)
-    assert.equal(document.attributes.status, 'active')
-
-    const payloadWriteCall = vi.mocked(writeFile).mock.calls.find(
-      ([filePath]) =>
-        typeof filePath === 'string' &&
-        filePath.includes('murph-food-save-') &&
-        filePath.endsWith('payload.json'),
-    )
-    assert.ok(payloadWriteCall)
-
-    const options = payloadWriteCall[2]
-    assert.ok(typeof options === 'object' && options !== null)
-    assert.equal(Reflect.get(options, 'mode'), 0o600)
-  } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
-    })
-  }
+  const options = payloadWriteCall[2]
+  assert.ok(typeof options === 'object' && options !== null)
+  assert.equal(Reflect.get(options, 'mode'), 0o600)
 })
 
 test('food save persists typed fields and can update an existing food id', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-food-save-parity-',
-  )
+  const { vaultRoot, food } = await createFoodVault()
 
-  try {
-    const cli = createFoodCli()
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      'init',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(initResult.exitCode, null)
-    assert.equal(requireData(initResult.envelope).created, true)
+  const saveResult = await food<FoodSaveResult>([
+    'save',
+    'Regular Acai Bowl',
+    '--slug',
+    'regular-acai-bowl',
+    '--status',
+    'active',
+    '--summary',
+    'The usual acai bowl order.',
+    '--kind',
+    'acai bowl',
+    '--brand',
+    'House Brand',
+    '--vendor',
+    'Neighborhood Acai Bar',
+    '--location',
+    'Test Kitchen',
+    '--serving',
+    '1 bowl',
+    '--calories',
+    '540',
+    '--protein-grams',
+    '11',
+    '--carbs-grams',
+    '68',
+    '--fat-grams',
+    '24',
+    '--fiber-grams',
+    '11',
+    '--nutrition-source',
+    'estimated',
+    '--nutrition-confidence',
+    'medium',
+    '--nutrition-source-detail',
+    'Menu board plus saved toppings.',
+    '--alias',
+    'usual acai bowl',
+    '--ingredient',
+    'acai base',
+    '--ingredient',
+    'banana',
+    '--tag',
+    'breakfast',
+    '--tag',
+    'favorite',
+    '--note',
+    'Typical order includes extra granola.',
+    '--attached-regimen-id',
+    'reg_01234567890123456789012345',
+    '--link-related-regimen-id',
+    'reg_01234567890123456789012346',
+  ])
 
-    const saveResult = await runInProcessJsonCli<FoodSaveResult>(cli, [
-      'food',
-      'save',
-      'Regular Acai Bowl',
-      '--slug',
-      'regular-acai-bowl',
-      '--status',
-      'active',
-      '--summary',
-      'The usual acai bowl order.',
-      '--kind',
-      'acai bowl',
-      '--brand',
-      'House Brand',
-      '--vendor',
-      'Neighborhood Acai Bar',
-      '--location',
-      'Test Kitchen',
-      '--serving',
-      '1 bowl',
-      '--calories',
-      '540',
-      '--protein-grams',
-      '11',
-      '--carbs-grams',
-      '68',
-      '--fat-grams',
-      '24',
-      '--fiber-grams',
-      '11',
-      '--nutrition-source',
-      'estimated',
-      '--nutrition-confidence',
-      'medium',
-      '--nutrition-source-detail',
-      'Menu board plus saved toppings.',
-      '--alias',
-      'usual acai bowl',
-      '--ingredient',
-      'acai base',
-      '--ingredient',
-      'banana',
-      '--tag',
-      'breakfast',
-      '--tag',
-      'favorite',
-      '--note',
-      'Typical order includes extra granola.',
-      '--attached-regimen-id',
-      'reg_01234567890123456789012345',
-      '--link-related-regimen-id',
-      'reg_01234567890123456789012346',
-      '--vault',
-      vaultRoot,
-    ])
+  assert.equal(saveResult.exitCode, null)
+  const saved = requireData(saveResult.envelope)
+  assert.equal(saved.created, true)
+  assert.match(saved.path, /^bank\/foods\/regular-acai-bowl\.md$/u)
 
-    assert.equal(saveResult.exitCode, null)
-    const saved = requireData(saveResult.envelope)
-    assert.equal(saved.created, true)
-    assert.match(saved.path, /^bank\/foods\/regular-acai-bowl\.md$/u)
+  const markdown = await readFile(path.join(vaultRoot, saved.path), 'utf8')
+  const document = parseFrontmatterDocument(markdown)
+  assert.equal(document.attributes.title, 'Regular Acai Bowl')
+  assert.equal(document.attributes.status, 'active')
+  assert.equal(document.attributes.summary, 'The usual acai bowl order.')
+  assert.equal(document.attributes.kind, 'acai bowl')
+  assert.equal(document.attributes.brand, 'House Brand')
+  assert.equal(document.attributes.vendor, 'Neighborhood Acai Bar')
+  assert.equal(document.attributes.location, 'Test Kitchen')
+  assert.equal(document.attributes.serving, '1 bowl')
+  assert.deepEqual(document.attributes.aliases, ['usual acai bowl'])
+  assert.deepEqual(document.attributes.ingredients, ['acai base', 'banana'])
+  assert.deepEqual(document.attributes.tags, ['breakfast', 'favorite'])
+  assert.equal(document.attributes.note, 'Typical order includes extra granola.')
+  assert.equal('autoLogDaily' in document.attributes, false)
+  assert.deepEqual(document.attributes.attachedRegimenIds, [
+    'reg_01234567890123456789012345',
+    'reg_01234567890123456789012346',
+  ])
+  assert.deepEqual(document.attributes.links, [
+    {
+      type: 'related_regimen',
+      targetId: 'reg_01234567890123456789012345',
+    },
+    {
+      type: 'related_regimen',
+      targetId: 'reg_01234567890123456789012346',
+    },
+  ])
+  assert.deepEqual(document.attributes.nutrition, {
+    perServing: {
+      calories: 540,
+      proteinGrams: 11,
+      carbsGrams: 68,
+      fatGrams: 24,
+      fiberGrams: 11,
+    },
+    provenance: {
+      source: 'estimated',
+      confidence: 'medium',
+      sourceDetail: 'Menu board plus saved toppings.',
+    },
+  })
 
-    const markdown = await readFile(path.join(vaultRoot, saved.path), 'utf8')
-    const document = parseFrontmatterDocument(markdown)
-    assert.equal(document.attributes.title, 'Regular Acai Bowl')
-    assert.equal(document.attributes.status, 'active')
-    assert.equal(document.attributes.summary, 'The usual acai bowl order.')
-    assert.equal(document.attributes.kind, 'acai bowl')
-    assert.equal(document.attributes.brand, 'House Brand')
-    assert.equal(document.attributes.vendor, 'Neighborhood Acai Bar')
-    assert.equal(document.attributes.location, 'Test Kitchen')
-    assert.equal(document.attributes.serving, '1 bowl')
-    assert.deepEqual(document.attributes.aliases, ['usual acai bowl'])
-    assert.deepEqual(document.attributes.ingredients, ['acai base', 'banana'])
-    assert.deepEqual(document.attributes.tags, ['breakfast', 'favorite'])
-    assert.equal(document.attributes.note, 'Typical order includes extra granola.')
-    assert.equal('autoLogDaily' in document.attributes, false)
-    assert.deepEqual(document.attributes.attachedRegimenIds, [
-      'reg_01234567890123456789012345',
-      'reg_01234567890123456789012346',
-    ])
-    assert.deepEqual(document.attributes.links, [
-      {
-        type: 'related_regimen',
-        targetId: 'reg_01234567890123456789012345',
-      },
-      {
-        type: 'related_regimen',
-        targetId: 'reg_01234567890123456789012346',
-      },
-    ])
-    assert.deepEqual(document.attributes.nutrition, {
-      perServing: {
-        calories: 540,
-        proteinGrams: 11,
-        carbsGrams: 68,
-        fatGrams: 24,
-        fiberGrams: 11,
-      },
-      provenance: {
-        source: 'estimated',
-        confidence: 'medium',
-        sourceDetail: 'Menu board plus saved toppings.',
-      },
-    })
+  const updateResult = await food<FoodSaveResult>([
+    'save',
+    'Regular Acai Bowl',
+    '--id',
+    saved.foodId,
+    '--slug',
+    'regular-acai-bowl',
+    '--summary',
+    'Updated usual order.',
+  ])
+  assert.equal(updateResult.exitCode, null)
+  const updated = requireData(updateResult.envelope)
+  assert.equal(updated.created, false)
+  assert.equal(updated.path, saved.path)
 
-    const updateResult = await runInProcessJsonCli<FoodSaveResult>(cli, [
-      'food',
-      'save',
-      'Regular Acai Bowl',
-      '--id',
-      saved.foodId,
-      '--slug',
-      'regular-acai-bowl',
-      '--summary',
-      'Updated usual order.',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(updateResult.exitCode, null)
-    const updated = requireData(updateResult.envelope)
-    assert.equal(updated.created, false)
-    assert.equal(updated.path, saved.path)
+  const updatedMarkdown = await readFile(path.join(vaultRoot, updated.path), 'utf8')
+  const updatedDocument = parseFrontmatterDocument(updatedMarkdown)
+  assert.equal(updatedDocument.attributes.summary, 'Updated usual order.')
+  assert.equal(updatedDocument.attributes.status, 'active')
 
-    const updatedMarkdown = await readFile(path.join(vaultRoot, updated.path), 'utf8')
-    const updatedDocument = parseFrontmatterDocument(updatedMarkdown)
-    assert.equal(updatedDocument.attributes.summary, 'Updated usual order.')
-    assert.equal(updatedDocument.attributes.status, 'active')
+  const archivedResult = await food<FoodSaveResult>([
+    'save',
+    'Regular Acai Bowl',
+    '--id',
+    saved.foodId,
+    '--status',
+    'archived',
+  ])
+  assert.equal(archivedResult.exitCode, null)
 
-    const archivedResult = await runInProcessJsonCli<FoodSaveResult>(cli, [
-      'food',
-      'save',
-      'Regular Acai Bowl',
-      '--id',
-      saved.foodId,
-      '--status',
-      'archived',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(archivedResult.exitCode, null)
+  const preserveStatusResult = await food<FoodSaveResult>([
+    'save',
+    'Regular Acai Bowl',
+    '--id',
+    saved.foodId,
+    '--summary',
+    'Archived usual order.',
+  ])
+  assert.equal(preserveStatusResult.exitCode, null)
+  const preserved = requireData(preserveStatusResult.envelope)
+  const preservedMarkdown = await readFile(path.join(vaultRoot, preserved.path), 'utf8')
+  const preservedDocument = parseFrontmatterDocument(preservedMarkdown)
+  assert.equal(preservedDocument.attributes.summary, 'Archived usual order.')
+  assert.equal(preservedDocument.attributes.status, 'archived')
 
-    const preserveStatusResult = await runInProcessJsonCli<FoodSaveResult>(cli, [
-      'food',
-      'save',
-      'Regular Acai Bowl',
-      '--id',
-      saved.foodId,
-      '--summary',
-      'Archived usual order.',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(preserveStatusResult.exitCode, null)
-    const preserved = requireData(preserveStatusResult.envelope)
-    const preservedMarkdown = await readFile(path.join(vaultRoot, preserved.path), 'utf8')
-    const preservedDocument = parseFrontmatterDocument(preservedMarkdown)
-    assert.equal(preservedDocument.attributes.summary, 'Archived usual order.')
-    assert.equal(preservedDocument.attributes.status, 'archived')
-
-    const conflictingEdit = await runInProcessJsonCli<{
-      entity: {
-        data: Record<string, unknown>
-      }
-    }>(cli, [
-      'food',
-      'edit',
-      saved.foodId,
-      '--ingredient',
-      'chia seeds',
-      '--clear-ingredients',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(conflictingEdit.exitCode, 1)
-    assert.equal(conflictingEdit.envelope.ok, false)
-    if (!conflictingEdit.envelope.ok) {
-      assert.equal(conflictingEdit.envelope.error.code, 'invalid_payload')
-      assert.match(conflictingEdit.envelope.error.message ?? '', /--set ingredients/u)
-      assert.match(conflictingEdit.envelope.error.message ?? '', /--clear ingredients/u)
+  const conflictingEdit = await food<{
+    entity: {
+      data: Record<string, unknown>
     }
-  } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
-    })
+  }>([
+    'edit',
+    saved.foodId,
+    '--ingredient',
+    'chia seeds',
+    '--clear-ingredients',
+  ])
+  assert.equal(conflictingEdit.exitCode, 1)
+  assert.equal(conflictingEdit.envelope.ok, false)
+  if (!conflictingEdit.envelope.ok) {
+    assert.equal(conflictingEdit.envelope.error.code, 'invalid_payload')
+    assert.match(conflictingEdit.envelope.error.message ?? '', /--set ingredients/u)
+    assert.match(conflictingEdit.envelope.error.message ?? '', /--clear ingredients/u)
   }
 })
 
 test('food save rejects malformed typed input before writing a food record', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-food-save-invalid-',
-  )
+  const { vaultRoot, food } = await createFoodVault()
 
-  try {
-    const cli = createFoodCli()
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      'init',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(initResult.exitCode, null)
+  const saveResult = await food<FoodSaveResult>([
+    'save',
+    'Broken Food',
+    '--nutrition-confidence',
+    'high',
+  ])
 
-    const saveResult = await runInProcessJsonCli<FoodSaveResult>(cli, [
-      'food',
-      'save',
-      'Broken Food',
-      '--nutrition-confidence',
-      'high',
-      '--vault',
-      vaultRoot,
-    ])
-
-    assert.equal(saveResult.exitCode, 1)
-    assert.equal(saveResult.envelope.ok, false)
-    if (!saveResult.envelope.ok) {
-      assert.equal(saveResult.envelope.error.code, 'invalid_option')
-      assert.match(saveResult.envelope.error.message ?? '', /--nutrition-source/u)
-    }
-    assert.deepEqual(await readdir(path.join(vaultRoot, 'bank/foods')), [])
-  } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
-    })
+  assert.equal(saveResult.exitCode, 1)
+  assert.equal(saveResult.envelope.ok, false)
+  if (!saveResult.envelope.ok) {
+    assert.equal(saveResult.envelope.error.code, 'invalid_option')
+    assert.match(saveResult.envelope.error.message ?? '', /--nutrition-source/u)
   }
+  assert.deepEqual(await readdir(path.join(vaultRoot, 'bank/foods')), [])
 })

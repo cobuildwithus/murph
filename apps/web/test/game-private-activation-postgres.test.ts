@@ -9,6 +9,7 @@ import { sealGameText } from "@/src/lib/game/crypto";
 import { activatePrivateGamePlayers, isPrivateKickoffCurrentTx, privateKickoffEventId, publishPrivateKickoff, reconcilePrivateGameActivations } from "@/src/lib/game/private-kickoff";
 import { readMyGameReminderProjection } from "@/src/lib/game/direct-tool";
 import { runGameCommand } from "@/src/lib/game/service";
+import * as reminderPreferences from "@/src/lib/game/reminder-preferences";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 
@@ -215,6 +216,46 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
     expect(await db.gamePlayer.count({ where: { memberId: a, reminderOff: true, reminderEveryDay: true } })).toBe(1_000);
   });
 
+  it("saves independent reminder choices only for the actor's live seats and preserves omitted cadence", async () => {
+    const a = await member("Alex"), b = await member("Sam");
+    const off = await game([a, b]), daily = await game([a, b]), settled = await game([a, b]);
+    await db.game.update({ where: { id: settled }, data: { status: "settled" } });
+    const save = (offGameIds: string[], everyDayGameIds?: string[]) => runGameCommand({ actorMemberId: a,
+      command: { type: "setReminders", minutes: 1140, push: true, text: false, offGameIds,
+        ...(everyDayGameIds === undefined ? {} : { everyDayGameIds }) } });
+    const settings = (gameId: string, memberId = a) => db.gamePlayer.findUniqueOrThrow({
+      where: { gameId_memberId: { gameId, memberId } }, select: { reminderOff: true, reminderEveryDay: true } });
+    expect(await save([off, settled], [daily, settled])).toMatchObject({ ok: true });
+    expect(await settings(off)).toEqual({ reminderOff: true, reminderEveryDay: false });
+    expect(await settings(daily)).toEqual({ reminderOff: false, reminderEveryDay: true });
+    expect(await settings(settled)).toEqual({ reminderOff: false, reminderEveryDay: false });
+    expect(await settings(off, b)).toEqual({ reminderOff: false, reminderEveryDay: false });
+    expect(await save([])).toMatchObject({ ok: true });
+    expect(await settings(off)).toEqual({ reminderOff: false, reminderEveryDay: false });
+    expect(await settings(daily)).toEqual({ reminderOff: false, reminderEveryDay: true });
+    expect(await save([], [])).toMatchObject({ ok: true });
+    expect(await settings(daily)).toEqual({ reminderOff: false, reminderEveryDay: false });
+    expect(await db.gameEvent.count({ where: { actor: a, type: { in: ["reminder_off_chosen", "reminder_every_day_chosen"] } } })).toBe(4);
+    expect(await db.gameEvent.count({ where: { gameId: settled, actor: a, type: "reminder_off_chosen" } })).toBe(0);
+  });
+
+  it("does not apply a reminder choice to a seat admitted after its choice facts", async () => {
+    const a = await member("Alex"), b = await member("Sam");
+    const current = await game([a, b]), late = await game([b]);
+    const record = reminderPreferences.recordGameReminderPreferencesTx;
+    const admission = vi.spyOn(reminderPreferences, "recordGameReminderPreferencesTx").mockImplementationOnce(async (...args) => {
+      await record(...args);
+      await db.gamePlayer.create({ data: { gameId: late, memberId: a, seat: 1, timeZone: "UTC", joinedAt: now } });
+    });
+    try {
+      expect(await runGameCommand({ actorMemberId: a, command: { type: "setReminders", minutes: 1140,
+        push: true, text: false, offGameIds: [current, late], everyDayGameIds: [current, late] } })).toMatchObject({ ok: true });
+    } finally { admission.mockRestore(); }
+    expect(await db.gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId: late, memberId: a } } }))
+      .toMatchObject({ reminderOff: false, reminderEveryDay: false });
+    expect(await db.gameEvent.count({ where: { gameId: late, actor: a, type: "reminder_off_chosen" } })).toBe(0);
+  });
+
   it("offers a new person once and a familiar person a new rhythm, then recovers a late join", async () => {
     const a = await member("Alex"), b = await member("Sam"), c = await member("Riley");
     const prior = await game([a, b], { startedAt: new Date("2026-11-05T18:00:00Z") });
@@ -232,6 +273,23 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
     expect(await receipt(group, c)).toMatchObject({ template: "game_private_kickoff", payloadOwnerMemberId: c });
     await activatePrivateGamePlayers(group, now);
     expect(await db.gameEvent.count({ where: { gameId: group, type: "reminder_activation", actor: "system" } })).toBe(3);
+  });
+
+  it("recovers a late join's inherited preferences after the game's help offer expired", async () => {
+    const a = await member("Alex"), b = await member("Sam"), c = await member("Riley");
+    const prior = await game([a, b, c], { startedAt: new Date("2026-11-02T18:00:00Z") });
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId: prior, memberId: c } },
+      data: { reminderOff: true, reminderEveryDay: true } });
+    const current = await game([a, b, c], { previousGameId: prior, startedAt: new Date("2026-11-04T18:00:00Z") });
+    // Model a committed late seat whose post-commit activation did not run.
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId: current, memberId: c } }, data: { joinedAt: now } });
+    await reconcilePrivateGameActivations(now);
+    expect(await db.gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId: current, memberId: c } } }))
+      .toMatchObject({ reminderOff: true, reminderEveryDay: true });
+    expect(await kind(current, c)).toEqual({ messageKind: "none" });
+    expect(await receipt(current, c)).toBeNull();
+    await reconcilePrivateGameActivations(now);
+    expect(await db.gameEvent.count({ where: { gameId: current, type: "reminder_activation" } })).toBe(3);
   });
 
   it("holds an overnight offer until 09:00 local and does not create expired offers", async () => {

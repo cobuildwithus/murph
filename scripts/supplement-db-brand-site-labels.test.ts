@@ -36,6 +36,20 @@ import {
   selectOcrInputRows,
 } from "../.agents/skills/research-supplements/scripts/supplement-db-brand-site-ocr-preview.mjs";
 
+function repairExample(sourceId: string, name: string, label: Record<string, unknown>) {
+  return repairPreviewForRow({
+    id: `example-brand:${sourceId}`,
+    dataOriginId: `example-brand:${sourceId}`,
+    dataOriginUrl: `https://example.test/products/${sourceId}`,
+    name,
+    brand: "Example Brand",
+    upc: null,
+    offMarket: false,
+    searchText: "",
+    label: { source: "example-brand", sourceId, ...label },
+  });
+}
+
 function ingredientRowName(row: unknown): string {
   assert.ok(row && typeof row === "object");
   assert.ok("name" in row);
@@ -2011,23 +2025,11 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview does not remove raw evidence from partial rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:caption-only",
-      dataOriginId: "example-brand:caption-only",
-      dataOriginUrl: "https://example.test/products/caption-only",
-      name: "Example Caption Only",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "caption-only",
-        factsText: "Supplement Facts Serving Size 1 Capsule",
-        bodyText: "Official page body retained for manual review.",
-        rawPageText: "Raw page text retained for refetch review.",
-        allProductFactsText: ["Supplement Facts"],
-      },
+    const preview = repairExample("caption-only", "Example Caption Only", {
+      factsText: "Supplement Facts Serving Size 1 Capsule",
+      bodyText: "Official page body retained for manual review.",
+      rawPageText: "Raw page text retained for refetch review.",
+      allProductFactsText: ["Supplement Facts"],
     });
 
     assert.equal(preview.parserStatus, "partial_parse");
@@ -2036,22 +2038,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview rejects malformed existing normalized rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:malformed-existing",
-      dataOriginId: "example-brand:malformed-existing",
-      dataOriginUrl: "https://example.test/products/malformed-existing",
-      name: "Example Existing",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "malformed-existing",
-        ingredientRows: [{}],
-        servingSizes: ["1 Capsule"],
-        bodyText: "Raw evidence must not be removed when existing rows are invalid.",
-      },
+    const preview = repairExample("malformed-existing", "Example Existing", {
+      ingredientRows: [{}],
+      servingSizes: ["1 Capsule"],
+      bodyText: "Raw evidence must not be removed when existing rows are invalid.",
     });
 
     assert.equal(preview.parserStatus, "partial_parse");
@@ -2063,23 +2053,11 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview reparses invalid existing normalized rows from clean facts text", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:reparse-existing",
-      dataOriginId: "example-brand:reparse-existing",
-      dataOriginUrl: "https://example.test/products/reparse-existing",
-      name: "Example Reparse Existing",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "reparse-existing",
-        ingredientRows: [{ name: "Serving Size 1 Capsule Magnesium", amount: "200", unit: "mg" }],
-        servingSizes: ["1 Capsule"],
-        factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving Magnesium 200 mg 48%",
-        bodyText: "Raw page evidence can be removed only after clean replacement rows are parsed.",
-      },
+    const preview = repairExample("reparse-existing", "Example Reparse Existing", {
+      ingredientRows: [{ name: "Serving Size 1 Capsule Magnesium", amount: "200", unit: "mg" }],
+      servingSizes: ["1 Capsule"],
+      factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving Magnesium 200 mg 48%",
+      bodyText: "Raw page evidence can be removed only after clean replacement rows are parsed.",
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -2134,22 +2112,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks numeric daily values that are not percent strings", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:fraction-daily-value",
-      dataOriginId: "example-brand:fraction-daily-value",
-      dataOriginUrl: "https://example.test/products/fraction-daily-value",
-      name: "Example Zinc",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "fraction-daily-value",
-        ingredientRows: [{ name: "Zinc", amount: "20", unit: "mg", dailyValue: "1.82" }],
-        servingSizes: ["1 Capsule"],
-        factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving Zinc 20 mg",
-      },
+    const preview = repairExample("fraction-daily-value", "Example Zinc", {
+      ingredientRows: [{ name: "Zinc", amount: "20", unit: "mg", dailyValue: "1.82" }],
+      servingSizes: ["1 Capsule"],
+      factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving Zinc 20 mg",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -2157,25 +2123,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks directions-like ingredient names", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:directions-name",
-      dataOriginId: "example-brand:directions-name",
-      dataOriginUrl: "https://example.test/products/directions-name",
-      name: "Example Creatine",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "directions-name",
-        ingredientRows: [
-          { name: "Creatine Monohydrate", amount: "5", unit: "g" },
-          { name: "Do not exceed", amount: "5", unit: "g" },
-        ],
-        servingSizes: ["1 Scoop"],
-        factsText: "Supplement Facts Serving Size 1 Scoop Amount Per Serving Creatine Monohydrate 5 g",
-      },
+    const preview = repairExample("directions-name", "Example Creatine", {
+      ingredientRows: [
+        { name: "Creatine Monohydrate", amount: "5", unit: "g" },
+        { name: "Do not exceed", amount: "5", unit: "g" },
+      ],
+      servingSizes: ["1 Scoop"],
+      factsText: "Supplement Facts Serving Size 1 Scoop Amount Per Serving Creatine Monohydrate 5 g",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -2183,23 +2137,11 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks composite slash amounts and mangled spoon servings", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:composite-amount",
-      dataOriginId: "example-brand:composite-amount",
-      dataOriginUrl: "https://example.test/products/composite-amount",
-      name: "Example Inositol Powder",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "composite-amount",
-        ingredientRows: [{ name: "Vitamin D (as D3 Cholecalciferol)", amount: "1,000/25", unit: "mcg" }],
-        // OCR-mangled "1/4 Teaspoon" that lost its fraction slash
-        servingSizes: ["14 Teaspoon (850 mg)"],
-        factsText: "Supplement Facts Serving Size 1/4 Teaspoon (850 mg) Amount Per Serving Vitamin D (as D3 Cholecalciferol) 1,000 IU 25 mcg",
-      },
+    const preview = repairExample("composite-amount", "Example Inositol Powder", {
+      ingredientRows: [{ name: "Vitamin D (as D3 Cholecalciferol)", amount: "1,000/25", unit: "mcg" }],
+      // OCR-mangled "1/4 Teaspoon" that lost its fraction slash
+      servingSizes: ["14 Teaspoon (850 mg)"],
+      factsText: "Supplement Facts Serving Size 1/4 Teaspoon (850 mg) Amount Per Serving Vitamin D (as D3 Cholecalciferol) 1,000 IU 25 mcg",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -2240,22 +2182,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview excludes production review issues from automated candidates", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:starter-kit",
-      dataOriginId: "example-brand:starter-kit",
-      dataOriginUrl: "https://example.test/products/starter-kit",
-      name: "Example Starter Kit",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "starter-kit",
-        ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg" }],
-        servingSizes: [{ text: "2 capsules", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 capsules Magnesium 200 mg",
-      },
+    const preview = repairExample("starter-kit", "Example Starter Kit", {
+      ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg" }],
+      servingSizes: [{ text: "2 capsules", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 capsules Magnesium 200 mg",
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -2300,25 +2230,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks retained legacy ingredient names contaminated by table headers", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:legacy-reference-intake",
-      dataOriginId: "example-brand:legacy-reference-intake",
-      dataOriginUrl: "https://example.test/products/legacy-reference-intake",
-      name: "Example Legacy Reference Intake",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "legacy-reference-intake",
-        ingredientRows: [
-          { name: "Vitamin C", amount: "90", unit: "mg" },
-          { name: "%Reference Intake*", amount: "100", unit: "mg" },
-        ],
-        servingSizes: [{ text: "1 tablet", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 tablet Vitamin C 90 mg",
-      },
+    const preview = repairExample("legacy-reference-intake", "Example Legacy Reference Intake", {
+      ingredientRows: [
+        { name: "Vitamin C", amount: "90", unit: "mg" },
+        { name: "%Reference Intake*", amount: "100", unit: "mg" },
+      ],
+      servingSizes: [{ text: "1 tablet", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 tablet Vitamin C 90 mg",
     });
 
     assert.ok(preview.parserBlockers.length > 0);
@@ -2327,25 +2245,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks retained fallback amount-pattern ingredient rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:retained-fallback-amount-row",
-      dataOriginId: "example-brand:retained-fallback-amount-row",
-      dataOriginUrl: "https://example.test/products/retained-fallback-amount-row",
-      name: "Example Creatine",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "retained-fallback-amount-row",
-        ingredientRows: [
-          { name: "Creatine Monohydrate", amount: "3", unit: "g", source: "factsText" },
-          { name: "100 Amount per serving Creatine Monohydrate 3", amount: "3", unit: "g", source: "factsText_amount_pattern" },
-        ],
-        servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 scoop Creatine Monohydrate 3 g",
-      },
+    const preview = repairExample("retained-fallback-amount-row", "Example Creatine", {
+      ingredientRows: [
+        { name: "Creatine Monohydrate", amount: "3", unit: "g", source: "factsText" },
+        { name: "100 Amount per serving Creatine Monohydrate 3", amount: "3", unit: "g", source: "factsText_amount_pattern" },
+      ],
+      servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 scoop Creatine Monohydrate 3 g",
     });
 
     assert.ok(preview.parserBlockers.includes("fallback_amount_pattern_rows"));
@@ -2354,22 +2260,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks retained percent-prefix nutrient table artifacts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:retained-percent-prefix-artifact",
-      dataOriginId: "example-brand:retained-percent-prefix-artifact",
-      dataOriginUrl: "https://example.test/products/retained-percent-prefix-artifact",
-      name: "Example Glutamine",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "retained-percent-prefix-artifact",
-        ingredientRows: [{ name: "%RDA (Women) Energy Value", amount: "3.9", unit: "kcal", source: "factsText_table" }],
-        servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 scoop Energy Value 3.9 kcal",
-      },
+    const preview = repairExample("retained-percent-prefix-artifact", "Example Glutamine", {
+      ingredientRows: [{ name: "%RDA (Women) Energy Value", amount: "3.9", unit: "kcal", source: "factsText_table" }],
+      servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 scoop Energy Value 3.9 kcal",
     });
 
     assert.ok(preview.parserBlockers.length > 0);
@@ -2378,22 +2272,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview repairs retained embedded age-column artifacts from clean facts text", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:retained-age-column-artifact",
-      dataOriginId: "example-brand:retained-age-column-artifact",
-      dataOriginUrl: "https://example.test/products/retained-age-column-artifact",
-      name: "Example Baby Vitamin D",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "retained-age-column-artifact",
-        ingredientRows: [{ name: "12 Months 1 through 3 Years Vitamin D", amount: "10", unit: "mcg", source: "factsText_table" }],
-        servingSizes: [{ text: "1 drop", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 drop Vitamin D 10 mcg",
-      },
+    const preview = repairExample("retained-age-column-artifact", "Example Baby Vitamin D", {
+      ingredientRows: [{ name: "12 Months 1 through 3 Years Vitamin D", amount: "10", unit: "mcg", source: "factsText_table" }],
+      servingSizes: [{ text: "1 drop", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 drop Vitamin D 10 mcg",
     });
 
     assert.deepEqual(preview.parserBlockers, []);
@@ -2404,27 +2286,15 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview normalizes retained amounts that already include units", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:retained-amount-unit",
-      dataOriginId: "example-brand:retained-amount-unit",
-      dataOriginUrl: "https://example.test/products/retained-amount-unit",
-      name: "Example Vitamin C",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "retained-amount-unit",
-        ingredientRows: [
-          { name: "Vitamin C", amount: "476 mg", unit: "mg", source: "structured_label_field" },
-          { name: "Protease", amount: "10500 HUT", unit: "HUT", source: "structured_label_field" },
-          { name: "Lactobacillus rhamnosus", amount: "17,75 milliard", unit: "d", source: "structured_label_field" },
-          { name: "Streptococcus salivarius K12", amount: "1 milliard d’UFC*", unit: "milliard", source: "structured_label_field" },
-        ],
-        servingSizes: [{ text: "1 tablet", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 tablet Vitamin C 476 mg",
-      },
+    const preview = repairExample("retained-amount-unit", "Example Vitamin C", {
+      ingredientRows: [
+        { name: "Vitamin C", amount: "476 mg", unit: "mg", source: "structured_label_field" },
+        { name: "Protease", amount: "10500 HUT", unit: "HUT", source: "structured_label_field" },
+        { name: "Lactobacillus rhamnosus", amount: "17,75 milliard", unit: "d", source: "structured_label_field" },
+        { name: "Streptococcus salivarius K12", amount: "1 milliard d’UFC*", unit: "milliard", source: "structured_label_field" },
+      ],
+      servingSizes: [{ text: "1 tablet", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 tablet Vitamin C 476 mg",
     });
 
     assert.equal(preview.automatedBackfillReady, true);
@@ -2440,22 +2310,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks retained rows missing specific mushroom title actives", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:lions-mane-missing-active",
-      dataOriginId: "example-brand:lions-mane-missing-active",
-      dataOriginUrl: "https://example.test/products/lions-mane-missing-active",
-      name: "Lion's Mane Powder",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "lions-mane-missing-active",
-        ingredientRows: [{ name: "Certified Organic", amount: "1.5", unit: "g", source: "factsText_table" }],
-        servingSizes: [{ text: "1/2 tsp", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1/2 tsp Certified Organic 1.5 g",
-      },
+    const preview = repairExample("lions-mane-missing-active", "Lion's Mane Powder", {
+      ingredientRows: [{ name: "Certified Organic", amount: "1.5", unit: "g", source: "factsText_table" }],
+      servingSizes: [{ text: "1/2 tsp", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1/2 tsp Certified Organic 1.5 g",
     });
 
     assert.ok(preview.parserBlockers.includes("likely_missing_product_active"));
@@ -2464,22 +2322,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks retained inactive-only nutrition rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:inactive-only-energy",
-      dataOriginId: "example-brand:inactive-only-energy",
-      dataOriginUrl: "https://example.test/products/inactive-only-energy",
-      name: "Daily Energy",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "inactive-only-energy",
-        ingredientRows: [{ name: "Sodium", amount: "10", unit: "mg", source: "factsText_table" }],
-        servingSizes: [{ text: "2 gummies", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 gummies Sodium 10 mg",
-      },
+    const preview = repairExample("inactive-only-energy", "Daily Energy", {
+      ingredientRows: [{ name: "Sodium", amount: "10", unit: "mg", source: "factsText_table" }],
+      servingSizes: [{ text: "2 gummies", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 gummies Sodium 10 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("inactive_only_ingredient_rows"));
@@ -2488,33 +2334,21 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks retained spotcheck artifact ingredient names", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:retained-spotcheck-artifacts",
-      dataOriginId: "example-brand:retained-spotcheck-artifacts",
-      dataOriginUrl: "https://example.test/products/retained-spotcheck-artifacts",
-      name: "Example Complex",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "retained-spotcheck-artifacts",
-        ingredientRows: [
-          { name: "Actifs Dosage pour 2 comprimés/jour AR* Charbon actif végétal", amount: "200", unit: "mg", source: "factsText_table" },
-          { name: "PM", amount: "150", unit: "mg", source: "factsText_table" },
-          { name: "DVt VitaminA", amount: "650", unit: "mcg", source: "factsText_table" },
-          { name: "Rosavins and", amount: "3", unit: "mg", source: "factsText_table" },
-          { name: "Carrelne", amount: "150", unit: "mg", source: "factsText_table" },
-          { name: "Type-A Polymers]", amount: "175", unit: "mg", source: "factsText_table" },
-          { name: "0.65* Protein", amount: "0.21", unit: "g", source: "factsText_table" },
-          { name: "✜1", amount: "1", unit: "g", source: "factsText_table" },
-          { name: ") Magnesium (from Magnesium Citrate", amount: "500", unit: "mg", source: "factsText_table" },
-          { name: ") 4:1 (equiv.", amount: "3.5", unit: "g", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 capsule Example 150 mg",
-      },
+    const preview = repairExample("retained-spotcheck-artifacts", "Example Complex", {
+      ingredientRows: [
+        { name: "Actifs Dosage pour 2 comprimés/jour AR* Charbon actif végétal", amount: "200", unit: "mg", source: "factsText_table" },
+        { name: "PM", amount: "150", unit: "mg", source: "factsText_table" },
+        { name: "DVt VitaminA", amount: "650", unit: "mcg", source: "factsText_table" },
+        { name: "Rosavins and", amount: "3", unit: "mg", source: "factsText_table" },
+        { name: "Carrelne", amount: "150", unit: "mg", source: "factsText_table" },
+        { name: "Type-A Polymers]", amount: "175", unit: "mg", source: "factsText_table" },
+        { name: "0.65* Protein", amount: "0.21", unit: "g", source: "factsText_table" },
+        { name: "✜1", amount: "1", unit: "g", source: "factsText_table" },
+        { name: ") Magnesium (from Magnesium Citrate", amount: "500", unit: "mg", source: "factsText_table" },
+        { name: ") 4:1 (equiv.", amount: "3.5", unit: "g", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 capsule Example 150 mg",
     });
 
     assert.ok(preview.parserBlockers.length > 0);
@@ -2552,27 +2386,15 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks multi-row inactive-only nutrition panels", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:pomegranate-powder",
-      dataOriginId: "example-brand:pomegranate-powder",
-      dataOriginUrl: "https://example.test/products/pomegranate-powder",
-      name: "Pomegranate Powder",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "pomegranate-powder",
-        ingredientRows: [
-          { name: "Total Carbs", amount: "5", unit: "g", source: "factsText_table" },
-          { name: "Total Sugar", amount: "2", unit: "g", source: "factsText_table" },
-          { name: "Includes Added Sugar", amount: "0", unit: "g", source: "factsText_table" },
-          { name: "Potassium", amount: "30", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "2 tsp", source: "official_facts_table" }],
-        factsText: "Nutrition Facts Serving Size 2 tsp Total Carbs 5 g Total Sugar 2 g Potassium 30 mg",
-      },
+    const preview = repairExample("pomegranate-powder", "Pomegranate Powder", {
+      ingredientRows: [
+        { name: "Total Carbs", amount: "5", unit: "g", source: "factsText_table" },
+        { name: "Total Sugar", amount: "2", unit: "g", source: "factsText_table" },
+        { name: "Includes Added Sugar", amount: "0", unit: "g", source: "factsText_table" },
+        { name: "Potassium", amount: "30", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "2 tsp", source: "official_facts_table" }],
+      factsText: "Nutrition Facts Serving Size 2 tsp Total Carbs 5 g Total Sugar 2 g Potassium 30 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("inactive_only_ingredient_rows"));
@@ -2581,38 +2403,26 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks remaining manual spotcheck parser fragments", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:manual-spotcheck-fragments",
-      dataOriginId: "example-brand:manual-spotcheck-fragments",
-      dataOriginUrl: "https://example.test/products/manual-spotcheck-fragments",
-      name: "Example Complex",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "manual-spotcheck-fragments",
-        ingredientRows: [
-          { name: "FREE", amount: "1", unit: "g", source: "factsText_table" },
-          { name: "Daily Values L-Glutamine", amount: "1", unit: "g", source: "factsText_table" },
-          { name: "Flavours: chocolate", amount: "100", unit: "g", source: "factsText_table" },
-          { name: "Dávka – 70 g", amount: "70", unit: "g", source: "factsText_table" },
-          { name: "Energetická hodnota", amount: "235", unit: "kcal", source: "factsText_table" },
-          { name: "Vitamin B12 Lic. No.: 10020022011847", amount: "1", unit: "mcg", source: "factsText_pipe" },
-          { name: "Protein meets pure refreshment. Our", amount: "10", unit: "g", source: "factsText" },
-          { name: "4 L-Citrulline 259", amount: "5", unit: "g", source: "factsText_table" },
-          { name: "Vitamin B12", amount: "2,000", unit: "calorie", source: "factsText" },
-          { name: "Manufactured and distributed by Naked Nutrition", amount: "5", unit: "g", source: "factsText" },
-          { name: "PO Box 348634 Coral Gables, FL 33234 Creatine Monohydrate", amount: "5", unit: "g", source: "factsText" },
-          { name: "Store in a cool, dry place.", amount: "100", unit: "mcg", source: "factsText_table" },
-          { name: "Mix 1 scoop lappin", amount: "200", unit: "mg", source: "factsText" },
-          { name: "Acid and Grape Seed Extract", amount: "70", unit: "mg", source: "factsText_table" },
-          { name: "Vitamin E (as dl-alpha tocopheryl acetate) Marine Lipid Concentrate", amount: "1000", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 scoop Example 100 mg",
-      },
+    const preview = repairExample("manual-spotcheck-fragments", "Example Complex", {
+      ingredientRows: [
+        { name: "FREE", amount: "1", unit: "g", source: "factsText_table" },
+        { name: "Daily Values L-Glutamine", amount: "1", unit: "g", source: "factsText_table" },
+        { name: "Flavours: chocolate", amount: "100", unit: "g", source: "factsText_table" },
+        { name: "Dávka – 70 g", amount: "70", unit: "g", source: "factsText_table" },
+        { name: "Energetická hodnota", amount: "235", unit: "kcal", source: "factsText_table" },
+        { name: "Vitamin B12 Lic. No.: 10020022011847", amount: "1", unit: "mcg", source: "factsText_pipe" },
+        { name: "Protein meets pure refreshment. Our", amount: "10", unit: "g", source: "factsText" },
+        { name: "4 L-Citrulline 259", amount: "5", unit: "g", source: "factsText_table" },
+        { name: "Vitamin B12", amount: "2,000", unit: "calorie", source: "factsText" },
+        { name: "Manufactured and distributed by Naked Nutrition", amount: "5", unit: "g", source: "factsText" },
+        { name: "PO Box 348634 Coral Gables, FL 33234 Creatine Monohydrate", amount: "5", unit: "g", source: "factsText" },
+        { name: "Store in a cool, dry place.", amount: "100", unit: "mcg", source: "factsText_table" },
+        { name: "Mix 1 scoop lappin", amount: "200", unit: "mg", source: "factsText" },
+        { name: "Acid and Grape Seed Extract", amount: "70", unit: "mg", source: "factsText_table" },
+        { name: "Vitamin E (as dl-alpha tocopheryl acetate) Marine Lipid Concentrate", amount: "1000", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 scoop Example 100 mg",
     });
 
     assert.ok(preview.parserBlockers.length > 0);
@@ -2697,30 +2507,18 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview normalizes safe OCR and footnote ingredient names", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:safe-name-cleanup",
-      dataOriginId: "example-brand:safe-name-cleanup",
-      dataOriginUrl: "https://example.test/products/safe-name-cleanup",
-      name: "Example Cordyceps Fiber",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "safe-name-cleanup",
-        ingredientRows: [
-          { name: "Cordyceps (Cordyceps militaris) mycelium-/", amount: "1", unit: "g", source: "factsText_table" },
-          { name: "Dietary Hiber", amount: "5", unit: "g", source: "factsText_table" },
-          { name: "Magnosium (as Dimagnesium Malato)", amount: "40", unit: "mg", source: "factsText_table" },
-          { name: "Tron", amount: "1", unit: "mg", source: "factsText_table" },
-          { name: "Zino (as zino gluconate)", amount: "5", unit: "mg", source: "factsText_table" },
-          { name: "Odorless Garlic **", amount: "1000", unit: "mg", source: "factsText_table" },
-          { name: "Bromelain (2,000 G.D.U. per gram)TT", amount: "300", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 scoop Cordyceps 1 g Dietary Fiber 5 g",
-      },
+    const preview = repairExample("safe-name-cleanup", "Example Cordyceps Fiber", {
+      ingredientRows: [
+        { name: "Cordyceps (Cordyceps militaris) mycelium-/", amount: "1", unit: "g", source: "factsText_table" },
+        { name: "Dietary Hiber", amount: "5", unit: "g", source: "factsText_table" },
+        { name: "Magnosium (as Dimagnesium Malato)", amount: "40", unit: "mg", source: "factsText_table" },
+        { name: "Tron", amount: "1", unit: "mg", source: "factsText_table" },
+        { name: "Zino (as zino gluconate)", amount: "5", unit: "mg", source: "factsText_table" },
+        { name: "Odorless Garlic **", amount: "1000", unit: "mg", source: "factsText_table" },
+        { name: "Bromelain (2,000 G.D.U. per gram)TT", amount: "300", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 scoop Cordyceps 1 g Dietary Fiber 5 g",
     });
 
     assert.equal(preview.automatedBackfillReady, true);
@@ -2736,25 +2534,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks conventional coconut milk powder food rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:coconut-milk-powder",
-      dataOriginId: "example-brand:coconut-milk-powder",
-      dataOriginUrl: "https://example.test/products/coconut-milk-powder",
-      name: "Coconut Milk Powder",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "coconut-milk-powder",
-        ingredientRows: [
-          { name: "Saturated Fat", amount: "8", unit: "g", source: "factsText_table" },
-          { name: "Protein", amount: "1", unit: "g", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
-        factsText: "Nutrition Facts Serving Size 1 scoop Saturated Fat 8 g Protein 1 g",
-      },
+    const preview = repairExample("coconut-milk-powder", "Coconut Milk Powder", {
+      ingredientRows: [
+        { name: "Saturated Fat", amount: "8", unit: "g", source: "factsText_table" },
+        { name: "Protein", amount: "1", unit: "g", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
+      factsText: "Nutrition Facts Serving Size 1 scoop Saturated Fat 8 g Protein 1 g",
     });
 
     assert.ok(preview.parserBlockers.includes("likely_food_or_non_supplement"));
@@ -2763,26 +2549,14 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks automated candidates that would shrink existing ingredient rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:shrinking-facts",
-      dataOriginId: "example-brand:shrinking-facts",
-      dataOriginUrl: "https://example.test/products/shrinking-facts",
-      name: "Example Magnesium",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "shrinking-facts",
-        ingredientRows: [
-          { name: "Serving Size" },
-          { name: "% der empf. Tageszufuhr pro Kapsel * Magnesium", amount: "240", unit: "mg" },
-          { name: "Magnesium", amount: "240", unit: "mg" },
-        ],
-        servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 capsule Magnesium 240 mg 64%",
-      },
+    const preview = repairExample("shrinking-facts", "Example Magnesium", {
+      ingredientRows: [
+        { name: "Serving Size" },
+        { name: "% der empf. Tageszufuhr pro Kapsel * Magnesium", amount: "240", unit: "mg" },
+        { name: "Magnesium", amount: "240", unit: "mg" },
+      ],
+      servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 capsule Magnesium 240 mg 64%",
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -2792,22 +2566,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks parser artifact ingredient names", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:directions-as-ingredient",
-      dataOriginId: "example-brand:directions-as-ingredient",
-      dataOriginUrl: "https://example.test/products/directions-as-ingredient",
-      name: "Example Liquid Herbal",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "directions-as-ingredient",
-        ingredientRows: [{ name: "How to Use: Take", amount: "30", unit: "ml" }],
-        servingSizes: [{ text: "30 ml", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 30 ml How to Use: Take 30 ml",
-      },
+    const preview = repairExample("directions-as-ingredient", "Example Liquid Herbal", {
+      ingredientRows: [{ name: "How to Use: Take", amount: "30", unit: "ml" }],
+      servingSizes: [{ text: "30 ml", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 30 ml How to Use: Take 30 ml",
     });
 
     assert.ok(preview.parserBlockers.length > 0);
@@ -2816,22 +2578,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks extraction-rate rows as automated ingredients", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:herbal-extraction-rate",
-      dataOriginId: "example-brand:herbal-extraction-rate",
-      dataOriginUrl: "https://example.test/products/herbal-extraction-rate",
-      name: "Example Cotton",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "herbal-extraction-rate",
-        ingredientRows: [{ name: "Extraction rate 467 mg fresh herb per", amount: "0.7", unit: "ml" }],
-        servingSizes: [{ text: "0.7 ml", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 0.7 ml Extraction rate 467 mg fresh herb per 0.7 ml",
-      },
+    const preview = repairExample("herbal-extraction-rate", "Example Cotton", {
+      ingredientRows: [{ name: "Extraction rate 467 mg fresh herb per", amount: "0.7", unit: "ml" }],
+      servingSizes: [{ text: "0.7 ml", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 0.7 ml Extraction rate 467 mg fresh herb per 0.7 ml",
     });
 
     assert.ok(preview.parserBlockers.some((blocker) => blocker.endsWith("ingredient_name_contamination")));
@@ -2840,26 +2590,14 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks percent and footer artifact ingredient names", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:footer-artifacts",
-      dataOriginId: "example-brand:footer-artifacts",
-      dataOriginUrl: "https://example.test/products/footer-artifacts",
-      name: "Example Melatonin Gummies",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "footer-artifacts",
-        ingredientRows: [
-          { name: "4%*** 8%*** Melatonin", amount: "1", unit: "mg" },
-          { name: "Equivalent to", amount: "226", unit: "mg" },
-          { name: "RDA is based", amount: "1", unit: "g" },
-        ],
-        servingSizes: [{ text: "2 gummies", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 gummies Melatonin 1 mg",
-      },
+    const preview = repairExample("footer-artifacts", "Example Melatonin Gummies", {
+      ingredientRows: [
+        { name: "4%*** 8%*** Melatonin", amount: "1", unit: "mg" },
+        { name: "Equivalent to", amount: "226", unit: "mg" },
+        { name: "RDA is based", amount: "1", unit: "g" },
+      ],
+      servingSizes: [{ text: "2 gummies", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 gummies Melatonin 1 mg",
     });
 
     assert.ok(preview.parserBlockers.some((blocker) => blocker.endsWith("ingredient_name_contamination")));
@@ -2868,27 +2606,15 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks age, badge, and joined table artifact ingredient names", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:joined-table-artifacts",
-      dataOriginId: "example-brand:joined-table-artifacts",
-      dataOriginUrl: "https://example.test/products/joined-table-artifacts",
-      name: "Example Immune Capsules",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "joined-table-artifacts",
-        ingredientRows: [
-          { name: "1 through 3 Years", amount: "3", unit: "g" },
-          { name: "# Certified Organic", amount: "1.5", unit: "g" },
-          { name: "Holy Basil (Ocimum sanctum) (leaf) (extract) Zinc", amount: "5", unit: "mg" },
-          { name: "1 Capsule %* 2 Capsules %*", amount: "250", unit: "mg" },
-        ],
-        servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 capsule Zinc 5 mg",
-      },
+    const preview = repairExample("joined-table-artifacts", "Example Immune Capsules", {
+      ingredientRows: [
+        { name: "1 through 3 Years", amount: "3", unit: "g" },
+        { name: "# Certified Organic", amount: "1.5", unit: "g" },
+        { name: "Holy Basil (Ocimum sanctum) (leaf) (extract) Zinc", amount: "5", unit: "mg" },
+        { name: "1 Capsule %* 2 Capsules %*", amount: "250", unit: "mg" },
+      ],
+      servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 capsule Zinc 5 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("existing_ingredient_rows_would_decrease"));
@@ -2897,28 +2623,16 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks direction and provenance fragments parsed as ingredient names", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:provenance-fragments",
-      dataOriginId: "example-brand:provenance-fragments",
-      dataOriginUrl: "https://example.test/products/provenance-fragments",
-      name: "Example Energy Powder",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "provenance-fragments",
-        ingredientRows: [
-          { name: "Manufactured for: Example Theanine", amount: "100", unit: "mg" },
-          { name: "Mix: Shake the bottle & add", amount: "30", unit: "ml" },
-          { name: "% Nutrient Reference Value (NRV). Rows: Vitamin D", amount: "40", unit: "mcg" },
-          { name: "Servings per bottle: 48", amount: "5", unit: "g" },
-          { name: "Milligrams Capsules per Strength Organic Gymnema 25:1 Extract", amount: "300", unit: "mg" },
-        ],
-        servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 scoop Theanine 100 mg",
-      },
+    const preview = repairExample("provenance-fragments", "Example Energy Powder", {
+      ingredientRows: [
+        { name: "Manufactured for: Example Theanine", amount: "100", unit: "mg" },
+        { name: "Mix: Shake the bottle & add", amount: "30", unit: "ml" },
+        { name: "% Nutrient Reference Value (NRV). Rows: Vitamin D", amount: "40", unit: "mcg" },
+        { name: "Servings per bottle: 48", amount: "5", unit: "g" },
+        { name: "Milligrams Capsules per Strength Organic Gymnema 25:1 Extract", amount: "300", unit: "mg" },
+      ],
+      servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 scoop Theanine 100 mg",
     });
 
     assert.ok(preview.parserBlockers.length > 0);
@@ -3034,22 +2748,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks implausible micronutrient amount units", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:b12-unit-ocr",
-      dataOriginId: "example-brand:b12-unit-ocr",
-      dataOriginUrl: "https://example.test/products/b12-unit-ocr",
-      name: "Example Vitamin B-12",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "b12-unit-ocr",
-        ingredientRows: [{ name: "Vitamin B12 (as Methylcobalamin)", amount: "5000", unit: "mg" }],
-        servingSizes: [{ text: "1 lozenge", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 lozenge Vitamin B12 5000 mg",
-      },
+    const preview = repairExample("b12-unit-ocr", "Example Vitamin B-12", {
+      ingredientRows: [{ name: "Vitamin B12 (as Methylcobalamin)", amount: "5000", unit: "mg" }],
+      servingSizes: [{ text: "1 lozenge", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 lozenge Vitamin B12 5000 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("implausible_parsed_ingredient_amount"));
@@ -3058,22 +2760,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks percent units in ingredient rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:percent-unit",
-      dataOriginId: "example-brand:percent-unit",
-      dataOriginUrl: "https://example.test/products/percent-unit",
-      name: "Example Biotin",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "percent-unit",
-        ingredientRows: [{ name: "Biotin: 1,000ug", amount: "2000", unit: "%" }],
-        servingSizes: [{ text: "1 tablet", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 tablet Biotin 2000%",
-      },
+    const preview = repairExample("percent-unit", "Example Biotin", {
+      ingredientRows: [{ name: "Biotin: 1,000ug", amount: "2000", unit: "%" }],
+      servingSizes: [{ text: "1 tablet", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 tablet Biotin 2000%",
     });
 
     assert.ok(preview.parserBlockers.includes("invalid_existing_ingredient_rows"));
@@ -3082,27 +2772,15 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks implausible micronutrient mass units", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:implausible-mass-units",
-      dataOriginId: "example-brand:implausible-mass-units",
-      dataOriginUrl: "https://example.test/products/implausible-mass-units",
-      name: "Example Greens",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "implausible-mass-units",
-        ingredientRows: [
-          { name: "Vitamin E", amount: "2.3", unit: "g" },
-          { name: "Thiamin", amount: "1", unit: "g" },
-          { name: "Iodine", amount: "30000", unit: "mcg" },
-          { name: "Sélénium", amount: "110", unit: "mg" },
-        ],
-        servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 scoop Vitamin E 2.3 g Iodine 30000 mcg Sélénium 110 mg",
-      },
+    const preview = repairExample("implausible-mass-units", "Example Greens", {
+      ingredientRows: [
+        { name: "Vitamin E", amount: "2.3", unit: "g" },
+        { name: "Thiamin", amount: "1", unit: "g" },
+        { name: "Iodine", amount: "30000", unit: "mcg" },
+        { name: "Sélénium", amount: "110", unit: "mg" },
+      ],
+      servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 scoop Vitamin E 2.3 g Iodine 30000 mcg Sélénium 110 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("implausible_parsed_ingredient_amount"));
@@ -3111,22 +2789,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks implausibly huge milligram active amounts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:inulin-container-amount",
-      dataOriginId: "example-brand:inulin-container-amount",
-      dataOriginUrl: "https://example.test/products/inulin-container-amount",
-      name: "Example Inulin Powder 200g",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "inulin-container-amount",
-        ingredientRows: [{ name: "Inulin (from Chicory Root)", amount: "225000", unit: "mg" }],
-        servingSizes: [{ text: "1 teaspoon", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 teaspoon Inulin 225000 mg",
-      },
+    const preview = repairExample("inulin-container-amount", "Example Inulin Powder 200g", {
+      ingredientRows: [{ name: "Inulin (from Chicory Root)", amount: "225000", unit: "mg" }],
+      servingSizes: [{ text: "1 teaspoon", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 teaspoon Inulin 225000 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("implausible_parsed_ingredient_amount"));
@@ -3135,22 +2801,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks less-than gram vitamin OCR artifacts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:less-than-gram-vitamin",
-      dataOriginId: "example-brand:less-than-gram-vitamin",
-      dataOriginUrl: "https://example.test/products/less-than-gram-vitamin",
-      name: "Example Vitamin D",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "less-than-gram-vitamin",
-        ingredientRows: [{ name: "Vitamin D", amount: "<1", unit: "g" }],
-        servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 capsule Vitamin D <1 g",
-      },
+    const preview = repairExample("less-than-gram-vitamin", "Example Vitamin D", {
+      ingredientRows: [{ name: "Vitamin D", amount: "<1", unit: "g" }],
+      servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 capsule Vitamin D <1 g",
     });
 
     assert.ok(preview.parserBlockers.includes("implausible_parsed_ingredient_amount"));
@@ -3159,26 +2813,14 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks implausible high gram elemental calcium", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:electrolyte-calcium-ocr",
-      dataOriginId: "example-brand:electrolyte-calcium-ocr",
-      dataOriginUrl: "https://example.test/products/electrolyte-calcium-ocr",
-      name: "Example Electrolytes Powder",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "electrolyte-calcium-ocr",
-        ingredientRows: [
-          { name: "Sodium", amount: "330", unit: "mg" },
-          { name: "Calcium", amount: "7", unit: "g" },
-          { name: "Potassium", amount: "285", unit: "mg" },
-        ],
-        servingSizes: [{ text: "1 stick", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 stick Sodium 330 mg Calcium 7 g Potassium 285 mg",
-      },
+    const preview = repairExample("electrolyte-calcium-ocr", "Example Electrolytes Powder", {
+      ingredientRows: [
+        { name: "Sodium", amount: "330", unit: "mg" },
+        { name: "Calcium", amount: "7", unit: "g" },
+        { name: "Potassium", amount: "285", unit: "mg" },
+      ],
+      servingSizes: [{ text: "1 stick", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 stick Sodium 330 mg Calcium 7 g Potassium 285 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("implausible_parsed_ingredient_amount"));
@@ -3187,26 +2829,14 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks implausible swapped nutrition units", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:collagen-creamer-ocr",
-      dataOriginId: "example-brand:collagen-creamer-ocr",
-      dataOriginUrl: "https://example.test/products/collagen-creamer-ocr",
-      name: "Example Collagen Creamer",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "collagen-creamer-ocr",
-        ingredientRows: [
-          { name: "Sodium", amount: "5", unit: "g" },
-          { name: "Protein", amount: "35", unit: "mg" },
-          { name: "Hydrolyzed Collagen", amount: "6", unit: "g" },
-        ],
-        servingSizes: [{ text: "2 scoops", source: "official_facts_table" }],
-        factsText: "Nutrition Facts Serving Size 2 scoops Sodium 5 g Protein 35 mg Hydrolyzed Collagen 6 g",
-      },
+    const preview = repairExample("collagen-creamer-ocr", "Example Collagen Creamer", {
+      ingredientRows: [
+        { name: "Sodium", amount: "5", unit: "g" },
+        { name: "Protein", amount: "35", unit: "mg" },
+        { name: "Hydrolyzed Collagen", amount: "6", unit: "g" },
+      ],
+      servingSizes: [{ text: "2 scoops", source: "official_facts_table" }],
+      factsText: "Nutrition Facts Serving Size 2 scoops Sodium 5 g Protein 35 mg Hydrolyzed Collagen 6 g",
     });
 
     assert.ok(preview.parserBlockers.includes("implausible_parsed_ingredient_amount"));
@@ -3246,22 +2876,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks implausible gram trace minerals", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:chromium-gram-ocr",
-      dataOriginId: "example-brand:chromium-gram-ocr",
-      dataOriginUrl: "https://example.test/products/chromium-gram-ocr",
-      name: "Example Carb Blocker",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "chromium-gram-ocr",
-        ingredientRows: [{ name: "Chromium", amount: "1", unit: "g" }],
-        servingSizes: [{ text: "2 softgels", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 softgels Chromium 1 g",
-      },
+    const preview = repairExample("chromium-gram-ocr", "Example Carb Blocker", {
+      ingredientRows: [{ name: "Chromium", amount: "1", unit: "g" }],
+      servingSizes: [{ text: "2 softgels", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 softgels Chromium 1 g",
     });
 
     assert.ok(preview.parserBlockers.includes("implausible_parsed_ingredient_amount"));
@@ -3270,22 +2888,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks vitamin D3 retained as milligrams", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:d3-milligram-artifact",
-      dataOriginId: "example-brand:d3-milligram-artifact",
-      dataOriginUrl: "https://example.test/products/d3-milligram-artifact",
-      name: "Example K2 + D3",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "d3-milligram-artifact",
-        ingredientRows: [{ name: "Vitamin D3 (as cholecalciferol)", amount: "125 (5,000 IU)", unit: "mg", source: "factsText_table" }],
-        servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 capsule Vitamin D3 125 mcg (5,000 IU)",
-      },
+    const preview = repairExample("d3-milligram-artifact", "Example K2 + D3", {
+      ingredientRows: [{ name: "Vitamin D3 (as cholecalciferol)", amount: "125 (5,000 IU)", unit: "mg", source: "factsText_table" }],
+      servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 capsule Vitamin D3 125 mcg (5,000 IU)",
     });
 
     assert.ok(preview.parserBlockers.includes("implausible_parsed_ingredient_amount"));
@@ -3294,25 +2900,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks conflicting duplicate ingredient rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:conflicting-fish-oil",
-      dataOriginId: "example-brand:conflicting-fish-oil",
-      dataOriginUrl: "https://example.test/products/conflicting-fish-oil",
-      name: "Example Fish Oil",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "conflicting-fish-oil",
-        ingredientRows: [
-          { name: "EPA (Eicosapentaenoic Acid)", amount: "1.25", unit: "g", source: "factsText_table" },
-          { name: "EPA (Eicosapentaenoic Acid)", amount: "450", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "1 softgel", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 softgel EPA 450 mg",
-      },
+    const preview = repairExample("conflicting-fish-oil", "Example Fish Oil", {
+      ingredientRows: [
+        { name: "EPA (Eicosapentaenoic Acid)", amount: "1.25", unit: "g", source: "factsText_table" },
+        { name: "EPA (Eicosapentaenoic Acid)", amount: "450", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "1 softgel", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 softgel EPA 450 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("conflicting_duplicate_ingredient_rows"));
@@ -3321,23 +2915,11 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview drops zero-value inactive nutrition rows from parsed facts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:protein-zero-vitamin-d",
-      dataOriginId: "example-brand:protein-zero-vitamin-d",
-      dataOriginUrl: "https://example.test/products/protein-zero-vitamin-d",
-      name: "Example Protein Powder",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "protein-zero-vitamin-d",
-        factsText: [
-          "Nutrition Facts Serving Size 2 scoops",
-          "Amount Per Serving Protein 20 g Total Sugar 0 g Includes Added Sugar 0 g Vitamin D 0 mg",
-        ].join(" "),
-      },
+    const preview = repairExample("protein-zero-vitamin-d", "Example Protein Powder", {
+      factsText: [
+        "Nutrition Facts Serving Size 2 scoops",
+        "Amount Per Serving Protein 20 g Total Sugar 0 g Includes Added Sugar 0 g Vitamin D 0 mg",
+      ].join(" "),
     });
 
     assert.equal(preview.automatedBackfillReady, true);
@@ -3347,22 +2929,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks coconut oil food-like rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:liquid-coconut-oil",
-      dataOriginId: "example-brand:liquid-coconut-oil",
-      dataOriginUrl: "https://example.test/products/liquid-coconut-oil",
-      name: "Liquid Coconut Oil",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "liquid-coconut-oil",
-        ingredientRows: [{ name: "Saturated Fat", amount: "14", unit: "g", source: "factsText_table" }],
-        servingSizes: [{ text: "1 tablespoon", source: "official_facts_table" }],
-        factsText: "Nutrition Facts Serving Size 1 tablespoon Saturated Fat 14 g",
-      },
+    const preview = repairExample("liquid-coconut-oil", "Liquid Coconut Oil", {
+      ingredientRows: [{ name: "Saturated Fat", amount: "14", unit: "g", source: "factsText_table" }],
+      servingSizes: [{ text: "1 tablespoon", source: "official_facts_table" }],
+      factsText: "Nutrition Facts Serving Size 1 tablespoon Saturated Fat 14 g",
     });
 
     assert.ok(preview.parserBlockers.includes("likely_food_or_non_supplement"));
@@ -3450,25 +3020,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview keeps supplement-style latte rows with active collagen", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:matcha-collagen-latte",
-      dataOriginId: "example-brand:matcha-collagen-latte",
-      dataOriginUrl: "https://example.test/products/matcha-collagen-latte",
-      name: "Example Matcha Collagen Latte",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "matcha-collagen-latte",
-        ingredientRows: [
-          { name: "Hydrolyzed Collagen", amount: "10", unit: "g" },
-          { name: "MCT Powder", amount: "1", unit: "g" },
-        ],
-        servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 scoop Hydrolyzed Collagen 10 g MCT Powder 1 g",
-      },
+    const preview = repairExample("matcha-collagen-latte", "Example Matcha Collagen Latte", {
+      ingredientRows: [
+        { name: "Hydrolyzed Collagen", amount: "10", unit: "g" },
+        { name: "MCT Powder", amount: "1", unit: "g" },
+      ],
+      servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 scoop Hydrolyzed Collagen 10 g MCT Powder 1 g",
     });
 
     assert.equal(preview.automatedBackfillReady, true);
@@ -3476,27 +3034,15 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks underparsed facts panels from non-OCR sources", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:glucose-regulation-ocr-scramble",
-      dataOriginId: "example-brand:glucose-regulation-ocr-scramble",
-      dataOriginUrl: "https://example.test/products/glucose-regulation-ocr-scramble",
-      name: "Example Glucose Regulation Complex",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "glucose-regulation-ocr-scramble",
-        ingredientRows: [{ name: "S5 Zinc (as zinc gluconate)", amount: "5", unit: "mg", source: "factsText_pipe" }],
-        servingSizes: [{ text: "2 Capsules", source: "official_facts_table" }],
-        factsText: [
-          "Supplement Facts Serving Size: 2 Capsules Amount Per Serving % DV",
-          "Total Carbohydrate <1g 1% Magnesium 200mg 48%",
-          "S5 Zinc (as zinc gluconate) 5mg 4% Chromium 400 mcg 143%",
-          "Taurine 500 mg Vanadium 100 mcg Alpha-Lipoic Acid 10 mg Banaba Leaf Extract 18 mg",
-        ].join(" "),
-      },
+    const preview = repairExample("glucose-regulation-ocr-scramble", "Example Glucose Regulation Complex", {
+      ingredientRows: [{ name: "S5 Zinc (as zinc gluconate)", amount: "5", unit: "mg", source: "factsText_pipe" }],
+      servingSizes: [{ text: "2 Capsules", source: "official_facts_table" }],
+      factsText: [
+        "Supplement Facts Serving Size: 2 Capsules Amount Per Serving % DV",
+        "Total Carbohydrate <1g 1% Magnesium 200mg 48%",
+        "S5 Zinc (as zinc gluconate) 5mg 4% Chromium 400 mcg 143%",
+        "Taurine 500 mg Vanadium 100 mcg Alpha-Lipoic Acid 10 mg Banaba Leaf Extract 18 mg",
+      ].join(" "),
     });
 
     assert.ok(preview.parserBlockers.includes("likely_missing_facts_rows"));
@@ -3505,36 +3051,24 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks long stacked facts panels that parsed only a few rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:basic-prenatal-stacked-panel",
-      dataOriginId: "example-brand:basic-prenatal-stacked-panel",
-      dataOriginUrl: "https://example.test/products/basic-prenatal-stacked-panel",
-      name: "Example Basic Prenatal",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "basic-prenatal-stacked-panel",
-        ingredientRows: [
-          { name: "Vitamin A", amount: "1500", unit: "mcg RAE", source: "factsText_table" },
-          { name: "Vitamin D", amount: "25", unit: "mcg", source: "factsText_table" },
-          { name: "Vitamin K", amount: "90", unit: "mcg", source: "factsText_table" },
-          { name: "Vitamin B6", amount: "10", unit: "mg", source: "factsText_table" },
-          { name: "Folate", amount: "1000", unit: "mcg DFE", source: "factsText_table" },
-          { name: "Vitamin B12", amount: "50", unit: "mcg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "3 Capsules", source: "official_facts_table" }],
-        factsText: [
-          "Supplement Facts Serving Size: Three Capsules Amount Per Serving % DV",
-          "Vitamin A 1500 mcg RAE 167% Vitamin C 150 mg 167% Vitamin D 25 mcg 125% Vitamin E 20 mg 133%",
-          "Vitamin K 90 mcg 75% Thiamin 5 mg 417% Riboflavin 5 mg 385% Niacin 20 mg 125%",
-          "Vitamin B6 10 mg 588% Folate 1000 mcg DFE 250% Vitamin B12 50 mcg 2083%",
-          "Biotin 300 mcg 1000% Pantothenic Acid 10 mg 200% Calcium 100 mg 8% Iron 45 mg 250%",
-          "Iodine 150 mcg 100% Magnesium 50 mg 12% Zinc 20 mg 182% Selenium 70 mcg 127% Copper 2 mg 222%",
-        ].join(" "),
-      },
+    const preview = repairExample("basic-prenatal-stacked-panel", "Example Basic Prenatal", {
+      ingredientRows: [
+        { name: "Vitamin A", amount: "1500", unit: "mcg RAE", source: "factsText_table" },
+        { name: "Vitamin D", amount: "25", unit: "mcg", source: "factsText_table" },
+        { name: "Vitamin K", amount: "90", unit: "mcg", source: "factsText_table" },
+        { name: "Vitamin B6", amount: "10", unit: "mg", source: "factsText_table" },
+        { name: "Folate", amount: "1000", unit: "mcg DFE", source: "factsText_table" },
+        { name: "Vitamin B12", amount: "50", unit: "mcg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "3 Capsules", source: "official_facts_table" }],
+      factsText: [
+        "Supplement Facts Serving Size: Three Capsules Amount Per Serving % DV",
+        "Vitamin A 1500 mcg RAE 167% Vitamin C 150 mg 167% Vitamin D 25 mcg 125% Vitamin E 20 mg 133%",
+        "Vitamin K 90 mcg 75% Thiamin 5 mg 417% Riboflavin 5 mg 385% Niacin 20 mg 125%",
+        "Vitamin B6 10 mg 588% Folate 1000 mcg DFE 250% Vitamin B12 50 mcg 2083%",
+        "Biotin 300 mcg 1000% Pantothenic Acid 10 mg 200% Calcium 100 mg 8% Iron 45 mg 250%",
+        "Iodine 150 mcg 100% Magnesium 50 mg 12% Zinc 20 mg 182% Selenium 70 mcg 127% Copper 2 mg 222%",
+      ].join(" "),
     });
 
     assert.ok(preview.parserBlockers.includes("likely_missing_facts_rows"));
@@ -3543,25 +3077,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks short page-body fragments masquerading as facts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:omega-product-highlights",
-      dataOriginId: "example-brand:omega-product-highlights",
-      dataOriginUrl: "https://example.test/products/omega-product-highlights",
-      name: "Example Omega Fish Oil",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "omega-product-highlights",
-        ingredientRows: [
-          { name: "EPA", amount: "360", unit: "mg", source: "factsText_table" },
-          { name: "DHA", amount: "160", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
-        factsText: "Product Highlights: Premium Source Product information: Key Ingredients: Fish Oil 800 mg EPA 360 mg DHA 160 mg",
-      },
+    const preview = repairExample("omega-product-highlights", "Example Omega Fish Oil", {
+      ingredientRows: [
+        { name: "EPA", amount: "360", unit: "mg", source: "factsText_table" },
+        { name: "DHA", amount: "160", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
+      factsText: "Product Highlights: Premium Source Product information: Key Ingredients: Fish Oil 800 mg EPA 360 mg DHA 160 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("page_body_contamination"));
@@ -3570,26 +3092,14 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks accordion and review page text retained as facts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:d-mannose-page-body",
-      dataOriginId: "example-brand:d-mannose-page-body",
-      dataOriginUrl: "https://example.test/products/d-mannose-page-body",
-      name: "Example D-Mannose",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "d-mannose-page-body",
-        ingredientRows: [{ name: "D-Mannose", amount: "500", unit: "mg", source: "factsText_table" }],
-        servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
-        factsText: [
-          "Supplement Facts Filter Plus Icon Filter Minus Icon Directions: take 1 capsule daily.",
-          "Supplement Facts Serving Size: 1 capsule D-Mannose 500 mg",
-          "Reviews Filter Plus Icon Filter Minus Icon <div class=\"yotpo\" data-product-id=\"123\">",
-        ].join(" "),
-      },
+    const preview = repairExample("d-mannose-page-body", "Example D-Mannose", {
+      ingredientRows: [{ name: "D-Mannose", amount: "500", unit: "mg", source: "factsText_table" }],
+      servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
+      factsText: [
+        "Supplement Facts Filter Plus Icon Filter Minus Icon Directions: take 1 capsule daily.",
+        "Supplement Facts Serving Size: 1 capsule D-Mannose 500 mg",
+        "Reviews Filter Plus Icon Filter Minus Icon <div class=\"yotpo\" data-product-id=\"123\">",
+      ].join(" "),
     });
 
     assert.ok(preview.parserBlockers.includes("page_body_contamination"));
@@ -3598,31 +3108,19 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks whole legal/manufacturer label text retained as facts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:whole-label-text",
-      dataOriginId: "example-brand:whole-label-text",
-      dataOriginUrl: "https://example.test/products/whole-label-text",
-      name: "Example Calcium Magnesium Zinc",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "whole-label-text",
-        ingredientRows: [
-          { name: "Calcium", amount: "2084", unit: "mg", source: "factsText_table" },
-          { name: "Magnesium", amount: "91.5", unit: "mg", source: "factsText_table" },
-          { name: "Zinc", amount: "94.2", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "2 tablets", source: "official_facts_table" }],
-        factsText: [
-          "NOT FOR MEDICINAL USE. Non-standard size under the Legal Metrology Rule.",
-          "Manufactured By: Example Wellness. Lic. No.: 123456.",
-          "Recommended duration of use: as suggested by your healthcare professional.",
-          "Supplement Facts Serving Size 2 tablets Calcium 2084 mg Magnesium 91.5 mg Zinc 94.2 mg",
-        ].join(" "),
-      },
+    const preview = repairExample("whole-label-text", "Example Calcium Magnesium Zinc", {
+      ingredientRows: [
+        { name: "Calcium", amount: "2084", unit: "mg", source: "factsText_table" },
+        { name: "Magnesium", amount: "91.5", unit: "mg", source: "factsText_table" },
+        { name: "Zinc", amount: "94.2", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "2 tablets", source: "official_facts_table" }],
+      factsText: [
+        "NOT FOR MEDICINAL USE. Non-standard size under the Legal Metrology Rule.",
+        "Manufactured By: Example Wellness. Lic. No.: 123456.",
+        "Recommended duration of use: as suggested by your healthcare professional.",
+        "Supplement Facts Serving Size 2 tablets Calcium 2084 mg Magnesium 91.5 mg Zinc 94.2 mg",
+      ].join(" "),
     });
 
     assert.ok(preview.parserBlockers.includes("page_body_contamination"));
@@ -3631,22 +3129,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks missing prominent rows in pipe-delimited facts tables", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:pipe-table-mineral",
-      dataOriginId: "example-brand:pipe-table-mineral",
-      dataOriginUrl: "https://example.test/products/pipe-table-mineral",
-      name: "Example Mineral Formula",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "pipe-table-mineral",
-        ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg", source: "factsText_table" }],
-        servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 scoop Amount Per Serving | % Daily Value Magnesium | 200 mg | 48% Potassium | 280 mg | 6%",
-      },
+    const preview = repairExample("pipe-table-mineral", "Example Mineral Formula", {
+      ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg", source: "factsText_table" }],
+      servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 scoop Amount Per Serving | % Daily Value Magnesium | 200 mg | 48% Potassium | 280 mg | 6%",
     });
 
     assert.ok(preview.parserBlockers.includes("missing_prominent_facts_rows"));
@@ -3655,22 +3141,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview treats OCR lodine as a required iodine row", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:trace-minerals-ocr",
-      dataOriginId: "example-brand:trace-minerals-ocr",
-      dataOriginUrl: "https://example.test/products/trace-minerals-ocr",
-      name: "Example Trace Minerals",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "trace-minerals-ocr",
-        ingredientRows: [{ name: "Zinc", amount: "30", unit: "mg", source: "factsText_table" }],
-        servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving lodine (as potassium iodide) 250 mcg 167% Zinc 30 mg 273%",
-      },
+    const preview = repairExample("trace-minerals-ocr", "Example Trace Minerals", {
+      ingredientRows: [{ name: "Zinc", amount: "30", unit: "mg", source: "factsText_table" }],
+      servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 Capsule Amount Per Serving lodine (as potassium iodide) 250 mcg 167% Zinc 30 mg 273%",
     });
 
     assert.ok(preview.parserBlockers.includes("missing_prominent_facts_rows"));
@@ -3679,26 +3153,14 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks missing DHA from omega facts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:omega-missing-dha",
-      dataOriginId: "example-brand:omega-missing-dha",
-      dataOriginUrl: "https://example.test/products/omega-missing-dha",
-      name: "Example Omega Fish Krill Oil",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "omega-missing-dha",
-        ingredientRows: [
-          { name: "Total Omega 3 Fatty Acids", amount: "680", unit: "mg", source: "factsText_table" },
-          { name: "EPA (Eicosapentaenoic Acid)", amount: "360", unit: "mg", source: "factsText_table" },
-          { name: "Other Omega-3 Fatty Acids", amount: "50", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "2 softgels", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 Softgels Fish and Krill Oil Providing 1000 mg Total Omega 3 Fatty Acids 680 mg EPA (Eicosapentaenoic Acid) 360 mg DHA (Docosahexaenoic Acid) 270 mg Other Omega-3 Fatty Acids 50 mg",
-      },
+    const preview = repairExample("omega-missing-dha", "Example Omega Fish Krill Oil", {
+      ingredientRows: [
+        { name: "Total Omega 3 Fatty Acids", amount: "680", unit: "mg", source: "factsText_table" },
+        { name: "EPA (Eicosapentaenoic Acid)", amount: "360", unit: "mg", source: "factsText_table" },
+        { name: "Other Omega-3 Fatty Acids", amount: "50", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "2 softgels", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 Softgels Fish and Krill Oil Providing 1000 mg Total Omega 3 Fatty Acids 680 mg EPA (Eicosapentaenoic Acid) 360 mg DHA (Docosahexaenoic Acid) 270 mg Other Omega-3 Fatty Acids 50 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("missing_prominent_facts_rows"));
@@ -3707,29 +3169,17 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks missing visible active rows from dense botanical facts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:phytocore-active-gap",
-      dataOriginId: "example-brand:phytocore-active-gap",
-      dataOriginUrl: "https://example.test/products/phytocore-active-gap",
-      name: "Example PhytoCore",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "phytocore-active-gap",
-        ingredientRows: [
-          { name: "Choline", amount: "72", unit: "mg", source: "factsText_table" },
-          { name: "Dandelion Root Extract", amount: "225", unit: "mg", source: "factsText_table" },
-          { name: "Artichoke Leaf Extract", amount: "145", unit: "mg", source: "factsText_table" },
-          { name: "L-Methionine USP", amount: "140", unit: "mg", source: "factsText_table" },
-          { name: "Milk Thistle Seed Extract", amount: "130", unit: "mg", source: "factsText_table" },
-          { name: "Turmeric Root Extract", amount: "100", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "3 capsules", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 3 Capsules Choline 72 mg Dandelion Root Extract 225 mg Artichoke Leaf Extract 145 mg Inositol NF 140 mg L-Methionine USP 140 mg Milk Thistle Seed Extract 130 mg Garlic Bulb 100 mg Turmeric Root Extract 100 mg",
-      },
+    const preview = repairExample("phytocore-active-gap", "Example PhytoCore", {
+      ingredientRows: [
+        { name: "Choline", amount: "72", unit: "mg", source: "factsText_table" },
+        { name: "Dandelion Root Extract", amount: "225", unit: "mg", source: "factsText_table" },
+        { name: "Artichoke Leaf Extract", amount: "145", unit: "mg", source: "factsText_table" },
+        { name: "L-Methionine USP", amount: "140", unit: "mg", source: "factsText_table" },
+        { name: "Milk Thistle Seed Extract", amount: "130", unit: "mg", source: "factsText_table" },
+        { name: "Turmeric Root Extract", amount: "100", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "3 capsules", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 3 Capsules Choline 72 mg Dandelion Root Extract 225 mg Artichoke Leaf Extract 145 mg Inositol NF 140 mg L-Methionine USP 140 mg Milk Thistle Seed Extract 130 mg Garlic Bulb 100 mg Turmeric Root Extract 100 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("missing_prominent_facts_rows"));
@@ -3738,25 +3188,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks merged prominent nutrient names with missing rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:merged-potassium-iron",
-      dataOriginId: "example-brand:merged-potassium-iron",
-      dataOriginUrl: "https://example.test/products/merged-potassium-iron",
-      name: "Example Vegan Protein",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "merged-potassium-iron",
-        ingredientRows: [
-          { name: "Protein", amount: "21", unit: "g", source: "factsText_table" },
-          { name: "Iron", amount: "1.3", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
-        factsText: "Nutrition Facts 56 servings per container SUGGESTED USE Mix 1 scoop with water. Amount Per Serving Protein 21g Potassium Iron 1.3mg 200mg 8% 4%",
-      },
+    const preview = repairExample("merged-potassium-iron", "Example Vegan Protein", {
+      ingredientRows: [
+        { name: "Protein", amount: "21", unit: "g", source: "factsText_table" },
+        { name: "Iron", amount: "1.3", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
+      factsText: "Nutrition Facts 56 servings per container SUGGESTED USE Mix 1 scoop with water. Amount Per Serving Protein 21g Potassium Iron 1.3mg 200mg 8% 4%",
     });
 
     assert.ok(preview.parserBlockers.includes("missing_prominent_facts_rows"));
@@ -3765,25 +3203,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks single-serving multi-audience facts tables", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:kids-liquid-multi",
-      dataOriginId: "example-brand:kids-liquid-multi",
-      dataOriginUrl: "https://example.test/products/kids-liquid-multi",
-      name: "Example Children's Multivitamin Liquid",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "kids-liquid-multi",
-        ingredientRows: [
-          { name: "Vitamin A", amount: "1500", unit: "mcg RAE", source: "factsText_table" },
-          { name: "Vitamin D", amount: "12.5", unit: "mcg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "1 Tablespoon", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 Tablespoon % Daily Value Children 1-3 Years Adults and Children ≥4 Years Vitamin A 1500 mcg RAE 500% 167% Vitamin D 12.5 mcg 83% 63%",
-      },
+    const preview = repairExample("kids-liquid-multi", "Example Children's Multivitamin Liquid", {
+      ingredientRows: [
+        { name: "Vitamin A", amount: "1500", unit: "mcg RAE", source: "factsText_table" },
+        { name: "Vitamin D", amount: "12.5", unit: "mcg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "1 Tablespoon", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 Tablespoon % Daily Value Children 1-3 Years Adults and Children ≥4 Years Vitamin A 1500 mcg RAE 500% 167% Vitamin D 12.5 mcg 83% 63%",
     });
 
     assert.ok(preview.parserBlockers.includes("multi_audience_serving_sizes"));
@@ -3792,22 +3218,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks visible blend rows that were not normalized", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:complex-formula",
-      dataOriginId: "example-brand:complex-formula",
-      dataOriginUrl: "https://example.test/products/complex-formula",
-      name: "Example Complex Formula",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "complex-formula",
-        ingredientRows: [{ name: "Vitamin B12", amount: "5", unit: "mcg", source: "factsText_table" }],
-        servingSizes: [{ text: "2 capsules", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 Capsules Vitamin B12 5 mcg Example Weight Loss Plus Blend 604 mg Robusta coffee extract 200 mg",
-      },
+    const preview = repairExample("complex-formula", "Example Complex Formula", {
+      ingredientRows: [{ name: "Vitamin B12", amount: "5", unit: "mcg", source: "factsText_table" }],
+      servingSizes: [{ text: "2 capsules", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 Capsules Vitamin B12 5 mcg Example Weight Loss Plus Blend 604 mg Robusta coffee extract 200 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("missing_prominent_facts_rows"));
@@ -3816,26 +3230,14 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks visible blend constituents that are absent from normalized rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:hydration-blend",
-      dataOriginId: "example-brand:hydration-blend",
-      dataOriginUrl: "https://example.test/products/hydration-blend",
-      name: "Example Electrolyte",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "hydration-blend",
-        ingredientRows: [
-          { name: "Hydration blend", amount: "1.6", unit: "g", source: "factsText_table" },
-          { name: "Sodium", amount: "150", unit: "mg", source: "factsText_table" },
-          { name: "Potassium", amount: "500", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 Scoop Sodium 150 mg Potassium 500 mg Hydration blend: 1.6 g Creatine (as creatine monohydrate), Taurine, PEAK ATP Adenosine 5'-Triphosphate",
-      },
+    const preview = repairExample("hydration-blend", "Example Electrolyte", {
+      ingredientRows: [
+        { name: "Hydration blend", amount: "1.6", unit: "g", source: "factsText_table" },
+        { name: "Sodium", amount: "150", unit: "mg", source: "factsText_table" },
+        { name: "Potassium", amount: "500", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 Scoop Sodium 150 mg Potassium 500 mg Hydration blend: 1.6 g Creatine (as creatine monohydrate), Taurine, PEAK ATP Adenosine 5'-Triphosphate",
     });
 
     assert.ok(preview.parserBlockers.includes("missing_blend_constituents"));
@@ -3844,25 +3246,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks long proprietary blend constituent text without normalized components", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:long-proprietary-blend",
-      dataOriginId: "example-brand:long-proprietary-blend",
-      dataOriginUrl: "https://example.test/products/long-proprietary-blend",
-      name: "Example Immune Blend",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "long-proprietary-blend",
-        ingredientRows: [
-          { name: "Vitamin C", amount: "150", unit: "mg", source: "factsText_table" },
-          { name: "Proprietary Blend", amount: "430", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "2 capsules", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 Capsules Vitamin C 150 mg Proprietary Blend: 430 mg Ribonucleic Acid (from yeast) Maitake Mushroom (Grifola frondosa) (aerial part). Chrysanthemum (flower) extract, Loquat leaf extract, Thyme leaf extract, Mullein leaf extract, Oregon Grape root extract",
-      },
+    const preview = repairExample("long-proprietary-blend", "Example Immune Blend", {
+      ingredientRows: [
+        { name: "Vitamin C", amount: "150", unit: "mg", source: "factsText_table" },
+        { name: "Proprietary Blend", amount: "430", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "2 capsules", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 Capsules Vitamin C 150 mg Proprietary Blend: 430 mg Ribonucleic Acid (from yeast) Maitake Mushroom (Grifola frondosa) (aerial part). Chrysanthemum (flower) extract, Loquat leaf extract, Thyme leaf extract, Mullein leaf extract, Oregon Grape root extract",
     });
 
     assert.ok(preview.parserBlockers.includes("missing_blend_constituents"));
@@ -3871,25 +3261,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks amount-dense panels with too few normalized rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:healthy-aging-powder",
-      dataOriginId: "example-brand:healthy-aging-powder",
-      dataOriginUrl: "https://example.test/products/healthy-aging-powder",
-      name: "Example Healthy Aging Powder",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "healthy-aging-powder",
-        ingredientRows: [
-          { name: "Taurine", amount: "5000", unit: "mg", source: "factsText_table" },
-          { name: "Lithium", amount: "2000", unit: "mcg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
-        factsText: "Serving Size 1 scoop (Approx. 7 g) Amount Per Serving Taurine 5000 mg Wheat germ extract 1500 mg Spermidine 5 mg Lithium 2000 mcg",
-      },
+    const preview = repairExample("healthy-aging-powder", "Example Healthy Aging Powder", {
+      ingredientRows: [
+        { name: "Taurine", amount: "5000", unit: "mg", source: "factsText_table" },
+        { name: "Lithium", amount: "2000", unit: "mcg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "1 scoop", source: "official_facts_table" }],
+      factsText: "Serving Size 1 scoop (Approx. 7 g) Amount Per Serving Taurine 5000 mg Wheat germ extract 1500 mg Spermidine 5 mg Lithium 2000 mcg",
     });
 
     assert.ok(preview.parserBlockers.includes("likely_missing_facts_rows"));
@@ -3898,30 +3276,18 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks candidates that lose visible vitamin rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:elderberry-vitamin-c-scramble",
-      dataOriginId: "example-brand:elderberry-vitamin-c-scramble",
-      dataOriginUrl: "https://example.test/products/elderberry-vitamin-c-scramble",
-      name: "Example Elderberry Gummies",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "elderberry-vitamin-c-scramble",
-        ingredientRows: [
-          { name: "Zinc", amount: "3.75", unit: "mg", source: "factsText_table" },
-          { name: "Sodium", amount: "20", unit: "mg", source: "factsText_table" },
-          { name: "Elderberry Extract", amount: "50", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [{ text: "2 Gummies", source: "official_facts_table" }],
-        factsText: [
-          "Supplement Facts Serving Size: 2 Gummies Amount Per Serving % DV",
-          "Vitamin C (as ascorbic acid) Includes Added Sugars 4g 8%",
-          "Zinc 3.75mg 45mg 50% Sodium 20mg <1% Elderberry Extract 50mg",
-        ].join(" "),
-      },
+    const preview = repairExample("elderberry-vitamin-c-scramble", "Example Elderberry Gummies", {
+      ingredientRows: [
+        { name: "Zinc", amount: "3.75", unit: "mg", source: "factsText_table" },
+        { name: "Sodium", amount: "20", unit: "mg", source: "factsText_table" },
+        { name: "Elderberry Extract", amount: "50", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [{ text: "2 Gummies", source: "official_facts_table" }],
+      factsText: [
+        "Supplement Facts Serving Size: 2 Gummies Amount Per Serving % DV",
+        "Vitamin C (as ascorbic acid) Includes Added Sugars 4g 8%",
+        "Zinc 3.75mg 45mg 50% Sodium 20mg <1% Elderberry Extract 50mg",
+      ].join(" "),
     });
 
     assert.ok(preview.parserBlockers.includes("missing_prominent_facts_rows"));
@@ -3930,28 +3296,16 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks multipack supplement rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:p3-health-essentials",
-      dataOriginId: "example-brand:p3-health-essentials",
-      dataOriginUrl: "https://example.test/products/p3-health-essentials",
-      name: "P3 - Health Essentials Sachets (O3, M3, D3)",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "p3-health-essentials",
-        ingredientRows: [
-          { name: "Vitamin D3", amount: "25", unit: "mcg", source: "factsText_table" },
-          { name: "Magnesium", amount: "100", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [
-          { text: "4 softgels", source: "factsText" },
-          { text: "3 capsules", source: "factsText" },
-        ],
-        factsText: "Supplement Facts Serving Size 1 multi-pack (4 softgels & 3 capsules) Vitamin D3 25 mcg Magnesium 100 mg",
-      },
+    const preview = repairExample("p3-health-essentials", "P3 - Health Essentials Sachets (O3, M3, D3)", {
+      ingredientRows: [
+        { name: "Vitamin D3", amount: "25", unit: "mcg", source: "factsText_table" },
+        { name: "Magnesium", amount: "100", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [
+        { text: "4 softgels", source: "factsText" },
+        { text: "3 capsules", source: "factsText" },
+      ],
+      factsText: "Supplement Facts Serving Size 1 multi-pack (4 softgels & 3 capsules) Vitamin D3 25 mcg Magnesium 100 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("non_standalone_product"));
@@ -3960,34 +3314,22 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks multiple supplement-facts panels in one product row", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:multi-panel-formula",
-      dataOriginId: "example-brand:multi-panel-formula",
-      dataOriginUrl: "https://example.test/products/multi-panel-formula",
-      name: "Example Master Formula",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "multi-panel-formula",
-        ingredientRows: [
-          { name: "Vitamin D3", amount: "10", unit: "mcg", source: "factsText_table" },
-          { name: "Vitamin A", amount: "1350", unit: "mcg RAE", source: "factsText_table" },
-          { name: "Vitamin C", amount: "61", unit: "mg", source: "factsText_table" },
-        ],
-        servingSizes: [
-          { text: "1 Veggie Capsule", source: "factsText" },
-          { text: "2 Veggie Capsules", source: "factsText" },
-          { text: "1 Caplet", source: "factsText" },
-        ],
-        factsText: [
-          "Liquid Vitamin Capsule - Supplement Facts Serving Size 1 Veggie Capsule Vitamin D3 10 mcg",
-          "Micronized Nutrient Capsule - Supplement Facts Serving Size 2 Veggie Capsules Vitamin A 1350 mcg RAE",
-          "Phyto-Caplet - Supplement Facts Serving Size 1 Caplet Vitamin C 61 mg",
-        ].join("\n"),
-      },
+    const preview = repairExample("multi-panel-formula", "Example Master Formula", {
+      ingredientRows: [
+        { name: "Vitamin D3", amount: "10", unit: "mcg", source: "factsText_table" },
+        { name: "Vitamin A", amount: "1350", unit: "mcg RAE", source: "factsText_table" },
+        { name: "Vitamin C", amount: "61", unit: "mg", source: "factsText_table" },
+      ],
+      servingSizes: [
+        { text: "1 Veggie Capsule", source: "factsText" },
+        { text: "2 Veggie Capsules", source: "factsText" },
+        { text: "1 Caplet", source: "factsText" },
+      ],
+      factsText: [
+        "Liquid Vitamin Capsule - Supplement Facts Serving Size 1 Veggie Capsule Vitamin D3 10 mcg",
+        "Micronized Nutrient Capsule - Supplement Facts Serving Size 2 Veggie Capsules Vitamin A 1350 mcg RAE",
+        "Phyto-Caplet - Supplement Facts Serving Size 1 Caplet Vitamin C 61 mg",
+      ].join("\n"),
     });
 
     assert.ok(preview.parserBlockers.includes("multi_panel_facts"));
@@ -3996,22 +3338,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview normalizes retained serving size objects", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:serving-size-object",
-      dataOriginId: "example-brand:serving-size-object",
-      dataOriginUrl: "https://example.test/products/serving-size-object",
-      name: "Example Biotin",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "serving-size-object",
-        ingredientRows: [{ name: "Biotin", amount: "5000", unit: "mcg" }],
-        servingSizes: [{ servingSize: "1 tablet", servingsPerContainer: 60 }],
-        factsText: "Supplement Facts Serving Size 1 tablet Biotin 5000 mcg",
-      },
+    const preview = repairExample("serving-size-object", "Example Biotin", {
+      ingredientRows: [{ name: "Biotin", amount: "5000", unit: "mcg" }],
+      servingSizes: [{ servingSize: "1 tablet", servingsPerContainer: 60 }],
+      factsText: "Supplement Facts Serving Size 1 tablet Biotin 5000 mcg",
     });
 
     assert.equal(preview.automatedBackfillReady, true);
@@ -4021,25 +3351,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview dedupes retained existing ingredient rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:duplicate-existing-rows",
-      dataOriginId: "example-brand:duplicate-existing-rows",
-      dataOriginUrl: "https://example.test/products/duplicate-existing-rows",
-      name: "Example Magnesium",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "duplicate-existing-rows",
-        ingredientRows: [
-          { name: "Magnesium", amount: "100", unit: "mg" },
-          { name: "Magnesium", amount: "100", unit: "mg" },
-        ],
-        servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 capsule Magnesium 100 mg",
-      },
+    const preview = repairExample("duplicate-existing-rows", "Example Magnesium", {
+      ingredientRows: [
+        { name: "Magnesium", amount: "100", unit: "mg" },
+        { name: "Magnesium", amount: "100", unit: "mg" },
+      ],
+      servingSizes: [{ text: "1 capsule", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 capsule Magnesium 100 mg",
     });
 
     assert.equal(preview.automatedBackfillReady, true);
@@ -4049,26 +3367,14 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview dedupes retained rows that only differ by daily value", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:duplicate-dv-existing-rows",
-      dataOriginId: "example-brand:duplicate-dv-existing-rows",
-      dataOriginUrl: "https://example.test/products/duplicate-dv-existing-rows",
-      name: "Example Magnesium Glycinate",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "duplicate-dv-existing-rows",
-        ingredientRows: [
-          { name: "Dietary Fiber", amount: "1", unit: "g", dailyValue: "<1%*" },
-          { name: "Dietary Fiber", amount: "1", unit: "g", dailyValue: "4%*" },
-          { name: "Magnesium", amount: "200", unit: "mg", dailyValue: "48%" },
-        ],
-        servingSizes: [{ text: "2 tablets", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 tablets Total Carbohydrate 1 g <1% Dietary Fiber 1 g 4% Magnesium 200 mg 48%",
-      },
+    const preview = repairExample("duplicate-dv-existing-rows", "Example Magnesium Glycinate", {
+      ingredientRows: [
+        { name: "Dietary Fiber", amount: "1", unit: "g", dailyValue: "<1%*" },
+        { name: "Dietary Fiber", amount: "1", unit: "g", dailyValue: "4%*" },
+        { name: "Magnesium", amount: "200", unit: "mg", dailyValue: "48%" },
+      ],
+      servingSizes: [{ text: "2 tablets", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 tablets Total Carbohydrate 1 g <1% Dietary Fiber 1 g 4% Magnesium 200 mg 48%",
     });
 
     assert.equal(preview.automatedBackfillReady, true);
@@ -4079,22 +3385,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks products whose promised active is missing from parsed rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:bcaa-watermelon",
-      dataOriginId: "example-brand:bcaa-watermelon",
-      dataOriginUrl: "https://example.test/products/bcaa-watermelon",
-      name: "Example BCAA Powder - Watermelon",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "bcaa-watermelon",
-        ingredientRows: [{ name: "Protein", amount: "1", unit: "g" }],
-        servingSizes: [{ text: "1 scoop (9 g)", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 scoop (9 g) Protein 1 g",
-      },
+    const preview = repairExample("bcaa-watermelon", "Example BCAA Powder - Watermelon", {
+      ingredientRows: [{ name: "Protein", amount: "1", unit: "g" }],
+      servingSizes: [{ text: "1 scoop (9 g)", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 scoop (9 g) Protein 1 g",
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -4104,40 +3398,16 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks probiotic and omega products whose active is missing", () => {
-    const probioticPreview = repairPreviewForRow({
-      id: "example-brand:probiotic-gummies",
-      dataOriginId: "example-brand:probiotic-gummies",
-      dataOriginUrl: "https://example.test/products/probiotic-gummies",
-      name: "Example Probiotic Gummies",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "probiotic-gummies",
-        ingredientRows: [{ name: "Sugars", amount: "4", unit: "g" }],
-        servingSizes: [{ text: "2 gummies", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 gummies Sugars 4 g",
-      },
+    const probioticPreview = repairExample("probiotic-gummies", "Example Probiotic Gummies", {
+      ingredientRows: [{ name: "Sugars", amount: "4", unit: "g" }],
+      servingSizes: [{ text: "2 gummies", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 gummies Sugars 4 g",
     });
 
-    const omegaPreview = repairPreviewForRow({
-      id: "example-brand:omega-gummies",
-      dataOriginId: "example-brand:omega-gummies",
-      dataOriginUrl: "https://example.test/products/omega-gummies",
-      name: "Example Veg Omega-3 Gummies",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "omega-gummies",
-        ingredientRows: [{ name: "Vitamin C", amount: "90", unit: "mg" }],
-        servingSizes: [{ text: "2 gummies", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 gummies Vitamin C 90 mg",
-      },
+    const omegaPreview = repairExample("omega-gummies", "Example Veg Omega-3 Gummies", {
+      ingredientRows: [{ name: "Vitamin C", amount: "90", unit: "mg" }],
+      servingSizes: [{ text: "2 gummies", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 gummies Vitamin C 90 mg",
     });
 
     assert.ok(probioticPreview.parserBlockers.includes("likely_missing_product_active"));
@@ -4149,40 +3419,16 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks vitamin and multivitamin products with missing title actives", () => {
-    const vitaminCPreview = repairPreviewForRow({
-      id: "example-brand:vitamin-c-gummies",
-      dataOriginId: "example-brand:vitamin-c-gummies",
-      dataOriginUrl: "https://example.test/products/vitamin-c-gummies",
-      name: "Example Vitamin C Gummies",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "vitamin-c-gummies",
-        ingredientRows: [{ name: "Proprietary Blend", amount: "25", unit: "mg" }],
-        servingSizes: [{ text: "2 gummies", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 gummies Proprietary Blend 25 mg",
-      },
+    const vitaminCPreview = repairExample("vitamin-c-gummies", "Example Vitamin C Gummies", {
+      ingredientRows: [{ name: "Proprietary Blend", amount: "25", unit: "mg" }],
+      servingSizes: [{ text: "2 gummies", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 gummies Proprietary Blend 25 mg",
     });
 
-    const prenatalPreview = repairPreviewForRow({
-      id: "example-brand:prenatal-multivitamin",
-      dataOriginId: "example-brand:prenatal-multivitamin",
-      dataOriginUrl: "https://example.test/products/prenatal-multivitamin",
-      name: "Example Prenatal Multivitamin Gummies",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "prenatal-multivitamin",
-        ingredientRows: [{ name: "Zinc", amount: "10", unit: "mg" }],
-        servingSizes: [{ text: "2 gummies", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 gummies Zinc 10 mg",
-      },
+    const prenatalPreview = repairExample("prenatal-multivitamin", "Example Prenatal Multivitamin Gummies", {
+      ingredientRows: [{ name: "Zinc", amount: "10", unit: "mg" }],
+      servingSizes: [{ text: "2 gummies", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 gummies Zinc 10 mg",
     });
 
     assert.ok(vitaminCPreview.parserBlockers.includes("likely_missing_product_active"));
@@ -4194,32 +3440,20 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks age-split multi-audience facts panels", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:kids-multi-age-split",
-      dataOriginId: "example-brand:kids-multi-age-split",
-      dataOriginUrl: "https://example.test/products/kids-multi-age-split",
-      name: "Example Kids Multivitamin",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "kids-multi-age-split",
-        ingredientRows: [
-          { name: "Vitamin A", amount: "750", unit: "mcg" },
-          { name: "Vitamin C", amount: "250", unit: "mg" },
-          { name: "Vitamin D", amount: "10", unit: "mcg" },
-          { name: "Vitamin E", amount: "6.75", unit: "mg" },
-          { name: "Thiamin", amount: "1.05", unit: "mg" },
-          { name: "Riboflavin", amount: "1.2", unit: "mg" },
-        ],
-        servingSizes: [
-          { text: "1 Chewable Tablet (2-3 Yrs.)", source: "official_facts_table" },
-          { text: "1 Chewable Tablet (4 & Up)", source: "official_facts_table" },
-        ],
-        factsText: "Supplement Facts Serving Size 1 Chewable Tablet (2-3 Yrs.) 1 Chewable Tablet (4 & Up) Vitamin A 750 mcg Vitamin C 250 mg",
-      },
+    const preview = repairExample("kids-multi-age-split", "Example Kids Multivitamin", {
+      ingredientRows: [
+        { name: "Vitamin A", amount: "750", unit: "mcg" },
+        { name: "Vitamin C", amount: "250", unit: "mg" },
+        { name: "Vitamin D", amount: "10", unit: "mcg" },
+        { name: "Vitamin E", amount: "6.75", unit: "mg" },
+        { name: "Thiamin", amount: "1.05", unit: "mg" },
+        { name: "Riboflavin", amount: "1.2", unit: "mg" },
+      ],
+      servingSizes: [
+        { text: "1 Chewable Tablet (2-3 Yrs.)", source: "official_facts_table" },
+        { text: "1 Chewable Tablet (4 & Up)", source: "official_facts_table" },
+      ],
+      factsText: "Supplement Facts Serving Size 1 Chewable Tablet (2-3 Yrs.) 1 Chewable Tablet (4 & Up) Vitamin A 750 mcg Vitamin C 250 mg",
     });
 
     assert.ok(preview.parserBlockers.includes("multi_audience_serving_sizes"));
@@ -4331,29 +3565,17 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview cleans safe sampled OCR prefixes", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:resveratrol-prefix",
-      dataOriginId: "example-brand:resveratrol-prefix",
-      dataOriginUrl: "https://example.test/products/resveratrol-prefix",
-      name: "Example Resveratrol Capsules",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "resveratrol-prefix",
-        ingredientRows: [
-          { name: "Serving %** Polygonum cuspidatum Extract", amount: "1000", unit: "mg" },
-          { name: "T urmeric Extract", amount: "35", unit: "mg" },
-          { name: "ORGANIC Milligrams Organic Black Maca Root", amount: "500", unit: "mg" },
-          { name: "Caffeine anhydrous; supplying", amount: "265", unit: "mg" },
-          { name: "KRILL OIL++", amount: "500", unit: "mg" },
-          { name: "ASTAXANTHIN++++ ++", amount: "25", unit: "mcg" },
-        ],
-        servingSizes: [{ text: "2 Capsules", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 Capsules Serving %** Polygonum cuspidatum Extract 1000 mg T urmeric Extract 35 mg",
-      },
+    const preview = repairExample("resveratrol-prefix", "Example Resveratrol Capsules", {
+      ingredientRows: [
+        { name: "Serving %** Polygonum cuspidatum Extract", amount: "1000", unit: "mg" },
+        { name: "T urmeric Extract", amount: "35", unit: "mg" },
+        { name: "ORGANIC Milligrams Organic Black Maca Root", amount: "500", unit: "mg" },
+        { name: "Caffeine anhydrous; supplying", amount: "265", unit: "mg" },
+        { name: "KRILL OIL++", amount: "500", unit: "mg" },
+        { name: "ASTAXANTHIN++++ ++", amount: "25", unit: "mcg" },
+      ],
+      servingSizes: [{ text: "2 Capsules", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 Capsules Serving %** Polygonum cuspidatum Extract 1000 mg T urmeric Extract 35 mg",
     });
 
     assert.equal(preview.automatedBackfillReady, true);
@@ -4401,22 +3623,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview rejects facts-panel text stored as an existing serving size", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:malformed-serving-size",
-      dataOriginId: "example-brand:malformed-serving-size",
-      dataOriginUrl: "https://example.test/products/malformed-serving-size",
-      name: "Example Existing Serving Size",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "malformed-serving-size",
-        ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg", dailyValue: "48%" }],
-        servingSizes: ["Supplement Facts Serving Size 2 Capsules Amount Per Serving Magnesium 200 mg 48%"],
-        bodyText: "Raw evidence must not be removed when existing serving size text is invalid.",
-      },
+    const preview = repairExample("malformed-serving-size", "Example Existing Serving Size", {
+      ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg", dailyValue: "48%" }],
+      servingSizes: ["Supplement Facts Serving Size 2 Capsules Amount Per Serving Magnesium 200 mg 48%"],
+      bodyText: "Raw evidence must not be removed when existing serving size text is invalid.",
     });
 
     assert.equal(preview.parserStatus, "partial_parse");
@@ -4428,22 +3638,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview rejects facts-panel text stored as singular serving size", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:malformed-singular-serving-size",
-      dataOriginId: "example-brand:malformed-singular-serving-size",
-      dataOriginUrl: "https://example.test/products/malformed-singular-serving-size",
-      name: "Example Singular Serving Size",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "malformed-singular-serving-size",
-        ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg", dailyValue: "48%" }],
-        servingSize: "Supplement Facts Serving Size 2 Capsules Amount Per Serving Magnesium 200 mg 48%",
-        bodyText: "Raw evidence must not be removed when singular serving size text is invalid.",
-      },
+    const preview = repairExample("malformed-singular-serving-size", "Example Singular Serving Size", {
+      ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg", dailyValue: "48%" }],
+      servingSize: "Supplement Facts Serving Size 2 Capsules Amount Per Serving Magnesium 200 mg 48%",
+      bodyText: "Raw evidence must not be removed when singular serving size text is invalid.",
     });
 
     assert.equal(preview.parserStatus, "partial_parse");
@@ -4497,24 +3695,12 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview replaces mixed existing serving sizes with valid serving subset", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:mixed-serving-sizes",
-      dataOriginId: "example-brand:mixed-serving-sizes",
-      dataOriginUrl: "https://example.test/products/mixed-serving-sizes",
-      name: "Example Mixed Serving Sizes",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "mixed-serving-sizes",
-        ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg" }],
-        servingSizes: [
-          { text: "Dávka – 35 g", source: "official_nutrition_table" },
-          { text: "Poměr ředění: 35 g/250 ml vody", source: "official_nutrition_table" },
-        ],
-      },
+    const preview = repairExample("mixed-serving-sizes", "Example Mixed Serving Sizes", {
+      ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg" }],
+      servingSizes: [
+        { text: "Dávka – 35 g", source: "official_nutrition_table" },
+        { text: "Poměr ředění: 35 g/250 ml vody", source: "official_nutrition_table" },
+      ],
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -4523,25 +3709,13 @@ describe("supplement brand-site repair preview", () => {
       { text: "35 g", source: "official_nutrition_table" },
     ]);
 
-    const packetPreview = repairPreviewForRow({
-      id: "example-brand:mixed-packet-serving-sizes",
-      dataOriginId: "example-brand:mixed-packet-serving-sizes",
-      dataOriginUrl: "https://example.test/products/mixed-packet-serving-sizes",
-      name: "Example Packet Gel",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "mixed-packet-serving-sizes",
-        ingredientRows: [{ name: "Caffeine", amount: "50", unit: "mg" }],
-        servingSizes: [
-          { text: "100 g", source: "official_nutrition_table" },
-          { text: "200 g - 4 sáčky", source: "official_nutrition_table" },
-          { text: "50 g - 1 sáček", source: "official_nutrition_table" },
-        ],
-      },
+    const packetPreview = repairExample("mixed-packet-serving-sizes", "Example Packet Gel", {
+      ingredientRows: [{ name: "Caffeine", amount: "50", unit: "mg" }],
+      servingSizes: [
+        { text: "100 g", source: "official_nutrition_table" },
+        { text: "200 g - 4 sáčky", source: "official_nutrition_table" },
+        { text: "50 g - 1 sáček", source: "official_nutrition_table" },
+      ],
     });
 
     assert.equal(packetPreview.parserStatus, "structured_ready");
@@ -4552,24 +3726,12 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview accepts official serving-column volumes while rejecting table bases", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:liquid-caffeine-serving-column",
-      dataOriginId: "example-brand:liquid-caffeine-serving-column",
-      dataOriginUrl: "https://example.test/products/liquid-caffeine-serving-column",
-      name: "Example Liquid Caffeine Supplement",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "liquid-caffeine-serving-column",
-        ingredientRows: [{ name: "Caffeine", amount: "100", unit: "mg" }],
-        servingSizes: [
-          { text: "100 ml", source: "table_amount_basis" },
-          { text: "330 ml", source: "official_nutrition_table" },
-        ],
-      },
+    const preview = repairExample("liquid-caffeine-serving-column", "Example Liquid Caffeine Supplement", {
+      ingredientRows: [{ name: "Caffeine", amount: "100", unit: "mg" }],
+      servingSizes: [
+        { text: "100 ml", source: "table_amount_basis" },
+        { text: "330 ml", source: "official_nutrition_table" },
+      ],
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -4610,37 +3772,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview summary separates parser readiness from automated backfill readiness", () => {
-    const safe = repairPreviewForRow({
-      id: "example-brand:magnesium",
-      dataOriginId: "example-brand:magnesium",
-      dataOriginUrl: "https://example.test/products/magnesium",
-      name: "Example Magnesium",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "magnesium",
-        ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg" }],
-        servingSizes: [{ text: "1 capsule", source: "official_label" }],
-      },
+    const safe = repairExample("magnesium", "Example Magnesium", {
+      ingredientRows: [{ name: "Magnesium", amount: "200", unit: "mg" }],
+      servingSizes: [{ text: "1 capsule", source: "official_label" }],
     });
-    const blocked = repairPreviewForRow({
-      id: "example-brand:chunky-flavour",
-      dataOriginId: "example-brand:chunky-flavour",
-      dataOriginUrl: "https://example.test/products/chunky-flavour",
-      name: "Chunky Flavour - Fudge Brownie",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "chunky-flavour",
-        ingredientRows: [{ name: "Erythritol", amount: "2", unit: "g" }],
-        servingSizes: [{ text: "3 g", source: "official_nutrition_table" }],
-      },
+    const blocked = repairExample("chunky-flavour", "Chunky Flavour - Fudge Brownie", {
+      ingredientRows: [{ name: "Erythritol", amount: "2", unit: "g" }],
+      servingSizes: [{ text: "3 g", source: "official_nutrition_table" }],
     });
 
     assert.equal(safe.automatedBackfillReady, true);
@@ -4785,22 +3923,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview rejects net-content counts stored as existing serving sizes", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:net-content-serving-size",
-      dataOriginId: "example-brand:net-content-serving-size",
-      dataOriginUrl: "https://example.test/products/net-content-serving-size",
-      name: "Example Stick Packs",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "net-content-serving-size",
-        ingredientRows: [{ name: "Vitamin C", amount: "500", unit: "mg" }],
-        servingSizes: ["30 Stick Packs"],
-        bodyText: "Raw evidence must not be removed when net contents are stored as serving size.",
-      },
+    const preview = repairExample("net-content-serving-size", "Example Stick Packs", {
+      ingredientRows: [{ name: "Vitamin C", amount: "500", unit: "mg" }],
+      servingSizes: ["30 Stick Packs"],
+      bodyText: "Raw evidence must not be removed when net contents are stored as serving size.",
     });
 
     assert.equal(preview.parserStatus, "partial_parse");
@@ -4841,21 +3967,9 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview keeps large mass serving sizes with explicit serving context", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:large-serving-size",
-      dataOriginId: "example-brand:large-serving-size",
-      dataOriginUrl: "https://example.test/products/large-serving-size",
-      name: "Example Mass Gainer",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "large-serving-size",
-        ingredientRows: [{ name: "Protein", amount: "50", unit: "g" }],
-        servingSizes: ["340 g (About 2 Scoops)"],
-      },
+    const preview = repairExample("large-serving-size", "Example Mass Gainer", {
+      ingredientRows: [{ name: "Protein", amount: "50", unit: "g" }],
+      servingSizes: ["340 g (About 2 Scoops)"],
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -4863,20 +3977,8 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview infers one-unit serving size from exact per-form product title", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:iron",
-      dataOriginId: "example-brand:iron",
-      dataOriginUrl: "https://example.test/products/iron",
-      name: "45mg Iron Per Tablet",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "iron",
-        factsText: "Supplement Facts Amount Per Serving Iron 45 mg 250%",
-      },
+    const preview = repairExample("iron", "45mg Iron Per Tablet", {
+      factsText: "Supplement Facts Amount Per Serving Iron 45 mg 250%",
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -4885,24 +3987,12 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview extracts structured label facts with compact amounts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:collagen",
-      dataOriginId: "example-brand:collagen",
-      dataOriginUrl: "https://example.test/products/collagen",
-      name: "Example Collagen",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "collagen",
-        servingSize: "2 Capsules",
-        facts: [
-          { nutrient: "Protein", amount: "9g" },
-          { nutrient: "Vitamin C", parentheses: "from Lipid Metabolite Ascorbate", amount: "90mg", dailyValuePercentage: "100%" },
-        ],
-      },
+    const preview = repairExample("collagen", "Example Collagen", {
+      servingSize: "2 Capsules",
+      facts: [
+        { nutrient: "Protein", amount: "9g" },
+        { nutrient: "Vitamin C", parentheses: "from Lipid Metabolite Ascorbate", amount: "90mg", dailyValuePercentage: "100%" },
+      ],
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -4911,29 +4001,17 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview extracts structured factsRows before text fallback", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:b-complex",
-      dataOriginId: "example-brand:b-complex",
-      dataOriginUrl: "https://example.test/products/b-complex",
-      name: "Example B Complex",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "b-complex",
-        servingSize: "1 Coated Caplet",
-        factsRows: [
-          { name: "Thiamin (Vitamin B-1)", amount: "50 mg", dailyValue: "4,167%" },
-          { name: "Folate (400 mcg Folic Acid)", amount: "666 mcg DFE", dailyValue: "167%" },
-        ],
-        factsText: [
-          "Supplement Facts Serving size: 1 Coated Caplet Amount Per Serving | % Daily Value",
-          "Thiamin (Vitamin B-1) 50 mg | 4,167%",
-          "Folate (400 mcg Folic Acid) 666 mcg DFE | 167%",
-        ].join("\n"),
-      },
+    const preview = repairExample("b-complex", "Example B Complex", {
+      servingSize: "1 Coated Caplet",
+      factsRows: [
+        { name: "Thiamin (Vitamin B-1)", amount: "50 mg", dailyValue: "4,167%" },
+        { name: "Folate (400 mcg Folic Acid)", amount: "666 mcg DFE", dailyValue: "167%" },
+      ],
+      factsText: [
+        "Supplement Facts Serving size: 1 Coated Caplet Amount Per Serving | % Daily Value",
+        "Thiamin (Vitamin B-1) 50 mg | 4,167%",
+        "Folate (400 mcg Folic Acid) 666 mcg DFE | 167%",
+      ].join("\n"),
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -4980,32 +4058,20 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview does not treat enzyme activity text as stacked amount risk", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:quercetin",
-      dataOriginId: "example-brand:quercetin",
-      dataOriginUrl: "https://example.test/products/quercetin",
-      name: "Example Quercetin",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "quercetin",
-        factsText: [
-          "Supplement Facts",
-          "Serving Size 3 Tablets",
-          "Amount Per Serving",
-          "Vitamin C (as ascorbic acid)",
-          "700 mg",
-          "778%",
-          "Quercetin",
-          "1 g",
-          "Bromelain (2,000 G.D.U. per gram)tT",
-          "300 mg",
-          "†Daily Value not established.",
-        ].join("\n"),
-      },
+    const preview = repairExample("quercetin", "Example Quercetin", {
+      factsText: [
+        "Supplement Facts",
+        "Serving Size 3 Tablets",
+        "Amount Per Serving",
+        "Vitamin C (as ascorbic acid)",
+        "700 mg",
+        "778%",
+        "Quercetin",
+        "1 g",
+        "Bromelain (2,000 G.D.U. per gram)tT",
+        "300 mg",
+        "†Daily Value not established.",
+      ].join("\n"),
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -5014,32 +4080,20 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview allows parenthetical name continuations before amount rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:apple-pectin",
-      dataOriginId: "example-brand:apple-pectin",
-      dataOriginUrl: "https://example.test/products/apple-pectin",
-      name: "Example Apple Pectin",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "apple-pectin",
-        factsText: [
-          "Supplement Facts",
-          "Serving Size: 3 Capsules",
-          "Amount Per Serving",
-          "% DV",
-          "Dietary Fiber",
-          "1g",
-          "4%",
-          "Apple Pectin Powder",
-          "(Malus domestica) (pomace)",
-          "2,100mg",
-          "** Daily Value not established.",
-        ].join("\n"),
-      },
+    const preview = repairExample("apple-pectin", "Example Apple Pectin", {
+      factsText: [
+        "Supplement Facts",
+        "Serving Size: 3 Capsules",
+        "Amount Per Serving",
+        "% DV",
+        "Dietary Fiber",
+        "1g",
+        "4%",
+        "Apple Pectin Powder",
+        "(Malus domestica) (pomace)",
+        "2,100mg",
+        "** Daily Value not established.",
+      ].join("\n"),
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -5059,20 +4113,8 @@ describe("supplement brand-site repair preview", () => {
       "120 mg",
       "*Daily Value not established.",
     ].join("\n");
-    const preview = repairPreviewForRow({
-      id: "example-brand:gotu-kola",
-      dataOriginId: "example-brand:gotu-kola",
-      dataOriginUrl: "https://example.test/products/gotu-kola",
-      name: "Example Gotu Kola",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "gotu-kola",
-        factsText,
-      },
+    const preview = repairExample("gotu-kola", "Example Gotu Kola", {
+      factsText,
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -5112,20 +4154,8 @@ describe("supplement brand-site repair preview", () => {
       "+",
       "*Percent Daily Values are based on a 2,000 calorie diet.",
     ].join("\n");
-    const preview = repairPreviewForRow({
-      id: "example-brand:krill-oil",
-      dataOriginId: "example-brand:krill-oil",
-      dataOriginUrl: "https://example.test/products/krill-oil",
-      name: "Example Krill Oil",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "krill-oil",
-        factsText,
-      },
+    const preview = repairExample("krill-oil", "Example Krill Oil", {
+      factsText,
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -5142,25 +4172,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview downgrades page-body facts text even when amount patterns are found", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:creatine-gummies",
-      dataOriginId: "example-brand:creatine-gummies",
-      dataOriginUrl: "https://example.test/products/creatine-gummies",
-      name: "Example Creatine Gummies",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "creatine-gummies",
-        factsText: [
-          "Tub Flavor: Tropical Fruit Punch Quantity: Decrease quantity Increase quantity Buy Now Notify Me When Available",
-          "Description Suggested Use Supplement Facts FAQ Previous Next Description Why Example Creatine Gummies Are Convenient.",
-          "Taking 4 gummies daily provides a maintenance dose of 5 g. Four gummies deliver the same 5 g dose.",
-          " ".repeat(1300),
-        ].join(" "),
-      },
+    const preview = repairExample("creatine-gummies", "Example Creatine Gummies", {
+      factsText: [
+        "Tub Flavor: Tropical Fruit Punch Quantity: Decrease quantity Increase quantity Buy Now Notify Me When Available",
+        "Description Suggested Use Supplement Facts FAQ Previous Next Description Why Example Creatine Gummies Are Convenient.",
+        "Taking 4 gummies daily provides a maintenance dose of 5 g. Four gummies deliver the same 5 g dose.",
+        " ".repeat(1300),
+      ].join(" "),
     });
 
     assert.equal(preview.parserStatus, "needs_better_parser");
@@ -5174,31 +4192,19 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks official-image marketing copy from automated backfill", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:beef-liver",
-      dataOriginId: "example-brand:beef-liver",
-      dataOriginUrl: "https://example.test/products/beef-liver",
-      name: "Example Beef Liver",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "beef-liver",
-        ingredientRows: [{ name: "Grassfed Liver", amount: "4,500", unit: "mg" }],
-        servingSizes: ["6 Capsules"],
-        factsText: [
-          "Supplement Facts Serving Size: 6 Capsules Servings Per Container 10",
-          "Amount Per Serving Grassfed Liver 4,500 mg *Daily Value not established.",
-          "Other Ingredients: Gelatin Capsule.",
-          "At Example Brand, it's been our promise to deliver the highest quality vitamins and self-care products.",
-          "We put all our products to the test in our cutting-edge laboratory.",
-          "Our mission is simple - to provide the best nutritional care.",
-          "Supports: Stamina and Endurance Male Performance Product.",
-          "Potent and Powerful Formula.",
-        ].join(" "),
-      },
+    const preview = repairExample("beef-liver", "Example Beef Liver", {
+      ingredientRows: [{ name: "Grassfed Liver", amount: "4,500", unit: "mg" }],
+      servingSizes: ["6 Capsules"],
+      factsText: [
+        "Supplement Facts Serving Size: 6 Capsules Servings Per Container 10",
+        "Amount Per Serving Grassfed Liver 4,500 mg *Daily Value not established.",
+        "Other Ingredients: Gelatin Capsule.",
+        "At Example Brand, it's been our promise to deliver the highest quality vitamins and self-care products.",
+        "We put all our products to the test in our cutting-edge laboratory.",
+        "Our mission is simple - to provide the best nutritional care.",
+        "Supports: Stamina and Endurance Male Performance Product.",
+        "Potent and Powerful Formula.",
+      ].join(" "),
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -5208,25 +4214,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview downgrades table-layout facts text with separated names and amounts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:mass-gainer",
-      dataOriginId: "example-brand:mass-gainer",
-      dataOriginUrl: "https://example.test/products/mass-gainer",
-      name: "Example Mass Gainer",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "mass-gainer",
-        factsText: [
-          "Supplement Facts Serving Size 340 g (About 2 Scoops)",
-          "Amount Per Serving Calories Total Fat Saturated Fat Cholesterol Total Carbohydrate Protein Vitamin C Magnesium Zinc Creatine Monohydrate",
-          "1250 5 g 3 g 200 mg 252 g 50 g 30 mg 140 mg 3 mg 5 g",
-          "% Daily Value 6% 15% 67%",
-        ].join(" "),
-      },
+    const preview = repairExample("mass-gainer", "Example Mass Gainer", {
+      factsText: [
+        "Supplement Facts Serving Size 340 g (About 2 Scoops)",
+        "Amount Per Serving Calories Total Fat Saturated Fat Cholesterol Total Carbohydrate Protein Vitamin C Magnesium Zinc Creatine Monohydrate",
+        "1250 5 g 3 g 200 mg 252 g 50 g 30 mg 140 mg 3 mg 5 g",
+        "% Daily Value 6% 15% 67%",
+      ].join(" "),
     });
 
     assert.equal(preview.parserStatus, "partial_parse");
@@ -5234,23 +4228,11 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks oversized retained page evidence even with parsed rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:legacy-page",
-      dataOriginId: "example-brand:legacy-page",
-      dataOriginUrl: "https://example.test/products/legacy-page",
-      name: "Example Legacy Page",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "legacy-page",
-        servingSize: "2 Capsules",
-        factsText: "Supplement Facts Amount Per Serving Magnesium 200 mg 48%",
-        ingredientText: "Saved page body ".repeat(500),
-        bodyText: "Raw page evidence must stay until refetch/OCR replaces it.",
-      },
+    const preview = repairExample("legacy-page", "Example Legacy Page", {
+      servingSize: "2 Capsules",
+      factsText: "Supplement Facts Amount Per Serving Magnesium 200 mg 48%",
+      ingredientText: "Saved page body ".repeat(500),
+      bodyText: "Raw page evidence must stay until refetch/OCR replaces it.",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5260,32 +4242,20 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair parser extracts multi-DV prenatal facts rows from OCR text", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:prenatal",
-      dataOriginId: "example-brand:prenatal",
-      dataOriginUrl: "https://example.test/products/prenatal",
-      name: "Example Prenatal",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "prenatal",
-        evidenceStatus: "structured_facts_from_official_facts_image_ocr",
-        factsText: [
-          "Supplement Facts",
-          "Serving size 1 Tablet",
-          "Amount per serving %DV for adults %DV for pregnant women",
-          "Vitamin A (100% as beta-carotene and from ferment media) 770 mcg 86% 59%",
-          "Vitamin C (as calcium ascorbate and as ascorbic acid from ferment media) 60 mg 67% 50%",
-          "Vitamin D3 (as cholecalciferol and from ferment media) 25 mcg [1000 IU] 125% 167%",
-          "Folate (as L-5-methylfolate) 680 mcg DFE 170% 113%",
-          "Iron (as ferrous bisglycinate chelate) 20 mg 111% 74%",
-          "Zinc (as zinc oxide from ferment media) 5.2 mg 47% 40%",
-          "Soothing Digestive Blend 65 mg",
-        ].join("\n"),
-      },
+    const preview = repairExample("prenatal", "Example Prenatal", {
+      evidenceStatus: "structured_facts_from_official_facts_image_ocr",
+      factsText: [
+        "Supplement Facts",
+        "Serving size 1 Tablet",
+        "Amount per serving %DV for adults %DV for pregnant women",
+        "Vitamin A (100% as beta-carotene and from ferment media) 770 mcg 86% 59%",
+        "Vitamin C (as calcium ascorbate and as ascorbic acid from ferment media) 60 mg 67% 50%",
+        "Vitamin D3 (as cholecalciferol and from ferment media) 25 mcg [1000 IU] 125% 167%",
+        "Folate (as L-5-methylfolate) 680 mcg DFE 170% 113%",
+        "Iron (as ferrous bisglycinate chelate) 20 mg 111% 74%",
+        "Zinc (as zinc oxide from ferment media) 5.2 mg 47% 40%",
+        "Soothing Digestive Blend 65 mg",
+      ].join("\n"),
     });
 
     assert.equal(preview.parserStatus, "structured_ready");
@@ -5434,20 +4404,8 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks multi-bottle duplicate rows before backfill", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:b-complex-2-bottles",
-      dataOriginId: "example-brand:b-complex-2-bottles",
-      dataOriginUrl: "https://example.test/products/b-complex-2-bottles",
-      name: "B-Complex, 180 Coated Caplets, 2 Bottles",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "b-complex-2-bottles",
-        factsText: "Supplement Facts Serving Size: 1 Caplet Amount Per Serving Vitamin B12 50 mcg 2083%",
-      },
+    const preview = repairExample("b-complex-2-bottles", "B-Complex, 180 Coated Caplets, 2 Bottles", {
+      factsText: "Supplement Facts Serving Size: 1 Caplet Amount Per Serving Vitamin B12 50 mcg 2083%",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5455,24 +4413,12 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks FAQ page-body evidence even when facts rows parse", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:magnesium-glycinate",
-      dataOriginId: "example-brand:magnesium-glycinate",
-      dataOriginUrl: "https://example.test/products/magnesium-glycinate",
-      name: "Magnesium Glycinate",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "magnesium-glycinate",
-        factsText: [
-          "Details Supplement Facts Serving Size: 2 tablets Amount per serving % Daily Value Magnesium 300 mg 71%",
-          "Directions: Adults take two tablets daily.",
-          "All About Magnesium Your Magnesium questions, answered What is magnesium glycinate, and how does it differ from other forms of magnesium?",
-        ].join(" "),
-      },
+    const preview = repairExample("magnesium-glycinate", "Magnesium Glycinate", {
+      factsText: [
+        "Details Supplement Facts Serving Size: 2 tablets Amount per serving % Daily Value Magnesium 300 mg 71%",
+        "Directions: Adults take two tablets daily.",
+        "All About Magnesium Your Magnesium questions, answered What is magnesium glycinate, and how does it differ from other forms of magnesium?",
+      ].join(" "),
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5481,22 +4427,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks sweetener rows that only carry retail metadata", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:stevia-table-top-sweetener",
-      dataOriginId: "example-brand:stevia-table-top-sweetener",
-      dataOriginUrl: "https://example.test/products/stevia-table-top-sweetener",
-      name: "Stevia Table Top Sweetener",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "stevia-table-top-sweetener",
-        factsText: "Product / Model Name: Stevia Powder Quantity: Pack of 1 (100g) Best Before: 2 years of Manufacturing Item Weight: 100 g",
-        servingSizes: [{ text: "1 g", source: "existing_serving_size" }],
-        ingredientRows: [{ name: "Item Weight", amount: "100", unit: "g", source: "existing_ingredient_row" }],
-      },
+    const preview = repairExample("stevia-table-top-sweetener", "Stevia Table Top Sweetener", {
+      factsText: "Product / Model Name: Stevia Powder Quantity: Pack of 1 (100g) Best Before: 2 years of Manufacturing Item Weight: 100 g",
+      servingSizes: [{ text: "1 g", source: "existing_serving_size" }],
+      ingredientRows: [{ name: "Item Weight", amount: "100", unit: "g", source: "existing_ingredient_row" }],
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5504,20 +4438,8 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks implausible OCR gram amounts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:collagen-beauty",
-      dataOriginId: "example-brand:collagen-beauty",
-      dataOriginUrl: "https://example.test/products/collagen-beauty",
-      name: "Collagen Beauty Builder",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "collagen-beauty",
-        factsText: "Supplement Facts Serving Size 3 Caplets Amount Per Serving Protein 3 g BioActive Collagen Peptides 3,000 g Hyaluronic Acid 27 mg Alpha-Lipoic Acid 10 mg",
-      },
+    const preview = repairExample("collagen-beauty", "Collagen Beauty Builder", {
+      factsText: "Supplement Facts Serving Size 3 Caplets Amount Per Serving Protein 3 g BioActive Collagen Peptides 3,000 g Hyaluronic Acid 27 mg Alpha-Lipoic Acid 10 mg",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5525,20 +4447,8 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks OCR facts when a visible BCAA row is missing", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:bcaa",
-      dataOriginId: "example-brand:bcaa",
-      dataOriginUrl: "https://example.test/products/bcaa",
-      name: "BCAA 800 mg",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "bcaa",
-        factsText: "Supplement Facts Serving Size: 4 Capsules Amount Per Serving L-Leucine 1600 mg L-Isoleucine 800 mg Best Naturals L-Valine 800 mg i socture. Other Ingredients: Capsule.",
-      },
+    const preview = repairExample("bcaa", "BCAA 800 mg", {
+      factsText: "Supplement Facts Serving Size: 4 Capsules Amount Per Serving L-Leucine 1600 mg L-Isoleucine 800 mg Best Naturals L-Valine 800 mg i socture. Other Ingredients: Capsule.",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5546,20 +4456,8 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview rejects retail net weight rows parsed as ingredients", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:creatine",
-      dataOriginId: "example-brand:creatine",
-      dataOriginUrl: "https://example.test/products/creatine",
-      name: "Creatine",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "creatine",
-        factsText: "Supplement Facts Serving Size 1 Scoop (5.7 g) Amount Per Scoop Creatine 5 g Other Ingredients: None. Net Weight: 20.2 oz (1.26 lbs) 573 g",
-      },
+    const preview = repairExample("creatine", "Creatine", {
+      factsText: "Supplement Facts Serving Size 1 Scoop (5.7 g) Amount Per Scoop Creatine 5 g Other Ingredients: None. Net Weight: 20.2 oz (1.26 lbs) 573 g",
     });
 
     assert.equal(preview.automatedBackfillReady, true);
@@ -5569,20 +4467,8 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks facts when visible turmeric powder is missing", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:turmeric-curcumin",
-      dataOriginId: "example-brand:turmeric-curcumin",
-      dataOriginUrl: "https://example.test/products/turmeric-curcumin",
-      name: "Turmeric Curcumin with BioPerine",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "turmeric-curcumin",
-        factsText: "Supplement Facts Serving Size: 2 Capsules Amount Per Serving Turmeric Powder (Curcuma longa) (root) 1400 mg Turmeric Extract 99% Curcumin 100 mg BioPerine Black Pepper Extract 10 mg",
-      },
+    const preview = repairExample("turmeric-curcumin", "Turmeric Curcumin with BioPerine", {
+      factsText: "Supplement Facts Serving Size: 2 Capsules Amount Per Serving Turmeric Powder (Curcuma longa) (root) 1400 mg Turmeric Extract 99% Curcumin 100 mg BioPerine Black Pepper Extract 10 mg",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5590,20 +4476,8 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks probiotic blends when strain constituents are only raw text", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:probiotic-blend",
-      dataOriginId: "example-brand:probiotic-blend",
-      dataOriginUrl: "https://example.test/products/probiotic-blend",
-      name: "Complete Probiotic",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "probiotic-blend",
-        factsText: "Supplement Facts Serving Size 1 capsule Amount Per Serving Probiotic Blend 280 mg (720 million AFU) Akkermansia muciniphila (TA09) 500 million AFU Bifidobacterium adolescentis (TA38) 100 million AFU Bifidobacterium longum (TA24) 100 million AFU",
-      },
+    const preview = repairExample("probiotic-blend", "Complete Probiotic", {
+      factsText: "Supplement Facts Serving Size 1 capsule Amount Per Serving Probiotic Blend 280 mg (720 million AFU) Akkermansia muciniphila (TA09) 500 million AFU Bifidobacterium adolescentis (TA38) 100 million AFU Bifidobacterium longum (TA24) 100 million AFU",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5611,20 +4485,8 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks enzyme blends when only a mineral row is normalized", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:acid-soothe",
-      dataOriginId: "example-brand:acid-soothe",
-      dataOriginUrl: "https://example.test/products/acid-soothe",
-      name: "Acid Soothe",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "acid-soothe",
-        factsText: "Supplement Facts Serving Size: 1 Capsule Amount Per Serving Zinc 2 mg 18% Marshmallow Root (Althaea officinalis) Acid Soothe Enzyme Blend Fiber-Digesting Enzymes Cellulase Thera-blend (600 CU) Fat-Digesting Enzymes Lipase Thera-blend (400 FIP)",
-      },
+    const preview = repairExample("acid-soothe", "Acid Soothe", {
+      factsText: "Supplement Facts Serving Size: 1 Capsule Amount Per Serving Zinc 2 mg 18% Marshmallow Root (Althaea officinalis) Acid Soothe Enzyme Blend Fiber-Digesting Enzymes Cellulase Thera-blend (600 CU) Fat-Digesting Enzymes Lipase Thera-blend (400 FIP)",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5632,20 +4494,8 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview rejects sampled generic plural serving-size artifacts", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:magnesium-glycinate",
-      dataOriginId: "example-brand:magnesium-glycinate",
-      dataOriginUrl: "https://example.test/products/magnesium-glycinate",
-      name: "Magnesium Glycinate",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "magnesium-glycinate",
-        factsText: "Supplement Facts Serving Size 2 Servings Per Container 90 Amount Per Serving Magnesium 240 mg 57%",
-      },
+    const preview = repairExample("magnesium-glycinate", "Magnesium Glycinate", {
+      factsText: "Supplement Facts Serving Size 2 Servings Per Container 90 Amount Per Serving Magnesium 240 mg 57%",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5805,22 +4655,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks sampled amount-before proprietary blend constituents", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:respiration-blend",
-      dataOriginId: "example-brand:respiration-blend",
-      dataOriginUrl: "https://example.test/products/respiration-blend",
-      name: "Respiration Blend SP-3",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "respiration-blend",
-        ingredientRows: [{ name: "Proprietary Blend", amount: "875", unit: "mg", source: "official_facts_table" }],
-        servingSizes: [{ text: "2 VegCaps", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 VegCaps Amount Per Serving 875 mg % Daily Value Proprietary Blend Pleurisy (root), Slippery Elm (bark), Wild Cherry (bark), Plantain (leaf), Chickweed (aerial), Horehound (aerial), Licorice (root), Mullein (leaf) *Daily Value not established.",
-      },
+    const preview = repairExample("respiration-blend", "Respiration Blend SP-3", {
+      ingredientRows: [{ name: "Proprietary Blend", amount: "875", unit: "mg", source: "official_facts_table" }],
+      servingSizes: [{ text: "2 VegCaps", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 VegCaps Amount Per Serving 875 mg % Daily Value Proprietary Blend Pleurisy (root), Slippery Elm (bark), Wild Cherry (bark), Plantain (leaf), Chickweed (aerial), Horehound (aerial), Licorice (root), Mullein (leaf) *Daily Value not established.",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5941,20 +4779,8 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks sampled parser-origin leading comma rows", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:bcaa-leading-comma",
-      dataOriginId: "example-brand:bcaa-leading-comma",
-      dataOriginUrl: "https://example.test/products/bcaa-leading-comma",
-      name: "BCAA Powder",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "bcaa-leading-comma",
-        factsText: "Ingredients You Can Trust: Supplement Facts, Serving Size 1 Scoop (6.7g), Amount Per Serving, %DV, L-Leucine 2.5 g, *, L-Isoleucine 1.25 g, *, L-Valine 1.25 g, *, *Daily Value not established",
-      },
+    const preview = repairExample("bcaa-leading-comma", "BCAA Powder", {
+      factsText: "Ingredients You Can Trust: Supplement Facts, Serving Size 1 Scoop (6.7g), Amount Per Serving, %DV, L-Leucine 2.5 g, *, L-Isoleucine 1.25 g, *, L-Valine 1.25 g, *, *Daily Value not established",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5962,22 +4788,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks sampled CJK continuation amount tables", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:cjk-continuation",
-      dataOriginId: "example-brand:cjk-continuation",
-      dataOriginUrl: "https://example.test/products/cjk-continuation",
-      name: "Example CJK Supplement",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "cjk-continuation",
-        ingredientRows: [{ name: "鋅", amount: "10", unit: "mg", source: "official_facts_table" }],
-        servingSizes: [{ text: "2 粒", source: "official_facts_table" }],
-        factsText: "營養標示\n每一份量 2 粒\n成分\n每份\n鋅\n10毫克\n其他成分含量\n每一份量 2粒\n牛蒡萃取物\n(含牛蒡多酚)\n500毫克\n甘藍萃取物\n(含維生素U)\n380毫克",
-      },
+    const preview = repairExample("cjk-continuation", "Example CJK Supplement", {
+      ingredientRows: [{ name: "鋅", amount: "10", unit: "mg", source: "official_facts_table" }],
+      servingSizes: [{ text: "2 粒", source: "official_facts_table" }],
+      factsText: "營養標示\n每一份量 2 粒\n成分\n每份\n鋅\n10毫克\n其他成分含量\n每一份量 2粒\n牛蒡萃取物\n(含牛蒡多酚)\n500毫克\n甘藍萃取物\n(含維生素U)\n380毫克",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -5985,22 +4799,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks sampled comma-merged active names", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:sod-2000-plus",
-      dataOriginId: "example-brand:sod-2000-plus",
-      dataOriginUrl: "https://example.test/products/sod-2000-plus",
-      name: "SOD 2000 Plus",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "sod-2000-plus",
-        ingredientRows: [{ name: "Rosemary Leaf, Green Tea Leaf Extract, Calcium D-Glucarate, Ellagic", amount: "400", unit: "mg", source: "official_facts_table" }],
-        servingSizes: [{ text: "1 VegCap", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 VegCap S.O.D. Complex 400 mg Superoxide Dismutase Catalase Support Base Rosemary Leaf, Green Tea Leaf Extract, Calcium D-Glucarate, Ellagic Acid, Grape Seed Extract 70 mg",
-      },
+    const preview = repairExample("sod-2000-plus", "SOD 2000 Plus", {
+      ingredientRows: [{ name: "Rosemary Leaf, Green Tea Leaf Extract, Calcium D-Glucarate, Ellagic", amount: "400", unit: "mg", source: "official_facts_table" }],
+      servingSizes: [{ text: "1 VegCap", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 VegCap S.O.D. Complex 400 mg Superoxide Dismutase Catalase Support Base Rosemary Leaf, Green Tea Leaf Extract, Calcium D-Glucarate, Ellagic Acid, Grape Seed Extract 70 mg",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -6008,22 +4810,10 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks parenthesized probiotic blend amounts when strains are missing", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:complete-afterbiotics",
-      dataOriginId: "example-brand:complete-afterbiotics",
-      dataOriginUrl: "https://example.test/products/complete-afterbiotics",
-      name: "Complete Afterbiotics",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "complete-afterbiotics",
-        ingredientRows: [{ name: "Complete Afterbiotics", amount: "255", unit: "mg", source: "official_facts_table" }],
-        servingSizes: [{ text: "1 Capsule", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 1 Capsule Complete Afterbiotics 255 mg Probiotic and SBO Blend (18 Billion CFU) Saccharomyces boulardii Pediococcus acidilactici Lactobacillus rhamnosus Bacillus subtilis",
-      },
+    const preview = repairExample("complete-afterbiotics", "Complete Afterbiotics", {
+      ingredientRows: [{ name: "Complete Afterbiotics", amount: "255", unit: "mg", source: "official_facts_table" }],
+      servingSizes: [{ text: "1 Capsule", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 1 Capsule Complete Afterbiotics 255 mg Probiotic and SBO Blend (18 Billion CFU) Saccharomyces boulardii Pediococcus acidilactici Lactobacillus rhamnosus Bacillus subtilis",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -6031,25 +4821,13 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks sampled OCR junk ingredient prefixes", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:lycopene-ocr",
-      dataOriginId: "example-brand:lycopene-ocr",
-      dataOriginUrl: "https://example.test/products/lycopene-ocr",
-      name: "Lycopene",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "lycopene-ocr",
-        ingredientRows: [
-          { name: "Naus Lycopene (from tomatoes)", amount: "30", unit: "mg", source: "official_facts_table" },
-          { name: "Dict", amount: "0.5", unit: "g", source: "official_facts_table" },
-        ],
-        servingSizes: [{ text: "2 Softgels", source: "official_facts_table" }],
-        factsText: "Supplement Facts Serving Size 2 Softgels Dict Calories 5 Naus Lycopene (from tomatoes) 30 mg",
-      },
+    const preview = repairExample("lycopene-ocr", "Lycopene", {
+      ingredientRows: [
+        { name: "Naus Lycopene (from tomatoes)", amount: "30", unit: "mg", source: "official_facts_table" },
+        { name: "Dict", amount: "0.5", unit: "g", source: "official_facts_table" },
+      ],
+      servingSizes: [{ text: "2 Softgels", source: "official_facts_table" }],
+      factsText: "Supplement Facts Serving Size 2 Softgels Dict Calories 5 Naus Lycopene (from tomatoes) 30 mg",
     });
 
     assert.equal(preview.automatedBackfillReady, false);
@@ -6057,26 +4835,14 @@ describe("supplement brand-site repair preview", () => {
   });
 
   test("repair preview blocks herb-promising multivitamins when herb rows are absent", () => {
-    const preview = repairPreviewForRow({
-      id: "example-brand:multi-urter",
-      dataOriginId: "example-brand:multi-urter",
-      dataOriginUrl: "https://example.test/products/multi-urter",
-      name: "Livol Multivitamin m. urter",
-      brand: "Example Brand",
-      upc: null,
-      offMarket: false,
-      searchText: "",
-      label: {
-        source: "example-brand",
-        sourceId: "multi-urter",
-        ingredientRows: [
-          { name: "Vitamin A", amount: "800", unit: "mcg", source: "official_facts_table" },
-          { name: "Vitamin D", amount: "20", unit: "mcg", source: "official_facts_table" },
-          { name: "Calcium", amount: "400", unit: "mg", source: "official_facts_table" },
-        ],
-        servingSizes: [{ text: "2 tablette", source: "official_facts_table" }],
-        factsText: "Næringsindhold pr. dagsdosis Vitamin A 800 mcg Vitamin D 20 mcg Calcium 400 mg Urter Ca. mængde Paprikafrugtekstrakt Fra 396 mg Rosmarinbladpulver 20 mg",
-      },
+    const preview = repairExample("multi-urter", "Livol Multivitamin m. urter", {
+      ingredientRows: [
+        { name: "Vitamin A", amount: "800", unit: "mcg", source: "official_facts_table" },
+        { name: "Vitamin D", amount: "20", unit: "mcg", source: "official_facts_table" },
+        { name: "Calcium", amount: "400", unit: "mg", source: "official_facts_table" },
+      ],
+      servingSizes: [{ text: "2 tablette", source: "official_facts_table" }],
+      factsText: "Næringsindhold pr. dagsdosis Vitamin A 800 mcg Vitamin D 20 mcg Calcium 400 mg Urter Ca. mængde Paprikafrugtekstrakt Fra 396 mg Rosmarinbladpulver 20 mg",
     });
 
     assert.equal(preview.automatedBackfillReady, false);

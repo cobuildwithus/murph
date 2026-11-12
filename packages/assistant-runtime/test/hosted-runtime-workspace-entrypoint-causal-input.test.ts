@@ -1,4 +1,5 @@
 import {
+  createWorkspaceRunRequest,
   REAL_SET_TIMEOUT,
   TEST_NOW,
   TEST_USER_ID,
@@ -29,33 +30,20 @@ import {
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import assert from "node:assert/strict";
-import { Buffer } from "node:buffer";
-import { access, appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+
+import {
+  mkdtemp,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  addCaptureWithLookup,
-  CURRENT_VAULT_FORMAT_VERSION,
-  HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-  buildIntegrationEvidencePart,
-  buildIntegrationIngestRecord,
-  findCaptureByLookup,
   initializeVault,
-  patchAutomation,
-  readJsonlRecords,
-  repairVault,
-  runCanonicalWrite,
-  showAutomation,
-  upsertAutomation,
-  validateVault,
 } from "@murphai/core";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
-  buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
-  buildHostedExecutionRuntimeControlWake,
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
 import {
@@ -71,60 +59,24 @@ import {
   startLiveWorkout,
 } from "@murphai/vault-usecases/workouts";
 import {
-  appendAssistantTranscriptEntries,
-  createAssistantOutboxIntent,
-  ensureAutomaticMealCloseoutAutomation,
-  getAssistantCronStatus,
-  listAssistantTranscriptEntries,
-  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   listAssistantOutboxIntents,
-  markAssistantOutboxIntentSentById,
-  readAssistantContextSnapshotState,
-  refreshAssistantContextSnapshotBestEffort,
-  recordHostedMailboxAssistantInputItem,
-  saveAssistantOutboxIntent,
-  saveAssistantSession,
-  type AssistantHostedImageGenerationLauncher,
-  type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
 import {
-  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   readHostedRuntimeFailurePhaseCode,
   type HostedMailboxFetchRequest,
-  type HostedMailboxFetchResponse,
   type HostedMailboxItem,
-  type HostedMailboxPayloadFetchRequest,
-  type HostedMailboxPayloadFetchResponse,
-  type HostedRuntimeRedactedJson,
-  type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
-  type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
-  type HostedWorkspaceCheckpointResponse,
-  type HostedWorkspaceReadResponse,
-  type HostedWorkspaceInvocationRequest,
-  type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
   type HostedExecutionAssistantAskRequestedWake,
-  type HostedBrowserVaultReplicaRef,
-  type HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
 import { describe, expect, test, vi } from "vitest";
 import {
   createCoalescingRuntimeWakeSignal,
-  HostedRuntimeCheckpointInterruptedByWakeError,
-  HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
-  HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
-  parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
-  type HostedWorkspaceRuntimeJobOptions,
-  type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
 import {
   runHostedWorkspaceAssistantPhase,
@@ -136,7 +88,6 @@ import type {
   RuntimeWakeSignal,
 } from "../src/hosted-runtime/runtime-wake.ts";
 import {
-  createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
 } from "../src/hosted-runtime/environment.ts";
 import {
@@ -147,18 +98,13 @@ import {
 } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   readHostedSystemMailboxState,
-  updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
   createHostedWorkspaceBridgeMailboxImporter,
 } from "../src/hosted-runtime/snapshot-bridge-mailbox.ts";
 import {
-  HostedRuntimeArtifactReadError,
-  type HostedRuntimeDeviceSyncPort,
   type HostedRuntimeMailboxPort,
   type HostedRuntimePlatform,
-  type HostedRuntimeWorkspacePort,
-  type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
 
 describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window trigger when a queued runtime wake has no foreground work", async () => {
@@ -211,8 +157,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           attemptId: "attempt_synthetic_phase_checkpoint_queued_wake_idle_window",
           runnerIdleTtlMs: 200,
           leaseGeneration: "7",
-          userId: TEST_USER_ID,
-          workspaceVersion: "0",
         },
       }), {
         async createCheckpointSnapshot(snapshotInput) {
@@ -379,8 +323,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           attemptId: `attempt_synthetic_external_wake_${slug}`,
           runnerIdleTtlMs: 1_000,
           leaseGeneration: "7",
-          userId: TEST_USER_ID,
-          workspaceVersion: "0",
         },
       }), {
         async createCheckpointSnapshot(snapshotInput) {
@@ -524,8 +466,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             attemptId: "attempt_synthetic_causal_pending_effects_dirty_wake",
             runnerIdleTtlMs: 500,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -702,8 +642,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
                 attemptId: `attempt_pre_checkpoint_${actionKind.replaceAll(".", "_")}`,
                 runnerIdleTtlMs: 200,
                 leaseGeneration: "7",
-                userId: TEST_USER_ID,
-                workspaceVersion: "0",
               },
             }),
             {
@@ -1068,8 +1006,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             budget: { maxMailboxItems: 50 },
             runnerIdleTtlMs: 1_000,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -1275,8 +1211,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               createMailboxItem({
                 id:
                   `mailbox_item_entrypoint_external_completion_conversation_${index + 1}`,
-                kind: "conversation.message",
-                lane: "conversation",
                 laneSeq: String(index + 1),
               })
             ),
@@ -1327,8 +1261,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               }`,
               runnerIdleTtlMs: 200,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -1660,8 +1592,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
                   ? 180_000
                   : 200,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           });
         const runtimeOptions: Parameters<typeof runHostedWorkspaceRuntimeJobInProcess>[1] = {
@@ -2265,8 +2195,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               attemptId: "attempt_private_completion_mixed_system_prefix",
               runnerIdleTtlMs: 50,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -2362,8 +2290,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             attemptId: "attempt_synthetic_assistant_ask_completion_dirty_wake",
             runnerIdleTtlMs: 500,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2632,8 +2558,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               attemptId: "attempt_synthetic_late_imported_approval",
               runnerIdleTtlMs: 200,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -2782,8 +2706,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             attemptId: "attempt_synthetic_assistant_ask_dirty_wake",
             runnerIdleTtlMs: 500,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -2974,10 +2896,7 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           request: {
             attemptId: "attempt_synthetic_warm_ask_continuation",
             processingMode: "default",
-            runnerIdleTtlMs: 1,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -3109,8 +3028,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
               }`,
               runnerIdleTtlMs: 600_000,
               leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
             },
           }),
           {
@@ -3154,8 +3071,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
                   if (withConversationWork) {
                     mailboxItems.push(createMailboxItem({
                       id: "mailbox_item_entrypoint_consented_checkpoint_conversation",
-                      lane: "conversation",
-                      laneSeq: "1",
                     }));
                   }
                   mailboxItems.push(askItem);
@@ -3246,8 +3161,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
             attemptId: "attempt_synthetic_mixed_pending_effects_canonical_dirty_wake",
             runnerIdleTtlMs: 200,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -3351,8 +3264,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
           request: {
             attemptId,
             leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
           },
         }),
         {
@@ -3510,8 +3421,6 @@ describe("hosted workspace runtime entrypoint", () => {test("keeps idle-window t
         request: {
           attemptId: "attempt_synthetic_restore_phase_failure",
           leaseGeneration: "7",
-          userId: TEST_USER_ID,
-          workspaceVersion: "0",
         },
       }), {
         async createCheckpointSnapshot() {

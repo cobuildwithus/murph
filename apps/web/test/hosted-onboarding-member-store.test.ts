@@ -23,7 +23,6 @@ import {
 
 import {
   claimHostedMemberSignupNotificationEmailAttempt,
-  composeHostedMemberSnapshot,
   createHostedMember as createHostedMemberStore,
   hostedMemberVerifiedEmailRecordsEqual,
   lockHostedMemberVerifiedEmailRecordTx,
@@ -35,7 +34,6 @@ import {
   readHostedMemberSnapshot,
   readHostedMemberVerifiedEmailRecord,
   readHostedMemberVerifiedEmailSnapshots,
-  type HostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
   activeHostedPersonAccessWhere,
@@ -46,9 +44,7 @@ import {
   lookupHostedMemberStripeBillingRefByStripeCustomerId,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionId,
   readHostedMemberBillingEligibilityState,
-  readHostedMemberStripeBillingRef,
   projectHostedMemberStripeBillingRefSnapshot,
-  type HostedMemberStripeBillingRefSnapshot,
   writeHostedMemberStripeBillingRefTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import {
@@ -56,7 +52,6 @@ import {
   lookupHostedMemberIdentityByPhoneNumber,
   lookupHostedMemberIdByPhoneNumber,
 
-  type HostedMemberIdentityState,
   upsertHostedMemberIdentity,
 } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import {
@@ -71,7 +66,6 @@ import {
   readHostedMemberRoutingState,
   resolveHostedMemberReplyAliasRegistrationTx,
   resolveHostedMemberCoreByTelegramUserId,
-  type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx,
   upsertHostedMemberReplyAliasLookupKeyTx,
@@ -172,69 +166,6 @@ describe("hosted-member-store", () => {
         initialOnboardingCompletedAt: null,
       }),
     }));
-  });
-
-  it("keeps identity, routing, and billing refs nested under their owning slices", () => {
-    const core: HostedMemberCoreState = {
-      billingStatus: HostedBillingStatus.incomplete,
-      createdAt: new Date("2026-04-07T00:00:00.000Z"),
-      id: "member_123",
-      suspendedAt: null,
-      updatedAt: new Date("2026-04-07T00:05:00.000Z"),
-    };
-    const identity: HostedMemberIdentityState = {
-      maskedPhoneNumberHint: "+1 **** 1234",
-      memberId: core.id,
-      phoneNumber: "+15551234",
-      phoneLookupKey: "phone_lookup_123",
-      phoneNumberVerifiedAt: new Date("2026-04-07T00:02:00.000Z"),
-
-      signupPhoneNumber: "+15551234",
-
-
-    };
-    const routing: HostedMemberRoutingStateSnapshot = {
-      linqChatId: "linq_chat_123",
-      linqHomeLineAssignedAt: null,
-      linqRecipientPhone: null,
-      memberId: core.id,
-      pendingLinqChatId: null,
-      pendingLinqParticipantContact: null,
-      pendingLinqRecipientPhone: null,
-      telegramThreadId: null,
-      telegramUserId: null,
-      telegramUserLookupKey: "telegram_lookup_123",
-    };
-    const billingRef: HostedMemberStripeBillingRefSnapshot = {
-      memberId: core.id,
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    };
-
-    const snapshot = composeHostedMemberSnapshot(core, {
-      billingRef,
-      identity,
-      routing,
-    });
-
-    expect(snapshot).toEqual({
-      billingRef,
-      core,
-      identity,
-      routing,
-    });
-    expect(Object.keys(snapshot).sort()).toEqual([
-      "billingRef",
-      "core",
-      "identity",
-      "routing",
-    ]);
-    expect("phoneLookupKey" in snapshot).toBe(false);
-    expect("linqChatId" in snapshot).toBe(false);
-    expect("stripeCustomerId" in snapshot).toBe(false);
-    expect(snapshot.identity?.phoneLookupKey).toBe(identity.phoneLookupKey);
-    expect(snapshot.routing?.linqChatId).toBe(routing.linqChatId);
-    expect(snapshot.billingRef?.stripeSubscriptionId).toBe(billingRef.stripeSubscriptionId);
   });
 
   it("looks up verified email members across readable blind-index versions", async () => {
@@ -516,84 +447,51 @@ describe("hosted-member-store", () => {
     });
   });
 
-
-  it("looks up identity by phone lookup key without returning the lookup key", async () => {
+  it("looks up phone identity by key or raw number without exposing the blind index", async () => {
     const member = createHostedMember();
-    const prisma = {
-      hostedMemberIdentity: {
-        findUnique: vi.fn().mockResolvedValue({
-          maskedPhoneNumberHint: "*** 4567",
-          member,
-          memberId: member.id,
-          phoneLookupKey: "hbidx:phone:v1:abc123",
-          phoneNumberVerifiedAt: null,
-
-          signupPhoneNumberEncrypted: await encryptHostedWebNullableString({
-            field: "hosted-member-identity.signup-phone-number",
-            memberId: member.id,
-            value: "+15551234567",
-          }),
-
-
-        }),
-      },
-    } as never;
-
-    await expect(
-      lookupHostedMemberIdentityByPhoneLookupKey({
-        phoneLookupKey: "hbidx:phone:v1:abc123",
-        prisma,
+    const record = {
+      maskedPhoneNumberHint: "*** 4567",
+      member,
+      memberId: member.id,
+      phoneLookupKey: "hbidx:phone:v1:abc123",
+      phoneNumberVerifiedAt: null,
+      signupPhoneNumberEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-identity.signup-phone-number",
+        memberId: member.id,
+        value: "+15551234567",
       }),
-    ).resolves.toEqual({
-      core: member,
-      identity: {
-        maskedPhoneNumberHint: "*** 4567",
-        memberId: member.id,
-        phoneNumber: null,
-        phoneNumberVerifiedAt: null,
-
-        signupPhoneNumber: "+15551234567",
-
-
-      },
-      matchedBy: "phoneLookupKey",
-    });
-  });
-
-  it("looks up identity by raw phone number through read candidates", async () => {
-    const member = createHostedMember();
-    const findMany = vi.fn().mockResolvedValue([
-      {
-        maskedPhoneNumberHint: "*** 4567",
-        member,
-        memberId: member.id,
-        phoneLookupKey: "hbidx:phone:v1:abc123",
-        phoneNumberVerifiedAt: null,
-
-        signupPhoneNumberEncrypted: null,
-
-
-      },
-    ]);
+    };
+    const findMany = vi.fn().mockResolvedValue([record]);
     const prisma = {
       hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(record),
         findMany,
       },
     } as never;
+    const identity = {
+      maskedPhoneNumberHint: "*** 4567",
+      memberId: member.id,
+      phoneNumber: null,
+      phoneNumberVerifiedAt: null,
+      signupPhoneNumber: "+15551234567",
+    };
 
-    await expect(
-      lookupHostedMemberIdentityByPhoneNumber({
-        phoneNumber: "+15551234567",
-        prisma,
-      }),
-    ).resolves.toEqual({
+    await expect(lookupHostedMemberIdentityByPhoneLookupKey({
+      phoneLookupKey: "hbidx:phone:v1:abc123",
+      prisma,
+    })).resolves.toEqual({
       core: member,
-      identity: expect.not.objectContaining({
-        phoneLookupKey: expect.anything(),
-      }),
+      identity,
+      matchedBy: "phoneLookupKey",
+    });
+    await expect(lookupHostedMemberIdentityByPhoneNumber({
+      phoneNumber: "+15551234567",
+      prisma,
+    })).resolves.toEqual({
+      core: member,
+      identity,
       matchedBy: "phoneNumber",
     });
-
     expect(findMany).toHaveBeenCalledWith({
       where: {
         phoneLookupKey: {
@@ -635,7 +533,6 @@ describe("hosted-member-store", () => {
     });
   });
 
-
   it("looks up routing by Telegram lookup key without exposing the blind index", async () => {
     const prisma = {
       hostedMemberRouting: {
@@ -676,85 +573,6 @@ describe("hosted-member-store", () => {
         hasTelegramUserBinding: true,
         linqChatId: "chat_123",
         memberId: "member_123",
-      },
-    });
-  });
-
-  it("looks up routing by raw Telegram user id through read candidates", async () => {
-    const findMany = vi.fn().mockResolvedValue([{
-      linqChatIdEncrypted: null,
-      linqRecipientPhoneEncrypted: null,
-      member: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      },
-      memberId: "member_123",
-      pendingLinqChatIdEncrypted: null,
-      pendingLinqRecipientPhoneEncrypted: null,
-      telegramUserIdEncrypted: null,
-      telegramUserLookupKey: "hbidx:telegram-user:v1:abc123",
-    }]);
-    const prisma = {
-      hostedMemberRouting: {
-        findMany,
-      },
-    } as never;
-
-    await expect(
-      lookupHostedMemberRoutingByTelegramUserId({
-        prisma,
-        telegramUserId: "456",
-      }),
-    ).resolves.toEqual({
-      core: {
-        billingStatus: HostedBillingStatus.active,
-        id: "member_123",
-        suspendedAt: null,
-      },
-      matchedBy: "telegramUserId",
-      routing: {
-        hasTelegramUserBinding: true,
-        linqChatId: null,
-        memberId: "member_123",
-      },
-    });
-
-    expect(findMany).toHaveBeenCalledWith({
-      where: {
-        telegramUserLookupKey: {
-          in: expect.arrayContaining([expect.stringMatching(/^hbidx:telegram-user:v1:/u)]),
-        },
-      },
-      select: {
-        linqChatIdEncrypted: true,
-        linqChatLookupKey: true,
-        linqHomeLineAssignedAt: true,
-        linqParticipantContactKind: true,
-        linqParticipantContactLookupKey: true,
-        linqRecipientPhoneEncrypted: true,
-        linqRecipientPhoneLookupKey: true,
-        member: {
-          select: {
-            billingStatus: true,
-            createdAt: true,
-            id: true,
-            suspendedAt: true,
-            updatedAt: true,
-          },
-        },
-        memberId: true,
-        pendingLinqChatIdEncrypted: true,
-        pendingLinqChatLookupKey: true,
-        pendingLinqParticipantContactEncrypted: true,
-        pendingLinqParticipantContactKind: true,
-        pendingLinqParticipantContactLookupKey: true,
-        pendingLinqParticipantContactObservedAt: true,
-        pendingLinqRecipientPhoneEncrypted: true,
-        pendingLinqRecipientPhoneLookupKey: true,
-        replyAliasLookupKey: true,
-        telegramUserLookupKey: true,
-        telegramUserIdEncrypted: true,
       },
     });
   });
@@ -916,7 +734,7 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("fails closed when raw Telegram user id resolves to multiple members across read candidates", async () => {
+  it("resolves one Telegram owner across rotated candidates and rejects multiple owners", async () => {
     setHostedContactPrivacyKeyring({
       currentVersion: "v2",
       keysByVersion: {
@@ -925,7 +743,7 @@ describe("hosted-member-store", () => {
       },
     });
 
-    const findMany = vi.fn().mockResolvedValue([
+    const records = [
       {
         linqChatIdEncrypted: null,
         linqHomeLineAssignedAt: null,
@@ -956,7 +774,8 @@ describe("hosted-member-store", () => {
         telegramUserIdEncrypted: null,
         telegramUserLookupKey: "hbidx:telegram-user:v2:def456",
       },
-    ]);
+    ];
+    const findMany = vi.fn().mockResolvedValue(records);
     const prisma = {
       hostedMemberRouting: {
         findMany,
@@ -1017,180 +836,75 @@ describe("hosted-member-store", () => {
         telegramUserIdEncrypted: true,
       },
     });
-  });
 
-  it("reads member routing state from routing lookup keys plus encrypted local columns", async () => {
-    const prisma = {
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          linqChatIdEncrypted: await encryptHostedWebNullableString({
-            field: "hosted-member-routing.home-linq-chat-id",
-            memberId: "member_123",
-            value: "chat_123",
-          }),
-          linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
-          linqParticipantContactKind: "email",
-          linqParticipantContactLookupKey: "hbidx:email:v1:home-participant",
-          linqRecipientPhoneEncrypted: null,
-          memberId: "member_123",
-          pendingLinqChatIdEncrypted: null,
-          pendingLinqRecipientPhoneEncrypted: null,
-          telegramUserIdEncrypted: null,
-          telegramUserLookupKey: "tg_user_123",
-        }),
+    findMany.mockResolvedValue([records[0]]);
+    await expect(lookupHostedMemberRoutingByTelegramUserId({
+      prisma,
+      telegramUserId: "456",
+    })).resolves.toEqual({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_v1",
+        suspendedAt: null,
       },
-    } as never;
-
-    await expect(
-      readHostedMemberRoutingState({
-        memberId: "member_123",
-        prisma,
-      }),
-    ).resolves.toEqual({
-      hasPendingLinqRouteState: false,
-      linqChatId: "chat_123",
-      linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
-      linqParticipantContact: {
-        kind: "email",
-        lookupKey: "hbidx:email:v1:home-participant",
+      matchedBy: "telegramUserId",
+      routing: {
+        hasTelegramUserBinding: true,
+        linqChatId: null,
+        memberId: "member_v1",
       },
-      linqRecipientPhone: null,
-      linqRecipientPhoneLookupKey: null,
-      memberId: "member_123",
-      pendingLinqChatId: null,
-      pendingLinqParticipantContact: null,
-      pendingLinqRecipientPhone: null,
-      replyAliasLookupKey: null,
-      telegramThreadId: null,
-      telegramUserId: null,
-      telegramUserLookupKey: "tg_user_123",
     });
   });
 
-  it("reads a persisted Telegram thread target alongside the raw Telegram user id", async () => {
-    const telegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
-      linqChatId: null,
-      linqRecipientPhone: null,
-      memberId: "member_123",
-      pendingLinqChatId: null,
-      pendingLinqParticipantContact: null,
-      pendingLinqRecipientPhone: null,
-      telegramThreadId: "456:business:biz-42:dm-topic:9",
-      telegramUserId: "456",
-    });
-    const prisma = {
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          linqChatIdEncrypted: null,
-          linqRecipientPhoneEncrypted: null,
-          memberId: "member_123",
-          pendingLinqChatIdEncrypted: null,
-          pendingLinqRecipientPhoneEncrypted: null,
-          telegramUserIdEncrypted: telegramPrivateColumns.telegramUserIdEncrypted,
-          telegramUserLookupKey: "tg_user_456",
-        }),
-      },
-    } as never;
-
-    await expect(
-      readHostedMemberRoutingState({
-        memberId: "member_123",
-        prisma,
-      }),
-    ).resolves.toEqual({
-      hasPendingLinqRouteState: false,
-      linqChatId: null,
-      linqChatLookupKey: null,
-      linqRecipientPhone: null,
-      linqRecipientPhoneLookupKey: null,
-      memberId: "member_123",
-      pendingLinqChatId: null,
-      pendingLinqParticipantContact: null,
-      pendingLinqRecipientPhone: null,
-      replyAliasLookupKey: null,
-      telegramThreadId: "456:business:biz-42:dm-topic:9",
-      telegramUserId: "456",
-      telegramUserLookupKey: "tg_user_456",
-    });
-  });
-
-  it("does not project a Telegram identity-only binding as a direct thread target", async () => {
-    const telegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
-      linqChatId: null,
-      linqRecipientPhone: null,
-      memberId: "member_123",
-      pendingLinqChatId: null,
-      pendingLinqParticipantContact: null,
-      pendingLinqRecipientPhone: null,
-      telegramThreadId: null,
-      telegramUserId: "456",
-    });
-    const prisma = {
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          linqChatIdEncrypted: null,
-          linqRecipientPhoneEncrypted: null,
-          memberId: "member_123",
-          pendingLinqChatIdEncrypted: null,
-          pendingLinqRecipientPhoneEncrypted: null,
-          telegramUserIdEncrypted: telegramPrivateColumns.telegramUserIdEncrypted,
-          telegramUserLookupKey: "tg_user_456",
-        }),
-      },
-    } as never;
-
-    await expect(
-      readHostedMemberRoutingState({
-        memberId: "member_123",
-        prisma,
-      }),
-    ).resolves.toEqual({
-      hasPendingLinqRouteState: false,
-      linqChatId: null,
-      linqChatLookupKey: null,
-      linqRecipientPhone: null,
-      linqRecipientPhoneLookupKey: null,
-      memberId: "member_123",
-      pendingLinqChatId: null,
-      pendingLinqParticipantContact: null,
-      pendingLinqRecipientPhone: null,
-      replyAliasLookupKey: null,
-      telegramThreadId: null,
-      telegramUserId: "456",
-      telegramUserLookupKey: "tg_user_456",
-    });
-  });
-
-  it("preserves legacy Telegram user lookup and valid direct thread targets", async () => {
+  it.each([
+    {
+      name: "current direct thread target",
+      schema: "murph.hosted-member-routing.telegram.v2",
+      storedThreadId: "456:business:biz-42:dm-topic:9",
+      expectedThreadId: "456:business:biz-42:dm-topic:9",
+    },
+    {
+      name: "current identity-only binding",
+      schema: "murph.hosted-member-routing.telegram.v2",
+      storedThreadId: null,
+      expectedThreadId: null,
+    },
+    {
+      name: "legacy direct thread target",
+      schema: LEGACY_TELEGRAM_PRIVATE_STATE_SCHEMA,
+      storedThreadId: "456:business:biz-42:dm-topic:9",
+      expectedThreadId: "456:business:biz-42:dm-topic:9",
+    },
+    {
+      name: "legacy identity-only binding",
+      schema: LEGACY_TELEGRAM_PRIVATE_STATE_SCHEMA,
+      storedThreadId: "456",
+      expectedThreadId: null,
+    },
+  ])("reads Telegram routing for $name", async ({ schema, storedThreadId, expectedThreadId }) => {
     const telegramUserIdEncrypted = await encryptHostedWebNullableString({
       field: "hosted-member-routing.telegram-user-id",
       memberId: "member_123",
       value: JSON.stringify({
-        schema: LEGACY_TELEGRAM_PRIVATE_STATE_SCHEMA,
-        telegramThreadId: "456:business:biz-42:dm-topic:9",
+        schema,
+        telegramThreadId: storedThreadId,
         telegramUserId: "456",
       }),
     });
     const prisma = {
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
-          linqChatIdEncrypted: null,
-          linqRecipientPhoneEncrypted: null,
-          memberId: "member_123",
-          pendingLinqChatIdEncrypted: null,
-          pendingLinqRecipientPhoneEncrypted: null,
+          ...createHostedMemberRoutingLookupRecord({ member: createHostedMember() }),
           telegramUserIdEncrypted,
           telegramUserLookupKey: "tg_user_456",
         }),
       },
     } as never;
 
-    await expect(
-      readHostedMemberRoutingState({
-        memberId: "member_123",
-        prisma,
-      }),
-    ).resolves.toEqual({
+    await expect(readHostedMemberRoutingState({
+      memberId: "member_123",
+      prisma,
+    })).resolves.toEqual({
       hasPendingLinqRouteState: false,
       linqChatId: null,
       linqChatLookupKey: null,
@@ -1201,246 +915,77 @@ describe("hosted-member-store", () => {
       pendingLinqParticipantContact: null,
       pendingLinqRecipientPhone: null,
       replyAliasLookupKey: null,
-      telegramThreadId: "456:business:biz-42:dm-topic:9",
+      telegramThreadId: expectedThreadId,
       telegramUserId: "456",
       telegramUserLookupKey: "tg_user_456",
     });
   });
 
-  it("preserves legacy Telegram user lookup while dropping legacy identity-only thread targets", async () => {
-    const telegramUserIdEncrypted = await encryptHostedWebNullableString({
-      field: "hosted-member-routing.telegram-user-id",
-      memberId: "member_123",
-      value: JSON.stringify({
-        schema: LEGACY_TELEGRAM_PRIVATE_STATE_SCHEMA,
-        telegramThreadId: "456",
-        telegramUserId: "456",
-      }),
-    });
-    const prisma = {
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          linqChatIdEncrypted: null,
-          linqRecipientPhoneEncrypted: null,
-          memberId: "member_123",
-          pendingLinqChatIdEncrypted: null,
-          pendingLinqRecipientPhoneEncrypted: null,
-          telegramUserIdEncrypted,
-          telegramUserLookupKey: "tg_user_456",
-        }),
-      },
-    } as never;
-
-    await expect(
-      readHostedMemberRoutingState({
-        memberId: "member_123",
-        prisma,
-      }),
-    ).resolves.toEqual({
-      hasPendingLinqRouteState: false,
-      linqChatId: null,
-      linqChatLookupKey: null,
-      linqRecipientPhone: null,
-      linqRecipientPhoneLookupKey: null,
-      memberId: "member_123",
-      pendingLinqChatId: null,
-      pendingLinqParticipantContact: null,
-      pendingLinqRecipientPhone: null,
-      replyAliasLookupKey: null,
-      telegramThreadId: null,
-      telegramUserId: "456",
-      telegramUserLookupKey: "tg_user_456",
-    });
-  });
-
-  it("fails closed when the persisted Telegram private payload uses an unknown schema", async () => {
-    const telegramUserIdEncrypted = await encryptHostedWebNullableString({
-      field: "hosted-member-routing.telegram-user-id",
-      memberId: "member_123",
+  it.each([
+    {
+      name: "unknown schema",
       value: JSON.stringify({
         schema: "murph.hosted-member-routing.telegram.v99",
         telegramThreadId: "456:business:biz-42:dm-topic:9",
         telegramUserId: "456",
       }),
-    });
-
-    await expect(
-      readHostedMemberRoutingTelegramPrivateState({
-        memberId: "member_123",
-        telegramUserIdEncrypted,
-      }),
-    ).resolves.toEqual({
-      telegramThreadId: null,
-      telegramUserId: null,
-    });
-  });
-
-  it("fails closed when the persisted Telegram private payload is not JSON", async () => {
+    },
+    { name: "invalid JSON", value: "not-json" },
+    { name: "wrong JSON shape", value: "456" },
+    { name: "bare group chat id", value: "-1009999999999" },
+  ])("fails closed for a Telegram private payload with $name", async ({ value }) => {
     const telegramUserIdEncrypted = await encryptHostedWebNullableString({
       field: "hosted-member-routing.telegram-user-id",
       memberId: "member_123",
-      value: "456",
+      value,
     });
 
-    await expect(
-      readHostedMemberRoutingTelegramPrivateState({
-        memberId: "member_123",
-        telegramUserIdEncrypted,
-      }),
-    ).resolves.toEqual({
+    await expect(readHostedMemberRoutingTelegramPrivateState({
+      memberId: "member_123",
+      telegramUserIdEncrypted,
+    })).resolves.toEqual({
       telegramThreadId: null,
       telegramUserId: null,
     });
   });
 
-  it("fails closed when the persisted Telegram private payload has the wrong JSON shape", async () => {
-    const telegramUserIdEncrypted = await encryptHostedWebNullableString({
-      field: "hosted-member-routing.telegram-user-id",
+  it.each([
+    {
+      name: "trimmed alias",
+      input: "  replyalias1234  ",
+      lookupKey: "replyalias1234",
       memberId: "member_123",
-      value: JSON.stringify(456),
-    });
-
-    await expect(
-      readHostedMemberRoutingTelegramPrivateState({
-        memberId: "member_123",
-        telegramUserIdEncrypted,
-      }),
-    ).resolves.toEqual({
-      telegramThreadId: null,
-      telegramUserId: null,
-    });
-  });
-
-  it("fails closed when a persisted Telegram private payload points at a bare group chat id", async () => {
-    const telegramUserIdEncrypted = await encryptHostedWebNullableString({
-      field: "hosted-member-routing.telegram-user-id",
+    },
+    {
+      name: "upgraded 32-hex alias",
+      input: "0123456789abcdef0123456789abcdef",
+      lookupKey: "0123456789abcdef0123456789abcdef",
       memberId: "member_123",
-      value: "-1009999999999",
-    });
-
-    await expect(
-      readHostedMemberRoutingTelegramPrivateState({
-        memberId: "member_123",
-        telegramUserIdEncrypted,
-      }),
-    ).resolves.toEqual({
-      telegramThreadId: null,
-      telegramUserId: null,
-    });
-  });
-
-  it("looks up the routed member by reply-alias lookup key", async () => {
-    const findUnique = vi.fn().mockResolvedValue({
-      memberId: "member_123",
-    });
+    },
+    {
+      name: "former 16-hex alias",
+      input: "0123456789abcdef",
+      lookupKey: "0123456789abcdef",
+      memberId: null,
+    },
+    {
+      name: "unrecognized alias",
+      input: "not-a-legacy-key",
+      lookupKey: "not-a-legacy-key",
+      memberId: null,
+    },
+  ])("uses only an exact reply-alias lookup for $name", async ({ input, lookupKey, memberId }) => {
+    const findUnique = vi.fn().mockResolvedValue(memberId ? { memberId } : null);
     const findMany = vi.fn();
-    const prisma = {
-      hostedMemberRouting: {
-        findMany,
-        findUnique,
-      },
-    } as never;
 
-    await expect(
-      readHostedMemberIdByReplyAliasLookupKey({
-        prisma,
-        replyAliasLookupKey: "  replyalias1234  ",
-      }),
-    ).resolves.toBe("member_123");
+    await expect(readHostedMemberIdByReplyAliasLookupKey({
+      prisma: { hostedMemberRouting: { findMany, findUnique } } as never,
+      replyAliasLookupKey: input,
+    })).resolves.toBe(memberId);
 
     expect(findUnique).toHaveBeenCalledWith({
-      where: {
-        replyAliasLookupKey: "replyalias1234",
-      },
-      select: {
-        memberId: true,
-      },
-    });
-    expect(findMany).not.toHaveBeenCalled();
-  });
-
-  it("looks up an upgraded 32-hex reply-alias lookup key directly", async () => {
-    const findUnique = vi.fn().mockResolvedValue({
-      memberId: "member_123",
-    });
-    const findMany = vi.fn();
-    const prisma = {
-      hostedMemberRouting: {
-        findMany,
-        findUnique,
-      },
-    } as never;
-
-    await expect(
-      readHostedMemberIdByReplyAliasLookupKey({
-        prisma,
-        replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
-      }),
-    ).resolves.toBe("member_123");
-
-    expect(findUnique).toHaveBeenCalledWith({
-      where: {
-        replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
-      },
-      select: {
-        memberId: true,
-      },
-    });
-    expect(findMany).not.toHaveBeenCalled();
-  });
-
-  it("does not use prefix fallback for former 16-hex reply-alias lookup keys", async () => {
-    const findUnique = vi.fn().mockResolvedValue(null);
-    const findMany = vi.fn();
-    const prisma = {
-      hostedMemberRouting: {
-        findMany,
-        findUnique,
-      },
-    } as never;
-
-    await expect(
-      readHostedMemberIdByReplyAliasLookupKey({
-        prisma,
-        replyAliasLookupKey: "0123456789abcdef",
-      }),
-    ).resolves.toBeNull();
-
-    expect(findUnique).toHaveBeenCalledWith({
-      where: {
-        replyAliasLookupKey: "0123456789abcdef",
-      },
-      select: {
-        memberId: true,
-      },
-    });
-    expect(findMany).not.toHaveBeenCalled();
-  });
-
-  it("does not use prefix fallback for non-matching reply-alias lookup keys", async () => {
-    const findUnique = vi.fn().mockResolvedValue(null);
-    const findMany = vi.fn();
-    const prisma = {
-      hostedMemberRouting: {
-        findMany,
-        findUnique,
-      },
-    } as never;
-
-    await expect(
-      readHostedMemberIdByReplyAliasLookupKey({
-        prisma,
-        replyAliasLookupKey: "not-a-legacy-key",
-      }),
-    ).resolves.toBeNull();
-
-    expect(findUnique).toHaveBeenCalledWith({
-      where: {
-        replyAliasLookupKey: "not-a-legacy-key",
-      },
-      select: {
-        memberId: true,
-      },
+      where: { replyAliasLookupKey: lookupKey },
+      select: { memberId: true },
     });
     expect(findMany).not.toHaveBeenCalled();
   });
@@ -3307,41 +2852,6 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("reads Stripe billing refs from billing lookup keys plus encrypted local columns", async () => {
-    const prisma = {
-      hostedMemberBillingRef: {
-        findUnique: vi.fn().mockResolvedValue({
-          ...createHostedBillingRefFixture(),
-          memberId: "member_123",
-          stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-            field: "hosted-member-billing-ref.stripe-customer-id",
-            memberId: "member_123",
-            value: "cus_123",
-          }),
-          stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-          stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
-            field: "hosted-member-billing-ref.stripe-subscription-id",
-            memberId: "member_123",
-            value: "sub_123",
-          }),
-          stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:abc123",
-        }),
-      },
-    } as never;
-
-    await expect(
-      readHostedMemberStripeBillingRef({
-        memberId: "member_123",
-        prisma,
-      }),
-    ).resolves.toEqual({
-      ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
-      memberId: "member_123",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    });
-  });
-
   it("reads billing eligibility without loading private Stripe identifiers", async () => {
     const findUnique = vi.fn().mockResolvedValue({
       currentBillingPhase: "pulse_trial",
@@ -3418,30 +2928,18 @@ describe("hosted-member-store", () => {
     const member = createHostedMember();
     const findMany = vi.fn()
       .mockResolvedValueOnce([{
-        ...createHostedBillingRefFixture(),
-        member,
-        memberId: member.id,
-        stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-          field: "hosted-member-billing-ref.stripe-customer-id",
+        ...await createEncryptedBillingRefFixture({
           memberId: member.id,
-          value: "cus_123",
+          stripeCustomerId: "cus_123",
         }),
-        stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-        stripeSubscriptionIdEncrypted: null,
-        stripeSubscriptionLookupKey: null,
+        member,
       }])
       .mockResolvedValueOnce([{
-        ...createHostedBillingRefFixture(),
-        member,
-        memberId: member.id,
-        stripeCustomerIdEncrypted: null,
-        stripeCustomerLookupKey: null,
-        stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
-          field: "hosted-member-billing-ref.stripe-subscription-id",
+        ...await createEncryptedBillingRefFixture({
           memberId: member.id,
-          value: "sub_123",
+          stripeSubscriptionId: "sub_123",
         }),
-        stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:abc123",
+        member,
       }]);
     const prisma = {
       hostedMemberBillingRef: {
@@ -3513,34 +3011,23 @@ describe("hosted-member-store", () => {
 
     const findMany = vi.fn().mockResolvedValue([
       {
-        ...createHostedBillingRefFixture(),
+        ...await createEncryptedBillingRefFixture({
+          memberId: "member_v1",
+          stripeCustomerId: "cus_123",
+        }),
         member: createHostedMember({
           id: "member_v1",
         }),
-        memberId: "member_v1",
-        stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-          field: "hosted-member-billing-ref.stripe-customer-id",
-          memberId: "member_v1",
-          value: "cus_123",
-        }),
-        stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-        stripeSubscriptionIdEncrypted: null,
-        stripeSubscriptionLookupKey: null,
       },
       {
-        ...createHostedBillingRefFixture(),
+        ...await createEncryptedBillingRefFixture({
+          memberId: "member_v2",
+          stripeCustomerId: "cus_123",
+        }),
         member: createHostedMember({
           id: "member_v2",
         }),
-        memberId: "member_v2",
-        stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-          field: "hosted-member-billing-ref.stripe-customer-id",
-          memberId: "member_v2",
-          value: "cus_123",
-        }),
         stripeCustomerLookupKey: "hbidx:stripe-customer:v2:def456",
-        stripeSubscriptionIdEncrypted: null,
-        stripeSubscriptionLookupKey: null,
       },
     ]);
     const prisma = {
@@ -3576,25 +3063,24 @@ describe("hosted-member-store", () => {
     });
   });
 
-  it("writes Stripe billing refs through lookup keys and encrypted local columns", async () => {
+  it("writes encrypted Stripe billing refs with reconciliation freshness, plan, and period markers", async () => {
+    const freshnessAt = new Date("2026-04-12T00:00:00.000Z");
+    const currentBillingPlanCode = "launch_edge_monthly";
+    const currentPeriodStart = new Date("2026-04-01T00:00:00.000Z");
+    const currentPeriodEnd = new Date("2026-05-01T00:00:00.000Z");
     const findMany = vi.fn().mockResolvedValue([]);
     const executeRaw = vi.fn().mockResolvedValue(0);
     const upsert = vi.fn().mockResolvedValue({
-      ...createHostedBillingRefFixture(),
-      memberId: "member_123",
+      ...await createEncryptedBillingRefFixture({
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      }),
+      currentBillingPlanCode,
+      currentPeriodStart,
+      currentPeriodEnd,
+      lastStripeEventCreatedAt: freshnessAt,
       pulseTrialStartSource: "web_onboarding",
-      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-customer-id",
-        memberId: "member_123",
-        value: "cus_123",
-      }),
-      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-      stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-subscription-id",
-        memberId: "member_123",
-        value: "sub_123",
-      }),
-      stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:abc123",
     });
     const prisma = {
       $executeRaw: executeRaw,
@@ -3610,6 +3096,10 @@ describe("hosted-member-store", () => {
 
     await expect(
       writeHostedMemberStripeBillingRefTx({
+        currentBillingPlanCode,
+        currentPeriodStart,
+        currentPeriodEnd,
+        stripeEventCreatedAt: freshnessAt,
         memberId: "member_123",
         pulseTrialStartSource: "web_onboarding",
         stripeCustomerId: "cus_123",
@@ -3618,6 +3108,10 @@ describe("hosted-member-store", () => {
       }),
     ).resolves.toEqual({
       ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
+      currentBillingPlanCode,
+      currentPeriodStart,
+      currentPeriodEnd,
+      lastStripeEventCreatedAt: freshnessAt,
       memberId: "member_123",
       pulseTrialStartSource: "web_onboarding",
       stripeCustomerId: "cus_123",
@@ -3629,11 +3123,12 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
       create: {
+        lastStripeEventCreatedAt: freshnessAt,
         currentBillingPhase: null,
-        currentBillingPlanCode: null,
+        currentBillingPlanCode,
         currentCheckoutOffer: null,
-        currentPeriodEnd: null,
-        currentPeriodStart: null,
+        currentPeriodEnd,
+        currentPeriodStart,
         currentTrialEndsAt: null,
         currentTrialStartedAt: null,
         memberId: "member_123",
@@ -3654,6 +3149,10 @@ describe("hosted-member-store", () => {
         usagePlanTransitionToCode: null,
       },
       update: {
+        currentBillingPlanCode,
+        currentPeriodStart,
+        currentPeriodEnd,
+        lastStripeEventCreatedAt: freshnessAt,
         pulseTrialStartSource: "web_onboarding",
         stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
         stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
@@ -3772,114 +3271,6 @@ describe("hosted-member-store", () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 
-  it("persists Stripe billing freshness markers when a Stripe source drives the write", async () => {
-    const freshnessAt = new Date("2026-04-12T00:00:00.000Z");
-    const findMany = vi.fn().mockResolvedValue([]);
-    const upsert = vi.fn().mockResolvedValue({
-      ...createHostedBillingRefFixture(),
-      lastStripeEventCreatedAt: freshnessAt,
-      memberId: "member_123",
-      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-customer-id",
-        memberId: "member_123",
-        value: "cus_123",
-      }),
-      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-      stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-subscription-id",
-        memberId: "member_123",
-        value: "sub_123",
-      }),
-      stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:abc123",
-    });
-    const prisma = {
-      $executeRaw: vi.fn().mockResolvedValue(0),
-      $queryRaw: vi.fn().mockResolvedValue([{ id: "member_123" }]),
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
-      },
-      hostedMemberBillingRef: {
-        findMany,
-        upsert,
-      },
-    } as never;
-
-    await expect(
-      writeHostedMemberStripeBillingRefTx({
-        memberId: "member_123",
-        stripeCustomerId: "cus_123",
-        stripeEventCreatedAt: freshnessAt,
-        stripeSubscriptionId: "sub_123",
-        tx: prisma,
-      }),
-    ).resolves.toEqual({
-      ...EMPTY_BILLING_REF_SNAPSHOT_FIELDS,
-      lastStripeEventCreatedAt: freshnessAt,
-      memberId: "member_123",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    });
-
-    expect(upsert).toHaveBeenCalledWith({
-      where: {
-        memberId: "member_123",
-      },
-      create: {
-        currentBillingPhase: null,
-        currentBillingPlanCode: null,
-        currentCheckoutOffer: null,
-        currentPeriodEnd: null,
-        currentPeriodStart: null,
-        currentTrialEndsAt: null,
-        currentTrialStartedAt: null,
-        lastStripeEventCreatedAt: freshnessAt,
-        memberId: "member_123",
-        pulseTrialPolicyVersion: null,
-        pulseTrialRedeemedAt: null,
-        pulseTrialStartSource: null,
-        scheduledBillingEffectiveAt: null,
-        scheduledBillingPlanCode: null,
-        stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
-        stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
-        stripeSubscriptionIdEncrypted: expect.stringMatching(/^hsb-test:/u),
-        stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
-        stripeSubscriptionScheduleIdEncrypted: null,
-        stripeSubscriptionScheduleLookupKey: null,
-        usagePlanTransitionAt: null,
-        usagePlanTransitionFromCode: null,
-        usagePlanTransitionKind: null,
-        usagePlanTransitionToCode: null,
-      },
-      update: {
-        lastStripeEventCreatedAt: freshnessAt,
-        stripeCustomerIdEncrypted: expect.stringMatching(/^hsb-test:/u),
-        stripeCustomerLookupKey: expect.stringMatching(/^hbidx:stripe-customer:v1:/u),
-        stripeSubscriptionIdEncrypted: expect.stringMatching(/^hsb-test:/u),
-        stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
-      },
-    });
-    expect(findMany).toHaveBeenNthCalledWith(1, {
-      where: {
-        stripeCustomerLookupKey: {
-          in: [expect.stringMatching(/^hbidx:stripe-customer:v1:/u)],
-        },
-      },
-      select: {
-        memberId: true,
-      },
-    });
-    expect(findMany).toHaveBeenNthCalledWith(2, {
-      where: {
-        stripeSubscriptionLookupKey: {
-          in: [expect.stringMatching(/^hbidx:stripe-subscription:v1:/u)],
-        },
-      },
-      select: {
-        memberId: true,
-      },
-    });
-  });
-
   it("preserves attempt A and Session S when the invoice.paid billing write binds subscription X first", async () => {
     // applyStripeInvoicePaid reaches this existing ref owner through
     // writeHostedMemberStripeBillingTx without owning Checkout-attempt fields.
@@ -3976,91 +3367,12 @@ describe("hosted-member-store", () => {
     }
   });
 
-  it("persists Stripe billing plan and period markers from reconciliation", async () => {
-    const currentBillingPlanCode = "launch_edge_monthly";
-    const currentPeriodStart = new Date("2026-04-01T00:00:00.000Z");
-    const currentPeriodEnd = new Date("2026-05-01T00:00:00.000Z");
-    const findMany = vi.fn().mockResolvedValue([]);
-    const upsert = vi.fn().mockResolvedValue({
-      ...createHostedBillingRefFixture(),
-      currentBillingPlanCode,
-      currentPeriodEnd,
-      currentPeriodStart,
-      memberId: "member_123",
-      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-customer-id",
-        memberId: "member_123",
-        value: "cus_123",
-      }),
-      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-      stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-subscription-id",
-        memberId: "member_123",
-        value: "sub_123",
-      }),
-      stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:abc123",
-    });
-    const prisma = {
-      $executeRaw: vi.fn().mockResolvedValue(0),
-      $queryRaw: vi.fn().mockResolvedValue([{ id: "member_123" }]),
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({ suspendedAt: null }),
-      },
-      hostedMemberBillingRef: {
-        findMany,
-        upsert,
-      },
-    } as never;
-
-    await expect(
-      writeHostedMemberStripeBillingRefTx({
-        currentBillingPlanCode,
-        currentPeriodEnd,
-        currentPeriodStart,
-        memberId: "member_123",
-        stripeCustomerId: "cus_123",
-        stripeSubscriptionId: "sub_123",
-        tx: prisma,
-      }),
-    ).resolves.toMatchObject({
-      currentBillingPlanCode,
-      currentPeriodEnd,
-      currentPeriodStart,
-      memberId: "member_123",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    });
-
-    expect(upsert).toHaveBeenCalledWith({
-      where: {
-        memberId: "member_123",
-      },
-      create: expect.objectContaining({
-        currentBillingPlanCode,
-        currentPeriodEnd,
-        currentPeriodStart,
-        memberId: "member_123",
-      }),
-      update: expect.objectContaining({
-        currentBillingPlanCode,
-        currentPeriodEnd,
-        currentPeriodStart,
-      }),
-    });
-  });
-
   it("binds Stripe customer ids without mutating the member row", async () => {
     const upsert = vi.fn().mockResolvedValue({
-      ...createHostedBillingRefFixture(),
-      memberId: "member_123",
-      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-customer-id",
+      ...await createEncryptedBillingRefFixture({
         memberId: "member_123",
-        value: "cus_123",
+        stripeCustomerId: "cus_123",
       }),
-      stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-      stripeSubscriptionIdEncrypted: null,
-      stripeSubscriptionLookupKey: null,
     });
     const findMany = vi.fn().mockResolvedValue([]);
     const prisma = {
@@ -4120,19 +3432,12 @@ describe("hosted-member-store", () => {
 
   it("binds Stripe customer ids without clearing existing encrypted billing fields", async () => {
     const upsert = vi.fn().mockResolvedValue({
-      ...createHostedBillingRefFixture(),
-      memberId: "member_123",
-      stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-customer-id",
+      ...await createEncryptedBillingRefFixture({
         memberId: "member_123",
-        value: "cus_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_existing",
       }),
       stripeCustomerLookupKey: "hbidx:stripe-customer:v1:new",
-      stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-billing-ref.stripe-subscription-id",
-        memberId: "member_123",
-        value: "sub_existing",
-      }),
       stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:existing",
     });
     const findMany = vi.fn().mockResolvedValue([]);
@@ -4145,14 +3450,9 @@ describe("hosted-member-store", () => {
       hostedMemberBillingRef: {
         findMany,
         findUnique: vi.fn().mockResolvedValue({
-          ...createHostedBillingRefFixture(),
-          memberId: "member_123",
-          stripeCustomerIdEncrypted: null,
-          stripeCustomerLookupKey: null,
-          stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
-            field: "hosted-member-billing-ref.stripe-subscription-id",
+          ...await createEncryptedBillingRefFixture({
             memberId: "member_123",
-            value: "sub_existing",
+            stripeSubscriptionId: "sub_existing",
           }),
           stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:existing",
         }),
@@ -4204,16 +3504,11 @@ describe("hosted-member-store", () => {
       hostedMemberBillingRef: {
         findMany,
         findUnique: vi.fn().mockResolvedValue({
-          ...createHostedBillingRefFixture(),
-          memberId: "member_123",
-          stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-            field: "hosted-member-billing-ref.stripe-customer-id",
+          ...await createEncryptedBillingRefFixture({
             memberId: "member_123",
-            value: "cus_existing",
+            stripeCustomerId: "cus_existing",
           }),
           stripeCustomerLookupKey: "hbidx:stripe-customer:v1:existing",
-          stripeSubscriptionIdEncrypted: null,
-          stripeSubscriptionLookupKey: null,
         }),
         upsert,
       },
@@ -4251,20 +3546,11 @@ describe("hosted-member-store", () => {
         findUnique: vi.fn().mockResolvedValue({
           ...createHostedMember(),
           billingRef: {
-            ...createHostedBillingRefFixture(),
-            memberId: "member_123",
-            stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
-              field: "hosted-member-billing-ref.stripe-customer-id",
+            ...await createEncryptedBillingRefFixture({
               memberId: "member_123",
-              value: "cus_123",
+              stripeCustomerId: "cus_123",
+              stripeSubscriptionId: "sub_123",
             }),
-            stripeCustomerLookupKey: "hbidx:stripe-customer:v1:abc123",
-            stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
-              field: "hosted-member-billing-ref.stripe-subscription-id",
-              memberId: "member_123",
-              value: "sub_123",
-            }),
-            stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:abc123",
           },
           identity: {
             maskedPhoneNumberHint: "*** 4567",
@@ -4284,6 +3570,8 @@ describe("hosted-member-store", () => {
               value: "chat_123",
             }),
             linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
+            linqParticipantContactKind: "email",
+            linqParticipantContactLookupKey: "hbidx:email:v1:home-participant",
             linqRecipientPhoneEncrypted: null,
             memberId: "member_123",
             pendingLinqChatIdEncrypted: null,
@@ -4329,6 +3617,10 @@ describe("hosted-member-store", () => {
         hasPendingLinqRouteState: false,
         linqChatId: "chat_123",
         linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
+        linqParticipantContact: {
+          kind: "email",
+          lookupKey: "hbidx:email:v1:home-participant",
+        },
         linqRecipientPhone: null,
         linqRecipientPhoneLookupKey: null,
         memberId: "member_123",
@@ -4497,4 +3789,30 @@ function createHostedMemberRoutingLookupRecord(input: {
     telegramUserIdEncrypted: null,
     telegramUserLookupKey: null,
   };
+}
+
+async function createEncryptedBillingRefFixture(input: {
+  memberId: string;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+}) {
+  return createHostedBillingRefFixture({
+    memberId: input.memberId,
+    stripeCustomerIdEncrypted: await encryptHostedWebNullableString({
+      field: "hosted-member-billing-ref.stripe-customer-id",
+      memberId: input.memberId,
+      value: input.stripeCustomerId ?? null,
+    }),
+    stripeCustomerLookupKey: input.stripeCustomerId
+      ? "hbidx:stripe-customer:v1:abc123"
+      : null,
+    stripeSubscriptionIdEncrypted: await encryptHostedWebNullableString({
+      field: "hosted-member-billing-ref.stripe-subscription-id",
+      memberId: input.memberId,
+      value: input.stripeSubscriptionId ?? null,
+    }),
+    stripeSubscriptionLookupKey: input.stripeSubscriptionId
+      ? "hbidx:stripe-subscription:v1:abc123"
+      : null,
+  });
 }

@@ -1989,7 +1989,8 @@ function resolveDeviceSyncFailureRetryPolicy(input: {
 export function readSafeJunctionNormalizationDiagnostics(
   input: Record<string, unknown>,
 ): Pick<DeviceSyncJobFailureDiagnostic["details"],
-  "normalizationValueKind" | "normalizationValueRange" | "normalizationUnitKind"> {
+  "normalizationValueKind" | "normalizationValueRange" | "normalizationUnitKind"
+  | "normalizationRecordExpanded" | "normalizationDayBasis" | "normalizationUtcDayRelation" | "normalizationResolvedDayRelation"> {
   const allowed = (value: unknown, values: readonly string[]): string | null =>
     typeof value === "string" && values.includes(value) ? value : null;
   return compactFailureDiagnostics({
@@ -2000,6 +2001,13 @@ export function readSafeJunctionNormalizationDiagnostics(
         "below_range", "above_range_up_to_10x", "above_range_10x_to_1000x", "above_range_over_1000x"]),
     normalizationUnitKind: allowed(input.normalizationUnitKind,
       ["missing", "percent", "ratio", "other", "g", "mg", "ml", "l", "min", "s"]),
+    normalizationRecordExpanded: typeof input.normalizationRecordExpanded === "boolean" ? input.normalizationRecordExpanded : null,
+    normalizationDayBasis: allowed(input.normalizationDayBasis,
+      ["explicit_calendar", "timestamp_calendar", "source_offset", "vault_timezone", "utc", "missing"]),
+    normalizationUtcDayRelation: allowed(input.normalizationUtcDayRelation,
+      ["before", "equal", "after", "missing"]),
+    normalizationResolvedDayRelation: allowed(input.normalizationResolvedDayRelation,
+      ["before", "equal", "after", "missing"]),
   });
 }
 
@@ -2043,6 +2051,10 @@ function normalizeExecutionError(error: unknown): {
           normalizationValueKind: error.diagnostic.valueKind,
           normalizationValueRange: error.diagnostic.valueRange,
           normalizationUnitKind: error.diagnostic.unitKind,
+          normalizationRecordExpanded: error.diagnostic.recordExpanded,
+          normalizationDayBasis: error.diagnostic.dayBasis,
+          normalizationUtcDayRelation: error.diagnostic.utcDayRelation,
+          normalizationResolvedDayRelation: error.diagnostic.resolvedDayRelation,
         }),
       }),
       message: error.message,
@@ -2088,9 +2100,7 @@ function normalizeExecutionError(error: unknown): {
 
 function summarizeDeviceSyncErrorMessage(error: DeviceSyncError): string {
   const baseMessage = sanitizeHostedRuntimeErrorText(error.message) ?? "[redacted]";
-  const providerReason =
-    readSafeDiagnosticText(error.details?.responseErrorDescription)
-    ?? readSafeDiagnosticText(error.details?.oauthErrorDescription);
+  const providerReason = readSafeDiagnosticText(error.details?.responseErrorDescription);
   if (!providerReason) {
     return baseMessage;
   }
@@ -2136,39 +2146,6 @@ function buildDeviceSyncErrorFailureDiagnostics(
     ),
     providerResponseErrorFieldPresent: readSafeDiagnosticBoolean(error.details?.responseErrorFieldPresent),
     providerResponseShapeKind: readSafeDiagnosticToken(error.details?.responseShapeKind),
-    providerOAuthErrorCode: readSafeDiagnosticToken(error.details?.oauthErrorCode),
-    providerOAuthErrorDescription: readSafeDiagnosticText(error.details?.oauthErrorDescription),
-    providerOAuthGrantType: readSafeDiagnosticToken(error.details?.oauthGrantType),
-    providerOAuthRequestBodyBuilderKind: readSafeDiagnosticToken(error.details?.oauthRequestBodyBuilderKind),
-    providerOAuthRequestClientAuthPlacement: readSafeDiagnosticToken(error.details?.oauthRequestClientAuthPlacement),
-    providerOAuthRequestClientCredentialPresent: readSafeDiagnosticBoolean(
-      error.details?.oauthRequestClientCredentialPresent,
-    ),
-    providerOAuthRequestClientIdPresent: readSafeDiagnosticBoolean(error.details?.oauthRequestClientIdPresent),
-    providerOAuthRequestContentType: readSafeDiagnosticToken(error.details?.oauthRequestContentType),
-    providerOAuthRequestDuplicateParameterCount: readSafeDiagnosticNumber(
-      error.details?.oauthRequestDuplicateParameterCount,
-    ),
-    providerOAuthRequestEncodingKind: readSafeDiagnosticToken(error.details?.oauthRequestEncodingKind),
-    providerOAuthRequestHasDuplicateParameters: readSafeDiagnosticBoolean(
-      error.details?.oauthRequestHasDuplicateParameters,
-    ),
-    providerOAuthRequestMethod: readSafeDiagnosticToken(error.details?.oauthRequestMethod),
-    providerOAuthRequestOfflineScopePresent: readSafeDiagnosticBoolean(error.details?.oauthRequestOfflineScopePresent),
-    providerOAuthRequestParameterCount: readSafeDiagnosticNumber(error.details?.oauthRequestParameterCount),
-    providerOAuthRequestParameterNames: readSafeDiagnosticToken(error.details?.oauthRequestParameterNames),
-    providerOAuthRequestRefreshCredentialPresent: readSafeDiagnosticBoolean(
-      error.details?.oauthRequestRefreshCredentialPresent,
-    ),
-    providerOAuthRequestScopeCount: readSafeDiagnosticNumber(error.details?.oauthRequestScopeCount),
-    providerOAuthRequestScopePresent: readSafeDiagnosticBoolean(error.details?.oauthRequestScopePresent),
-    providerOAuthRequestScopeValue: readSafeDiagnosticToken(error.details?.oauthRequestScopeValue),
-    providerOAuthRequestTokenEndpointKind: readSafeDiagnosticToken(error.details?.oauthRequestTokenEndpointKind),
-    providerOAuthResponseErrorDescriptionFieldPresent: readSafeDiagnosticBoolean(
-      error.details?.oauthResponseErrorDescriptionFieldPresent,
-    ),
-    providerOAuthResponseErrorFieldPresent: readSafeDiagnosticBoolean(error.details?.oauthResponseErrorFieldPresent),
-    providerOAuthResponseShapeKind: readSafeDiagnosticToken(error.details?.oauthResponseShapeKind),
   });
 }
 

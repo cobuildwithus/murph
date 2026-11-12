@@ -147,7 +147,7 @@ async function createFixture(run: ParserProvider["run"]) {
   const service = createInboxParserService({
     runtime, vaultRoot, ffmpeg: { allowSystemLookup: false, commandCandidates: [] },
     registry: createParserRegistry([{
-      id: "synthetic-preparation", priority: 1, locality: "local", openness: "open_source", runtime: "node",
+      id: "synthetic-preparation",
       async discover() { return { available: true, reason: "Synthetic fixture." }; },
       supports(request) { return request.artifact.kind === "audio"; },
       run,

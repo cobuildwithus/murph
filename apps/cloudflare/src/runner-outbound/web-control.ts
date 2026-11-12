@@ -29,6 +29,7 @@ import {
 import {
   HOSTED_RUNTIME_USAGE_RECORD_PATH
 } from "@murphai/hosted-execution/routes";
+import { HOSTED_WEB_REQUEST_MAX_BYTES } from "@murphai/hosted-execution/runtime-control";
 import {
   createAssistantUsageReportingUserId,
 } from "@murphai/hosted-execution/assistant-usage";
@@ -65,8 +66,6 @@ import {
   HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
   readHostedRuntimeFetchCorrelationId,
 } from "./headers.ts";
-
-const HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES = 256 * 1024;
 
 export async function handleRunnerWebControlRequest(input: {
   caller?: RuntimeProviderCaller;
@@ -457,7 +456,7 @@ function forceHostedRunnerRuntimeSnapshotCredentialMaterial(body: string): strin
 
 async function readOptionalHostedRunnerWebControlBody(request: Request): Promise<string | undefined> {
   const bodyText = await readRequestBodyText(request, {
-    limitBytes: HOSTED_RUNNER_WEB_CONTROL_BODY_LIMIT_BYTES,
+    limitBytes: HOSTED_WEB_REQUEST_MAX_BYTES,
   });
   return bodyText.length > 0 ? bodyText : undefined;
 }

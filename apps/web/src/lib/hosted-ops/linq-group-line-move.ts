@@ -3,12 +3,45 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { getPrisma } from "../prisma";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates, createHostedExternalThreadLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
-import { addHostedLinqChatParticipant, leaveHostedLinqChat, removeHostedLinqChatParticipant } from "../hosted-onboarding/linq-client";
+import { addHostedLinqChatParticipant, getHostedLinqChatSummary, leaveHostedLinqChat, removeHostedLinqChatParticipant } from "../hosted-onboarding/linq-client";
+import { readHostedLinqLinePhoneNumberByLookupKey } from "../hosted-onboarding/linq-line-phone-resolver";
+import { normalizePhoneNumber } from "../hosted-onboarding/phone";
+import { releaseHostedLinqRemovedLineRouteTx } from "../hosted-routing/thread-container-service";
+import { adoptDiscoveredHostedLinqGroupMove } from "./linq-group-line-move-discovery";
 import { openHostedThreadDeliveryRoute } from "../hosted-routing/thread-delivery-route";
 import { openHostedLinqGroupMoveCleanup, prepareHostedLinqGroupMoveCleanup, type HostedLinqGroupMoveCleanup } from "../hosted-routing/linq-group-line-move-store";
 import { activeGroupMoveHandles, assertGroupMoveLinesCanSend, assertGroupMoveQuiet, assertGroupMoveReservationAvailable, assertGroupMoveSourceSelf,
-  GROUP_MOVE_ADOPTION_MS, groupMoveError, groupMoveFailureCode, groupMoveHasPhone, groupMoveOperatorSelect, lockGroupMoveSource,
+  GROUP_MOVE_ADD_SETTLE_MS, GROUP_MOVE_ADOPTION_MS, groupMoveError, groupMoveFailureCode, groupMoveHasPhone, groupMoveOperatorSelect, lockGroupMoveSource,
   readGroupMoveRoster, readOperatorGroupMove, recordGroupMoveError, summarizeOperatorGroupMove, type OperatorGroupMove } from "./linq-group-line-move-state";
+
+/**
+ * Detach a group route whose own line Linq reports as removed from that chat.
+ * Used when an earlier test left a stale container bound to the target line's
+ * copy of a group: re-adding the line would otherwise deliver to that copy.
+ */
+export async function releaseHostedLinqRemovedLineRoute(input: { containerRef: string; prisma?: PrismaClient }) {
+  const prisma = input.prisma ?? getPrisma();
+  const expected = await prisma.hostedThreadRoute.findUnique({ where: {
+    channel_threadIdentityLookupKey: { channel: "linq", threadIdentityLookupKey: input.containerRef },
+  } });
+  if (!expected) groupMoveError("ROUTE_REQUIRED");
+  const route = await openHostedThreadDeliveryRoute({ channel: "linq", containerMemberId: expected.containerMemberId,
+    encrypted: expected.deliveryRouteEncrypted, prisma });
+  if (route.channel !== "linq" || (expected.accountLookupKey !== null && route.accountLookupKey !== expected.accountLookupKey)
+    || !createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: "linq", threadId: route.threadId }).includes(expected.threadIdentityLookupKey)) groupMoveError("ROUTE_CHANGED");
+  const linePhone = await readHostedLinqLinePhoneNumberByLookupKey({ phoneNumberLookupKey: route.accountLookupKey, prisma });
+  if (!linePhone) groupMoveError("LINE_UNKNOWN");
+  const chat = await getHostedLinqChatSummary({ chatId: route.threadId, timeoutMs: 3_000 });
+  if (chat.isGroup !== true || !chat.handlesComplete || !chat.handles.length || chat.handles.length > 32
+    || Date.now() - chat.observedAt.getTime() > 30_000) groupMoveError("ROSTER_UNAVAILABLE");
+  // The route's own line must be listed as self and no longer active.
+  const [own, duplicate] = chat.handles.filter(handle => normalizePhoneNumber(handle.handle) === linePhone);
+  if (!own || duplicate || !own.isMe || own.status === null || own.status.trim().toLowerCase() === "active")
+    groupMoveError("LINE_STILL_ACTIVE");
+  const released = await prisma.$transaction(tx => releaseHostedLinqRemovedLineRouteTx({ expected, threadId: route.threadId, prisma: tx }));
+  if (!released) groupMoveError("ROUTE_CHANGED");
+  return { containerHint: expected.containerMemberId.slice(-8), released: true };
+}
 
 export async function startHostedLinqGroupLineMove(input: { containerRef: string; targetLineLookupKey: string; prisma?: PrismaClient }) {
   const prisma = input.prisma ?? getPrisma();
@@ -61,7 +94,7 @@ async function reserveGroupMove(input: { containerRef: string; targetLineLookupK
 }
 
 export async function operateHostedLinqGroupLineMove(input: {
-  operation: "resume" | "cancel" | "retry_leave"; moveId: string; prisma?: PrismaClient;
+  operation: "resume" | "cancel" | "retry_leave" | "adopt"; moveId: string; prisma?: PrismaClient;
 }) {
   const prisma = input.prisma ?? getPrisma();
   const move = await readOperatorGroupMove(input.moveId, prisma);
@@ -71,7 +104,12 @@ export async function operateHostedLinqGroupLineMove(input: {
   // Encryption and all provider calls are outside transactions, including after route deletion.
   try {
     const cleanup = await openHostedLinqGroupMoveCleanup(move, prisma);
-    if (input.operation === "cancel") await cancelGroupMove(move, cleanup, prisma);
+    if (input.operation === "adopt" && move.status === "reserved") {
+      await adoptDiscoveredHostedLinqGroupMove({ move, cleanup, prisma });
+      const current = await readOperatorGroupMove(move.id, prisma);
+      if (current.status === "adopted") await leaveGroupMove(current, cleanup, prisma);
+    }
+    else if (input.operation === "cancel") await cancelGroupMove(move, cleanup, prisma);
     else if (move.status === "adopted") await leaveGroupMove(move, cleanup, prisma);
     else await resumeGroupMove(move, cleanup, prisma);
   } catch (error) {
@@ -87,10 +125,9 @@ async function resumeGroupMove(move: OperatorGroupMove, cleanup: HostedLinqGroup
   let roster = await readGroupMoveRoster(cleanup);
   assertGroupMoveSourceSelf(roster, cleanup);
   if (!groupMoveHasPhone(roster, cleanup.targetPhone)) {
-    // Never blindly repeat a claimed add. Disarm and clean up an unconfirmed attempt.
+    // A queued or interrupted add can appear later. Reconcile without repeating it.
     if (move.addStartedAt) {
-      await recordGroupMoveError(move, "add_unconfirmed", prisma);
-      await cancelGroupMove(await readOperatorGroupMove(move.id, prisma), cleanup, prisma);
+      await recordGroupMoveError(move, "add_pending", prisma);
       return;
     }
     const claimed = await prisma.$transaction(async tx => {
@@ -110,8 +147,7 @@ async function resumeGroupMove(move: OperatorGroupMove, cleanup: HostedLinqGroup
       return;
     }
     if (!groupMoveHasPhone(roster, cleanup.targetPhone)) {
-      await recordGroupMoveError(move, "add_unconfirmed", prisma);
-      await cancelGroupMove(await readOperatorGroupMove(move.id, prisma), cleanup, prisma);
+      await recordGroupMoveError(move, "add_pending", prisma);
       return;
     }
   }
@@ -135,7 +171,13 @@ async function cancelGroupMove(move: OperatorGroupMove, cleanup: HostedLinqGroup
   // Reconciliation absence must be observed after the dispatch receipt.
   let roster = await readGroupMoveRoster(cleanup);
   assertGroupMoveSourceSelf(roster, cleanup);
-  if (!groupMoveHasPhone(roster, cleanup.targetPhone) && current.addStartedAt && !current.addConfirmedAt && !current.lastErrorCode?.startsWith("add_rejected")) {
+  const addStartedAt = current.addStartedAt;
+  const addUnconfirmed = addStartedAt !== null && !current.addConfirmedAt
+    && !current.lastErrorCode?.startsWith("add_rejected") && !groupMoveHasPhone(roster, cleanup.targetPhone);
+  // An accepted add can surface later, so absence alone keeps the reservation.
+  // Once the settle window passes, absence releases it; a later arrival is an
+  // ordinary unbound copy on the target line, never adoption authority.
+  if (addUnconfirmed && Date.now() - addStartedAt.getTime() < GROUP_MOVE_ADD_SETTLE_MS) {
     await recordGroupMoveError(move, current.lastErrorCode?.startsWith("add_") ? current.lastErrorCode : "add_outcome_unknown", prisma); return;
   }
   if (groupMoveHasPhone(roster, cleanup.targetPhone)) {
@@ -161,7 +203,8 @@ async function cancelGroupMove(move: OperatorGroupMove, cleanup: HostedLinqGroup
     await lockGroupMoveSource(cleanup, tx);
     await tx.hostedLinqGroupLineMove.updateMany({ where: { id: move.id, status: "reserved", adoptionDeadlineAt: new Date(0),
       removeStartedAt: current.removeStartedAt, removeAcceptedAt: current.removeAcceptedAt },
-      data: { status: "cancelled", lastErrorCode: current.lastErrorCode?.startsWith("add_") ? current.lastErrorCode : null } });
+      data: { status: "cancelled", lastErrorCode: addUnconfirmed ? "add_abandoned"
+        : current.lastErrorCode?.startsWith("add_") ? current.lastErrorCode : null } });
   });
 }
 

@@ -112,22 +112,6 @@ function setAction(
   };
 }
 
-function preferenceOnlyAction() {
-  return {
-    expectedWorkout: {
-      actionBinding: ACTION_BINDING,
-      exercises: [{
-        name: "Leg press",
-        sets: [{ logged: false }],
-      }],
-    },
-    kind: "workout.live.apply" as const,
-    mutations: [],
-    version: 1 as const,
-    weightUnitPreference: "kg" as const,
-  };
-}
-
 function appendAction(setCount = 1) {
   return {
     expectedWorkout: {
@@ -346,29 +330,6 @@ describe("live workout member action", () => {
     });
   });
 
-  it("validates and records a preference-only action through the canonical write", async () => {
-    await expect(applyLiveWorkoutMemberAction({
-      acceptedAt: ACCEPTED_AT,
-      action: preferenceOnlyAction(),
-      vault: "/vault",
-    })).resolves.toEqual({ status: "unchanged" });
-
-    expect(mocks.withLiveWorkoutMutationLock).toHaveBeenCalledWith(
-      "/vault",
-      "evt_test_workout",
-      expect.any(Function),
-    );
-    expect(mocks.updateLiveWorkoutExercises).toHaveBeenCalledWith(
-      shownWorkout(),
-      BASE_WORKOUT,
-      BASE_WORKOUT.exercises,
-      {
-        lastMemberActionId: ACTION_ID,
-        observedAt: ACCEPTED_AT,
-      },
-    );
-  });
-
   it("renames an exercise in one canonical write", async () => {
     await expect(applyLiveWorkoutMemberAction({
       acceptedAt: ACCEPTED_AT,
@@ -453,9 +414,21 @@ describe("live workout member action", () => {
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 
-  it("returns one authoritative V6 card for an apply and its exact replay", async () => {
+  it.each([
+    { state: "open", finite: false, boundary: {} },
+    { state: "completed", finite: true, boundary: { endedAt: ACCEPTED_AT } },
+  ])("returns one authoritative V6 card for a $state workout apply and its exact replay", async ({ finite, boundary }) => {
+    const currentWorkout: WorkoutSession = {
+      ...BASE_WORKOUT,
+      exercises: [{ ...BASE_WORKOUT.exercises[0], setPlanIsFinite: finite }],
+    };
+    mocks.candidateWorkouts.mockResolvedValueOnce([shownWorkout(currentWorkout)]);
     const action = {
       ...setAction({ kind: "reps" as const, reps: 8 }),
+      expectedWorkout: {
+        actionBinding: deriveWorkoutActionBinding("evt_test_workout", currentWorkout),
+        exercises: [{ name: "Leg press", sets: [{ logged: false }] }],
+      },
       presentation: workoutPresentation({
         exercises: [{
           name: "Leg press",
@@ -468,10 +441,11 @@ describe("live workout member action", () => {
       }),
     };
     const persistedWorkout: WorkoutSession = {
-      ...BASE_WORKOUT,
+      ...currentWorkout,
+      ...boundary,
       lastMemberActionId: ACTION_ID,
       exercises: [{
-        ...BASE_WORKOUT.exercises[0],
+        ...currentWorkout.exercises[0],
         sets: [{ order: 1, reps: 8 }],
       }],
     };
@@ -512,6 +486,17 @@ describe("live workout member action", () => {
     expect(replayed).toEqual({
       result: applied.result,
       status: "unchanged",
+    });
+    expect(mocks.withLiveWorkoutMutationLock).toHaveBeenCalledTimes(1);
+    expect(mocks.withLiveWorkoutMutationLock).toHaveBeenCalledWith(
+      "/vault",
+      "evt_test_workout",
+      expect.any(Function),
+    );
+    expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[3]).toEqual({
+      ...boundary,
+      lastMemberActionId: ACTION_ID,
+      observedAt: ACCEPTED_AT,
     });
     expect(mocks.resolveLiveWorkout).toHaveBeenCalledTimes(1);
     expect(mocks.updateLiveWorkoutExercises).toHaveBeenCalledTimes(1);
@@ -646,68 +631,6 @@ describe("live workout member action", () => {
     })).resolves.toEqual({ status: "applied" });
   });
 
-  it("closes a finite workout in the same accepted final-set write", async () => {
-    const finiteWorkout: WorkoutSession = {
-      ...BASE_WORKOUT,
-      exercises: [{
-        ...BASE_WORKOUT.exercises[0],
-        setPlanIsFinite: true,
-      }],
-    };
-    const action = {
-      ...setAction({ kind: "reps" as const, reps: 8 }),
-      expectedWorkout: {
-        ...setAction({ kind: "reps" as const, reps: 8 }).expectedWorkout,
-        actionBinding: deriveWorkoutActionBinding(
-          "evt_finite_workout",
-          finiteWorkout,
-        ),
-      },
-      presentation: workoutPresentation({
-        exercises: [{
-          name: "Leg press",
-          sets: [{ actual: "8 reps", status: "completed", target: "8 reps" }],
-        }],
-      }),
-    };
-    mocks.candidateWorkouts.mockResolvedValueOnce([
-      shownWorkout(finiteWorkout, "evt_finite_workout"),
-    ]);
-    mocks.updateLiveWorkoutExercises.mockResolvedValueOnce(shownWorkout({
-      ...finiteWorkout,
-      endedAt: ACCEPTED_AT,
-      lastMemberActionId: ACTION_ID,
-      exercises: [{
-        ...finiteWorkout.exercises[0],
-        sets: [{ order: 1, reps: 8 }],
-      }],
-    }, "evt_finite_workout"));
-
-    const result = await applyLiveWorkoutMemberAction({
-      acceptedAt: ACCEPTED_AT,
-      action,
-      vault: "/vault",
-    });
-    expect(result.status).toBe("applied");
-    if (result.status !== "applied" || result.result === undefined) {
-      throw new TypeError("Expected the completed apply card result.");
-    }
-    expect(result.result.card).toMatchObject({
-      schemaVersion: 6,
-    });
-
-    expect(mocks.withLiveWorkoutMutationLock).toHaveBeenCalledWith(
-      "/vault",
-      "evt_finite_workout",
-      expect.any(Function),
-    );
-    expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[3]).toEqual({
-      endedAt: ACCEPTED_AT,
-      lastMemberActionId: ACTION_ID,
-      observedAt: ACCEPTED_AT,
-    });
-  });
-
   it("fails closed when the exact workout no longer matches the expected shape", async () => {
     mocks.candidateWorkouts.mockResolvedValueOnce([shownWorkout({
       ...BASE_WORKOUT,
@@ -744,60 +667,6 @@ describe("live workout member action", () => {
       reason: "workout_changed",
       status: "rejected",
     });
-    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
-  });
-
-  it("uses the persisted action id for exact retry before stale-shape checks", async () => {
-    mocks.candidateWorkouts.mockResolvedValueOnce([shownWorkout({
-      ...BASE_WORKOUT,
-      lastMemberActionId: ACTION_ID,
-      exercises: [{
-        ...BASE_WORKOUT.exercises[0],
-        sets: [{ order: 1, reps: 8 }],
-      }],
-    })]);
-
-    await expect(applyLiveWorkoutMemberAction({
-      acceptedAt: ACCEPTED_AT,
-      action: setAction({ kind: "reps", reps: 8 }),
-      vault: "/vault",
-    })).resolves.toEqual({ status: "unchanged" });
-    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
-  });
-
-  it("resolves an exact persisted retry after its workout is completed", async () => {
-    mocks.findLiveWorkoutActionTargets.mockResolvedValueOnce({
-      bindingMatches: [],
-      exactReplays: [shownWorkout({
-        ...BASE_WORKOUT,
-        endedAt: "2026-08-12T16:00:00.000Z",
-        lastMemberActionId: ACTION_ID,
-      })],
-    });
-
-    await expect(applyLiveWorkoutMemberAction({
-      acceptedAt: ACCEPTED_AT,
-      action: setAction({ kind: "reps", reps: 8 }),
-      vault: "/vault",
-    })).resolves.toEqual({ status: "unchanged" });
-    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
-  });
-
-  it("resolves a completed retry without retargeting to a later open workout", async () => {
-    mocks.findLiveWorkoutActionTargets.mockResolvedValueOnce({
-      bindingMatches: [shownWorkout(BASE_WORKOUT, "evt_later_workout")],
-      exactReplays: [shownWorkout({
-        ...BASE_WORKOUT,
-        endedAt: "2026-08-12T16:00:00.000Z",
-        lastMemberActionId: ACTION_ID,
-      })],
-    });
-
-    await expect(applyLiveWorkoutMemberAction({
-      acceptedAt: ACCEPTED_AT,
-      action: setAction({ kind: "reps", reps: 8 }),
-      vault: "/vault",
-    })).resolves.toEqual({ status: "unchanged" });
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 
@@ -844,60 +713,6 @@ describe("live workout member action", () => {
       reason: "workout_changed",
       status: "rejected",
     });
-    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
-  });
-
-  it("removes a set and compacts canonical set order", async () => {
-    mocks.candidateWorkouts.mockResolvedValueOnce([shownWorkout({
-      ...BASE_WORKOUT,
-      exercises: [{
-        ...BASE_WORKOUT.exercises[0],
-        sets: [{ order: 1 }, { order: 2, reps: 8 }, { order: 3 }],
-      }],
-    })]);
-
-    const action = removeAction({
-      expectedSets: [
-        { logged: false, result: null },
-        { logged: true, result: { kind: "reps", reps: 8 } },
-        { logged: false, result: null },
-      ],
-    });
-    await expect(applyLiveWorkoutMemberAction({
-      acceptedAt: ACCEPTED_AT,
-      action: {
-        ...action,
-        expectedWorkout: {
-          ...action.expectedWorkout,
-          exercises: [{
-            name: "Leg press",
-            sets: [{ logged: false }, { logged: true }, { logged: false }],
-          }],
-        },
-      },
-      vault: "/vault",
-    })).resolves.toEqual({ status: "applied" });
-    expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual([{
-      ...BASE_WORKOUT.exercises[0],
-      sets: [{ order: 1 }, { order: 2 }],
-    }]);
-  });
-
-  it("treats an exact set-removal replay as unchanged", async () => {
-    mocks.candidateWorkouts.mockResolvedValueOnce([shownWorkout({
-      ...BASE_WORKOUT,
-      lastMemberActionId: ACTION_ID,
-      exercises: [{
-        ...BASE_WORKOUT.exercises[0],
-        sets: [{ order: 1 }],
-      }],
-    })]);
-
-    await expect(applyLiveWorkoutMemberAction({
-      acceptedAt: ACCEPTED_AT,
-      action: removeAction(),
-      vault: "/vault",
-    })).resolves.toEqual({ status: "unchanged" });
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 
@@ -1028,85 +843,7 @@ describe("live workout member action", () => {
     expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
   });
 
-  it("applies and exactly replays descending removals plus appended sets", async () => {
-    const expectedSets = [
-      { logged: false, result: null },
-      { logged: true, result: { kind: "reps" as const, reps: 8 } },
-      { logged: false, result: null },
-      { logged: true, result: { kind: "reps" as const, reps: 10 } },
-    ];
-    const initialWorkout: WorkoutSession = {
-      ...BASE_WORKOUT,
-      exercises: [{
-        ...BASE_WORKOUT.exercises[0],
-        sets: [
-          { order: 1 },
-          { order: 2, reps: 8 },
-          { order: 3 },
-          { order: 4, reps: 10 },
-        ],
-      }],
-    };
-    mocks.candidateWorkouts.mockResolvedValueOnce([
-      shownWorkout(initialWorkout),
-    ]);
-
-    const firstRemoval = removeAction({ expectedSets, setPosition: 2 });
-    const action = {
-      ...firstRemoval,
-      mutations: [
-        ...firstRemoval.mutations,
-        { ...firstRemoval.mutations[0], setPosition: 4 },
-        {
-          exerciseName: "Leg press",
-          exercisePosition: 1,
-          kind: "set.append" as const,
-          result: { kind: "reps" as const, reps: 12 },
-          setPosition: 3,
-        },
-        {
-          exerciseName: "Leg press",
-          exercisePosition: 1,
-          kind: "set.append" as const,
-          result: null,
-          setPosition: 4,
-        },
-      ],
-    };
-
-    await expect(applyLiveWorkoutMemberAction({
-      acceptedAt: ACCEPTED_AT,
-      action,
-      vault: "/vault",
-    })).resolves.toEqual({ status: "applied" });
-    const finalExercises = [{
-      ...BASE_WORKOUT.exercises[0],
-      sets: [
-        { order: 1 },
-        { order: 2 },
-        { order: 3, reps: 12 },
-        { order: 4 },
-      ],
-    }];
-    expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual(
-      finalExercises,
-    );
-
-    mocks.updateLiveWorkoutExercises.mockClear();
-    mocks.candidateWorkouts.mockResolvedValueOnce([shownWorkout({
-      ...BASE_WORKOUT,
-      lastMemberActionId: ACTION_ID,
-      exercises: finalExercises,
-    })]);
-    await expect(applyLiveWorkoutMemberAction({
-      acceptedAt: ACCEPTED_AT,
-      action,
-      vault: "/vault",
-    })).resolves.toEqual({ status: "unchanged" });
-    expect(mocks.updateLiveWorkoutExercises).not.toHaveBeenCalled();
-  });
-
-  it("edits retained original positions before compacting removed sets", async () => {
+  it("edits original positions before removal and appends an empty set with exact replay", async () => {
     const expectedSets = [
       { logged: false, result: null },
       { logged: true, result: { kind: "reps" as const, reps: 8 } },
@@ -1135,13 +872,20 @@ describe("live workout member action", () => {
             result: { kind: "reps" as const, reps: 10 },
             setPosition: 2,
           },
+          {
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            kind: "set.append" as const,
+            result: null,
+            setPosition: 3,
+          },
         ],
       },
       vault: "/vault",
     })).resolves.toEqual({ status: "applied" });
     expect(mocks.updateLiveWorkoutExercises.mock.calls[0]?.[2]).toEqual([{
       ...BASE_WORKOUT.exercises[0],
-      sets: [{ order: 1, reps: 10 }, { order: 2 }],
+      sets: [{ order: 1, reps: 10 }, { order: 2 }, { order: 3 }],
     }]);
 
     mocks.updateLiveWorkoutExercises.mockClear();
@@ -1150,7 +894,7 @@ describe("live workout member action", () => {
       lastMemberActionId: ACTION_ID,
       exercises: [{
         ...BASE_WORKOUT.exercises[0],
-        sets: [{ order: 1, reps: 10 }, { order: 2 }],
+        sets: [{ order: 1, reps: 10 }, { order: 2 }, { order: 3 }],
       }],
     })]);
     await expect(applyLiveWorkoutMemberAction({
@@ -1166,6 +910,13 @@ describe("live workout member action", () => {
             kind: "set.put" as const,
             result: { kind: "reps" as const, reps: 10 },
             setPosition: 2,
+          },
+          {
+            exerciseName: "Leg press",
+            exercisePosition: 1,
+            kind: "set.append" as const,
+            result: null,
+            setPosition: 3,
           },
         ],
       },

@@ -40,6 +40,14 @@ When an exact read feeds a mutation, carry the observed lifecycle revision or
 source revision into the canonical core writer rather than treating projection
 state as write authority.
 
+Food, recipe and provider edits hold core's existing canonical write lock across
+reading the current record, applying edits and persisting the result. Food
+renames use that same boundary so an independent concurrent edit is preserved.
+The lazy core loaders derive their signatures from the owning package.
+Food deletion archives its generated daily schedule first; if archival fails,
+the food remains available for retry. If deletion fails afterward, the archived
+schedule remains safe to retry.
+
 Exact-event and meal/document owner lookups lazily load
 `@murphai/core/event-read` inside the existing `event-core-load` span. They retain
 the same readers, visibility checks, error mappings and owner-scan spans. Other

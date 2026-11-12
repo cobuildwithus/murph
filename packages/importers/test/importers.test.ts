@@ -7,7 +7,6 @@ import { test } from "vitest";
 import * as coreRuntime from "@murphai/core";
 import {
   addMeal,
-  createSamplePresetRegistry,
   CsvSampleImportError,
   importCsvSamples,
   importDocument,
@@ -145,25 +144,11 @@ test("importCsvSamples parses rows and emits recordedAt values for core", async 
     ].join("\n"),
   );
   const { calls, corePort } = createCorePortSpy();
-  const presetRegistry = createSamplePresetRegistry([
-    {
-      id: "vendor-watch-heart-rate",
-      stream: "heart_rate",
-      tsColumn: "timestamp",
-      valueColumn: "bpm",
-      unit: "bpm",
-      metadataColumns: ["device", "context"],
-      source: "device",
-    },
-  ]);
-
-  await importCsvSamples(
-    {
-      filePath,
-      presetId: "vendor-watch-heart-rate",
-    },
-    { corePort, presetRegistry },
-  );
+  await importCsvSamples({
+    filePath,
+    stream: "heart_rate", tsColumn: "timestamp", valueColumn: "bpm", unit: "bpm",
+    metadataColumns: ["device", "context"], source: "device",
+  }, { corePort });
 
   const [samplePayload] = calls.samples;
 
@@ -306,31 +291,7 @@ test("profileCsvSampleFile exposes a non-mutating CSV plan with source hints and
   );
   assert.equal(profile.series.find((entry) => entry.stream === "spo2")?.importableCount, 3);
   assert.equal(profile.summaries?.find((entry) => entry.stream === "spo2")?.thresholds[1]?.below, 90);
-  assert.equal(profile.summaries?.find((entry) => entry.stream === "spo2")?.screen?.level, "normal_oxygen_trace");
-});
-
-test("createSamplePresetRegistry rejects duplicate preset ids", () => {
-  const registry = createSamplePresetRegistry();
-
-  registry.register({
-    id: "duplicate",
-    stream: "steps",
-    tsColumn: "ts",
-    valueColumn: "value",
-    unit: "count",
-  });
-
-  assert.throws(
-    () =>
-      registry.register({
-        id: "duplicate",
-        stream: "steps",
-        tsColumn: "ts",
-        valueColumn: "value",
-        unit: "count",
-      }),
-    /already registered/,
-  );
+  assert.deepEqual(profile.summaries?.find((entry) => entry.stream === "spo2")?.thresholds.map((entry) => entry.below), [92, 90, 88]);
 });
 
 test("parseDelimitedRows handles quoted commas", () => {

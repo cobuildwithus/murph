@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
-  resolveDeviceProviderDescriptor,
 } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
@@ -47,35 +46,3 @@ describe("device-sync providers", () => {
   });
 
 });
-
-it("keeps the built-in runtime providers aligned with the shared descriptor registry", () => {
-    const providers = [
-      createJunctionDeviceSyncProvider({
-        apiKey: "sk_us_junction-test",
-        clientUserIdSecret: "junction-client-user-id-secret",
-        environment: "sandbox",
-        region: "us",
-      }),
-    ];
-
-    expect([...providers.map((provider) => provider.provider)].sort()).toEqual([
-      "junction",
-    ]);
-
-    for (const provider of providers) {
-      const descriptor = resolveDeviceProviderDescriptor(provider.provider);
-
-      expect(descriptor?.provider).toBe(provider.provider);
-      expect(provider.descriptor.provider).toBe(provider.provider);
-      expect(provider.descriptor.displayName).toBe(descriptor?.displayName);
-      expect(provider.jobExecutor).toBeDefined();
-    }
-
-    const junction = providers.find((provider) => provider.provider === "junction");
-    expect(junction?.connectionHandler).toBeDefined();
-    expect(junction?.webhookHandler).toBeDefined();
-    expect(Boolean(junction && "buildConnectUrl" in junction)).toBe(false);
-    expect(Boolean(junction && "exchangeAuthorizationCode" in junction)).toBe(false);
-    expect(Boolean(junction && "refreshTokens" in junction)).toBe(false);
-
-  });

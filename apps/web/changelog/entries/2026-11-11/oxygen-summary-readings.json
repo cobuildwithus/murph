@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 100,
+  "item": {
+    "id": "oxygen-summary-readings",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Oxygen summaries focus on your readings",
+    "summary": "Oxygen summaries show numerical measurements without an automatic categorical screening label.",
+    "details": "Sample counts, ranges, gaps and time below selected thresholds remain available.",
+    "relevanceTags": [
+      "oxygen",
+      "health-data"
+    ],
+    "sourcePullRequests": [
+      4861
+    ]
+  }
+}

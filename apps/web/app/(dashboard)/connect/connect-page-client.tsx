@@ -173,6 +173,7 @@ export function ConnectSourcesGrid({
   const [initialConnectIntentDismissed, setInitialConnectIntentDismissed] =
     useState(false);
   const initialConnectIntentAttemptedRef = useRef(false);
+  const connectionSessionRef = useRef<symbol | null>(null);
   const router = useRouter();
   const { openAuthDialog } = useAuth();
   const callbackConnectedSourceId =
@@ -292,6 +293,13 @@ export function ConnectSourcesGrid({
   });
 
   useEffect(() => {
+    connectionSessionRef.current = authenticated ? Symbol() : null;
+    return () => {
+      connectionSessionRef.current = null;
+    };
+  }, [authenticated]);
+
+  useEffect(() => {
     if (hasInitialCallback) {
       stripConnectCallbackParams();
     }
@@ -328,7 +336,8 @@ export function ConnectSourcesGrid({
 
   const startConnection = useCallback(
     async (source: ConnectSource, options: ConnectStartOptions = {}) => {
-      if (!authenticated || (!options.intentClaim && !source.connectTarget)) {
+      const connectionSession = connectionSessionRef.current;
+      if (!connectionSession || !authenticated || (!options.intentClaim && !source.connectTarget)) {
         return;
       }
 
@@ -346,7 +355,7 @@ export function ConnectSourcesGrid({
       ) {
         setPendingSourceId(null);
         setVitalConnectionRequest({
-          ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
+          intentClaim: options.intentClaim,
           source,
         });
         options.onHandoff?.();
@@ -363,14 +372,19 @@ export function ConnectSourcesGrid({
         const authorizationUrl = await requestConnectionAuthorizationUrl(
           source,
           {
-            ...(options.intentClaim
-              ? { intentClaim: options.intentClaim }
-              : {}),
+            intentClaim: options.intentClaim,
           },
         );
+        if (connectionSessionRef.current !== connectionSession) {
+          return;
+        }
         options.onHandoff?.();
         window.location.assign(authorizationUrl);
       } catch (error) {
+        if (connectionSessionRef.current !== connectionSession) {
+          return;
+        }
+        setPendingSourceId(null);
         if (options.intentClaim) {
           setConnectIntentRedirectName(null);
         }
@@ -383,30 +397,23 @@ export function ConnectSourcesGrid({
             message: error.message,
             sourceName: source.name,
           });
-          setPendingSourceId(null);
-          options.onHandoff?.();
-          return;
-        }
-
-        if (isHostedWhoopDirectConnectCapReachedError(error)) {
+        } else if (isHostedWhoopDirectConnectCapReachedError(error)) {
           setShowWhoopAppleHealthSetupDialog(true);
-          setPendingSourceId(null);
-          options.onHandoff?.();
+        } else {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Connection could not be started.";
+          setActionError({
+            message,
+            sourceId: source.id,
+          });
+          if (options.intentClaim) {
+            setConnectIntentFailure({ claim: options.intentClaim, source });
+          }
           return;
         }
-
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Connection could not be started.";
-        setActionError({
-          message,
-          sourceId: source.id,
-        });
-        if (options.intentClaim) {
-          setConnectIntentFailure({ claim: options.intentClaim, source });
-        }
-        setPendingSourceId(null);
+        options.onHandoff?.();
       }
     },
     [authenticated],
@@ -433,77 +440,35 @@ export function ConnectSourcesGrid({
     }
 
     let cancelled = false;
-    if (requiresVitalConnectionPreflight(
-      source,
-      activeConnectIntent.connectProvider,
-    )) {
-      void Promise.resolve().then(() => {
-        if (cancelled || initialConnectIntentAttemptedRef.current) {
-          return;
-        }
-
-        initialConnectIntentAttemptedRef.current = true;
-        stripDeviceConnectIntentParams();
+    void Promise.resolve().then(() => {
+      if (cancelled || initialConnectIntentAttemptedRef.current) {
+        return;
+      }
+      initialConnectIntentAttemptedRef.current = true;
+      stripDeviceConnectIntentParams();
+      if (requiresVitalConnectionPreflight(
+        source,
+        activeConnectIntent.connectProvider,
+      )) {
         setConnectIntentRedirectName(null);
         setInitialConnectIntentDismissed(true);
         setVitalConnectionRequest({
           intentClaim: activeConnectIntent.claim,
           source,
         });
+        return;
+      }
+      // Once accepted, the component owns this request. A refreshed source list
+      // must not discard its authorization result or start another redemption.
+      void startConnection(source, {
+        intentClaim: activeConnectIntent.claim,
+        vitalDisclosureConfirmed: true,
       });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    initialConnectIntentAttemptedRef.current = true;
-    stripDeviceConnectIntentParams();
-    void requestConnectionAuthorizationUrl(source, {
-      intentClaim: activeConnectIntent.claim,
-    })
-      .then((authorizationUrl) => {
-        if (cancelled) {
-          return;
-        }
-
-        setInitialConnectIntentDismissed(true);
-        window.location.assign(authorizationUrl);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) {
-          return;
-        }
-
-        setConnectIntentRedirectName(null);
-        setInitialConnectIntentDismissed(true);
-        if (isHostedWhoopDirectConnectCapReachedError(error)) {
-          setShowWhoopAppleHealthSetupDialog(true);
-          return;
-        }
-
-        if (isHostedDeviceConnectIntentUnavailableError(error)) {
-          setConnectIntentRecovery({
-            message: error.message,
-            sourceName: source.name,
-          });
-          return;
-        }
-
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Connection could not be started.";
-        setActionError({
-          message,
-          sourceId: source.id,
-        });
-        setConnectIntentFailure({ claim: activeConnectIntent.claim, source });
-      });
-
+    });
     return () => {
       cancelled = true;
     };
-  }, [activeConnectIntent, authenticated, displaySources]);
+  }, [activeConnectIntent, authenticated, displaySources, startConnection]);
 
   const connectIntentSource = resolveConnectIntentSource(
     activeConnectIntent,

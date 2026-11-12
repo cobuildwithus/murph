@@ -1,9 +1,8 @@
 "use client";
 
 import { LockKeyhole, type LucideIcon } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
-import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { Button } from "@/src/components/ui/button";
 
 interface HostedAuthRequiredScreenProps {
@@ -17,22 +16,6 @@ interface HostedAuthRequiredScreenProps {
   title: string;
 }
 
-export function HostedAuthRequiredScreen(props: HostedAuthRequiredScreenProps) {
-  const { authenticated, openAuthDialog } = useAuth();
-
-  useEffect(() => {
-    if (!authenticated) {
-      openAuthDialog();
-    }
-  }, [authenticated, openAuthDialog]);
-
-  return <HostedAuthRequiredScreenView {...props} onLogin={openAuthDialog} />;
-}
-
-/**
- * Presentation only. The design catalog renders this rather than the screen
- * above, whose effect would open the app-wide auth dialog over the catalog.
- */
 export function HostedAuthRequiredScreenView({
   description,
   details,

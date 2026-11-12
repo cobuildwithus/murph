@@ -29,76 +29,8 @@ import {
   uniqueStrings,
 } from './vault-usecase-helpers.js'
 
-interface ProviderReadModel {
-  providerId: string
-  slug: string
-  title: string
-  status?: string
-  relativePath: string
-  markdown: string
-  [key: string]: unknown
-}
-
-interface ProviderEventCoreRuntime {
-  upsertProvider(input: {
-    vaultRoot: string
-    providerId?: string
-    slug?: string
-    title: string
-    status?: string
-    specialty?: string
-    organization?: string
-    location?: string
-    website?: string
-    phone?: string
-    note?: string
-    aliases?: string[]
-    body?: string
-  }): Promise<{
-    providerId: string
-    relativePath: string
-    created: boolean
-  }>
-  deleteProvider(input: {
-    vaultRoot: string
-    providerId?: string
-    slug?: string
-  }): Promise<{
-    providerId: string
-    relativePath: string
-    deleted: true
-  }>
-  upsertEvent(input: {
-    vaultRoot: string
-    payload: JsonObject
-  }): Promise<{
-    eventId: string
-    ledgerFile: string
-    created: boolean
-  }>
-  importSamples(input: {
-    vaultRoot: string
-    stream: string
-    unit: string
-    samples: JsonObject[]
-    sourcePath?: string
-    source?: string
-    quality?: string
-    batchProvenance?: JsonObject
-  }): Promise<{
-    count: number
-    records: Array<{
-      id: string
-    }>
-    shardPaths: string[]
-  }>
-  listProviders(vaultRoot: string): Promise<ProviderReadModel[]>
-  readProvider(input: {
-    vaultRoot: string
-    providerId?: string
-    slug?: string
-  }): Promise<ProviderReadModel>
-}
+type ProviderEventCoreRuntime = typeof import('@murphai/core')
+type ProviderReadModel = Awaited<ReturnType<ProviderEventCoreRuntime['readProvider']>>
 
 const PROVIDER_ID_PATTERN = /^prov_[0-9A-Za-z]+$/u
 const providerStatusSchema = z.string().min(1)
@@ -475,32 +407,35 @@ export async function editProviderRecord(input: {
   set?: string[]
   clear?: string[]
 }) {
-  const provider = await requireProviderRecord(input.vault, input.lookup)
-  const payload = buildProviderPayload(provider)
-  const patched = await applyRecordPatch({
-    record: payload,
-    inputFile: input.inputFile,
-    set: input.set,
-    clear: input.clear,
-    patchLabel: 'provider payload',
-  })
-  const patchedPayload = syncProviderBodyForEdit({
-    originalPayload: payload,
-    patchedPayload: parseProviderPayload({
-      ...patched.record,
-      providerId: provider.providerId,
-    }),
-    clearedFields: patched.clearedFields,
-    touchedTopLevelFields: patched.touchedTopLevelFields,
-  })
+  const core = await loadProviderEventCoreRuntime()
+  return core.withCanonicalWriteLock(input.vault, async () => {
+    const provider = await requireProviderRecord(input.vault, input.lookup)
+    const payload = buildProviderPayload(provider)
+    const patched = await applyRecordPatch({
+      record: payload,
+      inputFile: input.inputFile,
+      set: input.set,
+      clear: input.clear,
+      patchLabel: 'provider payload',
+    })
+    const patchedPayload = syncProviderBodyForEdit({
+      originalPayload: payload,
+      patchedPayload: parseProviderPayload({
+        ...patched.record,
+        providerId: provider.providerId,
+      }),
+      clearedFields: patched.clearedFields,
+      touchedTopLevelFields: patched.touchedTopLevelFields,
+    })
 
-  await upsertProviderRecord({
-    vault: input.vault,
-    payload: patchedPayload,
-    clearedFields: patched.clearedFields,
-  })
+    await upsertProviderRecord({
+      vault: input.vault,
+      payload: patchedPayload,
+      clearedFields: patched.clearedFields,
+    })
 
-  return showProviderRecord(input.vault, provider.providerId)
+    return showProviderRecord(input.vault, provider.providerId)
+  })
 }
 
 function isDefaultProviderBody(payload: ProviderPayload): boolean {

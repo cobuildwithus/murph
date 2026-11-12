@@ -178,7 +178,6 @@ function createProviderResult(input: {
     route: input.route,
     session: input.session,
     stderr: '',
-    stdout: '',
     transcriptResponse: input.text,
     usage: null,
     workingDirectory: '/vault',

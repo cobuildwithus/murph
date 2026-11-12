@@ -192,10 +192,7 @@ test("attachment parse worker fails closed on non-raw stored paths with missing 
     registry: createParserRegistry([
       {
         id: "unexpected-provider-run",
-        locality: "local",
-        openness: "open_source",
-        runtime: "node",
-        priority: 100,
+
         async discover() {
           return {
             available: true,

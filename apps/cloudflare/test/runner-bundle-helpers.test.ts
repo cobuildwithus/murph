@@ -16,8 +16,8 @@ import {
 } from "../src/crypto-context.js";
 import { encryptHostedStorageEnvelope } from "../src/crypto.js";
 import { hostedArtifactObjectKey } from "../src/storage-paths.js";
-import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
-import { MemoryEncryptedR2Bucket, createTestRootKey } from "./test-helpers.js";
+import { deleteLegacyHostedBundle } from "../src/bundle-gc.js";
+import { MemoryEncryptedR2Bucket } from "./test-helpers.js";
 
 describe("hosted bundle reads", () => {
   const bundleKey = Uint8Array.from({ length: 32 }, () => 9);
@@ -86,10 +86,10 @@ describe("hosted bundle reads", () => {
   });
 });
 
-describe("HostedBundleGarbageCollector", () => {
+describe("deleteLegacyHostedBundle", () => {
   const bundleKey = Uint8Array.from({ length: 32 }, () => 7);
 
-  it("deletes superseded bundle objects and removed artifacts after a committed ref swap", async () => {
+  it("deletes retired legacy bundles and their artifacts without affecting another bundle", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const artifactStore = createHostedArtifactStore({
       bucket,
@@ -121,16 +121,12 @@ describe("HostedBundleGarbageCollector", () => {
       previousArtifactSha,
     );
 
-    await new HostedBundleGarbageCollector(
+    await deleteLegacyHostedBundle({
       bucket,
-      bundleKey,
-      "v1",
-      {
-        v1: bundleKey,
-      },
-    ).cleanupBundleTransition({
-      nextBundleRef,
-      previousBundleRef,
+      key: bundleKey,
+      keyId: "v1",
+      keysById: { v1: bundleKey },
+      ref: previousBundleRef,
       userId: "member_123",
     });
 
@@ -142,48 +138,6 @@ describe("HostedBundleGarbageCollector", () => {
     expect(bucket.objects.has(previousArtifactKey)).toBe(false);
     expect(bucket.objects.has(previousBundleRef.key)).toBe(false);
     expect(bucket.objects.has(nextBundleRef.key)).toBe(true);
-  });
-
-  it("keeps another user's distinct bundle object alive after one user cleans up a superseded ref", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const firstUserStore = createLegacyHostedBundleFixtureStore({
-      bucket,
-      key: bundleKey,
-      keyId: "v1",
-      userId: "member_a",
-    });
-    const secondUserStore = createLegacyHostedBundleFixtureStore({
-      bucket,
-      key: bundleKey,
-      keyId: "v1",
-      userId: "member_b",
-    });
-    const firstUserPreviousBytes = createArtifactOnlyBundle("", 0);
-    const secondUserBytes = createArtifactOnlyBundle("a".repeat(64), 1);
-    const replacementBytes = createArtifactOnlyBundle("b".repeat(64), 1);
-    const firstUserPreviousRef = await firstUserStore.writeBundle("vault", firstUserPreviousBytes);
-    const secondUserRef = await secondUserStore.writeBundle("vault", secondUserBytes);
-    const firstUserNextRef = await firstUserStore.writeBundle("vault", replacementBytes);
-
-    expect(firstUserPreviousRef.key).not.toBe(secondUserRef.key);
-
-    await new HostedBundleGarbageCollector(
-      bucket,
-      bundleKey,
-      "v1",
-      {
-        v1: bundleKey,
-      },
-    ).cleanupBundleTransition({
-      nextBundleRef: firstUserNextRef,
-      previousBundleRef: firstUserPreviousRef,
-      userId: "member_a",
-    });
-
-    expect(bucket.objects.has(firstUserPreviousRef.key)).toBe(false);
-    expect(bucket.objects.has(firstUserNextRef.key)).toBe(true);
-    expect(bucket.objects.has(secondUserRef.key)).toBe(true);
-    await expect(secondUserStore.readBundle(secondUserRef)).resolves.toEqual(secondUserBytes);
   });
 
   it("keeps another user's identical bundle bytes alive after one user cleans up a superseded ref", async () => {
@@ -211,16 +165,12 @@ describe("HostedBundleGarbageCollector", () => {
     expect(firstUserPreviousRef.hash).toBe(secondUserRef.hash);
     expect(firstUserPreviousRef.key).not.toBe(secondUserRef.key);
 
-    await new HostedBundleGarbageCollector(
+    await deleteLegacyHostedBundle({
       bucket,
-      bundleKey,
-      "v1",
-      {
-        v1: bundleKey,
-      },
-    ).cleanupBundleTransition({
-      nextBundleRef: firstUserNextRef,
-      previousBundleRef: firstUserPreviousRef,
+      key: bundleKey,
+      keyId: "v1",
+      keysById: { v1: bundleKey },
+      ref: firstUserPreviousRef,
       userId: "member_a",
     });
 
@@ -254,16 +204,12 @@ describe("HostedBundleGarbageCollector", () => {
     );
 
     await expect(
-      new HostedBundleGarbageCollector(
+      deleteLegacyHostedBundle({
         bucket,
-        bundleKey,
-        "v1",
-        {
-          v1: bundleKey,
-        },
-      ).cleanupBundleTransition({
-        nextBundleRef: replacementRef,
-        previousBundleRef: foreignRef,
+        key: bundleKey,
+        keyId: "v1",
+        keysById: { v1: bundleKey },
+        ref: foreignRef,
         userId: "member_a",
       }),
     ).rejects.toThrow(`Hosted bundle ${foreignRef.key} is outside the bound user bundle namespace.`);
@@ -273,276 +219,7 @@ describe("HostedBundleGarbageCollector", () => {
     expect(bucket.deleted).toEqual([]);
   });
 
-  it("fails closed and preserves the previous bundle when the authoritative next bundle is missing", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const artifactStore = createHostedArtifactStore({
-      bucket,
-      key: bundleKey,
-      keyId: "v1",
-      userId: "member_123",
-    });
-    const bundleStore = createLegacyHostedBundleFixtureStore({
-      bucket,
-      key: bundleKey,
-      keyId: "v1",
-      userId: "member_123",
-    });
-    const previousArtifactBytes = Uint8Array.from(Buffer.from("old-artifact"));
-    const previousArtifactSha = sha256HostedBundleHex(previousArtifactBytes);
-
-    await artifactStore.writeArtifact(previousArtifactSha, previousArtifactBytes);
-    const previousBundleRef = await bundleStore.writeBundle(
-      "vault",
-      createArtifactOnlyBundle(previousArtifactSha, previousArtifactBytes.byteLength),
-    );
-    const nextBundleRef = await bundleStore.writeBundle(
-      "vault",
-      createArtifactOnlyBundle("", 0),
-    );
-    const previousArtifactKey = await artifactObjectKeyForTest(
-      bundleKey,
-      "member_123",
-      previousArtifactSha,
-    );
-
-    await bucket.delete(nextBundleRef.key);
-
-    await expect(
-      new HostedBundleGarbageCollector(
-        bucket,
-        bundleKey,
-        "v1",
-        {
-          v1: bundleKey,
-        },
-      ).cleanupBundleTransition({
-        nextBundleRef,
-        previousBundleRef,
-        userId: "member_123",
-      }),
-    ).rejects.toThrow(
-      `Hosted vault bundle ${nextBundleRef.key} is missing from R2.`,
-    );
-
-    expect(bucket.objects.has(previousArtifactKey)).toBe(true);
-    expect(bucket.objects.has(previousBundleRef.key)).toBe(true);
-    expect(bucket.deleted).toEqual([nextBundleRef.key]);
-  });
-
-  it("fails closed and preserves an artifact-free previous bundle when the authoritative next bundle is missing", async () => {
-    const bucket = new MemoryEncryptedR2Bucket();
-    const bundleStore = createLegacyHostedBundleFixtureStore({
-      bucket,
-      key: bundleKey,
-      keyId: "v1",
-      userId: "member_123",
-    });
-    const previousBundleRef = await bundleStore.writeBundle(
-      "vault",
-      createTextOnlyBundle("notes/previous.txt", "previous"),
-    );
-    const nextBundleRef = await bundleStore.writeBundle(
-      "vault",
-      createTextOnlyBundle("notes/next.txt", "next"),
-    );
-
-    await bucket.delete(nextBundleRef.key);
-    bucket.deleted.length = 0;
-
-    await expect(
-      new HostedBundleGarbageCollector(
-        bucket,
-        bundleKey,
-        "v1",
-        {
-          v1: bundleKey,
-        },
-      ).cleanupBundleTransition({
-        nextBundleRef,
-        previousBundleRef,
-        userId: "member_123",
-      }),
-    ).rejects.toThrow(
-      `Hosted vault bundle ${nextBundleRef.key} is missing from R2.`,
-    );
-
-    expect(bucket.deleted).toEqual([]);
-    expect(bucket.objects.has(previousBundleRef.key)).toBe(true);
-  });
-
-  it("fails closed and preserves the previous bundle when the authoritative next bundle cannot be decrypted", async () => {
-    const bucket = createBucketStore();
-    const artifactStore = createHostedArtifactStore({
-      bucket: bucket.api,
-      key: bundleKey,
-      keyId: "v1",
-      userId: "member_123",
-    });
-    const bundleStore = createLegacyHostedBundleFixtureStore({
-      bucket: bucket.api,
-      key: bundleKey,
-      keyId: "v1",
-    });
-    const previousArtifactBytes = Uint8Array.from(Buffer.from("old-artifact"));
-    const previousArtifactSha = sha256HostedBundleHex(previousArtifactBytes);
-
-    await artifactStore.writeArtifact(previousArtifactSha, previousArtifactBytes);
-    const previousBundleRef = await bundleStore.writeBundle(
-      "vault",
-      createArtifactOnlyBundle(previousArtifactSha, previousArtifactBytes.byteLength),
-    );
-    const nextBundleRef = await bundleStore.writeBundle(
-      "vault",
-      createArtifactOnlyBundle("", 0),
-    );
-    const previousArtifactKey = await artifactObjectKeyForTest(
-      bundleKey,
-      "member_123",
-      previousArtifactSha,
-    );
-    const corruptedEnvelope = await encryptHostedStorageEnvelope({
-      aad: buildHostedStorageAad({
-        hash: nextBundleRef.hash,
-        key: nextBundleRef.key,
-        kind: "vault",
-        purpose: "bundle",
-        size: nextBundleRef.size,
-      }),
-      key: Uint8Array.from({ length: 32 }, () => 1),
-      keyId: "v1",
-      plaintext: createArtifactOnlyBundle("", 0),
-      scope: "bundle",
-    });
-
-    await bucket.api.put(nextBundleRef.key, JSON.stringify(corruptedEnvelope));
-
-    await expect(
-      new HostedBundleGarbageCollector(
-        bucket.api,
-        bundleKey,
-        "v1",
-        {
-          v1: bundleKey,
-        },
-      ).cleanupBundleTransition({
-        nextBundleRef,
-        previousBundleRef,
-        userId: "member_123",
-      }),
-    ).rejects.toThrow();
-
-    expect(bucket.deleted).toEqual([]);
-    expect(bucket.values.has(previousArtifactKey)).toBe(true);
-    expect(bucket.values.has(previousBundleRef.key)).toBe(true);
-  });
-
-  it("fails closed and preserves an artifact-free previous bundle when the authoritative next bundle cannot be decrypted", async () => {
-    const bucket = createBucketStore();
-    const bundleStore = createLegacyHostedBundleFixtureStore({
-      bucket: bucket.api,
-      key: bundleKey,
-      keyId: "v1",
-    });
-    const previousBundleRef = await bundleStore.writeBundle(
-      "vault",
-      createTextOnlyBundle("notes/previous.txt", "previous"),
-    );
-    const nextBundleRef = await bundleStore.writeBundle(
-      "vault",
-      createTextOnlyBundle("notes/next.txt", "next"),
-    );
-    const corruptedEnvelope = await encryptHostedStorageEnvelope({
-      aad: buildHostedStorageAad({
-        hash: nextBundleRef.hash,
-        key: nextBundleRef.key,
-        kind: "vault",
-        purpose: "bundle",
-        size: nextBundleRef.size,
-      }),
-      key: Uint8Array.from({ length: 32 }, () => 1),
-      keyId: "v1",
-      plaintext: createTextOnlyBundle("notes/next.txt", "next"),
-      scope: "bundle",
-    });
-
-    await bucket.api.put(nextBundleRef.key, JSON.stringify(corruptedEnvelope));
-
-    await expect(
-      new HostedBundleGarbageCollector(
-        bucket.api,
-        bundleKey,
-        "v1",
-        {
-          v1: bundleKey,
-        },
-      ).cleanupBundleTransition({
-        nextBundleRef,
-        previousBundleRef,
-        userId: "member_123",
-      }),
-    ).rejects.toThrow();
-
-    expect(bucket.deleted).toEqual([]);
-    expect(bucket.values.has(previousBundleRef.key)).toBe(true);
-  });
-
-  it("fails closed and preserves the previous bundle when the authoritative next bundle is an invalid archive", async () => {
-    const bucket = createBucketStore();
-    const artifactStore = createHostedArtifactStore({
-      bucket: bucket.api,
-      key: bundleKey,
-      keyId: "v1",
-      userId: "member_123",
-    });
-    const bundleStore = createLegacyHostedBundleFixtureStore({
-      bucket: bucket.api,
-      key: bundleKey,
-      keyId: "v1",
-      userId: "member_123",
-    });
-    const previousArtifactBytes = Uint8Array.from(Buffer.from("old-artifact"));
-    const previousArtifactSha = sha256HostedBundleHex(previousArtifactBytes);
-
-    await artifactStore.writeArtifact(previousArtifactSha, previousArtifactBytes);
-    const previousBundleRef = await bundleStore.writeBundle(
-      "vault",
-      createArtifactOnlyBundle(previousArtifactSha, previousArtifactBytes.byteLength),
-    );
-    const nextBundleRef = await bundleStore.writeBundle(
-      "vault",
-      Uint8Array.from(Buffer.from("not-a-hosted-bundle")),
-    );
-    const previousArtifactKey = await artifactObjectKeyForTest(
-      bundleKey,
-      "member_123",
-      previousArtifactSha,
-    );
-
-    await expect(
-      new HostedBundleGarbageCollector(
-        bucket.api,
-        bundleKey,
-        "v1",
-        {
-          v1: bundleKey,
-        },
-      ).cleanupBundleTransition({
-        nextBundleRef,
-        previousBundleRef,
-        userId: "member_123",
-      }),
-    ).rejects.toMatchObject({
-      operation: "cleanup-authoritative-next",
-      refKeyPresent: true,
-    });
-
-    expect(bucket.deleted).toEqual([]);
-    expect(bucket.values.has(previousArtifactKey)).toBe(true);
-    expect(bucket.values.has(previousBundleRef.key)).toBe(true);
-    expect(bucket.values.has(nextBundleRef.key)).toBe(true);
-  });
-
-  it("skips artifact diffing but still deletes an unreadable superseded previous bundle", async () => {
+  it("deletes unreadable retired bundles without guessing their artifacts", async () => {
     const bucket = createBucketStore();
     const artifactStore = createHostedArtifactStore({
       bucket: bucket.api,
@@ -590,16 +267,12 @@ describe("HostedBundleGarbageCollector", () => {
     await bucket.api.put(previousBundleRef.key, JSON.stringify(corruptedEnvelope));
 
     await expect(
-      new HostedBundleGarbageCollector(
-        bucket.api,
-        bundleKey,
-        "v1",
-        {
-          v1: bundleKey,
-        },
-      ).cleanupBundleTransition({
-        nextBundleRef,
-        previousBundleRef,
+      deleteLegacyHostedBundle({
+        bucket: bucket.api,
+        key: bundleKey,
+        keyId: "v1",
+        keysById: { v1: bundleKey },
+        ref: previousBundleRef,
         userId: "member_123",
       }),
     ).resolves.toBeUndefined();

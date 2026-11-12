@@ -1,3 +1,5 @@
+import { after } from "next/server";
+
 import type { PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
@@ -9,13 +11,8 @@ import {
 import {
   recordHostedStripeEvent,
 } from "./stripe-event-reconciliation";
-import {
-  prepareDuplicateHostedStripeWebhookEventForWorkflowRetry,
-} from "./stripe-webhook-reconciliation";
 import { scheduleHostedStripePaymentFailureEventAlert } from "./stripe-alert-email";
-import {
-  startHostedStripeWebhookReconciliationWorkflow,
-} from "./stripe-webhook-workflow-start";
+import { startHostedStripeWebhookReconciliationWorkflow } from "./stripe-webhook-workflow-start";
 import type { HostedStripeWebhookResponse } from "./webhook-service-types";
 
 export async function handleHostedStripeWebhook(input: {
@@ -60,40 +57,18 @@ export async function handleHostedStripeWebhook(input: {
       eventType: event.type,
       livemode: event.livemode,
     });
+    // The receipt and minute sweep own retries. The pointer workflow provides
+    // execution time for billing operations that can outlive this request.
+    after(async () => {
+      await startHostedStripeWebhookReconciliationWorkflow({ eventId: event.id });
+    });
   }
-
-  await handoffHostedStripeWebhookReconciliation({
-    duplicate: recorded.duplicate,
-    eventId: event.id,
-    prisma,
-  });
 
   return {
     duplicate: recorded.duplicate || undefined,
     ok: true,
     type: recorded.type,
   };
-}
-
-async function handoffHostedStripeWebhookReconciliation(input: {
-  duplicate: boolean;
-  eventId: string;
-  prisma: PrismaClient;
-}): Promise<void> {
-  if (input.duplicate) {
-    const shouldSkip = await prepareDuplicateHostedStripeWebhookEventForWorkflowRetry(
-      input.eventId,
-      input.prisma,
-    );
-
-    if (shouldSkip) {
-      return;
-    }
-  }
-
-  await startHostedStripeWebhookReconciliationWorkflow({
-    eventId: input.eventId,
-  });
 }
 
 function constructStripeWebhookEvent(input: {

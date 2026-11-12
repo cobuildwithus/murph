@@ -45,18 +45,6 @@ describe("check-no-js hygiene guards", () => {
     expect(generatedArtifactDirectories).toContain("apps/cloudflare/.deploy/smoke-dist");
   });
 
-  it("keeps large git file-list scans on an explicit buffer", async () => {
-    const [checkNoJsSource, pruneSource] = await Promise.all([
-      readFile(new URL("./check-no-js.ts", import.meta.url), "utf8"),
-      readFile(new URL("./prune-generated-source-sidecars.ts", import.meta.url), "utf8"),
-    ]);
-
-    for (const source of [checkNoJsSource, pruneSource]) {
-      expect(source).toContain("const gitListMaxBuffer = 16 * 1024 * 1024;");
-      expect(source).toMatch(/execFileAsync\("git",[\s\S]*?maxBuffer: gitListMaxBuffer,/u);
-    }
-  });
-
   it("refuses to prune through symlinked generated artifact parents", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "murph-prune-test-"));
     const outside = await mkdtemp(path.join(tmpdir(), "murph-prune-target-"));

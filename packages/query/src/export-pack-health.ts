@@ -1,26 +1,14 @@
 import {
   HEALTH_HISTORY_EVENT_KINDS,
-  VAULT_LAYOUT,
   extractIsoDatePrefix,
 } from "@murphai/contracts";
 
 import { type CanonicalEntity } from "./canonical-entities.ts";
 import {
-  readJsonlEntitiesStrict,
-  readJsonlEntitiesTolerant,
-} from "./health/entity-slices.ts";
-import type { ParseFailure } from "./health/loaders.ts";
-import { collectCanonicalEntities } from "./health/canonical-collector.ts";
-import type { CanonicalHealthEntityCollection } from "./health/canonical-collector.ts";
-import {
   compareByOccurredAtDescThenId,
   compareByRecordedOrImportedAtDescThenId,
 } from "./health/comparators.ts";
 import { assessmentRecordFromEntity } from "./health/projections.ts";
-import {
-  collapseEventLedgerEntities,
-  projectHistoryEntity,
-} from "./health/projectors/history.ts";
 import type { FrontmatterObject } from "./health/shared.ts";
 import type {
   ExportPackAssessmentRecord,
@@ -32,11 +20,6 @@ import type {
 import type { VaultReadModel } from "./model.ts";
 
 const HEALTH_EVENT_KIND_SET = new Set<string>(HEALTH_HISTORY_EVENT_KINDS);
-
-export interface ExportPackHealthReadResult {
-  health: ExportPackHealthContext;
-  failures: ParseFailure[];
-}
 
 function exportPackHealthEventRecordFromEntity(
   entity: CanonicalEntity,
@@ -72,7 +55,6 @@ function exportPackHealthEventRecordFromEntity(
 
 function bankPageFromEntity(
   entity: CanonicalEntity,
-  markdown: string,
 ): ExportPackBankPage {
   return {
     id: entity.entityId,
@@ -80,163 +62,34 @@ function bankPageFromEntity(
     title: entity.title,
     status: entity.status,
     relativePath: entity.path,
-    markdown,
+    markdown: "",
     body: entity.body ?? "",
     attributes: entity.attributes as FrontmatterObject,
   };
-}
-
-function mapBankPages(
-  entities: CanonicalEntity[],
-  markdownByPath: ReadonlyMap<string, string>,
-): ExportPackBankPage[] {
-  return entities.map((entity) =>
-    bankPageFromEntity(entity, markdownByPath.get(entity.path) ?? ""),
-  );
-}
-
-function buildHealthContext(
-  input: {
-    assessments: readonly CanonicalEntity[];
-    healthEvents: readonly CanonicalEntity[];
-    goals: readonly CanonicalEntity[];
-    conditions: readonly CanonicalEntity[];
-    allergies: readonly CanonicalEntity[];
-    regimens: readonly CanonicalEntity[];
-    familyMembers: readonly CanonicalEntity[];
-    geneticVariants: readonly CanonicalEntity[];
-    markdownByPath?: ReadonlyMap<string, string>;
-  },
-  filters: ExportPackFilters,
-): ExportPackHealthContext {
-  const markdownByPath = input.markdownByPath ?? new Map<string, string>();
-
-  return {
-    assessments: input.assessments
-      .map(assessmentRecordFromEntity)
-      .filter((entry): entry is ExportPackAssessmentRecord => entry !== null)
-      .filter((entry) => matchesDateWindow(entry.recordedAt ?? entry.importedAt, filters))
-      .sort(compareByRecordedOrImportedAtDescThenId),
-    healthEvents: input.healthEvents
-      .map(exportPackHealthEventRecordFromEntity)
-      .filter((entry): entry is ExportPackHealthEventRecord => entry !== null)
-      .filter((entry) => matchesDateWindow(entry.occurredAt, filters))
-      .sort(compareByOccurredAtDescThenId),
-    goals: mapBankPages([...input.goals], markdownByPath),
-    conditions: mapBankPages([...input.conditions], markdownByPath),
-    allergies: mapBankPages([...input.allergies], markdownByPath),
-    regimens: mapBankPages([...input.regimens], markdownByPath),
-    familyMembers: mapBankPages([...input.familyMembers], markdownByPath),
-    geneticVariants: mapBankPages([...input.geneticVariants], markdownByPath),
-  };
-}
-
-async function readHealthHistoryEventsStrict(vaultRoot: string): Promise<CanonicalEntity[]> {
-  return collapseEventLedgerEntities(
-    await readJsonlEntitiesStrict(
-      vaultRoot,
-      VAULT_LAYOUT.eventLedgerDirectory,
-      projectHistoryEntity,
-    ),
-  );
-}
-
-async function readHealthHistoryEventsTolerant(vaultRoot: string): Promise<CanonicalEntity[]> {
-  return collapseEventLedgerEntities(
-    (await readJsonlEntitiesTolerant(
-      vaultRoot,
-      VAULT_LAYOUT.eventLedgerDirectory,
-      projectHistoryEntity,
-    )).entities,
-  );
-}
-
-function healthEventsFromCollectionAndLedger(
-  collected: CanonicalHealthEntityCollection,
-  ledgerEvents: readonly CanonicalEntity[],
-): CanonicalEntity[] {
-  return collapseEventLedgerEntities([
-    ...collected.entities.filter((entity) => entity.family === "event"),
-    ...ledgerEvents,
-  ]);
-}
-
-export async function readHealthContext(
-  vaultRoot: string,
-  filters: ExportPackFilters,
-): Promise<ExportPackHealthReadResult> {
-  const [collected, ledgerEvents] = await Promise.all([
-    collectCanonicalEntities(vaultRoot, { mode: "strict-async" }),
-    readHealthHistoryEventsStrict(vaultRoot),
-  ]);
-
-  return {
-    health: buildHealthContext(
-      {
-        assessments: collected.assessments,
-        healthEvents: healthEventsFromCollectionAndLedger(
-          collected,
-          ledgerEvents,
-        ),
-        goals: collected.goals,
-        conditions: collected.conditions,
-        allergies: collected.allergies,
-        regimens: collected.regimens,
-        familyMembers: collected.familyMembers,
-        geneticVariants: collected.geneticVariants,
-        markdownByPath: collected.markdownByPath,
-      },
-      filters,
-    ),
-    failures: collected.failures,
-  };
-}
-
-export async function readHealthContextTolerant(
-  vaultRoot: string,
-  filters: ExportPackFilters,
-): Promise<ExportPackHealthContext> {
-  const [collected, ledgerEvents] = await Promise.all([
-    collectCanonicalEntities(vaultRoot, { mode: "tolerant-async" }),
-    readHealthHistoryEventsTolerant(vaultRoot),
-  ]);
-
-  return buildHealthContext(
-    {
-      assessments: collected.assessments,
-      healthEvents: healthEventsFromCollectionAndLedger(
-        collected,
-        ledgerEvents,
-      ),
-      goals: collected.goals,
-      conditions: collected.conditions,
-      allergies: collected.allergies,
-      regimens: collected.regimens,
-      familyMembers: collected.familyMembers,
-      geneticVariants: collected.geneticVariants,
-      markdownByPath: collected.markdownByPath,
-    },
-    filters,
-  );
 }
 
 export function buildHealthContextFromVault(
   vault: VaultReadModel,
   filters: ExportPackFilters,
 ): ExportPackHealthContext {
-  return buildHealthContext(
-    {
-      assessments: vault.assessments,
-      healthEvents: vault.events,
-      goals: vault.goals,
-      conditions: vault.conditions,
-      allergies: vault.allergies,
-      regimens: vault.regimens,
-      familyMembers: vault.familyMembers,
-      geneticVariants: vault.geneticVariants,
-    },
-    filters,
-  );
+  return {
+    assessments: vault.assessments
+      .map(assessmentRecordFromEntity)
+      .filter((entry): entry is ExportPackAssessmentRecord => entry !== null)
+      .filter((entry) => matchesDateWindow(entry.recordedAt ?? entry.importedAt, filters))
+      .sort(compareByRecordedOrImportedAtDescThenId),
+    healthEvents: vault.events
+      .map(exportPackHealthEventRecordFromEntity)
+      .filter((entry): entry is ExportPackHealthEventRecord => entry !== null)
+      .filter((entry) => matchesDateWindow(entry.occurredAt, filters))
+      .sort(compareByOccurredAtDescThenId),
+    goals: vault.goals.map(bankPageFromEntity),
+    conditions: vault.conditions.map(bankPageFromEntity),
+    allergies: vault.allergies.map(bankPageFromEntity),
+    regimens: vault.regimens.map(bankPageFromEntity),
+    familyMembers: vault.familyMembers.map(bankPageFromEntity),
+    geneticVariants: vault.geneticVariants.map(bankPageFromEntity),
+  };
 }
 
 function matchesDateWindow(

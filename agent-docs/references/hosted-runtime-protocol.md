@@ -3463,17 +3463,21 @@ reads produce no device context and must not be interpreted as proof that the
 user has no connection.
 
 Hosted Stripe webhook routes keep raw request bodies and Stripe signatures in
-the route/service verification path only. After verification, web stores the
-minimal `HostedStripeEvent` receipt and starts a Stripe-specific Vercel Workflow
-with `{ eventId }`. The workflow uses one event-id step to re-fetch the Stripe
-event through the existing Stripe API reconciliation path, apply billing and
-activation mailbox facts behind the hosted Stripe receipt claim, and signal
-Temporal when activation appended runtime work. Step inputs and outputs stay
-pointer-only; any member or activation ids needed for retry are re-derived
-inside the step from web-owned Postgres and Stripe. Raw Stripe
-payloads, signatures, customer objects, invoice objects, provider headers, and
-mailbox payloads must not be Workflow inputs or step outputs. The minute cron
-drain remains a receipt retry fallback for due Stripe rows.
+the route/service verification path only. After verification, Web stores the
+minimal `HostedStripeEvent` receipt and starts a pointer-only Vercel Workflow
+with `{ eventId }`. Its single step invokes one receipt-owned reconciliation
+attempt. The receipt owns claiming, backoff, poisoning, retained activation
+pointers and completion; it is completed only after required activation
+acknowledgements. The workflow has no independent retry policy. The minute cron
+selects bounded due receipt IDs and dispatches the same execution transport;
+lost dispatches remain due and duplicate dispatches meet the receipt claim.
+Workflow execution remains necessary because existing Stripe/member mutation
+budgets can exceed the cron request duration. Raw Stripe payloads, signatures,
+customer objects, invoice objects, provider headers and mailbox payloads are
+never workflow inputs or step outputs; unexpected step errors are replaced with
+a fixed safe error. Preserve old deployments until their pinned Stripe runs
+have drained: older completed receipts can still depend on those runs for their
+activation handoff. Do not reset all completed receipts to compensate.
 
 Cloudflare does not acquire a web run row and does not reconcile durable work.
 Only Temporal decides when Cloudflare should process. The short-lived

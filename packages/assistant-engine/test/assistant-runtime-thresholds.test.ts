@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -37,6 +37,62 @@ afterEach(async () => {
 })
 
 describe('assistant runtime thresholds', () => {
+  it('clears stale runtime locks and prunes old artifacts with malformed quarantine metadata', async () => {
+    const paths = await createAssistantPaths('assistant-infra-runtime-budgets-')
+    await ensureAssistantState(paths)
+
+    const oldDate = new Date('2026-01-01T00:00:00.000Z')
+    const maintenanceDate = new Date('2026-02-15T00:00:00.000Z')
+    const nestedDirectory = path.join(paths.quarantineDirectory, 'nested')
+    const payloadPath = path.join(nestedDirectory, 'budget.invalid.json')
+    const metadataPath = `${payloadPath}.meta.json`
+    await mkdir(nestedDirectory, {
+      recursive: true,
+    })
+    await writeFile(payloadPath, '{"bad":true}', 'utf8')
+    await writeFile(metadataPath, '{bad-metadata', 'utf8')
+    await utimes(payloadPath, oldDate, oldDate)
+    await utimes(metadataPath, oldDate, oldDate)
+
+    const inspectAssistantRuntimeWriteLock = vi.fn(async () => ({
+      state: 'stale' as const,
+    }))
+    const clearAssistantRuntimeWriteLock = vi.fn(async () => undefined)
+
+    vi.doMock('../src/assistant/runtime-write-lock.js', async () => {
+      const actual = await vi.importActual<
+        typeof import('../src/assistant/runtime-write-lock.ts')
+      >('../src/assistant/runtime-write-lock.ts')
+      return {
+        ...actual,
+        clearAssistantRuntimeWriteLock,
+        inspectAssistantRuntimeWriteLock,
+        withAssistantRuntimeWriteLock: vi.fn(
+          async (_vault: string, run: (lockedPaths: typeof paths) => Promise<unknown>) =>
+            await run(paths),
+        ),
+      }
+    })
+
+    const runtimeBudgets = await import('../src/assistant/runtime-budgets.ts')
+    const snapshot = await runtimeBudgets.runAssistantRuntimeMaintenance({
+      now: maintenanceDate,
+      vault: 'ignored-by-mock',
+    })
+
+    expect(snapshot.maintenance.staleLocksCleared).toBe(1)
+    expect(snapshot.maintenance.staleQuarantinePruned).toBe(1)
+    expect(snapshot.maintenance.notes).toContain('1 stale runtime lock(s) were cleared.')
+    expect(clearAssistantRuntimeWriteLock).toHaveBeenCalledOnce()
+
+    await expect(stat(payloadPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await expect(stat(metadataPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+
   it('covers the turn-lock held-message formatter for owned and unknown lock owners', async () => {
     let capturedConfig:
       | {

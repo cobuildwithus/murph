@@ -25,8 +25,6 @@ of a job; they occupy the same SQLite integer/JSON number, not a history list.
 At the capped cadence, reaching JavaScript's safe-integer limit would take over
 two trillion years; no new counter cap or retry-budget policy is introduced.
 
-Contributing a new wearable provider? Start with `docs/device-provider-contribution-kit.md` in the repo root, then use the scaffolds listed in `docs/templates/README.md`.
-
 Web owns authenticated device control and connection authority. The runner consumes
 shared hosted-runtime contracts and finite scheduler/worker passes. The worker
 service exposes account reads, scheduling and execution; connection starts,
@@ -250,9 +248,8 @@ descriptor support.
 
 ## Shared public ingress
 
-Use `DeviceSyncPublicIngress` when you need the same callback/webhook logic in a different HTTP surface:
-- local `device-syncd` with an exposed public listener or tunnel
-- the current hosted Next.js/Vercel control plane that stores durable integration state in Postgres
+`DeviceSyncPublicIngress` handles Web callbacks and webhooks against durable
+connection state in Postgres.
 
 The shared ingress owns:
 - provider connect URL creation
@@ -505,23 +502,14 @@ defaults.
 
 Provider request failures emit a shared, metadata-only diagnostic shape. Logs and hosted runtime apply payloads may include endpoint kind, method, auth placement, body/query field names and counts, upstream status, response shape, and a sanitized provider error code/description. They must not include provider tokens, client secrets, auth codes, raw request bodies, raw response bodies, raw provider paths, query values, or provider account identifiers. New provider transports should use the shared provider diagnostics helpers instead of adding provider-specific ad hoc logging.
 
-## Adding another provider
-
-The permanent provider path is:
-- add one shared descriptor in `@murphai/importers`
-- add one `packages/device-syncd/src/providers/<provider>.ts` transport module that owns auth, refresh, jobs, and any provider-owned webhook preflight/admin behavior
-- add one importer adapter in `packages/importers/src/device-providers/<provider>.ts`
-- define its boot-safe serialization schema in `packages/device-syncd/src/config/serializable-provider-configs.ts`, then compose that schema into its registration in `packages/device-syncd/src/config/provider-manifests.ts`
-
-Hosted web should not need a second provider registry or a provider-specific
-Prisma table for a normal addition. Its Postgres device-sync models stay
-provider-generic, and its route layer should keep using the shared
-`DeviceSyncPublicIngress` seam.
-
-Provider-readiness checkpoint:
-- a normal provider addition should stop at the descriptor, transport module, importer adapter, boot-safe serialization schema, and provider-manifest registration
-- generic hosted ingress should not gain provider-specific webhook secrets, provider-specific route branching, or provider-specific persistence tables
-- if a provider seems to need edits outside those seams, treat it as an architecture review instead of routine provider wiring
+Junction is the only configured transport. Its manifest composes the shared
+provider descriptor, job payload definitions, environment keys and serialization
+allowlist directly. Public descriptors derive capabilities from the shared
+descriptor; there is no separate capability registry or registration factory.
+The boot-safe serializer selects only the Junction fields declared by its
+allowlist and rejects provider secrets at the wire boundary. Retired direct
+provider envelopes remain readable so an in-flight deployment cannot revive them
+or fail unrelated Junction work.
 
 ## Environment
 

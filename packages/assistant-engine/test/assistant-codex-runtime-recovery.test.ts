@@ -1,5 +1,8 @@
 import { withCodexToolInputContract } from '../src/assistant-codex/tool-input-contract.ts'
 import {
+  initializeWarmTurn,
+  mockWarmCodexProcess,
+  mockCodexProcess,
   cliTimingLaunchArgs,
   MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
   MockChildProcess,
@@ -67,15 +70,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
 
       queueMicrotask(() => {
         void (async () => {
-          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: 'thread-v2-events-one',
-            turnId: 'turn-v2-events-one',
-          })
+          await initializeWarmTurn(spawnedChild, 'thread-v2-events-one', 'turn-v2-events-one')
           writeCodexV2AssistantEventTurn({
             child: spawnedChild,
             finalMessage: 'First warm answer.',
@@ -147,15 +142,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
 
       queueMicrotask(() => {
         void (async () => {
-          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: 'thread-unsupported-request',
-            turnId: 'turn-unsupported-request',
-          })
+          await initializeWarmTurn(spawnedChild, 'thread-unsupported-request', 'turn-unsupported-request')
           spawnedChild.stdout.write(jsonLine({
             id: 99,
             method: 'approval/request',
@@ -208,44 +195,24 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     const hostedCodexHome = await createTempDir('assistant-codex-warm-off-turn-output-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-off-turn-output-work-')
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const spawnedChild = new MockChildProcess()
-      spawnedChild.pid = 23_500 + spawnedChildren.length
-      spawnedChildren.push(spawnedChild)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: 'thread-off-turn-one',
-            turnId: 'turn-off-turn-one',
-          })
-          writeCompletedTurn(
-            spawnedChild,
-            'thread-off-turn-one',
-            'turn-off-turn-one',
-          )
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 2,
-            threadId: 'thread-off-turn-two',
-            turnId: 'turn-off-turn-two',
-          })
-          writeCompletedTurn(
-            spawnedChild,
-            'thread-off-turn-two',
-            'turn-off-turn-two',
-          )
-        })()
+    mockWarmCodexProcess(spawnedChildren, 23_500, async (spawnedChild) => {
+      await initializeWarmTurn(spawnedChild, 'thread-off-turn-one', 'turn-off-turn-one')
+      writeCompletedTurn(
+        spawnedChild,
+        'thread-off-turn-one',
+        'turn-off-turn-one',
+      )
+      await writeWarmTurnStarted({
+        child: spawnedChild,
+        requestCount: 2,
+        threadId: 'thread-off-turn-two',
+        turnId: 'turn-off-turn-two',
       })
-
-      return spawnedChild
+      writeCompletedTurn(
+        spawnedChild,
+        'thread-off-turn-two',
+        'turn-off-turn-two',
+      )
     })
 
     const hostedEnv = {
@@ -315,25 +282,12 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
           const initialize = await waitForRpcMethod(spawnedChild, 'initialize')
           spawnedChild.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-          const firstThread = await waitForRpcMethodCount(spawnedChild, 'thread/start', 1)
-          spawnedChild.stdout.write(jsonLine({
-            id: firstThread.id,
-            result: {
-              thread: {
-                id: 'thread-warm-config-1',
-              },
-            },
-          }))
-
-          const firstTurn = await waitForRpcMethodCount(spawnedChild, 'turn/start', 1)
-          spawnedChild.stdout.write(jsonLine({
-            id: firstTurn.id,
-            result: {
-              turn: {
-                id: 'turn-warm-config-1',
-              },
-            },
-          }))
+          await writeWarmTurnStarted({
+            child: spawnedChild,
+            requestCount: 1,
+            threadId: 'thread-warm-config-1',
+            turnId: 'turn-warm-config-1',
+          })
           spawnedChild.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
@@ -343,25 +297,12 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
               },
             },
           }))
-          const secondThread = await waitForRpcMethodCount(spawnedChild, 'thread/start', 2)
-          spawnedChild.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-warm-config-2',
-              },
-            },
-          }))
-
-          const secondTurn = await waitForRpcMethodCount(spawnedChild, 'turn/start', 2)
-          spawnedChild.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-warm-config-2',
-              },
-            },
-          }))
+          await writeWarmTurnStarted({
+            child: spawnedChild,
+            requestCount: 2,
+            threadId: 'thread-warm-config-2',
+            turnId: 'turn-warm-config-2',
+          })
           spawnedChild.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
@@ -444,16 +385,12 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
           const initialize = await waitForRpcMethod(child, 'initialize')
           child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-          const firstThread = await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(jsonLine({
-            id: firstThread.id,
-            result: { thread: { id: 'thread-warm-personalization' } },
-          }))
-          const firstTurn = await waitForRpcMethodCount(child, 'turn/start', 1)
-          child.stdout.write(jsonLine({
-            id: firstTurn.id,
-            result: { turn: { id: 'turn-warm-personalization-1' } },
-          }))
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-warm-personalization',
+            turnId: 'turn-warm-personalization-1',
+          })
           child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
@@ -1184,55 +1121,47 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
 
     await writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          const threadStart = await waitForRpcMethod(child, 'thread/start')
-          expect(asRecord(threadStart.params)).toMatchObject({
-            approvalPolicy: 'never',
-          })
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-path',
-                },
-              },
-            }),
-          )
-          const turnStart = await waitForRpcMethod(child, 'turn/start')
-          const inputItems = readTurnStartInputItems(turnStart)
-          expect(readLocalImagePath(inputItems[1])).toBe(imagePath)
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-path',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-path',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
+    mockCodexProcess(async (child) => {
+      await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: 1, result: {} }))
+      const threadStart = await waitForRpcMethod(child, 'thread/start')
+      expect(asRecord(threadStart.params)).toMatchObject({
+        approvalPolicy: 'never',
       })
-
-      return child
+      child.stdout.write(
+        jsonLine({
+          id: 2,
+          result: {
+            thread: {
+              id: 'thread-path',
+            },
+          },
+        }),
+      )
+      const turnStart = await waitForRpcMethod(child, 'turn/start')
+      const inputItems = readTurnStartInputItems(turnStart)
+      expect(readLocalImagePath(inputItems[1])).toBe(imagePath)
+      child.stdout.write(
+        jsonLine({
+          id: 3,
+          result: {
+            turn: {
+              id: 'turn-path',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-path',
+              status: 'completed',
+            },
+          },
+        }),
+      )
     })
 
     await expect(
@@ -1358,49 +1287,41 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
   it('captures turn ids from turn/started when turn/start returns no turn id', async () => {
     const workingDirectory = await createTempDir('assistant-codex-turn-started-id-')
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-started-fallback',
-                },
-              },
-            }),
-          )
-          await waitForRpcMethod(child, 'turn/start')
-          child.stdout.write(jsonLine({ id: 3, result: {} }))
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/started',
-              params: {
-                turnId: 'turn-started-fallback',
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-started-fallback',
-                  status: 'completed',
-                },
-              },
-            }),
-          )
-        })()
-      })
-
-      return child
+    mockCodexProcess(async (child) => {
+      await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: 1, result: {} }))
+      await waitForRpcMethod(child, 'thread/start')
+      child.stdout.write(
+        jsonLine({
+          id: 2,
+          result: {
+            thread: {
+              id: 'thread-started-fallback',
+            },
+          },
+        }),
+      )
+      await waitForRpcMethod(child, 'turn/start')
+      child.stdout.write(jsonLine({ id: 3, result: {} }))
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/started',
+          params: {
+            turnId: 'turn-started-fallback',
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-started-fallback',
+              status: 'completed',
+            },
+          },
+        }),
+      )
     })
 
     await expect(
@@ -1519,19 +1440,11 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
   it('maps missing Codex binaries to a not-found CLI error', async () => {
     const workingDirectory = await createTempDir('assistant-codex-not-found-')
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
-          error.code = 'ENOENT'
-          emitProcessErrorAndExit(child, error)
-        })()
-      })
-
-      return child
+    mockCodexProcess(async (child) => {
+      await waitForRpcMethod(child, 'initialize')
+      const error = new Error('spawn codex ENOENT') as NodeJS.ErrnoException
+      error.code = 'ENOENT'
+      emitProcessErrorAndExit(child, error)
     })
 
     await expect(
@@ -1745,52 +1658,44 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
   it('marks connection-loss failures as retryable and preserves the Codex thread id', async () => {
     const workingDirectory = await createTempDir('assistant-codex-connection-loss-')
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-77',
-                },
-              },
-            }),
-          )
-          await waitForRpcMessages(child, 4)
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-77',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/started',
-              params: {
-                turn: {
-                  id: 'turn-77',
-                },
-              },
-            }),
-          )
-          child.stderr.write('connection closed before response.completed\n')
-          child.emit('exit', 1, null)
-          child.emit('close', 1, null)
-        })()
-      })
-
-      return child
+    mockCodexProcess(async (child) => {
+      await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: 1, result: {} }))
+      await waitForRpcMethod(child, 'thread/start')
+      child.stdout.write(
+        jsonLine({
+          id: 2,
+          result: {
+            thread: {
+              id: 'thread-77',
+            },
+          },
+        }),
+      )
+      await waitForRpcMessages(child, 4)
+      child.stdout.write(
+        jsonLine({
+          id: 3,
+          result: {
+            turn: {
+              id: 'turn-77',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-77',
+            },
+          },
+        }),
+      )
+      child.stderr.write('connection closed before response.completed\n')
+      child.emit('exit', 1, null)
+      child.emit('close', 1, null)
     })
 
     await expect(
@@ -1820,74 +1725,66 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     // phrases (June 2026 quota incident regression guard).
     const workingDirectory = await createTempDir('assistant-codex-structured-usage-limit-')
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-structured-usage',
-                },
-              },
-            }),
-          )
-          await waitForRpcMessages(child, 4)
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-structured-usage',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/started',
-              params: {
-                turn: {
-                  id: 'turn-structured-usage',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'error',
-              params: {
-                error: {
-                  codexErrorInfo: 'usageLimitExceeded',
-                  message: 'You have reached your monthly cap.',
-                },
-                threadId: 'thread-structured-usage',
-                turnId: 'turn-structured-usage',
-                willRetry: false,
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/completed',
-              params: {
-                turn: {
-                  id: 'turn-structured-usage',
-                  status: 'failed',
-                },
-              },
-            }),
-          )
-        })()
-      })
-
-      return child
+    mockCodexProcess(async (child) => {
+      await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: 1, result: {} }))
+      await waitForRpcMethod(child, 'thread/start')
+      child.stdout.write(
+        jsonLine({
+          id: 2,
+          result: {
+            thread: {
+              id: 'thread-structured-usage',
+            },
+          },
+        }),
+      )
+      await waitForRpcMessages(child, 4)
+      child.stdout.write(
+        jsonLine({
+          id: 3,
+          result: {
+            turn: {
+              id: 'turn-structured-usage',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-structured-usage',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'error',
+          params: {
+            error: {
+              codexErrorInfo: 'usageLimitExceeded',
+              message: 'You have reached your monthly cap.',
+            },
+            threadId: 'thread-structured-usage',
+            turnId: 'turn-structured-usage',
+            willRetry: false,
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/completed',
+          params: {
+            turn: {
+              id: 'turn-structured-usage',
+              status: 'failed',
+            },
+          },
+        }),
+      )
     })
 
     await expect(
@@ -1916,66 +1813,58 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     // structured classification must win over text sniffing end to end.
     const workingDirectory = await createTempDir('assistant-codex-structured-non-connection-')
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/start')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              result: {
-                thread: {
-                  id: 'thread-structured-exit',
-                },
-              },
-            }),
-          )
-          await waitForRpcMessages(child, 4)
-          child.stdout.write(
-            jsonLine({
-              id: 3,
-              result: {
-                turn: {
-                  id: 'turn-structured-exit',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'turn/started',
-              params: {
-                turn: {
-                  id: 'turn-structured-exit',
-                },
-              },
-            }),
-          )
-          child.stdout.write(
-            jsonLine({
-              method: 'error',
-              params: {
-                error: {
-                  codexErrorInfo: 'internalServerError',
-                  message: 'provider rejected the request',
-                },
-                threadId: 'thread-structured-exit',
-                turnId: 'turn-structured-exit',
-                willRetry: false,
-              },
-            }),
-          )
-          child.stderr.write('connection closed before response.completed\n')
-          child.emit('exit', 1, null)
-          child.emit('close', 1, null)
-        })()
-      })
-
-      return child
+    mockCodexProcess(async (child) => {
+      await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: 1, result: {} }))
+      await waitForRpcMethod(child, 'thread/start')
+      child.stdout.write(
+        jsonLine({
+          id: 2,
+          result: {
+            thread: {
+              id: 'thread-structured-exit',
+            },
+          },
+        }),
+      )
+      await waitForRpcMessages(child, 4)
+      child.stdout.write(
+        jsonLine({
+          id: 3,
+          result: {
+            turn: {
+              id: 'turn-structured-exit',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'turn/started',
+          params: {
+            turn: {
+              id: 'turn-structured-exit',
+            },
+          },
+        }),
+      )
+      child.stdout.write(
+        jsonLine({
+          method: 'error',
+          params: {
+            error: {
+              codexErrorInfo: 'internalServerError',
+              message: 'provider rejected the request',
+            },
+            threadId: 'thread-structured-exit',
+            turnId: 'turn-structured-exit',
+            willRetry: false,
+          },
+        }),
+      )
+      child.stderr.write('connection closed before response.completed\n')
+      child.emit('exit', 1, null)
+      child.emit('close', 1, null)
     })
 
     await expect(
@@ -1998,27 +1887,19 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
   it('classifies stale resume failures from thread/resume RPC errors', async () => {
     const workingDirectory = await createTempDir('assistant-codex-stale-resume-')
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-
-      queueMicrotask(() => {
-        void (async () => {
-          await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: 1, result: {} }))
-          await waitForRpcMethod(child, 'thread/resume')
-          child.stdout.write(
-            jsonLine({
-              id: 2,
-              error: {
-                code: -32000,
-                message: 'thread/resume failed: no rollout found for thread id stale-thread',
-              },
-            }),
-          )
-        })()
-      })
-
-      return child
+    mockCodexProcess(async (child) => {
+      await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: 1, result: {} }))
+      await waitForRpcMethod(child, 'thread/resume')
+      child.stdout.write(
+        jsonLine({
+          id: 2,
+          error: {
+            code: -32000,
+            message: 'thread/resume failed: no rollout found for thread id stale-thread',
+          },
+        }),
+      )
     })
 
     const error: unknown = await executeCodexAppServerTurn({
@@ -2242,38 +2123,26 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     const workingDirectory = await createTempDir('assistant-codex-stale-resume-context-')
     const staleWorkingDirectory = await createTempDir('assistant-codex-old-resume-context-')
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    mockWarmCodexProcess(spawnedChildren, 35_100, async (child) => {
+      const initialize = await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 35_100 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const threadResume = await waitForRpcMethod(child, 'thread/resume')
-          child.stdout.write(
-            jsonLine({
-              id: threadResume.id,
-              result: {
-                approvalPolicy: 'never',
-                cwd: staleWorkingDirectory,
-                model: 'gpt-5',
-                modelProvider: 'hosted-openai',
-                sandbox: codexSandboxPolicyForMode('read-only'),
-                thread: {
-                  id: 'resume-thread',
-                },
-              },
-            }),
-          )
-        })()
-      })
-
-      return child
+      const threadResume = await waitForRpcMethod(child, 'thread/resume')
+      child.stdout.write(
+        jsonLine({
+          id: threadResume.id,
+          result: {
+            approvalPolicy: 'never',
+            cwd: staleWorkingDirectory,
+            model: 'gpt-5',
+            modelProvider: 'hosted-openai',
+            sandbox: codexSandboxPolicyForMode('read-only'),
+            thread: {
+              id: 'resume-thread',
+            },
+          },
+        }),
+      )
     })
 
     await expect(
@@ -2306,37 +2175,25 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
   it('fails closed when thread/resume returns a different thread id', async () => {
     const workingDirectory = await createTempDir('assistant-codex-resume-thread-mismatch-')
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    mockWarmCodexProcess(spawnedChildren, 35_200, async (child) => {
+      const initialize = await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 35_200 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const threadResume = await waitForRpcMethod(child, 'thread/resume')
-          child.stdout.write(
-            jsonLine({
-              id: threadResume.id,
-              result: {
-                approvalPolicy: 'never',
-                cwd: path.resolve(workingDirectory),
-                model: 'gpt-5.1',
-                modelProvider: 'openai',
-                thread: {
-                  id: 'wrong-thread',
-                },
-              },
-            }),
-          )
-        })()
-      })
-
-      return child
+      const threadResume = await waitForRpcMethod(child, 'thread/resume')
+      child.stdout.write(
+        jsonLine({
+          id: threadResume.id,
+          result: {
+            approvalPolicy: 'never',
+            cwd: path.resolve(workingDirectory),
+            model: 'gpt-5.1',
+            modelProvider: 'openai',
+            thread: {
+              id: 'wrong-thread',
+            },
+          },
+        }),
+      )
     })
 
     const error: unknown = await executeCodexAppServerTurn({
@@ -2377,35 +2234,23 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
   it('fails closed on missing echoed fields and skips unrequested ones', async () => {
     const workingDirectory = await createTempDir('assistant-codex-resume-missing-echo-')
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    mockWarmCodexProcess(spawnedChildren, 35_300, async (child) => {
+      const initialize = await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
 
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 35_300 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          const threadResume = await waitForRpcMethod(child, 'thread/resume')
-          child.stdout.write(
-            jsonLine({
-              id: threadResume.id,
-              result: {
-                cwd: '',
-                model: 'unrequested-model',
-                modelProvider: 'unrequested-provider',
-                sandbox: codexSandboxPolicyForMode('read-only'),
-                thread: {},
-              },
-            }),
-          )
-        })()
-      })
-
-      return child
+      const threadResume = await waitForRpcMethod(child, 'thread/resume')
+      child.stdout.write(
+        jsonLine({
+          id: threadResume.id,
+          result: {
+            cwd: '',
+            model: 'unrequested-model',
+            modelProvider: 'unrequested-provider',
+            sandbox: codexSandboxPolicyForMode('read-only'),
+            thread: {},
+          },
+        }),
+      )
     })
 
     await expect(
@@ -2532,32 +2377,25 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
         ])
       }
 
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            await writeSuccessfulTurn({
-              child,
-              expectedPrompt: 'fresh prompt',
-              responseThreadId: 'thread-fresh',
-              threadRequestCount: 1,
-              threadMethod: 'thread/start',
-              turnRequestCount: 1,
-            })
-            await writeSuccessfulTurn({
-              child,
-              expectedPrompt: 'resume prompt',
-              responseThreadId: 'thread-resume-request',
-              threadRequestCount: 1,
-              threadMethod: 'thread/resume',
-              turnRequestCount: 2,
-            })
-          })()
+      mockCodexProcess(async (child) => {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+        await writeSuccessfulTurn({
+          child,
+          expectedPrompt: 'fresh prompt',
+          responseThreadId: 'thread-fresh',
+          threadRequestCount: 1,
+          threadMethod: 'thread/start',
+          turnRequestCount: 1,
         })
-
-        return child
+        await writeSuccessfulTurn({
+          child,
+          expectedPrompt: 'resume prompt',
+          responseThreadId: 'thread-resume-request',
+          threadRequestCount: 1,
+          threadMethod: 'thread/resume',
+          turnRequestCount: 2,
+        })
       })
 
       await expect(

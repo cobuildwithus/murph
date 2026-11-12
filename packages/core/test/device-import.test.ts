@@ -53,6 +53,18 @@ async function snapshotVaultFiles(vaultRoot: string): Promise<Map<string, Buffer
   return snapshot;
 }
 
+async function assertAmbiguousReplayPreservesVault(
+  input: Parameters<typeof importDeviceBatch>[0],
+): Promise<void> {
+  const beforeReplay = await snapshotVaultFiles(input.vaultRoot);
+  await assert.rejects(
+    importDeviceBatch(input),
+    (error) => error instanceof VaultError
+      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+  );
+  assert.deepEqual(await snapshotVaultFiles(input.vaultRoot), beforeReplay);
+}
+
 interface DeviceImportManifest {
   ingestId: string;
   importKind: string;
@@ -3113,30 +3125,36 @@ test("importDeviceBatch rejects an exact retry when the complete canonical spine
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedRepair);
 });
 
-test("exact repair rejects one stored event output claimed by two missing events", async () => {
+test.each([
+  {
+    name: "exact repair rejects one stored event output claimed by two missing events",
+    resourceIds: ["workout-missing-a", "workout-missing-b"],
+    evidenceRoles: ["junction-summary-workouts"],
+    evidenceParts: [{
+      role: "junction-summary-workouts",
+      fileName: "junction-summary-workouts.json",
+      content: { ids: ["workout-missing-a", "workout-missing-b"] },
+    }],
+  },
+  {
+    name: "exact repair rejects one stored empty-role output claimed by two missing events",
+    resourceIds: ["workout-empty-role-a", "workout-empty-role-b"],
+    evidenceRoles: [],
+    evidenceParts: [],
+  },
+] as const)("$name", async ({ resourceIds, evidenceRoles, evidenceParts }) => {
   const vaultRoot = await makeTempDirectory("murph-device-import-ambiguous-stored-output-repair");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-  const sharedEvidenceRole = "junction-summary-workouts";
   const input = {
     vaultRoot,
     provider: "junction",
     accountId: "account-a",
     importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      {
-        ...buildJunctionStyleWorkoutEvent({ resourceId: "workout-missing-a" }),
-        evidenceRoles: [sharedEvidenceRole],
-      },
-      {
-        ...buildJunctionStyleWorkoutEvent({ resourceId: "workout-missing-b" }),
-        evidenceRoles: [sharedEvidenceRole],
-      },
-    ],
-    evidenceParts: [{
-      role: sharedEvidenceRole,
-      fileName: "junction-summary-workouts.json",
-      content: { ids: ["workout-missing-a", "workout-missing-b"] },
-    }],
+    events: resourceIds.map((resourceId) => ({
+      ...buildJunctionStyleWorkoutEvent({ resourceId }),
+      evidenceRoles,
+    })),
+    evidenceParts,
   } as const;
   const first = await importDeviceBatch(input);
   assert.ok(first.applied);
@@ -3145,6 +3163,8 @@ test("exact repair rejects one stored event output claimed by two missing events
   const eventShardPath = first.eventShardPaths[0];
   assert.ok(eventShardPath);
   const stored = await readRequiredIntegrationIngest(vaultRoot, first.ingestId);
+  assert.equal(stored.outputs.events.length, 2);
+  assert.deepEqual(stored.outputs.events.map((output) => output.roles), [evidenceRoles, evidenceRoles]);
   const retainedOutput = stored.outputs.events[0];
   assert.ok(retainedOutput);
   const ambiguousStoredDelivery: IntegrationIngestRecord = {
@@ -3164,81 +3184,7 @@ test("exact repair rejects one stored event output claimed by two missing events
     "utf8",
   );
   await fs.writeFile(path.join(vaultRoot, eventShardPath), "", "utf8");
-  const watchedPaths = [first.ingestShardPath, eventShardPath];
-  const beforeRepair = await Promise.all(
-    watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
-  );
-
-  await assert.rejects(
-    importDeviceBatch(input),
-    (error) =>
-      error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(
-    await Promise.all(
-      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
-    ),
-    beforeRepair,
-  );
-});
-
-test("exact repair rejects one stored empty-role output claimed by two missing events", async () => {
-  const vaultRoot = await makeTempDirectory("murph-device-import-empty-role-output-repair");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-  const input = {
-    vaultRoot,
-    provider: "junction",
-    accountId: "account-a",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      {
-        ...buildJunctionStyleWorkoutEvent({ resourceId: "workout-empty-role-a" }),
-        evidenceRoles: [],
-      },
-      {
-        ...buildJunctionStyleWorkoutEvent({ resourceId: "workout-empty-role-b" }),
-        evidenceRoles: [],
-      },
-    ],
-    evidenceParts: [],
-  } as const;
-  const first = await importDeviceBatch(input);
-  assert.ok(first.ingestId);
-  assert.ok(first.ingestShardPath);
-  const eventShardPath = first.eventShardPaths[0];
-  assert.ok(eventShardPath);
-  const stored = await readRequiredIntegrationIngest(vaultRoot, first.ingestId);
-  assert.equal(stored.outputs.events.length, 2);
-  assert.deepEqual(stored.outputs.events.map((output) => output.roles), [[], []]);
-  const retainedOutput = stored.outputs.events[0];
-  assert.ok(retainedOutput);
-  const partialStoredDelivery: IntegrationIngestRecord = {
-    ...stored,
-    outputs: {
-      ...stored.outputs,
-      events: [retainedOutput],
-    },
-    counts: {
-      ...stored.counts,
-      eventCount: 1,
-    },
-  };
-  await fs.writeFile(
-    path.join(vaultRoot, first.ingestShardPath),
-    `${JSON.stringify(partialStoredDelivery)}\n`,
-    "utf8",
-  );
-  await fs.writeFile(path.join(vaultRoot, eventShardPath), "", "utf8");
-  const beforeRepair = await snapshotVaultFiles(vaultRoot);
-
-  await assert.rejects(
-    importDeviceBatch(input),
-    (error) =>
-      error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRepair);
+  await assertAmbiguousReplayPreservesVault(input);
 });
 
 test("exact repair rejects stored event outputs swapped across missing owners", async () => {
@@ -3294,23 +3240,7 @@ test("exact repair rejects stored event outputs swapped across missing owners", 
     "utf8",
   );
   await fs.writeFile(path.join(vaultRoot, eventShardPath), "", "utf8");
-  const watchedPaths = [first.ingestShardPath, eventShardPath];
-  const beforeRepair = await Promise.all(
-    watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
-  );
-
-  await assert.rejects(
-    importDeviceBatch(input),
-    (error) =>
-      error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(
-    await Promise.all(
-      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
-    ),
-    beforeRepair,
-  );
+  await assertAmbiguousReplayPreservesVault(input);
 });
 
 test("exact repair rejects an output id owned by an unrelated vault event", async () => {
@@ -3382,23 +3312,7 @@ test("exact repair rejects an output id owned by an unrelated vault event", asyn
       .join("\n") + "\n",
     "utf8",
   );
-  const watchedPaths = [first.ingestShardPath, eventShardPath];
-  const beforeRepair = await Promise.all(
-    watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
-  );
-
-  await assert.rejects(
-    importDeviceBatch(input),
-    (error) =>
-      error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(
-    await Promise.all(
-      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
-    ),
-    beforeRepair,
-  );
+  await assertAmbiguousReplayPreservesVault(input);
 });
 
 test("exact repair rejects its prepared id when unrelated content occupies it", async () => {
@@ -3464,28 +3378,7 @@ test("exact repair rejects its prepared id when unrelated content occupies it", 
     "utf8",
   );
   await fs.writeFile(path.join(vaultRoot, eventShardPath), "", "utf8");
-  const watchedPaths = [
-    first.ingestShardPath,
-    eventShardPath,
-    occupantShardPath,
-
-  ];
-  const beforeRepair = await Promise.all(
-    watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
-  );
-
-  await assert.rejects(
-    importDeviceBatch(input),
-    (error) =>
-      error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(
-    await Promise.all(
-      watchedPaths.map((relativePath) => fs.readFile(path.join(vaultRoot, relativePath))),
-    ),
-    beforeRepair,
-  );
+  await assertAmbiguousReplayPreservesVault(input);
 });
 
 test("exact corrected replay rejects an unproven surviving prefix and complete spine loss", async () => {
@@ -3538,14 +3431,7 @@ test("exact corrected replay rejects an unproven surviving prefix and complete s
   const watchedPaths = [eventPath, v2.ingestShardPath];
 
   await fs.writeFile(path.join(vaultRoot, eventPath), `${JSON.stringify(v1Row)}\n`, "utf8");
-  const beforeRejectedPrefixRepair = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(v2Input),
-    (error) =>
-      error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedPrefixRepair);
+  await assertAmbiguousReplayPreservesVault(v2Input);
 
   await fs.writeFile(path.join(vaultRoot, eventPath), completeEventBytes);
   const beforeConvergedReplay = await Promise.all(
@@ -5105,13 +4991,7 @@ test("exact repair replans when a partial current row hides full legacy member p
       .join("\n") + "\n",
     "utf8",
   );
-  const beforePartialOnlyReplay = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(input),
-    (error) => error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforePartialOnlyReplay);
+  await assertAmbiguousReplayPreservesVault(input);
 
   await fs.writeFile(
     path.join(vaultRoot, first.ingestShardPath),
@@ -5296,13 +5176,7 @@ test("exact repair rejects unresolved partial associations after full inspection
   );
   const februaryBytesBeforeRepair = await fs.readFile(path.join(vaultRoot, februaryShardPath));
 
-  const beforeUnprovenReplay = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(input),
-    (error) => error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeUnprovenReplay);
+  await assertAmbiguousReplayPreservesVault(input);
 
   await fs.writeFile(
     path.join(vaultRoot, first.ingestShardPath),
@@ -5315,13 +5189,7 @@ test("exact repair rejects unresolved partial associations after full inspection
     ].join("\n") + "\n",
     "utf8",
   );
-  const beforeUnsafeReplay = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(input),
-    (error) => error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeUnsafeReplay);
+  await assertAmbiguousReplayPreservesVault(input);
 
   await fs.writeFile(
     path.join(vaultRoot, first.ingestShardPath),
@@ -6194,52 +6062,88 @@ test("repairJunctionWorkoutHeartRateZones appends corrected revisions idempotent
   assert.equal(recordsAfterSecondApply.length, records.length);
 });
 
-test("repairJunctionWorkoutHeartRateZones inherits provider context from an envelope around nested workout entries", async () => {
-  // Junction can ship workouts inside an envelope where the envelope holds
-  // `source.provider` and the child holds id+hr_zones. The matcher must
-  // propagate the envelope's provider into the child to verify the match.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-envelope");
+const legacyWorkoutRaw = {
+  source: { provider: "garmin" },
+  id: "legacy-workout",
+  hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
+};
+
+async function importLegacyJunctionWorkout({
+  sourceApp = "garmin",
+  evidenceParts = [{
+    role: "junction-summary-workouts",
+    fileName: "junction-summary-workouts.json",
+    content: [legacyWorkoutRaw],
+  }],
+  evidenceRoles,
+}: {
+  sourceApp?: "garmin" | "whoop";
+  evidenceParts?: Parameters<typeof importDeviceBatch>[0]["evidenceParts"];
+  evidenceRoles?: readonly string[];
+} = {}) {
+  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const garminResourceId = "workouts-garmin-envelope";
-  const garminWorkoutId = "garmin-envelope-workout-1";
-
-  await importDeviceBatch({
+  const imported = await importDeviceBatch({
     vaultRoot,
     provider: "junction",
     accountId: "jxn_acct_stable",
     importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      buildJunctionStyleWorkoutEvent({
-        resourceId: garminResourceId,
-        resourceType: "junction-garmin-workouts",
-        sourceApp: "garmin",
-        sourceWorkoutId: garminWorkoutId,
+    events: [{
+      ...buildJunctionStyleWorkoutEvent({
+        resourceId: "workouts-legacy",
+        resourceType: sourceApp === "whoop" ? "junction-whoop-v2-workouts" : "junction-garmin-workouts",
+        sourceApp,
+        sourceWorkoutId: legacyWorkoutRaw.id,
         heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
           zone: index + 1,
           durationMinutes,
         })),
       }),
-    ],
-    evidenceParts: [
-      {
-        role: "junction-summary-workouts",
-        fileName: "junction-summary-workouts.json",
-        content: [
-          {
-            source: { provider: "garmin" },
-            entries: [
-              {
-                id: garminWorkoutId,
-                hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
-              },
-            ],
-          },
-        ],
-      },
-    ],
+      evidenceRoles,
+    }],
+    evidenceParts,
   });
+  assert.ok(imported.applied);
+  const event = imported.events[0];
+  const shardPath = imported.eventShardPaths[0];
+  assert.ok(event);
+  assert.ok(shardPath);
+  return { vaultRoot, imported, event, shardAbsolute: path.join(vaultRoot, shardPath) };
+}
 
+test.each([
+  {
+    name: "inherits provider context from an envelope around nested workout entries",
+    sourceApp: "garmin",
+    content: [{
+      source: { provider: "garmin" },
+      entries: [{ id: legacyWorkoutRaw.id, hr_zones: legacyWorkoutRaw.hr_zones }],
+    }],
+  },
+  {
+    name: "accepts raw hr_zones stored as numeric strings",
+    sourceApp: "garmin",
+    content: [{ ...legacyWorkoutRaw, hr_zones: ["600", "1200", "1800", "2400", "3000", "3600"] }],
+  },
+  {
+    name: "repairs non-Garmin Junction-backed providers with matching raw evidence",
+    sourceApp: "whoop",
+    content: [{ ...legacyWorkoutRaw, source: { provider: "whoop" } }],
+  },
+  {
+    name: "repairs connection-backed workouts whose raw row has no inline provider",
+    sourceApp: "garmin",
+    content: [{ id: legacyWorkoutRaw.id, hr_zones: legacyWorkoutRaw.hr_zones }],
+  },
+] as const)("repairJunctionWorkoutHeartRateZones $name", async ({ sourceApp, content }) => {
+  const { vaultRoot } = await importLegacyJunctionWorkout({
+    sourceApp,
+    evidenceParts: [{
+      role: "junction-summary-workouts",
+      fileName: "junction-summary-workouts.json",
+      content,
+    }],
+  });
   const applied = await repairJunctionWorkoutHeartRateZones({
     vaultRoot,
     apply: true,
@@ -6252,661 +6156,115 @@ test("repairJunctionWorkoutHeartRateZones inherits provider context from an enve
   assert.equal(applied.mutated, true);
 });
 
-test("repairJunctionWorkoutHeartRateZones accepts raw hr_zones stored as numeric strings", async () => {
-  // The importer's numeric branch uses finiteNumber, which accepts both
-  // numbers and trimmed numeric strings. Legacy stringified payloads were
-  // normalized into the same 1..6 stored shape and must be repairable.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-numeric-strings");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const garminResourceId = "workouts-garmin-stringified";
-  const garminWorkoutId = "garmin-stringified-workout-1";
-
-  await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      buildJunctionStyleWorkoutEvent({
-        resourceId: garminResourceId,
-        resourceType: "junction-garmin-workouts",
-        sourceApp: "garmin",
-        sourceWorkoutId: garminWorkoutId,
-        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-          zone: index + 1,
-          durationMinutes,
-        })),
-      }),
-    ],
-    evidenceParts: [
-      {
-        role: "junction-summary-workouts",
-        fileName: "junction-summary-workouts.json",
-        content: [
-          {
-            source: { provider: "garmin" },
-            id: garminWorkoutId,
-            hr_zones: ["600", "1200", "1800", "2400", "3000", "3600"],
-          },
-        ],
-      },
-    ],
-  });
-
+test.each([
+  {
+    name: "refuses candidates from shards with unparseable JSON without aborting the run",
+    row: (_event: EventRecord) => '{"truncated":\n',
+    repairedCount: 0,
+  },
+  {
+    name: "skips malformed ledger rows instead of aborting the run",
+    row: (_event: EventRecord) => `${JSON.stringify({ totally: "not-an-event-record" })}\n`,
+    repairedCount: 1,
+  },
+  {
+    name: "refuses to repair an id that also appears on a schema-invalid revision",
+    row: (event: EventRecord) => `${JSON.stringify({
+      id: event.id,
+      kind: "activity_session",
+      "from-the-future": true,
+    })}\n`,
+    repairedCount: 0,
+  },
+  {
+    name: "refuses an id whose latest revision is a different event kind",
+    row: (event: EventRecord) => `${JSON.stringify({
+      id: event.id,
+      kind: "note",
+      occurredAt: "2026-06-04T10:00:00.000Z",
+      recordedAt: "2026-06-04T10:00:00.000Z",
+      source: "self",
+      title: "renamed",
+      fields: { body: "kind change supersedes the workout row" },
+      lifecycle: { revision: (event.lifecycle?.revision ?? 1) + 1 },
+    })}\n`,
+    repairedCount: 0,
+  },
+])("repairJunctionWorkoutHeartRateZones $name", async ({ row, repairedCount }) => {
+  const { vaultRoot, event, shardAbsolute } = await importLegacyJunctionWorkout();
+  await fs.appendFile(shardAbsolute, row(event));
   const applied = await repairJunctionWorkoutHeartRateZones({
     vaultRoot,
     apply: true,
     now: new Date("2026-06-04T12:00:00.000Z"),
   });
 
-  assert.equal(applied.candidateCount, 1);
-  assert.equal(applied.unverifiedCandidateCount, 0);
-  assert.equal(applied.repairedCount, 1);
-  assert.equal(applied.mutated, true);
+  assert.equal(applied.candidateCount, repairedCount);
+  assert.equal(applied.repairedCount, repairedCount);
+  assert.equal(applied.mutated, repairedCount === 1);
 });
 
-test("repairJunctionWorkoutHeartRateZones refuses candidates from shards with unparseable JSON without aborting the run", async () => {
-  // An unparseable JSONL line in a shard might be a torn later revision
-  // (tombstone, kind change, manual correction) under any id. We can't tell
-  // which id, so we refuse the whole shard's candidates rather than risk
-  // appending a revision over an invisible newer one. The command itself
-  // must still complete — torn lines in one shard don't abort the run.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-torn-jsonl");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const garminResourceId = "workouts-garmin-torn-jsonl";
-  const garminWorkoutId = "garmin-torn-jsonl-workout-1";
-
-  const imported = await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      buildJunctionStyleWorkoutEvent({
-        resourceId: garminResourceId,
-        resourceType: "junction-garmin-workouts",
-        sourceApp: "garmin",
-        sourceWorkoutId: garminWorkoutId,
-        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-          zone: index + 1,
-          durationMinutes,
-        })),
-      }),
+test.each([
+  {
+    name: "refuses when a contradicting same-provider primitive row coexists with a matching providerless row",
+    content: [
+      { ...legacyWorkoutRaw, hr_zones: [60, 120, 180, 240, 300, 360] },
+      { id: legacyWorkoutRaw.id, hr_zones: legacyWorkoutRaw.hr_zones },
     ],
-    evidenceParts: [
+  },
+  {
+    name: "refuses when a same-id raw duplicate carries object-shaped zones",
+    content: [
+      legacyWorkoutRaw,
       {
-        role: "junction-summary-workouts",
-        fileName: "junction-summary-workouts.json",
-        content: [
-          {
-            source: { provider: "garmin" },
-            id: garminWorkoutId,
-            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
-          },
-        ],
+        ...legacyWorkoutRaw,
+        hr_zones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
+          zone: index + 1,
+          duration: durationMinutes * 60,
+        })),
       },
     ],
+  },
+  {
+    name: "refuses raw evidence whose durations do not match the stored row",
+    content: [{ ...legacyWorkoutRaw, hr_zones: [60, 120, 180, 240, 300, 360] }],
+  },
+  {
+    name: "refuses raw evidence from a different provider row",
+    content: [{ ...legacyWorkoutRaw, source: { provider: "whoop" } }],
+  },
+])("repairJunctionWorkoutHeartRateZones $name", async ({ content }) => {
+  const { vaultRoot } = await importLegacyJunctionWorkout({
+    evidenceParts: [{
+      role: "junction-summary-workouts",
+      fileName: "junction-summary-workouts.json",
+      content,
+    }],
   });
-
-  const shardPath = imported.eventShardPaths[0];
-  assert.ok(typeof shardPath === "string");
-  const shardAbsolute = path.join(vaultRoot, shardPath as string);
-  await fs.appendFile(shardAbsolute, '{"truncated":\n');
-
+  const dryRun = await repairJunctionWorkoutHeartRateZones({ vaultRoot });
   const applied = await repairJunctionWorkoutHeartRateZones({
     vaultRoot,
     apply: true,
     now: new Date("2026-06-04T12:00:00.000Z"),
   });
 
-  assert.equal(applied.candidateCount, 0);
-  assert.equal(applied.repairedCount, 0);
-  assert.equal(applied.mutated, false);
-});
-
-test("repairJunctionWorkoutHeartRateZones skips malformed ledger rows instead of aborting the run", async () => {
-  // Legacy/partially migrated vaults can contain rows the current schema
-  // rejects. A single bad row must not block the repair from reporting and
-  // fixing valid Junction workout candidates elsewhere.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-malformed-row");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const garminResourceId = "workouts-garmin-malformed-row";
-  const garminWorkoutId = "garmin-malformed-row-workout-1";
-
-  const imported = await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      buildJunctionStyleWorkoutEvent({
-        resourceId: garminResourceId,
-        resourceType: "junction-garmin-workouts",
-        sourceApp: "garmin",
-        sourceWorkoutId: garminWorkoutId,
-        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-          zone: index + 1,
-          durationMinutes,
-        })),
-      }),
-    ],
-    evidenceParts: [
-      {
-        role: "junction-summary-workouts",
-        fileName: "junction-summary-workouts.json",
-        content: [
-          {
-            source: { provider: "garmin" },
-            id: garminWorkoutId,
-            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
-          },
-        ],
-      },
-    ],
-  });
-
-  const shardPath = imported.eventShardPaths[0];
-  assert.ok(typeof shardPath === "string");
-  const shardAbsolute = path.join(vaultRoot, shardPath as string);
-  await fs.appendFile(shardAbsolute, `${JSON.stringify({ totally: "not-an-event-record" })}\n`);
-
-  const applied = await repairJunctionWorkoutHeartRateZones({
-    vaultRoot,
-    apply: true,
-    now: new Date("2026-06-04T12:00:00.000Z"),
-  });
-
-  assert.equal(applied.candidateCount, 1);
-  assert.equal(applied.repairedCount, 1);
-  assert.equal(applied.mutated, true);
-});
-
-test("repairJunctionWorkoutHeartRateZones repairs non-Garmin Junction-backed providers with matching raw evidence", async () => {
-  // The HR-zone normalization bug lives in Junction's provider-agnostic
-  // workout pipeline (buildWorkoutHeartRateZones / readWorkoutHeartRateZoneNumber),
-  // so any Junction-routed provider that delivered primitive-numeric `hr_zones`
-  // arrays carries the same legacy 1..6 corruption. The repair must reach them too.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-non-garmin");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const whoopResourceId = "workouts-whoop-legacy";
-  const whoopWorkoutId = "whoop-legacy-workout-1";
-
-  await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      buildJunctionStyleWorkoutEvent({
-        resourceId: whoopResourceId,
-        resourceType: "junction-whoop-v2-workouts",
-        sourceApp: "whoop",
-        sourceWorkoutId: whoopWorkoutId,
-        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-          zone: index + 1,
-          durationMinutes,
-        })),
-      }),
-    ],
-    evidenceParts: [
-      {
-        role: "junction-summary-workouts",
-        fileName: "junction-summary-workouts.json",
-        content: [
-          {
-            source: { provider: "whoop" },
-            id: whoopWorkoutId,
-            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
-          },
-        ],
-      },
-    ],
-  });
-
-  const applied = await repairJunctionWorkoutHeartRateZones({
-    vaultRoot,
-    apply: true,
-    now: new Date("2026-06-04T12:00:00.000Z"),
-  });
-
-  assert.equal(applied.candidateCount, 1);
-  assert.equal(applied.unverifiedCandidateCount, 0);
-  assert.equal(applied.repairedCount, 1);
-  assert.equal(applied.mutated, true);
-});
-
-test("repairJunctionWorkoutHeartRateZones refuses to repair an id that also appears on a schema-invalid revision", async () => {
-  // If the actual latest revision under an id is rejected by today's schema,
-  // a stale older revision would shadow it. Repairing then would append over
-  // unknown current state. We must refuse rather than guess.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-id-shadow");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const garminResourceId = "workouts-garmin-id-shadow";
-  const garminWorkoutId = "garmin-id-shadow-workout-1";
-
-  const imported = await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      buildJunctionStyleWorkoutEvent({
-        resourceId: garminResourceId,
-        resourceType: "junction-garmin-workouts",
-        sourceApp: "garmin",
-        sourceWorkoutId: garminWorkoutId,
-        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-          zone: index + 1,
-          durationMinutes,
-        })),
-      }),
-    ],
-    evidenceParts: [
-      {
-        role: "junction-summary-workouts",
-        fileName: "junction-summary-workouts.json",
-        content: [
-          {
-            source: { provider: "garmin" },
-            id: garminWorkoutId,
-            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
-          },
-        ],
-      },
-    ],
-  });
-
-  const eventId = imported.events[0]?.id;
-  assert.ok(typeof eventId === "string");
-
-  const shardPath = imported.eventShardPaths[0];
-  assert.ok(typeof shardPath === "string");
-  const shardAbsolute = path.join(vaultRoot, shardPath as string);
-  // Append a schema-invalid row under the same id (e.g. a future schema field
-  // that today's schema rejects). The repair must refuse this id entirely.
-  await fs.appendFile(
-    shardAbsolute,
-    `${JSON.stringify({ id: eventId, kind: "activity_session", "from-the-future": true })}\n`,
-  );
-
-  const applied = await repairJunctionWorkoutHeartRateZones({
-    vaultRoot,
-    apply: true,
-    now: new Date("2026-06-04T12:00:00.000Z"),
-  });
-
-  assert.equal(applied.candidateCount, 0);
-  assert.equal(applied.repairedCount, 0);
-  assert.equal(applied.mutated, false);
-});
-
-test("repairJunctionWorkoutHeartRateZones repairs connection-backed workouts whose raw row has no inline provider", async () => {
-  // Junction's raw sanitizer strips connectionId/sourceId without
-  // re-injecting the resolved sourceProviderSlug, so legacy
-  // connection-resolved workouts can land in raw artifacts with no inline
-  // provider. The candidate event still carries the correct sourceApp from
-  // the importer's connection lookup. When the providerless raw row's
-  // durations bind exactly to the stored durations and no same-id row
-  // contradicts, the repair must still run.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-connection-backed");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const resourceId = "workouts-garmin-connection-backed";
-  const sourceWorkoutId = "garmin-connection-backed-workout-1";
-
-  await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      buildJunctionStyleWorkoutEvent({
-        resourceId,
-        resourceType: "junction-garmin-workouts",
-        sourceApp: "garmin",
-        sourceWorkoutId,
-        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-          zone: index + 1,
-          durationMinutes,
-        })),
-      }),
-    ],
-    evidenceParts: [
-      {
-        role: "junction-summary-workouts",
-        fileName: "junction-summary-workouts.json",
-        content: [
-          {
-            // No source.provider / provider field — simulates a raw row that
-            // came from a connection-resolved import and lost the linkage
-            // keys during sanitization.
-            id: sourceWorkoutId,
-            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
-          },
-        ],
-      },
-    ],
-  });
-
-  const applied = await repairJunctionWorkoutHeartRateZones({
-    vaultRoot,
-    apply: true,
-    now: new Date("2026-06-04T12:00:00.000Z"),
-  });
-
-  assert.equal(applied.candidateCount, 1);
-  assert.equal(applied.repairedCount, 1);
-  assert.equal(applied.mutated, true);
-});
-
-test("repairJunctionWorkoutHeartRateZones refuses when a contradicting same-provider primitive row coexists with a matching providerless row", async () => {
-  // A same-id, same-provider primitive numeric row whose durations do not
-  // match the stored row is a contradiction — the artifact carries an
-  // alternate snapshot of the workout. The providerless fallback must not
-  // override that contradiction with a coincidentally-matching providerless
-  // duplicate.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-contradiction");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const resourceId = "workouts-garmin-contradiction";
-  const sourceWorkoutId = "garmin-contradiction-workout-1";
-
-  await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      buildJunctionStyleWorkoutEvent({
-        resourceId,
-        resourceType: "junction-garmin-workouts",
-        sourceApp: "garmin",
-        sourceWorkoutId,
-        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-          zone: index + 1,
-          durationMinutes,
-        })),
-      }),
-    ],
-    evidenceParts: [
-      {
-        role: "junction-summary-workouts",
-        fileName: "junction-summary-workouts.json",
-        content: [
-          {
-            // Same provider, same id, primitive — but durations are wrong
-            // (does not match the stored 10..60 minutes after seconds/60).
-            source: { provider: "garmin" },
-            id: sourceWorkoutId,
-            hr_zones: [60, 120, 180, 240, 300, 360],
-          },
-          {
-            // Providerless duplicate that happens to match the stored
-            // durations. Without contradiction handling, this would falsely
-            // verify the candidate via the connection-backed fallback.
-            id: sourceWorkoutId,
-            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
-          },
-        ],
-      },
-    ],
-  });
-
-  const applied = await repairJunctionWorkoutHeartRateZones({
-    vaultRoot,
-    apply: true,
-    now: new Date("2026-06-04T12:00:00.000Z"),
-  });
-
+  assert.equal(dryRun.candidateCount, 0);
+  assert.equal(dryRun.unverifiedCandidateCount, 1);
+  assert.equal(dryRun.repairedCount, 0);
   assert.equal(applied.candidateCount, 0);
   assert.equal(applied.unverifiedCandidateCount, 1);
-  assert.equal(applied.repairedCount, 0);
-  assert.equal(applied.mutated, false);
-});
-
-test("repairJunctionWorkoutHeartRateZones refuses when a same-id raw duplicate carries object-shaped zones", async () => {
-  // Even if a same-id+same-provider primitive numeric raw row matches the
-  // stored durations exactly, a duplicate same-id row whose hr_zones are
-  // object-shaped breaks the proof: we can no longer tell legacy primitive
-  // from explicit object zones for this id, so the repair must refuse.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-same-id-ambiguity");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const resourceId = "workouts-garmin-same-id-ambiguity";
-  const sourceWorkoutId = "garmin-same-id-ambiguity-workout-1";
-
-  await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      buildJunctionStyleWorkoutEvent({
-        resourceId,
-        resourceType: "junction-garmin-workouts",
-        sourceApp: "garmin",
-        sourceWorkoutId,
-        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-          zone: index + 1,
-          durationMinutes,
-        })),
-      }),
-    ],
-    evidenceParts: [
-      {
-        role: "junction-summary-workouts",
-        fileName: "junction-summary-workouts.json",
-        content: [
-          {
-            source: { provider: "garmin" },
-            id: sourceWorkoutId,
-            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
-          },
-          {
-            source: { provider: "garmin" },
-            id: sourceWorkoutId,
-            hr_zones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-              zone: index + 1,
-              duration: durationMinutes * 60,
-            })),
-          },
-        ],
-      },
-    ],
-  });
-
-  const applied = await repairJunctionWorkoutHeartRateZones({
-    vaultRoot,
-    apply: true,
-    now: new Date("2026-06-04T12:00:00.000Z"),
-  });
-
-  assert.equal(applied.candidateCount, 0);
-  assert.equal(applied.unverifiedCandidateCount, 1);
-  assert.equal(applied.repairedCount, 0);
-  assert.equal(applied.mutated, false);
-});
-
-test("repairJunctionWorkoutHeartRateZones refuses raw evidence whose durations do not match the stored row", async () => {
-  // Raw evidence with the right shape but the wrong durations does not prove
-  // this stored row came from the legacy numeric branch. It could be a stale
-  // same-id raw payload or a manually corrected stored row that coincidentally
-  // retained 1..6 zone indexes. Either way, repairing would corrupt data.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-duration-mismatch");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const garminResourceId = "workouts-garmin-duration-mismatch";
-  const garminWorkoutId = "garmin-duration-mismatch-workout-1";
-
-  await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      buildJunctionStyleWorkoutEvent({
-        resourceId: garminResourceId,
-        resourceType: "junction-garmin-workouts",
-        sourceApp: "garmin",
-        sourceWorkoutId: garminWorkoutId,
-        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-          zone: index + 1,
-          durationMinutes,
-        })),
-      }),
-    ],
-    evidenceParts: [
-      {
-        role: "junction-summary-workouts",
-        fileName: "junction-summary-workouts.json",
-        content: [
-          {
-            source: { provider: "garmin" },
-            id: garminWorkoutId,
-            // Same id, same provider, but durations that, after seconds/60,
-            // do not match the stored 10,20,30,40,50,60 minutes.
-            hr_zones: [60, 120, 180, 240, 300, 360],
-          },
-        ],
-      },
-    ],
-  });
-
-  const applied = await repairJunctionWorkoutHeartRateZones({
-    vaultRoot,
-    apply: true,
-    now: new Date("2026-06-04T12:00:00.000Z"),
-  });
-
-  assert.equal(applied.candidateCount, 0);
-  assert.equal(applied.unverifiedCandidateCount, 1);
-  assert.equal(applied.repairedCount, 0);
-  assert.equal(applied.mutated, false);
-});
-
-test("repairJunctionWorkoutHeartRateZones refuses an id whose latest revision is a different event kind", async () => {
-  // If the actual latest revision under an event id is a non-activity kind
-  // (tombstone, type change, hand-edited row), selecting the older
-  // activity_session row and appending another revision to it would violate
-  // the event-spine kind invariant and resurrect stale workout state.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-cross-kind");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const garminResourceId = "workouts-garmin-cross-kind";
-  const garminWorkoutId = "garmin-cross-kind-workout-1";
-
-  const imported = await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      buildJunctionStyleWorkoutEvent({
-        resourceId: garminResourceId,
-        resourceType: "junction-garmin-workouts",
-        sourceApp: "garmin",
-        sourceWorkoutId: garminWorkoutId,
-        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-          zone: index + 1,
-          durationMinutes,
-        })),
-      }),
-    ],
-    evidenceParts: [
-      {
-        role: "junction-summary-workouts",
-        fileName: "junction-summary-workouts.json",
-        content: [
-          {
-            source: { provider: "garmin" },
-            id: garminWorkoutId,
-            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
-          },
-        ],
-      },
-    ],
-  });
-
-  const eventId = imported.events[0]?.id;
-  assert.ok(typeof eventId === "string");
-  const original = imported.events[0];
-  assert.ok(original);
-  const originalRevision = original.lifecycle?.revision ?? 1;
-  const shardPath = imported.eventShardPaths[0];
-  assert.ok(typeof shardPath === "string");
-  const shardAbsolute = path.join(vaultRoot, shardPath as string);
-
-  // Append a later schema-valid revision under the same id but a different
-  // kind. After this, the spine's latest entry for the id is non-activity.
-  const supersedingRow = {
-    id: eventId,
-    kind: "note",
-    occurredAt: "2026-06-04T10:00:00.000Z",
-    recordedAt: "2026-06-04T10:00:00.000Z",
-    source: "self",
-    title: "renamed",
-    fields: { body: "kind change supersedes the workout row" },
-    lifecycle: { revision: originalRevision + 1 },
-  };
-  await fs.appendFile(shardAbsolute, `${JSON.stringify(supersedingRow)}\n`);
-
-  const applied = await repairJunctionWorkoutHeartRateZones({
-    vaultRoot,
-    apply: true,
-    now: new Date("2026-06-04T12:00:00.000Z"),
-  });
-
-  assert.equal(applied.candidateCount, 0);
   assert.equal(applied.repairedCount, 0);
   assert.equal(applied.mutated, false);
 });
 
 test("repairJunctionWorkoutHeartRateZones refuses when any referenced evidence part is unreadable", async () => {
-  // The joint cross-evidence invariant only holds if every referenced part is
-  // actually inspected. An unreadable part could carry a same-id contradiction
-  // we'd never see, so fail closed.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-unreadable-evidence");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const garminResourceId = "workouts-garmin-missing-rawref";
-  const garminWorkoutId = "garmin-missing-rawref-workout-1";
-
-  const imported = await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      {
-        ...buildJunctionStyleWorkoutEvent({
-          resourceId: garminResourceId,
-          resourceType: "junction-garmin-workouts",
-          sourceApp: "garmin",
-          sourceWorkoutId: garminWorkoutId,
-          heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-            zone: index + 1,
-            durationMinutes,
-          })),
-        }),
-        evidenceRoles: ["junction-summary-workouts-present", "junction-summary-workouts-absent"],
-      },
-    ],
+  const { vaultRoot, imported } = await importLegacyJunctionWorkout({
+    evidenceRoles: ["junction-summary-workouts-present", "junction-summary-workouts-absent"],
     evidenceParts: [
       {
         role: "junction-summary-workouts-present",
         fileName: "junction-summary-workouts-present.json",
-        content: [
-          {
-            source: { provider: "garmin" },
-            id: garminWorkoutId,
-            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
-          },
-        ],
+        content: [legacyWorkoutRaw],
       },
       {
         role: "junction-summary-workouts-absent",
@@ -6915,8 +6273,6 @@ test("repairJunctionWorkoutHeartRateZones refuses when any referenced evidence p
       },
     ],
   });
-
-  assert.ok(imported.applied);
   const ingest = await readRequiredIntegrationIngest(vaultRoot, imported.ingestId);
   const corruptContent = "not-json";
   const corruptedIngest = {
@@ -6948,132 +6304,27 @@ test("repairJunctionWorkoutHeartRateZones refuses when any referenced evidence p
 });
 
 test("repairJunctionWorkoutHeartRateZones decides across all rawRefs jointly", async () => {
-  // A workout's rawRefs can point at multiple artifacts. A matching row in
-  // one artifact must not mask a contradicting same-id row in another:
-  // contradictions disqualify globally, and the providerless uniqueness rule
-  // must apply over the union of evidence.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-multi-rawref");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const garminResourceId = "workouts-garmin-multi-rawref";
-  const garminWorkoutId = "garmin-multi-rawref-workout-1";
-
-  await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      {
-        ...buildJunctionStyleWorkoutEvent({
-          resourceId: garminResourceId,
-          resourceType: "junction-garmin-workouts",
-          sourceApp: "garmin",
-          sourceWorkoutId: garminWorkoutId,
-          heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-            zone: index + 1,
-            durationMinutes,
-          })),
-        }),
-        evidenceRoles: ["junction-summary-workouts-a", "junction-summary-workouts-b"],
-      },
-    ],
+  const { vaultRoot } = await importLegacyJunctionWorkout({
+    evidenceRoles: ["junction-summary-workouts-a", "junction-summary-workouts-b"],
     evidenceParts: [
       {
         role: "junction-summary-workouts-a",
         fileName: "junction-summary-workouts-a.json",
-        content: [
-          {
-            source: { provider: "garmin" },
-            id: garminWorkoutId,
-            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
-          },
-        ],
+        content: [legacyWorkoutRaw],
       },
       {
         role: "junction-summary-workouts-b",
         fileName: "junction-summary-workouts-b.json",
-        content: [
-          {
-            // Same provider, same id, primitive — but durations don't match
-            // the stored row. Without joint cross-rawRef analysis the matching
-            // artifact above would mask this contradiction and the repair
-            // would falsely run.
-            source: { provider: "garmin" },
-            id: garminWorkoutId,
-            hr_zones: [60, 120, 180, 240, 300, 360],
-          },
-        ],
+        content: [{ ...legacyWorkoutRaw, hr_zones: [60, 120, 180, 240, 300, 360] }],
       },
     ],
   });
-
   const applied = await repairJunctionWorkoutHeartRateZones({
     vaultRoot,
     apply: true,
     now: new Date("2026-06-04T12:00:00.000Z"),
   });
 
-  assert.equal(applied.candidateCount, 0);
-  assert.equal(applied.unverifiedCandidateCount, 1);
-  assert.equal(applied.repairedCount, 0);
-  assert.equal(applied.mutated, false);
-});
-
-test("repairJunctionWorkoutHeartRateZones refuses raw evidence from a different provider row", async () => {
-  // Junction-summary-workouts artifacts can mix providers, so a Garmin
-  // candidate's rawRef can point at a payload that also contains a non-Garmin
-  // workout whose id collides with `sourceWorkoutId`. Without the provider
-  // gate the repair would treat that foreign primitive-numeric zone array as
-  // proof and rewrite the legitimate explicit Garmin record.
-  const vaultRoot = await makeTempDirectory("murph-hr-zone-repair-cross-provider");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-
-  const collidingId = "collision-workout-id";
-  const garminResourceId = "workouts-garmin-collision";
-
-  await importDeviceBatch({
-    vaultRoot,
-    provider: "junction",
-    accountId: "jxn_acct_stable",
-    importedAt: "2026-06-03T21:00:00.000Z",
-    events: [
-      buildJunctionStyleWorkoutEvent({
-        resourceId: garminResourceId,
-        resourceType: "junction-garmin-workouts",
-        sourceApp: "garmin",
-        sourceWorkoutId: collidingId,
-        heartRateZones: [10, 20, 30, 40, 50, 60].map((durationMinutes, index) => ({
-          zone: index + 1,
-          durationMinutes,
-        })),
-      }),
-    ],
-    evidenceParts: [
-      {
-        role: "junction-summary-workouts",
-        fileName: "junction-summary-workouts.json",
-        content: [
-          {
-            source: { provider: "whoop" },
-            id: collidingId,
-            hr_zones: [600, 1200, 1800, 2400, 3000, 3600],
-          },
-        ],
-      },
-    ],
-  });
-
-  const dryRun = await repairJunctionWorkoutHeartRateZones({ vaultRoot });
-  const applied = await repairJunctionWorkoutHeartRateZones({
-    vaultRoot,
-    apply: true,
-    now: new Date("2026-06-04T12:00:00.000Z"),
-  });
-
-  assert.equal(dryRun.candidateCount, 0);
-  assert.equal(dryRun.unverifiedCandidateCount, 1);
-  assert.equal(dryRun.repairedCount, 0);
   assert.equal(applied.candidateCount, 0);
   assert.equal(applied.unverifiedCandidateCount, 1);
   assert.equal(applied.repairedCount, 0);
@@ -10741,13 +9992,7 @@ test("importDeviceBatch replays stale-then-new, shared-role, and empty-role deli
     `${survivingPrefixRows.map((record) => JSON.stringify(record)).join("\n")}\n`,
     "utf8",
   );
-  const beforeAmbiguousPrefixRepair = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(input),
-    (error) => error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeAmbiguousPrefixRepair);
+  await assertAmbiguousReplayPreservesVault(input);
   await fs.writeFile(path.join(vaultRoot, eventShardPath), completeEventBytes);
   const survivingRows = (await readJsonlRecords({
     vaultRoot,
@@ -10758,14 +10003,7 @@ test("importDeviceBatch replays stale-then-new, shared-role, and empty-role deli
     `${survivingRows.map((record) => JSON.stringify(record)).join("\n")}\n`,
     "utf8",
   );
-  const beforeRejectedTailRepair = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(input),
-    (error) =>
-      error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedTailRepair);
+  await assertAmbiguousReplayPreservesVault(input);
   await fs.writeFile(path.join(vaultRoot, eventShardPath), completeEventBytes);
 
   const ambiguousInput = {
@@ -10836,14 +10074,7 @@ test("importDeviceBatch replays stale-then-new, shared-role, and empty-role deli
     `${rowsWithoutSharedRoleRevision.map((record) => JSON.stringify(record)).join("\n")}\n`,
     "utf8",
   );
-  const beforeAmbiguousRepair = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(ambiguousInput),
-    (error) =>
-      error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeAmbiguousRepair);
+  await assertAmbiguousReplayPreservesVault(ambiguousInput);
   await fs.writeFile(
     path.join(vaultRoot, ambiguousWatchedPaths[0] as string),
     completeAmbiguousEventBytes,
@@ -11123,13 +10354,7 @@ test("exact replay rejects sibling incoming-newer members that would share a rev
     `${survivingRows.map((record) => JSON.stringify(record)).join("\n")}\n`,
     "utf8",
   );
-  const beforeReplay = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(replayInput),
-    (error) => error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
+  await assertAmbiguousReplayPreservesVault(replayInput);
 });
 
 test("exact replay rejects a missing accepted middle revision without a stored-proven anchor", async () => {
@@ -11232,13 +10457,7 @@ test("exact replay rejects a missing accepted middle revision without a stored-p
     `${survivingRows.map((record) => JSON.stringify(record)).join("\n")}\n`,
     "utf8",
   );
-  const beforeReplay = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(replayInput),
-    (error) => error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
+  await assertAmbiguousReplayPreservesVault(replayInput);
 });
 
 test.each(["distinct", "shared", "roleless"] as const)(
@@ -11428,14 +10647,7 @@ test("ambiguous shared-role replay rejects a missing incomparable provider revis
     `${survivingRows.map((record) => JSON.stringify(record)).join("\n")}\n`,
     "utf8",
   );
-  const beforeRejectedReplay = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(sharedInput),
-    (error) =>
-      error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedReplay);
+  await assertAmbiguousReplayPreservesVault(sharedInput);
 });
 
 test("importDeviceBatch replays a newest-then-stale provider spine using only retained roles", async () => {
@@ -11756,14 +10968,7 @@ test("exact replay rejects a missing accepted roleless revision behind a role-be
     `${survivingRows.map((record) => JSON.stringify(record)).join("\n")}\n`,
     "utf8",
   );
-  const beforeRejectedReplay = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(input),
-    (error) =>
-      error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedReplay);
+  await assertAmbiguousReplayPreservesVault(input);
 });
 
 test("dedupeDeviceEventsByExternalRef tombstones legacy duplicates and keeps the latest copy", async () => {
@@ -12006,15 +11211,7 @@ test("stale WHOOP replay stays bounded for a huge stored lifecycle revision", as
     })}\n`,
     "utf8",
   );
-  const beforeReplay = await snapshotVaultFiles(vaultRoot);
-
-  await assert.rejects(
-    importDeviceBatch(input),
-    (error) =>
-      error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
+  await assertAmbiguousReplayPreservesVault(input);
 });
 
 test("exact replay does not relink evidence to a different-content dedupe survivor", async () => {
@@ -12445,14 +11642,7 @@ test("exact mixed replay rejects a completely missing owner without reverting a 
     payload: { ...protectedEvent, note: "protected user edit", source: "manual" },
   });
 
-  const beforeRejectedRepair = await snapshotVaultFiles(vaultRoot);
-  await assert.rejects(
-    importDeviceBatch(originalInput),
-    (error) =>
-      error instanceof VaultError
-      && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
-  );
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedRepair);
+  await assertAmbiguousReplayPreservesVault(originalInput);
 });
 
 test("dedupeDeviceEventsByExternalRef does not cross-tombstone distinct facets sharing one resourceId", async () => {

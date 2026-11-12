@@ -293,7 +293,7 @@ describe("assistant family plan tool", () => {
         namespace: "murph",
         tool: "family_plan",
       },
-    })?.kind).toBe("invalid-family-plan-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
   });
 
   it("rejects invitation context on Family checkout", () => {
@@ -310,7 +310,7 @@ describe("assistant family plan tool", () => {
         namespace: "murph",
         tool: "family_plan",
       },
-    })?.kind).toBe("invalid-family-plan-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
   });
 
   it("rejects invite requests without a phone number, Telegram username, or email", () => {
@@ -326,7 +326,7 @@ describe("assistant family plan tool", () => {
         namespace: "murph",
         tool: "family_plan",
       },
-    })?.kind).toBe("invalid-family-plan-arguments");
+    })?.kind).toBe("invalid-tool-arguments");
   });
 
   it("reports ambiguous Family mutations as unconfirmed without encouraging a duplicate", async () => {

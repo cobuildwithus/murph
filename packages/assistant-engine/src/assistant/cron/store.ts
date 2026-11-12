@@ -67,9 +67,8 @@ export async function readAssistantCronStore(
 ): Promise<AssistantCronStore> {
   await ensureAssistantCronState(paths)
 
-  let raw: string | null = null
   try {
-    raw = await readFile(paths.cronJobsPath, 'utf8')
+    const raw = await readFile(paths.cronJobsPath, 'utf8')
     return normalizeAssistantCronStore(
       assistantCronStoreSchema.parse(JSON.parse(raw)),
     )
@@ -78,14 +77,8 @@ export async function readAssistantCronStore(
       return createEmptyAssistantCronStore()
     }
 
-    await quarantineAssistantStateFile({
-      artifactKind: 'cron-store',
-      error,
-      ...(raw === null ? {} : { expectedContent: raw }),
-      filePath: paths.cronJobsPath,
-      paths,
-    }).catch(() => undefined)
-    return createEmptyAssistantCronStore()
+    // A failed read is not proof that queued occurrences are absent.
+    throw error
   }
 }
 

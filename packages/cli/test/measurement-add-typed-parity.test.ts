@@ -6,7 +6,7 @@ import { findEventByExternalRef, importDeviceBatch } from '@murphai/core'
 import { normalizeJunctionSnapshot } from '@murphai/importers'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
-import { afterEach } from 'vitest'
+import type { TestContext } from 'vitest'
 
 import { registerEventCommands } from '../src/commands/event.js'
 import { registerMeasurementCommands } from '../src/commands/measurement.js'
@@ -99,19 +99,13 @@ interface MeasurementShowResult {
   }
 }
 
-test('measurement add resolves date-only occurrence in its explicit event timezone', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-timezone-')
-  cleanupPaths.push(parentRoot)
-  const cli = createMeasurementCli()
-  await initVault(cli, vaultRoot)
+test('measurement add resolves date-only occurrence in its explicit event timezone', async ({ onTestFinished }) => {
+  const { measurement } = await createMeasurementVault(onTestFinished)
 
   const created = requireData(
     (
-      await runInProcessJsonCli<MeasurementAddResult>(cli, [
-        'measurement',
+      await measurement<MeasurementAddResult>([
         'add',
-        '--vault',
-        vaultRoot,
         '--metric',
         'weight',
         '--value',
@@ -130,12 +124,9 @@ test('measurement add resolves date-only occurrence in its explicit event timezo
 
   const shown = requireData(
     (
-      await runInProcessJsonCli<MeasurementShowResult>(cli, [
-        'measurement',
+      await measurement<MeasurementShowResult>([
         'show',
         created.eventId,
-        '--vault',
-        vaultRoot,
       ])
     ).envelope,
   )
@@ -173,19 +164,6 @@ interface MeasurementListResult {
   }>
 }
 
-const cleanupPaths: string[] = []
-
-afterEach(async () => {
-  await Promise.all(
-    cleanupPaths.splice(0).map(async (target) => {
-      await rm(target, {
-        force: true,
-        recursive: true,
-      })
-    }),
-  )
-})
-
 function createMeasurementCli() {
   const cli = Cli.create('vault-cli', {
     description: 'measurement add typed parity test cli',
@@ -199,6 +177,20 @@ function createMeasurementCli() {
   registerMeasurementCommands(cli)
 
   return cli
+}
+
+async function createMeasurementVault(onTestFinished: TestContext['onTestFinished']) {
+  const context = await createTempVaultContext('murph-measurement-typed-')
+  onTestFinished(() => rm(context.parentRoot, { force: true, recursive: true }))
+  const cli = createMeasurementCli()
+  await initVault(cli, context.vaultRoot)
+  return {
+    ...context,
+    cli,
+    measurement: <T = Record<string, unknown>>(args: string[]) => runInProcessJsonCli<T>(cli, [
+      'measurement', ...args, '--vault', context.vaultRoot,
+    ]),
+  }
 }
 
 async function runRawInProcessCli(
@@ -326,19 +318,13 @@ test('measurement entry list schema uses canonical metric identity and preserves
   assert.match(getOptionDescription(schema, 'metric'), /never fuzzy matching/u)
 })
 
-test('measurement entry list returns primary, legacy, and device-observation scalars without changing event list', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-entry-list-')
-  cleanupPaths.push(parentRoot)
-  const cli = createMeasurementCli()
-  await initVault(cli, vaultRoot)
+test('measurement entry list returns primary, legacy, and device-observation scalars without changing event list', async ({ onTestFinished }) => {
+  const { parentRoot, vaultRoot, cli, measurement } = await createMeasurementVault(onTestFinished)
 
   const directBmi = requireData(
     (
-      await runInProcessJsonCli<MeasurementAddResult>(cli, [
-        'measurement',
+      await measurement<MeasurementAddResult>([
         'add',
-        '--vault',
-        vaultRoot,
         '--metric',
         'body mass index',
         '--value',
@@ -354,11 +340,8 @@ test('measurement entry list returns primary, legacy, and device-observation sca
   )
   const grouped = requireData(
     (
-      await runInProcessJsonCli<MeasurementAddResult>(cli, [
-        'measurement',
+      await measurement<MeasurementAddResult>([
         'add',
-        '--vault',
-        vaultRoot,
         '--metric',
         'height',
         '--value',
@@ -380,11 +363,8 @@ test('measurement entry list returns primary, legacy, and device-observation sca
   )
   requireData(
     (
-      await runInProcessJsonCli<MeasurementAddResult>(cli, [
-        'measurement',
+      await measurement<MeasurementAddResult>([
         'add',
-        '--vault',
-        vaultRoot,
         '--metric',
         'body-weight-estimate',
         '--value',
@@ -580,12 +560,9 @@ test('measurement entry list returns primary, legacy, and device-observation sca
 
   const entries = requireData(
     (
-      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
-        'measurement',
+      await measurement<MeasurementEntryListResult>([
         'entry',
         'list',
-        '--vault',
-        vaultRoot,
         '--metric',
         'BMI',
         '--metric',
@@ -697,12 +674,9 @@ test('measurement entry list returns primary, legacy, and device-observation sca
 
   const pregnancyEntries = requireData(
     (
-      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
-        'measurement',
+      await measurement<MeasurementEntryListResult>([
         'entry',
         'list',
-        '--vault',
-        vaultRoot,
         '--metric',
         'pregnancy-test',
         '--from',
@@ -736,12 +710,9 @@ test('measurement entry list returns primary, legacy, and device-observation sca
 
   const saturated = requireData(
     (
-      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
-        'measurement',
+      await measurement<MeasurementEntryListResult>([
         'entry',
         'list',
-        '--vault',
-        vaultRoot,
         '--metric',
         'bmi',
         '--from',
@@ -758,11 +729,8 @@ test('measurement entry list returns primary, legacy, and device-observation sca
 
   const events = requireData(
     (
-      await runInProcessJsonCli<MeasurementListResult>(cli, [
-        'measurement',
+      await measurement<MeasurementListResult>([
         'list',
-        '--vault',
-        vaultRoot,
         '--from',
         '2026-07-01',
         '--to',
@@ -780,11 +748,8 @@ test('measurement entry list returns primary, legacy, and device-observation sca
   assert.equal(events.items.some((item) => item.id === junctionWeight.eventId), false)
 })
 
-test('measurement entry list resolves every expanded assistant metric alias without confusing absence with an unsupported route', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-expanded-assistant-metrics-')
-  cleanupPaths.push(parentRoot)
-  const cli = createMeasurementCli()
-  await initVault(cli, vaultRoot)
+test('measurement entry list resolves every expanded assistant metric alias without confusing absence with an unsupported route', async ({ onTestFinished }) => {
+  const { parentRoot, vaultRoot, cli, measurement } = await createMeasurementVault(onTestFinished)
 
   const cases = [
     ['daylight_exposure', 'daylight-exposure-minutes', 45, 'minutes'],
@@ -835,12 +800,9 @@ test('measurement entry list resolves every expanded assistant metric alias with
   for (const [publicMetric, canonicalMetric, value, unit] of cases) {
     const result = requireData(
       (
-        await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
-          'measurement',
+        await measurement<MeasurementEntryListResult>([
           'entry',
           'list',
-          '--vault',
-          vaultRoot,
           '--metric',
           publicMetric,
           '--from',
@@ -868,12 +830,9 @@ test('measurement entry list resolves every expanded assistant metric alias with
 
   const absent = requireData(
     (
-      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
-        'measurement',
+      await measurement<MeasurementEntryListResult>([
         'entry',
         'list',
-        '--vault',
-        vaultRoot,
         '--metric',
         'daylight_exposure',
         '--from',
@@ -890,11 +849,8 @@ test('measurement entry list resolves every expanded assistant metric alias with
 
 })
 
-test('normalized Junction categorical facts survive canonical import and query', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-junction-categorical-query-')
-  cleanupPaths.push(parentRoot)
-  const cli = createMeasurementCli()
-  await initVault(cli, vaultRoot)
+test('normalized Junction categorical facts survive canonical import and query', async ({ onTestFinished }) => {
+  const { vaultRoot, measurement } = await createMeasurementVault(onTestFinished)
 
   const normalized = normalizeJunctionSnapshot({
     importedAt: '2026-07-13T12:00:00.000Z',
@@ -1039,12 +995,9 @@ test('normalized Junction categorical facts survive canonical import and query',
 
   const entries = requireData(
     (
-      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
-        'measurement',
+      await measurement<MeasurementEntryListResult>([
         'entry',
         'list',
-        '--vault',
-        vaultRoot,
         '--metric',
         'progesterone-test',
         '--metric',
@@ -1105,19 +1058,13 @@ test('measurement import-json schema exposes the structured payload escape hatch
   }
 })
 
-test('measurement add typed grouped fields persist with the same event shape as JSON input', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-typed-')
-  cleanupPaths.push(parentRoot)
-  const cli = createMeasurementCli()
-  await initVault(cli, vaultRoot)
+test('measurement add typed grouped fields persist with the same event shape as JSON input', async ({ onTestFinished }) => {
+  const { parentRoot, measurement } = await createMeasurementVault(onTestFinished)
 
   const typedResult = requireData(
     (
-      await runInProcessJsonCli<MeasurementAddResult>(cli, [
-        'measurement',
+      await measurement<MeasurementAddResult>([
         'add',
-        '--vault',
-        vaultRoot,
         '--metric',
         'Grip Strength',
         '--value',
@@ -1195,11 +1142,8 @@ test('measurement add typed grouped fields persist with the same event shape as 
 
   const jsonResult = requireData(
     (
-      await runInProcessJsonCli<MeasurementAddResult>(cli, [
-        'measurement',
+      await measurement<MeasurementAddResult>([
         'import-json',
-        '--vault',
-        vaultRoot,
         '--input',
         `@${payloadPath}`,
       ])
@@ -1213,12 +1157,9 @@ test('measurement add typed grouped fields persist with the same event shape as 
 
   const shown = requireData(
     (
-      await runInProcessJsonCli<MeasurementShowResult>(cli, [
-        'measurement',
+      await measurement<MeasurementShowResult>([
         'show',
         typedResult.eventId,
-        '--vault',
-        vaultRoot,
       ])
     ).envelope,
   )
@@ -1228,11 +1169,8 @@ test('measurement add typed grouped fields persist with the same event shape as 
   assert.equal(shown.entity.data.source, 'manual')
 })
 
-test('measurement add typed repeatable qualifiers and media stage onto one event', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-media-')
-  cleanupPaths.push(parentRoot)
-  const cli = createMeasurementCli()
-  await initVault(cli, vaultRoot)
+test('measurement add typed repeatable qualifiers and media stage onto one event', async ({ onTestFinished }) => {
+  const { parentRoot, measurement } = await createMeasurementVault(onTestFinished)
 
   const photoPath = path.join(parentRoot, 'measurement-photo.jpg')
   const videoPath = path.join(parentRoot, 'measurement-video.mp4')
@@ -1241,11 +1179,8 @@ test('measurement add typed repeatable qualifiers and media stage onto one event
 
   const result = requireData(
     (
-      await runInProcessJsonCli<MeasurementAddResult>(cli, [
-        'measurement',
+      await measurement<MeasurementAddResult>([
         'add',
-        '--vault',
-        vaultRoot,
         '--metric',
         'waist check',
         '--value',
@@ -1282,17 +1217,11 @@ test('measurement add typed repeatable qualifiers and media stage onto one event
   assert.ok(result.manifestFile?.startsWith('raw/measurements/2026/03/'))
 })
 
-test('measurement add rejects incomplete typed measurement groups before writing', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-invalid-')
-  cleanupPaths.push(parentRoot)
-  const cli = createMeasurementCli()
-  await initVault(cli, vaultRoot)
+test('measurement add rejects incomplete typed measurement groups before writing', async ({ onTestFinished }) => {
+  const { measurement } = await createMeasurementVault(onTestFinished)
 
-  const result = await runInProcessJsonCli<MeasurementAddResult>(cli, [
-    'measurement',
+  const result = await measurement<MeasurementAddResult>([
     'add',
-    '--vault',
-    vaultRoot,
     '--metric',
     'grip-strength',
     '--value',
@@ -1309,17 +1238,11 @@ test('measurement add rejects incomplete typed measurement groups before writing
   }
 })
 
-test('measurement add rejects non-slug typed tags before writing', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-tag-invalid-')
-  cleanupPaths.push(parentRoot)
-  const cli = createMeasurementCli()
-  await initVault(cli, vaultRoot)
+test('measurement add rejects non-slug typed tags before writing', async ({ onTestFinished }) => {
+  const { measurement } = await createMeasurementVault(onTestFinished)
 
-  const result = await runInProcessJsonCli<MeasurementAddResult>(cli, [
-    'measurement',
+  const result = await measurement<MeasurementAddResult>([
     'add',
-    '--vault',
-    vaultRoot,
     '--metric',
     'resting-heart-rate',
     '--value',
@@ -1341,17 +1264,11 @@ test('measurement add rejects non-slug typed tags before writing', async () => {
   }
 })
 
-test('measurement add reports indexed qualifier and note shape mistakes directly', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-indexed-invalid-')
-  cleanupPaths.push(parentRoot)
-  const cli = createMeasurementCli()
-  await initVault(cli, vaultRoot)
+test('measurement add reports indexed qualifier and note shape mistakes directly', async ({ onTestFinished }) => {
+  const { measurement } = await createMeasurementVault(onTestFinished)
 
-  const malformedQualifier = await runInProcessJsonCli<MeasurementAddResult>(cli, [
-    'measurement',
+  const malformedQualifier = await measurement<MeasurementAddResult>([
     'add',
-    '--vault',
-    vaultRoot,
     '--metric',
     'grip-strength',
     '--value',
@@ -1376,11 +1293,8 @@ test('measurement add reports indexed qualifier and note shape mistakes directly
     assert.match(malformedQualifier.envelope.error.message ?? '', /1:side=right/u)
   }
 
-  const missingNoteText = await runInProcessJsonCli<MeasurementAddResult>(cli, [
-    'measurement',
+  const missingNoteText = await measurement<MeasurementAddResult>([
     'add',
-    '--vault',
-    vaultRoot,
     '--metric',
     'grip-strength',
     '--value',
@@ -1406,11 +1320,8 @@ test('measurement add reports indexed qualifier and note shape mistakes directly
   }
 })
 
-test('measurement import-json preserves nested links and import metadata', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-raw-input-')
-  cleanupPaths.push(parentRoot)
-  const cli = createMeasurementCli()
-  await initVault(cli, vaultRoot)
+test('measurement import-json preserves nested links and import metadata', async ({ onTestFinished }) => {
+  const { parentRoot, measurement } = await createMeasurementVault(onTestFinished)
 
   const payloadPath = path.join(parentRoot, 'measurement-import.json')
   await writeFile(
@@ -1461,11 +1372,8 @@ test('measurement import-json preserves nested links and import metadata', async
 
   const added = requireData(
     (
-      await runInProcessJsonCli<MeasurementAddResult>(cli, [
-        'measurement',
+      await measurement<MeasurementAddResult>([
         'import-json',
-        '--vault',
-        vaultRoot,
         '--input',
         `@${payloadPath}`,
       ])
@@ -1494,12 +1402,9 @@ test('measurement import-json preserves nested links and import metadata', async
 
   const shown = requireData(
     (
-      await runInProcessJsonCli<MeasurementShowResult>(cli, [
-        'measurement',
+      await measurement<MeasurementShowResult>([
         'show',
         added.eventId,
-        '--vault',
-        vaultRoot,
       ])
     ).envelope,
   )
@@ -1523,11 +1428,8 @@ test('measurement import-json preserves nested links and import metadata', async
   assert.equal(shown.entity.data.timeZone, 'America/Los_Angeles')
 })
 
-test('measurement import-json localizes malformed nested values without saving a partial record', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-strict-input-')
-  cleanupPaths.push(parentRoot)
-  const cli = createMeasurementCli()
-  await initVault(cli, vaultRoot)
+test('measurement import-json localizes malformed nested values without saving a partial record', async ({ onTestFinished }) => {
+  const { parentRoot, measurement } = await createMeasurementVault(onTestFinished)
   const payloadPath = path.join(parentRoot, 'measurement-invalid.json')
   const privateInvalidValue = 'private-invalid-measurement-value'
   await writeFile(payloadPath, JSON.stringify({
@@ -1547,11 +1449,8 @@ test('measurement import-json localizes malformed nested values without saving a
     ],
   }), 'utf8')
 
-  const invalid = await runInProcessJsonCli(cli, [
-    'measurement',
+  const invalid = await measurement([
     'import-json',
-    '--vault',
-    vaultRoot,
     '--input',
     `@${payloadPath}`,
   ])
@@ -1579,11 +1478,8 @@ test('measurement import-json localizes malformed nested values without saving a
     tags: ['valid-tag', { value: privateInvalidValue }],
   }), 'utf8')
 
-  const invalidTags = await runInProcessJsonCli(cli, [
-    'measurement',
+  const invalidTags = await measurement([
     'import-json',
-    '--vault',
-    vaultRoot,
     '--input',
     `@${invalidTagsPayloadPath}`,
   ])
@@ -1600,20 +1496,14 @@ test('measurement import-json localizes malformed nested values without saving a
     assert.equal(JSON.stringify(invalidTags.envelope).includes(privateInvalidValue), false)
   }
 
-  const listed = await runInProcessJsonCli<MeasurementListResult>(cli, [
-    'measurement',
+  const listed = await measurement<MeasurementListResult>([
     'list',
-    '--vault',
-    vaultRoot,
   ])
   assert.deepEqual(requireData(listed.envelope).items, [])
 })
 
-test('measurement add rejects raw --input because JSON imports are explicit', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-input-flags-')
-  cleanupPaths.push(parentRoot)
-  const cli = createMeasurementCli()
-  await initVault(cli, vaultRoot)
+test('measurement add rejects raw --input because JSON imports are explicit', async ({ onTestFinished }) => {
+  const { parentRoot, measurement } = await createMeasurementVault(onTestFinished)
 
   const payloadPath = path.join(parentRoot, 'measurement.json')
   await writeFile(
@@ -1631,11 +1521,8 @@ test('measurement add rejects raw --input because JSON imports are explicit', as
     'utf8',
   )
 
-  const result = await runInProcessJsonCli<MeasurementAddResult>(cli, [
-    'measurement',
+  const result = await measurement<MeasurementAddResult>([
     'add',
-    '--vault',
-    vaultRoot,
     '--input',
     `@${payloadPath}`,
     '--tag',

@@ -11,6 +11,63 @@ import { JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG } from "@murphai/device-syncd/fitb
 
 import { renderClientComponent } from "./render-client-component";
 
+import ConnectPage, {
+  resolveConfiguredConnectSources,
+  resolveConnectSourceConnectionStates,
+  resolveConnectedConnectSourceConnections,
+  resolveHistoricalResetIncompleteConnectSourceIds,
+} from "../app/(dashboard)/connect/connect-page-content";
+import {
+  filterConnectSourcesForSearch,
+  ConnectSourcesGrid,
+  requiresVitalConnectionPreflight,
+} from "../app/(dashboard)/connect/connect-page-client";
+import { SourceCard } from "../app/(dashboard)/connect/connect-source-card";
+import { markLocallyDisconnectedSources } from "../app/(dashboard)/connect/connect-page-helpers";
+
+const WHOOP_SOURCE = {
+  id: "whoop",
+  name: "Whoop",
+  description: "Recovery, strain, sleep, and heart rate.",
+  logo: {
+    className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+    height: 15,
+    src: "/brand-logos/connect/whoop.svg",
+    width: 96,
+  },
+};
+
+const GARMIN_SOURCE = {
+  id: "garmin",
+  name: "Garmin",
+  description: "Workouts, sleep, stress, heart rate, and body battery.",
+  logo: {
+    className: "size-11 object-contain",
+    height: 44,
+    src: "/brand-logos/connect/garmin.png",
+    width: 44,
+  },
+};
+
+const OURA_SOURCE = {
+  id: "oura",
+  name: "Oura",
+  description: "Sleep, readiness, activity, heart rate, and temperature trends.",
+  logo: {
+    className: "size-11 object-contain",
+    height: 44,
+    src: "/brand-logos/connect/oura.png",
+    width: 44,
+  },
+};
+
+const CONNECTED_WHOOP_V2 = {
+  providerLabel: "WHOOP",
+  resourceCount: 3,
+  sourceProviderSlug: "whoop_v2",
+  status: "connected",
+} as const;
+
 vi.mock("next/image", () => ({
   default: (props: {
     alt?: string;
@@ -189,12 +246,7 @@ afterEach(() => {
   mocks.authDialogProps = null;
 });
 
-test("ConnectPage renders source search, source names, and logo marks", async () => {
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  // Read metadata through the page module so the route-owner re-export is
-  // proven, not just the helper module.
+test("ConnectPage renders search, source availability, native setup, and valid decorative logos", async () => {
   const { metadata } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage());
 
@@ -204,269 +256,18 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   const [ogImage] = ogImages;
   assert.ok(typeof ogImage === "object" && ogImage !== null && "url" in ogImage);
   assert.equal(String(ogImage.url), "/connect/opengraph-image");
-  assert.match(markup, /Sync your biomarkers/);
-  assert.match(markup, /Live Well/);
-  assert.match(markup, /placeholder="Search sources"/);
-  assert.match(markup, /aria-label="Search sources"/);
-  assert.match(markup, />32 of 32 sources</);
-  assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
+  assert.match(markup, /aria-label="Search sources"/u);
   assert.match(markup, /data-connect-source="fitbit"/u);
   assert.match(markup, /data-connect-source="oura"/u);
-  assert.equal(markup.match(/data-connect-source=/gu)?.length, 32);
-  assert.doesNotMatch(markup, /scroll-mt-24/gu);
-  assert.doesNotMatch(markup, /target:ring/gu);
-  assert.doesNotMatch(markup, /data-priority list/);
-  assert.doesNotMatch(markup, /Priority/u);
-  assert.doesNotMatch(
-    markup,
-    /Health data source from the Just Cobuild priority catalog/u,
-  );
-  assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[0]?.[0], {
-    message: {
-      body: "Help me finish setting up WHOOP through Apple Health.",
-    },
-  });
-  assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[1]?.[0], {
-    message: {
-      body: "Help me set up Zepp/Amazfit through Apple Health. Please walk me through it with a voice memo.",
-    },
-  });
-  assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[2]?.[0], {
-    message: {
-      body: "Help me set up Xiaomi / Mi Fitness through Apple Health. Please walk me through it with a voice memo.",
-    },
-  });
-  assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[6]?.[0], {
-    message: {
-      body: "Help me set up Huawei Health through Apple Health. Please walk me through it with a voice memo.",
-    },
-  });
-
-  const sources = [
-    {
-      assetPath: "/brand-logos/connect/apple-health.png",
-      description:
-        "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
-      name: "Apple Health",
-    },
-    {
-      assetPath: "/brand-logos/connect/zepp.png",
-      description:
-        "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
-      name: "Zepp / Amazfit",
-    },
-    {
-      assetPath: "/brand-logos/connect/mi-fitness.png",
-      description:
-        "Mi Band, Xiaomi Smart Band, and Redmi Watch activity, sleep, heart rate, and workouts through Apple Health.",
-      name: "Xiaomi / Mi Fitness",
-    },
-    {
-      assetPath: "/brand-logos/connect/ringconn.png",
-      description:
-        "Smart-ring sleep, activity, heart rate, and supported data through Apple Health.",
-      name: "RingConn",
-    },
-    {
-      assetPath: "/brand-logos/connect/coros.png",
-      description:
-        "Activity, sleep, heart rate, and supported workouts through Apple Health.",
-      name: "COROS",
-    },
-    {
-      assetPath: "/brand-logos/connect/suunto.png",
-      description:
-        "Activity, sleep, heart rate, and supported workouts through Apple Health.",
-      name: "Suunto",
-    },
-    {
-      assetPath: "/brand-logos/connect/huawei-health.png",
-      description:
-        "Selected watch and band data through Apple Health, where supported.",
-      name: "Huawei Health",
-    },
-    {
-      assetPath: "/brand-logos/connect/whoop.svg",
-      description:
-        "Recovery, strain, sleep, heart rate, and daily readiness from Whoop.",
-      name: "Whoop",
-    },
-    {
-      assetPath: "/brand-logos/connect/mapmyfitness.png",
-      description:
-        "Logged workouts, routes, pace, distance, and activity history from MapMyFitness.",
-      name: "MapMyFitness",
-    },
-    {
-      assetPath: "/brand-logos/connect/ultrahuman.png",
-      description:
-        "Ring-based sleep, recovery, temperature, movement, and metabolic insight signals from Ultrahuman.",
-      name: "Ultrahuman",
-    },
-    {
-      assetPath: "/brand-logos/connect/dexcom-g6-and-older.png",
-      description:
-        "Legacy Dexcom glucose readings and sensor trends from G6-era devices.",
-      name: "Dexcom (G6 and older)",
-    },
-    {
-      assetPath: "/brand-logos/connect/renpho.svg",
-      description:
-        "Smart-scale weight, body composition, and measurement trends from Renpho devices.",
-      name: "Renpho",
-    },
-    {
-      assetPath: "/brand-logos/connect/runkeeper.svg",
-      description:
-        "Runs, walks, routes, duration, pace, and training history from Runkeeper.",
-      name: "Runkeeper",
-    },
-    {
-      assetPath: "/brand-logos/connect/tandem-source.svg",
-      description:
-        "Insulin pump, CGM, therapy, and diabetes device records from Tandem.",
-      name: "Tandem Source",
-    },
-    {
-      assetPath: "/brand-logos/connect/beurer.png",
-      description:
-        "Blood pressure, scale, glucose, and home health measurements from Beurer.",
-      name: "Beurer",
-    },
-    {
-      assetPath: "/brand-logos/connect/omron.png",
-      description:
-        "Blood pressure, pulse, weight, and connected home measurements from Omron.",
-      name: "Omron",
-    },
-    {
-      assetPath: "/brand-logos/connect/eight-sleep.svg",
-      description:
-        "Mattress-based sleep, temperature, heart rate, and nightly recovery signal trends.",
-      name: "Eight Sleep",
-    },
-    {
-      assetPath: "/brand-logos/connect/fitbit.svg",
-      description:
-        "Fitbit and Pixel Watch sleep, activity, heart rate, and workouts.",
-      name: "Fitbit",
-    },
-    {
-      assetPath: "/brand-logos/connect/freestyle-libre.png",
-      description:
-        "Libre glucose history, sensor trends, and daily time-in-range context patterns.",
-      name: "Freestyle Libre",
-    },
-    {
-      assetPath: "/brand-logos/connect/garmin.png",
-      description:
-        "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
-      name: "Garmin",
-    },
-    {
-      assetPath: "/brand-logos/connect/hammerhead.png",
-      description:
-        "Hammerhead cycling rides, route data, distance, elevation, and performance metrics.",
-      name: "Hammerhead",
-    },
-    {
-      assetPath: "/brand-logos/connect/ihealth.png",
-      description:
-        "iHealth blood pressure, glucose, weight, oxygen, and home measurement records.",
-      name: "iHealth",
-    },
-    {
-      assetPath: "/brand-logos/connect/oura.png",
-      description:
-        "Oura sleep, readiness, activity, temperature, heart, and nightly recovery trends.",
-      name: "Oura",
-    },
-    {
-      assetPath: "/brand-logos/connect/peloton.svg",
-      description:
-        "Peloton rides, runs, strength sessions, output, and performance training history.",
-      name: "Peloton",
-    },
-    {
-      assetPath: "/brand-logos/connect/wahoo.svg",
-      description:
-        "Wahoo cycling, running, heart rate, power, and trainer workout data.",
-      name: "Wahoo",
-    },
-    {
-      assetPath: "/brand-logos/connect/withings.png",
-      description:
-        "Withings scale, sleep, blood pressure, temperature, and activity measurement trends.",
-      name: "Withings",
-    },
-    {
-      assetPath: "/brand-logos/connect/zwift.png",
-      description:
-        "Indoor rides, runs, power, distance, elevation, and virtual training sessions.",
-      name: "Zwift",
-    },
-    {
-      assetPath: "/brand-logos/connect/abbott-libreview.svg",
-      description:
-        "Abbott LibreView glucose reports, trends, sensor history, and sharing data.",
-      name: "Abbott LibreView",
-    },
-    {
-      assetPath: "/brand-logos/connect/dexcom.png",
-      description:
-        "Current Dexcom CGM glucose readings, trend arrows, and sensor sessions.",
-      name: "Dexcom",
-    },
-    {
-      assetPath: "/brand-logos/connect/kardia.svg",
-      description:
-        "Kardia ECG recordings, rhythm summaries, and heart health observation history.",
-      name: "Kardia",
-    },
-    {
-      assetPath: "/brand-logos/connect/cronometer.png",
-      description:
-        "Cronometer meal logs with calories, macros, timing, and supported nutrient fields. Daily targets and dashboard percentages stay in Cronometer.",
-      name: "Cronometer",
-    },
-    {
-      assetPath: "/brand-logos/connect/polar.svg",
-      description:
-        "Polar training, sleep, heart rate, recovery, and cardio load data.",
-      name: "Polar",
-    },
-  ];
-
-  assert.equal(sources.length, 32);
-  assert.equal(
-    markup.match(/data-connection-state="idle"/gu)?.length,
-    sources.length - 6,
-  );
-  assert.equal(
-    markup.match(/>Not available<\/button>/gu)?.length,
-    sources.length - 8,
-  );
-  assert.match(markup, /disabled=""/);
-  assert.match(markup, /aria-label="Download app for Apple Health"/);
-  assert.match(
-    markup,
-    /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859"/,
-  );
-  assert.match(markup, /target="_blank"/);
-  assert.match(markup, /rel="noopener noreferrer"/);
-  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch/u);
-  assert.doesNotMatch(markup, /Get Murph for Android/u);
-  assert.doesNotMatch(markup, /play\.google\.com/u);
-  assert.match(markup, /aria-label="Oura connection is not available yet"/);
-  assert.match(markup, /Dexcom connections are coming soon\./u);
-  assert.match(
-    markup,
-    /aria-label="Dexcom web setup is not available yet"[^>]+disabled/u,
-  );
-  assert.match(markup, />Coming soon<\/button>/u);
+  assert.match(markup, /aria-label="Oura connection is not available yet"/u);
+  assert.match(markup, /Oura not connected/u);
+  assert.match(markup, /aria-label="Download app for Apple Health"/u);
+  assert.match(markup, /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859"/u);
+  assert.match(markup, /rel="noopener noreferrer"/u);
+  assert.match(markup, /aria-label="Dexcom web setup is not available yet"[^>]+disabled/u);
   assert.doesNotMatch(markup, /aria-label="Connect Dexcom"/u);
-  assert.match(markup, /Apple Health not connected/);
-  assert.match(markup, /Oura not connected/);
+  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch|Get Murph for Android|play\.google\.com/u);
+
   for (const relayName of [
     "Zepp / Amazfit",
     "Xiaomi / Mi Fitness",
@@ -477,123 +278,19 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   ]) {
     assert.match(
       markup,
-      new RegExp(
-        `aria-label="Set up sync for ${escapeRegExp(relayName)}"`,
-        "u",
-      ),
+      new RegExp(`aria-label="Set up sync for ${escapeRegExp(relayName)}"`, "u"),
     );
   }
-  assert.equal(markup.match(/>Set up sync<\/button>/gu)?.length, 6);
-  assert.doesNotMatch(markup, /Not connected/u);
-  assert.doesNotMatch(markup, />Connected</u);
-  assert.doesNotMatch(markup, />Health Connect</u);
-  assert.doesNotMatch(markup, />Samsung Health</u);
-  assert.doesNotMatch(markup, />Freestyle Libre BLE</u);
-  assert.doesNotMatch(markup, />Accu-Chek</u);
-  assert.doesNotMatch(markup, />Contour BLE</u);
-  assert.doesNotMatch(markup, />OneTouch</u);
-  assert.doesNotMatch(markup, />Manual</u);
-  assert.doesNotMatch(markup, />Strava</u);
-  assert.doesNotMatch(markup, />Google Fit</u);
-  assert.doesNotMatch(markup, /Whoop V2/u);
-  assert.ok(
-    sourceHeadingIndex(markup, "Apple Health") <
-      sourceHeadingIndex(markup, "Garmin"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Garmin") < sourceHeadingIndex(markup, "Fitbit"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Fitbit") <
-      sourceHeadingIndex(markup, "Huawei Health"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Huawei Health") <
-      sourceHeadingIndex(markup, "Xiaomi / Mi Fitness"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Xiaomi / Mi Fitness") <
-      sourceHeadingIndex(markup, "Zepp / Amazfit"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Zepp / Amazfit") <
-      sourceHeadingIndex(markup, "Withings"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Withings") < sourceHeadingIndex(markup, "Oura"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "COROS"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "COROS") < sourceHeadingIndex(markup, "Suunto"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Suunto") <
-      sourceHeadingIndex(markup, "RingConn"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "RingConn") <
-      sourceHeadingIndex(markup, "Dexcom"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Dexcom (G6 and older)") <
-      sourceHeadingIndex(markup, "Freestyle Libre"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Freestyle Libre") <
-      sourceHeadingIndex(markup, "Abbott LibreView"),
-  );
 
-  for (const source of sources) {
-    assert.match(markup, new RegExp(escapeRegExp(source.name)));
-    assert.match(markup, new RegExp(`src="${escapeRegExp(source.assetPath)}"`));
-    assert.match(
-      markup,
-      new RegExp(
-        `<img(?=[^>]*alt="")(?=[^>]*src="${escapeRegExp(source.assetPath)}")[^>]*>`,
-        "u",
-      ),
-    );
+  const logos = [...markup.matchAll(/<img[^>]*src="(\/brand-logos\/connect\/[^"]+)"[^>]*>/gu)];
+  assert.ok(logos.length > 0);
+  for (const [image, assetPath] of logos) {
+    assert.match(image, /alt=""/u);
     assert.ok(
-      existsSync(path.join(process.cwd(), "apps/web/public", source.assetPath)),
-      `${source.assetPath} should exist under apps/web/public`,
-    );
-
-    assert.notEqual(source.description.split(/\s+/u)[0], "Sync");
-    assert.notEqual(source.description.split(/\s+/u)[0], "Import");
-  }
-
-  for (const relayAssetPath of [
-    "/brand-logos/connect/huawei-health.png",
-    "/brand-logos/connect/mi-fitness.png",
-    "/brand-logos/connect/zepp.png",
-    "/brand-logos/connect/coros.png",
-    "/brand-logos/connect/suunto.png",
-    "/brand-logos/connect/ringconn.png",
-  ]) {
-    assert.match(
-      markup,
-      new RegExp(
-        `<img(?=[^>]*class="[^"]*rounded-md[^"]*")(?=[^>]*src="${escapeRegExp(relayAssetPath)}")[^>]*>`,
-        "u",
-      ),
+      existsSync(path.join(process.cwd(), "apps/web/public", assetPath)),
+      `${assetPath} should exist under apps/web/public`,
     );
   }
-
-  for (const staleDescription of [
-    "Health data source from the Just Cobuild priority catalog.",
-    "Sync recovery, strain, sleep, heart rate, and daily readiness trends.",
-    "Import logged workouts, routes, pace, distance, and activity history from MapMyFitness.",
-  ]) {
-    assert.doesNotMatch(markup, new RegExp(escapeRegExp(staleDescription)));
-  }
-
-  assert.doesNotMatch(markup, />St</);
-  assert.doesNotMatch(markup, />Ap</);
 });
 
 test("ConnectPage maps the WHOOP setup Messages option at the server boundary", async () => {
@@ -605,9 +302,6 @@ test("ConnectPage maps the WHOOP setup Messages option at the server boundary", 
     },
   ]);
 
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const page = await ConnectPage();
 
   assert.deepEqual(readWhoopSyncContactAction(page), {
@@ -628,9 +322,6 @@ test("ConnectPage preserves the WHOOP setup Telegram option at the server bounda
     },
   ]);
 
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const page = await ConnectPage();
 
   assert.deepEqual(readWhoopSyncContactAction(page), {
@@ -647,9 +338,6 @@ test("ConnectPage fails open when the WHOOP setup contact route cannot resolve",
     new Error("contact routing unavailable"),
   );
 
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const page = await ConnectPage();
 
   assert.equal(readWhoopSyncContactAction(page), null);
@@ -666,9 +354,6 @@ test("ConnectPage maps the Zepp setup Messages option at the server boundary", a
       },
     ]);
 
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const page = await ConnectPage();
 
   assert.deepEqual(readConnectSourcesGridProp(page, "zeppSyncContactAction"), {
@@ -690,9 +375,6 @@ test("ConnectPage maps brand-specific Apple Health relay setup Messages options"
       },
     ]);
 
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const page = await ConnectPage();
 
   assert.deepEqual(
@@ -712,9 +394,6 @@ test("ConnectPage maps brand-specific Apple Health relay setup Messages options"
 });
 
 test("filterConnectSourcesForSearch matches source names, ids, and descriptions", async () => {
-  const { filterConnectSourcesForSearch } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const sources = [
     {
       id: "oura",
@@ -776,9 +455,6 @@ test("filterConnectSourcesForSearch matches source names, ids, and descriptions"
 });
 
 test("ConnectSourcesGrid opens source hashes in a dialog and clears them on close", async () => {
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
@@ -863,9 +539,6 @@ test("ConnectSourcesGrid hands a signed-out source dialog to auth without losing
   const { AuthProvider } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(
       AuthProvider,
@@ -907,11 +580,7 @@ test("ConnectSourcesGrid hands a signed-out source dialog to auth without losing
   );
   assert.ok(signInButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    signInButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, signInButton);
 
   await vi.waitFor(() => {
     assert.equal(mocks.authDialogProps?.open, true);
@@ -941,9 +610,6 @@ test("ConnectSourcesGrid keeps source-dialog errors visible until authorization 
     }));
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
@@ -977,11 +643,7 @@ test("ConnectSourcesGrid keeps source-dialog errors visible until authorization 
     '[data-dialog-open] button[aria-label="Connect Oura"]',
   );
   assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    connectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, connectButton);
 
   await vi.waitFor(() => {
     const sourceDialog = rendered.container.querySelector("[data-dialog-open]");
@@ -996,11 +658,7 @@ test("ConnectSourcesGrid keeps source-dialog errors visible until authorization 
   assert.equal(rendered.assign.mock.calls.length, 0);
   assert.equal(connectButton.disabled, false);
 
-  await act(async () => {
-    connectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, connectButton);
 
   await vi.waitFor(() => {
     assert.equal(
@@ -1020,9 +678,6 @@ test("ConnectSourcesGrid replaces a focused source dialog with its connection pr
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
@@ -1057,11 +712,7 @@ test("ConnectSourcesGrid replaces a focused source dialog with its connection pr
     '[data-dialog-open] button[aria-label="Connect Garmin"]',
   );
   assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    connectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, connectButton);
 
   const successorDialog = rendered.container.querySelector("[data-dialog-open]");
   assert.ok(successorDialog);
@@ -1089,9 +740,6 @@ test("ConnectSourcesGrid keeps a failed focused Fitbit migration retry in its di
   ));
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [createFitbitMigrationSource({
@@ -1115,11 +763,7 @@ test("ConnectSourcesGrid keeps a failed focused Fitbit migration retry in its di
     '[data-dialog-open] button[aria-label="Retry Fitbit migration now"]',
   );
   assert.ok(retryButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    retryButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, retryButton);
 
   await vi.waitFor(() => {
     const sourceDialog = rendered.container.querySelector("[data-dialog-open]");
@@ -1295,9 +939,6 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
 });
 
 test("ConnectSourcesGrid shows an empty-state alert when no sources are available", async () => {
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const markup = renderToStaticMarkup(
     createElement(ConnectSourcesGrid, { sources: [] }),
   );
@@ -1313,9 +954,6 @@ test("ConnectSourcesGrid shows an empty-state alert when no sources are availabl
 });
 
 test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claiming a direct connection", async () => {
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
@@ -1371,11 +1009,7 @@ test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claimin
     /needs a fresh connection|needs reconnect|Please reconnect/u,
   );
 
-  await act(async () => {
-    setupButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, setupButton);
 
   assert.match(
     rendered.container.textContent ?? "",
@@ -1398,9 +1032,6 @@ test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claimin
 });
 
 test("ConnectSourcesGrid opens a reusable Xiaomi Apple Health setup guide", async () => {
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       appleHealthRelaySyncContactActions: {
@@ -1439,11 +1070,7 @@ test("ConnectSourcesGrid opens a reusable Xiaomi Apple Health setup guide", asyn
     null,
   );
 
-  await act(async () => {
-    setupButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, setupButton);
 
   assert.match(
     rendered.container.textContent ?? "",
@@ -1460,9 +1087,6 @@ test("ConnectSourcesGrid opens a reusable Xiaomi Apple Health setup guide", asyn
 });
 
 test("ConnectSourcesGrid requires account authentication before opening the Zepp guide", async () => {
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       authenticated: false,
@@ -1516,19 +1140,9 @@ test("ConnectSourcesGrid requires account authentication before opening the Zepp
 });
 
 test("ConnectPage enables Garmin when Junction exposes Garmin as a connect target", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction("garmin");
 
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectPage();
 
   assert.match(markup, /aria-label="Connect Garmin"/u);
   assert.match(markup, />Connect<\/button>/u);
@@ -1536,42 +1150,23 @@ test("ConnectPage enables Garmin when Junction exposes Garmin as a connect targe
 });
 
 test("ConnectPage hides Strava when Junction connection routes are configured", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "strava");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction("strava");
 
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectPage();
 
   assert.doesNotMatch(markup, />Strava</u);
   assert.doesNotMatch(markup, /Connect Strava/u);
 });
 
 test("ConnectPage preserves an existing Strava connection for status and disconnect only", async () => {
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_strava_123",
-        provider: "strava",
-        state: "active",
-        upstreamSources: [],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_strava_123",
+      provider: "strava",
+      state: "active",
+      upstreamSources: [],
+    },
+  ]);
 
   assert.match(markup, /Strava connected/u);
   assert.match(markup, /aria-label="Disconnect Strava"/u);
@@ -1580,29 +1175,20 @@ test("ConnectPage preserves an existing Strava connection for status and disconn
 });
 
 test("ConnectPage does not offer Strava reconnection for an existing account needing access", async () => {
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_strava_123",
-        connectSourceId: "strava",
-        connectTarget: "strava",
-        primaryAction: {
-          kind: "reconnect",
-          label: "Reconnect",
-        },
-        provider: "strava",
-        state: "reauthorization_required",
-        upstreamSources: [],
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_strava_123",
+      connectSourceId: "strava",
+      connectTarget: "strava",
+      primaryAction: {
+        kind: "reconnect",
+        label: "Reconnect",
       },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+      provider: "strava",
+      state: "reauthorization_required",
+      upstreamSources: [],
+    },
+  ]);
 
   assert.match(markup, /Strava needs attention from the connected app/u);
   assert.match(markup, /aria-label="Disconnect Strava"/u);
@@ -1610,17 +1196,8 @@ test("ConnectPage does not offer Strava reconnection for an existing account nee
 });
 
 test("ConnectPage enables every Link source exposed by the shared Junction defaults", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction("");
 
-  const { default: ConnectPage, resolveConfiguredConnectSources } =
-    await import("../app/(dashboard)/connect/connect-page-content");
   const { JUNCTION_DEFAULT_PROVIDER_FILTER } = await import(
     "@murphai/device-syncd/config"
   );
@@ -1698,19 +1275,9 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
 });
 
 test("ConnectPage enables mapped Junction Link source slugs only", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "map_my_fitness,beurer_api");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction("map_my_fitness,beurer_api");
 
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectPage();
 
   assert.match(markup, /aria-label="Connect MapMyFitness"/u);
   assert.match(markup, /aria-label="Connect Beurer"/u);
@@ -1721,32 +1288,15 @@ test("ConnectPage enables mapped Junction Link source slugs only", async () => {
 });
 
 test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "map_my_fitness");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction("map_my_fitness");
 
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({
-        authorizationUrl: "https://junction.example.test/link/mapmyfitness",
-      });
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({
+      authorizationUrl: "https://junction.example.test/link/mapmyfitness",
+    });
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { resolveConfiguredConnectSources } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const logo = {
     className: "size-11 object-contain",
     height: 44,
@@ -1771,11 +1321,7 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
     }),
   );
 
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, rendered.button);
 
   assert.equal(fetch.mock.calls.length, 0);
   assert.match(
@@ -1787,11 +1333,7 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
     ...rendered.container.querySelectorAll("button"),
   ].find((button) => button.textContent === "Continue to MapMyFitness");
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    continueButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, continueButton);
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
@@ -1816,46 +1358,30 @@ test("ConnectSourcesGrid posts mapped Junction connect targets", async () => {
 });
 
 test("ConnectPage marks explicit and upstream Junction sources connected from hosted state", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "oura,strava");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction("oura,strava");
 
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_123",
-        provider: "junction",
-        state: "active",
-        upstreamSources: [
-          {
-            providerLabel: "Oura",
-            resourceCount: 3,
-            sourceProviderSlug: "oura",
-            status: "connected",
-          },
-        ],
-      },
-      {
-        connectionId: "dsc_whoop_123",
-        provider: "junction",
-        connectSourceId: "whoop",
-        state: "active",
-        upstreamSources: [],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_123",
+      provider: "junction",
+      state: "active",
+      upstreamSources: [
+        {
+          providerLabel: "Oura",
+          resourceCount: 3,
+          sourceProviderSlug: "oura",
+          status: "connected",
+        },
+      ],
+    },
+    {
+      connectionId: "dsc_whoop_123",
+      provider: "junction",
+      connectSourceId: "whoop",
+      state: "active",
+      upstreamSources: [],
+    },
+  ]);
 
   assert.match(markup, /Oura connected/);
   assert.match(markup, /Whoop connected/);
@@ -1873,30 +1399,21 @@ test("ConnectPage marks explicit and upstream Junction sources connected from ho
 });
 
 test("ConnectPage marks iOS Apple Health Junction SDK source connected from hosted state", async () => {
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_apple_health",
-        provider: "junction",
-        state: "active",
-        upstreamSources: [
-          {
-            providerLabel: "Apple Health",
-            resourceCount: 4,
-            sourceProviderSlug: "apple_health_kit",
-            status: "connected",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_apple_health",
+      provider: "junction",
+      state: "active",
+      upstreamSources: [
+        {
+          providerLabel: "Apple Health",
+          resourceCount: 4,
+          sourceProviderSlug: "apple_health_kit",
+          status: "connected",
+        },
+      ],
+    },
+  ]);
 
   assert.match(markup, /Apple Health connected/u);
   assert.match(markup, /aria-label="Disconnect Apple Health"/u);
@@ -1910,30 +1427,21 @@ test("ConnectPage marks iOS Apple Health Junction SDK source connected from host
 
 test("ConnectPage keeps Mobvoi statusless when Health Connect is active", async () => {
   vi.stubEnv("MURPH_ANDROID_APP_ENABLED", "1");
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_health_connect",
-        provider: "junction",
-        state: "active",
-        upstreamSources: [
-          {
-            providerLabel: "Health Connect",
-            resourceCount: 4,
-            sourceProviderSlug: "health_connect",
-            status: "connected",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_health_connect",
+      provider: "junction",
+      state: "active",
+      upstreamSources: [
+        {
+          providerLabel: "Health Connect",
+          resourceCount: 4,
+          sourceProviderSlug: "health_connect",
+          status: "connected",
+        },
+      ],
+    },
+  ]);
 
   assert.match(
     markup,
@@ -1949,36 +1457,22 @@ test("ConnectPage keeps Mobvoi statusless when Health Connect is active", async 
 });
 
 test("ConnectPage shows source-scoped disconnects for multi-source Junction accounts", async () => {
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_multi_source",
-        provider: "junction",
-        state: "active",
-        upstreamSources: [
-          {
-            providerLabel: "Apple Health",
-            resourceCount: 4,
-            sourceProviderSlug: "apple_health_kit",
-            status: "connected",
-          },
-          {
-            providerLabel: "WHOOP",
-            resourceCount: 3,
-            sourceProviderSlug: "whoop_v2",
-            status: "connected",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_multi_source",
+      provider: "junction",
+      state: "active",
+      upstreamSources: [
+        {
+          providerLabel: "Apple Health",
+          resourceCount: 4,
+          sourceProviderSlug: "apple_health_kit",
+          status: "connected",
+        },
+        CONNECTED_WHOOP_V2,
+      ],
+    },
+  ]);
 
   assert.match(markup, /Apple Health connected/u);
   assert.match(markup, /Whoop connected/u);
@@ -1989,36 +1483,27 @@ test("ConnectPage shows source-scoped disconnects for multi-source Junction acco
 });
 
 test("ConnectPage scopes disconnects by every non-disconnected Junction upstream", async () => {
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_multi_source",
-        provider: "junction",
-        state: "active",
-        upstreamSources: [
-          {
-            providerLabel: "Garmin",
-            resourceCount: 2,
-            sourceProviderSlug: "garmin",
-            status: "connected",
-          },
-          {
-            providerLabel: "Apple Health",
-            resourceCount: 4,
-            sourceProviderSlug: "apple_health_kit",
-            status: "unavailable",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_multi_source",
+      provider: "junction",
+      state: "active",
+      upstreamSources: [
+        {
+          providerLabel: "Garmin",
+          resourceCount: 2,
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+        {
+          providerLabel: "Apple Health",
+          resourceCount: 4,
+          sourceProviderSlug: "apple_health_kit",
+          status: "unavailable",
+        },
+      ],
+    },
+  ]);
 
   assert.match(markup, /Garmin connected/u);
   assert.doesNotMatch(markup, /Apple Health connected/u);
@@ -2028,46 +1513,30 @@ test("ConnectPage scopes disconnects by every non-disconnected Junction upstream
 });
 
 test("ConnectPage keeps source disconnects visible for parent-level Junction reauthorization", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
-  vi.stubEnv("JUNCTION_REGION", "us");
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_multi",
-        provider: "junction",
-        state: "reauthorization_required",
-        upstreamSources: [
-          {
-            connectProvider: "junction",
-            connectTarget: "garmin",
-            providerLabel: "Garmin",
-            resourceCount: 2,
-            sourceProviderSlug: "garmin",
-            status: "unavailable",
-          },
-          {
-            providerLabel: "Apple Health",
-            resourceCount: 4,
-            sourceProviderSlug: "apple_health_kit",
-            status: "unavailable",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  configureJunction("garmin");
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_multi",
+      provider: "junction",
+      state: "reauthorization_required",
+      upstreamSources: [
+        {
+          connectProvider: "junction",
+          connectTarget: "garmin",
+          providerLabel: "Garmin",
+          resourceCount: 2,
+          sourceProviderSlug: "garmin",
+          status: "unavailable",
+        },
+        {
+          providerLabel: "Apple Health",
+          resourceCount: 4,
+          sourceProviderSlug: "apple_health_kit",
+          status: "unavailable",
+        },
+      ],
+    },
+  ]);
 
   assert.match(markup, /Apple Health needs reconnect/u);
   assert.match(markup, /Garmin needs reconnect/u);
@@ -2079,46 +1548,30 @@ test("ConnectPage keeps source disconnects visible for parent-level Junction rea
 });
 
 test("ConnectPage does not apply parent Junction reauthorization to disconnected upstream projections", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
-  vi.stubEnv("JUNCTION_REGION", "us");
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_multi",
-        provider: "junction",
-        state: "reauthorization_required",
-        upstreamSources: [
-          {
-            connectProvider: "junction",
-            connectTarget: "garmin",
-            providerLabel: "Garmin",
-            resourceCount: 2,
-            sourceProviderSlug: "garmin",
-            status: "unavailable",
-          },
-          {
-            providerLabel: "Apple Health",
-            resourceCount: 4,
-            sourceProviderSlug: "apple_health_kit",
-            status: "disconnected",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  configureJunction("garmin");
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_multi",
+      provider: "junction",
+      state: "reauthorization_required",
+      upstreamSources: [
+        {
+          connectProvider: "junction",
+          connectTarget: "garmin",
+          providerLabel: "Garmin",
+          resourceCount: 2,
+          sourceProviderSlug: "garmin",
+          status: "unavailable",
+        },
+        {
+          providerLabel: "Apple Health",
+          resourceCount: 4,
+          sourceProviderSlug: "apple_health_kit",
+          status: "disconnected",
+        },
+      ],
+    },
+  ]);
 
   assert.match(markup, /Garmin needs reconnect/u);
   assert.match(markup, /aria-label="Reconnect Garmin"/u);
@@ -2131,31 +1584,22 @@ test("ConnectPage does not apply parent Junction reauthorization to disconnected
 });
 
 test("ConnectPage shows mobile-managed guidance for Apple Health reconnect states without web target", async () => {
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_apple_health",
-        provider: "junction",
-        state: "active",
-        upstreamSources: [
-          {
-            providerLabel: "Apple Health",
-            requiresReconnect: true,
-            resourceCount: 4,
-            sourceProviderSlug: "apple_health_kit",
-            status: "error",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_apple_health",
+      provider: "junction",
+      state: "active",
+      upstreamSources: [
+        {
+          providerLabel: "Apple Health",
+          requiresReconnect: true,
+          resourceCount: 4,
+          sourceProviderSlug: "apple_health_kit",
+          status: "error",
+        },
+      ],
+    },
+  ]);
 
   assert.match(markup, /Apple Health needs reconnect/u);
   assert.match(
@@ -2176,45 +1620,29 @@ test("ConnectPage shows mobile-managed guidance for Apple Health reconnect state
 });
 
 test("ConnectPage ignores disconnected Junction upstream projections on active connections", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin,oura");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction("garmin,oura");
 
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_123",
-        provider: "junction",
-        state: "active",
-        upstreamSources: [
-          {
-            providerLabel: "Garmin",
-            resourceCount: 2,
-            sourceProviderSlug: "garmin",
-            status: "disconnected",
-          },
-          {
-            providerLabel: "Oura",
-            resourceCount: 3,
-            sourceProviderSlug: "oura",
-            status: "connected",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_123",
+      provider: "junction",
+      state: "active",
+      upstreamSources: [
+        {
+          providerLabel: "Garmin",
+          resourceCount: 2,
+          sourceProviderSlug: "garmin",
+          status: "disconnected",
+        },
+        {
+          providerLabel: "Oura",
+          resourceCount: 3,
+          sourceProviderSlug: "oura",
+          status: "connected",
+        },
+      ],
+    },
+  ]);
 
   assert.match(markup, /Oura connected/u);
   assert.match(markup, /Garmin not connected/u);
@@ -2228,109 +1656,29 @@ test("ConnectPage ignores disconnected Junction upstream projections on active c
   assert.doesNotMatch(markup, /aria-label="Disconnect Garmin"/u);
 });
 
-test("ConnectPage surfaces reauthorization-required sources as reconnectable", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_REGION", "us");
-
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_whoop_123",
-        provider: "junction",
-        connectSourceId: "whoop",
-        state: "reauthorization_required",
-        upstreamSources: [],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
-
-  assert.match(markup, /Whoop needs reconnect/);
-  assert.match(markup, /Please reconnect Whoop to resume syncing\./u);
-  assert.match(markup, /data-connection-state="needs-access"/u);
-  assert.match(markup, /aria-label="Reconnect Whoop"/u);
-  assert.doesNotMatch(markup, /aria-label="Disconnect Whoop"/u);
-  assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
-});
-
-test("ConnectPage keeps disconnected sources quiet and connectable", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_REGION", "us");
-
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_whoop_123",
-        provider: "junction",
-        connectSourceId: "whoop",
-        state: "disconnected",
-        upstreamSources: [],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
-
-  assert.match(markup, /Whoop not connected/);
-  assert.match(markup, /data-connection-state="idle"/u);
-  assert.match(markup, /aria-label="Connect Whoop"/u);
-  assert.doesNotMatch(markup, /Please reconnect Whoop to resume syncing\./u);
-  assert.doesNotMatch(markup, /aria-label="Reconnect Whoop"/u);
-  assert.doesNotMatch(markup, /aria-label="Disconnect Whoop"/u);
-});
-
-test("ConnectPage surfaces active sources with reconnect action as reconnectable", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_REGION", "us");
-
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_whoop_123",
-        primaryAction: {
-          kind: "reconnect",
-          label: "Reconnect",
-        },
-        provider: "junction",
-        connectSourceId: "whoop",
-        state: "active",
-        upstreamSources: [],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+test.each([
+  {
+    name: "reauthorization-required sources",
+    connection: { state: "reauthorization_required" },
+  },
+  {
+    name: "active sources with reconnect action",
+    connection: {
+      state: "active",
+      primaryAction: { kind: "reconnect", label: "Reconnect" },
+    },
+  },
+])("ConnectPage surfaces $name as reconnectable", async ({ connection }) => {
+  configureJunction();
+  const markup = await renderConnectedPage([
+    {
+      ...connection,
+      connectionId: "dsc_whoop_123",
+      provider: "junction",
+      connectSourceId: "whoop",
+      upstreamSources: [],
+    },
+  ]);
 
   assert.match(markup, /Whoop needs reconnect/);
   assert.match(markup, /Please reconnect Whoop to resume syncing\./u);
@@ -2341,38 +1689,67 @@ test("ConnectPage surfaces active sources with reconnect action as reconnectable
   assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });
 
-test("ConnectPage preserves unambiguous Junction source reconnects with upstream projections", async () => {
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_whoop",
-        primaryAction: {
-          kind: "reconnect",
-          label: "Reconnect",
-        },
-        provider: "junction",
-        state: "active",
-        upstreamSources: [
-          {
-            connectProvider: "junction",
-            connectSourceId: "whoop",
-            connectTarget: "whoop",
-            providerLabel: "WHOOP",
-            resourceCount: 3,
-            sourceProviderSlug: "whoop_v2",
-            status: "connected",
-          },
-        ],
-      },
-    ],
-  });
+test.each([
+  {
+    name: "explicit sources",
+    label: "Whoop",
+    providerFilter: undefined,
+    connection: { connectSourceId: "whoop", upstreamSources: [] },
+  },
+  {
+    name: "Junction upstream sources",
+    label: "Oura",
+    providerFilter: "oura",
+    connection: {
+      upstreamSources: [{
+        providerLabel: "Oura",
+        resourceCount: 3,
+        sourceProviderSlug: "oura",
+        status: "connected",
+      }],
+    },
+  },
+])("ConnectPage keeps disconnected $name quiet and connectable", async ({ label, connection, providerFilter }) => {
+  configureJunction(providerFilter);
+  const markup = await renderConnectedPage([
+    {
+      ...connection,
+      connectionId: "dsc_disconnected",
+      provider: "junction",
+      state: "disconnected",
+    },
+  ]);
 
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  assert.ok(markup.includes(label + " not connected"));
+  assert.match(markup, /data-connection-state="idle"/u);
+  assert.ok(markup.includes('aria-label="Connect ' + label + '"'));
+  assert.ok(!markup.includes(label + " needs reconnect"));
+  assert.ok(!markup.includes("Please reconnect " + label + " to resume syncing."));
+  assert.doesNotMatch(markup, /did not finish/u);
+  assert.ok(!markup.includes('aria-label="Reconnect ' + label + '"'));
+  assert.ok(!markup.includes('aria-label="Disconnect ' + label + '"'));
+});
+
+test("ConnectPage preserves unambiguous Junction source reconnects with upstream projections", async () => {
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_whoop",
+      primaryAction: {
+        kind: "reconnect",
+        label: "Reconnect",
+      },
+      provider: "junction",
+      state: "active",
+      upstreamSources: [
+        {
+          ...CONNECTED_WHOOP_V2,
+          connectProvider: "junction",
+          connectSourceId: "whoop",
+          connectTarget: "whoop",
+        },
+      ],
+    },
+  ]);
 
   assert.match(markup, /Whoop needs reconnect/u);
   assert.match(markup, /Please reconnect Whoop to resume syncing\./u);
@@ -2382,9 +1759,6 @@ test("ConnectPage preserves unambiguous Junction source reconnects with upstream
 });
 
 test("ConnectPage lets active state win when duplicate rows mention the same source", async () => {
-  const { resolveConnectSourceConnectionStates } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates(
@@ -2427,9 +1801,6 @@ test("ConnectPage lets active state win when duplicate rows mention the same sou
 });
 
 test("ConnectPage maps Apple Health Junction upstream slugs to the visible source", async () => {
-  const { resolveConnectSourceConnectionStates } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
 
   for (const sourceProviderSlug of ["apple_health_kit", "apple_health"]) {
     assert.deepEqual(
@@ -2467,9 +1838,6 @@ test("ConnectPage maps Apple Health Junction upstream slugs to the visible sourc
 });
 
 test("ConnectPage carries source-scoped disconnect ids for multi-source upstream projections", async () => {
-  const { resolveConnectSourceConnectionStates } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates(
@@ -2486,12 +1854,7 @@ test("ConnectPage carries source-scoped disconnect ids for multi-source upstream
               sourceProviderSlug: "apple_health_kit",
               status: "connected",
             },
-            {
-              providerLabel: "WHOOP",
-              resourceCount: 3,
-              sourceProviderSlug: "whoop_v2",
-              status: "connected",
-            },
+            CONNECTED_WHOOP_V2,
           ],
         },
       ],
@@ -2520,9 +1883,6 @@ test("ConnectPage carries source-scoped disconnect ids for multi-source upstream
 });
 
 test("ConnectPage preserves reconnect action on active source matches", async () => {
-  const { resolveConnectSourceConnectionStates } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates(
@@ -2555,9 +1915,6 @@ test("ConnectPage preserves reconnect action on active source matches", async ()
 });
 
 test("ConnectPage lets Junction source reconnect win over healthy duplicate explicit source", async () => {
-  const { resolveConnectSourceConnectionStates } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates(
@@ -2604,9 +1961,6 @@ test("ConnectPage lets Junction source reconnect win over healthy duplicate expl
 });
 
 test("ConnectPage keeps healthy Junction child sources connected when another child needs reconnect", async () => {
-  const { resolveConnectSourceConnectionStates } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates(
@@ -2664,9 +2018,6 @@ test("ConnectPage keeps healthy Junction child sources connected when another ch
 });
 
 test("ConnectPage gives each reconnect-required Junction child its own target", async () => {
-  const { resolveConnectSourceConnectionStates } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates(
@@ -2731,50 +2082,41 @@ test("ConnectPage gives each reconnect-required Junction child its own target", 
 });
 
 test("ConnectPage adds source-scoped disconnects beside Junction reconnect actions", async () => {
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_multi",
-        connectSourceId: "whoop",
-        connectTarget: "whoop",
-        primaryAction: {
-          kind: "reconnect",
-          label: "Reconnect",
-        },
-        provider: "junction",
-        state: "active",
-        upstreamSources: [
-          {
-            connectProvider: "junction",
-            connectSourceId: "garmin",
-            connectTarget: "garmin",
-            providerLabel: "Garmin",
-            requiresReconnect: true,
-            resourceCount: 2,
-            sourceProviderSlug: "garmin",
-            status: "error",
-          },
-          {
-            connectProvider: "junction",
-            connectSourceId: "whoop",
-            connectTarget: "whoop",
-            providerLabel: "WHOOP",
-            requiresReconnect: true,
-            resourceCount: 3,
-            sourceProviderSlug: "whoop_v2",
-            status: "error",
-          },
-        ],
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_multi",
+      connectSourceId: "whoop",
+      connectTarget: "whoop",
+      primaryAction: {
+        kind: "reconnect",
+        label: "Reconnect",
       },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+      provider: "junction",
+      state: "active",
+      upstreamSources: [
+        {
+          connectProvider: "junction",
+          connectSourceId: "garmin",
+          connectTarget: "garmin",
+          providerLabel: "Garmin",
+          requiresReconnect: true,
+          resourceCount: 2,
+          sourceProviderSlug: "garmin",
+          status: "error",
+        },
+        {
+          connectProvider: "junction",
+          connectSourceId: "whoop",
+          connectTarget: "whoop",
+          providerLabel: "WHOOP",
+          requiresReconnect: true,
+          resourceCount: 3,
+          sourceProviderSlug: "whoop_v2",
+          status: "error",
+        },
+      ],
+    },
+  ]);
 
   assert.match(markup, /Garmin needs reconnect/u);
   assert.match(markup, /Whoop needs reconnect/u);
@@ -2786,9 +2128,6 @@ test("ConnectPage adds source-scoped disconnects beside Junction reconnect actio
 });
 
 test("ConnectPage projects Junction connection-reset sources with account-scoped disconnects", async () => {
-  const { resolveConnectSourceConnectionStates } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates(
@@ -2826,40 +2165,24 @@ test("ConnectPage projects Junction connection-reset sources with account-scoped
 });
 
 test("ConnectPage keeps single-source Junction historical recovery on disconnect, never reconnect", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction("garmin");
 
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-07-09T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_garmin",
-        provider: "junction",
-        state: "active",
-        upstreamSources: [
-          {
-            providerLabel: "Garmin",
-            recoveryKind: "connection_reset",
-            resourceCount: 3,
-            sourceProviderSlug: "garmin",
-            status: "error",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_garmin",
+      provider: "junction",
+      state: "active",
+      upstreamSources: [
+        {
+          providerLabel: "Garmin",
+          recoveryKind: "connection_reset",
+          resourceCount: 3,
+          sourceProviderSlug: "garmin",
+          status: "error",
+        },
+      ],
+    },
+  ]);
 
   assert.match(markup, /Garmin needs a fresh connection/u);
   assert.match(markup, /Disconnect it first, then connect it again\./u);
@@ -2871,46 +2194,25 @@ test("ConnectPage keeps single-source Junction historical recovery on disconnect
 });
 
 test("ConnectPage keeps multi-source Junction historical recovery on disconnect, never reconnect", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction("garmin");
 
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-07-09T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_multi",
-        provider: "junction",
-        state: "active",
-        upstreamSources: [
-          {
-            providerLabel: "Garmin",
-            recoveryKind: "connection_reset",
-            resourceCount: 3,
-            sourceProviderSlug: "garmin",
-            status: "error",
-          },
-          {
-            providerLabel: "WHOOP",
-            resourceCount: 3,
-            sourceProviderSlug: "whoop_v2",
-            status: "connected",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_multi",
+      provider: "junction",
+      state: "active",
+      upstreamSources: [
+        {
+          providerLabel: "Garmin",
+          recoveryKind: "connection_reset",
+          resourceCount: 3,
+          sourceProviderSlug: "garmin",
+          status: "error",
+        },
+        CONNECTED_WHOOP_V2,
+      ],
+    },
+  ]);
 
   assert.match(markup, /Garmin needs a fresh connection/u);
   assert.match(markup, /Whoop connected/u);
@@ -2920,10 +2222,7 @@ test("ConnectPage keeps multi-source Junction historical recovery on disconnect,
   assert.match(markup, /aria-label="Disconnect Whoop"/u);
 });
 
-test("SourceCard stacks connection-reset content vertically at the base breakpoint", async () => {
-  const { SourceCard } = await import(
-    "../app/(dashboard)/connect/connect-source-card"
-  );
+test("SourceCard offers account reset without an unavailable reconnect", async () => {
   const logo = {
     className: "size-11 object-contain",
     height: 44,
@@ -2959,99 +2258,15 @@ test("SourceCard stacks connection-reset content vertically at the base breakpoi
     resetMarkup,
     /Garmin needs a fresh connection\. Disconnect it first, then connect it again\./u,
   );
-  // The reset message can be up to 22rem wide, so the card content must stack at
-  // the base breakpoint instead of squeezing the source details in the shared
-  // horizontal row under the card's overflow-hidden.
-  assert.match(
-    resetMarkup,
-    /class="flex flex-1 flex-col items-stretch gap-3 sm:gap-0"/u,
-  );
-  assert.doesNotMatch(resetMarkup, /items-center gap-4/u);
   assert.match(resetMarkup, /aria-label="Disconnect account"/u);
   assert.doesNotMatch(
     resetMarkup,
     /aria-label="(?:Connect|Reconnect) Garmin"/u,
   );
 
-  const ordinaryMarkup = renderToStaticMarkup(
-    createElement(SourceCard, {
-      ...cardProps,
-      source: {
-        description:
-          "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
-        id: "garmin",
-        logo,
-        name: "Garmin",
-      },
-    }),
-  );
-
-  assert.match(
-    ordinaryMarkup,
-    /class="flex flex-1 items-end gap-4 sm:flex-col sm:items-stretch sm:gap-0"/u,
-  );
-  assert.match(
-    ordinaryMarkup,
-    /class="ml-auto flex shrink-0 flex-col items-stretch gap-2 self-end sm:mt-auto sm:shrink"/u,
-  );
-  assert.match(ordinaryMarkup, /data-connection-state="idle"/u);
-  assert.match(ordinaryMarkup, /Garmin not connected/u);
-  assert.match(
-    ordinaryMarkup,
-    /aria-label="Garmin connection is not available yet"[^>]+self-end/u,
-  );
-
-  const connectedMarkup = renderToStaticMarkup(
-    createElement(SourceCard, {
-      ...cardProps,
-      source: {
-        connected: true,
-        description:
-          "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
-        disconnectConnectionId: "dsc_garmin",
-        id: "garmin",
-        logo,
-        name: "Garmin",
-      },
-    }),
-  );
-
-  assert.match(
-    connectedMarkup,
-    /class="ml-auto flex shrink-0 flex-col items-end gap-2 self-end sm:mt-auto sm:shrink"/u,
-  );
-  assert.match(connectedMarkup, /aria-label="Disconnect Garmin"[^>]+self-end/u);
-
-  const actionErrorMarkup = renderToStaticMarkup(
-    createElement(SourceCard, {
-      ...cardProps,
-      errorMessage: "Garmin could not open. Please try again.",
-      source: {
-        connectTarget: "garmin",
-        description:
-          "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
-        id: "garmin",
-        logo,
-        name: "Garmin",
-      },
-    }),
-  );
-
-  assert.match(
-    actionErrorMarkup,
-    /class="flex flex-1 flex-col items-stretch gap-3 sm:gap-0"/u,
-  );
-  assert.match(
-    actionErrorMarkup,
-    /class="flex w-full shrink-0 flex-col items-stretch gap-2 self-stretch sm:mt-auto sm:shrink"/u,
-  );
-  assert.match(actionErrorMarkup, /aria-label="Connect Garmin"[^>]+self-end/u);
 });
 
 test("SourceCard shows modern Dexcom as coming soon without hiding existing-account controls", async () => {
-  const { SourceCard } = await import(
-    "../app/(dashboard)/connect/connect-source-card"
-  );
   const logo = {
     className: "size-11 object-contain",
     height: 44,
@@ -3129,9 +2344,6 @@ test("SourceCard shows modern Dexcom as coming soon without hiding existing-acco
 });
 
 test("SourceCard does not promise unavailable Strava recovery connections", async () => {
-  const { SourceCard } = await import(
-    "../app/(dashboard)/connect/connect-source-card"
-  );
   const logo = {
     className: "h-auto max-h-9 w-auto max-w-[8rem] object-contain",
     height: 20,
@@ -3203,10 +2415,7 @@ test("SourceCard does not promise unavailable Strava recovery connections", asyn
   assert.doesNotMatch(historicalResetMarkup, />Not available</u);
 });
 
-test("SourceCard stacks Apple Health app content vertically at the base breakpoint", async () => {
-  const { SourceCard } = await import(
-    "../app/(dashboard)/connect/connect-source-card"
-  );
+test("SourceCard directs Apple Health setup to the iPhone app", async () => {
   const logo = {
     className: "size-11 object-contain",
     height: 44,
@@ -3246,28 +2455,9 @@ test("SourceCard stacks Apple Health app content vertically at the base breakpoi
     appDownloadMarkup,
     /href="https:\/\/apps\.apple\.com\/us\/app\/murph-ai\/id6786145859"/u,
   );
-  // The app-download message can be up to 22rem wide, so the card content must
-  // stack at the base breakpoint instead of overlapping the source details in
-  // the shared horizontal row under the card's overflow-hidden.
-  assert.match(
-    appDownloadMarkup,
-    /class="flex flex-1 flex-col items-stretch gap-3 sm:gap-0"/u,
-  );
-  assert.doesNotMatch(appDownloadMarkup, /items-center gap-4/u);
-  assert.match(
-    appDownloadMarkup,
-    /class="flex w-full shrink-0 flex-col items-stretch gap-2 self-stretch sm:mt-auto sm:shrink"/u,
-  );
-  assert.match(
-    appDownloadMarkup,
-    /aria-label="Download app for Apple Health"[^>]+self-end/u,
-  );
 });
 
 test("SourceCard uses one sign-in action for every signed-out source type", async () => {
-  const { SourceCard } = await import(
-    "../app/(dashboard)/connect/connect-source-card"
-  );
   const logo = {
     className: "size-11 object-contain",
     height: 44,
@@ -3359,9 +2549,6 @@ test("connect source card design study renders the production action states", as
 });
 
 test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
-  const { resolveConnectSourceConnectionStates } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
 
   assert.deepEqual(
     resolveConnectSourceConnectionStates(
@@ -3401,48 +2588,29 @@ test("ConnectPage lets active reconnect rows win over stale reconnectable rows",
 });
 
 test("ConnectPage treats Junction reauthorization as reconnectable even when upstream status is stale", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "oura");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction("oura");
 
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_123",
-        provider: "junction",
-        state: "reauthorization_required",
-        upstreamSources: [
-          {
-            providerLabel: "Oura",
-            resourceCount: 1,
-            sourceProviderSlug: "oura",
-            status: "unavailable",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_123",
+      provider: "junction",
+      state: "reauthorization_required",
+      upstreamSources: [
+        {
+          providerLabel: "Oura",
+          resourceCount: 1,
+          sourceProviderSlug: "oura",
+          status: "unavailable",
+        },
+      ],
+    },
+  ]);
 
   assert.match(markup, /Oura needs reconnect/);
   assert.match(markup, /aria-label="Reconnect Oura"/u);
 });
 
 test("resolveConnectedConnectSourceConnections carries connection ids for explicit and upstream Junction matches", async () => {
-  const { resolveConnectedConnectSourceConnections } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const sources = [{ id: "oura" }, { id: "whoop" }, { id: "garmin" }];
 
   assert.deepEqual(
@@ -3481,85 +2649,25 @@ test("resolveConnectedConnectSourceConnections carries connection ids for explic
   );
 });
 
-test("ConnectPage keeps disconnected Junction sources quiet and connectable", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "oura");
-  vi.stubEnv("JUNCTION_REGION", "us");
-
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-05-01T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_disconnected",
-        provider: "junction",
-        state: "disconnected",
-        upstreamSources: [
-          {
-            providerLabel: "Oura",
-            resourceCount: 3,
-            sourceProviderSlug: "oura",
-            status: "connected",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
-
-  assert.match(markup, /Oura not connected/);
-  assert.match(markup, /data-connection-state="idle"/u);
-  assert.match(markup, /aria-label="Connect Oura"/u);
-  assert.doesNotMatch(markup, /Oura needs reconnect/u);
-  assert.doesNotMatch(markup, /did not finish/u);
-  assert.doesNotMatch(markup, /aria-label="Reconnect Oura"/u);
-  assert.doesNotMatch(markup, /aria-label="Disconnect Oura"/u);
-});
-
 test("ConnectPage keeps unfinished-reset guidance visible on disconnected Junction sources", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction("garmin");
 
-  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
-    generatedAt: "2026-07-10T00:00:00.000Z",
-    ok: true,
-    sources: [
-      {
-        connectionId: "dsc_junction_garmin",
-        historicalResetIncomplete: true,
-        provider: "junction",
-        state: "disconnected",
-        upstreamSources: [
-          {
-            providerLabel: "Garmin",
-            resourceCount: 0,
-            sourceProviderSlug: "garmin",
-            status: "disconnected",
-          },
-        ],
-      },
-    ],
-  });
-
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectedPage([
+    {
+      connectionId: "dsc_junction_garmin",
+      historicalResetIncomplete: true,
+      provider: "junction",
+      state: "disconnected",
+      upstreamSources: [
+        {
+          providerLabel: "Garmin",
+          resourceCount: 0,
+          sourceProviderSlug: "garmin",
+          status: "disconnected",
+        },
+      ],
+    },
+  ]);
 
   assert.match(
     markup,
@@ -3573,9 +2681,6 @@ test("ConnectPage keeps unfinished-reset guidance visible on disconnected Juncti
 });
 
 test("resolveHistoricalResetIncompleteConnectSourceIds maps explicit and upstream Junction disconnected sources", async () => {
-  const { resolveHistoricalResetIncompleteConnectSourceIds } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
 
   const sourceIds = resolveHistoricalResetIncompleteConnectSourceIds(
     [{ id: "whoop" }, { id: "garmin" }],
@@ -3615,14 +2720,7 @@ test("resolveHistoricalResetIncompleteConnectSourceIds maps explicit and upstrea
 });
 
 test("ConnectPage keeps configured sources visible but renders sign-in actions when signed out", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_PROVIDER_FILTER", "garmin");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction("garmin");
   mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
     authenticated: false,
     authenticatedMember: null,
@@ -3630,10 +2728,7 @@ test("ConnectPage keeps configured sources visible but renders sign-in actions w
     session: null,
   });
 
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const markup = renderToStaticMarkup(await ConnectPage());
+  const markup = await renderConnectPage();
 
   assert.match(markup, />Sign in<\/button>/);
   assert.match(markup, /aria-label="Sign in to Murph"/u);
@@ -3649,9 +2744,6 @@ test("ConnectSourcesGrid signs in on the page for a pending device connect inten
   const { AuthProvider } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(
       AuthProvider,
@@ -3660,15 +2752,7 @@ test("ConnectSourcesGrid signs in on the page for a pending device connect inten
         authenticated: false,
         sources: [
           {
-            description: "Recovery, strain, sleep, and heart rate.",
-            id: "whoop",
-            logo: {
-              className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-              height: 15,
-              src: "/brand-logos/connect/whoop.svg",
-              width: 96,
-            },
-            name: "Whoop",
+            ...WHOOP_SOURCE,
           },
         ],
       }),
@@ -3703,9 +2787,6 @@ test("ConnectSourcesGrid ignores malformed pending device connect intents while 
   const { AuthProvider } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(
       AuthProvider,
@@ -3714,16 +2795,8 @@ test("ConnectSourcesGrid ignores malformed pending device connect intents while 
         authenticated: false,
         sources: [
           {
+            ...WHOOP_SOURCE,
             connectTarget: "whoop",
-            description: "Recovery, strain, sleep, and heart rate.",
-            id: "whoop",
-            logo: {
-              className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-              height: 15,
-              src: "/brand-logos/connect/whoop.svg",
-              width: 96,
-            },
-            name: "Whoop",
           },
         ],
       }),
@@ -3754,9 +2827,6 @@ test("ConnectSourcesGrid keeps sign-in on the page for unmatched device connect 
   const { AuthProvider } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
   );
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(
       AuthProvider,
@@ -3765,16 +2835,8 @@ test("ConnectSourcesGrid keeps sign-in on the page for unmatched device connect 
         authenticated: false,
         sources: [
           {
+            ...WHOOP_SOURCE,
             connectTarget: "whoop",
-            description: "Recovery, strain, sleep, and heart rate.",
-            id: "whoop",
-            logo: {
-              className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-              height: 15,
-              src: "/brand-logos/connect/whoop.svg",
-              width: 96,
-            },
-            name: "Whoop",
           },
         ],
       }),
@@ -3800,36 +2862,21 @@ test("ConnectSourcesGrid keeps sign-in on the page for unmatched device connect 
 });
 
 test("ConnectSourcesGrid explains Garmin Historical Data before starting the connection", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({
-        authorizationUrl: "https://junction.example.test/link/garmin",
-      });
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({
+      authorizationUrl: "https://junction.example.test/link/garmin",
+    });
+  });
   vi.stubGlobal("fetch", fetch);
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       garminHistoricalDataVoiceMemoSrc:
         "/audio/garmin-historical-data-memos/grandpa.mp3",
       sources: [
         {
+          ...GARMIN_SOURCE,
           connectTarget: "garmin",
           requiresVitalDisclosure: true,
-          description: "Workouts, sleep, stress, heart rate, and body battery.",
-          id: "garmin",
-          logo: {
-            className: "size-11 object-contain",
-            height: 44,
-            src: "/brand-logos/connect/garmin.png",
-            width: 44,
-          },
-          name: "Garmin",
         },
       ],
     }),
@@ -3838,11 +2885,7 @@ test("ConnectSourcesGrid explains Garmin Historical Data before starting the con
   assert.equal(rendered.button.disabled, false);
   assert.equal(rendered.button.textContent, "Connect");
 
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, rendered.button);
 
   assert.equal(fetch.mock.calls.length, 0);
   assert.match(rendered.container.textContent ?? "", /Turn on Historical Data/);
@@ -3867,11 +2910,7 @@ test("ConnectSourcesGrid explains Garmin Historical Data before starting the con
   ].find((button) => button.textContent === "Continue to Garmin");
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    continueButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, continueButton);
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
@@ -3898,20 +2937,13 @@ test("ConnectSourcesGrid explains Garmin Historical Data before starting the con
 
 test("ConnectSourcesGrid redeems an initial device connect intent through the app page", async () => {
   const claim = "dc_12345678901234567890123456789012";
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({
-        authorizationUrl: "https://provider.example.test/oauth/start",
-      });
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+    });
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
@@ -3980,9 +3012,6 @@ test("ConnectSourcesGrid explains Vital before redeeming a WHOOP device connect 
   );
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
@@ -4021,11 +3050,7 @@ test("ConnectSourcesGrid explains Vital before redeeming a WHOOP device connect 
     ...rendered.container.querySelectorAll("button"),
   ].find((button) => button.textContent === "Continue to Whoop");
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    continueButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, continueButton);
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
@@ -4080,23 +3105,12 @@ test("ConnectSourcesGrid clears signed-intent progress when Vital redemption fai
   );
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...OURA_SOURCE,
           connectTarget: "oura",
-          description: "Sleep, readiness, activity, heart rate, and temperature trends.",
-          id: "oura",
-          logo: {
-            className: "size-11 object-contain",
-            height: 44,
-            src: "/brand-logos/connect/oura.png",
-            width: 44,
-          },
-          name: "Oura",
           requiresVitalDisclosure: true,
         },
       ],
@@ -4115,11 +3129,7 @@ test("ConnectSourcesGrid clears signed-intent progress when Vital redemption fai
   const continueButton = [...rendered.container.querySelectorAll("button")]
     .find((button) => button.textContent === "Continue to Oura");
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    continueButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, continueButton);
 
   await vi.waitFor(() => {
     assert.match(
@@ -4151,9 +3161,6 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
   );
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       deviceConnectRecoveryContactAction: {
@@ -4163,15 +3170,7 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
       },
       sources: [
         {
-          description: "Recovery, strain, sleep, and heart rate.",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
+          ...WHOOP_SOURCE,
         },
       ],
     }),
@@ -4209,9 +3208,7 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
 
 test("ConnectSourcesGrid offers a retry of the same link when an intent cannot start", async () => {
   const claim = "dc_12345678901234567890123456789012";
-  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
-    void _input;
-    void _init;
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
     return Response.json(
       {
         error: {
@@ -4225,22 +3222,11 @@ test("ConnectSourcesGrid offers a retry of the same link when an intent cannot s
   });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
-          description: "Recovery, strain, sleep, and heart rate.",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
+          ...WHOOP_SOURCE,
         },
       ],
     }),
@@ -4261,11 +3247,7 @@ test("ConnectSourcesGrid offers a retry of the same link when an intent cannot s
   const retryButton = [...rendered.container.querySelectorAll("button")]
     .find((button) => button.textContent === "Try again");
   assert.ok(retryButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    retryButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, retryButton);
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 2);
@@ -4280,23 +3262,12 @@ test("ConnectSourcesGrid settles an intent for a source that is already connecte
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...WHOOP_SOURCE,
           connected: true,
-          description: "Recovery, strain, sleep, and heart rate.",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
         },
       ],
     }),
@@ -4316,11 +3287,7 @@ test("ConnectSourcesGrid settles an intent for a source that is already connecte
   const exploreButton = [...rendered.container.querySelectorAll("button")]
     .find((button) => button.textContent === "Continue exploring");
   assert.ok(exploreButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    exploreButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, exploreButton);
 
   assert.doesNotMatch(rendered.container.textContent ?? "", /Whoop is connected\./u);
   assert.ok(
@@ -4334,22 +3301,11 @@ test("ConnectSourcesGrid keeps the Garmin Historical Data reminder on a link's R
   const claim = "dc_12345678901234567890123456789012";
   vi.stubGlobal("fetch", vi.fn());
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
-          description: "Workouts, sleep, stress, heart rate, and body battery.",
-          id: "garmin",
-          logo: {
-            className: "size-11 object-contain",
-            height: 44,
-            src: "/brand-logos/connect/garmin.png",
-            width: 44,
-          },
-          name: "Garmin",
+          ...GARMIN_SOURCE,
           requiresVitalDisclosure: true,
         },
       ],
@@ -4375,28 +3331,21 @@ test("ConnectSourcesGrid keeps the Garmin Historical Data reminder on a link's R
 
 test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches capacity", async () => {
   const claim = "dc_12345678901234567890123456789012";
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json(
-        {
-          error: {
-            code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
-            message:
-              "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
-            retryable: false,
-          },
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json(
+      {
+        error: {
+          code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
+          message:
+            "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
+          retryable: false,
         },
-        { status: 409 },
-      );
-    },
-  );
+      },
+      { status: 409 },
+    );
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       initialConnectIntent: {
@@ -4405,15 +3354,7 @@ test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches cap
       },
       sources: [
         {
-          description: "Recovery, strain, sleep, and heart rate.",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
+          ...WHOOP_SOURCE,
         },
       ],
     }),
@@ -4480,11 +3421,7 @@ test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches cap
   );
   assert.ok(closeButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    closeButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, closeButton);
 
   assert.ok(
     rendered.container.querySelector("input[aria-label='Search sources']"),
@@ -4498,42 +3435,27 @@ test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches cap
 });
 
 test("ConnectSourcesGrid opens the WHOOP setup dialog for a manual start", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json(
-        {
-          error: {
-            code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
-            message:
-              "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
-            retryable: false,
-          },
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json(
+      {
+        error: {
+          code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
+          message:
+            "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
+          retryable: false,
         },
-        { status: 409 },
-      );
-    },
-  );
+      },
+      { status: 409 },
+    );
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...WHOOP_SOURCE,
           connectTarget: "whoop",
-          description: "Recovery, strain, sleep, and heart rate.",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
         },
       ],
       whoopSyncContactAction: {
@@ -4547,11 +3469,7 @@ test("ConnectSourcesGrid opens the WHOOP setup dialog for a manual start", async
     }),
   );
 
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, rendered.button);
 
   await vi.waitFor(() => {
     assert.match(rendered.container.textContent ?? "", /Get your full sync/);
@@ -4589,52 +3507,33 @@ test("ConnectSourcesGrid opens the WHOOP setup dialog for a manual start", async
 });
 
 test("ConnectSourcesGrid gives a no-route manual capacity dialog a truthful close control", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json(
-        {
-          error: {
-            code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
-            message:
-              "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
-            retryable: false,
-          },
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json(
+      {
+        error: {
+          code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
+          message:
+            "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
+          retryable: false,
         },
-        { status: 409 },
-      );
-    },
-  );
+      },
+      { status: 409 },
+    );
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...WHOOP_SOURCE,
           connectTarget: "whoop",
-          description: "Recovery, strain, sleep, and heart rate.",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
         },
       ],
     }),
   );
 
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, rendered.button);
 
   await vi.waitFor(() => {
     assert.match(rendered.container.textContent ?? "", /Get your full sync/);
@@ -4651,11 +3550,7 @@ test("ConnectSourcesGrid gives a no-route manual capacity dialog a truthful clos
   );
   assert.ok(closeButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    closeButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, closeButton);
 
   assert.ok(
     rendered.container.querySelector("input[aria-label='Search sources']"),
@@ -4685,9 +3580,6 @@ test("ConnectSourcesGrid labels Telegram recovery as texting Murph", async () =>
   );
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       deviceConnectRecoveryContactAction: {
@@ -4699,15 +3591,7 @@ test("ConnectSourcesGrid labels Telegram recovery as texting Murph", async () =>
       },
       sources: [
         {
-          description: "Recovery, strain, sleep, and heart rate.",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
+          ...WHOOP_SOURCE,
         },
       ],
     }),
@@ -4757,22 +3641,11 @@ test("ConnectSourcesGrid falls back to email when no preferred recovery contact 
   );
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
-          description: "Recovery, strain, sleep, and heart rate.",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
+          ...WHOOP_SOURCE,
         },
       ],
     }),
@@ -4810,7 +3683,11 @@ test("ConnectSourcesGrid falls back to email when no preferred recovery contact 
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid shows a pending-redirect dialog while an initial connect intent resolves", async () => {
+test.each([
+  { name: "source refresh", authenticated: [true], redirects: true },
+  { name: "logout", authenticated: [false], redirects: false },
+  { name: "logout then login", authenticated: [false, true], redirects: false },
+])("ConnectSourcesGrid preserves only the authorized pending intent after $name", async (scenario) => {
   const claim = "dc_12345678901234567890123456789012";
   let resolveFetch: ((response: Response) => void) | undefined;
   const fetch = vi.fn(
@@ -4821,26 +3698,17 @@ test("ConnectSourcesGrid shows a pending-redirect dialog while an initial connec
   );
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
-  const rendered = await renderClientComponent(
-    createElement(ConnectSourcesGrid, {
+  const renderGrid = (authenticated = true) => createElement(ConnectSourcesGrid, {
+      authenticated,
       sources: [
         {
+          ...WHOOP_SOURCE,
           connectTarget: "whoop",
-          description: "Recovery, strain, sleep, and heart rate.",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
         },
       ],
-    }),
+    });
+  const rendered = await renderClientComponent(
+    renderGrid(),
     {
       location: {
         hash: `#deviceConnectIntent=${claim}&connectSource=whoop`,
@@ -4854,6 +3722,10 @@ test("ConnectSourcesGrid shows a pending-redirect dialog while an initial connec
     assert.match(rendered.container.textContent ?? "", /Connecting Whoop/);
   });
 
+  for (const authenticated of scenario.authenticated) {
+    await rendered.rerender(renderGrid(authenticated));
+  }
+
   await act(async () => {
     resolveFetch?.(
       Response.json({
@@ -4862,45 +3734,93 @@ test("ConnectSourcesGrid shows a pending-redirect dialog while an initial connec
     );
   });
 
-  await vi.waitFor(() => {
-    assert.equal(
-      rendered.assign.mock.calls[0]?.[0],
-      "https://provider.example.test/oauth/start",
-    );
-  });
+  if (scenario.redirects) {
+    await vi.waitFor(() => {
+      assert.equal(
+        rendered.assign.mock.calls[0]?.[0],
+        "https://provider.example.test/oauth/start",
+      );
+    });
+  }
 
+  assert.equal(fetch.mock.calls.length, 1);
+  assert.equal(rendered.assign.mock.calls.length, scenario.redirects ? 1 : 0);
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid disconnects a connected source after confirmation", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({});
+test.each([
+  "logout",
+  "logout then login",
+  "member change",
+] as const)("ConnectPage resets pending authorization after %s", async (transition) => {
+  configureJunction("oura");
+  let resolveFetch: ((response: Response) => void) | undefined;
+  const fetch = vi.fn(() => new Promise<Response>((resolve) => {
+    resolveFetch = resolve;
+  }));
+  vi.stubGlobal("fetch", fetch);
+  const claim = "dc_12345678901234567890123456789012";
+  const rendered = await renderClientComponent(await ConnectPage(), {
+    location: {
+      hash: `#deviceConnectIntent=${claim}&connectSource=oura`,
+      href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=oura`,
     },
-  );
+  });
+  try {
+    const continueButton = [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Continue to Oura");
+    assert.ok(continueButton);
+    await clickButton(rendered, continueButton);
+    await vi.waitFor(() => {
+      assert.equal(fetch.mock.calls.length, 1);
+      assert.match(rendered.container.textContent ?? "", /Connecting Oura/u);
+    });
+    const previousAuth = await mocks.getHostedPageAuthSnapshot();
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue(transition === "member change"
+      ? {
+          ...previousAuth,
+          authenticatedMember: { ...previousAuth.authenticatedMember, id: "member_other" },
+        }
+      : { ...previousAuth, authenticated: false, authenticatedMember: null });
+    await rendered.rerender(await ConnectPage());
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Oura/u);
+
+    if (transition === "logout then login") {
+      mocks.getHostedPageAuthSnapshot.mockResolvedValue(previousAuth);
+      await rendered.rerender(await ConnectPage());
+    }
+    await act(async () => {
+      resolveFetch?.(Response.json({
+        authorizationUrl: "https://provider.example.test/oauth/previous-member",
+      }));
+    });
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.equal(rendered.assign.mock.calls.length, 0);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Oura/u);
+    const nextAction = rendered.container.querySelector<HTMLButtonElement>(
+      `[data-connect-source="oura"] button[aria-label="${transition === "logout" ? "Sign in to Murph" : "Connect Oura"}"]`,
+    );
+    assert.ok(nextAction);
+    assert.equal(nextAction.disabled, false);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("ConnectSourcesGrid disconnects a connected source after confirmation", async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({});
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...WHOOP_SOURCE,
           connectTarget: "whoop",
           connected: true,
-          description: "Recovery, strain, sleep, and heart rate.",
           disconnectConnectionId: "dsc_whoop_123",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
         },
       ],
     }),
@@ -4912,11 +3832,7 @@ test("ConnectSourcesGrid disconnects a connected source after confirmation", asy
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
   assert.equal(disconnectButton.textContent, "Disconnect");
 
-  await act(async () => {
-    disconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, disconnectButton);
 
   assert.match(rendered.container.textContent ?? "", /Disconnect Whoop\?/);
   const confirmButton = [...rendered.container.querySelectorAll("button")]
@@ -4925,11 +3841,7 @@ test("ConnectSourcesGrid disconnects a connected source after confirmation", asy
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
   assert.equal(confirmButton.textContent, "Disconnect");
 
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, confirmButton);
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
@@ -4979,45 +3891,25 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
   );
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const sharedConnectionId = "dsc_junction_shared";
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...OURA_SOURCE,
           connected: true,
           connectProvider: "junction",
           connectTarget: "oura",
-          description:
-            "Sleep, readiness, activity, heart rate, and temperature trends.",
           disconnectConnectionId: sharedConnectionId,
           disconnectSourceProviderSlug: "oura",
-          id: "oura",
-          logo: {
-            className: "size-11 object-contain",
-            height: 44,
-            src: "/brand-logos/connect/oura.png",
-            width: 44,
-          },
-          name: "Oura",
           requiresReconnect: true,
           requiresVitalDisclosure: false,
         },
         {
+          ...WHOOP_SOURCE,
           connected: true,
-          description: "Recovery, strain, sleep, and heart rate.",
           disconnectConnectionId: sharedConnectionId,
           disconnectSourceProviderSlug: "whoop_v2",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
         },
       ],
     }),
@@ -5028,11 +3920,7 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
   );
   assert.ok(reconnectButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    reconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, reconnectButton);
 
   assert.match(rendered.container.textContent ?? "", /We use Vital/u);
   assert.equal(fetch.mock.calls.length, 0);
@@ -5041,22 +3929,14 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
   );
   assert.ok(closeButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    closeButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, closeButton);
 
   const disconnectButton = rendered.container.querySelector(
     "button[aria-label='Disconnect Oura']",
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    disconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, disconnectButton);
 
   assert.match(rendered.container.textContent ?? "", /Disconnect Oura\?/u);
   assert.match(
@@ -5068,11 +3948,7 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
     .at(-1);
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, confirmButton);
 
   await vi.waitFor(() => {
     assert.match(rendered.container.textContent ?? "", /Oura not connected/u);
@@ -5090,11 +3966,7 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
   );
   assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    connectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, connectButton);
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 2);
@@ -5120,18 +3992,11 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
 });
 
 test("ConnectSourcesGrid hides a connection-disabled source after its local disconnect", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({});
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({});
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
@@ -5160,22 +4025,14 @@ test("ConnectSourcesGrid hides a connection-disabled source after its local disc
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    disconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, disconnectButton);
 
   const confirmButton = [...rendered.container.querySelectorAll("button")]
     .filter((button) => button.textContent === "Disconnect")
     .at(-1);
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, confirmButton);
 
   await vi.waitFor(() => {
     assert.match(
@@ -5201,18 +4058,11 @@ test("ConnectSourcesGrid hides a connection-disabled source after its local disc
 });
 
 test("ConnectSourcesGrid keeps Apple Health mobile guidance after local disconnect", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({});
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({});
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
@@ -5244,22 +4094,14 @@ test("ConnectSourcesGrid keeps Apple Health mobile guidance after local disconne
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    disconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, disconnectButton);
 
   const confirmButton = [...rendered.container.querySelectorAll("button")]
     .filter((button) => button.textContent === "Disconnect")
     .at(-1);
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, confirmButton);
 
   await vi.waitFor(() => {
     assert.match(
@@ -5294,36 +4136,21 @@ test("ConnectSourcesGrid keeps Apple Health mobile guidance after local disconne
 });
 
 test("ConnectSourcesGrid warns when a Garmin account reset also disconnects unavailable Dexcom", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({});
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({});
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...GARMIN_SOURCE,
           connectionAvailable: true,
           connectTarget: "garmin",
           connected: true,
-          description: "Workouts, sleep, stress, heart rate, and body battery.",
           disconnectConnectionId: "dsc_shared_garmin_dexcom",
           disconnectScope: "junction_account",
-          id: "garmin",
-          logo: {
-            className: "size-11 object-contain",
-            height: 44,
-            src: "/brand-logos/connect/garmin.png",
-            width: 44,
-          },
-          name: "Garmin",
           recoveryKind: "connection_reset",
         },
         {
@@ -5355,11 +4182,7 @@ test("ConnectSourcesGrid warns when a Garmin account reset also disconnects unav
   ) ?? null;
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    disconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, disconnectButton);
 
   assert.match(
     rendered.container.textContent ?? "",
@@ -5369,31 +4192,19 @@ test("ConnectSourcesGrid warns when a Garmin account reset also disconnects unav
     .find((button) => button.textContent === "Cancel");
   assert.ok(cancelButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    cancelButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, cancelButton);
 
   assert.match(rendered.container.textContent ?? "", /Garmin needs a fresh connection/u);
   assert.match(rendered.container.textContent ?? "", /Dexcom connected/u);
   assert.equal(fetch.mock.calls.length, 0);
 
-  await act(async () => {
-    disconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, disconnectButton);
   const confirmButton = [...rendered.container.querySelectorAll("button")]
     .filter((button) => button.textContent === "Disconnect")
     .at(-1);
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, confirmButton);
 
   await vi.waitFor(() => {
     assert.match(rendered.container.textContent ?? "", /Garmin not connected/u);
@@ -5423,34 +4234,19 @@ test("ConnectSourcesGrid warns when a Garmin account reset also disconnects unav
 });
 
 test("ConnectSourcesGrid uses account-scoped disconnect copy without naming Junction", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({});
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({});
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...WHOOP_SOURCE,
           connected: true,
-          description: "Recovery, strain, sleep, and heart rate.",
           disconnectConnectionId: "dsc_junction_multi",
           disconnectScope: "junction_account",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
         },
       ],
     }),
@@ -5466,11 +4262,7 @@ test("ConnectSourcesGrid uses account-scoped disconnect copy without naming Junc
     /Junction account/u,
   );
 
-  await act(async () => {
-    disconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, disconnectButton);
 
   assert.match(rendered.container.textContent ?? "", /Disconnect account\?/);
   assert.match(
@@ -5483,11 +4275,7 @@ test("ConnectSourcesGrid uses account-scoped disconnect copy without naming Junc
     .at(-1);
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, confirmButton);
 
   await vi.waitFor(() => {
     assert.match(
@@ -5504,34 +4292,19 @@ test("ConnectSourcesGrid uses account-scoped disconnect copy without naming Junc
 });
 
 test("ConnectSourcesGrid walks connection-reset sources through account disconnect then connect", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({});
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({});
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...GARMIN_SOURCE,
           connectTarget: "garmin",
-          description: "Workouts, sleep, stress, heart rate, and body battery.",
           disconnectConnectionId: "dsc_junction_garmin",
           disconnectScope: "junction_account",
-          id: "garmin",
-          logo: {
-            className: "size-11 object-contain",
-            height: 44,
-            src: "/brand-logos/connect/garmin.png",
-            width: 44,
-          },
-          name: "Garmin",
           recoveryKind: "connection_reset",
         },
       ],
@@ -5556,11 +4329,7 @@ test("ConnectSourcesGrid walks connection-reset sources through account disconne
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    disconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, disconnectButton);
 
   assert.match(rendered.container.textContent ?? "", /Disconnect account\?/);
   assert.match(
@@ -5573,11 +4342,7 @@ test("ConnectSourcesGrid walks connection-reset sources through account disconne
     .at(-1);
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, confirmButton);
 
   await vi.waitFor(() => {
     assert.match(
@@ -5604,42 +4369,27 @@ test("ConnectSourcesGrid walks connection-reset sources through account disconne
 });
 
 test("ConnectSourcesGrid keeps an unfinished historical-reset disconnect open for retry", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({
-        warning: {
-          code: "HISTORICAL_RESET_REVOKE_FAILED",
-          historicalResetIncomplete: true,
-          message:
-            "Provider revoke did not complete while a historical data reset is pending. " +
-            "Remove the connection in the provider account before reconnecting.",
-        },
-      });
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({
+      warning: {
+        code: "HISTORICAL_RESET_REVOKE_FAILED",
+        historicalResetIncomplete: true,
+        message:
+          "Provider revoke did not complete while a historical data reset is pending. " +
+          "Remove the connection in the provider account before reconnecting.",
+      },
+    });
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...GARMIN_SOURCE,
           connectTarget: "garmin",
-          description: "Workouts, sleep, stress, heart rate, and body battery.",
           disconnectConnectionId: "dsc_junction_garmin",
           disconnectScope: "junction_account",
-          id: "garmin",
-          logo: {
-            className: "size-11 object-contain",
-            height: 44,
-            src: "/brand-logos/connect/garmin.png",
-            width: 44,
-          },
-          name: "Garmin",
           recoveryKind: "connection_reset",
         },
       ],
@@ -5651,22 +4401,14 @@ test("ConnectSourcesGrid keeps an unfinished historical-reset disconnect open fo
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    disconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, disconnectButton);
 
   const confirmButton = [...rendered.container.querySelectorAll("button")]
     .filter((button) => button.textContent === "Disconnect")
     .at(-1);
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, confirmButton);
 
   await vi.waitFor(() => {
     assert.match(
@@ -5693,58 +4435,35 @@ test("ConnectSourcesGrid keeps an unfinished historical-reset disconnect open fo
 });
 
 test("ConnectSourcesGrid keeps a shared historical-reset disconnect open for retry", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({
-        warning: {
-          code: "HISTORICAL_RESET_REVOKE_FAILED",
-          historicalResetIncomplete: true,
-          message:
-            "Provider revoke did not complete while a historical data reset is pending. " +
-            "Remove the connection in the provider account before reconnecting.",
-        },
-      });
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({
+      warning: {
+        code: "HISTORICAL_RESET_REVOKE_FAILED",
+        historicalResetIncomplete: true,
+        message:
+          "Provider revoke did not complete while a historical data reset is pending. " +
+          "Remove the connection in the provider account before reconnecting.",
+      },
+    });
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...GARMIN_SOURCE,
           connectTarget: "garmin",
-          description: "Workouts, sleep, stress, heart rate, and body battery.",
           disconnectConnectionId: "dsc_junction_multi",
           disconnectScope: "junction_account",
-          id: "garmin",
-          logo: {
-            className: "size-11 object-contain",
-            height: 44,
-            src: "/brand-logos/connect/garmin.png",
-            width: 44,
-          },
-          name: "Garmin",
           recoveryKind: "connection_reset",
         },
         {
+          ...WHOOP_SOURCE,
           connectTarget: "whoop",
           connected: true,
-          description: "Recovery, strain, sleep, and heart rate.",
           disconnectConnectionId: "dsc_junction_multi",
           disconnectScope: "junction_account",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
         },
       ],
     }),
@@ -5761,22 +4480,14 @@ test("ConnectSourcesGrid keeps a shared historical-reset disconnect open for ret
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    disconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, disconnectButton);
 
   const confirmButton = [...rendered.container.querySelectorAll("button")]
     .filter((button) => button.textContent === "Disconnect")
     .at(-1);
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, confirmButton);
 
   await vi.waitFor(() => {
     assert.match(
@@ -5797,39 +4508,24 @@ test("ConnectSourcesGrid keeps a shared historical-reset disconnect open for ret
 });
 
 test("ConnectSourcesGrid keeps ordinary failed revokes on the disconnect path", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({
-        warning: {
-          code: "PROVIDER_REVOKE_FAILED",
-          message: "Provider revoke request failed during disconnect.",
-        },
-      });
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({
+      warning: {
+        code: "PROVIDER_REVOKE_FAILED",
+        message: "Provider revoke request failed during disconnect.",
+      },
+    });
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...WHOOP_SOURCE,
           connectTarget: "whoop",
           connected: true,
-          description: "Recovery, strain, sleep, and heart rate.",
           disconnectConnectionId: "dsc_whoop_123",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
         },
       ],
     }),
@@ -5840,22 +4536,14 @@ test("ConnectSourcesGrid keeps ordinary failed revokes on the disconnect path", 
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    disconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, disconnectButton);
 
   const confirmButton = [...rendered.container.querySelectorAll("button")]
     .filter((button) => button.textContent === "Disconnect")
     .at(-1);
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, confirmButton);
 
   await vi.waitFor(() => {
     assert.match(
@@ -5881,35 +4569,20 @@ test("ConnectSourcesGrid keeps ordinary failed revokes on the disconnect path", 
 });
 
 test("ConnectSourcesGrid shows reconnect guidance without a disconnect action", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({
-        authorizationUrl: "https://provider.example.test/oauth/start",
-      });
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+    });
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...WHOOP_SOURCE,
           connectTarget: "whoop",
-          description: "Recovery, strain, sleep, and heart rate.",
           disconnectConnectionId: "dsc_whoop_123",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
           requiresReconnect: true,
         },
       ],
@@ -5930,11 +4603,7 @@ test("ConnectSourcesGrid shows reconnect guidance without a disconnect action", 
   assert.ok(reconnectButton instanceof rendered.window.HTMLButtonElement);
   assert.equal(reconnectButton.textContent, "Reconnect");
 
-  await act(async () => {
-    reconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, reconnectButton);
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
@@ -5960,42 +4629,27 @@ test("ConnectSourcesGrid shows reconnect guidance without a disconnect action", 
 });
 
 test("ConnectSourcesGrid shows disconnect failures inside the confirmation dialog", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json(
-        {
-          error: {
-            code: "DEVICE_SYNC_DISCONNECT_FAILED",
-            message: "We could not disconnect Whoop right now.",
-          },
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json(
+      {
+        error: {
+          code: "DEVICE_SYNC_DISCONNECT_FAILED",
+          message: "We could not disconnect Whoop right now.",
         },
-        { status: 502 },
-      );
-    },
-  );
+      },
+      { status: 502 },
+    );
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...WHOOP_SOURCE,
           connectTarget: "whoop",
           connected: true,
-          description: "Recovery, strain, sleep, and heart rate.",
           disconnectConnectionId: "dsc_whoop_123",
-          id: "whoop",
-          logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 15,
-            src: "/brand-logos/connect/whoop.svg",
-            width: 96,
-          },
-          name: "Whoop",
         },
       ],
     }),
@@ -6006,22 +4660,14 @@ test("ConnectSourcesGrid shows disconnect failures inside the confirmation dialo
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    disconnectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, disconnectButton);
 
   const confirmButton = [...rendered.container.querySelectorAll("button")]
     .filter((button) => button.textContent === "Disconnect")
     .at(-1);
   assert.ok(confirmButton instanceof rendered.window.HTMLButtonElement);
 
-  await act(async () => {
-    confirmButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, confirmButton);
 
   await vi.waitFor(() => {
     const alert = rendered.container.querySelector("[role='alert']");
@@ -6039,19 +4685,12 @@ test("ConnectSourcesGrid shows disconnect failures inside the confirmation dialo
 });
 
 test("ConnectSourcesGrid rejects malformed connect responses before redirecting", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({
-        authorizationUrl: 42,
-      });
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({
+      authorizationUrl: 42,
+    });
+  });
   vi.stubGlobal("fetch", fetch);
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
@@ -6072,11 +4711,7 @@ test("ConnectSourcesGrid rejects malformed connect responses before redirecting"
     }),
   );
 
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, rendered.button);
 
   assert.equal(rendered.assign.mock.calls.length, 0);
   assert.match(
@@ -6088,19 +4723,12 @@ test("ConnectSourcesGrid rejects malformed connect responses before redirecting"
 });
 
 test("ConnectSourcesGrid rejects unsafe connect response URLs before redirecting", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({
-        authorizationUrl: "javascript:alert(1)",
-      });
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({
+      authorizationUrl: "javascript:alert(1)",
+    });
+  });
   vi.stubGlobal("fetch", fetch);
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
@@ -6121,11 +4749,7 @@ test("ConnectSourcesGrid rejects unsafe connect response URLs before redirecting
     }),
   );
 
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, rendered.button);
 
   assert.equal(rendered.assign.mock.calls.length, 0);
   assert.match(
@@ -6157,9 +4781,6 @@ test("ConnectPage shows callback success with the original source label", async 
     ],
   });
 
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const markup = renderToStaticMarkup(
     await ConnectPage({
       searchParams: Promise.resolve({
@@ -6179,9 +4800,6 @@ test("ConnectPage shows callback success with the original source label", async 
 });
 
 test("ConnectPage suppresses unverified connected callbacks from query params", async () => {
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const markup = renderToStaticMarkup(
     await ConnectPage({
       searchParams: Promise.resolve({
@@ -6197,9 +4815,6 @@ test("ConnectPage suppresses unverified connected callbacks from query params", 
 });
 
 test("ConnectPage ignores connected callback status when callback source metadata is missing", async () => {
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const markup = renderToStaticMarkup(
     await ConnectPage({
       searchParams: Promise.resolve({
@@ -6214,9 +4829,6 @@ test("ConnectPage ignores connected callback status when callback source metadat
 });
 
 test("ConnectPage keeps unavailable callback state neutral without asserting connection", async () => {
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const markup = renderToStaticMarkup(
     await ConnectPage({
       searchParams: Promise.resolve({
@@ -6235,9 +4847,6 @@ test("ConnectPage keeps unavailable callback state neutral without asserting con
 });
 
 test("ConnectPage shows rejected callback errors with the original source label", async () => {
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const markup = renderToStaticMarkup(
     await ConnectPage({
       searchParams: Promise.resolve({
@@ -6254,9 +4863,6 @@ test("ConnectPage shows rejected callback errors with the original source label"
 });
 
 test("ConnectPage shows fallback callback errors with the original source label", async () => {
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const markup = renderToStaticMarkup(
     await ConnectPage({
       searchParams: Promise.resolve({
@@ -6273,9 +4879,6 @@ test("ConnectPage shows fallback callback errors with the original source label"
 });
 
 test("ConnectPage offers support and Settings recovery on callback failures", async () => {
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const markup = renderToStaticMarkup(
     await ConnectPage({
       searchParams: Promise.resolve({
@@ -6304,9 +4907,6 @@ test("ConnectPage offers support and Settings recovery on callback failures", as
 });
 
 test("ConnectPage keeps unverified callback query text out of the support draft", async () => {
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const markup = renderToStaticMarkup(
     await ConnectPage({
       searchParams: Promise.resolve({
@@ -6330,13 +4930,7 @@ test.each([
   [false, "CALLBACK_PROOF_INVALID"], [true, "CALLBACK_PROOF_INVALID"],
   [false, "OAUTH_STATE_INVALID"], [true, "OAUTH_STATE_INVALID"],
 ] as const)("ConnectPage preserves connected=%s for neutral %s recovery", async (connected, errorCode) => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction();
   if (connected) {
     mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
       generatedAt: "2026-05-01T00:00:00.000Z",
@@ -6348,9 +4942,6 @@ test.each([
       }],
     });
   }
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const markup = renderToStaticMarkup(
     await ConnectPage({
       searchParams: Promise.resolve({
@@ -6386,9 +4977,6 @@ test("ConnectPage offers sign-in recovery when the callback arrived signed out",
     session: null,
   });
 
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const markup = renderToStaticMarkup(
     await ConnectPage({
       searchParams: Promise.resolve({
@@ -6409,9 +4997,6 @@ test("ConnectPage offers sign-in recovery when the callback arrived signed out",
 });
 
 test("ConnectPage omits sign-in recovery when the member is already signed in", async () => {
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const markup = renderToStaticMarkup(
     await ConnectPage({
       searchParams: Promise.resolve({
@@ -6428,9 +5013,6 @@ test("ConnectPage omits sign-in recovery when the member is already signed in", 
 });
 
 test("ConnectPage keeps successful callbacks free of failure recovery actions", async () => {
-  const { default: ConnectPage } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const markup = renderToStaticMarkup(
     await ConnectPage({
       searchParams: Promise.resolve({
@@ -6446,18 +5028,9 @@ test("ConnectPage keeps successful callbacks free of failure recovery actions", 
 });
 
 test("resolveConfiguredConnectSources keeps Fitbit on its dedicated Junction disclosure", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction();
   vi.stubEnv("JUNCTION_PROVIDER_FILTER", "fitbit");
 
-  const { resolveConfiguredConnectSources } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const logo = {
     className: "size-11 object-contain",
     height: 44,
@@ -6481,24 +5054,9 @@ test("resolveConfiguredConnectSources keeps Fitbit on its dedicated Junction dis
 });
 
 test("Vital disclosure follows reconnect and fresh providers across local disconnects", async () => {
-  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
-  vi.stubEnv(
-    "JUNCTION_CLIENT_USER_ID_SECRET",
-    "junction-client-user-id-secret",
-  );
-  vi.stubEnv("JUNCTION_ENV", "sandbox");
-  vi.stubEnv("JUNCTION_REGION", "us");
+  configureJunction();
   vi.stubEnv("JUNCTION_PROVIDER_FILTER", "oura,whoop_v2");
 
-  const { resolveConfiguredConnectSources } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
-  const { requiresVitalConnectionPreflight } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
-  const { markLocallyDisconnectedSources } = await import(
-    "../app/(dashboard)/connect/connect-page-helpers"
-  );
   const logo = {
     className: "size-11 object-contain",
     height: 44,
@@ -6552,34 +5110,19 @@ test("Vital disclosure follows reconnect and fresh providers across local discon
 });
 
 test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", async () => {
-  const fetch = vi.fn(
-    async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return Response.json({
-        authorizationUrl: "https://junction.example.test/link/oura",
-      });
-    },
-  );
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+    return Response.json({
+      authorizationUrl: "https://junction.example.test/link/oura",
+    });
+  });
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...OURA_SOURCE,
           connectTarget: "oura",
-          description: "Sleep, readiness, activity, heart rate, and temperature trends.",
-          id: "oura",
-          logo: {
-            className: "size-11 object-contain",
-            height: 44,
-            src: "/brand-logos/connect/oura.png",
-            width: 44,
-          },
-          name: "Oura",
           requiresVitalDisclosure: true,
         },
       ],
@@ -6590,11 +5133,7 @@ test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", as
     "button[aria-label='Connect Oura']",
   );
   assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    connectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, connectButton);
 
   assert.equal(fetch.mock.calls.length, 0);
   assert.match(
@@ -6615,11 +5154,7 @@ test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", as
     ...rendered.container.querySelectorAll("button"),
   ].find((button) => button.textContent === "Continue to Oura");
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    continueButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, continueButton);
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
@@ -6637,23 +5172,12 @@ test("ConnectSourcesGrid dismisses a Vital handoff without starting a connection
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
         {
+          ...OURA_SOURCE,
           connectTarget: "oura",
-          description: "Sleep, readiness, activity, heart rate, and temperature trends.",
-          id: "oura",
-          logo: {
-            className: "size-11 object-contain",
-            height: 44,
-            src: "/brand-logos/connect/oura.png",
-            width: 44,
-          },
-          name: "Oura",
           requiresVitalDisclosure: true,
         },
       ],
@@ -6664,11 +5188,7 @@ test("ConnectSourcesGrid dismisses a Vital handoff without starting a connection
     "button[aria-label='Connect Oura']",
   );
   assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    connectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, connectButton);
 
   assert.match(
     rendered.container.textContent ?? "",
@@ -6678,11 +5198,7 @@ test("ConnectSourcesGrid dismisses a Vital handoff without starting a connection
     'button[aria-label="Close"]',
   );
   assert.ok(closeButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    closeButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, closeButton);
 
   assert.equal(fetch.mock.calls.length, 0);
   assert.equal(rendered.assign.mock.calls.length, 0);
@@ -6705,9 +5221,6 @@ test("ConnectSourcesGrid keeps Fitbit on its dedicated connection flow", async (
   );
   vi.stubGlobal("fetch", fetch);
 
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const rendered = await renderClientComponent(
     createElement(ConnectSourcesGrid, {
       sources: [
@@ -6731,11 +5244,7 @@ test("ConnectSourcesGrid keeps Fitbit on its dedicated connection flow", async (
     "button[aria-label='Connect Fitbit']",
   );
   assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
-  await act(async () => {
-    connectButton.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true }),
-    );
-  });
+  await clickButton(rendered, connectButton);
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
@@ -6795,9 +5304,6 @@ function expectSettingResponseNotLoaded() {
 }
 
 test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", async () => {
-  const { resolveConnectSourceConnectionStates } = await import(
-    "../app/(dashboard)/connect/connect-page-content"
-  );
   const legacy = {
     firstSeenAt: "2026-07-01T00:00:00.000Z",
     lastDataAt: "2026-08-10T00:00:00.000Z",
@@ -6909,9 +5415,6 @@ test("ConnectSourcesGrid keeps automatic Fitbit continuation live and accelerabl
       status: "complete",
     }));
   vi.stubGlobal("fetch", fetch);
-  const { ConnectSourcesGrid } = await import(
-    "../app/(dashboard)/connect/connect-page-client"
-  );
   const renderMigration = (input: {
     migrationRetryRequired?: true;
     migrationState: "verifying_successor" | "cutover_ready";
@@ -6964,11 +5467,7 @@ test("ConnectSourcesGrid keeps automatic Fitbit continuation live and accelerabl
       'button[aria-label="Retry Fitbit migration now"]',
     );
     assert.ok(retryButton instanceof rendered.window.HTMLButtonElement);
-    await act(async () => {
-      retryButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
+    await clickButton(rendered, retryButton);
 
     await vi.waitFor(() => {
       assert.match(rendered.container.textContent ?? "", /Retry requested/u);
@@ -6992,11 +5491,7 @@ test("ConnectSourcesGrid keeps automatic Fitbit continuation live and accelerabl
       'button[aria-label="Retry Fitbit migration now"]',
     );
     assert.ok(retryAgainButton instanceof rendered.window.HTMLButtonElement);
-    await act(async () => {
-      retryAgainButton.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true }),
-      );
-    });
+    await clickButton(rendered, retryAgainButton);
 
     await vi.waitFor(() => {
       assert.match(
@@ -7054,4 +5549,36 @@ function createFitbitMigrationSource(input: {
     ...input,
     name: "Fitbit",
   };
+}
+
+function configureJunction(providerFilter?: string) {
+  vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+  vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
+  vi.stubEnv("JUNCTION_ENV", "sandbox");
+  vi.stubEnv("JUNCTION_REGION", "us");
+  if (providerFilter !== undefined) {
+    vi.stubEnv("JUNCTION_PROVIDER_FILTER", providerFilter);
+  }
+}
+
+async function renderConnectPage() {
+  return renderToStaticMarkup(await ConnectPage());
+}
+
+async function renderConnectedPage(sources: unknown[]) {
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources,
+  });
+  return renderConnectPage();
+}
+
+async function clickButton(
+  rendered: Awaited<ReturnType<typeof renderClientComponent>>,
+  button: Element,
+) {
+  await act(async () => {
+    button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
 }

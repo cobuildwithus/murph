@@ -237,18 +237,12 @@ describe("RunnerContainer", () => {
       });
 
     const firstResponse = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest(),
-      },
+      job: createRunnerInvocationJob(),
       timeoutMs: 60_000,
       userId: "member_123",
     });
     const secondResponse = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_second"),
-      },
+      job: createRunnerInvocationJob("evt_second"),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -312,10 +306,7 @@ describe("RunnerContainer", () => {
       });
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_recycle_v1_runtime"),
-      },
+      job: createRunnerInvocationJob("evt_recycle_v1_runtime"),
       timeoutMs: 60_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -337,10 +328,7 @@ describe("RunnerContainer", () => {
 
     for (let index = 1; index <= 101; index += 1) {
       await expect(container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest(`evt_no_success_recycle_${index}`),
-        },
+        job: createRunnerInvocationJob(`evt_no_success_recycle_${index}`),
         timeoutMs: 60_000,
         userId: "member_123",
       })).resolves.toEqual(createRunnerResult());
@@ -380,10 +368,7 @@ describe("RunnerContainer", () => {
     });
 
     const invocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest(),
-      },
+      job: createRunnerInvocationJob(),
       orchestration: {
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_090,
         replacedStaleFence: true,
@@ -496,10 +481,7 @@ describe("RunnerContainer", () => {
     });
     await activeRequestStarted.promise;
     const queuedInvocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_queued_during_active_wake"),
-      },
+      job: createRunnerInvocationJob("evt_queued_during_active_wake"),
       timeoutMs: 30_000,
       userId: "member_123",
     });
@@ -579,10 +561,7 @@ describe("RunnerContainer", () => {
     });
     await wakeRequestStarted.promise;
     const queuedInvocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_queued_during_wake_request"),
-      },
+      job: createRunnerInvocationJob("evt_queued_during_wake_request"),
       timeoutMs: 30_000,
       userId: "member_123",
     });
@@ -965,10 +944,7 @@ describe("RunnerContainer", () => {
       );
     });
     const queuedInvocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_successor_after_rejected_wake"),
-      },
+      job: createRunnerInvocationJob("evt_successor_after_rejected_wake"),
       timeoutMs: 30_000,
       userId: "member_123",
     });
@@ -1524,10 +1500,7 @@ describe("RunnerContainer", () => {
     });
 
     const invocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_active_op_platform_stopped"),
-      },
+      job: createRunnerInvocationJob("evt_active_op_platform_stopped"),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -1582,29 +1555,84 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("treats a legacy identity-blind rejected wake as no active child when health reports idle", async () => {
+  it.each([
+    {
+      name: "idle health proves no active child",
+      accepted: "0",
+      health: () => Response.json({ ...createRunnerHealthResult(), activeJobCount: 0 }),
+      healthCalls: 1,
+      expected: { kind: "not-wakeable", reason: "no-active-child" },
+    },
+    {
+      name: "missing accepted header prevents the legacy health fallback",
+      accepted: undefined,
+      health: () => Response.json({ ...createRunnerHealthResult(), activeJobCount: 0 }),
+      healthCalls: 0,
+      expected: { kind: "unknown", reason: "active-child-rejected" },
+    },
+    {
+      name: "active count stays authoritative without warmth metadata",
+      accepted: "0",
+      health: () => Response.json({
+        activeJobCount: 1,
+        hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+        ok: true,
+      }),
+      healthCalls: 1,
+      expected: { kind: "unknown", reason: "active-child-rejected" },
+    },
+    {
+      name: "unavailable health leaves rejection unconfirmed",
+      accepted: "0",
+      health: () => { throw new Error("health probe unavailable"); },
+      healthCalls: 1,
+      expected: { kind: "unknown", reason: "active-child-rejected" },
+    },
+    {
+      name: "missing active count leaves rejection unconfirmed",
+      accepted: "0",
+      health: () => Response.json({
+        conversationActivityReceivedAtEpochMs: null,
+        hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+        ok: true,
+      }),
+      healthCalls: 1,
+      expected: { kind: "unknown", reason: "active-child-rejected" },
+    },
+    {
+      name: "malformed health leaves rejection unconfirmed",
+      accepted: "0",
+      health: () => new Response("not-json", {
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      }),
+      healthCalls: 1,
+      expected: { kind: "unknown", reason: "active-child-rejected" },
+    },
+    {
+      name: "nonnumeric active count leaves rejection unconfirmed",
+      accepted: "0",
+      health: () => Response.json({ ...createRunnerHealthResult(), activeJobCount: "0" }),
+      healthCalls: 1,
+      expected: { kind: "unknown", reason: "active-child-rejected" },
+    },
+    {
+      name: "negative active count leaves rejection unconfirmed",
+      accepted: "0",
+      health: () => Response.json({ ...createRunnerHealthResult(), activeJobCount: -1 }),
+      healthCalls: 1,
+      expected: { kind: "unknown", reason: "active-child-rejected" },
+    },
+  ])("classifies a pointerless legacy wake: $name", async ({ accepted, health, healthCalls, expected }) => {
+    const readHealth = vi.fn(health);
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/internal/runtime-wake")) {
           return new Response(null, {
-            headers: {
-              "x-runtime-wake-accepted": "0",
-            },
+            headers: accepted === undefined ? {} : { "x-runtime-wake-accepted": accepted },
             status: 204,
           });
         }
-        if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({
-            ...createRunnerHealthResult(),
-            activeJobCount: 0,
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
+        if (url.endsWith("/health")) return readHealth();
         throw new Error(`Unexpected runner request URL: ${url}`);
       }),
     });
@@ -1613,260 +1641,8 @@ describe("RunnerContainer", () => {
       attemptId: "attempt_lost_pointer",
       leaseGeneration: "12",
       userId: "member_123",
-    })).resolves.toMatchObject({
-      kind: "not-wakeable",
-      reason: "no-active-child",
-    });
-  });
-
-  it("does not use the legacy health fallback when the wake response omits the accepted header", async () => {
-    let healthCallCount = 0;
-    const { container } = createContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
-        if (url.endsWith("/internal/runtime-wake")) {
-          return new Response(null, {
-            status: 204,
-          });
-        }
-        if (url.endsWith("/health")) {
-          healthCallCount += 1;
-          return new Response(JSON.stringify({
-            ...createRunnerHealthResult(),
-            activeJobCount: 0,
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        throw new Error(`Unexpected runner request URL: ${url}`);
-      }),
-    });
-
-    await expect(container.wakeRuntime({
-      attemptId: "attempt_lost_pointer",
-      leaseGeneration: "12",
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      kind: "unknown",
-      reason: "active-child-rejected",
-    });
-    expect(healthCallCount).toBe(0);
-  });
-
-  it("keeps legacy active-count liveness authoritative when warmth metadata is absent", async () => {
-    const { container } = createContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
-        if (url.endsWith("/internal/runtime-wake")) {
-          return new Response(null, {
-            headers: {
-              "x-runtime-wake-accepted": "0",
-            },
-            status: 204,
-          });
-        }
-        if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({
-            activeJobCount: 1,
-            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
-            ok: true,
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        throw new Error(`Unexpected runner request URL: ${url}`);
-      }),
-    });
-
-    await expect(container.wakeRuntime({
-      attemptId: "attempt_lost_pointer",
-      leaseGeneration: "12",
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      kind: "unknown",
-      reason: "active-child-rejected",
-    });
-  });
-
-  it("keeps a legacy identity-blind rejected wake unconfirmed when health is unavailable", async () => {
-    const { container } = createContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
-        if (url.endsWith("/internal/runtime-wake")) {
-          return new Response(null, {
-            headers: {
-              "x-runtime-wake-accepted": "0",
-            },
-            status: 204,
-          });
-        }
-        if (url.endsWith("/health")) {
-          throw new Error("health probe unavailable");
-        }
-
-        throw new Error(`Unexpected runner request URL: ${url}`);
-      }),
-    });
-
-    await expect(container.wakeRuntime({
-      attemptId: "attempt_lost_pointer",
-      leaseGeneration: "12",
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      kind: "unknown",
-      reason: "active-child-rejected",
-    });
-  });
-
-  it("keeps a legacy identity-blind rejected wake unconfirmed when health omits active job count", async () => {
-    const { container } = createContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
-        if (url.endsWith("/internal/runtime-wake")) {
-          return new Response(null, {
-            headers: {
-              "x-runtime-wake-accepted": "0",
-            },
-            status: 204,
-          });
-        }
-        if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({
-            conversationActivityReceivedAtEpochMs: null,
-            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
-            ok: true,
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        throw new Error(`Unexpected runner request URL: ${url}`);
-      }),
-    });
-
-    await expect(container.wakeRuntime({
-      attemptId: "attempt_lost_pointer",
-      leaseGeneration: "12",
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      kind: "unknown",
-      reason: "active-child-rejected",
-    });
-  });
-
-  it("keeps a legacy identity-blind rejected wake unconfirmed when health is malformed", async () => {
-    const { container } = createContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
-        if (url.endsWith("/internal/runtime-wake")) {
-          return new Response(null, {
-            headers: {
-              "x-runtime-wake-accepted": "0",
-            },
-            status: 204,
-          });
-        }
-        if (url.endsWith("/health")) {
-          return new Response("not-json", {
-            headers: {
-              "content-type": "text/plain; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        throw new Error(`Unexpected runner request URL: ${url}`);
-      }),
-    });
-
-    await expect(container.wakeRuntime({
-      attemptId: "attempt_lost_pointer",
-      leaseGeneration: "12",
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      kind: "unknown",
-      reason: "active-child-rejected",
-    });
-  });
-
-  it("keeps a legacy identity-blind rejected wake unconfirmed when health reports a nonnumeric active job count", async () => {
-    const { container } = createContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
-        if (url.endsWith("/internal/runtime-wake")) {
-          return new Response(null, {
-            headers: {
-              "x-runtime-wake-accepted": "0",
-            },
-            status: 204,
-          });
-        }
-        if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({
-            ...createRunnerHealthResult(),
-            activeJobCount: "0",
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        throw new Error(`Unexpected runner request URL: ${url}`);
-      }),
-    });
-
-    await expect(container.wakeRuntime({
-      attemptId: "attempt_lost_pointer",
-      leaseGeneration: "12",
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      kind: "unknown",
-      reason: "active-child-rejected",
-    });
-  });
-
-  it("keeps a legacy identity-blind rejected wake unconfirmed when health reports a negative active job count", async () => {
-    const { container } = createContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
-        if (url.endsWith("/internal/runtime-wake")) {
-          return new Response(null, {
-            headers: {
-              "x-runtime-wake-accepted": "0",
-            },
-            status: 204,
-          });
-        }
-        if (url.endsWith("/health")) {
-          return new Response(JSON.stringify({
-            ...createRunnerHealthResult(),
-            activeJobCount: -1,
-          }), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            status: 200,
-          });
-        }
-
-        throw new Error(`Unexpected runner request URL: ${url}`);
-      }),
-    });
-
-    await expect(container.wakeRuntime({
-      attemptId: "attempt_lost_pointer",
-      leaseGeneration: "12",
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      kind: "unknown",
-      reason: "active-child-rejected",
-    });
+    })).resolves.toMatchObject(expected);
+    expect(readHealth).toHaveBeenCalledTimes(healthCalls);
   });
 
   it("ensureProcessing wakes the exact active child without starting a replacement", async () => {
@@ -1898,10 +1674,7 @@ describe("RunnerContainer", () => {
     });
 
     const invocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest(),
-      },
+      job: createRunnerInvocationJob(),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -2001,10 +1774,7 @@ describe("RunnerContainer", () => {
     });
 
     const invocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest(),
-      },
+      job: createRunnerInvocationJob(),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -2067,10 +1837,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       },
       invoke: {
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_replacement"),
-        },
+        job: createRunnerInvocationJob("evt_replacement"),
         timeoutMs: 60_000,
         userId: "member_123",
       },
@@ -2112,10 +1879,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.ensureProcessing({
       invoke: {
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_shutdown_replacement_required"),
-        },
+        job: createRunnerInvocationJob("evt_shutdown_replacement_required"),
         timeoutMs: 60_000,
         userId: "member_123",
       },
@@ -3974,129 +3738,60 @@ describe("RunnerContainer", () => {
     }
   });
 
-  it("reuses immediate startup readiness proof for the following workspace invocation", async () => {
-    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+  it.each([1, 2])(
+    "reuses startup proof after %i readiness checks, then consumes it on invocation",
+    async (readinessChecks) => {
+      const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 7_500,
+        userId: "member_123",
+      })).resolves.toMatchObject({ action: "started", kind: "ready" });
 
-    await expect(container.ensureReadyForProcessing({
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      action: "started",
-      kind: "ready",
-    });
+      for (let check = 1; check < readinessChecks; check += 1) {
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 7_500,
+          userId: "member_123",
+        })).resolves.toEqual({
+          action: "already_warm",
+          kind: "ready",
+          preparesSupervisedLaunch: true,
+        });
+      }
+      await expect(container.invoke({
+        job: createRunnerInvocationJob("evt_after_startup_confirm"),
+        timeoutMs: 60_000,
+        userId: "member_123",
+      })).resolves.toEqual(createRunnerResult());
 
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_after_startup_confirm"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    const healthCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/health")
-    );
-    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation")
-    );
-    expect(healthCalls).toHaveLength(1);
-    expect(executeCalls).toHaveLength(1);
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-    expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions)
-      .toMatchObject({
-        portProbeTimeoutMS: 1_500,
-      });
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        component: "container",
-        details: expect.objectContaining({
-          readinessProofReused: true,
+      expect(containerFetch.mock.calls.filter(([url]) => String(url).endsWith("/health")))
+        .toHaveLength(1);
+      expect(containerFetch.mock.calls.filter(([url]) => String(url).endsWith("/internal/workspace-invocation")))
+        .toHaveLength(1);
+      expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+      expect(startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions)
+        .toMatchObject({ portProbeTimeoutMS: 1_500 });
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component: "container",
+          details: expect.objectContaining({ readinessProofReused: true }),
+          message: "Hosted execution container is ready.",
+          phase: "container.ready",
         }),
-        message: "Hosted execution container is ready.",
-        phase: "container.ready",
-      }),
-    );
-  });
+      );
 
-  it("keeps reused readiness-only proof available for the following workspace invocation", async () => {
-    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
-
-    await expect(container.ensureReadyForProcessing({
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      action: "started",
-      kind: "ready",
-    });
-    await expect(container.ensureReadyForProcessing({
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toEqual({
-      action: "already_warm",
-      kind: "ready",
-      preparesSupervisedLaunch: true,
-    });
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_after_reused_readiness_confirm"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    const healthCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/health")
-    );
-    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation")
-    );
-    expect(healthCalls).toHaveLength(1);
-    expect(executeCalls).toHaveLength(1);
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-  });
-
-  it("clears reused readiness proof after a workspace invocation accepts it", async () => {
-    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
-
-    await expect(container.ensureReadyForProcessing({
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toMatchObject({
-      action: "started",
-      kind: "ready",
-    });
-
-    await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_after_startup_confirm"),
-      },
-      timeoutMs: 60_000,
-      userId: "member_123",
-    })).resolves.toEqual(createRunnerResult());
-
-    await expect(container.ensureReadyForProcessing({
-      timeoutMs: 7_500,
-      userId: "member_123",
-    })).resolves.toEqual({
-      action: "already_warm",
-      kind: "ready",
-      preparesSupervisedLaunch: true,
-    });
-
-    const healthCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/health")
-    );
-    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
-      String(url).endsWith("/internal/workspace-invocation")
-    );
-    expect(healthCalls).toHaveLength(2);
-    expect(executeCalls).toHaveLength(1);
-    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
-  });
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 7_500,
+        userId: "member_123",
+      })).resolves.toEqual({
+        action: "already_warm",
+        kind: "ready",
+        preparesSupervisedLaunch: true,
+      });
+      expect(containerFetch.mock.calls.filter(([url]) => String(url).endsWith("/health")))
+        .toHaveLength(2);
+      expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    },
+  );
 
   it("does not reuse readiness proof across users", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
@@ -4145,10 +3840,7 @@ describe("RunnerContainer", () => {
 
       nowMs += 5_001;
       await expect(container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_after_stale_startup_confirm"),
-        },
+        job: createRunnerInvocationJob("evt_after_stale_startup_confirm"),
         timeoutMs: 60_000,
         userId: "member_123",
       })).resolves.toEqual(createRunnerResult());
@@ -4197,10 +3889,7 @@ describe("RunnerContainer", () => {
       });
 
       await expect(container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_after_slow_state_read"),
-        },
+        job: createRunnerInvocationJob("evt_after_slow_state_read"),
         timeoutMs: 60_000,
         userId: "member_123",
       })).resolves.toEqual(createRunnerResult());
@@ -4241,10 +3930,7 @@ describe("RunnerContainer", () => {
 
     currentStatus = "stopping";
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_after_transitional_status"),
-      },
+      job: createRunnerInvocationJob("evt_after_transitional_status"),
       timeoutMs: 60_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -4276,10 +3962,7 @@ describe("RunnerContainer", () => {
     );
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_after_lifecycle_error"),
-      },
+      job: createRunnerInvocationJob("evt_after_lifecycle_error"),
       timeoutMs: 60_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -4428,10 +4111,7 @@ describe("RunnerContainer", () => {
     container.onStop({ exitCode: 0, reason: "exit" });
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_after_container_stop"),
-      },
+      job: createRunnerInvocationJob("evt_after_container_stop"),
       timeoutMs: 60_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -4461,10 +4141,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.ensureProcessing({
       invoke: {
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_replacement"),
-        },
+        job: createRunnerInvocationJob("evt_replacement"),
         timeoutMs: 60_000,
         userId: "member_other",
       },
@@ -4509,10 +4186,7 @@ describe("RunnerContainer", () => {
     });
 
     const invocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest(),
-      },
+      job: createRunnerInvocationJob(),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -4571,10 +4245,7 @@ describe("RunnerContainer", () => {
     });
 
     const invocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest(),
-      },
+      job: createRunnerInvocationJob(),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -4630,10 +4301,7 @@ describe("RunnerContainer", () => {
     });
 
     const invocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest(),
-      },
+      job: createRunnerInvocationJob(),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -4726,10 +4394,7 @@ describe("RunnerContainer", () => {
       });
 
       const invocation = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest(),
-        },
+        job: createRunnerInvocationJob(),
         timeoutMs: 60_000,
         userId: "member_123",
       });
@@ -5527,10 +5192,7 @@ describe("RunnerContainer", () => {
     });
 
     await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_local_proxy_upstream"),
-      },
+      job: createRunnerInvocationJob("evt_local_proxy_upstream"),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -5549,10 +5211,7 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_local_bridge_forwarding"),
-      },
+      job: createRunnerInvocationJob("evt_local_bridge_forwarding"),
       timeoutMs: 60_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -5598,10 +5257,7 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_active_proxy_token"),
-      },
+      job: createRunnerInvocationJob("evt_active_proxy_token"),
       timeoutMs: 60_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -5620,10 +5276,7 @@ describe("RunnerContainer", () => {
     try {
       vi.setSystemTime(new Date("2026-05-06T00:00:00.000Z"));
       await container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest(),
-        },
+        job: createRunnerInvocationJob(),
         timeoutMs: 60_000,
         userId: "member_123",
       });
@@ -5665,10 +5318,7 @@ describe("RunnerContainer", () => {
       );
 
       await container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_after_alarm"),
-        },
+        job: createRunnerInvocationJob("evt_after_alarm"),
         timeoutMs: 60_000,
         userId: "member_123",
       });
@@ -6094,10 +5744,7 @@ describe("RunnerContainer", () => {
     });
 
     const invocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_container_stop_during_work"),
-      },
+      job: createRunnerInvocationJob("evt_container_stop_during_work"),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -6182,10 +5829,7 @@ describe("RunnerContainer", () => {
 
       vi.setSystemTime(new Date("2026-06-04T03:56:40.000Z"));
       await container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_recent_activity"),
-        },
+        job: createRunnerInvocationJob("evt_recent_activity"),
         timeoutMs: 60_000,
         userId: "member_123",
       });
@@ -6287,10 +5931,7 @@ describe("RunnerContainer", () => {
     });
 
     const invocation = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_container_error_during_work"),
-      },
+      job: createRunnerInvocationJob("evt_container_error_during_work"),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -6358,10 +5999,7 @@ describe("RunnerContainer", () => {
       });
 
       const invocation = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_container_status_stop_during_work"),
-        },
+        job: createRunnerInvocationJob("evt_container_status_stop_during_work"),
         timeoutMs: 60_000,
         userId: "member_123",
       });
@@ -6426,10 +6064,7 @@ describe("RunnerContainer", () => {
       });
 
       const invocation = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_container_status_stop_response_race"),
-        },
+        job: createRunnerInvocationJob("evt_container_status_stop_response_race"),
         timeoutMs: 60_000,
         userId: "member_123",
       });
@@ -6496,10 +6131,7 @@ describe("RunnerContainer", () => {
       });
 
       const invocation = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_container_missing_during_work"),
-        },
+        job: createRunnerInvocationJob("evt_container_missing_during_work"),
         timeoutMs: 60_000,
         userId: "member_123",
       });
@@ -6524,10 +6156,7 @@ describe("RunnerContainer", () => {
     });
 
     await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest(),
-      },
+      job: createRunnerInvocationJob(),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -6566,10 +6195,7 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_reuse_running_shell"),
-      },
+      job: createRunnerInvocationJob("evt_reuse_running_shell"),
       timeoutMs: 30_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -6603,10 +6229,7 @@ describe("RunnerContainer", () => {
     });
 
     await expect(rehydrated.container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_reuse_surviving_warm_shell"),
-      },
+      job: createRunnerInvocationJob("evt_reuse_surviving_warm_shell"),
       timeoutMs: 30_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -6656,10 +6279,7 @@ describe("RunnerContainer", () => {
     });
 
     const invokeResultPromise = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_destroy_during_cold_start"),
-      },
+      job: createRunnerInvocationJob("evt_destroy_during_cold_start"),
       timeoutMs: 30_000,
       userId: "member_123",
     }).catch((error: unknown) => error);
@@ -6701,10 +6321,7 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_cold_health_failure"),
-      },
+      job: createRunnerInvocationJob("evt_cold_health_failure"),
       timeoutMs: 30_000,
       userId: "member_123",
     })).rejects.toThrow("Hosted runner container health check returned HTTP 503.");
@@ -6862,10 +6479,7 @@ describe("RunnerContainer", () => {
       "evt_second_queued_behind_preempted_warm_shell",
     ].map((eventId) =>
       container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest(eventId),
-        },
+        job: createRunnerInvocationJob(eventId),
         timeoutMs: 30_000,
         userId: "member_123",
       }).catch((error: unknown) => error)
@@ -6899,10 +6513,7 @@ describe("RunnerContainer", () => {
     await expect(abortResult).resolves.toBe("accepted");
 
     const replacementResult = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_immediate_foreground_replacement"),
-      },
+      job: createRunnerInvocationJob("evt_immediate_foreground_replacement"),
       timeoutMs: 30_000,
       userId: "member_123",
     });
@@ -7029,10 +6640,7 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
     const canceledSuccessor = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_registered_abort_successor"),
-      },
+      job: createRunnerInvocationJob("evt_registered_abort_successor"),
       timeoutMs: 30_000,
       userId: "member_123",
     }).catch((error: unknown) => error);
@@ -7065,10 +6673,7 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_after_registered_abort"),
-      },
+      job: createRunnerInvocationJob("evt_after_registered_abort"),
       timeoutMs: 30_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -7522,10 +7127,7 @@ describe("RunnerContainer", () => {
 
     await expect(container.destroyInstance()).resolves.toBeUndefined();
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_after_transport_uncertain_destroy"),
-      },
+      job: createRunnerInvocationJob("evt_after_transport_uncertain_destroy"),
       timeoutMs: 30_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -7671,10 +7273,7 @@ describe("RunnerContainer", () => {
     await expect(container.destroyInstance()).resolves.toBeUndefined();
 
     const replacement = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_replacement_after_delayed_abort"),
-      },
+      job: createRunnerInvocationJob("evt_replacement_after_delayed_abort"),
       timeoutMs: 30_000,
       userId: "member_123",
     });
@@ -8882,10 +8481,7 @@ describe("RunnerContainer", () => {
         },
       });
       await container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_restart_after_failed_health"),
-        },
+        job: createRunnerInvocationJob("evt_restart_after_failed_health"),
         timeoutMs: 5_000,
         userId: "member_123",
       });
@@ -8952,10 +8548,7 @@ describe("RunnerContainer", () => {
       });
 
       const invokePromise = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_wait_for_destroy_settle"),
-        },
+        job: createRunnerInvocationJob("evt_wait_for_destroy_settle"),
         timeoutMs: 60_000,
         userId: "member_123",
       });
@@ -9018,19 +8611,13 @@ describe("RunnerContainer", () => {
       preparesSupervisedLaunch: true,
     });
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_establish_ready_warm_health"),
-      },
+      job: createRunnerInvocationJob("evt_establish_ready_warm_health"),
       timeoutMs: 60_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_non_json_warm_health"),
-      },
+      job: createRunnerInvocationJob("evt_non_json_warm_health"),
       timeoutMs: 60_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -9090,10 +8677,7 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_restart_after_poisoned_health"),
-      },
+      job: createRunnerInvocationJob("evt_restart_after_poisoned_health"),
       timeoutMs: 60_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -9144,10 +8728,7 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_restart_after_stale_bundle"),
-      },
+      job: createRunnerInvocationJob("evt_restart_after_stale_bundle"),
       timeoutMs: 60_000,
       userId: "member_123",
     })).resolves.toEqual(createRunnerResult());
@@ -9162,10 +8743,7 @@ describe("RunnerContainer", () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 
     const response = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_short_budget"),
-      },
+      job: createRunnerInvocationJob("evt_short_budget"),
       timeoutMs: 1_000,
       userId: "member_123",
     });
@@ -9188,10 +8766,7 @@ describe("RunnerContainer", () => {
     const { container } = createContainerDouble();
 
     await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_workspace_ready"),
-      },
+      job: createRunnerInvocationJob("evt_workspace_ready"),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -9257,20 +8832,14 @@ describe("RunnerContainer", () => {
     });
 
     const activeInvoke = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_active_destroyed"),
-      },
+      job: createRunnerInvocationJob("evt_active_destroyed"),
       timeoutMs: 60_000,
       userId: "member_123",
     }).catch((error: unknown) => error);
     await firstWorkspaceFetchStarted.promise;
 
     const queuedInvoke = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_queued_before_destroy"),
-      },
+      job: createRunnerInvocationJob("evt_queued_before_destroy"),
       timeoutMs: 60_000,
       userId: "member_123",
     }).catch((error: unknown) => error);
@@ -9283,10 +8852,7 @@ describe("RunnerContainer", () => {
     });
     await expect(destroyResult).resolves.toBeUndefined();
     const postDestroyInvoke = container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_queued_after_destroy"),
-      },
+      job: createRunnerInvocationJob("evt_queued_after_destroy"),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -9320,10 +8886,7 @@ describe("RunnerContainer", () => {
     });
 
     const thrown = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_config_error"),
-      },
+      job: createRunnerInvocationJob("evt_config_error"),
       timeoutMs: 10_000,
       userId: "member_123",
     }).catch((error: unknown) => error);
@@ -9354,10 +8917,7 @@ describe("RunnerContainer", () => {
     });
 
     const thrown = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_invalid_request_diagnostics"),
-      },
+      job: createRunnerInvocationJob("evt_invalid_request_diagnostics"),
       timeoutMs: 10_000,
       userId: "member_123",
     }).catch((error: unknown) => error);
@@ -9431,10 +8991,7 @@ describe("RunnerContainer", () => {
 
     const thrown = await container.ensureProcessing({
       invoke: {
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_non_json_failure"),
-        },
+        job: createRunnerInvocationJob("evt_non_json_failure"),
         timeoutMs: 10_000,
         userId: "member_123",
       },
@@ -9517,10 +9074,7 @@ describe("RunnerContainer", () => {
     });
 
     const thrown = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_runtime_detail"),
-      },
+      job: createRunnerInvocationJob("evt_runtime_detail"),
       timeoutMs: 10_000,
       userId: "member_123",
     }).catch((error: unknown) => error);
@@ -9587,10 +9141,7 @@ describe("RunnerContainer", () => {
     });
 
     const thrown = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_legacy_child_response_details"),
-      },
+      job: createRunnerInvocationJob("evt_legacy_child_response_details"),
       timeoutMs: 10_000,
       userId: "member_123",
     }).catch((error: unknown) => error);
@@ -9671,10 +9222,7 @@ describe("RunnerContainer", () => {
     });
 
     const thrown = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_runtime_inner_status"),
-      },
+      job: createRunnerInvocationJob("evt_runtime_inner_status"),
       timeoutMs: 10_000,
       userId: "member_123",
     }).catch((error: unknown) => error);
@@ -9722,10 +9270,7 @@ describe("RunnerContainer", () => {
     });
 
     const thrown = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_bundle_validation_diagnostics"),
-      },
+      job: createRunnerInvocationJob("evt_bundle_validation_diagnostics"),
       timeoutMs: 10_000,
       userId: "member_123",
     }).catch((error: unknown) => error);
@@ -9747,10 +9292,7 @@ describe("RunnerContainer", () => {
 
     const response = await container.fetch(new Request("https://runner.internal/internal/workspace-invocation", {
       body: JSON.stringify({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_no_token"),
-        },
+        job: createRunnerInvocationJob("evt_no_token"),
         timeoutMs: 30_000,
         userId: "member_123",
       }),
@@ -10129,10 +9671,7 @@ describe("RunnerContainer", () => {
       await expect(cleanupPromise).resolves.toBeUndefined();
 
       const invokeResult = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_after_unsettled_best_effort_destroy"),
-        },
+        job: createRunnerInvocationJob("evt_after_unsettled_best_effort_destroy"),
         timeoutMs: 60_000,
         userId: "member_123",
       }).catch((error: unknown) => error);
@@ -10246,10 +9785,7 @@ describe("RunnerContainer", () => {
     vi.useFakeTimers();
     try {
       const invokeResultPromise = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_destroy_failure"),
-        },
+        job: createRunnerInvocationJob("evt_destroy_failure"),
         timeoutMs: 30_000,
         userId: "member_123",
       }).catch((error: unknown) => error);
@@ -10323,10 +9859,7 @@ describe("RunnerContainer", () => {
         },
       });
       const invokePromise = container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_after_destroy_race"),
-        },
+        job: createRunnerInvocationJob("evt_after_destroy_race"),
         timeoutMs: 30_000,
         userId: "member_123",
       }).catch((error: unknown) => error);
@@ -10379,10 +9912,7 @@ describe("RunnerContainer", () => {
       Object.assign(container, { renewActivityTimeout });
 
       await container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_short_maintenance_cadence"),
-        },
+        job: createRunnerInvocationJob("evt_short_maintenance_cadence"),
         timeoutMs: 60_000,
         userId: "member_123",
       });
@@ -10504,10 +10034,7 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_bad_ready_timeout"),
-      },
+      job: createRunnerInvocationJob("evt_bad_ready_timeout"),
       timeoutMs: 60_000,
       userId: "member_123",
     })).rejects.toThrow("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS must be a positive integer.");
@@ -10966,10 +10493,7 @@ describe("RunnerContainer", () => {
     });
 
     await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_health_body_consumed"),
-      },
+      job: createRunnerInvocationJob("evt_health_body_consumed"),
       timeoutMs: 60_000,
       userId: "member_123",
     });
@@ -11017,10 +10541,7 @@ describe("RunnerContainer", () => {
       });
 
       await container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest(`evt_ready_timeout_${expectedTimeoutMs}`),
-        },
+        job: createRunnerInvocationJob(`evt_ready_timeout_${expectedTimeoutMs}`),
         timeoutMs: 120_000,
         userId: "member_123",
       });
@@ -11208,10 +10729,7 @@ describe("RunnerContainer", () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 
     await expect(container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: createRunnerRequest("evt_invoke_mismatch"),
-      },
+      job: createRunnerInvocationJob("evt_invoke_mismatch"),
       timeoutMs: 45_000,
       userId: "member_other",
     })).rejects.toThrow("invoke userId must match workspace job userId");
@@ -11687,6 +11205,13 @@ function createRunnerRequest(eventId = "evt_123") {
     leaseGeneration: "11",
     userId: "member_123",
     workspaceVersion: "6",
+  };
+}
+
+function createRunnerInvocationJob(eventId?: string) {
+  return {
+    kind: "workspace-invocation" as const,
+    request: createRunnerRequest(eventId),
   };
 }
 

@@ -3,7 +3,7 @@ import { readFile, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 
 import { Cli } from 'incur'
-import { test } from 'vitest'
+import { onTestFinished, test } from 'vitest'
 
 import { parseFrontmatterDocument, upsertRegimen } from '@murphai/core'
 import { SUPPLEMENT_INGREDIENTS_MAX_ITEMS } from '@murphai/contracts'
@@ -77,6 +77,24 @@ function createSupplementCli() {
   registerSupplementCommands(cli, services)
 
   return cli
+}
+
+async function createSupplementVault() {
+  const context = await createTempVaultContext('murph-supplement-typed-')
+  onTestFinished(() => rm(context.parentRoot, { force: true, recursive: true }))
+  const cli = createSupplementCli()
+  const initialized = await runInProcessJsonCli<{ created: boolean }>(cli, [
+    'init', '--vault', context.vaultRoot,
+  ])
+  assert.equal(initialized.exitCode, null)
+  assert.equal(requireData(initialized.envelope).created, true)
+  return {
+    ...context,
+    cli,
+    supplement: <T = Record<string, unknown>>(args: string[]) => runInProcessJsonCli<T>(cli, [
+      'supplement', ...args, '--vault', context.vaultRoot,
+    ]),
+  }
 }
 
 async function runRawInProcessCli(
@@ -202,550 +220,418 @@ test('supplement save compact guidance teaches shell-safe ingredient JSON object
 })
 
 test('supplement save persists top-level dose fields and repeated typed ingredients', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-supplement-save-parity-',
-  )
+  const { vaultRoot, supplement } = await createSupplementVault()
 
-  try {
-    const cli = createSupplementCli()
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      'init',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(initResult.exitCode, null)
-    assert.equal(requireData(initResult.envelope).created, true)
+  const saveResult = await supplement<SupplementSaveResult>([
+    'save',
+    'Magnesium glycinate',
+    '--slug',
+    'magnesium-glycinate',
+    '--status',
+    'active',
+    '--started-on',
+    '2026-04-01',
+    '--schedule',
+    'before bed',
+    '--group',
+    'sleep/supplements',
+    '--substance',
+    'Magnesium glycinate',
+    '--dose',
+    '200',
+    '--dose-unit',
+    'mg',
+    '--brand',
+    'Test Brand',
+    '--manufacturer',
+    'Test Maker',
+    '--serving-size',
+    '2 capsules',
+    '--ingredient',
+    '{"compound":"Magnesium","label":"Magnesium glycinate","amount":200,"unit":"mg","active":false}',
+    '--ingredient',
+    '{"compound":"Glycine","amount":1800,"unit":"mg","note":"Approximate remainder of 2 capsule serving."}',
+    '--related-goal-id',
+    'goal_01JNY0B2W4VG5C2A0G9S8M7R6R',
+    '--related-condition-id',
+    'cond_01JNY0B2W4VG5C2A0G9S8M7R6S',
+    '--related-regimen-id',
+    'reg_01JNY0B2W4VG5C2A0G9S8M7R6T',
+  ])
 
-    const saveResult = await runInProcessJsonCli<SupplementSaveResult>(cli, [
-      'supplement',
-      'save',
-      'Magnesium glycinate',
-      '--slug',
-      'magnesium-glycinate',
-      '--status',
-      'active',
-      '--started-on',
-      '2026-04-01',
-      '--schedule',
-      'before bed',
-      '--group',
-      'sleep/supplements',
-      '--substance',
-      'Magnesium glycinate',
-      '--dose',
-      '200',
-      '--dose-unit',
-      'mg',
-      '--brand',
-      'Test Brand',
-      '--manufacturer',
-      'Test Maker',
-      '--serving-size',
-      '2 capsules',
-      '--ingredient',
-      '{"compound":"Magnesium","label":"Magnesium glycinate","amount":200,"unit":"mg","active":false}',
-      '--ingredient',
-      '{"compound":"Glycine","amount":1800,"unit":"mg","note":"Approximate remainder of 2 capsule serving."}',
-      '--related-goal-id',
-      'goal_01JNY0B2W4VG5C2A0G9S8M7R6R',
-      '--related-condition-id',
-      'cond_01JNY0B2W4VG5C2A0G9S8M7R6S',
-      '--related-regimen-id',
-      'reg_01JNY0B2W4VG5C2A0G9S8M7R6T',
-      '--vault',
-      vaultRoot,
-    ])
+  assert.equal(saveResult.exitCode, null)
+  const saved = requireData(saveResult.envelope)
+  assert.equal(saved.vault, vaultRoot)
+  assert.equal(saved.created, true)
+  assert.equal(saved.lookupId, saved.regimenId)
+  const relativePath = requireSavedPath(saved)
+  assert.match(relativePath, /^bank\/regimens\/sleep\/supplements\/.+\.md$/u)
+  assert.equal(saved.entity.id, saved.regimenId)
+  assert.equal(saved.entity.kind, 'supplement')
+  assert.equal(saved.entity.title, 'Magnesium glycinate')
+  assert.equal(saved.entity.occurredAt, null)
+  assert.equal(saved.entity.path, relativePath)
+  assertCompactSavedEntity(saved.entity)
+  assert.equal(saved.entity.data.brand, 'Test Brand')
+  assert.equal(saved.entity.data.manufacturer, 'Test Maker')
+  assert.equal(saved.entity.data.schedule, 'before bed')
+  assert.equal(saved.entity.data.dose, 200)
+  assert.equal(saved.entity.data.unit, 'mg')
+  assert.equal(saved.entity.data.servingSize, '2 capsules')
+  assert.deepEqual(saved.entity.data.relatedGoalIds, [
+    'goal_01JNY0B2W4VG5C2A0G9S8M7R6R',
+  ])
+  assert.deepEqual(saved.entity.data.relatedConditionIds, [
+    'cond_01JNY0B2W4VG5C2A0G9S8M7R6S',
+  ])
+  assert.deepEqual(saved.entity.data.relatedRegimenIds, [
+    'reg_01JNY0B2W4VG5C2A0G9S8M7R6T',
+  ])
+  assert.deepEqual(savedEntityLinkIds(saved.entity), [
+    'cond_01JNY0B2W4VG5C2A0G9S8M7R6S',
+    'goal_01JNY0B2W4VG5C2A0G9S8M7R6R',
+    'reg_01JNY0B2W4VG5C2A0G9S8M7R6T',
+  ])
+  assert.deepEqual(saved.entity.data.ingredients, [
+    {
+      compound: 'Magnesium',
+      label: 'Magnesium glycinate',
+      amount: 200,
+      unit: 'mg',
+      active: false,
+    },
+    {
+      compound: 'Glycine',
+      amount: 1800,
+      unit: 'mg',
+      note: 'Approximate remainder of 2 capsule serving.',
+    },
+  ])
 
-    assert.equal(saveResult.exitCode, null)
-    const saved = requireData(saveResult.envelope)
-    assert.equal(saved.vault, vaultRoot)
-    assert.equal(saved.created, true)
-    assert.equal(saved.lookupId, saved.regimenId)
-    const relativePath = requireSavedPath(saved)
-    assert.match(relativePath, /^bank\/regimens\/sleep\/supplements\/.+\.md$/u)
-    assert.equal(saved.entity.id, saved.regimenId)
-    assert.equal(saved.entity.kind, 'supplement')
-    assert.equal(saved.entity.title, 'Magnesium glycinate')
-    assert.equal(saved.entity.occurredAt, null)
-    assert.equal(saved.entity.path, relativePath)
-    assertCompactSavedEntity(saved.entity)
-    assert.equal(saved.entity.data.brand, 'Test Brand')
-    assert.equal(saved.entity.data.manufacturer, 'Test Maker')
-    assert.equal(saved.entity.data.schedule, 'before bed')
-    assert.equal(saved.entity.data.dose, 200)
-    assert.equal(saved.entity.data.unit, 'mg')
-    assert.equal(saved.entity.data.servingSize, '2 capsules')
-    assert.deepEqual(saved.entity.data.relatedGoalIds, [
-      'goal_01JNY0B2W4VG5C2A0G9S8M7R6R',
-    ])
-    assert.deepEqual(saved.entity.data.relatedConditionIds, [
-      'cond_01JNY0B2W4VG5C2A0G9S8M7R6S',
-    ])
-    assert.deepEqual(saved.entity.data.relatedRegimenIds, [
-      'reg_01JNY0B2W4VG5C2A0G9S8M7R6T',
-    ])
-    assert.deepEqual(savedEntityLinkIds(saved.entity), [
-      'cond_01JNY0B2W4VG5C2A0G9S8M7R6S',
-      'goal_01JNY0B2W4VG5C2A0G9S8M7R6R',
-      'reg_01JNY0B2W4VG5C2A0G9S8M7R6T',
-    ])
-    assert.deepEqual(saved.entity.data.ingredients, [
-      {
-        compound: 'Magnesium',
-        label: 'Magnesium glycinate',
-        amount: 200,
-        unit: 'mg',
-        active: false,
-      },
-      {
-        compound: 'Glycine',
-        amount: 1800,
-        unit: 'mg',
-        note: 'Approximate remainder of 2 capsule serving.',
-      },
-    ])
-
-    const markdown = await readFile(path.join(vaultRoot, relativePath), 'utf8')
-    const document = parseFrontmatterDocument(markdown)
-    assert.equal(document.attributes.title, 'Magnesium glycinate')
-    assert.equal(document.attributes.kind, 'supplement')
-    assert.equal(document.attributes.status, 'active')
-    assert.equal(document.attributes.startedOn, '2026-04-01')
-    assert.equal(document.attributes.schedule, 'before bed')
-    assert.equal(document.attributes.substance, 'Magnesium glycinate')
-    assert.equal(document.attributes.dose, 200)
-    assert.equal(document.attributes.unit, 'mg')
-    assert.equal(document.attributes.brand, 'Test Brand')
-    assert.equal(document.attributes.manufacturer, 'Test Maker')
-    assert.equal(document.attributes.servingSize, '2 capsules')
-    assert.deepEqual(document.attributes.ingredients, [
-      {
-        compound: 'Magnesium',
-        label: 'Magnesium glycinate',
-        amount: 200,
-        unit: 'mg',
-        active: false,
-      },
-      {
-        compound: 'Glycine',
-        amount: 1800,
-        unit: 'mg',
-        note: 'Approximate remainder of 2 capsule serving.',
-      },
-    ])
-  } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
-    })
-  }
+  const markdown = await readFile(path.join(vaultRoot, relativePath), 'utf8')
+  const document = parseFrontmatterDocument(markdown)
+  assert.equal(document.attributes.title, 'Magnesium glycinate')
+  assert.equal(document.attributes.kind, 'supplement')
+  assert.equal(document.attributes.status, 'active')
+  assert.equal(document.attributes.startedOn, '2026-04-01')
+  assert.equal(document.attributes.schedule, 'before bed')
+  assert.equal(document.attributes.substance, 'Magnesium glycinate')
+  assert.equal(document.attributes.dose, 200)
+  assert.equal(document.attributes.unit, 'mg')
+  assert.equal(document.attributes.brand, 'Test Brand')
+  assert.equal(document.attributes.manufacturer, 'Test Maker')
+  assert.equal(document.attributes.servingSize, '2 capsules')
+  assert.deepEqual(document.attributes.ingredients, [
+    {
+      compound: 'Magnesium',
+      label: 'Magnesium glycinate',
+      amount: 200,
+      unit: 'mg',
+      active: false,
+    },
+    {
+      compound: 'Glycine',
+      amount: 1800,
+      unit: 'mg',
+      note: 'Approximate remainder of 2 capsule serving.',
+    },
+  ])
 })
 
 test('supplement save normalizes known label units before validation', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-supplement-save-label-unit-',
-  )
+  const { vaultRoot, supplement } = await createSupplementVault()
 
-  try {
-    const cli = createSupplementCli()
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      'init',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(initResult.exitCode, null)
-    assert.equal(requireData(initResult.envelope).created, true)
+  const saveResult = await supplement<SupplementSaveResult>([
+    'save',
+    'Folate and vitamin A',
+    '--ingredient',
+    '{"compound":"Folate","amount":680,"unit":"mcg DFE"}',
+    '--ingredient',
+    '{"compound":"Vitamin A","amount":900,"unit":"µg RAE","note":"from beta carotene"}',
+    '--ingredient',
+    '{"compound":"Niacin","amount":16,"unit":"mg NE"}',
+    '--ingredient',
+    '{"compound":"Lactobacillus rhamnosus","amount":17.75,"unit":"billion CFUs"}',
+    '--ingredient',
+    '{"compound":"Bifidobacterium breve","amount":250,"unit":"million CFU","note":"per capsule"}',
+    '--ingredient',
+    '{"compound":"Probiotic blend","amount":30,"unit":"CFUs"}',
+    '--ingredient',
+    '{"compound":"Vitamin C","amount":500,"unit":" mgt "}',
+  ])
 
-    const saveResult = await runInProcessJsonCli<SupplementSaveResult>(cli, [
-      'supplement',
-      'save',
-      'Folate and vitamin A',
-      '--ingredient',
-      '{"compound":"Folate","amount":680,"unit":"mcg DFE"}',
-      '--ingredient',
-      '{"compound":"Vitamin A","amount":900,"unit":"µg RAE","note":"from beta carotene"}',
-      '--ingredient',
-      '{"compound":"Niacin","amount":16,"unit":"mg NE"}',
-      '--ingredient',
-      '{"compound":"Lactobacillus rhamnosus","amount":17.75,"unit":"billion CFUs"}',
-      '--ingredient',
-      '{"compound":"Bifidobacterium breve","amount":250,"unit":"million CFU","note":"per capsule"}',
-      '--ingredient',
-      '{"compound":"Probiotic blend","amount":30,"unit":"CFUs"}',
-      '--ingredient',
-      '{"compound":"Vitamin C","amount":500,"unit":" mgt "}',
-      '--vault',
-      vaultRoot,
-    ])
+  assert.equal(saveResult.exitCode, null)
+  const saved = requireData(saveResult.envelope)
+  assert.deepEqual(saved.entity.data.ingredients, [
+    {
+      compound: 'Folate',
+      amount: 680,
+      unit: 'mcg',
+      note: 'DFE',
+    },
+    {
+      compound: 'Vitamin A',
+      amount: 900,
+      unit: 'mcg',
+      note: 'from beta carotene; RAE',
+    },
+    {
+      compound: 'Niacin',
+      amount: 16,
+      unit: 'mg',
+      note: 'NE',
+    },
+    {
+      compound: 'Lactobacillus rhamnosus',
+      amount: 17_750_000_000,
+      unit: 'CFU',
+      note: 'label unit: billion CFU',
+    },
+    {
+      compound: 'Bifidobacterium breve',
+      amount: 250_000_000,
+      unit: 'CFU',
+      note: 'per capsule; label unit: million CFU',
+    },
+    {
+      compound: 'Probiotic blend',
+      amount: 30,
+      unit: 'CFU',
+    },
+    {
+      compound: 'Vitamin C',
+      amount: 500,
+      unit: 'mg',
+    },
+  ])
 
-    assert.equal(saveResult.exitCode, null)
-    const saved = requireData(saveResult.envelope)
-    assert.deepEqual(saved.entity.data.ingredients, [
-      {
-        compound: 'Folate',
-        amount: 680,
-        unit: 'mcg',
-        note: 'DFE',
-      },
-      {
-        compound: 'Vitamin A',
-        amount: 900,
-        unit: 'mcg',
-        note: 'from beta carotene; RAE',
-      },
-      {
-        compound: 'Niacin',
-        amount: 16,
-        unit: 'mg',
-        note: 'NE',
-      },
-      {
-        compound: 'Lactobacillus rhamnosus',
-        amount: 17_750_000_000,
-        unit: 'CFU',
-        note: 'label unit: billion CFU',
-      },
-      {
-        compound: 'Bifidobacterium breve',
-        amount: 250_000_000,
-        unit: 'CFU',
-        note: 'per capsule; label unit: million CFU',
-      },
-      {
-        compound: 'Probiotic blend',
-        amount: 30,
-        unit: 'CFU',
-      },
-      {
-        compound: 'Vitamin C',
-        amount: 500,
-        unit: 'mg',
-      },
-    ])
-
-    const markdown = await readFile(path.join(vaultRoot, requireSavedPath(saved)), 'utf8')
-    const document = parseFrontmatterDocument(markdown)
-    assert.deepEqual(document.attributes.ingredients, [
-      {
-        compound: 'Folate',
-        amount: 680,
-        unit: 'mcg',
-        note: 'DFE',
-      },
-      {
-        compound: 'Vitamin A',
-        amount: 900,
-        unit: 'mcg',
-        note: 'from beta carotene; RAE',
-      },
-      {
-        compound: 'Niacin',
-        amount: 16,
-        unit: 'mg',
-        note: 'NE',
-      },
-      {
-        compound: 'Lactobacillus rhamnosus',
-        amount: 17_750_000_000,
-        unit: 'CFU',
-        note: 'label unit: billion CFU',
-      },
-      {
-        compound: 'Bifidobacterium breve',
-        amount: 250_000_000,
-        unit: 'CFU',
-        note: 'per capsule; label unit: million CFU',
-      },
-      {
-        compound: 'Probiotic blend',
-        amount: 30,
-        unit: 'CFU',
-      },
-      {
-        compound: 'Vitamin C',
-        amount: 500,
-        unit: 'mg',
-      },
-    ])
-  } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
-    })
-  }
+  const markdown = await readFile(path.join(vaultRoot, requireSavedPath(saved)), 'utf8')
+  const document = parseFrontmatterDocument(markdown)
+  assert.deepEqual(document.attributes.ingredients, [
+    {
+      compound: 'Folate',
+      amount: 680,
+      unit: 'mcg',
+      note: 'DFE',
+    },
+    {
+      compound: 'Vitamin A',
+      amount: 900,
+      unit: 'mcg',
+      note: 'from beta carotene; RAE',
+    },
+    {
+      compound: 'Niacin',
+      amount: 16,
+      unit: 'mg',
+      note: 'NE',
+    },
+    {
+      compound: 'Lactobacillus rhamnosus',
+      amount: 17_750_000_000,
+      unit: 'CFU',
+      note: 'label unit: billion CFU',
+    },
+    {
+      compound: 'Bifidobacterium breve',
+      amount: 250_000_000,
+      unit: 'CFU',
+      note: 'per capsule; label unit: million CFU',
+    },
+    {
+      compound: 'Probiotic blend',
+      amount: 30,
+      unit: 'CFU',
+    },
+    {
+      compound: 'Vitamin C',
+      amount: 500,
+      unit: 'mg',
+    },
+  ])
 })
 
 test('supplement save update returns compact entity and preserves omitted product fields', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-supplement-save-preserve-',
-  )
+  const { vaultRoot, supplement } = await createSupplementVault()
 
-  try {
-    const cli = createSupplementCli()
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      'init',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(initResult.exitCode, null)
-    assert.equal(requireData(initResult.envelope).created, true)
+  const createResult = await supplement<SupplementSaveResult>([
+    'save',
+    'Magnesium glycinate',
+    '--slug',
+    'magnesium-glycinate',
+    '--status',
+    'active',
+    '--started-on',
+    '2026-04-01',
+    '--schedule',
+    'before bed',
+    '--brand',
+    'Test Brand',
+    '--manufacturer',
+    'Test Maker',
+    '--serving-size',
+    '2 capsules',
+    '--ingredient',
+    '{"compound":"Magnesium","label":"Magnesium glycinate","amount":200,"unit":"mg"}',
+  ])
+  assert.equal(createResult.exitCode, null)
+  const created = requireData(createResult.envelope)
 
-    const createResult = await runInProcessJsonCli<SupplementSaveResult>(cli, [
-      'supplement',
-      'save',
-      'Magnesium glycinate',
-      '--slug',
-      'magnesium-glycinate',
-      '--status',
-      'active',
-      '--started-on',
-      '2026-04-01',
-      '--schedule',
-      'before bed',
-      '--brand',
-      'Test Brand',
-      '--manufacturer',
-      'Test Maker',
-      '--serving-size',
-      '2 capsules',
-      '--ingredient',
-      '{"compound":"Magnesium","label":"Magnesium glycinate","amount":200,"unit":"mg"}',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(createResult.exitCode, null)
-    const created = requireData(createResult.envelope)
+  const updateResult = await supplement<SupplementSaveResult>([
+    'save',
+    'Magnesium glycinate',
+    '--id',
+    created.regimenId,
+    '--schedule',
+    'after lunch',
+    '--dose',
+    '300',
+    '--dose-unit',
+    'mg',
+  ])
 
-    const updateResult = await runInProcessJsonCli<SupplementSaveResult>(cli, [
-      'supplement',
-      'save',
-      'Magnesium glycinate',
-      '--id',
-      created.regimenId,
-      '--schedule',
-      'after lunch',
-      '--dose',
-      '300',
-      '--dose-unit',
-      'mg',
-      '--vault',
-      vaultRoot,
-    ])
-
-    assert.equal(updateResult.exitCode, null)
-    const updated = requireData(updateResult.envelope)
-    assert.equal(updated.vault, vaultRoot)
-    assert.equal(updated.created, false)
-    assert.equal(updated.lookupId, created.regimenId)
-    assert.equal(updated.entity.id, created.regimenId)
-    assert.equal(updated.entity.kind, 'supplement')
-    assert.equal(updated.entity.path, requireSavedPath(updated))
-    assertCompactSavedEntity(updated.entity)
-    assert.equal(updated.entity.data.brand, 'Test Brand')
-    assert.equal(updated.entity.data.manufacturer, 'Test Maker')
-    assert.equal(updated.entity.data.servingSize, '2 capsules')
-    assert.equal(updated.entity.data.schedule, 'after lunch')
-    assert.equal(updated.entity.data.dose, 300)
-    assert.equal(updated.entity.data.unit, 'mg')
-    assert.deepEqual(updated.entity.data.ingredients, [
-      {
-        compound: 'Magnesium',
-        label: 'Magnesium glycinate',
-        amount: 200,
-        unit: 'mg',
-      },
-    ])
-  } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
-    })
-  }
+  assert.equal(updateResult.exitCode, null)
+  const updated = requireData(updateResult.envelope)
+  assert.equal(updated.vault, vaultRoot)
+  assert.equal(updated.created, false)
+  assert.equal(updated.lookupId, created.regimenId)
+  assert.equal(updated.entity.id, created.regimenId)
+  assert.equal(updated.entity.kind, 'supplement')
+  assert.equal(updated.entity.path, requireSavedPath(updated))
+  assertCompactSavedEntity(updated.entity)
+  assert.equal(updated.entity.data.brand, 'Test Brand')
+  assert.equal(updated.entity.data.manufacturer, 'Test Maker')
+  assert.equal(updated.entity.data.servingSize, '2 capsules')
+  assert.equal(updated.entity.data.schedule, 'after lunch')
+  assert.equal(updated.entity.data.dose, 300)
+  assert.equal(updated.entity.data.unit, 'mg')
+  assert.deepEqual(updated.entity.data.ingredients, [
+    {
+      compound: 'Magnesium',
+      label: 'Magnesium glycinate',
+      amount: 200,
+      unit: 'mg',
+    },
+  ])
 })
 
 test('supplement save rejects ingredient array payloads', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-supplement-save-array-',
-  )
+  const { supplement } = await createSupplementVault()
 
-  try {
-    const cli = createSupplementCli()
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      'init',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(initResult.exitCode, null)
-    assert.equal(requireData(initResult.envelope).created, true)
+  const saveResult = await supplement<SupplementSaveResult>([
+    'save',
+    'Vitamin D3',
+    '--ingredient',
+    '[{"compound":"Vitamin D3","amount":50,"unit":"mcg"}]',
+  ])
 
-    const saveResult = await runInProcessJsonCli<SupplementSaveResult>(cli, [
-      'supplement',
-      'save',
-      'Vitamin D3',
-      '--ingredient',
-      '[{"compound":"Vitamin D3","amount":50,"unit":"mcg"}]',
-      '--vault',
-      vaultRoot,
-    ])
-
-    assert.equal(saveResult.exitCode, 1)
-    assert.equal(saveResult.envelope.ok, false)
-    if (!saveResult.envelope.ok) {
-      assert.equal(saveResult.envelope.error.code, 'invalid_option')
-      assert.match(saveResult.envelope.error.message ?? '', /one object per ingredient/u)
-    }
-  } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
-    })
+  assert.equal(saveResult.exitCode, 1)
+  assert.equal(saveResult.envelope.ok, false)
+  if (!saveResult.envelope.ok) {
+    assert.equal(saveResult.envelope.error.code, 'invalid_option')
+    assert.match(saveResult.envelope.error.message ?? '', /one object per ingredient/u)
   }
 })
 
 test('supplement save rejects malformed and schema-invalid ingredient objects without echoing payload contents', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-supplement-save-invalid-',
-  )
+  const { vaultRoot, supplement } = await createSupplementVault()
 
-  try {
-    const cli = createSupplementCli()
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      'init',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(initResult.exitCode, null)
-    assert.equal(requireData(initResult.envelope).created, true)
+  const malformed = await supplement<SupplementSaveResult>([
+    'save',
+    'Vitamin D3',
+    '--ingredient',
+    '{"compound":"Vitamin D3"',
+  ])
+  assert.equal(malformed.exitCode, 1)
+  assert.equal(malformed.envelope.ok, false)
+  if (!malformed.envelope.ok) {
+    const serialized = JSON.stringify(malformed.envelope)
+    assert.equal(serialized.includes('Vitamin D3'), false)
+    assert.match(malformed.envelope.error.message ?? '', /valid JSON object/u)
+  }
 
-    const malformed = await runInProcessJsonCli<SupplementSaveResult>(cli, [
-      'supplement',
-      'save',
-      'Vitamin D3',
-      '--ingredient',
-      '{"compound":"Vitamin D3"',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(malformed.exitCode, 1)
-    assert.equal(malformed.envelope.ok, false)
-    if (!malformed.envelope.ok) {
-      const serialized = JSON.stringify(malformed.envelope)
-      assert.equal(serialized.includes('Vitamin D3'), false)
-      assert.match(malformed.envelope.error.message ?? '', /valid JSON object/u)
-    }
-
-    const schemaInvalid = await runCli([
-      'supplement',
-      'save',
-      'Vitamin D3',
-      '--ingredient',
-      '{"compound":"Vitamin D3","amount":50,"unit":"mcg"}',
-      '--ingredient',
-      '{"compound":"Do Not Echo Label","amount":400,"unit":"mcg XYZ"}',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(schemaInvalid.ok, false)
-    if (!schemaInvalid.ok) {
-      const serialized = JSON.stringify(schemaInvalid)
-      assert.equal(serialized.includes('Do Not Echo Label'), false)
-      assert.equal(serialized.includes('mcg XYZ'), false)
-      assert.match(schemaInvalid.error.message ?? '', /--ingredient #2 failed validation/u)
-      assert.match(schemaInvalid.error.message ?? '', /unit/u)
-      assert.match(schemaInvalid.error.message ?? '', /compact units such as "mcg"/u)
-      assert.match(schemaInvalid.error.message ?? '', /qualifiers such as "DFE" in note/u)
-      assert.deepEqual(schemaInvalid.error.fieldErrors?.[0], {
-        code: 'invalid_format',
-        expected: '',
-        message: 'This field is invalid.',
-        path: 'ingredient.1.unit',
-        received: 'invalid',
-      })
-    }
-
-    const missingCompound = await runInProcessJsonCli<SupplementSaveResult>(cli, [
-      'supplement',
-      'save',
-      'NAC',
-      '--ingredient',
-      '{"name":"N-Acetyl-Cysteine","amount":1200,"unit":"mg","active":true}',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(missingCompound.exitCode, 1)
-    assert.equal(missingCompound.envelope.ok, false)
-    if (!missingCompound.envelope.ok) {
-      const serialized = JSON.stringify(missingCompound.envelope)
-      assert.equal(serialized.includes('N-Acetyl-Cysteine'), false)
-      assert.match(
-        missingCompound.envelope.error.message ?? '',
-        /--ingredient #1 is missing required field: compound/u,
-      )
-      assert.match(
-        missingCompound.envelope.error.message ?? '',
-        /Expected fields: compound, label, amount, unit, active, note/u,
-      )
-      assert.deepEqual(missingCompound.envelope.error.fieldErrors?.[0], {
-        code: 'invalid_type',
-        expected: 'string',
-        message: 'This field is invalid.',
-        path: 'ingredient.0.compound',
-        received: 'invalid',
-      })
-    }
-    assert.deepEqual(await listRegimenMarkdownPaths(vaultRoot), [])
-  } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
+  const schemaInvalid = await runCli([
+    'supplement',
+    'save',
+    'Vitamin D3',
+    '--ingredient',
+    '{"compound":"Vitamin D3","amount":50,"unit":"mcg"}',
+    '--ingredient',
+    '{"compound":"Do Not Echo Label","amount":400,"unit":"mcg XYZ"}',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(schemaInvalid.ok, false)
+  if (!schemaInvalid.ok) {
+    const serialized = JSON.stringify(schemaInvalid)
+    assert.equal(serialized.includes('Do Not Echo Label'), false)
+    assert.equal(serialized.includes('mcg XYZ'), false)
+    assert.match(schemaInvalid.error.message ?? '', /--ingredient #2 failed validation/u)
+    assert.match(schemaInvalid.error.message ?? '', /unit/u)
+    assert.match(schemaInvalid.error.message ?? '', /compact units such as "mcg"/u)
+    assert.match(schemaInvalid.error.message ?? '', /qualifiers such as "DFE" in note/u)
+    assert.deepEqual(schemaInvalid.error.fieldErrors?.[0], {
+      code: 'invalid_format',
+      expected: '',
+      message: 'This field is invalid.',
+      path: 'ingredient.1.unit',
+      received: 'invalid',
     })
   }
+
+  const missingCompound = await supplement<SupplementSaveResult>([
+    'save',
+    'NAC',
+    '--ingredient',
+    '{"name":"N-Acetyl-Cysteine","amount":1200,"unit":"mg","active":true}',
+  ])
+  assert.equal(missingCompound.exitCode, 1)
+  assert.equal(missingCompound.envelope.ok, false)
+  if (!missingCompound.envelope.ok) {
+    const serialized = JSON.stringify(missingCompound.envelope)
+    assert.equal(serialized.includes('N-Acetyl-Cysteine'), false)
+    assert.match(
+      missingCompound.envelope.error.message ?? '',
+      /--ingredient #1 is missing required field: compound/u,
+    )
+    assert.match(
+      missingCompound.envelope.error.message ?? '',
+      /Expected fields: compound, label, amount, unit, active, note/u,
+    )
+    assert.deepEqual(missingCompound.envelope.error.fieldErrors?.[0], {
+      code: 'invalid_type',
+      expected: 'string',
+      message: 'This field is invalid.',
+      path: 'ingredient.0.compound',
+      received: 'invalid',
+    })
+  }
+  assert.deepEqual(await listRegimenMarkdownPaths(vaultRoot), [])
 })
 
 test('supplement save rejects more than the canonical ingredient limit', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-cli-supplement-save-limit-',
-  )
+  const { supplement } = await createSupplementVault()
 
-  try {
-    const cli = createSupplementCli()
-    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
-      'init',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(initResult.exitCode, null)
-    assert.equal(requireData(initResult.envelope).created, true)
+  const ingredientArgs = Array.from(
+    { length: SUPPLEMENT_INGREDIENTS_MAX_ITEMS + 1 },
+    (_, index) => [
+      '--ingredient',
+      `{"compound":"Ingredient ${index + 1}","amount":${index + 1},"unit":"mg"}`,
+    ],
+  ).flat()
 
-    const ingredientArgs = Array.from(
-      { length: SUPPLEMENT_INGREDIENTS_MAX_ITEMS + 1 },
-      (_, index) => [
-        '--ingredient',
-        `{"compound":"Ingredient ${index + 1}","amount":${index + 1},"unit":"mg"}`,
-      ],
-    ).flat()
+  const saveResult = await supplement<SupplementSaveResult>([
+    'save',
+    'Large panel',
+    ...ingredientArgs,
+  ])
 
-    const saveResult = await runInProcessJsonCli<SupplementSaveResult>(cli, [
-      'supplement',
-      'save',
-      'Large panel',
-      ...ingredientArgs,
-      '--vault',
-      vaultRoot,
-    ])
-
-    assert.equal(saveResult.exitCode, 1)
-    assert.equal(saveResult.envelope.ok, false)
-    if (!saveResult.envelope.ok) {
-      assert.equal(saveResult.envelope.error.code, 'VALIDATION_ERROR')
-      assert.equal(saveResult.envelope.error.message, 'The command input is invalid.')
-      assert.equal(saveResult.envelope.error.fieldErrors?.[0]?.path, 'ingredient')
-    }
-  } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
-    })
+  assert.equal(saveResult.exitCode, 1)
+  assert.equal(saveResult.envelope.ok, false)
+  if (!saveResult.envelope.ok) {
+    assert.equal(saveResult.envelope.error.code, 'VALIDATION_ERROR')
+    assert.equal(saveResult.envelope.error.message, 'The command input is invalid.')
+    assert.equal(saveResult.envelope.error.fieldErrors?.[0]?.path, 'ingredient')
   }
 })
 

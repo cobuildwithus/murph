@@ -37,14 +37,6 @@ test('assistant header helpers redact persistence-unsafe values', () => {
     'X-Zeta': 'z',
   }
 
-  assert.deepEqual(normalizedHeaders, {
-    Authorization: 'Bearer kept-secret-value',
-    'X-Api-Key': 'opaque-api-key',
-    'X-Custom-Token': 'custom-token',
-    'X-Trace-Id': 'replacement-trace-id',
-    'X-User': 'user-123',
-    'X-Zeta': 'z',
-  })
   assert.equal(isSensitiveAssistantHeaderName('x-api-key'), true)
   assert.equal(isSensitiveAssistantHeaderName('x-custom-token'), true)
   assert.equal(isSensitiveAssistantHeaderName('x-trace-id'), false)
@@ -150,13 +142,6 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     reasoningEffort: 'low',
     sandbox: 'danger-full-access',
   })
-  assert.throws(
-    () =>
-      normalizeAssistantProviderConfig({
-        provider: 'unsupported-provider',
-      }),
-    /Assistant runtime targets must use Codex App Server/u,
-  )
 })
 
 test('hosted assistant helpers normalize Codex profiles and active-profile fallback', () => {

@@ -195,7 +195,7 @@ export function readGameDynamicToolRequest(input: { arguments: unknown; tool: st
       minutes: z.number().int().min(0).max(1439).optional(), gameId: z.string().min(8).max(64).optional(),
       on: z.boolean().optional(), everyDay: z.boolean().optional(), text: z.boolean().optional(), push: z.boolean().optional() }).strict()
     const parsed = parseDynamicToolArguments({ schema, value: input.arguments, schemaRootKeys: ['operation', 'messageRef', 'minutes', 'gameId', 'on', 'everyDay', 'text', 'push'], toolName: 'murph.my_game_reminders' })
-    return parsed.ok ? { kind: 'game' as const, request: { action: 'my_game_reminders' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
+    return parsed.ok ? { kind: 'game' as const, request: { action: 'my_game_reminders' as const, ...parsed.args } } : { kind: 'invalid-tool-arguments' as const, errorCode: 'invalid_game_arguments', validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'game_lore') {
     const schema = z.discriminatedUnion('operation', [
@@ -203,29 +203,29 @@ export function readGameDynamicToolRequest(input: { arguments: unknown; tool: st
       z.object({ operation: z.literal('replace'), content: z.string().max(40000) }).strict(),
     ])
     const parsed = parseDynamicToolArguments({ schema, value: input.arguments, schemaRootKeys: ['operation', 'content'], toolName: 'murph.game_lore' })
-    return parsed.ok ? { kind: 'game' as const, request: { action: 'game_lore' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
+    return parsed.ok ? { kind: 'game' as const, request: { action: 'game_lore' as const, ...parsed.args } } : { kind: 'invalid-tool-arguments' as const, errorCode: 'invalid_game_arguments', validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'write_recap' && input.arguments && typeof input.arguments === 'object' && 'draftPath' in input.arguments) {
     const parsed = parseDynamicToolArguments({ schema: z.object({ draftPath: z.string().min(1).max(512) }).strict(), value: input.arguments, toolName: 'murph.write_recap' })
-    return parsed.ok ? { kind: 'game' as const, request: { action: 'write_recap_file' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
+    return parsed.ok ? { kind: 'game' as const, request: { action: 'write_recap_file' as const, ...parsed.args } } : { kind: 'invalid-tool-arguments' as const, errorCode: 'invalid_game_arguments', validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'write_recap') {
     const parsed = parseDynamicToolArguments({ schema: hostedGameRecapWriterSchema, value: input.arguments, schemaRootKeys: ['pages', 'scoreLine', 'chatLine', 'superlatives', 'treatment', 'song'], toolName: 'murph.write_recap' })
-    return parsed.ok ? { kind: 'game' as const, request: { action: 'write_recap' as const, recap: parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
+    return parsed.ok ? { kind: 'game' as const, request: { action: 'write_recap' as const, recap: parsed.args } } : { kind: 'invalid-tool-arguments' as const, errorCode: 'invalid_game_arguments', validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'read_game') {
     const parsed = parseDynamicToolArguments({ schema: z.object({ messageRef: z.string().min(1).max(128).optional() }).strict(), value: input.arguments, schemaRootKeys: ['messageRef'], toolName: 'murph.read_game' })
-    return parsed.ok ? { kind: 'game' as const, request: { action: 'read_game' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
+    return parsed.ok ? { kind: 'game' as const, request: { action: 'read_game' as const, ...parsed.args } } : { kind: 'invalid-tool-arguments' as const, errorCode: 'invalid_game_arguments', validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'game_photo') {
     const parsed = parseDynamicToolArguments({ schema: rawPhotoArguments, value: input.arguments, schemaRootKeys: ['messageRef', 'operation', 'gameId', 'sourceMessageRef', 'attachmentOrdinal', 'replaceEntryId'], toolName: 'murph.game_photo' })
-    if (!parsed.ok) return { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
+    if (!parsed.ok) return { kind: 'invalid-tool-arguments' as const, errorCode: 'invalid_game_arguments', validationDigest: parsed.validationDigest }
     const { messageRef, ...photo } = parsed.args
     return { kind: 'game' as const, request: { action: 'game_photo' as const, messageRef, photo } }
   }
   if (input.tool !== 'update_game') return null
   const parsed = parseDynamicToolArguments({ schema: rawUpdateArguments, value: input.arguments, schemaRootKeys: ['messageRef', 'operation', 'gameId', 'minutes', 'on', 'proposalId', 'expectedTermsVersion', 'change', 'date', 'text', 'terms', 'previousGameId'], toolName: 'murph.update_game' })
-  return parsed.ok ? { kind: 'game' as const, request: { action: 'update_game' as const, ...parsed.args } } : { kind: 'invalid-game-arguments' as const, validationDigest: parsed.validationDigest }
+  return parsed.ok ? { kind: 'game' as const, request: { action: 'update_game' as const, ...parsed.args } } : { kind: 'invalid-tool-arguments' as const, errorCode: 'invalid_game_arguments', validationDigest: parsed.validationDigest }
 }
 
 async function executeTrustedGameRecapTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null }): Promise<ReturnType<typeof toolTextResult> | null> {

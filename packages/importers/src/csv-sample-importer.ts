@@ -1,6 +1,5 @@
 import { assertCanonicalWritePort } from "./core-port.ts";
 import type { SampleImportPayload } from "./core-port.ts";
-import type { SamplePresetRegistry } from "./preset-registry.ts";
 import {
   type CsvSampleImportBatchPlan,
   type CsvSampleImportBatchResult,
@@ -32,18 +31,17 @@ export { CsvSampleImportError } from "./csv-sample-import-planner.ts";
 
 export interface CsvSampleImporterOptions {
   corePort?: unknown;
-  presetRegistry?: Pick<SamplePresetRegistry, "get">;
 }
 
 export async function importCsvSamples(
   input: unknown,
-  { corePort, presetRegistry }: CsvSampleImporterOptions = {},
+  { corePort }: CsvSampleImporterOptions = {},
 ): Promise<CsvSampleImportResult> {
   const writer = assertCanonicalWritePort(corePort, [
     "validateSampleImport",
     "importSamples",
   ]);
-  const plan = await prepareCsvSampleImport(input, { presetRegistry });
+  const plan = await prepareCsvSampleImport(input);
   const imports: CsvSampleImportBatchResult[] = [];
   const lookupIds: string[] = [];
   const ledgerFileSet = new Set<string>();

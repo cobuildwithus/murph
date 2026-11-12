@@ -20,7 +20,7 @@ import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-exe
 import type { HostedGameRecap, HostedGameUpdate } from "@murphai/hosted-execution/runtime-control";
 import { hostedGameChatStateSchema } from "@murphai/hosted-execution/runtime-control";
 import { openGameTexts } from "@/src/lib/game/crypto";
-import { parseStoredResult, canRedeemGroupTicket } from "@/src/lib/game/rules";
+import { parseStoredResult, parseStoredTerms, parseTermWords, canRedeemGroupTicket } from "@/src/lib/game/rules";
 import { dayStartInstant, gameLocalDate, GAME_GRACE_MS } from "@/src/lib/game/time";
 import { prepareGameAccountDeletion, applyGameAccountDeletionTx } from "@/src/lib/game/account-deletion";
 import type { GameCommand, GameTerms } from "@/src/lib/game/command";
@@ -182,6 +182,13 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await ok(starter.id, { type: "editTerms", gameId: game.id, expectedTermsVersion: 1, terms });
     expect(await readInvitePreview(game.token, true, invited.id)).toMatchObject({ yourTask: terms.defaultTask });
     await ok(starter.id, { type: "editTerms", gameId: game.id, expectedTermsVersion: 2, terms: { ...terms, tasks: [ownTask] } });
+    const draft = await db.game.findUniqueOrThrow({ where: { id: game.id } });
+    expect(parseStoredTerms(draft.terms).versions).toHaveLength(1);
+    const [draftWords] = await openGameTexts([{ table: "game", field: "terms_words", rowId: game.id,
+      memberId: draft.wordsOwnerMemberId, value: draft.termsWordsEncrypted }]);
+    expect(parseTermWords(draftWords!).versions).toHaveLength(1);
+    expect(await runGameCommand({ actorMemberId: joined.id, multiplayer: true, command: join(game.token, "UTC", 1) }))
+      .toMatchObject({ ok: false, error: { code: "TERMS_CHANGED" } });
     await ok(joined.id, join(game.token, "UTC", 3));
     const context = await groupContext(game.id, [starter, joined, invited]);
     const before = await readGame(game.id, starter.id, true);

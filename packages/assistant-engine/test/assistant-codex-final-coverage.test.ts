@@ -128,7 +128,6 @@ import {
   normalizeAssistantProviderConfig,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
-import type { AssistantCodexContinuation } from '../src/assistant/active-turn-input-journal.ts'
 import { executeCodexTurnWithRecovery } from '../src/assistant/codex-turn-runner.ts'
 import { recordAssistantUsageEvent } from '../src/assistant/service-usage.ts'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
@@ -231,6 +230,59 @@ function createRoutePlanningDiagnostics(): AssistantRouteTurnPlan['planningDiagn
     routePlanningUnaccountedElapsedMs: 0,
     routeResumeBindingElapsedMs: null,
     shouldPrepareBootstrapContext: false,
+  }
+}
+
+function createExecutionPlan(
+  overrides: Pick<AssistantCodexTurnExecutionPlan, 'input' | 'route' | 'turnId'> &
+    Partial<AssistantCodexTurnExecutionPlan>,
+): AssistantCodexTurnExecutionPlan {
+  return {
+    activeTurnSteering: null,
+    executionContext: { hosted: null },
+    profile: {
+      promptProfile: 'conversation',
+      toolProfile: 'provider-turn',
+      threadScope: 'session-thread',
+    },
+    promptTimeContext: {
+      currentLocalDate: '2026-04-29',
+      currentTimeZone: 'UTC',
+    },
+    sharedPlan: createSharedPlan(),
+    ...overrides,
+  }
+}
+
+function createAttemptPlan(
+  input: Omit<AssistantCodexAttemptPlan, 'routePlan'> & {
+    routePlan?: Partial<AssistantRouteTurnPlan>
+  },
+): AssistantCodexAttemptPlan {
+  return {
+    ...input,
+    routePlan: {
+      transcriptBoundary: 'start',
+      assistantContractFingerprint: 'a'.repeat(64),
+      assistantCliContract: null,
+      cliEnv: {},
+      codexContinuation: { kind: 'explicit-structured-history' },
+      developerInstructions: null,
+      diagnosticsPolicy: {
+        environment: 'local',
+        privateIssueCaptureEnabled: false,
+        surface: null,
+      },
+      dynamicTools: [],
+      onboardingGuidanceInjected: false,
+      planningDiagnostics: createRoutePlanningDiagnostics(),
+      resume: null,
+      sessionContext: undefined,
+      systemPrompt: null,
+      turnContextPrompt: null,
+      workingDirectory: '/work',
+      ...input.routePlan,
+    },
   }
 }
 
@@ -373,7 +425,6 @@ function createProviderAttemptResult(): AssistantProviderTurnAttemptResult {
     response: 'provider response',
     responseDeliveryContextOrdinal: 0,
     stderr: '',
-    stdout: '',
     transcriptResponse: 'provider response',
     usage: null,
   }
@@ -395,25 +446,29 @@ describe('Codex provider routing', () => {
     const input = { prompt: 'Build the synthetic recap.', vault: '/vaults/test' }
     const scope = { gameId: 'synthetic-game', eventId: 'synthetic-event', pairFingerprint: 'a'.repeat(32), show: true as const }
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(createProviderAttemptResult())
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [] } },
       hostedToolContext: { currentGameRecapScope: () => scope,
         currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
         computerToolsAvailable: false, vaultFileSendAvailable: false,
-        sendVaultFile: async () => { throw new Error('Recaps never send chat media.') } }, input,
+        sendVaultFile: async () => { throw new Error('Recaps never send chat media.') } },
+      input,
       profile: { promptProfile: 'conversation', toolProfile: 'provider-turn', threadScope: 'isolated-thread' },
       promptTimeContext: { currentLocalDate: '2026-11-10', currentTimeZone: 'UTC' },
-      route, sharedPlan: createSharedPlan(), progressDelivery: null, turnId: 'synthetic-recap-turn',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({ route, session, routePlan: {
-      transcriptBoundary: 'start', assistantContractFingerprint: 'a'.repeat(64), assistantCliContract: null, cliEnv: {},
-      codexContinuation: { kind: 'explicit-structured-history' }, developerInstructions: null,
-      diagnosticsPolicy: { environment: 'hosted', privateIssueCaptureEnabled: false, surface: null },
-      dynamicTools: [], environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }], onboardingGuidanceInjected: false,
-      planningDiagnostics: createRoutePlanningDiagnostics(), resume: null, sessionContext: undefined,
-      systemPrompt: 'Build a synthetic recap.', turnContextPrompt: null, workingDirectory: '/vaults/test',
-    } } satisfies AssistantCodexAttemptPlan)
+      route,
+      progressDelivery: null,
+      turnId: 'synthetic-recap-turn',
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
+      route,
+      session,
+      routePlan: {
+        diagnosticsPolicy: { environment: 'hosted', privateIssueCaptureEnabled: false, surface: null },
+        environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
+        systemPrompt: 'Build a synthetic recap.',
+        workingDirectory: '/vaults/test',
+      },
+    }))
     const outcome = await executeCodexTurnWithRecovery({ input, plan: createSharedPlan(), resolvedSession: session,
       route, turnCreatedAt: '2026-11-10T00:00:00.000Z', turnId: 'synthetic-recap-turn' })
     expect(outcome.kind).toBe('succeeded')
@@ -485,54 +540,31 @@ describe('Codex provider routing', () => {
         vault: '/vaults/test',
       } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
 
-      providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-        activeTurnSteering: null,
-        executionContext: { hosted: null },
+      providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
         input,
-        profile: {
-          promptProfile: 'conversation',
-          toolProfile: 'provider-turn',
-          threadScope: 'session-thread',
-        },
         promptTimeContext: {
           currentLocalDate: '2026-08-15',
           currentTimeZone: 'UTC',
         },
         route,
-        sharedPlan: createSharedPlan(),
         turnId: 'turn-provider-plan-reasoning-effort',
-      } satisfies AssistantCodexTurnExecutionPlan)
-      providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      }))
+      providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
         route,
         routePlan: {
-          transcriptBoundary: 'start',
-          assistantContractFingerprint: 'a'.repeat(64),
-          assistantCliContract: null,
-          cliEnv: {},
-          codexContinuation: {
-            kind: 'explicit-structured-history',
-          } satisfies AssistantCodexContinuation,
-          developerInstructions: null,
           diagnosticsPolicy: {
             environment: 'hosted',
             privateIssueCaptureEnabled: false,
             surface: null,
           },
-          dynamicTools: [],
-          onboardingGuidanceInjected: false,
           planningDiagnostics: {
             ...createRoutePlanningDiagnostics(),
             assistantContextSnapshotRefreshElapsedMs: 73,
             followUpContextElapsedMs: 41,
           },
-          resume: null,
-          sessionContext: undefined,
-          systemPrompt: null,
-          turnContextPrompt: null,
-          workingDirectory: '/work',
-        } satisfies AssistantRouteTurnPlan,
+        },
         session,
-      } satisfies AssistantCodexAttemptPlan)
+      }))
 
       await expect(executeCodexTurnWithRecovery({
         input,
@@ -598,7 +630,7 @@ describe('Codex provider routing', () => {
         responseMedia: null,
       },
     })
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       acceptedInputItems: [
         {
           acceptedAt: '2031-02-15T09:59:58.000Z',
@@ -611,49 +643,18 @@ describe('Codex provider routing', () => {
           source: 'manual',
         },
       ],
-      activeTurnSteering: null,
-      executionContext: { hosted: null },
       input,
-      profile: {
-        promptProfile: 'conversation',
-        toolProfile: 'provider-turn',
-        threadScope: 'session-thread',
-      },
       promptTimeContext: {
         currentLocalDate: '2026-07-28',
         currentTimeZone: 'UTC',
       },
       route,
-      sharedPlan: createSharedPlan(),
       turnId: 'turn-response-card-propagation',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
-      routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint: 'a'.repeat(64),
-        assistantCliContract: null,
-        cliEnv: {},
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        developerInstructions: null,
-        diagnosticsPolicy: {
-          environment: 'local',
-          privateIssueCaptureEnabled: false,
-          surface: null,
-        },
-        dynamicTools: [],
-        onboardingGuidanceInjected: false,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
-        systemPrompt: null,
-        turnContextPrompt: null,
-        workingDirectory: '/work',
-      } satisfies AssistantRouteTurnPlan,
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     const outcome = await executeCodexTurnWithRecovery({
       input,
@@ -710,8 +711,7 @@ describe('Codex provider routing', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: {
         hosted: {
           materializeWorkspaceArtifacts: vi.fn(),
@@ -733,40 +733,19 @@ describe('Codex provider routing', () => {
         currentTimeZone: 'UTC',
       },
       route,
-      sharedPlan: createSharedPlan(),
       progressDelivery: unsafeProgressDelivery,
       turnId: 'turn-system-notification',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
       routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
-        cliEnv: {},
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        developerInstructions: null,
-        diagnosticsPolicy: {
-          environment: 'local',
-          privateIssueCaptureEnabled: false,
-          surface: null,
-        },
         dynamicTools: unsafeDynamicTools,
         followUpInvocation,
         environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
-        onboardingGuidanceInjected: false,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
         systemPrompt: 'Output-only system prompt.',
-        turnContextPrompt: null,
-        workingDirectory: '/work',
-      } satisfies AssistantRouteTurnPlan,
+      },
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     const outcome = await executeCodexTurnWithRecovery({
       input,
@@ -872,7 +851,7 @@ describe('Codex provider routing', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
-    const executionPlan: AssistantCodexTurnExecutionPlan = {
+    const executionPlan: AssistantCodexTurnExecutionPlan = createExecutionPlan({
       activeTurnSteering,
       executionContext: {
         hosted: {
@@ -885,34 +864,20 @@ describe('Codex provider routing', () => {
       },
       hostedToolContext,
       input,
-      profile: {
-        promptProfile: 'conversation',
-        toolProfile: 'provider-turn',
-        threadScope: 'session-thread',
-      },
       promptTimeContext: {
         currentLocalDate: '2026-08-10',
         currentTimeZone: 'UTC',
       },
       progressDelivery,
       route,
-      sharedPlan: createSharedPlan(),
       turnId: 'turn-completion-native-authority',
-    }
+    })
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(
       executionPlan,
     )
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
       routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint: 'a'.repeat(64),
-        assistantCliContract: null,
-        cliEnv: {},
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        developerInstructions: null,
         diagnosticsPolicy: {
           environment: 'hosted',
           privateIssueCaptureEnabled: false,
@@ -920,18 +885,13 @@ describe('Codex provider routing', () => {
         },
         dynamicTools,
         environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
-        onboardingGuidanceInjected: false,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
         resume: {
           codexThreadId: 'thread-completion-native-authority',
         },
-        sessionContext: undefined,
         systemPrompt: 'Trusted completion system prompt.',
-        turnContextPrompt: null,
-        workingDirectory: '/work',
-      } satisfies AssistantRouteTurnPlan,
+      },
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     const completionOutcome = await executeCodexTurnWithRecovery({
       input,
@@ -1069,8 +1029,7 @@ describe('Codex provider routing', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: {
         hosted: {
           memberId: 'member-room-model-maintenance',
@@ -1089,22 +1048,12 @@ describe('Codex provider routing', () => {
         currentTimeZone: 'America/New_York',
       },
       route,
-      sharedPlan: createSharedPlan(),
       progressDelivery: null,
       turnId: 'turn-room-model-maintenance',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
       routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
-        cliEnv: {},
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        developerInstructions: null,
         diagnosticsPolicy: {
           environment: 'hosted',
           privateIssueCaptureEnabled: false,
@@ -1112,16 +1061,11 @@ describe('Codex provider routing', () => {
         },
         dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL],
         followUpInvocation,
-        onboardingGuidanceInjected: false,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
         systemPrompt: 'Room-model maintenance prompt.',
-        turnContextPrompt: null,
         workingDirectory: '/vaults/group',
-      } satisfies AssistantRouteTurnPlan,
+      },
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     const outcome = await executeCodexTurnWithRecovery({
       input,
@@ -1200,8 +1144,7 @@ describe('Codex provider routing', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: input.executionContext,
       hostedToolContext: {
         computerToolsAvailable: false,
@@ -1221,38 +1164,23 @@ describe('Codex provider routing', () => {
         currentTimeZone: 'America/New_York',
       },
       route,
-      sharedPlan: createSharedPlan(),
       progressDelivery: null,
       turnId: 'turn-member-memory-maintenance',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
       routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
-        cliEnv: {},
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        developerInstructions: null,
         diagnosticsPolicy: {
           environment: 'hosted',
           privateIssueCaptureEnabled: false,
           surface: 'linq',
         },
         dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
-        onboardingGuidanceInjected: false,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
         systemPrompt: 'Member memory maintenance prompt.',
-        turnContextPrompt: null,
         workingDirectory: '/vaults/member',
-      } satisfies AssistantRouteTurnPlan,
+      },
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     const outcome = await executeCodexTurnWithRecovery({
       input,
@@ -1327,8 +1255,7 @@ describe('Codex provider routing', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: {
         hosted: {
           materializeWorkspaceArtifacts: vi.fn(),
@@ -1357,21 +1284,13 @@ describe('Codex provider routing', () => {
         currentTimeZone: 'America/New_York',
       },
       route,
-      sharedPlan: createSharedPlan(),
       progressDelivery: unsafeProgressDelivery,
       turnId: 'turn-onboarding-goal-checkin',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
       routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         assistantCliContract: 'Murph CLI Contract: read current vault state.',
-        cliEnv: {},
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
         developerInstructions: 'Immutable read-only goal check-in policy.',
         diagnosticsPolicy: {
           environment: 'hosted',
@@ -1380,18 +1299,14 @@ describe('Codex provider routing', () => {
         },
         dynamicTools: [MURPH_GENERATE_SONG_TOOL],
         environments: [{ PRIVATE_ENVIRONMENT: 'must-not-pass' }],
-        onboardingGuidanceInjected: false,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
         sessionContext: {
           binding: session.binding,
         },
         systemPrompt: 'Ordinary Murph prompt plus immutable read-only policy.',
-        turnContextPrompt: null,
         workingDirectory: '/vaults/member',
-      } satisfies AssistantRouteTurnPlan,
+      },
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     const outcome = await executeCodexTurnWithRecovery({
       input,
@@ -1454,9 +1369,7 @@ describe('Codex provider routing', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
-      executionContext: { hosted: null },
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       hostedToolContext: null,
       input,
       profile: {
@@ -1472,35 +1385,20 @@ describe('Codex provider routing', () => {
       sharedPlan,
       progressDelivery: null,
       turnId: 'turn-group-email',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
       routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
-        cliEnv: {},
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        developerInstructions: null,
         diagnosticsPolicy: {
           environment: 'hosted',
           privateIssueCaptureEnabled: false,
           surface: 'email',
         },
-        dynamicTools: [],
-        onboardingGuidanceInjected: false,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
         systemPrompt: 'Group-email prompt.',
-        turnContextPrompt: null,
         workingDirectory: '/vaults/group',
-      } satisfies AssistantRouteTurnPlan,
+      },
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     const outcome = await executeCodexTurnWithRecovery({
       input,
@@ -1578,32 +1476,17 @@ describe('Codex provider routing', () => {
         return createProviderAttemptResult()
       },
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: 'hosted' in scenario ? { hosted: null } : {
         hosted: { memberId: 'member-onboarding', userEnvKeys: [] },
       },
       input,
-      profile: {
-        promptProfile: 'conversation',
-        toolProfile: 'provider-turn',
-        threadScope: 'session-thread',
-      },
-      promptTimeContext: {
-        currentLocalDate: '2026-04-29',
-        currentTimeZone: 'UTC',
-      },
       route,
-      sharedPlan: createSharedPlan(),
       turnId: 'turn-1',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
       routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
         cliEnv: {
           ...flexCatalog.env,
           ...(scenario.ageMs === null ? {} : {
@@ -1611,26 +1494,9 @@ describe('Codex provider routing', () => {
               ? 'invalid' : new Date(now + 86_400_000 - scenario.ageMs).toISOString(),
           }),
         },
-        developerInstructions: null,
-        dynamicTools: [],
-        diagnosticsPolicy: {
-          environment: 'local',
-          privateIssueCaptureEnabled: false,
-          surface: null,
-        },
-        onboardingGuidanceInjected: false,
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
-        systemPrompt: null,
-        turnContextPrompt: null,
-        workingDirectory: '/work',
-      } satisfies AssistantRouteTurnPlan,
+      },
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     try {
       const outcome = await executeCodexTurnWithRecovery({
@@ -1787,54 +1653,19 @@ describe('Codex provider routing', () => {
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValueOnce(
         createProviderAttemptResult(),
       )
-      providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValueOnce({
-        activeTurnSteering: null,
-        executionContext: {
-          hosted: null,
-        },
+      providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValueOnce(createExecutionPlan({
         input,
-        profile: {
-          promptProfile: 'conversation',
-          toolProfile: 'provider-turn',
-          threadScope: 'session-thread',
-        },
-        promptTimeContext: {
-          currentLocalDate: '2026-04-29',
-          currentTimeZone: 'UTC',
-        },
         route,
         sharedPlan,
         turnId: `turn-${scenario.name.replaceAll(' ', '-')}`,
-      } satisfies AssistantCodexTurnExecutionPlan)
-      providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValueOnce({
+      }))
+      providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValueOnce(createAttemptPlan({
         route,
         routePlan: {
-          transcriptBoundary: 'start',
-          assistantContractFingerprint:
-            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          assistantCliContract: null,
-          cliEnv: {},
-          developerInstructions: null,
-          dynamicTools: [],
-          diagnosticsPolicy: {
-            environment: 'local',
-            privateIssueCaptureEnabled: false,
-            surface: null,
-          },
-          onboardingGuidanceInjected: false,
-          codexContinuation: {
-            kind: 'explicit-structured-history',
-          } satisfies AssistantCodexContinuation,
-          planningDiagnostics: createRoutePlanningDiagnostics(),
-          resume: null,
-          sessionContext: undefined,
-          systemPrompt: null,
-          turnContextPrompt: null,
           voiceMemoDeliveryChannel: scenario.expectedChannel,
-          workingDirectory: '/work',
-        } satisfies AssistantRouteTurnPlan,
+        },
         session,
-      } satisfies AssistantCodexAttemptPlan)
+      }))
 
       const outcome = await executeCodexTurnWithRecovery({
         input,
@@ -1868,54 +1699,17 @@ describe('Codex provider routing', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValueOnce(
       createProviderAttemptResult(),
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValueOnce({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValueOnce(createExecutionPlan({
       authorizeAcceptedMessageTarget,
-      executionContext: {
-        hosted: null,
-      },
       input,
-      profile: {
-        promptProfile: 'conversation',
-        toolProfile: 'provider-turn',
-        threadScope: 'session-thread',
-      },
-      promptTimeContext: {
-        currentLocalDate: '2026-04-29',
-        currentTimeZone: 'UTC',
-      },
       route,
       sharedPlan,
       turnId: 'turn-message-targeting',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValueOnce({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValueOnce(createAttemptPlan({
       route,
-      routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
-        cliEnv: {},
-        developerInstructions: null,
-        dynamicTools: [],
-        diagnosticsPolicy: {
-          environment: 'local',
-          privateIssueCaptureEnabled: false,
-          surface: null,
-        },
-        onboardingGuidanceInjected: false,
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
-        systemPrompt: null,
-        turnContextPrompt: null,
-        workingDirectory: '/work',
-      } satisfies AssistantRouteTurnPlan,
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     const outcome = await executeCodexTurnWithRecovery({
       authorizeAcceptedMessageTarget,
@@ -1970,8 +1764,7 @@ describe('Codex provider routing', () => {
     providerTurnRunnerMocks.recordAssistantRuntimeIssueInputsBestEffort.mockReturnValue(
       new Promise(() => undefined),
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: {
         hosted: {
           memberId: 'member-runtime-issue',
@@ -1979,47 +1772,20 @@ describe('Codex provider routing', () => {
         },
       },
       input,
-      profile: {
-        promptProfile: 'conversation',
-        toolProfile: 'provider-turn',
-        threadScope: 'session-thread',
-      },
-      promptTimeContext: {
-        currentLocalDate: '2026-04-29',
-        currentTimeZone: 'UTC',
-      },
       route,
-      sharedPlan: createSharedPlan(),
       turnId: 'turn-runtime-issue',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
       routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
-        cliEnv: {},
-        developerInstructions: null,
-        dynamicTools: [],
         diagnosticsPolicy: {
           environment: 'local',
           privateIssueCaptureEnabled: true,
           surface: null,
         },
-        onboardingGuidanceInjected: false,
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
-        systemPrompt: null,
-        turnContextPrompt: null,
-        workingDirectory: '/work',
-      } satisfies AssistantRouteTurnPlan,
+      },
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     const outcome = await executeCodexTurnWithRecovery({
       input,
@@ -2082,8 +1848,7 @@ describe('Codex provider routing', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       failedProviderAttempt,
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: {
         hosted: {
           memberId: 'member-terminal-provider-failure',
@@ -2091,46 +1856,21 @@ describe('Codex provider routing', () => {
         },
       },
       input,
-      profile: {
-        promptProfile: 'conversation',
-        toolProfile: 'provider-turn',
-        threadScope: 'session-thread',
-      },
-      promptTimeContext: {
-        currentLocalDate: '2026-04-29',
-        currentTimeZone: 'UTC',
-      },
       route,
-      sharedPlan: createSharedPlan(),
       turnId: 'turn-terminal-provider-failure',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
       routePlan: {
         assistantContractFingerprint,
-        transcriptBoundary: 'start',
-        assistantCliContract: null,
-        cliEnv: {},
-        developerInstructions: null,
-        dynamicTools: [],
         diagnosticsPolicy: {
           environment: 'hosted',
           privateIssueCaptureEnabled: true,
           surface: 'linq',
         },
-        onboardingGuidanceInjected: false,
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
-        systemPrompt: null,
-        turnContextPrompt: null,
-        workingDirectory: '/work',
-      } satisfies AssistantRouteTurnPlan,
+      },
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     const outcome = await executeCodexTurnWithRecovery({
       input,
@@ -2236,8 +1976,7 @@ describe('Codex provider routing', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       failedProviderAttempt,
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: {
         hosted: {
           memberId: 'member-maintenance-provider-failure',
@@ -2250,42 +1989,20 @@ describe('Codex provider routing', () => {
         toolProfile: 'provider-turn',
         threadScope: 'isolated-thread',
       },
-      promptTimeContext: {
-        currentLocalDate: '2026-04-29',
-        currentTimeZone: 'UTC',
-      },
       route,
-      sharedPlan: createSharedPlan(),
       turnId: 'turn-maintenance-provider-failure',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
       routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
-        cliEnv: {},
-        developerInstructions: null,
-        dynamicTools: [],
         diagnosticsPolicy: {
           environment: 'hosted',
           privateIssueCaptureEnabled: true,
           surface: 'linq',
         },
-        onboardingGuidanceInjected: false,
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
-        systemPrompt: null,
-        turnContextPrompt: null,
-        workingDirectory: '/work',
-      } satisfies AssistantRouteTurnPlan,
+      },
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     const outcome = await executeCodexTurnWithRecovery({
       input,
@@ -2331,8 +2048,7 @@ describe('Codex provider routing', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: {
         hosted: {
           memberId: 'member-flex-openai-no-catalog',
@@ -2340,47 +2056,13 @@ describe('Codex provider routing', () => {
         },
       },
       input,
-      profile: {
-        promptProfile: 'conversation',
-        toolProfile: 'provider-turn',
-        threadScope: 'session-thread',
-      },
-      promptTimeContext: {
-        currentLocalDate: '2026-04-29',
-        currentTimeZone: 'UTC',
-      },
       route,
-      sharedPlan: createSharedPlan(),
       turnId: 'turn-1',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
-      routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
-        cliEnv: {},
-        developerInstructions: null,
-        dynamicTools: [],
-        diagnosticsPolicy: {
-          environment: 'local',
-          privateIssueCaptureEnabled: false,
-          surface: null,
-        },
-        onboardingGuidanceInjected: false,
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
-        systemPrompt: null,
-        turnContextPrompt: null,
-        workingDirectory: '/work',
-      } satisfies AssistantRouteTurnPlan,
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     await executeCodexTurnWithRecovery({
       input,
@@ -2418,8 +2100,7 @@ describe('Codex provider routing', () => {
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: {
         hosted: {
           memberId: 'member-flex-gateway',
@@ -2427,47 +2108,13 @@ describe('Codex provider routing', () => {
         },
       },
       input,
-      profile: {
-        promptProfile: 'conversation',
-        toolProfile: 'provider-turn',
-        threadScope: 'session-thread',
-      },
-      promptTimeContext: {
-        currentLocalDate: '2026-04-29',
-        currentTimeZone: 'UTC',
-      },
       route,
-      sharedPlan: createSharedPlan(),
       turnId: 'turn-1',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
-      routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
-        cliEnv: {},
-        developerInstructions: null,
-        dynamicTools: [],
-        diagnosticsPolicy: {
-          environment: 'local',
-          privateIssueCaptureEnabled: false,
-          surface: null,
-        },
-        onboardingGuidanceInjected: false,
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
-        systemPrompt: null,
-        turnContextPrompt: null,
-        workingDirectory: '/work',
-      } satisfies AssistantRouteTurnPlan,
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
 
     await executeCodexTurnWithRecovery({
       input,
@@ -2518,51 +2165,27 @@ describe('Codex provider routing', () => {
       vault: '/vaults/test',
     } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
 
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       executionContext: input.executionContext,
       input,
-      profile: {
-        promptProfile: 'conversation',
-        toolProfile: 'provider-turn',
-        threadScope: 'session-thread',
-      },
       promptTimeContext: {
         currentLocalDate: '2026-04-30',
         currentTimeZone: 'UTC',
       },
       route,
-      sharedPlan: createSharedPlan(),
       turnId: 'turn-hosted-device-connect',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
       route,
       routePlan: {
-        transcriptBoundary: 'start',
-        assistantContractFingerprint:
-          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        assistantCliContract: null,
-        cliEnv: {},
-        developerInstructions: null,
-        dynamicTools: [],
         diagnosticsPolicy: {
           environment: 'hosted',
           privateIssueCaptureEnabled: false,
           surface: 'linq',
         },
-        onboardingGuidanceInjected: false,
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        } satisfies AssistantCodexContinuation,
-        planningDiagnostics: createRoutePlanningDiagnostics(),
-        resume: null,
-        sessionContext: undefined,
-        systemPrompt: null,
-        turnContextPrompt: null,
-        workingDirectory: '/work',
-      } satisfies AssistantRouteTurnPlan,
+      },
       session,
-    } satisfies AssistantCodexAttemptPlan)
+    }))
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
       createProviderAttemptResult(),
     )
@@ -2615,23 +2238,24 @@ describe('attested reaction routing through the admitted provider turn', () => {
       return decision.startsWith('quiet') ? 'quiet' : 'escalate'
     })
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(createProviderAttemptResult())
-    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
       acceptedInputItems: [{ id: 'synthetic-reaction-input', source: 'manual' }, ...(decision === 'mixed' ? [{ id: 'synthetic-other-input', source: 'manual' as const }] : [])],
-      activeTurnSteering: null, allowFinishWithoutReply: true,
+      allowFinishWithoutReply: true,
       executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [], usageRecorder: { recordUsage } } },
-      input, onFinishWithoutReplyAccepted: accepted, onFinishWithoutReplyRecorded: recorded,
-      profile: { promptProfile: 'conversation', toolProfile: 'provider-turn', threadScope: 'session-thread' },
-      promptTimeContext: { currentLocalDate: '2026-09-30', currentTimeZone: 'UTC' }, route, sharedPlan: createSharedPlan(), turnId: 'synthetic-parent-turn',
-    } satisfies AssistantCodexTurnExecutionPlan)
-    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({ route, session, routePlan: {
-      transcriptBoundary: 'start',
-      assistantContractFingerprint: 'a'.repeat(64), assistantCliContract: null, cliEnv: {},
-      codexContinuation: { kind: 'explicit-structured-history' }, developerInstructions: null,
-      diagnosticsPolicy: { environment: 'local', privateIssueCaptureEnabled: false, surface: null },
-      dynamicTools: [], onboardingGuidanceInjected: false, planningDiagnostics: createRoutePlanningDiagnostics(),
-      resume: decision === 'quiet-cold' ? null : { codexThreadId: 'unchanged-root-thread' }, sessionContext: undefined,
-      systemPrompt: null, turnContextPrompt: null, workingDirectory: '/work',
-    } } satisfies AssistantCodexAttemptPlan)
+      input,
+      onFinishWithoutReplyAccepted: accepted,
+      onFinishWithoutReplyRecorded: recorded,
+      promptTimeContext: { currentLocalDate: '2026-09-30', currentTimeZone: 'UTC' },
+      route,
+      turnId: 'synthetic-parent-turn',
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
+      route,
+      session,
+      routePlan: {
+        resume: decision === 'quiet-cold' ? null : { codexThreadId: 'unchanged-root-thread' },
+      },
+    }))
     const outcome = await executeCodexTurnWithRecovery({ input, plan: createSharedPlan(), resolvedSession: session, route,
       turnCreatedAt: '2026-09-30T12:00:00Z', turnId: 'synthetic-parent-turn',
       onProviderRequestPlanned: async () => { order.push('admitted'); return released },
@@ -2684,18 +2308,10 @@ describe('streamed child usage identity', () => {
           servedModel: null, totalTokens: 188,
         },
       })
-      providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
-        route, session, routePlan: {
-          transcriptBoundary: 'start',
-          assistantContractFingerprint: 'a'.repeat(64), assistantCliContract: null, cliEnv: {},
-          codexContinuation: { kind: 'explicit-structured-history' }, developerInstructions: null,
-          diagnosticsPolicy: { environment: 'local', privateIssueCaptureEnabled: false, surface: null },
-          dynamicTools: [], onboardingGuidanceInjected: false,
-          planningDiagnostics: createRoutePlanningDiagnostics(),
-          resume: null, sessionContext: undefined, systemPrompt: null,
-          turnContextPrompt: null, workingDirectory: '/work',
-        },
-      } satisfies AssistantCodexAttemptPlan)
+      providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({
+        route,
+        session,
+      }))
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mockImplementation(
         async (providerInput: AssistantProviderTurn) => {
           const callback = providerInput.onAdditionalUsage
@@ -2720,13 +2336,15 @@ describe('streamed child usage identity', () => {
       for (const providerRequestOrdinal of outcomeKind === 'standalone' ? [0] : [0, 1]) {
         const primaryOrdinal = allocateUsageRecordOrdinal()
         const inputIds = [`synthetic-input-${providerRequestOrdinal}`]
-        providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+        providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
           acceptedInputItems: inputIds.map((id) => ({ id, source: 'manual' as const })),
-          activeTurnSteering: null, allowFinishWithoutReply: true, executionContext, input,
-          profile: { promptProfile: 'conversation', toolProfile: 'provider-turn', threadScope: 'session-thread' },
+          allowFinishWithoutReply: true,
+          executionContext,
+          input,
           promptTimeContext: { currentLocalDate: '2026-09-30', currentTimeZone: 'UTC' },
-          route, sharedPlan: createSharedPlan(), turnId,
-        } satisfies AssistantCodexTurnExecutionPlan)
+          route,
+          turnId,
+        }))
         const outcome = await executeCodexTurnWithRecovery({
           input, plan: createSharedPlan(), resolvedSession: session, route,
           turnCreatedAt: '2026-09-30T12:00:00Z', turnId, providerRequestOrdinal,

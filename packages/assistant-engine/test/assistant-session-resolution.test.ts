@@ -9,6 +9,7 @@ import {
   parseAssistantSessionRecord,
   type AssistantSessionResumeState,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 
 const sessionResolutionMocks = vi.hoisted(() => ({
@@ -183,6 +184,54 @@ function createResumeStateForTarget(
 }
 
 describe('assistant session resolution', () => {
+  it('omits absent routing fields and falls back to the message participant', () => {
+    const minimal = buildResolveAssistantSessionInput(createResolutionInput({
+      model: 'gpt-5-codex',
+      provider: 'codex-cli',
+    }), null)
+    expect(minimal).not.toHaveProperty('actorId')
+    expect(minimal).not.toHaveProperty('threadId')
+    expect(minimal.threadIsDirect).toBeUndefined()
+
+    const explicit = buildResolveAssistantSessionInput(createResolutionInput({
+      model: 'gpt-5-codex',
+      provider: 'codex-cli',
+      participantId: 'participant-1',
+      threadId: 'thread-explicit',
+    }), null)
+    expect(explicit.actorId).toBe('participant-1')
+    expect(explicit.threadId).toBe('thread-explicit')
+  })
+
+  it('tries existing continuity without target overrides before creating a missing session', async () => {
+    const message = createMessageInput({ model: 'gpt-5-codex', provider: 'codex-cli' })
+    const resolvedSession = createResolvedAssistantSessionForTest({ target: createCodexTarget() })
+    sessionResolutionMocks.resolveAssistantSession
+      .mockRejectedValueOnce(new VaultCliError('ASSISTANT_SESSION_NOT_FOUND', 'session missing'))
+      .mockResolvedValueOnce(resolvedSession)
+
+    await expect(resolveAssistantSessionForMessage({ defaults: null, message }))
+      .resolves.toMatchObject(resolvedSession)
+
+    expect(sessionResolutionMocks.resolveAssistantSession).toHaveBeenCalledTimes(2)
+    expect(sessionResolutionMocks.resolveAssistantSession).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ createIfMissing: false, vault: message.vault }),
+    )
+    expect(sessionResolutionMocks.resolveAssistantSession.mock.calls[0]?.[0])
+      .not.toHaveProperty('model')
+    expect(sessionResolutionMocks.resolveAssistantSession.mock.calls[0]?.[0])
+      .not.toHaveProperty('provider')
+    expect(sessionResolutionMocks.resolveAssistantSession).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        model: 'gpt-5-codex',
+        provider: 'codex-cli',
+        vault: message.vault,
+      }),
+    )
+  })
+
   it('prefers conversation identifiers over message fields and shapes Codex config', () => {
     const defaults = createOperatorDefaults({
       identityId: 'default-identity',

@@ -168,7 +168,7 @@ describe('murph.analyze_video arguments and availability', () => {
         message_ref: 'ain_11111111111111111111111111111111',
         question: 'What happens?',
         ...extra,
-      })).toMatchObject({ kind: 'invalid-analyze-video-arguments' })
+      })).toMatchObject({ kind: 'invalid-tool-arguments', errorCode: 'invalid_analyze_video_arguments' })
     }
   })
 

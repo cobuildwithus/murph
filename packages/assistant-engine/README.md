@@ -18,6 +18,10 @@ and synthetic local-test transports retain their existing execution boundaries.
 
 ## Usage record identity
 
+Foreground X search keeps one three-provider-call budget for the accepted
+assistant turn, including group reconsideration requests. A new native provider
+request does not reset that budget.
+
 Foreground turns reserve the primary usage ordinal before starting each provider
 request. Streamed child usage, returned tool usage, and reconsideration requests
 share that turn's existing ordinal allocator. A child can settle after its parent
@@ -72,6 +76,10 @@ Keep missing values separate from `false`, select metadata only, and do not
 induce failures. An empty window is not evidence that the path works.
 
 ## Cron occurrence and history ownership
+
+Only a missing cron store starts empty. An unreadable, malformed, or unsupported
+store stops execution and preserves its bytes; treating existing state as absent
+could replay an occurrence or lose a pending delivery. Repair is explicit.
 
 Canonical automation policy and local device-triggered occurrences retain their
 existing stores and claim identities. One execution-result transition applies
@@ -299,8 +307,10 @@ Optional notifications share accepted outbound context at the notification
 boundary, after audience resolution. The existing outbox route index supplies
 at most 100 candidates across sessions; the prompt includes at most 20 whole
 accepted text messages and 8,000 text characters from the exact destination,
-channel and direct/group scope. Reactions, vault-file deliveries and unaccepted
-output are excluded. This is quoted evidence, never instructions or proof of
+channel and direct/group scope. Times are rendered in the vault's local zone,
+never as bare UTC, because a US evening send carries the next UTC date. Reactions,
+vault-file deliveries and unaccepted output are excluded. Game missed-day notes
+get no history: an earlier reminder never covers a miss. This is quoted evidence, never instructions or proof of
 reading or completion. Omit only an already-covered person/task/occurrence;
 keep uncovered tasks, explicit repeats and necessary safety cues. Required,
 maintenance and special-profile notifications keep their existing contracts.

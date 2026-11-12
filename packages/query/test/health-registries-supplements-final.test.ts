@@ -12,37 +12,20 @@ import type {
   MarkdownDocumentRecord,
 } from "../src/health/shared.ts";
 import {
-  allergyRecordFromEntity,
-  allergyRegistryDefinition,
   buildPriorityTitleComparator,
-  conditionRecordFromEntity,
-  conditionRegistryDefinition,
   createProjectedRegistryQueries,
   createRegistryQueries,
-  foodRecordFromEntity,
   foodRegistryDefinition,
-  familyRecordFromEntity,
-  familyRegistryDefinition,
-  geneticsRecordFromEntity,
-  geneticsRegistryDefinition,
   goalRecordFromEntity,
   goalRegistryDefinition,
   listProjectedRegistryRecords,
   listRegistryRecords,
-  regimenRecordFromEntity,
-  regimenRegistryDefinition,
-  providerRecordFromEntity,
-  providerRegistryDefinition,
   readPriority,
   readProjectedRegistryRecord,
   readRegistryRecord,
-  recipeRecordFromEntity,
-  recipeRegistryDefinition,
   showProjectedRegistryRecord,
   showRegistryRecord,
   toRegistryRecord,
-  workoutFormatRecordFromEntity,
-  workoutFormatRegistryDefinition,
 } from "../src/health/registries.ts";
 import type {
   RegistryDefinition,
@@ -155,41 +138,6 @@ async function seedCoverageVault(vaultRoot: string): Promise<void> {
       "status: active",
       "---",
       "# Missing Id",
-      "",
-    ].join("\n"),
-  );
-
-  await writeVaultFile(
-    vaultRoot,
-    "bank/conditions/insomnia.md",
-    [
-      "---",
-      "schemaVersion: hv/condition@v1",
-      "conditionId: cond_insomnia",
-      "slug: insomnia",
-      "title: Insomnia",
-      "clinicalStatus: active",
-      "verificationStatus: confirmed",
-      "assertedOn: 2026-03-01",
-      "---",
-      "# Insomnia",
-      "",
-    ].join("\n"),
-  );
-
-  await writeVaultFile(
-    vaultRoot,
-    "bank/allergies/peanut.md",
-    [
-      "---",
-      "schemaVersion: hv/allergy@v1",
-      "allergyId: alg_peanut",
-      "slug: peanut",
-      "title: Peanut",
-      "status: active",
-      "substance: Peanut",
-      "---",
-      "# Peanut",
       "",
     ].join("\n"),
   );
@@ -324,107 +272,6 @@ async function seedCoverageVault(vaultRoot: string): Promise<void> {
       "  - reg_vitamin_c",
       "---",
       "# Overnight Oats",
-      "",
-    ].join("\n"),
-  );
-
-  await writeVaultFile(
-    vaultRoot,
-    "bank/recipes/salmon-rice-bowl.md",
-    [
-      "---",
-      "schemaVersion: hv/recipe@v1",
-      "recipeId: recipe_salmon_rice_bowl",
-      "slug: salmon-rice-bowl",
-      "title: Salmon Rice Bowl",
-      "status: saved",
-      "servings: 2",
-      "relatedGoalIds:",
-      "  - goal_sleep_quality",
-      "relatedConditionIds:",
-      "  - cond_insomnia",
-      "---",
-      "# Salmon Rice Bowl",
-      "",
-    ].join("\n"),
-  );
-
-  await writeVaultFile(
-    vaultRoot,
-    "bank/providers/primary-care.md",
-    [
-      "---",
-      "schemaVersion: hv/provider@v1",
-      "providerId: prov_primary_care",
-      "slug: primary-care",
-      "title: Primary Care",
-      "status: active",
-      "specialty: primary-care",
-      "aliases:",
-      "  - doctor",
-      "  - clinic",
-      "---",
-      "# Primary Care",
-      "",
-    ].join("\n"),
-  );
-
-  await writeVaultFile(
-    vaultRoot,
-    "bank/workout-formats/push-day-a.md",
-    [
-      "---",
-      "schemaVersion: hv/workout-format@v1",
-      "workoutFormatId: wfmt_push_day_a",
-      "slug: push-day-a",
-      "title: Push Day A",
-      "status: active",
-      "activityType: strength-training",
-      "durationMinutes: 45",
-      "templateText: Press day",
-      "template:",
-      "  blocks:",
-      "    - press",
-      "---",
-      "# Push Day A",
-      "",
-    ].join("\n"),
-  );
-
-  await writeVaultFile(
-    vaultRoot,
-    "bank/family/mother.md",
-    [
-      "---",
-      "schemaVersion: hv/family@v1",
-      "familyMemberId: fam_mother",
-      "slug: mother",
-      "title: Mother",
-      "status: active",
-      "relationship: mother",
-      "relatedVariantIds:",
-      "  - var_mthfr",
-      "---",
-      "# Mother",
-      "",
-    ].join("\n"),
-  );
-
-  await writeVaultFile(
-    vaultRoot,
-    "bank/genetics/mthfr-c677t.md",
-    [
-      "---",
-      "schemaVersion: hv/genetics@v1",
-      "variantId: var_mthfr",
-      "slug: mthfr-c677t",
-      "title: MTHFR C677T",
-      "status: active",
-      "gene: MTHFR",
-      "sourceFamilyMemberIds:",
-      "  - fam_mother",
-      "---",
-      "# MTHFR C677T",
       "",
     ].join("\n"),
   );
@@ -575,183 +422,6 @@ test("registry queries cover the remaining projection and wrapper branches", asy
     }),
     null,
   );
-
-  const conditionRecord = projectedRegistryEntity(
-    "condition",
-    documentRecord(
-      "bank/conditions/insomnia.md",
-      {
-        conditionId: "cond_insomnia",
-        slug: "insomnia",
-        title: "Insomnia",
-        clinicalStatus: "active",
-        verificationStatus: "confirmed",
-        assertedOn: "2026-03-01",
-      },
-      "# Insomnia",
-    ),
-    conditionRegistryDefinition,
-  );
-  const allergyRecord = projectedRegistryEntity(
-    "allergy",
-    documentRecord(
-      "bank/allergies/peanut.md",
-      {
-        allergyId: "alg_peanut",
-        slug: "peanut",
-        title: "Peanut",
-        status: "active",
-        substance: "Peanut",
-      },
-      "# Peanut",
-    ),
-    allergyRegistryDefinition,
-  );
-  const familyRecord = projectedRegistryEntity(
-    "family",
-    documentRecord(
-      "bank/family/mother.md",
-      {
-        familyMemberId: "fam_mother",
-        slug: "mother",
-        title: "Mother",
-        status: "active",
-        relationship: "mother",
-        relatedVariantIds: ["var_mthfr"],
-      },
-      "# Mother",
-    ),
-    familyRegistryDefinition,
-  );
-  const geneticsRecord = projectedRegistryEntity(
-    "genetics",
-    documentRecord(
-      "bank/genetics/mthfr-c677t.md",
-      {
-        variantId: "var_mthfr",
-        slug: "mthfr-c677t",
-        title: "MTHFR C677T",
-        status: "active",
-        gene: "MTHFR",
-        sourceFamilyMemberIds: ["fam_mother"],
-      },
-      "# MTHFR C677T",
-    ),
-    geneticsRegistryDefinition,
-  );
-  const regimenRecord = projectedRegistryEntity(
-    "regimen",
-    documentRecord(
-      "bank/regimens/supplements/liposomal-vitamin-c.md",
-      {
-        regimenId: "reg_vitamin_c",
-        slug: "liposomal-vitamin-c",
-        title: "Liposomal Vitamin C",
-        status: "active",
-        kind: "supplement",
-        brand: "LivOn Labs",
-        manufacturer: "LivOn Laboratories",
-        ingredients: [
-          {
-            compound: "Vitamin C",
-            label: "Ascorbic acid",
-            amount: 500,
-            unit: "mg",
-            active: true,
-            note: null,
-          },
-          {
-            compound: "Vitamin C",
-            label: "Inactive vitamin C",
-            amount: 25,
-            unit: "mg",
-            active: false,
-            note: null,
-          },
-        ],
-      },
-      "# Liposomal Vitamin C",
-    ),
-    regimenRegistryDefinition,
-  );
-  const foodRecord = projectedRegistryEntity(
-    "food",
-    documentRecord(
-      "bank/foods/overnight-oats.md",
-      {
-        foodId: "food_overnight_oats",
-        slug: "overnight-oats",
-        title: "Overnight Oats",
-        status: "active",
-        serving: "1 bowl",
-        tags: ["breakfast"],
-        attachedRegimenIds: ["reg_vitamin_c"],
-      },
-      "# Overnight Oats",
-    ),
-    foodRegistryDefinition,
-  );
-  const recipeRecord = projectedRegistryEntity(
-    "recipe",
-    documentRecord(
-      "bank/recipes/salmon-rice-bowl.md",
-      {
-        recipeId: "recipe_salmon_rice_bowl",
-        slug: "salmon-rice-bowl",
-        title: "Salmon Rice Bowl",
-        status: "saved",
-        servings: 2,
-        relatedGoalIds: ["goal_sleep_quality"],
-        relatedConditionIds: ["cond_insomnia"],
-      },
-      "# Salmon Rice Bowl",
-    ),
-    recipeRegistryDefinition,
-  );
-  const providerRecord = projectedRegistryEntity(
-    "provider",
-    documentRecord(
-      "bank/providers/primary-care.md",
-      {
-        providerId: "prov_primary_care",
-        slug: "primary-care",
-        title: "Primary Care",
-        status: "active",
-        specialty: "primary-care",
-        aliases: ["doctor", "clinic"],
-      },
-      "# Primary Care",
-    ),
-    providerRegistryDefinition,
-  );
-  const workoutFormatRecord = projectedRegistryEntity(
-    "workout_format",
-    documentRecord(
-      "bank/workout-formats/push-day-a.md",
-      {
-        workoutFormatId: "wfmt_push_day_a",
-        slug: "push-day-a",
-        title: "Push Day A",
-        status: "active",
-        activityType: "strength-training",
-        durationMinutes: 45,
-        templateText: "Press day",
-        template: { blocks: ["press"] },
-      },
-      "# Push Day A",
-    ),
-    workoutFormatRegistryDefinition,
-  );
-
-  assert.ok(conditionRecordFromEntity(conditionRecord));
-  assert.ok(allergyRecordFromEntity(allergyRecord));
-  assert.ok(familyRecordFromEntity(familyRecord));
-  assert.ok(geneticsRecordFromEntity(geneticsRecord));
-  assert.ok(regimenRecordFromEntity(regimenRecord));
-  assert.ok(foodRecordFromEntity(foodRecord));
-  assert.ok(recipeRecordFromEntity(recipeRecord));
-  assert.ok(providerRecordFromEntity(providerRecord));
-  assert.ok(workoutFormatRecordFromEntity(workoutFormatRecord));
 
   assert.equal(
     (await listRegistryRecords(vaultRoot, foodRegistryDefinition, { text: "overnight" })).length,
