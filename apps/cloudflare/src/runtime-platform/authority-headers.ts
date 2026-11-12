@@ -13,10 +13,6 @@ const HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY_CODE =
   "HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY";
 const HOSTED_RUNTIME_INTERNAL_AUTHORITY_REJECTED_REASON =
   "internal_authority_rejected";
-const HOSTED_RUNTIME_CONTROL_PLANE_REJECTED_CODE =
-  "HOSTED_RUNTIME_CONTROL_PLANE_REJECTED";
-const HOSTED_RUNTIME_CONTROL_PLANE_REJECTED_REASON =
-  "control_plane_rejected";
 
 export class HostedRuntimeInternalAuthorityRejectedError extends Error {
   readonly code = HOSTED_RUNTIME_STALE_INVOCATION_AUTHORITY_CODE;
@@ -34,35 +30,6 @@ export class HostedRuntimeInternalAuthorityRejectedError extends Error {
       + `Hosted invocation is stale: ${HOSTED_RUNTIME_INTERNAL_AUTHORITY_REJECTED_REASON}.`,
     );
     this.name = "HostedRuntimeInternalAuthorityRejectedError";
-    this.responseStatus = input.status;
-    this.status = input.status;
-    this.statusCode = input.status;
-  }
-}
-
-export class HostedRuntimeControlPlaneRejectedError extends Error {
-  readonly code: string;
-  readonly reason: string;
-  readonly responseStatus: number;
-  readonly status: number;
-  readonly statusCode: number;
-
-  constructor(input: {
-    code?: string | null;
-    description: string;
-    message?: string | null;
-    status: number;
-  }) {
-    const code = normalizeControlPlaneRejectionText(input.code) ??
-      HOSTED_RUNTIME_CONTROL_PLANE_REJECTED_CODE;
-    const controlPlaneMessage = normalizeControlPlaneRejectionText(input.message) ??
-      `hosted control-plane rejected request (${input.status})`;
-    super(`${input.description} failed with HTTP ${input.status}. ${controlPlaneMessage}`);
-    this.name = "HostedRuntimeControlPlaneRejectedError";
-    this.code = code;
-    this.reason = code === HOSTED_RUNTIME_CONTROL_PLANE_REJECTED_CODE
-      ? HOSTED_RUNTIME_CONTROL_PLANE_REJECTED_REASON
-      : code;
     this.responseStatus = input.status;
     this.status = input.status;
     this.statusCode = input.status;
@@ -129,9 +96,4 @@ export async function requireHostedRuntimeWriteFenceHeaders(
 }
 export function isInternalAuthorityRejectedStatus(status: number): boolean {
   return status === 401;
-}
-
-function normalizeControlPlaneRejectionText(value: string | null | undefined): string | null {
-  const normalized = value?.trim();
-  return normalized && normalized.length > 0 ? normalized : null;
 }
