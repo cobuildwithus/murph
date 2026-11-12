@@ -5,9 +5,9 @@
     "id": "recap-song-timing",
     "kind": "improvement",
     "priority": 3,
-    "title": "Better songs and previews for recaps",
-    "summary": "New recap songs can follow the written lyrics and include word timings for playback, while cover previews can keep players' faces centered.",
-    "details": "New recap premises fit in a few words. Existing recaps remain available with their original songs and previews.",
+    "title": "Recap songs sing your story",
+    "summary": "The theme song sings the lyrics Murph wrote for your week, and each word lights up on screen as it's sung. Shared links to a show keep both faces in the middle of the picture.",
+    "details": "Shows made before today keep their songs and light whole lines.",
     "relevanceTags": [
       "games",
       "recaps"

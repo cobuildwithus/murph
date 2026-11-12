@@ -14,7 +14,8 @@ export type SongLine = z.infer<typeof songLinesSchema>[number];
 const wordsOf = (line: string) => line.trim().split(/\s+/u).filter(Boolean);
 const normalize = (word: string) => word.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 
-/** Align in order without allowing a sung extra or repeated word to steal later anchors. */
+/** Align in order without allowing a sung extra or repeated word to steal later anchors.
+ * Fewer than half the lyric words heard means the song did not sing these lyrics. */
 export function alignSongLyrics(lyrics: readonly string[], timestamps: readonly SongWordTimestamp[], durationMs: number): SongLine[] | undefined {
   const lines = lyrics.map(wordsOf);
   const words = lines.flat();
@@ -27,7 +28,8 @@ export function alignSongLyrics(lyrics: readonly string[], timestamps: readonly 
       ? 1 + lengths[i + 1]![j + 1]!
       : Math.max(lengths[i + 1]![j]!, lengths[i]![j + 1]!);
   }
-  if (!lengths[0]![0]) return undefined;
+  const matched = lengths[0]![0]!;
+  if (!matched || matched * 2 < lyricKeys.filter(Boolean).length) return undefined;
   const duration = Math.round(durationMs);
   const clamp = (ms: number) => Math.max(0, Math.min(duration, Math.round(ms)));
   const anchors: { index: number; startMs: number; endMs: number }[] = [];

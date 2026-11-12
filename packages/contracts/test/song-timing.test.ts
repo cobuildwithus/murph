@@ -26,6 +26,7 @@ it("uses global ordered matches when a greedy match would consume the wrong repe
 it("interpolates leading, middle and trailing missing words across lyric lines", () => {
   expect(alignSongLyrics(["Now Leo", "and Ava go home"], [
     { word: "Leo", startMs: 200, endMs: 400 }, { word: "Ava", startMs: 800, endMs: 1000 },
+    { word: "go", startMs: 1000, endMs: 1200 },
   ], 1400)).toEqual([
     { words: [{ text: "Now", startMs: 0, endMs: 200 }, { text: "Leo", startMs: 200, endMs: 400 }] },
     { words: [{ text: "and", startMs: 400, endMs: 800 }, { text: "Ava", startMs: 800, endMs: 1000 },
@@ -48,6 +49,8 @@ it("normalizes Unicode punctuation and clamps overlapping and out-of-order times
 it("omits timings without a usable matching anchor and bounds alignment work", () => {
   expect(alignSongLyrics(["Leo"], [], 1000)).toBeUndefined();
   expect(alignSongLyrics(["Leo"], [{ word: "Ava", startMs: 0, endMs: 200 }], 1000)).toBeUndefined();
+  // One word of five heard is a song that didn't sing these lyrics.
+  expect(alignSongLyrics(["Leo ran to the shop"], [{ word: "Leo", startMs: 0, endMs: 200 }], 1000)).toBeUndefined();
   expect(alignSongLyrics(["Leo ".repeat(5001)], [{ word: "Leo", startMs: 0, endMs: 200 }], 1000)).toBeUndefined();
   expect(alignSongLyrics(["Leo"], [{ word: "Leo", startMs: 0, endMs: 200 }], Number.NaN)).toBeUndefined();
   for (const value of [[], [{ word: "Leo", startMs: -1, endMs: 100 }], [{ word: "Leo", startMs: 200, endMs: 100 }],
