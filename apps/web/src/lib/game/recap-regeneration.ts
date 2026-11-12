@@ -5,7 +5,7 @@ import { groupGameRecapPlayers } from "./recap-cohort";
 import { getPrisma } from "../prisma";
 import { lockGamePair } from "./blocks";
 import { hasGameChatBlock, sameGamePlayers } from "./chat-membership";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { gameChatLifecycleEventId, reserveGameChatLifecycleTx } from "./chat-lifecycle-receipt";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { HOSTED_LINQ_TERMINAL_RETRY_WINDOW_MS } from "../hosted-onboarding/shared";
@@ -76,7 +76,7 @@ export async function requestGameRecapRegeneration(input: GameRecapRegenerationR
     } });
     const refusal = recapRosterRefusal(game, players);
     if (!game || refusal) return result(refusal ?? "ineligible_roster");
-    if (!isGameOn(game)) return result("game_disabled");
+    if (!isGameEnabled()) return result("game_disabled");
     if (!game.chatContainerMemberId) return result("chat_unavailable");
     if (await hasGameChatBlock(tx, game.players.flatMap(player => player.memberId ? [player.memberId] : []))) return result("players_blocked");
     const prior = await tx.gameEvent.findUnique({ where: { commandKey: eventId }, select: { id: true } });

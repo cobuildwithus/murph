@@ -24,10 +24,9 @@ export async function respondToGameCommand(
     answer?: (game: GameView, input: { command: Record<string, unknown>; memberId: string }) => Promise<GameView>;
     body: boolean;
     limitBytes?: number;
-    inviteToken?: string;
   } = { body: true },
 ): Promise<Response> {
-  const auth = await withRetryableServerFailures(() => requireGameMemberAuth(request, options.inviteToken));
+  const auth = await withRetryableServerFailures(() => requireGameMemberAuth(request));
   const memberId = auth.member.id;
   const body = options.body ? await readJsonObject(request, { limitBytes: options.limitBytes ?? BODY_LIMIT_BYTES }) : {};
   const built = command(body);

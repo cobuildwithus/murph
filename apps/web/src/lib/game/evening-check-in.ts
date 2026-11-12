@@ -9,7 +9,7 @@ import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxMaxSeqByLane, readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { getPrisma } from "../prisma";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { lockGamePair } from "./blocks";
 import { GameChatAudienceError, readGameChatAuthority, readGameChatAudience, type GameChatAudience } from "./chat-membership";
 import { visitGameMissedCheckInPages } from "./missed-check-in";
@@ -78,7 +78,7 @@ async function readEligibleRoomGames(roomId: string, ids: readonly string[], wor
   const audience = await readGameChatAudience(roomId);
   const games: Games = [];
   for (const game of candidates) {
-    if (game.row.status === "live" && game.row.chatContainerMemberId === roomId && isGameOn(game.row)
+    if (game.row.status === "live" && game.row.chatContainerMemberId === roomId && isGameEnabled()
       && await readGameChatAuthority(game.row, roomId, audience)) games.push(game);
   }
   return games.length ? { games, audience } : null;
@@ -209,7 +209,7 @@ export async function isEveningBatchCurrentTx(policy: HostedGameEveningCheckInPo
   const ids = [...new Set(policy.batch.map(game => game.gameId))].sort();
   await tx.$queryRaw`SELECT id FROM game WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
   const games = await loadGameMissedCheckInGames(tx, ids);
-  if (games.length !== ids.length || games.some(game => game.row.status !== "live" || game.row.chatContainerMemberId !== policy.roomId || !isGameOn(game.row))) return false;
+  if (games.length !== ids.length || games.some(game => game.row.status !== "live" || game.row.chatContainerMemberId !== policy.roomId || !isGameEnabled())) return false;
   if (!audience) return false;
   for (const { row } of games) if (!await readGameChatAuthority(row, policy.roomId, audience, tx)) return false;
   memberIds = [...new Set(games.flatMap(game => remainingPlayers(game.state).map(player => player.memberId)))];

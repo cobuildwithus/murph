@@ -57,17 +57,16 @@ describe("game pair discovery", () => {
     expect(m.games).not.toHaveBeenCalled(); expect(m.chat).not.toHaveBeenCalled();
   });
 
-  it("has no game chat when neither player is on the game list", async () => {
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "player-c");
+  it("does not discover group games from an empty room roster", async () => {
+    expect(await readGameChatCandidateIds([], true, "room")).toEqual([]);
+    expect(m.games).not.toHaveBeenCalled();
+  });
+
+  it("has no game chat when the global switch is off", async () => {
+    vi.stubEnv("MURPH_GAME_ENABLED", "false");
     await expect(requireExactGameChat("room")).rejects.toThrow("2 to 10");
     await expect(readGameChatCandidateIds(players)).resolves.toEqual([]);
     expect(m.chat).not.toHaveBeenCalled(); expect(m.games).not.toHaveBeenCalled();
-  });
-
-  it.each(["player-a", "player-b"])("opens the pair's game chat when one player is listed (%s only)", async (only) => {
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", only);
-    await expect(requireExactGameChat("room")).resolves.toEqual(players);
-    await expect(readGameChatCandidateIds(players)).resolves.toEqual(["active-game", "finished-game"]);
   });
 
   it("rejects stale local membership when the provider has an additional person", async () => {

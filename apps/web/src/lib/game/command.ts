@@ -173,8 +173,7 @@ const TRANSCRIPT_MAX = 500;
 
 /**
  * A photo post carries 1-4 photo uploads (and optional words). An excuse is
- * only words: the transcript the phone made on-device, 1-500 characters; no
- * audio is ever uploaded.
+ * only words, 1-500 characters; no audio is uploaded.
  */
 function post(input: Record<string, unknown>): GameCommand {
   const kind = oneOf(input.kind, "kind", GAME_ENTRY_KINDS);

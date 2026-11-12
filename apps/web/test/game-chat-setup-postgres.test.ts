@@ -195,9 +195,10 @@ describe.skipIf(!enabled)("chat game setup persistence", () => {
     expect(await getPrisma().game.count({ where: { id: create.gameId } })).toBe(0);
     expect(await getPrisma().game.count({ where: { chatContainerMemberId: room } })).toBe(0);
   });
-  it("enforces listed creation, the unlisted rematch exception and open/outdated chain rules", async () => {
-    const f = await setup(); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", f.a);
+  it("enforces the switch and open/outdated rematch chain rules", async () => {
+    const f = await setup(); vi.stubEnv("MURPH_GAME_ENABLED", "false");
     expect(await f.run(f.b, f.create())).toMatchObject({ ok: false, error: { code: "GAME_DISABLED" } });
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     const first = f.create(); await f.run(f.a, first);
     await getPrisma().game.update({ where: { id: first.gameId }, data: { status: "settled" } });
     const rematch = f.create(randomUUID(), first.gameId);

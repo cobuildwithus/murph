@@ -6,7 +6,7 @@ import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { getPrisma } from "../prisma";
 import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxMaxSeqByLane, readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { gameGroupLoreFingerprint } from "./audience";
 import { GameChatAudienceError, readGameChatAuthority, readGameChatAudience, type GameChatAudience } from "./chat-membership";
 import { gameGroupMissedDayEventId, reserveGameMissedDayTx } from "./chat-lifecycle-receipt";
@@ -27,7 +27,7 @@ export async function readGroupMissedDayRoom(roomId: string, gameIds?: readonly 
   const audience = await readGameChatAudience(roomId);
   const games: Games = [];
   for (const game of candidates.filter(game => game.row.maxPlayers === 10)) {
-    if (game.row.status !== "live" || game.row.chatContainerMemberId !== roomId || !isGameOn(game.row)) continue;
+    if (game.row.status !== "live" || game.row.chatContainerMemberId !== roomId || !isGameEnabled()) continue;
     const allowed = await readGameChatAuthority(game.row, roomId, audience);
     if (!allowed) continue;
     games.push(game);
@@ -35,7 +35,7 @@ export async function readGroupMissedDayRoom(roomId: string, gameIds?: readonly 
   if (!audience || games.length === 0) return null;
   // Mixed rooms may include each eligible pair's facts, never its notebook.
   for (const game of candidates.filter(game => game.row.maxPlayers === 2)) {
-    if (game.row.status === "live" && game.row.chatContainerMemberId === roomId && isGameOn(game.row)
+    if (game.row.status === "live" && game.row.chatContainerMemberId === roomId && isGameEnabled()
       && await readGameChatAuthority(game.row, roomId, audience)) games.push(game);
   }
   const fingerprints = new Set(games.filter(game => game.row.maxPlayers === 10).map(game => gameGroupLoreFingerprint(game.row.audienceKey!)));
@@ -112,7 +112,7 @@ export async function isGroupMissedDayBatchCurrentTx(policy: HostedGameGroupMiss
   if (games.length !== ids.length) return false;
   let groupCount = 0;
   for (const { row } of games) {
-    if (row.status !== "live" || row.chatContainerMemberId !== policy.roomId || !isGameOn(row)) return false;
+    if (row.status !== "live" || row.chatContainerMemberId !== policy.roomId || !isGameEnabled()) return false;
     if (row.maxPlayers === 10) {
       if (!row.audienceKey || gameGroupLoreFingerprint(row.audienceKey) !== policy.pairFingerprint) return false;
       groupCount += 1;

@@ -342,7 +342,6 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
 
   it("freezes shared game funding for one invocation and recomputes only after release", async () => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     const now = new Date("2030-01-15T12:00:00Z");
     try {
       const { primary, duplicate, firstPlayer, game } = await gameFundingRooms(now);
@@ -404,7 +403,6 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     { frozenSpent: 0n, sourceSpent: 0n, sourceDenied: true, allowed: false },
   ])("checks frozen funding before first launch ($frozenSpent / $sourceSpent / $sourceDenied)", async scenario => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     const now = new Date();
     try {
       const { primary, duplicate, firstPlayer, game } = await gameFundingRooms(now);

@@ -244,7 +244,7 @@ Revoking a sharing permission stops future disclosures by Murph to the extent su
 
 ### Games
 
-Murph may offer a game for two people. Each player picks a daily task and posts one proof a day, and the players agree on a prize the loser gives the winner, or a dare the loser does. Games are invite only and free to play. These rules apply to every game, together with the rest of these Terms.
+Murph may offer a game for two people. Each player picks a daily task and posts one proof a day, and the players agree on a prize the loser gives the winner, or a dare the loser does. Games are free to play. These rules apply to every game, together with the rest of these Terms.
 
 **No tolerance for objectionable content or abusive users.** In a game, you may not post, send, or share anything sexual, hateful, harassing, threatening, or violent, or anything that encourages someone to hurt themselves, and you may not abuse, bully, or threaten another player. We check the words players type before they are posted against a list of words and phrases that break these rules, such as slurs and explicit sexual words, and refuse ones that match. The check does not catch everything, so please report anything it misses. We remove content, end games, and suspend or close the accounts of people who break these rules.
 
