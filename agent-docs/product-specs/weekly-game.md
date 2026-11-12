@@ -531,7 +531,8 @@ resulting avatar. No private photo is shared with the subject or other players.
   produce one message per game. Days off, still-open days, any-N open capacity and posts the
   player marked incomplete do not trigger it. Murph reads bounded current-room
   history and the exact pair's lore first and stays quiet when the player already
-  explained the miss. This path requires the exact two-player roster, never
+  explained the miss. An earlier reminder never covers a miss, so pair and group
+  missed-day turns get no accepted-reminder history. This path requires the exact two-player roster, never
   discovers or creates a chat, and permits a no-reply result. A check-in that
   cannot go out within two hours of its claim is dropped, never sent late.
 - **Group missed-day host check-ins.** A group game, including two-person
@@ -569,8 +570,9 @@ resulting avatar. No private photo is shared with the subject or other players.
   task and local date by another reminder. Statements about another day or
   task leave other open tasks eligible for the same question. A reminder or
   stated intention never counts as completion. Shared notification context uses
-  bounded accepted outgoing messages from this exact room; pending output is
-  not evidence of a prior send.
+  bounded accepted outgoing messages from this exact room, timed in the room's
+  local zone so last night's 8pm question never reads as today's; pending
+  output is not evidence of a prior send.
   Three consecutive accepted scheduled evening sends without a player message
   pause future evenings until someone writes. Skips and failures do not count.
   The 90-day iMessage inactivity pause still applies. The feature is off unless

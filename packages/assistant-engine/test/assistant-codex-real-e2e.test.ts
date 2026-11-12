@@ -50743,3 +50743,87 @@ describeRealCodex('shared reminder awareness', () => {
     }
   }, 360_000)
 })
+
+describeRealCodex('reminder awareness across local midnight', () => {
+  it.each([
+    { name: 'evening check-in after last night’s question sent past UTC midnight', kind: 'evening' },
+    { name: 'missed-day note after last night’s question sent past UTC midnight', kind: 'missed' },
+  ] as const)('local midnight: $name', async scenario => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-reminder-midnight-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameEveningCheckInInstructions, buildGameMissedDayInstructions, gameEveningCheckInPolicySchema } = await import('@murphai/hosted-execution/runtime-control')
+    const { addDaysToIsoDate, resolveFloatingIsoTimestampInTimeZone, toLocalDayKey } = await import('@murphai/contracts')
+    const events: unknown[] = []
+    // Real dates: a turn that sees the clock treats a far-future missed date as not yet missed.
+    const zone = 'America/New_York'
+    const today = toLocalDayKey(new Date(), zone)
+    const yesterday = addDaysToIsoDate(today, -1)
+    const at = (date: string, time: string) => new Date(resolveFloatingIsoTimestampInTimeZone(`${date}T${time}`, zone)!.timestamp).toISOString()
+    try {
+      await initializeVault({ timezone: zone, vaultRoot: workingDirectory })
+      // 8:02 PM in New York is already the next day in UTC.
+      const lastNight = at(yesterday, '20:02:00')
+      const message = 'Bea, are you doing your plank and pull-ups today?'
+      const prior = notificationHistoryIntent({ message, createdAt: lastNight, updatedAt: lastNight, lastAttemptAt: lastNight, sentAt: lastNight,
+        delivery: { channel: 'linq', idempotencyKey: 'synthetic-history', messageLength: message.length, providerMessageId: 'synthetic-message',
+          providerThreadId: 'synthetic-room', sentAt: lastNight, target: 'synthetic-room', targetKind: 'thread' } })
+      await saveAssistantOutboxIntent(workingDirectory, prior)
+      const later = at(yesterday, '21:56:00')
+      const nudge = 'Bea, you still have time tonight for your plank and pull-ups.'
+      await saveAssistantOutboxIntent(workingDirectory, notificationHistoryIntent({ intentId: 'outbox_synthetic_nudge', message: nudge,
+        dedupeKey: 'synthetic-nudge', deliveryIdempotencyKey: 'synthetic-nudge', createdAt: later, updatedAt: later, lastAttemptAt: later, sentAt: later,
+        delivery: { channel: 'linq', idempotencyKey: 'synthetic-nudge', messageLength: nudge.length, providerMessageId: 'synthetic-nudge-message',
+          providerThreadId: 'synthetic-room', sentAt: later, target: 'synthetic-room', targetKind: 'thread' } }))
+      const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never',
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const tasks = [{ gameId: 'game_plank', task: 'a plank' }, { gameId: 'game_pullups', task: 'pull-ups' }]
+      const common = { actorId: null, bindingDeliveryTarget: 'synthetic-room', channel: 'linq', identityId: null,
+        deliveryTarget: 'synthetic-room', threadId: 'synthetic-room', threadIsDirect: false, deliveryDispatchMode: 'queue-only' as const,
+        onTraceEvent: (event: { rawEvent: unknown }) => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env },
+        turnTrigger: 'manual-deliver' as const, vault: workingDirectory, workingDirectory }
+      let result: Awaited<ReturnType<typeof sendAssistantNotificationLocal>>
+      if (scenario.kind === 'evening') {
+        const date = today
+        const eventId = `game-evening:synthetic-group:${date}`
+        const policy = gameEveningCheckInPolicySchema.parse({ kind: 'game_evening_check_in', roomId: 'synthetic-group',
+          eventId, date, expiresAt: at(today, '20:30:00'), conversationLaneSeq: '0',
+          batch: tasks.map(task => ({ gameId: task.gameId, termsVersion: 1, memberIds: ['player_ava', 'player_bea'], dayIndex: 1 })) })
+        result = await sendAssistantNotificationLocal({ ...common, deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+          executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'synthetic-group', userEnvKeys: [] } },
+          instructions: buildGameEveningCheckInInstructions({ date, transcript: [], players: [
+            { memberId: 'player_ava', playerName: 'Ava', tasks }, { memberId: 'player_bea', playerName: 'Bea', tasks }] }),
+          responsePolicy: policy })
+      } else {
+        const scope = { gameId: 'game_plank', eventId: `game-missed:game_plank:player_bea:${yesterday}`,
+          memberId: 'player_bea', firstMissedDate: yesterday, pairFingerprint: '0123456789abcdef0123456789abcdef' }
+        await mkdir(path.join(workingDirectory, 'games'), { recursive: true })
+        await writeFile(path.join(workingDirectory, 'games', `lore-${scope.pairFingerprint}.md`), '# Ava & Bea\n\n- Used bit: the floor filed a complaint.\n', 'utf8')
+        result = await sendAssistantNotificationLocal({ ...common, deliveryIdempotencyKey: scope.eventId, deliveryDedupeToken: scope.eventId,
+          executionContext: { hosted: { defaultTarget: modelTarget, gameMissedCheckInScope: scope, memberId: 'synthetic-group', userEnvKeys: [] } },
+          instructions: buildGameMissedDayInstructions({ playerName: 'Bea', firstMissedDate: scope.firstMissedDate,
+            missedDates: [scope.firstMissedDate], transcript: [], missedGames: [{ gameId: 'game_plank', playerName: 'Bea', task: 'a plank', missedDates: [scope.firstMissedDate] }] }),
+          responsePolicy: { kind: 'game_missed_check_in', ...scope } })
+      }
+      const newIntents = (await listAssistantOutboxIntents(workingDirectory)).filter(intent => !['outbox_synthetic_history', 'outbox_synthetic_nudge'].includes(intent.intentId))
+      process.stdout.write(`[reminder-midnight] ${JSON.stringify({ scenario: scenario.name, decision: result.decision.kind, reply: result.response, sends: newIntents.length })}\n`)
+      expect(result.decision.kind).toBe('send_message')
+      expect(newIntents).toHaveLength(1)
+      expect(result.response).toMatch(/Bea/u)
+      if (scenario.kind === 'evening') {
+        expect(result.response).toMatch(/Ava/u)
+        expect(result.response).toMatch(/plank/iu)
+        expect(result.response).toMatch(/pull/iu)
+      } else expect(result.response).toMatch(/\bno\b|miss|didn['’]t/iu)
+    } catch (error) {
+      process.stdout.write(`[reminder-midnight-failure] ${JSON.stringify({ scenario: scenario.name, messages: readCompletedAgentMessages(events) })}\n`)
+      throw error
+    } finally {
+      await stopWarmCodexAppServer('reminder-midnight-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})

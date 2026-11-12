@@ -2074,7 +2074,10 @@ async function buildNotificationPromptWithDeliveryHistory(context: {
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
 }): Promise<string> {
   const { input, messageInput, session, sharedPlan } = context
-  if (!assistantNotificationAllowsSkip(input.responsePolicy ?? { kind: 'allow_send_or_skip' })
+  const policy = input.responsePolicy ?? { kind: 'allow_send_or_skip' }
+  // A missed-day note reports a miss once per event; last night's question never covers it.
+  if (!assistantNotificationAllowsSkip(policy) || policy.kind === 'game_missed_check_in'
+    || policy.kind === 'game_group_missed_check_in'
     || input.turnPolicy?.kind === 'maintenance-exact-skip' || input.notificationPromptProfile) {
     return messageInput.prompt
   }
