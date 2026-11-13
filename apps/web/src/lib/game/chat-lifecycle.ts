@@ -714,10 +714,15 @@ async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMembe
       playerNamesByMemberId: shared.players.map(player => ({ memberId: player.memberId, name: player.firstName })),
       since: current.row.startedAt ?? current.row.createdAt });
     const prize = (candidate: typeof shared) => candidate.terms.stakes.find(stake => stake.kind !== "both_get")?.item ?? "";
+    // Only games these two finished in this same chat: their prizes were already said here.
+    // The room state also lists the pair's games from other chats, which this room may not see.
+    const here = new Set((await getPrisma().game.findMany({ where: { id: { in: room.filter(candidate => candidate.status === "settled").map(candidate => candidate.id) },
+      status: "settled", maxPlayers: 2, chatContainerMemberId: game.chatContainerMemberId!, players: { every: { memberId: { in: [...players] } } } },
+      select: { id: true } })).map(row => row.id));
     return buildGameBothWinOfferInstructions({ players: shared.players.map(player => ({ firstName: player.firstName,
       task: shared.terms.tasks.find(task => task.seat === player.seat)?.text ?? "" })), dayReached, lengthDays: shared.lengthDays,
       currentPrize: prize(shared),
-      earlierPrizes: room.filter(candidate => candidate.status === "settled" && candidate.maxPlayers !== 10).map(prize).filter(Boolean),
+      earlierPrizes: room.filter(candidate => here.has(candidate.id)).map(prize).filter(Boolean),
       transcript: transcript.slice(-40).map(({ playerName, text }) => ({ playerName, text })) });
   }
   if (kind === "cancelled") return await wasCalledOff(game.id) ? buildGameCalledOffInstructions() : buildGameInviteCancelledInstructions(game.maxPlayers === 10);

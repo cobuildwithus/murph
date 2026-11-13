@@ -90,6 +90,29 @@ describe.skipIf(!enabled)("both-win completion and held delivery against Postgre
     expect(await game.receipt()).toMatchObject({ retryAfterAt: at(held) });
     await drainGameChatLifecycle({ now: at(held) }); expect(effects.publish).toHaveBeenCalledOnce();
   });
+  it("offers only earlier prizes from this pair's games in this same chat", async () => {
+    const game = await fixture();
+    const other = randomUUID(); members.push(other);
+    await getPrisma().hostedMember.create({ data: { id: other, billingStatus: "not_started" } });
+    // Three finished games between the same two players: here, in another chat, and in no chat.
+    for (const [item, chatContainerMemberId] of [["Same room prize", game.room], ["Other room prize", other], ["Unbound prize", null]] as const) {
+      const gameId = randomUUID();
+      const created = await runGameCommand({ actorMemberId: game.ava, command: { type: "createGame", gameId, inviteeFirstName: "Leo",
+        terms: { lengthDays: 3, tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Walk" }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: "prize", item }] } } });
+      if (!created.ok || !created.game?.inviteToken) throw new Error("Earlier game fixture failed");
+      expect(await runGameCommand({ actorMemberId: game.leo, command: { type: "join", token: created.game.inviteToken, termsVersion: 1, timeZone: "UTC" } })).toMatchObject({ ok: true });
+      await getPrisma().game.update({ where: { id: gameId }, data: { status: "settled", settledAt: at("2030-03-20T00:00:00Z"), chatContainerMemberId,
+        result: { v: 1, termsVersion: 1, scores: [{ seat: 0, memberId: game.ava, score: 3, misses: 0 }, { seat: 1, memberId: game.leo, score: 2, misses: 1 }] } } });
+      await getPrisma().hostedLinqDelivery.deleteMany({ where: { source: "game_lifecycle", sourceRef: gameId } });
+    }
+    expect(await game.complete(at("2030-04-05T14:00:00Z"))).toMatchObject({ ok: true });
+    await drainGameChatLifecycle({ now: at("2030-04-05T14:00:00Z") });
+    expect(effects.publish).toHaveBeenCalledOnce();
+    const instructions: string = effects.publish.mock.calls[0][0].envelope.notification.instructions;
+    const data = JSON.parse(instructions.split("\n").at(-1)!);
+    expect(data).toMatchObject({ currentPrize: "Choose lunch", earlierPrizes: ["Same room prize"] });
+    expect(instructions).not.toMatch(/Other room prize|Unbound prize/u);
+  });
   it("uses now for a null morning result", async () => {
     const game = await fixture();
     const morning = vi.spyOn(time, "morningAfter").mockReturnValue(null);

@@ -5,10 +5,10 @@ const m = vi.hoisted(() => ({
   event: vi.fn(), cancelledEvent: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
   state: vi.fn(), rematchNotice: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
   destination: vi.fn(), mailbox: vi.fn(), prepare: vi.fn(), append: vi.fn(), signal: vi.fn(), route: vi.fn(),
-  reminders: vi.fn(), missedBatch: vi.fn(), reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(), room: vi.fn(),
+  sameRoom: vi.fn(), reminders: vi.fn(), missedBatch: vi.fn(), reserveMissed: vi.fn(), recapMaterial: vi.fn(), recapMessages: vi.fn(), transcript: vi.fn(), room: vi.fn(),
 }));
 vi.mock("../src/lib/prisma", () => {
-  const db = { $queryRaw: m.lock, gameEvent: { findUnique: m.event, findFirst: m.cancelledEvent, createMany: m.witness }, gameEntry: { findMany: m.entries }, gameReport: { findMany: m.reports }, hostedThreadRoute: { findFirst: m.threadRoute }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findUniqueOrThrow: m.game, findFirst: m.current, updateMany: m.bind } };
+  const db = { $queryRaw: m.lock, gameEvent: { findUnique: m.event, findFirst: m.cancelledEvent, createMany: m.witness }, gameEntry: { findMany: m.entries }, gameReport: { findMany: m.reports }, hostedThreadRoute: { findFirst: m.threadRoute }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findUniqueOrThrow: m.game, findFirst: m.current, findMany: m.sameRoom, updateMany: m.bind } };
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
 vi.mock("../src/lib/game/service", () => ({ isBothWinOfferCurrent: m.bothCurrent, readGameChatState: m.state, readGameNoticeRoom: m.room, readGameMissedCheckInBatch: m.missedBatch, readGameRematchNotice: m.rematchNotice,
@@ -106,7 +106,10 @@ describe("durable game chat lifecycle", () => {
     m.state.mockResolvedValue({ games: [{ id: "game", status: "live", lengthDays: 7, players: seats,
       terms: { tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Walk" }], stakes: [{ kind: "prize", item: "Choose lunch" }] } },
     { id: "earlier", status: "settled", lengthDays: 5, players: seats, terms: { tasks: [], stakes: [{ kind: "dare", item: "Sing" }, { kind: "both_get", item: "Tacos" }] } },
+    { id: "elsewhere", status: "settled", lengthDays: 5, players: seats, terms: { tasks: [], stakes: [{ kind: "prize", item: "Private prize from another chat" }] } },
     { id: "group", status: "settled", maxPlayers: 10, lengthDays: 5, players: seats, terms: { tasks: [], stakes: [{ kind: "prize", item: "Group prize" }] } }] });
+    // The database says which settled games were this pair's, in this chat.
+    m.sameRoom.mockResolvedValue([{ id: "earlier" }]);
     m.transcript.mockResolvedValue([{ playerName: "Ava", text: "ramen after this", sentAt: "2026-01-02T00:00:00.000Z" }]);
     if (status === "generation_queued") m.mailbox.mockResolvedValue({ id: "mailbox", consumedAt: null });
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
@@ -115,6 +118,9 @@ describe("durable game chat lifecycle", () => {
       expect(notice).toMatchObject({ deliveryIdempotencyKey: "game-both-win:game", responsePolicy: { kind: "require_send" }, deliveryDispatchMode: "queue-only" });
       expect(JSON.parse(notice.instructions.split("\n").at(-1))).toEqual({ players: [{ firstName: "Ava", task: "Read" }, { firstName: "Leo", task: "Walk" }], dayReached: 5, lengthDays: 7,
         currentPrize: "Choose lunch", earlierPrizes: ["Sing"], transcript: [{ playerName: "Ava", text: "ramen after this" }] });
+      expect(notice.instructions).not.toMatch(/Private prize from another chat|Group prize/u);
+      expect(m.sameRoom).toHaveBeenCalledWith({ where: { id: { in: ["earlier", "elsewhere", "group"] }, status: "settled", maxPlayers: 2, chatContainerMemberId: "room",
+        players: { every: { memberId: { in: players } } } }, select: { id: true } });
       expect(m.transcript).toHaveBeenCalledWith({ containerMemberId: "room", playerNamesByMemberId: seats.map(({ memberId, firstName }) => ({ memberId, name: firstName })), since: new Date("2026-01-01T00:00:00.000Z") });
     } else expect(m.prepare).not.toHaveBeenCalled();
     expect(m.signal).toHaveBeenCalledOnce(); expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
