@@ -48,6 +48,7 @@ export type ConnectSourceConnectionState = {
   connectTarget: string | null;
   disconnectScope?: ConnectSourceDisconnectScope;
   disconnectSourceProviderSlug?: string;
+  lastDataAt?: string | null;
   migrationState?: ConnectSourceMigrationState;
   migrationRetryRequired?: boolean;
   recoveryKind?: ConnectSourceRecoveryKind;
@@ -313,6 +314,21 @@ export function resolveConnectSources(
   ]);
 }
 
+/**
+ * How a source connects: Apple Health itself and the wearables that come in
+ * through it connect in the Murph app; every other source signs in on its own
+ * website.
+ */
+export function connectSourcePath(id: string): "apple_health" | "apple_health_relay" | "web" {
+  if (id === "apple-health") return "apple_health";
+  return DISPLAY_ONLY_CONNECT_SOURCE_IDS.has(id) ? "apple_health_relay" : "web";
+}
+
+/** When data last arrived, carried only where the settings read says anything about it. */
+function lastDataAtField(source: { lastDataAt?: string | null }): { lastDataAt?: string | null } {
+  return source.lastDataAt === undefined ? {} : { lastDataAt: source.lastDataAt };
+}
+
 export function connectSourcePngLogoPath(id: string): string | null {
   return readConnectSourceUi(id)?.logo.src.replace(/\.svg$/u, ".png") ?? null;
 }
@@ -368,6 +384,7 @@ export function resolveConfiguredConnectSources(
         connectTarget,
         disconnectScope,
         disconnectSourceProviderSlug,
+        lastDataAt,
         migrationState,
         migrationRetryRequired,
         recoveryKind,
@@ -406,6 +423,7 @@ export function resolveConfiguredConnectSources(
           ? { disconnectSourceProviderSlug }
           : {}),
         ...(historicalResetIncomplete ? { historicalResetIncomplete } : {}),
+        ...lastDataAtField({ lastDataAt }),
         ...(migrationState ? { migrationState } : {}),
         ...(migrationRetryRequired
           ? { migrationRetryRequired: true }
@@ -676,6 +694,7 @@ function resolveConnectSourceConnectionMatches(
             ? { recoveryKind: "connection_reset" as const }
             : {}),
           requiresReconnect: upstreamRequiresReconnect,
+          ...lastDataAtField(upstreamSource),
           sourceId,
           state: sourceState,
         });
@@ -743,6 +762,8 @@ function resolveFitbitMigrationConnectionState(input: {
       : successorNeedsAuthorization
         ? "authorization_required"
         : "verifying_successor",
+    lastDataAt: [legacy.lastDataAt, successor?.lastDataAt]
+      .filter((at): at is string => Boolean(at)).sort().at(-1) ?? null,
     requiresReconnect: false,
     sourceId: "fitbit",
     state: input.sourceState,

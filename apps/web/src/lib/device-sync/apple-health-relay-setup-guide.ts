@@ -73,6 +73,11 @@ export function readAppleHealthRelaySourceName(
   return APPLE_HEALTH_RELAY_SETUP_GUIDES[setupGuideId].sourceName;
 }
 
+export function readAppleHealthRelaySetupStep(setupGuideId: AppleHealthRelaySetupGuideId) {
+  const guide = APPLE_HEALTH_RELAY_SETUP_GUIDES[setupGuideId];
+  return { title: guide.setupTitle, detail: guide.setupDetail };
+}
+
 export function isAppleHealthRelaySetupGuideId(
   value: unknown,
 ): value is AppleHealthRelaySetupGuideId {

@@ -5385,6 +5385,7 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
     assert.equal(states.length, 1, value.name);
     assert.deepEqual(states[0], {
       connectionId: "dsc_junction_fitbit",
+      lastDataAt: value.upstreamSources.at(-1)?.lastDataAt ?? null,
       requiresReconnect: false,
       sourceId: "fitbit",
       state: "active",
