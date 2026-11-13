@@ -610,7 +610,7 @@ test('timeline merges journals, events, and metric sample summaries into one des
       { flags: ['--entry-type', 'journal', '--experiment', 'unrelated-experiment'], expectedIds: [] },
       { flags: ['--limit', '1'], expectedIds: ['sample-summary:2026-03-12:heart_rate:bpm'] },
     ]) {
-      const filtered = await runCli<{ items: Array<{ id: string }> }>([
+      const filtered = await runCli<{ items: Array<{ id: string }>; limit?: number }>([
         'timeline', '--from', '2026-03-12', '--to', '2026-03-12',
         ...flags, '--vault', fixture.vaultRoot,
       ])
@@ -620,6 +620,8 @@ test('timeline merges journals, events, and metric sample summaries into one des
         expectedIds,
         flags.join(' '),
       )
+      // Only a full page names its limit, so a truncated read is visible.
+      assert.equal(requireData(filtered).limit, flags.includes('--limit') ? 1 : undefined, flags.join(' '))
       for (const item of requireData(filtered).items) {
         assert.equal(Object.hasOwn(item, 'data'), false)
       }

@@ -61,8 +61,10 @@ const timelineEntrySchema = z.object({
   tags: z.array(z.string().min(1)),
 })
 
+// `limit` appears only when the page is full, the one sign that older entries exist.
 const timelineResultSchema = z.object({
   items: z.array(timelineEntrySchema),
+  limit: z.number().int().positive().optional(),
 })
 
 const queryProjectionStatusSchema = z.object({
@@ -409,6 +411,7 @@ export function registerSearchCommands(cli: Cli.Cli) {
             ...(hasOtherIds(item.relatedIds, item.id) ? { relatedIds: item.relatedIds } : {}),
             tags: item.tags,
           })),
+          ...(items.length >= options.limit ? { limit: options.limit } : {}),
         }
       },
     },
