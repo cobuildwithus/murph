@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { cache } from "react";
 
+import { isAppleMobileUserAgent } from "@/src/lib/apple-mobile";
 import { gameInviteAppUrl } from "@/src/lib/game/access";
 import { readInvitePreview } from "@/src/lib/game/service";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
@@ -46,6 +48,7 @@ export default async function GameInvitePage(props: GameInvitePageProps) {
       <GameInviteView
         appUrl={gameInviteAppUrl(token)}
         inviteUrl={`${MURPH_PUBLIC_SITE_URL}/g/${encodeURIComponent(token)}`}
+        onComputer={!isAppleMobileUserAgent((await headers()).get("user-agent"))}
         preview={await readPreview(token)}
       />
     </main>

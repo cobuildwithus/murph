@@ -47,6 +47,7 @@ import {
 } from "./connect-source-card-study";
 import { DataExportFlowStudy } from "./data-export-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
+import { ConnectLinkStudy } from "./connect-link-study";
 import { GameInviteStudy } from "./game-invite-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GroupStartStudy } from "./group-start-study";
@@ -563,6 +564,12 @@ export function SectionsContent({
             <ConnectSourceCardStudy
               androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
             />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Connect in the app link: an iPhone, a computer, and the link preview">
+            <ConnectLinkStudy />
           </StudySection>
 
           <Separator />
