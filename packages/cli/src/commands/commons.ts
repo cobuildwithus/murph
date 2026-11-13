@@ -13,6 +13,9 @@ import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 type CommonsGoalIndexEntry = ReturnType<
   typeof getGeneratedHealthCommonsWebGoalIndex
 >["goals"][number];
+type CommonsKnowledgeItem = ReturnType<
+  typeof searchGeneratedHealthCommonsKnowledge
+>["items"][number];
 
 const goalRevisionSchema = z.object({
   pageRevisionId: z.string().min(1),
@@ -51,15 +54,15 @@ const commonsGoalSummarySchema = z.object({
   }),
 });
 
+// List rows carry only what matching needs; `commons goal show` owns the guide.
 export const commonsGoalListResultSchema = z.object({
-  catalogHash: z.string().min(1),
-  filters: z.object({
-    query: z.string().min(1).nullable(),
-    categories: z.array(z.enum(HEALTH_COMMONS_GOAL_CATEGORIES)),
-    limit: z.number().int().positive().max(500),
-  }),
   total: z.number().int().nonnegative(),
-  goals: z.array(commonsGoalSummarySchema),
+  goals: z.array(z.object({
+    key: z.string().min(1),
+    title: z.string().min(1),
+    goalPhrase: z.string().min(1),
+    aliases: z.array(z.string().min(1)),
+  })),
 });
 
 export const commonsGoalShowResultSchema = z.object({
@@ -68,40 +71,36 @@ export const commonsGoalShowResultSchema = z.object({
   goal: commonsGoalSummarySchema,
 });
 
+// Entity fields appear only when an item belongs to a topic member other than
+// the resolved topic itself.
 const commonsKnowledgeItemSchema = z.object({
-  caveat: z.string().min(1).nullable(),
-  entityKey: z.string().min(1),
-  entityTitle: z.string().min(1),
   kind: z.enum(["claim", "safety", "source_finding"]),
-  strength: z.string().min(1).nullable(),
   text: z.string().min(1),
+  caveat: z.string().min(1).nullable(),
+  strength: z.string().min(1).nullable(),
+  entityKey: z.string().min(1).optional(),
+  entityTitle: z.string().min(1).optional(),
   sources: z.array(z.object({
-    authors: z.string().min(1).nullable(),
-    designKind: z.string().min(1).nullable(),
-    doi: z.string().min(1).nullable(),
-    participantCount: z.number().int().nonnegative().nullable(),
-    pmid: z.string().min(1).nullable(),
-    sourceKey: z.string().min(1),
     title: z.string().min(1),
-    url: z.string().url().nullable(),
     year: z.number().int().nullable(),
+    designKind: z.string().min(1).nullable(),
+    url: z.string().url().nullable(),
   })).min(1).max(4),
 });
 
+// `warning` is present only when the generated index is unavailable.
 export const commonsKnowledgeSearchResultSchema = z.object({
-  available: z.boolean(),
+  topic: z.object({
+    key: z.string().min(1),
+    title: z.string().min(1),
+  }).nullable(),
   candidates: z.array(z.object({
     key: z.string().min(1),
     title: z.string().min(1),
   })).max(3),
   items: z.array(commonsKnowledgeItemSchema).max(HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT),
-  query: z.string().min(1).max(500),
   safety: commonsKnowledgeItemSchema.nullable(),
-  topic: z.object({
-    key: z.string().min(1),
-    title: z.string().min(1),
-  }).nullable(),
-  warning: z.string().min(1).nullable(),
+  warning: z.string().min(1).optional(),
 });
 
 export function registerCommonsCommands(cli: Cli.Cli) {
@@ -179,14 +178,13 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         });
 
       return {
-        catalogHash: index.catalogHash,
-        filters: {
-          query,
-          categories,
-          limit: options.limit,
-        },
         total: goals.length,
-        goals: goals.slice(0, options.limit).map(toGoalSummary),
+        goals: goals.slice(0, options.limit).map((entry) => ({
+          key: entry.key,
+          title: entry.title,
+          goalPhrase: entry.goalPhrase,
+          aliases: entry.aliases,
+        })),
       };
     },
   });
@@ -263,19 +261,19 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         });
       } catch {
         return commonsKnowledgeSearchResultSchema.parse({
-          available: false,
+          topic: null,
           candidates: [],
           items: [],
-          query: args.query,
           safety: null,
-          topic: null,
           warning: "Health Commons knowledge index is unavailable; continue without corpus context.",
         });
       }
+      const topicKey = result.topic?.key ?? null;
       return commonsKnowledgeSearchResultSchema.parse({
-        available: true,
-        ...result,
-        warning: null,
+        topic: result.topic,
+        candidates: result.candidates,
+        items: result.items.map((item) => toCompactKnowledgeItem(item, topicKey)),
+        safety: result.safety && toCompactKnowledgeItem(result.safety, topicKey),
       });
     },
   });
@@ -311,6 +309,26 @@ function toGoalSummary(
     summary: entry.summary,
     title: entry.title,
     workflow: entry.workflow,
+  };
+}
+
+function toCompactKnowledgeItem(item: CommonsKnowledgeItem, topicKey: string | null) {
+  return {
+    kind: item.kind,
+    text: item.text,
+    caveat: item.caveat,
+    strength: item.strength,
+    ...(item.entityKey === topicKey
+      ? {}
+      : { entityKey: item.entityKey, entityTitle: item.entityTitle }),
+    sources: item.sources.map((source) => ({
+      title: source.title,
+      year: source.year,
+      designKind: source.designKind,
+      url: source.url
+        ?? (source.pmid ? `https://pubmed.ncbi.nlm.nih.gov/${source.pmid}/` : null)
+        ?? (source.doi ? `https://doi.org/${source.doi}` : null),
+    })),
   };
 }
 

@@ -26,42 +26,24 @@ const timelineEntryTypeValues = [
   'sample_summary',
 ] as const
 
+// Search and timeline rows are model-facing: they omit request echoes, storage
+// paths, ranking internals, null stream or experiment fields, and id lists that
+// only repeat the row id. Follow up with `show <id>` for the record.
 const searchHitSchema = z.object({
   recordId: z.string().min(1),
-  aliasIds: z.array(z.string().min(1)),
+  aliasIds: z.array(z.string().min(1)).optional(),
   recordType: z.enum(recordTypeValues),
   kind: z.string().min(1).nullable(),
-  stream: z.string().min(1).nullable(),
+  stream: z.string().min(1).optional(),
   title: z.string().min(1).nullable(),
   occurredAt: z.string().min(1).nullable(),
   date: localDateSchema.nullable(),
-  experimentSlug: z.string().min(1).nullable(),
+  experimentSlug: z.string().min(1).optional(),
   tags: z.array(z.string().min(1)),
-  path: pathSchema,
   snippet: z.string(),
-  score: z.number(),
-  matchedTerms: z.array(z.string().min(1)),
-  citation: z.object({
-    path: pathSchema,
-    recordId: z.string().min(1),
-    aliasIds: z.array(z.string().min(1)),
-  }),
 })
 
 const searchResultSchema = z.object({
-  vault: pathSchema,
-  query: z.string().min(1),
-  filters: z.object({
-    text: z.string().min(1),
-    recordTypes: z.array(z.enum(recordTypeValues)),
-    kinds: z.array(z.string().min(1)),
-    streams: z.array(z.string().min(1)),
-    experiment: slugSchema.nullable(),
-    from: localDateSchema.nullable(),
-    to: localDateSchema.nullable(),
-    tags: z.array(z.string().min(1)),
-    limit: z.number().int().positive().max(200),
-  }),
   total: z.number().int().nonnegative(),
   hits: z.array(searchHitSchema),
 })
@@ -73,24 +55,13 @@ const timelineEntrySchema = z.object({
   date: localDateSchema,
   title: z.string().min(1),
   kind: z.string().min(1),
-  stream: z.string().min(1).nullable(),
-  experimentSlug: z.string().min(1).nullable(),
-  path: pathSchema.nullable(),
-  relatedIds: z.array(z.string().min(1)),
+  stream: z.string().min(1).optional(),
+  experimentSlug: z.string().min(1).optional(),
+  relatedIds: z.array(z.string().min(1)).optional(),
   tags: z.array(z.string().min(1)),
 })
 
 const timelineResultSchema = z.object({
-  vault: pathSchema,
-  filters: z.object({
-    from: localDateSchema.nullable(),
-    to: localDateSchema.nullable(),
-    experiment: slugSchema.nullable(),
-    kinds: z.array(z.string().min(1)),
-    streams: z.array(z.string().min(1)),
-    entryTypes: z.array(z.enum(timelineEntryTypeValues)),
-    limit: z.number().int().positive().max(500),
-  }),
   items: z.array(timelineEntrySchema),
 })
 
@@ -146,6 +117,10 @@ function normalizeSearchQueryInput(input: {
   }
 
   return text
+}
+
+function hasOtherIds(ids: readonly string[], ownId: string): boolean {
+  return ids.some((id) => id !== ownId)
 }
 
 export function registerSearchCommands(cli: Cli.Cli) {
@@ -271,21 +246,20 @@ export function registerSearchCommands(cli: Cli.Cli) {
       )
 
       return {
-        vault: options.vault,
-        query: result.query,
-        filters: {
-          text,
-          recordTypes,
-          kinds,
-          streams,
-          experiment: options.experiment ?? null,
-          from: options.from ?? null,
-          to: options.to ?? null,
-          tags,
-          limit: options.limit,
-        },
         total: result.total,
-        hits: result.hits as z.infer<typeof searchResultSchema>['hits'],
+        hits: result.hits.map((hit) => ({
+          recordId: hit.recordId,
+          ...(hasOtherIds(hit.aliasIds, hit.recordId) ? { aliasIds: hit.aliasIds } : {}),
+          recordType: hit.recordType as z.infer<typeof searchHitSchema>['recordType'],
+          kind: hit.kind,
+          ...(hit.stream === null ? {} : { stream: hit.stream }),
+          title: hit.title,
+          occurredAt: hit.occurredAt,
+          date: hit.date,
+          ...(hit.experimentSlug === null ? {} : { experimentSlug: hit.experimentSlug }),
+          tags: hit.tags,
+          snippet: hit.snippet,
+        })),
       }
     },
   })
@@ -423,16 +397,6 @@ export function registerSearchCommands(cli: Cli.Cli) {
         })
 
         return {
-          vault: options.vault,
-          filters: {
-            from: options.from ?? null,
-            to: options.to ?? null,
-            experiment: options.experiment ?? null,
-            kinds,
-            streams,
-            entryTypes,
-            limit: options.limit,
-          },
           items: items.map((item) => ({
             id: item.id,
             entryType: item.entryType,
@@ -440,10 +404,9 @@ export function registerSearchCommands(cli: Cli.Cli) {
             date: item.date,
             title: item.title,
             kind: item.kind,
-            stream: item.stream,
-            experimentSlug: item.experimentSlug,
-            path: item.path,
-            relatedIds: item.relatedIds,
+            ...(item.stream === null ? {} : { stream: item.stream }),
+            ...(item.experimentSlug === null ? {} : { experimentSlug: item.experimentSlug }),
+            ...(hasOtherIds(item.relatedIds, item.id) ? { relatedIds: item.relatedIds } : {}),
             tags: item.tags,
           })),
         }

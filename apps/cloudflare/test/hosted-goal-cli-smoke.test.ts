@@ -134,6 +134,19 @@ describe("runHostedGoalCliSmoke", () => {
     ]);
   });
 
+  it("reads the public goal prompt from show, not from compact list rows", async () => {
+    const responses = createSmokeResponses();
+    const shown = JSON.parse(responses.get("commons-goal-show") ?? "{}");
+    responses.set("commons-goal-show", success({
+      ...shown.data,
+      goal: { ...shown.data.goal, startPrompt: "Hey Murph, help me sleep." },
+    }));
+
+    await expect(runHostedGoalCliSmoke({
+      runCommand: responseRunner(responses),
+    })).rejects.toThrow("found an unexpected public goal prompt");
+  });
+
   it("fails when a status-only update drops public Goal lineage", async () => {
     const responses = createSmokeResponses();
     responses.set(
@@ -162,8 +175,7 @@ describe("runHostedGoalCliSmoke", () => {
   it("rejects unbounded or article-bearing Commons payloads", async () => {
     const oversized = createSmokeResponses();
     oversized.set("commons-goal-list-metadata", success({
-      catalogHash,
-      goals: createGoalSummaries(2),
+      goals: createGoalSummaries(2).map(toListRow),
       total: 250,
     }));
     await expect(runHostedGoalCliSmoke({
@@ -203,8 +215,7 @@ describe("runHostedGoalCliSmoke", () => {
     const goals = createCatalogWithLargeCategory();
     const responses = createSmokeResponses(goals);
     responses.set("commons-goal-list-metadata", success({
-      catalogHash,
-      goals: goals.slice(0, 1),
+      goals: goals.slice(0, 1).map(toListRow),
       total: goals.length + 1,
     }));
 
@@ -259,16 +270,16 @@ function createSmokeResponses(
     [
       "commons-goal-list-metadata",
       success({
-        catalogHash,
-        goals: goals.slice(0, 1),
+        goals: goals.slice(0, 1).map(toListRow),
         total: goals.length,
       }),
     ],
     [
       "commons-goal-list-deep-sleep",
       success({
-        catalogHash,
-        goals: goals.filter((goal) => goal.key === commonsGoalRef.key).slice(0, 2),
+        goals: goals.filter((goal) => goal.key === commonsGoalRef.key)
+          .slice(0, 2)
+          .map(toListRow),
         total: goals.filter((goal) => goal.key === commonsGoalRef.key).length,
       }),
     ],
@@ -282,6 +293,7 @@ function createSmokeResponses(
             pageRevisionId,
             workflowSpecRevisionId,
           },
+          startPrompt: "Hey Murph, help me improve my deep sleep.",
         },
       }),
     ],
@@ -351,12 +363,20 @@ function createSmokeResponses(
   for (const category of publicGoalCategories) {
     const categoryGoals = goals.filter((goal) => goal.category === category);
     responses.set(`commons-goal-list-${category}`, success({
-      catalogHash,
-      goals: categoryGoals.slice(0, 1),
+      goals: categoryGoals.slice(0, 1).map(toListRow),
       total: categoryGoals.length,
     }));
   }
   return responses;
+}
+
+function toListRow(goal: Record<string, unknown>): Record<string, unknown> {
+  return {
+    aliases: goal.aliases,
+    goalPhrase: goal.goalPhrase,
+    key: goal.key,
+    title: goal.title,
+  };
 }
 
 function createGoalSummaries(

@@ -22,14 +22,25 @@ import {
   type DeviceSyncServices,
 } from '../src/device-services.js'
 import type {
-  KnowledgeAbsentPageResult,
-  KnowledgeGetResult as KnowledgeShowResult,
+  KnowledgeGetResult,
   KnowledgeIndexRebuildResult,
   KnowledgeLintResult,
   KnowledgeListResult,
   KnowledgeSearchResult,
   KnowledgeUpsertResult,
 } from '@murphai/query'
+
+interface KnowledgeShowResult {
+  degradation?: KnowledgeGetResult['degradation']
+  page: Pick<
+    KnowledgeGetResult['page'],
+    'body' | 'pageRevisionDigest' | 'pageType' | 'slug' | 'status' | 'title'
+  > & { markdown?: string }
+}
+
+interface KnowledgeAbsentPageResult {
+  page: null
+}
 import { createVaultCli } from '../src/vault-cli.js'
 import {
   binPath,
@@ -662,7 +673,11 @@ test('knowledge show returns complete content once and preserves explicit raw ex
   assert.equal(raw.envelope.ok, true)
   assert.equal(optionalRaw.envelope.ok, true)
   const compactPage = compact.envelope.data.page
-  assert.equal(Object.hasOwn(compactPage, 'markdown'), false)
+  assert.deepEqual(Object.keys(compact.envelope.data), ['page'])
+  assert.deepEqual(
+    Object.keys(compactPage).sort(),
+    ['body', 'pageRevisionDigest', 'pageType', 'slug', 'status', 'title'],
+  )
   assert.ok(compactPage.body.endsWith(body.trim()))
   assert.equal(compactPage.pageRevisionDigest, createHash('sha256').update(markdown).digest('hex'))
   assert.deepEqual(optional.envelope.data, compact.envelope.data)
@@ -698,7 +713,7 @@ test('optional knowledge show returns an absent page only when the graph confirm
   const absent = await show('synthetic-ledger', '--if-exists')
   assert.equal(absent.exitCode, null)
   assert.equal(absent.envelope.ok, true)
-  assert.deepEqual(absent.envelope.data, { degradation: null, page: null, slug: 'synthetic-ledger', vault: vaultRoot })
+  assert.deepEqual(absent.envelope.data, { page: null })
   const built = await runCli<KnowledgeAbsentPageResult>([
     'knowledge', 'show', 'synthetic-ledger', '--if-exists', '--vault', vaultRoot,
   ])
@@ -732,7 +747,8 @@ test('optional knowledge show returns an absent page only when the graph confirm
   assert.equal(strictMissing.envelope.error.code, 'knowledge_page_not_found')
   const degradedPresent = await show('present-ledger', '--if-exists')
   assert.equal(degradedPresent.envelope.ok, true)
-  assert.equal(degradedPresent.envelope.data.degradation?.issueCount, 1)
+  const degradedData = degradedPresent.envelope.data
+  assert.equal('degradation' in degradedData && degradedData.degradation?.issueCount, 1)
 
   await assert.rejects(readFile(path.join(vaultRoot, 'derived/knowledge/pages/synthetic-ledger.md'), 'utf8'))
   await assert.rejects(readFile(path.join(vaultRoot, 'derived/knowledge/log.md'), 'utf8'))
@@ -799,9 +815,7 @@ test('shipped vault-cli MCP keeps structured knowledge_show results for strict a
 
     const absent = await show(4, { slug: 'absent-ledger', ifExists: true })
     assert.equal(absent.result?.isError, undefined)
-    assert.deepEqual(absent.result?.structuredContent, {
-      degradation: null, page: null, slug: 'absent-ledger', vault: vaultRoot,
-    })
+    assert.deepEqual(absent.result?.structuredContent, { page: null })
 
     const strictMissing = await show(5, { slug: 'absent-ledger' })
     assert.equal(strictMissing.result?.isError, true)

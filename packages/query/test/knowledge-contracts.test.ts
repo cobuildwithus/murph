@@ -13,7 +13,6 @@ import {
   knowledgeLintResultSchema,
   knowledgeLogTailResultSchema,
   knowledgePageReferenceSchema,
-  knowledgePageSchema,
   knowledgeSearchResultSchema,
   knowledgeUpsertResultSchema,
 } from "../src/index.ts";
@@ -186,40 +185,45 @@ describe("knowledge contracts", () => {
     const showSchema = z.toJSONSchema(knowledgeShowResultSchema);
     expect(strictSchema.type).toBe("object");
     expect(showSchema.type).toBe("object");
-    expect(showSchema.anyOf).toEqual([
-      z.toJSONSchema(knowledgeGetResultSchema.extend({
-        page: knowledgePageSchema.partial({ markdown: true }),
-      })),
-      z.toJSONSchema(knowledgeAbsentPageResultSchema),
-    ].map(({ $schema: _schema, ...branch }) => branch));
+    expect(showSchema.anyOf).toHaveLength(2);
 
     const compact = {
-      degradation: null,
-      page: { ...reference, body: "Complete body.", pageRevisionDigest: "a".repeat(64) },
-      vault: "/vault",
+      page: {
+        body: "Complete body.",
+        pageRevisionDigest: "a".repeat(64),
+        pageType: reference.pageType,
+        slug: reference.slug,
+        status: reference.status,
+        title: reference.title,
+      },
     };
     expect(knowledgeShowResultSchema.parse(compact)).toEqual(compact);
     expect(knowledgeGetResultSchema.safeParse(compact).success).toBe(false);
-    const raw = { ...compact, page: { ...compact.page, markdown: "# Example\n\nComplete body." } };
+    const linked = {
+      degradation: { issueCodes: ["parse_frontmatter"], issueCount: 1, recoveryAction: KNOWLEDGE_READ_RECOVERY_ACTION },
+      page: {
+        ...compact.page,
+        librarySlugs: reference.librarySlugs,
+        relatedSlugs: reference.relatedSlugs,
+        sourcePaths: reference.sourcePaths,
+      },
+    };
+    expect(knowledgeShowResultSchema.parse(linked)).toEqual(linked);
+    const raw = { page: { ...compact.page, markdown: "# Example\n\nComplete body." } };
     expect(knowledgeShowResultSchema.parse(raw)).toEqual(raw);
-    expect(knowledgeGetResultSchema.parse(raw)).toEqual(raw);
     for (const required of ["body", "pageRevisionDigest"] as const) {
       const { [required]: _omitted, ...page } = compact.page;
-      expect(knowledgeShowResultSchema.safeParse({ ...compact, page }).success).toBe(false);
+      expect(knowledgeShowResultSchema.safeParse({ page }).success).toBe(false);
+    }
+    for (const emptyList of ["librarySlugs", "relatedSlugs", "sourcePaths"] as const) {
+      expect(knowledgeShowResultSchema.safeParse({
+        page: { ...compact.page, [emptyList]: [] },
+      }).success).toBe(false);
     }
 
-    const absent = { degradation: null, page: null, slug: "example", vault: "/vault" };
+    const absent = { page: null };
     expect(knowledgeShowResultSchema.parse(absent)).toEqual(absent);
-    for (const invalid of [
-      {
-        ...absent,
-        degradation: { issueCodes: ["parse_frontmatter"], issueCount: 1, recoveryAction: KNOWLEDGE_READ_RECOVERY_ACTION },
-      },
-      { degradation: null, page: null, vault: "/vault" },
-      { ...absent, slug: "Invalid Slug" },
-    ]) {
-      expect(knowledgeShowResultSchema.safeParse(invalid).success).toBe(false);
-    }
     expect(knowledgeGetResultSchema.safeParse(absent).success).toBe(false);
+    expect(knowledgeAbsentPageResultSchema.safeParse(absent).success).toBe(false);
   });
 });

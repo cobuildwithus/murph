@@ -1533,9 +1533,9 @@ test('root config file can provide command option defaults', async () => {
               requestId: 'config-smoke',
             },
           },
-          search: {
+          knowledge: {
             commands: {
-              query: {
+              list: {
                 options: {
                   limit: 1,
                 },
@@ -1548,40 +1548,34 @@ test('root config file can provide command option defaults', async () => {
 
     const showResult = requireData(
       await runSourceEntrypointJsonCliFromCwd<{
-        filters: {
-          limit: number
-        }
+        limit: number
       }>(
-        ['--config', configPath, 'search', 'query', '--vault', vaultRoot, '--text', 'no-match'],
+        ['--config', configPath, 'knowledge', 'list', '--vault', vaultRoot],
         {
           cwd: tempRoot,
           env: isolatedEnv,
         },
       ),
     )
-    assert.equal(showResult.filters.limit, 1)
+    assert.equal(showResult.limit, 1)
 
     const withoutConfig = await runSourceEntrypointJsonCliFromCwd<{
-      filters: {
-        limit: number
-      }
+      limit: number
     }>([
       '--config',
       configPath,
       '--no-config',
-      'search',
-      'query',
+      'knowledge',
+      'list',
       '--vault',
       vaultRoot,
-      '--text',
-      'no-match',
     ], {
       cwd: tempRoot,
       env: isolatedEnv,
     })
     assert.equal(withoutConfig.ok, true)
     if (withoutConfig.ok) {
-      assert.equal(withoutConfig.data.filters.limit, 10)
+      assert.equal(withoutConfig.data.limit, 10)
     }
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
@@ -1601,9 +1595,9 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
       path.join(configDir, 'config.json'),
       JSON.stringify({
         commands: {
-          search: {
+          knowledge: {
             commands: {
-              query: {
+              list: {
                 options: {
                   limit: 1,
                 },
@@ -1616,16 +1610,14 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
 
     const output = await runSourceEntrypointRawFromCwd(
       [
-        'search',
-        'query',
+        'knowledge',
+        'list',
         '--vault',
         homeVaultRoot,
-        '--text',
-        'no-match',
         '--format',
         'json',
         '--filter-output',
-        'filters.limit',
+        'limit',
       ],
       {
         cwd: tempRoot,
@@ -1635,11 +1627,7 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
         },
       },
     )
-    assert.deepEqual(JSON.parse(output), {
-      filters: {
-        limit: 1,
-      },
-    })
+    assert.equal(JSON.parse(output), 1)
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }

@@ -255,7 +255,7 @@ Assistant delivery targets are transport-native strings only; serialized objects
 
 Onboarding state remains runtime lifecycle state. Any future user-facing, queryable, or durable assistant setting must pass the persisted-state placement gate: canonical product state is not an `assistant` runtime CRUD surface, so it must use a core-owned canonical record or explicit derived materialization.
 
-`vault-cli knowledge *` manages Murph's non-canonical personal compiled wiki under `derived/knowledge/**`. That wiki is distinct from the stable reference layer under `bank/library/**`: `bank/library` is durable shared health context, while `derived/knowledge` is the assistant-authored user-specific synthesis layer. `knowledge upsert` writes one page and refreshes `derived/knowledge/index.md`. `knowledge append-section` creates the page when needed or appends/prepends one `## <heading>` section through the same locked write path, rejects duplicate section headings on the target page, refuses to overwrite an existing page file that cannot be loaded as a knowledge graph page, refreshes the index, and appends the write log. `knowledge show` fails with `knowledge_page_not_found` for a missing slug; for an optional page, `--if-exists` instead returns `page: null` and `degradation: null`, but only when every generic page parses, because an invalid page could still declare the slug. Otherwise it fails with `knowledge_page_invalid`, and it never writes. Each successful upsert or append also appends a chronological entry to `derived/knowledge/log.md`, and whitespace-only bodies are rejected before any write. `knowledge log tail` is the intentionally small operator-facing log inspection surface; richer wiki-maintainer behavior belongs in the assistant runtime prompt, which routes wiki reads and writes through these `vault-cli knowledge` commands, not in `AGENTS.md`.
+`vault-cli knowledge *` manages Murph's non-canonical personal compiled wiki under `derived/knowledge/**`. That wiki is distinct from the stable reference layer under `bank/library/**`: `bank/library` is durable shared health context, while `derived/knowledge` is the assistant-authored user-specific synthesis layer. `knowledge upsert` writes one page and refreshes `derived/knowledge/index.md`. `knowledge append-section` creates the page when needed or appends/prepends one `## <heading>` section through the same locked write path, rejects duplicate section headings on the target page, refuses to overwrite an existing page file that cannot be loaded as a knowledge graph page, refreshes the index, and appends the write log. `knowledge show` fails with `knowledge_page_not_found` for a missing slug; for an optional page, `--if-exists` instead returns `{ "page": null }`, but only when every generic page parses, because an invalid page could still declare the slug. Otherwise it fails with `knowledge_page_invalid`, and it never writes. Each successful upsert or append also appends a chronological entry to `derived/knowledge/log.md`, and whitespace-only bodies are rejected before any write. `knowledge log tail` is the intentionally small operator-facing log inspection surface; richer wiki-maintainer behavior belongs in the assistant runtime prompt, which routes wiki reads and writes through these `vault-cli knowledge` commands, not in `AGENTS.md`.
 
 The per-command synopses above intentionally omit incur-owned global output and discovery flags such as `--format`, `--json`, `--full-output`, `--schema`, `--llms`, `skills add/list`, and `--mcp`. Leaf-command `--schema --format json` returns that command's args/options/output schema. Root or group `--schema --format json` returns a `murph.schema-index.v1` command index so agents do not receive human help text for a JSON request. For commands that take `--input @file.json|-` or `--input @file.jsonl|-`, the command schema intentionally describes the file option; a matching `payload-schema` command, where present, is the first-class file-body contract and returns the Murph-owned JSON contract as `murph.payload-schema.v1`. Scaffold commands are examples, not complete writable contracts. The current supported payload-schema tranche covers `condition import-json`, `blood-test import-json`, `encounter import-json`, `workout import-json`, `assertion import-json`, `vitals import-json`, `diagnostic-test import-json`, `clinical-note import-json`, `social-history import-json`, and per-line `event import-jsonl` rows. The payload-schema migration plan in `docs/incur-payload-schema-migration-guide.md` defines the rollout for remaining import surfaces. These surfaces are provided by incur and thin Murph CLI adapters and are not re-frozen command-by-command in this contract.
 
@@ -885,25 +885,12 @@ The `plan.operations` values are internal core plan operation names, not public 
 
 ### `search query`
 
-`recordId` is the surfaced canonical read identity; `aliasIds` includes alternate read aliases such as the event id when that differs.
+`recordId` is the surfaced canonical read identity; `aliasIds` includes alternate read aliases such as the event id and appears only when it adds an id other than `recordId`. `stream` and `experimentSlug` appear only when set. Hits omit request echoes, storage paths, and ranking internals; follow up with `show <recordId>`.
 
 The query text may be passed either positionally as `vault-cli search query <query>` or explicitly as `vault-cli search query --text <query>`.
 
 ```json
 {
-  "vault": "<path>",
-  "query": "ferritin labcorp",
-  "filters": {
-    "text": "ferritin labcorp",
-    "recordTypes": ["event"],
-    "kinds": ["document"],
-    "streams": [],
-    "experiment": null,
-    "from": null,
-    "to": null,
-    "tags": ["labs"],
-    "limit": 20
-  },
   "total": 2,
   "hits": [
     {
@@ -911,21 +898,11 @@ The query text may be passed either positionally as `vault-cli search query <que
       "aliasIds": ["doc_123", "evt_123"],
       "recordType": "event",
       "kind": "document",
-      "stream": null,
       "title": "Lab Report",
       "occurredAt": "2026-03-12T08:00:00Z",
       "date": "2026-03-12",
-      "experimentSlug": null,
       "tags": ["labs"],
-      "path": "ledger/events/2026/2026-03.jsonl",
-      "snippet": "...ferritin from Labcorp...",
-      "score": 21.5,
-      "matchedTerms": ["ferritin", "labcorp"],
-      "citation": {
-        "path": "ledger/events/2026/2026-03.jsonl",
-        "recordId": "doc_123",
-        "aliasIds": ["doc_123", "evt_123"]
-      }
+      "snippet": "...ferritin from Labcorp..."
     }
   ]
 }
@@ -970,19 +947,21 @@ is published; `fresh` requires all three sections to match the canonical manifes
 
 ### `timeline`
 
+`stream` and `experimentSlug` appear only when set, and `relatedIds` only when it names a record other than the entry itself. Entries omit request echoes and storage paths.
+
 ```json
 {
-  "vault": "<path>",
-  "filters": {
-    "from": "2026-03-12",
-    "to": "2026-03-12",
-    "experiment": null,
-    "kinds": [],
-    "streams": [],
-    "entryTypes": [],
-    "limit": 50
-  },
   "items": [
+    {
+      "id": "meal_123",
+      "entryType": "event",
+      "occurredAt": "2026-03-12T12:30:00Z",
+      "date": "2026-03-12",
+      "title": "Lentil salad",
+      "kind": "meal",
+      "experimentSlug": "sleep-window",
+      "tags": []
+    },
     {
       "id": "sample-summary:2026-03-12:heart_rate",
       "entryType": "sample_summary",
@@ -991,9 +970,6 @@ is published; `fresh` requires all three sections to match the canonical manifes
       "title": "heart_rate daily summary",
       "kind": "sample_summary",
       "stream": "heart_rate",
-      "experimentSlug": null,
-      "path": "ledger/metric-samples/heart_rate/2026/2026-03.jsonl",
-      "relatedIds": ["smp_123", "smp_124"],
       "tags": ["sample_summary", "heart_rate"]
     }
   ]

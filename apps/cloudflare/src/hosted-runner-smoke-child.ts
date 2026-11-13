@@ -2479,8 +2479,9 @@ async function runHealthCommonsCliSmoke(): Promise<{
   ]);
   const serializedKnowledgeSearch = JSON.stringify(JSON.parse(knowledgeSearchOutput));
 
+  // The search adds `warning` only when its generated index is unavailable.
   if (
-    !serializedKnowledgeSearch.includes('"available":true') ||
+    serializedKnowledgeSearch.includes('"warning":') ||
     !serializedKnowledgeSearch.includes(HEALTH_COMMONS_SMOKE_KNOWLEDGE_TOPIC_KEY)
   ) {
     throw new Error(
