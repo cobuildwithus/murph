@@ -1,6 +1,6 @@
 import type { DeviceSyncCompletionSetupGuide } from "@/src/lib/device-sync/connect-completion-types";
 
-const MURPH_IOS_APP_STORE_URL = "https://apps.apple.com/us/app/murph-ai/id6786145859";
+import { MURPH_IOS_APP_STORE_URL } from "@/src/lib/site-metadata";
 
 export const APPLE_HEALTH_RELAY_SETUP_GUIDE_IDS = [
   "xiaomi-mi-fitness-apple-health",

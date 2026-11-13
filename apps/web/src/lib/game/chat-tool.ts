@@ -333,14 +333,12 @@ export async function readGameChatTranscript(input: {
   playerNamesByMemberId: readonly { memberId: string; name: string }[];
   since: Date;
   until?: Date;
-  throughConversationLaneSeq?: string;
 }): Promise<GameRecapChatMessage[]> {
   const prisma = getPrisma();
   const availableAt = new Date();
   const rows = await prisma.hostedMailboxItem.findMany({
     orderBy: { laneSeq: "desc" }, take: 100,
     where: { ...buildHostedMailboxLiveItemWhere(availableAt), userId: input.containerMemberId,
-      ...(input.throughConversationLaneSeq === undefined ? {} : { laneSeq: { lte: BigInt(input.throughConversationLaneSeq) } }),
       kind: "conversation.message", lane: "conversation", occurredAt: { gte: input.since, ...(input.until ? { lte: input.until } : {}) } },
     select: { id: true, userId: true, dedupeKey: true, kind: true, lane: true, laneSeq: true, occurredAt: true,
       payloadInlineCiphertext: true, payloadSchema: true, payload: { select: { payloadCiphertext: true } } },

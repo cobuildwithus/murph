@@ -1,6 +1,6 @@
 import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
 
-import type { ConnectSource } from "./connect-page-types";
+import type { ConnectSource } from "./connect-source-types";
 
 const MURPH_ANDROID_PLAY_STORE_URL =
   "https://play.google.com/store/apps/details?id=ai.withmurph.app";

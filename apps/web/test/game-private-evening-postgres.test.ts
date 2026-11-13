@@ -85,7 +85,7 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
     expect(await reserveDuePrivateEveningCheckIns(now)).toBe(0);
   });
 
-  it("invalidates a private evening watermark after a committed conversation append", async () => {
+  it("keeps a private evening current after the member writes", async () => {
     const owner = await member(), id = await game(owner);
     const policy = { kind: "game_private_evening_check_in" as const, eventId: privateEveningEventId(owner, date), memberId: owner, date,
       expiresAt: "2026-11-06T20:30:00.000Z", conversationLaneSeq: "0", batch: [{ gameId: id, termsVersion: 1, dayIndex: 0 }] };
@@ -94,6 +94,6 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
       eventId: `private-evening-conversation-${randomUUID()}`, userId: owner, occurredAt: now.toISOString(),
       telegramMessage: { messageId: "1", schema: "murph.hosted-telegram-message.v1", text: "hello", threadId: "123", threadIsDirect: true },
     }) }));
-    expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))).toBe(false);
+    expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))).toBe(true);
   });
 });

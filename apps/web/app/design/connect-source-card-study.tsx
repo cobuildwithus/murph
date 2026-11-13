@@ -13,8 +13,8 @@ import { markLocallyDisconnectedSources } from "@/app/(dashboard)/connect/connec
 import {
   APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
   listAppleHealthRelayConnectSources,
-} from "@/app/(dashboard)/connect/apple-health-relay-connect-sources";
-import { MOBVOI_HEALTH_CONNECT_SOURCE } from "@/app/(dashboard)/connect/health-connect-relay-connect-sources";
+} from "@/src/lib/device-sync/apple-health-relay-connect-sources";
+import { MOBVOI_HEALTH_CONNECT_SOURCE } from "@/src/lib/device-sync/health-connect-relay-connect-sources";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import { buildAppleHealthRelaySetupGuide } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";

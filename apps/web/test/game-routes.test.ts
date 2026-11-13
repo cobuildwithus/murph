@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   readHistory: vi.fn(),
   readHome: vi.fn(),
   readInvitePreview: vi.fn(),
+  readGameInviteForMember: vi.fn(),
   requireHostedMemberAuthFromBearerToken: vi.fn(),
   runGameCommand: vi.fn(),
 }));
@@ -49,6 +50,7 @@ vi.mock("@/src/lib/game/service", () => ({
   readHistory: mocks.readHistory,
   readHome: mocks.readHome,
   readInvitePreview: mocks.readInvitePreview,
+  readGameInviteForMember: mocks.readGameInviteForMember,
   runGameCommand: mocks.runGameCommand,
 }));
 
@@ -66,6 +68,7 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 }));
 
 type Routes = {
+  myInvite: typeof import("../app/api/game/v1/me/invite/route");
   replies: typeof import("../app/api/game/v1/games/[id]/entries/[entryId]/replies/route");
   reply: typeof import("../app/api/game/v1/games/[id]/replies/[replyId]/route");
   replyAudio: typeof import("../app/api/game/v1/games/[id]/replies/[replyId]/audio/route");
@@ -130,6 +133,7 @@ let signedInAs = LEO;
 describe("weekly game routes", () => {
   beforeAll(async () => {
     routes = {
+      myInvite: await import("../app/api/game/v1/me/invite/route"),
       replies: await import("../app/api/game/v1/games/[id]/entries/[entryId]/replies/route"),
       reply: await import("../app/api/game/v1/games/[id]/replies/[replyId]/route"),
       replyAudio: await import("../app/api/game/v1/games/[id]/replies/[replyId]/audio/route"),
@@ -390,12 +394,14 @@ describe("weekly game routes", () => {
         routes.upload.POST(uploadRequest()),
         routes.media.GET(new Request(`${BASE}/media/x`), params({ key: ["x"] })),
         routes.startNow.POST(new Request(`${BASE}/dev/games/${GAME_ID}/start-now`, { method: "POST" }), params({ id: GAME_ID })),
+        routes.myInvite.GET(new Request(`${BASE}/me/invite`)),
       ]);
 
       for (const response of responses) {
         expect(response.status).toBe(404);
         expect((await response.json()).error.code).toBe("GAME_DISABLED");
       }
+      expect(mocks.readGameInviteForMember).not.toHaveBeenCalled();
       expect(mocks.readHome).not.toHaveBeenCalled();
       expect(mocks.readHistory).not.toHaveBeenCalled();
       expect(mocks.runGameCommand).not.toHaveBeenCalled();
@@ -980,6 +986,28 @@ describe("weekly game routes", () => {
       expect(response.status).toBe(200);
       expect(mocks.devAdvanceDays).toHaveBeenCalledWith(GAME_ID, LEO, 3, false);
       expect(invalid.status).toBe(400);
+    });
+  });
+
+  describe("invite recovery", () => {
+    it.each(["synthetic-invite", null])("returns %s using only the bearer session", async token => {
+      mocks.readGameInviteForMember.mockResolvedValue(token);
+      const request = new Request(`${BASE}/me/invite`, { headers: { Authorization: "Bearer synthetic-session" } });
+      const response = await routes.myInvite.GET(request);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, token });
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(request, expect.anything());
+      expect(mocks.readGameInviteForMember).toHaveBeenCalledWith(LEO);
+    });
+
+    it.each<HeadersInit>([{}, { Cookie: "synthetic-browser-session" }, { Authorization: "Bearer revoked-session" }])("requires a current bearer session before lookup", async headers => {
+      mocks.requireHostedMemberAuthFromBearerToken.mockRejectedValue(hostedOnboardingError({ code: "UNAUTHENTICATED", httpStatus: 401, message: "Sign in" }));
+      const response = await routes.myInvite.GET(new Request(`${BASE}/me/invite`, { headers }));
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ error: { code: "UNAUTHENTICATED", message: "Sign in to continue." } });
+      expect(mocks.readGameInviteForMember).not.toHaveBeenCalled();
     });
   });
 

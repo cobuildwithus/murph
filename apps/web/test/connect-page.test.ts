@@ -11,12 +11,13 @@ import { JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG } from "@murphai/device-syncd/fitb
 
 import { renderClientComponent } from "./render-client-component";
 
-import ConnectPage, {
+import ConnectPage from "../app/(dashboard)/connect/connect-page-content";
+import {
   resolveConfiguredConnectSources,
   resolveConnectSourceConnectionStates,
   resolveConnectedConnectSourceConnections,
   resolveHistoricalResetIncompleteConnectSourceIds,
-} from "../app/(dashboard)/connect/connect-page-content";
+} from "../src/lib/device-sync/connect-sources";
 import {
   filterConnectSourcesForSearch,
   ConnectSourcesGrid,
@@ -793,7 +794,7 @@ test("connect source card screenshot study makes its focused dialog inert", asyn
 
 test("sortConnectSourcesByConnectionState keeps connected sources first, then popularity order", async () => {
   const { sortConnectSourcesByConnectionState } = await import(
-    "../app/(dashboard)/connect/connect-source-order"
+    "../src/lib/device-sync/connect-source-order"
   );
   const logo = {
     className: "size-11 object-contain",
@@ -917,6 +918,7 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
     sortConnectSourcesByConnectionState(sources).map((source) => source.id),
     [
       "oura",
+      "whoop",
       "garmin",
       "fitbit",
       "google-fit",
@@ -925,7 +927,6 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
       "xiaomi-mi-fitness",
       "zepp",
       "withings",
-      "whoop",
       "coros",
       "suunto",
       "ringconn",
@@ -5069,15 +5070,14 @@ test("Vital disclosure follows reconnect and fresh providers across local discon
       { id: "whoop", name: "Whoop", description: "Recovery.", logo },
     ],
     {
-      reconnectProviderBySourceId: new Map([
-        ["oura", "junction"],
-        ["whoop", "junction"],
-      ]),
-      reconnectSourceIds: new Set(["oura", "whoop"]),
-      reconnectTargetBySourceId: new Map([
-        ["oura", "oura"],
-        ["whoop", "whoop"],
-      ]),
+      connectionStates: ["oura", "whoop"].map((sourceId) => ({
+        connectionId: null,
+        connectProvider: "junction",
+        connectTarget: sourceId,
+        requiresReconnect: true,
+        sourceId,
+        state: "reauthorization_required",
+      })),
     },
   );
   const oura = resolved.find((source) => source.id === "oura");

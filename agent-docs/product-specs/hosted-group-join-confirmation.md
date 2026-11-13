@@ -225,9 +225,12 @@ group (18–19, then a decade, with 90 and over) in the encrypted envelope so
 the other board person's app can rank those numbers for their age. The chat
 reader never receives the age group. Revoking one of those scopes leaves the
 group available through the other; revoking both or leaving removes it.
-The app read captures and revalidates both viewer membership and exact grants
-around decryption. It reads only two people and four scopes, at most eight
-snapshots in batches of four, using the existing 4 MiB decoded-record ceiling.
+The app read uses the seated, unblocked pair's game authority to show the other
+person's granted numbers even when the viewer has not joined or shared anything.
+It captures and revalidates viewer membership and exact grants around decryption;
+a viewer membership change returns a null board for that read. It reads only
+two people and four scopes, at most eight snapshots in batches of four, using
+the existing 4 MiB decoded-record ceiling.
 It never loads contact names or private vault data. Missing/legacy snapshots
 remain pending, and revoked grants or changed membership cannot reuse captured
 values. The chat reader keeps its existing scope, window and wire limits.

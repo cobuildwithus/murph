@@ -6907,18 +6907,19 @@ settlement and uncertain sends.
 
 The encrypted mailbox policy `game_group_missed_check_in` freezes room/date,
 at most twenty game IDs and terms versions, each full remaining-player set and
-canonical misses, the original group lore digest, and a conversation-lane
-watermark. Transcript reads stop at that watermark and include remaining-player
-authors only. Preparation decrypts public names and their task words outside
+canonical misses, and the original group lore digest. The same-day transcript
+is read at preparation and includes remaining-player authors only. Preparation decrypts public names and their task words outside
 transactions; private labels, unjoined overrides, captions and media are absent.
 Publication and final egress acquire contributing game rows in ID order, reload
 structural evidence, and call `readGameChatAuthority`. These locks span
 mailbox publication/receipt advancement or the existing provider-dispatch claim.
 Any new departure, corrected miss, terms/binding change or unsafe audience
 suppresses frozen output. Historical departures before the snapshot are valid.
-The mailbox causal-append lock also protects a conversation watermark recheck:
-new conversation conservatively suppresses the notice, including unrelated
-chatter; notification-lane writes do not. The daily claim remains consumed.
+Chat never suppresses a check-in. Whether a player's words already cover a miss
+or a task is the model's call from that transcript, and it may stay quiet. A
+message that lands after preparation is not in the transcript, so that person
+may still be asked. The policy's `conversationLaneSeq` is retired: Web writes
+`"0"` until every runner accepts its absence. The daily claim remains consumed.
 Recovery reuses the exact mailbox pointer and room batch, never an arbitrary game.
 A pair or group check-in retries while fresh. Two hours after its receipt was
 created it ends, whatever held it up and without a provider read: an unpublished
@@ -6936,9 +6937,10 @@ room/date owns the claim, with the room as payload owner. Its immutable event
 key survives delivery metadata rewrites and identifies each of the previous
 three accepted evenings for the unanswered-send pause. The encrypted
 `game_evening_check_in` policy freezes addressed game/day/member sets, terms
-versions, expiry and conversation watermark. The bounded same-day transcript
-stops at that watermark. Publication and dispatch recheck the frozen witness
-under game and mailbox locks; an expired or changed witness is stale. Recovery
+versions and expiry. The bounded same-day transcript is read at preparation.
+Publication and dispatch recheck the frozen game witness under game locks; an
+expired or changed witness is stale. New chat is not a change, as for the
+missed-day notice. Recovery
 signals an existing mailbox item without replacing it. The runner parses this
 policy and allows a skip, with no game host tools or lore. Egress checks the
 90-day inactivity pause separately after validating evening currentness.
@@ -6959,9 +6961,9 @@ preserves its prior value; newly admitted seats without a choice fact are untouc
 
 The minute drain reserves one `game_private_evening` receipt per member and
 local date, one hour after their saved reminder time, for open games no room
-check-in covers. Its typed policy freezes game/day/terms and conversation
-watermark; publication and egress recheck text consent, access, the witness,
-expiry and unanswered-evening pause. Each player's live-game activation copies
+check-in covers. Its typed policy freezes game/day/terms; publication and
+egress recheck text consent, access, the witness, expiry and unanswered-evening
+pause. A new direct message does not stop it. Each player's live-game activation copies
 opt-out and cadence from validated lineage or the latest exact cohort, then
 records an idempotent activation event. A new-person or changed-rhythm offer
 gets one `game_private_kickoff` receipt per game and member. It waits overnight
