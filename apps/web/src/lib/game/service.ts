@@ -116,7 +116,7 @@ import {
   type GameTerms,
   type TermWords,
 } from "./rules";
-import { addDays, daysBetween, gameLocalDate } from "./time";
+import { addDays, daysBetween, gameLocalDate, morningAfter } from "./time";
 import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeMajority, normalizeGroupGameChange, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
@@ -1397,6 +1397,13 @@ async function endGame(tx: Tx, gameId: string, data: Prisma.GameUpdateInput): Pr
   }
 }
 
+/** One receipt per game, held until the later player's morning. */
+async function reserveBothWinOfferTx({ clock, loaded, now, tx }: LockedStep, state: RuleState): Promise<void> {
+  if (loaded.row.pendingChange || !loaded.row.chatContainerMemberId || !isBothWinOfferDue(state, now)) return;
+  const retryAfterAt = new Date(Math.max(...state.players.map(player => (morningAfter(clock, player.timeZone) ?? clock).getTime())));
+  await reserveGameChatLifecycleTx({ gameId: loaded.row.id, kind: "both_win", now: clock, retryAfterAt, tx });
+}
+
 async function post(context: CommandContext, command: Extract<GameCommand, { type: "post" }>): Promise<string> {
   const { actor } = context;
   const { entryId, gameId, kind, mediaKeys } = command;
@@ -1447,7 +1454,7 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
         where: { id: decision.withdrawEntryId },
       });
     }
-    await tx.gameEntry.create({
+    const created = await tx.gameEntry.create({
       data: {
         attempt: decision.attempt,
         captureAgeMs,
@@ -1464,12 +1471,13 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
         incomplete: kind !== "excuse" && loaded.state.entries.some((entry) => entry.memberId === actor && entry.dayIndex === decision.dayIndex && entry.incomplete) ? true : null,
       },
     });
+    const nextState = toRuleState(loaded.row, [...loaded.entries.filter(entry => entry.id !== decision.withdrawEntryId), created]);
+    if (kind !== "excuse") await reserveBothWinOfferTx({ clock, loaded, now, tx }, nextState);
     const { attempt, dayIndex, graceUsed } = decision;
     if (kind !== "excuse" && attempt === 1) {
       notification = await claimGamePostNotification(tx, {
         actor, clock, entryId, dayIndex,
-        state: { ...loaded.state, entries: [...loaded.state.entries, { id: entryId, memberId: actor, attempt, dayIndex, kind,
-          mediaKeys, receivedAt: clock, withdrawnAt: null, blurHash: command.blurHash ?? null }] },
+        state: nextState,
       });
     }
     return [{ payload: { attempt, dayIndex, entryId, graceUsed, kind }, type: "posted" }];
@@ -1610,11 +1618,14 @@ async function setDayCompletion(context: CommandContext, command: Extract<GameCo
     if (!decision.changed) return [];
     if (decision.outcome.status === "credited") {
       // No push: the request and Murph's answer are already in the game's own chat.
-      await tx.gameEntry.create({ data: { id: creditEntryId, gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex,
+      const created = await tx.gameEntry.create({ data: { id: creditEntryId, gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex,
         attempt: 1, kind: "words", mediaKeys: [], textEncrypted: creditText, receivedAt: clock } });
+      await reserveBothWinOfferTx({ clock, loaded, now, tx }, toRuleState(loaded.row, [...loaded.entries, created]));
       return [{ type: "day_credited", payload: { dayIndex: decision.dayIndex, entryId: creditEntryId } }];
     }
     await tx.gameEntry.updateMany({ where: { gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex, attempt: { gt: 0 } }, data: { incomplete: command.incomplete ? true : null } });
+    if (!command.incomplete) await reserveBothWinOfferTx({ clock, loaded, now, tx }, toRuleState(loaded.row,
+      loaded.entries.map(entry => entry.memberId === context.actor && entry.dayIndex === decision.dayIndex && entry.attempt > 0 ? { ...entry, incomplete: null } : entry)));
     return [{ type: command.incomplete ? "day_marked_incomplete" : "day_restored", payload: { dayIndex: decision.dayIndex } }];
   });
   if (!dayOutcome) throw new Error("Game day correction produced no outcome.");

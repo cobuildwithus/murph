@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({
-  consumed: vi.fn(), threadRoute: vi.fn(),
+  bothCurrent: vi.fn(), consumed: vi.fn(), threadRoute: vi.fn(),
   entries: vi.fn(), reports: vi.fn(), witness: vi.fn(), groupAuthority: vi.fn(), lock: vi.fn(), wake: vi.fn(), challengeCase: vi.fn(), challengeInstructions: vi.fn(), currentChange: vi.fn(),
   event: vi.fn(), cancelledEvent: vi.fn(), receipts: vi.fn(), frozen: vi.fn(), recover: vi.fn(), receiptUpdate: vi.fn(), game: vi.fn(), current: vi.fn(), bind: vi.fn(),
   state: vi.fn(), rematchNotice: vi.fn(), identity: vi.fn(), discover: vi.fn(), exact: vi.fn(), bootstrap: vi.fn(), proposal: vi.fn(),
@@ -11,7 +11,7 @@ vi.mock("../src/lib/prisma", () => {
   const db = { $queryRaw: m.lock, gameEvent: { findUnique: m.event, findFirst: m.cancelledEvent, createMany: m.witness }, gameEntry: { findMany: m.entries }, gameReport: { findMany: m.reports }, hostedThreadRoute: { findFirst: m.threadRoute }, hostedLinqDelivery: { findMany: (input: { where: { payloadSchema?: string } }) => input.where.payloadSchema ? m.frozen(input) : m.receipts(input), updateMany: m.receiptUpdate }, game: { findUnique: m.game, findUniqueOrThrow: m.game, findFirst: m.current, updateMany: m.bind } };
   return { getPrisma: () => ({ ...db, $transaction: async (fn: (tx: typeof db) => unknown) => fn(db) }) };
 });
-vi.mock("../src/lib/game/service", () => ({ readGameChatState: m.state, readGameNoticeRoom: m.room, readGameMissedCheckInBatch: m.missedBatch, readGameRematchNotice: m.rematchNotice,
+vi.mock("../src/lib/game/service", () => ({ isBothWinOfferCurrent: m.bothCurrent, readGameChatState: m.state, readGameNoticeRoom: m.room, readGameMissedCheckInBatch: m.missedBatch, readGameRematchNotice: m.rematchNotice,
   readGameChallengeCase: m.challengeCase, readGameChallengeInstructions: m.challengeInstructions, readCurrentGameChange: m.currentChange,
   readGameRecapMaterial: m.recapMaterial, reserveDueGameMissedDayCheckIns: m.reserveMissed }));
 vi.mock("../src/lib/game/chat-tool", () => ({ readGameRecapChatMessages: m.recapMessages, readGameChatTranscript: m.transcript }));
@@ -96,6 +96,33 @@ describe("durable game chat lifecycle", () => {
     const [sql, ...values] = m.lock.mock.calls[0] as [string[], ...unknown[]];
     expect(sql.join("?")).toMatch(/DISTINCT ON \(chat\)[\s\S]*source_ref IS NOT NULL[\s\S]*ORDER BY attempted_at, id LIMIT \?$/u);
     expect(values).toEqual([expect.arrayContaining(["game_started", "game_group_missed", "game_challenge"]), now, now, 10]);
+  });
+
+  it.each(["awaiting_generation", "generation_queued"])("both-win publishes or recovers one bound offer: %s", async status => {
+    m.receipts.mockResolvedValue([{ ...receipt, status, template: "game_both_win", idempotencyKey: "hash:game-both-win:game" }]);
+    m.bothCurrent.mockResolvedValue({ state: { players: players.map(memberId => ({ memberId })),
+      entries: players.map(memberId => ({ memberId, dayIndex: 4, kind: "words", withdrawnAt: null })) } });
+    m.state.mockResolvedValue({ games: [{ id: "game", lengthDays: 7, players: players.map((memberId, seat) => ({ memberId, seat, firstName: seat ? "Leo" : "Ava" })),
+      terms: { tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Walk" }] } }] });
+    if (status === "generation_queued") m.mailbox.mockResolvedValue({ id: "mailbox", consumedAt: null });
+    await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
+    if (status === "awaiting_generation") {
+      const notice = m.prepare.mock.calls[0][0].envelope.notification;
+      expect(notice).toMatchObject({ deliveryIdempotencyKey: "game-both-win:game", responsePolicy: { kind: "require_send" }, deliveryDispatchMode: "queue-only" });
+      expect(JSON.parse(notice.instructions.split("\n").at(-1))).toEqual({ players: [{ firstName: "Ava", task: "Read" }, { firstName: "Leo", task: "Walk" }], dayReached: 5, lengthDays: 7 });
+    } else expect(m.prepare).not.toHaveBeenCalled();
+    expect(m.signal).toHaveBeenCalledOnce(); expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
+  });
+  it.each(["missed", "finished", "pending", "already_added", "unbound", "cancelled", "settled"])("both-win skips stale generation and recovery without sending: %s", async cause => {
+    for (const status of ["awaiting_generation", "generation_queued"]) {
+      m.receipts.mockResolvedValue([{ ...receipt, status, template: "game_both_win", idempotencyKey: "hash:game-both-win:game" }]);
+      m.bothCurrent.mockResolvedValue(null);
+      m.game.mockResolvedValue({ ...game, chatContainerMemberId: cause === "unbound" ? null : "room", status: cause === "cancelled" ? "void" : cause === "settled" ? "settled" : "live" });
+      await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 0, deferred: 1 });
+      expect(m.receiptUpdate).toHaveBeenLastCalledWith(expect.objectContaining({ data: { status: "skipped", skippedAt: now, skipReason: "game_lifecycle_superseded", retryAfterAt: null } }));
+    }
+    expect(m.prepare).not.toHaveBeenCalled(); expect(m.signal).not.toHaveBeenCalled();
+    expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
   });
 
   it.each(["awaiting_generation", "generation_queued"])("queues or recovers one bound Prove it notice: %s", async status => {

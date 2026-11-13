@@ -314,7 +314,15 @@ provider dispatch, including retries. It requires a retained, unskipped receipt,
 a live bound pair game with a still-earnable offer and no waiting change.
 The compatible reader ships before any offer reservation or both-win writer.
 The writer uses the existing player proposal and other-player approval; a bare
-yes to an offer cannot name a prize. This adds no notification lifecycle.
+yes to an offer cannot name a prize. The `both_win` lifecycle reserves one
+`game-both-win:<gameId>` offer after a qualifying post, credit or restore, with
+`sourceRef` equal to the game id so a block skips it. It uses `require_send` in
+the existing bound chat. The existing receipt drain honors `retryAfterAt`, set
+to the latest of the two players' unchanged `morningAfter` results (null falls
+back to now). No new timer or sweep is added, and delivery never repeats the
+morning window check. Generation, queued wake recovery and final dispatch
+skip an offer that is no longer due, has a waiting change or has lost its chat;
+a skipped receipt is never offered again.
 Game evening room check-ins validate their frozen game and chat witness but do
 not inherit the game-proposal inactivity exemption. They stay subject to the
 90-day pause, the three-accepted-evening unanswered pause and the half-hour
