@@ -2704,8 +2704,9 @@ text(JSON.stringify(result));
       .flatMap((summary) => summary.customToolCallOutputs ?? [])
       .join('\n')
     expect(toolOutputs).toContain('name: murph-onboarding')
-    expect(toolOutputs).toContain('routeBinding')
-    expect(toolOutputs).toContain('current_conversation')
+    expect(toolOutputs).toContain('automation-first-personal-read')
+    // Binding to this conversation is the save default, so it is not repeated.
+    expect(toolOutputs).not.toContain('routeBinding')
   })
 
   it('carries a compact mixed-meal lookup through a grounded save and final reply', {

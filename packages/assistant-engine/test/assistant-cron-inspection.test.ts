@@ -55,11 +55,45 @@ describe('automation execution inspection', () => {
       })
     }
     const result = await getAssistantCronAutomationInspection(vault, jobId)
-    expect(result).toMatchObject({ status: 'available', historyLimit: 10, historyTruncated: true,
-      current: { phase: 'idle', retryAt: null }, recentRuns: [expect.objectContaining({ outcome: 'failed' }), ...Array.from({ length: 9 }, () => expect.objectContaining({ outcome: 'delivered' }))] })
+    if (result.status !== 'available') throw new Error('Expected available inspection')
+    // Absent nulls, constant limits and outcome-restating reasons are omitted.
+    expect(result).not.toHaveProperty('historyLimit')
+    expect(result).not.toHaveProperty('delivery')
+    expect(result.historyTruncated).toBe(true)
+    expect(result.current).toEqual({ phase: 'idle', error: expect.stringContaining('Service unavailable') })
+    const newest = new Date(Date.parse(at) + 11 * 60_000).toISOString()
+    expect(result.recentRuns[0]).toEqual({ finishedAt: newest, occurrenceAt: newest, outcome: 'failed',
+      reason: 'provider_unavailable', error: expect.stringContaining('Service unavailable') })
+    expect(result.recentRuns.slice(1)).toEqual(Array.from({ length: 9 }, (_, index) => {
+      const timestamp = new Date(Date.parse(at) + (10 - index) * 60_000).toISOString()
+      return { finishedAt: timestamp, occurrenceAt: timestamp, outcome: 'delivered' }
+    }))
     expect(JSON.stringify(result)).not.toMatch(/PRIVATE_RESPONSE_SENTINEL|synthetic-secret|sessionId|runId|runningPid/)
-    expect(JSON.stringify(result)).toContain('Service unavailable')
-    expect(result).toMatchObject({ nextStep: expect.stringContaining('option to reschedule') })
+    expect(result.nextStep).toContain('option to reschedule')
+    expect(result.interpretation).toContain('After failure, say the message may not have gone out')
+    expect(result.interpretation).toContain('A retry is scheduled only when current.retryAt or delivery.nextAttemptAt is present')
+    expect(result.interpretation).toContain('use occurrenceProjection for the next scheduled occurrence')
+    expect(result.interpretation).not.toContain('delivery_pending')
+  })
+
+  it('returns only the guidance that applies to an all-delivered idle history', async () => {
+    const { vault, paths } = await fixture()
+    await appendAssistantCronRun(paths, {
+      schema: 'murph.assistant-cron-run.v1', runId: `acr_${'1'.repeat(32)}`,
+      jobId, trigger: 'scheduled', startedAt: at, finishedAt: at,
+      scheduledOccurrenceAt: at, sessionId: null, response: null, responseLength: 0,
+      outcome: 'delivered', reason: 'sent', error: null,
+    })
+    const result = await getAssistantCronAutomationInspection(vault, jobId)
+    expect(result).toEqual({
+      status: 'available',
+      current: { phase: 'idle' },
+      recentRuns: [{ finishedAt: at, occurrenceAt: at, outcome: 'delivered' }],
+      nextStep: 'Explain the recorded outcome and use the stored schedule and occurrence projection for future timing.',
+      interpretation: 'This is retained attempt history, newest first, not a complete lifetime history. '
+        + 'Only delivered or delivery.status=sent confirms sending, not reading. '
+        + 'Do not treat a consumed occurrence, an empty retained history, or a null next occurrence as proof of delivery.',
+    })
   })
 
   it.each(['retryable', 'sent', 'failed', 'abandoned'] as const)('shows exact outstanding delivery evidence when %s', async (status) => {
@@ -72,7 +106,12 @@ describe('automation execution inspection', () => {
     runtime.jobs[0].state.pendingDeliveryIntentId = intent.intentId
     await writeAssistantCronCanonicalRuntimeStore(paths, runtime)
     const result = await getAssistantCronAutomationInspection(vault, jobId)
-    expect(result).toMatchObject({ status: 'available', delivery: { status, attemptCount: 1, sentAt: status === 'sent' ? at : null } })
+    expect(result).toMatchObject({ status: 'available', current: { phase: 'waiting_delivery' }, delivery: {
+      status, attemptCount: 1, lastAttemptAt: at, ...(status === 'sent' ? { sentAt: at } : {}),
+      ...(status === 'retryable' ? { nextAttemptAt: at } : {}) } })
+    if (status !== 'sent') expect(result).not.toHaveProperty('delivery.sentAt')
+    if (status !== 'retryable') expect(result).not.toHaveProperty('delivery.nextAttemptAt')
+    expect(result).toMatchObject({ interpretation: expect.stringContaining('use the outstanding delivery status') })
     expect(JSON.stringify(result)).not.toContain('PRIVATE_MESSAGE_SENTINEL')
   })
 })

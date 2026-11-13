@@ -73,7 +73,9 @@ it("projects model reviews without timing reads, preserving ordinary instruction
       expect(await readFile(recordPath, "utf8")).toBe(before);
       const compactBytes = Buffer.byteLength(JSON.stringify(compact));
       const fullBytes = Buffer.byteLength(JSON.stringify(full));
-      expect(compactBytes).toBeLessThan(managed ? fullBytes / 10 : fullBytes - 500);
+      // Full inspection now carries only the guidance its empty history needs,
+      // so an ordinary review saves the timing and history fields (~0.5 KB).
+      expect(compactBytes).toBeLessThan(managed ? fullBytes / 10 : fullBytes - 400);
       process.stdout.write(JSON.stringify({ automationReviewBytes: { managed, fullBytes, compactBytes } }) + "\n");
     }
   } finally {
