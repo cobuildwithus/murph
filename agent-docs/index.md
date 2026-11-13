@@ -2,7 +2,7 @@
 
 The local architecture and test cleanup checkpoint is recorded in [radical simplicity](exec-plans/completed/2026-11-11-radical-simplicity.md), with findings and retained-proof mappings in the [codebase audit](references/codebase-simplicity-audit-2026-11-11.md). The [PR review record](exec-plans/completed/2026-11-11-simplicity-pr-release.md) records implementation and review; [PR #4866](https://github.com/cobuildwithus/murph/pull/4866) tracks remaining merges and the single final Cloudflare deployment. Live game editing remains supported; categorical oxygen screening is retired in favor of numerical summaries.
 
-The [App Review server fixes plan](exec-plans/active/2026-11-12-app-review-server-fixes.md)
+The [App Review server fixes plan](exec-plans/completed/2026-11-12-app-review-server-fixes.md)
 records opening the game to every member, the review account's Home refresh and
 the removed speech wording. The [weekly game spec](product-specs/weekly-game.md)
 owns the current contract.

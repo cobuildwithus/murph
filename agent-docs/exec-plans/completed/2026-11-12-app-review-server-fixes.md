@@ -1,6 +1,6 @@
 # App Review server fixes: open the game, keep the demo game fresh, drop the speech excuse wording
 
-Status: active
+Status: completed
 Created: 2026-11-12
 Updated: 2026-11-12
 
@@ -131,3 +131,4 @@ Three server-side fixes before the 1v1 game goes to App Store review:
   `game-chat-access-postgres`, and the other touched `*-postgres` suites
   against an isolated loopback database.
 - `pnpm complexity:diff`.
+Completed: 2026-11-12
