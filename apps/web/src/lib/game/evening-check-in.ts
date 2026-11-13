@@ -7,7 +7,7 @@ import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-st
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
-import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxMaxSeqByLane, readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
+import { readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { getPrisma } from "../prisma";
 import { isGameEnabled } from "./access";
 import { lockGamePair } from "./blocks";
@@ -148,7 +148,7 @@ export async function reserveGameEveningCheckIn(roomId: string, gameIds: readonl
       const pairs = room.games.filter(game => game.row.maxPlayers === 2)
         .map(game => game.row.players.map(player => player.memberId!).sort()).sort((a, b) => a.join(":").localeCompare(b.join(":")));
       for (const pair of pairs) await lockGamePair(tx, pair[0]!, pair[1]!);
-      if (!await isEveningBatchCurrentTx(policy, room.memberIds, room.audience, tx, now, false)
+      if (!await isEveningBatchCurrentTx(policy, room.memberIds, room.audience, tx, now)
         || await paused(roomId, gameEveningCheckInHorizons(room.games.map(game => game.state)), date, tx)) return false;
       const result = await tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
         source: "game_lifecycle", sourceRef: `${roomId}:${date}`, template: "game_evening", status: "awaiting_generation",
@@ -196,15 +196,15 @@ export async function prepareGameEveningCheckIn(roomId: string, date: string, no
   if (!dueAt || !gameEveningWindow(dueAt, now)) return null;
   const batch = addressedBatch(room.games, date, now);
   if (!batch.length) return null;
-  const [watermark] = await readHostedMailboxMaxSeqByLane({ userId: roomId, lanes: ["conversation"] });
   const policy = gameEveningCheckInPolicySchema.parse({ kind: "game_evening_check_in", roomId, date,
     eventId: gameEveningEventId(roomId, date), expiresAt: new Date(dueAt.getTime() + WINDOW_MS).toISOString(),
-    conversationLaneSeq: watermark.maxSeq, batch });
+    conversationLaneSeq: "0", batch });
   return { ...room, policy };
 }
 
+/** Game facts decide currentness. Chat never does: what people said is the model's evidence, not a gate. */
 export async function isEveningBatchCurrentTx(policy: HostedGameEveningCheckInPolicy, memberIds: readonly string[],
-  audience: GameChatAudience | undefined, tx: Prisma.TransactionClient, now: Date, checkConversation = true): Promise<boolean> {
+  audience: GameChatAudience | undefined, tx: Prisma.TransactionClient, now: Date): Promise<boolean> {
   if (now >= new Date(policy.expiresAt)) return false;
   const ids = [...new Set(policy.batch.map(game => game.gameId))].sort();
   await tx.$queryRaw`SELECT id FROM game WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
@@ -217,11 +217,7 @@ export async function isEveningBatchCurrentTx(policy: HostedGameEveningCheckInPo
   if (profiles.length !== memberIds.length || profiles.some(profile => !normalizeIanaTimeZone(profile.timeZone))
     || gameZoneSpreadHours(profiles.map(profile => profile.timeZone), now) >= GAME_ROOM_FAR_APART_HOURS) return false;
   // Only the addressed games are loaded here, so the room's horizon can't be rebuilt; the frozen expiry above stands.
-  if (JSON.stringify(addressedBatch(games, policy.date, now)) !== JSON.stringify(policy.batch)) return false;
-  if (!checkConversation) return true;
-  await acquireHostedMailboxCausalAppendLockTx({ tx, userId: policy.roomId });
-  const [watermark] = await readHostedMailboxMaxSeqByLane({ prisma: tx, userId: policy.roomId, lanes: ["conversation"] });
-  return watermark.maxSeq === policy.conversationLaneSeq;
+  return JSON.stringify(addressedBatch(games, policy.date, now)) === JSON.stringify(policy.batch);
 }
 
 export async function readGameEveningDeliveryAuthority(eventId: string, roomId: string, target?: string | null) {

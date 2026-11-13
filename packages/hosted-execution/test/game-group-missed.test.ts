@@ -3,7 +3,7 @@ import { writeFile, rm } from "node:fs/promises";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "../src/index.ts";
 import { parseHostedExecutionWake } from "../src/parsers.ts";
-import { gameEveningCheckInPolicySchema, gameGroupMissedCheckInPolicySchema } from "../src/game-group-missed.ts";
+import { gameEveningCheckInPolicySchema, gameGroupMissedCheckInPolicySchema, gamePrivateEveningCheckInPolicySchema } from "../src/game-group-missed.ts";
 import { buildGameEveningCheckInInstructions, buildGameMissedDayInstructions } from "../src/game-chat-notifications.ts";
 
 const policy = { kind: "game_group_missed_check_in" as const, eventId: "game-missed:room:group:2030-03-04", roomId: "room",
@@ -68,6 +68,16 @@ describe("game evening check-in contract", () => {
     input.notification.responsePolicy = gameEveningCheckInPolicySchema.parse(evening);
     expect(parseHostedExecutionWake(input)).toEqual(input);
     expect(parseHostedExecutionWake(wake())).toEqual(wake());
+  });
+  it("accepts each check-in policy with and without the retired chat position", () => {
+    const { conversationLaneSeq: _room, ...roomOnly } = policy, { conversationLaneSeq: _evening, ...eveningOnly } = evening;
+    expect(gameGroupMissedCheckInPolicySchema.parse(roomOnly)).toEqual(roomOnly);
+    expect(gameEveningCheckInPolicySchema.parse(eveningOnly)).toEqual(eveningOnly);
+    expect(gameEveningCheckInPolicySchema.parse(evening)).toEqual(evening);
+    const direct = { kind: "game_private_evening_check_in" as const, eventId: "game-evening-private:one:2030-03-04", memberId: "one",
+      date: "2030-03-04", expiresAt: "2030-03-05T01:30:00.000Z", batch: [{ gameId: "game", termsVersion: 1, dayIndex: 0 }] };
+    expect(gamePrivateEveningCheckInPolicySchema.parse(direct)).toEqual(direct);
+    expect(gamePrivateEveningCheckInPolicySchema.parse({ ...direct, conversationLaneSeq: "7" })).toEqual({ ...direct, conversationLaneSeq: "7" });
   });
   it.each([{ eventId: "wrong" }, { batch: [] }, { conversationLaneSeq: "-1" }, { expiresAt: "wrong" },
     { batch: [evening.batch[0], evening.batch[0]] }, { batch: [{ ...evening.batch[0], memberIds: ["one", "one"] }] },

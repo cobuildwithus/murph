@@ -7,9 +7,9 @@
       "effectiveDate": "2026-04-09",
       "id": "privacy-policy",
       "latest": {
-        "bytes": 98766,
+        "bytes": 99192,
         "path": "/legal/privacy.pdf",
-        "sha256": "f516c7b7eb2becfa730f9ddd82fee583a12d3c6d3937d33b91dfb7aa1dbaf607"
+        "sha256": "ccbe3ccb3b9b3740cd2ae8feada99bfef33cf1f8ec5024722d2774c2c0a6643c"
       },
       "lastUpdated": "2026-11-12",
       "source": "apps/web/legal/privacy-policy.md",
@@ -17,9 +17,9 @@
       "version": "2026-11-12",
       "versions": [
         {
-          "bytes": 98766,
+          "bytes": 99192,
           "path": "/legal/privacy-2026-11-12.pdf",
-          "sha256": "f516c7b7eb2becfa730f9ddd82fee583a12d3c6d3937d33b91dfb7aa1dbaf607"
+          "sha256": "ccbe3ccb3b9b3740cd2ae8feada99bfef33cf1f8ec5024722d2774c2c0a6643c"
         }
       ]
     },

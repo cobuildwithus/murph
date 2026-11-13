@@ -254,7 +254,7 @@ BT /F1 10 Tf 1 0 0 1 72.00 75.00 Tm (add one;) Tj ET
 endstream
 endobj
 7 0 obj
-<< /Length 5892 >>
+<< /Length 6185 >>
 stream
 BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (-) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 738.00 Tm (heart rate, read over Bluetooth from a WHOOP you connect. Your iPhone shows your live heart rate) Tj ET
@@ -265,49 +265,51 @@ BT /F1 10 Tf 1 0 0 1 72.00 694.00 Tm (routes for a walk or run \(see Location be
 BT /F1 10 Tf 1 0 0 1 54.00 678.00 Tm (-) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 678.00 Tm (missed-day excuses: the words you give for a missed day;) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 662.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 662.00 Tm (invite details: if you pick someone from your contacts, their phone number stays on your iPhone and) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 648.00 Tm (is used only to open a Messages draft that you send. The name, relationship, and photo you give them) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 634.00 Tm (are kept as a private label that only you see. Murph's AI can use that photo as a guide when it draws) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 620.00 Tm (that person in a recap \(see Recaps below\);) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 604.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 604.00 Tm (reports and blocks: who you report or block, the reason and any note you add, and a copy of what you) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 590.00 Tm (reported as it was at that moment; and) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 574.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 574.00 Tm (notifications: if you turn them on, a device address so we can tell you about new posts. These) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 560.00 Tm (notifications don't include names, photos, tasks, or words.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 544.00 Tm (Before a photo you take in the game leaves your iPhone, the app removes its location and camera details.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 530.00 Tm (We encrypt game words and numbers at rest, and we show game photos only through short-lived links) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 516.00 Tm (to people allowed to see them.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 498.00 Tm (Why we collect game data. We collect your game photos, words, rep counts and routes because the game) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 484.00 Tm (you asked to play cannot run without them. We do not sell them or use them for advertising. Heart rate) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 470.00 Tm (is health data: the app asks for your permission before your first heart rate post, and you can withdraw) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 456.00 Tm (that permission in Settings.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 438.00 Tm (Murph's AI hosts the game. Murph is an AI. To host a game, our AI model provider, OpenAI, receives) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 424.00 Tm (what the players post in it \(photos, words, results, and numbers such as rep counts, heart rate) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 410.00 Tm (summaries and route distance\), each player's first name and profile photo, and the messages and photos) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 396.00 Tm (sent in the game's group chat. OpenAI processes this content for us, on our instructions, under terms) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 382.00 Tm (that do not let it use the content to train its models. We never ask an AI model to work out who a) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 368.00 Tm (person is or to match a face to a name.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 350.00 Tm (Recaps. When a game ends, Murph makes a recap for its players from the content above. A recap can) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 336.00 Tm (include pictures made by AI that show the players in a scene from their game. To draw a player,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 322.00 Tm (OpenAI's image model receives photos of that player as a guide to how they look: their profile photo, the) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 308.00 Tm (photos they posted in this game, recent photos they posted in earlier games with the same person, and) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 294.00 Tm (the photo the other player gave Murph for them as a private label, if there is one. A recap can also) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 280.00 Tm (include a short song made by ElevenLabs from a description of the sound and lyrics about the game,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 266.00 Tm (which can include players' first names. ElevenLabs does not receive photos.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 248.00 Tm (Location. The route feature uses your iPhone's precise location only while you use the app, and only after) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 234.00 Tm (you allow it. iOS asks the first time you tap Start, and Murph never asks for location all the time. Once) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 220.00 Tm (you have allowed it, opening the route screen finds where you are so the map can show it before you) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 206.00 Tm (start. Between Start and Stop, it keeps recording while your phone is locked, and iOS shows its location) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 192.00 Tm (indicator. Your location points stay in memory on your iPhone and are never sent or saved. When you tap) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 178.00 Tm (Send, we receive one map image of your route, plus its distance, its time, and whether it was a walk or a) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 164.00 Tm (run. The map leaves out the start and end of your route. If your route passes the same place again in) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 150.00 Tm (the middle, such as a second lap past where you started, the map can still show that place, and for a) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 136.00 Tm (very short route the part that is left is still close to where you started.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 662.00 Tm (invite details: if you pick someone from your contacts, their phone number is sent to Murph to check) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 648.00 Tm (whether it belongs to someone you have played. Murph does not store the number. We keep a hashed) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 634.00 Tm (lookup value with the invite so we can show it to that person if they sign in with the same number.) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 620.00 Tm (We remove that value when the invite is accepted or ends. The name, relationship, and photo you give) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 606.00 Tm (them are kept as a private label that only you see. Murph's AI can use that photo as a guide when it) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 592.00 Tm (draws that person in a recap \(see Recaps below\);) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 576.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 576.00 Tm (reports and blocks: who you report or block, the reason and any note you add, and a copy of what you) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 562.00 Tm (reported as it was at that moment; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 546.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 546.00 Tm (notifications: if you turn them on, a device address so we can tell you about new posts. These) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 532.00 Tm (notifications don't include names, photos, tasks, or words.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 516.00 Tm (Before a photo you take in the game leaves your iPhone, the app removes its location and camera details.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 502.00 Tm (We encrypt game words and numbers at rest, and we show game photos only through short-lived links) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 488.00 Tm (to people allowed to see them.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 470.00 Tm (Why we collect game data. We collect your game photos, words, rep counts and routes because the game) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 456.00 Tm (you asked to play cannot run without them. We do not sell them or use them for advertising. Heart rate) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 442.00 Tm (is health data: the app asks for your permission before your first heart rate post, and you can withdraw) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 428.00 Tm (that permission in Settings.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 410.00 Tm (Murph's AI hosts the game. Murph is an AI. To host a game, our AI model provider, OpenAI, receives) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 396.00 Tm (what the players post in it \(photos, words, results, and numbers such as rep counts, heart rate) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 382.00 Tm (summaries and route distance\), each player's first name and profile photo, and the messages and photos) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 368.00 Tm (sent in the game's group chat. OpenAI processes this content for us, on our instructions, under terms) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 354.00 Tm (that do not let it use the content to train its models. We never ask an AI model to work out who a) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 340.00 Tm (person is or to match a face to a name.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 322.00 Tm (Recaps. When a game ends, Murph makes a recap for its players from the content above. A recap can) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 308.00 Tm (include pictures made by AI that show the players in a scene from their game. To draw a player,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 294.00 Tm (OpenAI's image model receives photos of that player as a guide to how they look: their profile photo, the) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 280.00 Tm (photos they posted in this game, recent photos they posted in earlier games with the same person, and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 266.00 Tm (the photo the other player gave Murph for them as a private label, if there is one. A recap can also) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 252.00 Tm (include a short song made by ElevenLabs from a description of the sound and lyrics about the game,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 238.00 Tm (which can include players' first names. ElevenLabs does not receive photos.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 220.00 Tm (Location. The route feature uses your iPhone's precise location only while you use the app, and only after) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 206.00 Tm (you allow it. iOS asks the first time you tap Start, and Murph never asks for location all the time. Once) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 192.00 Tm (you have allowed it, opening the route screen finds where you are so the map can show it before you) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 178.00 Tm (start. Between Start and Stop, it keeps recording while your phone is locked, and iOS shows its location) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 164.00 Tm (indicator. Your location points stay in memory on your iPhone and are never sent or saved. When you tap) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 150.00 Tm (Send, we receive one map image of your route, plus its distance, its time, and whether it was a walk or a) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 136.00 Tm (run. The map leaves out the start and end of your route. If your route passes the same place again in) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 122.00 Tm (the middle, such as a second lap past where you started, the map can still show that place, and for a) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 108.00 Tm (very short route the part that is left is still close to where you started.) Tj ET
 endstream
 endobj
 8 0 obj
-<< /Length 5322 >>
+<< /Length 5455 >>
 stream
 BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Group chat. When a game starts, Murph may text both players about it in an iMessage group. Murph) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (writes those messages with help from its AI providers, using shared game details such as names, tasks,) Tj ET
@@ -334,39 +336,40 @@ BT /F1 10 Tf 1 0 0 1 54.00 460.00 Tm (-) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 460.00 Tm (From payment processors, when you purchase or subscribe to hosted services.) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 444.00 Tm (-) Tj ET
 BT /F1 10 Tf 1 0 0 1 72.00 444.00 Tm (From other Murph users, such as when someone sends you an invite link, plays a game with you, or) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 430.00 Tm (reports something you shared.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 414.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 414.00 Tm (From recipients, websites, portals, providers, and merchants you ask Murph to contact or use, when) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 400.00 Tm (they return status, confirmation, transaction, or result information.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 384.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 384.00 Tm (From service providers and security tools, where needed to operate, support, analyze, or secure) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 370.00 Tm (Murph.) Tj ET
-BT /F2 14 Tf 1 0 0 1 54.00 344.00 Tm (5. How we use information) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 320.00 Tm (We may use information for the following purposes.) Tj ET
-BT /F2 11 Tf 1 0 0 1 54.00 294.00 Tm (A. To provide Murph and requested features) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 275.00 Tm (We use information to:) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 257.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 257.00 Tm (create and manage accounts and sessions;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 241.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 241.00 Tm (authenticate users and verify access;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 225.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 225.00 Tm (sync, display, search, organize, and export records;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 209.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 209.00 Tm (operate wearable and provider connections;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 193.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 193.00 Tm (process prompts, messages, attachments, and requested outputs;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 177.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 177.00 Tm (deliver hosted onboarding, invite, import, and export flows;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 161.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 161.00 Tm (perform user-directed calls, messages, browser actions, bookings, purchases, cancellations,) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 147.00 Tm (submissions, and other tasks;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 131.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 131.00 Tm (verify and present resulting confirmations, statuses, summaries, receipts, and outcomes;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 115.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 115.00 Tm (run games you join, including checking the words you type before they are posted, showing your) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 101.00 Tm (posts to the other player, sending game messages and notifications, and reviewing reports;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 85.00 Tm (-) Tj ET
-BT /F1 10 Tf 1 0 0 1 72.00 85.00 Tm (enable billing, entitlement, and subscription management; and) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 430.00 Tm (reports something you shared. An invite may be matched to you by a hashed value of the phone) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 416.00 Tm (number the sender picked.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 400.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 400.00 Tm (From recipients, websites, portals, providers, and merchants you ask Murph to contact or use, when) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 386.00 Tm (they return status, confirmation, transaction, or result information.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 370.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 370.00 Tm (From service providers and security tools, where needed to operate, support, analyze, or secure) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 356.00 Tm (Murph.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 330.00 Tm (5. How we use information) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 306.00 Tm (We may use information for the following purposes.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54.00 280.00 Tm (A. To provide Murph and requested features) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 261.00 Tm (We use information to:) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 243.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 243.00 Tm (create and manage accounts and sessions;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 227.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 227.00 Tm (authenticate users and verify access;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 211.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 211.00 Tm (sync, display, search, organize, and export records;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 195.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 195.00 Tm (operate wearable and provider connections;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 179.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 179.00 Tm (process prompts, messages, attachments, and requested outputs;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 163.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 163.00 Tm (deliver hosted onboarding, invite, import, and export flows;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 147.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 147.00 Tm (perform user-directed calls, messages, browser actions, bookings, purchases, cancellations,) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 133.00 Tm (submissions, and other tasks;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 117.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 117.00 Tm (verify and present resulting confirmations, statuses, summaries, receipts, and outcomes;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 101.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 101.00 Tm (run games you join, including checking the words you type before they are posted, showing your) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 87.00 Tm (posts to the other player, sending game messages and notifications, and reviewing reports;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 71.00 Tm (-) Tj ET
+BT /F1 10 Tf 1 0 0 1 72.00 71.00 Tm (enable billing, entitlement, and subscription management; and) Tj ET
 endstream
 endobj
 9 0 obj
@@ -1033,42 +1036,42 @@ xref
 0000011349 00000 n 
 0000016657 00000 n 
 0000022243 00000 n 
-0000028187 00000 n 
-0000033561 00000 n 
-0000038533 00000 n 
-0000044104 00000 n 
-0000049507 00000 n 
-0000054802 00000 n 
-0000060364 00000 n 
-0000065200 00000 n 
-0000070606 00000 n 
-0000076123 00000 n 
-0000081942 00000 n 
-0000087371 00000 n 
-0000092451 00000 n 
-0000094979 00000 n 
-0000095117 00000 n 
-0000095255 00000 n 
-0000095393 00000 n 
-0000095531 00000 n 
-0000095669 00000 n 
-0000095807 00000 n 
-0000095945 00000 n 
-0000096084 00000 n 
-0000096223 00000 n 
-0000096362 00000 n 
-0000096501 00000 n 
-0000096640 00000 n 
-0000096779 00000 n 
-0000096918 00000 n 
-0000097057 00000 n 
-0000097196 00000 n 
-0000097335 00000 n 
-0000097474 00000 n 
-0000097653 00000 n 
-0000097794 00000 n 
+0000028480 00000 n 
+0000033987 00000 n 
+0000038959 00000 n 
+0000044530 00000 n 
+0000049933 00000 n 
+0000055228 00000 n 
+0000060790 00000 n 
+0000065626 00000 n 
+0000071032 00000 n 
+0000076549 00000 n 
+0000082368 00000 n 
+0000087797 00000 n 
+0000092877 00000 n 
+0000095405 00000 n 
+0000095543 00000 n 
+0000095681 00000 n 
+0000095819 00000 n 
+0000095957 00000 n 
+0000096095 00000 n 
+0000096233 00000 n 
+0000096371 00000 n 
+0000096510 00000 n 
+0000096649 00000 n 
+0000096788 00000 n 
+0000096927 00000 n 
+0000097066 00000 n 
+0000097205 00000 n 
+0000097344 00000 n 
+0000097483 00000 n 
+0000097622 00000 n 
+0000097761 00000 n 
+0000097900 00000 n 
+0000098079 00000 n 
+0000098220 00000 n 
 trailer
 << /Size 42 /Root 41 0 R /Info 40 0 R >>
 startxref
-97845
+98271
 %%EOF

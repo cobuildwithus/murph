@@ -14,9 +14,11 @@ import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-cryp
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import type { GameCommand, GameTermsInput } from "@/src/lib/game/contract";
 import { applyGameAccountDeletionTx, prepareGameAccountDeletion } from "@/src/lib/game/account-deletion";
-import { devSettleNow, devStartNow, readGame, readHome, runGameCommand } from "@/src/lib/game/service";
+import { devSettleNow, devStartNow, readGame, readHome, readGameInviteForMember, runGameCommand } from "@/src/lib/game/service";
 import { labelTarget, sealGameText, openGameTexts } from "@/src/lib/game/crypto";
 import { getPrisma } from "@/src/lib/prisma";
+import { upsertHostedMemberIdentity } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
+import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboarding/member-identity-fields";
 
 vi.mock("@/src/lib/hosted-crypto/env", async () => {
   const { generateKeyPairSync } = await import("node:crypto");
@@ -237,11 +239,64 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
 
   it("deletes a creator's open invite that nobody joined, and its link stops working", async () => {
     const leo = await member("Leo");
-    const { gameId, token } = await invite(leo);
+    const { gameId, token } = await invite(leo, { inviteeRecipient: { kind: "phone", value: "+14155550190" } });
+    expect(await getPrisma().gameInvitee.findFirst({ where: { gameId } })).toMatchObject({ recipientLookupKey: expect.any(String) });
     expect(await deleteAccount(leo)).toEqual({ calledOff: 0, deleted: 1, kept: 0 });
     expect(await getPrisma().game.findUnique({ where: { id: gameId } })).toBeNull();
+    expect(await getPrisma().gameInvitee.count({ where: { gameId } })).toBe(0);
     const ava = await member("Ava");
     expect(await run(ava, { termsVersion: 1, timeZone: "America/New_York", token, type: "join" })).toMatchObject({ ok: false, error: { code: "INVITE_NOT_FOUND" } });
+  });
+
+  it("forgets all rotation keys on contact-only pair invites without treating the contact as a player", async () => {
+    const ava = await member("Ava"), leo = await member("Leo");
+    const db = getPrisma();
+    const recipient = { kind: "phone" as const, value: "+14155550191" };
+    const verify = (memberId: string) => db.$transaction(tx => upsertHostedMemberIdentity({
+      ...buildHostedMemberPhoneIdentityFields(recipient.value), memberId, prisma: tx,
+      phoneNumberVerifiedAt: new Date(), signupPhoneNumber: null,
+    }));
+    const v1 = `v1:${Buffer.alloc(32, 7).toString("base64url")}`;
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", v1);
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v1");
+    try {
+      await verify(ava);
+      const first = await invite(leo, { inviteeFirstName: "Ava", inviteeRecipient: recipient });
+      // The key rotates: the prior version stays readable beside the new one.
+      vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", `${v1},v2:${Buffer.alloc(32, 8).toString("base64url")}`);
+      vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v2");
+      const second = await invite(leo, { inviteeFirstName: "Ava", inviteeRecipient: recipient });
+      const group = await invite(leo, { inviteeFirstName: "Ava", inviteeRecipient: recipient });
+      await db.game.update({ where: { id: group.gameId }, data: { maxPlayers: 10 } });
+      const unrelated = await invite(leo, { inviteeFirstName: "Sam", inviteeRecipient: { kind: "phone", value: "+14155550192" } });
+      const ids = [first, second, group, unrelated].map(game => game.gameId);
+      const before = await db.game.findMany({ where: { id: { in: ids } }, orderBy: { id: "asc" }, include: { invitees: true, players: true, events: true } });
+      expect(before.find(row => row.id === first.gameId)!.invitees[0].recipientLookupKey)
+        .not.toBe(before.find(row => row.id === second.gameId)!.invitees[0].recipientLookupKey);
+      expect(await readGameInviteForMember(ava)).not.toBeNull();
+      expect(await prepareGameAccountDeletion({ memberIds: [ava], prisma: db })).toMatchObject({ games: [], more: false });
+      expect(await deleteAccount(ava)).toEqual({ calledOff: 0, deleted: 0, kept: 0 });
+      const after = await db.game.findMany({ where: { id: { in: ids } }, orderBy: { id: "asc" }, include: { invitees: true, players: true, events: true } });
+      expect(after).toEqual(before.map(row => row.id === first.gameId || row.id === second.gameId
+        ? { ...row, invitees: row.invitees.map(seat => ({ ...seat, recipientLookupKey: null })) } : row));
+      const maya = await member("Maya");
+      await verify(maya);
+      expect(await readGameInviteForMember(maya)).toBeNull();
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("revalidates contact ownership before clearing a contact-only key", async () => {
+    const ava = await member("Ava"), leo = await member("Leo");
+    const db = getPrisma();
+    const recipient = { kind: "phone" as const, value: "+14155550193" };
+    await db.$transaction(tx => upsertHostedMemberIdentity({ ...buildHostedMemberPhoneIdentityFields(recipient.value),
+      memberId: ava, prisma: tx, phoneNumberVerifiedAt: new Date(), signupPhoneNumber: null }));
+    const game = await invite(leo, { inviteeFirstName: "Ava", inviteeRecipient: recipient });
+    const before = await db.gameInvitee.findFirstOrThrow({ where: { gameId: game.gameId } });
+    const prepared = await prepareGameAccountDeletion({ memberIds: [ava], prisma: db });
+    await db.hostedMemberIdentity.update({ where: { memberId: ava }, data: { phoneNumberVerifiedAt: null } });
+    await db.$transaction(tx => applyGameAccountDeletionTx({ memberIds: [ava], now: new Date(), prepared, tx }));
+    expect(await db.gameInvitee.findFirst({ where: { gameId: game.gameId } })).toEqual(before);
   });
 
   it.each(["creator", "invitee"] as const)("calls off an open addressed rematch when the %s deletes", async (leaver) => {

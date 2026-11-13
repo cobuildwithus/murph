@@ -1960,17 +1960,15 @@ publication, recovery and final egress, including two-person turnout.
 
 The strict `game_group_missed_check_in` policy in the encrypted mailbox binds
 the exact room/event/date, original-audience digest, bounded twenty-game batch,
-terms versions, full remaining-player sets, canonical misses and conversation
-watermark. Final egress reads this exact envelope outside its transaction;
+terms versions, full remaining-player sets and canonical misses. Final egress reads this exact envelope outside its transaction;
 caller-supplied batch facts cannot authorize sending. Publication and dispatch
 lock all contributing game rows in ID order through their atomic claims, then
 recheck the canonical batch, binding, rollout/restriction rules and audience.
 Any new departure invalidates, including a nonaffected player; earlier historical
 departures do not. Provider lookup and decryption stay outside these locks.
-The mailbox causal-append lock protects the conversation-lane watermark through
-publication/dispatch. New conversation suppresses even unrelated chatter, while
-notification appends do not. Suppression, quiet, settlement and uncertain sends
-retain the immutable room/date claim. Mixed rooms derive pair-before-game
+New conversation never suppresses a check-in; the room's own same-day words
+reach the model as transcript evidence and it may stay quiet. Suppression,
+quiet, settlement and uncertain sends retain the immutable room/date claim. Mixed rooms derive pair-before-game
 reservation locks from bound live and recently settled pair-game rosters, in
 stable order, and consult both receipt families by delivery hash even after
 receipt metadata is rewritten. Bystanders do not alter those pair identities.
