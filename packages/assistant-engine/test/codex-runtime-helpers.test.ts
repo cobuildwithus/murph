@@ -4216,6 +4216,37 @@ describe('Codex assistant registry helpers', () => {
     expect(appServerInput?.sandbox).toBeUndefined()
   })
 
+  it('forwards the digest of the room-model body already in the turn', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Done.',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'Done.',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'room-model-in-context-thread',
+      stderr: '',
+      threadId: 'room-model-in-context-thread',
+      turnId: 'turn-room-model-in-context',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: { provider: 'codex-cli', sandbox: 'read-only' },
+      turn: {
+        dynamicTools: [],
+        groupRoomModelInjectedDigest: 'd'.repeat(64),
+        prompt: 'Remember the new running bit.',
+        workingDirectory: '/tmp/provider-tests',
+      },
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+        ?.groupRoomModelInjectedDigest,
+    ).toBe('d'.repeat(64))
+  })
+
   it('forwards resident member-workspace permissions through start and resume inputs', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Completed ordinary hosted work.',

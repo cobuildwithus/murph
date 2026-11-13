@@ -399,6 +399,21 @@ function isCodexLegacyContextCompactionCompletion(message: CodexRpcMessage): boo
   return message.method === 'thread/compacted'
 }
 
+// The room-model page injected at turn start; show omits its body while it
+// matches. A compaction can summarize that page away, so forget it then.
+interface GroupRoomModelInContext {
+  digest: string | null | undefined
+}
+
+function forgetRoomModelPageAfterCompaction(
+  inContext: GroupRoomModelInContext,
+  message: CodexRpcMessage,
+): void {
+  if (isCodexContextCompactionCompletion(message)) {
+    inContext.digest = null
+  }
+}
+
 function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
   if (isCodexLegacyContextCompactionCompletion(message)) {
     return true
@@ -561,6 +576,7 @@ export interface CodexAppServerTurnInput {
   followUpAttachmentAllowed?: boolean | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
+  groupRoomModelInjectedDigest?: string | null
   memberMemoryMaintenanceAuthorized?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
@@ -3275,6 +3291,9 @@ async function runCodexAppServerTurnOnProcess(
     readProjectionScopeKeyBatches: [],
     roster: null,
   }
+  const groupRoomModelInContext: GroupRoomModelInContext = {
+    digest: input.groupRoomModelInjectedDigest,
+  }
   const automationRelativeDateReferenceWindows: Array<
     AssistantAcceptedTurnInputReferenceWindow | null
   > = [
@@ -4762,6 +4781,7 @@ async function runCodexAppServerTurnOnProcess(
           assistantStyleSettingsOverlay,
           groupRoomModelMaintenanceAuthorized:
             input.groupRoomModelMaintenanceAuthorized === true,
+          groupRoomModelInjectedDigest: groupRoomModelInContext.digest,
           memberMemoryMaintenanceAuthorized:
             input.memberMemoryMaintenanceAuthorized === true,
           abortSignal: input.abortSignal
@@ -5153,6 +5173,7 @@ async function runCodexAppServerTurnOnProcess(
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
     observeCodexContextCompactionActivity(finalResponseCompletion, message)
     forgetGameRulesAfterCompaction(groupSharedReadTurnState, message)
+    forgetRoomModelPageAfterCompaction(groupRoomModelInContext, message)
 
     const normalizedEvent = normalizeCodexEvent(message)
     recordProviderEventReceipt(normalizedEvent)

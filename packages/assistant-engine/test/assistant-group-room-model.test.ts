@@ -108,13 +108,18 @@ test('renders a complete body beyond the retired authored-body threshold', async
   if (missing.kind !== 'missing') {
     throw new Error('Expected a missing room model.')
   }
-  await replaceAssistantGroupRoomModel({
+  const saved = await replaceAssistantGroupRoomModel({
     body,
     expectedDigest: missing.digest,
     vaultRoot,
   })
 
-  const prompt = await readAssistantGroupRoomModelPrompt({ vaultRoot })
+  const { bodyDigest, prompt } = await readAssistantGroupRoomModelPrompt({
+    vaultRoot,
+  })
+
+  // The digest names exactly the body this prompt carries.
+  expect(bodyDigest).toBe(saved.digest)
 
   expect(prompt).toContain('Optional rough room tips')
   expect(prompt).toContain('Jimmy gets teased about the combine')
@@ -126,8 +131,8 @@ test('renders a complete body beyond the retired authored-body threshold', async
   expect(prompt).toContain('\\n')
   expect(prompt).toContain('never expose an internal participant handle')
   expect(prompt).not.toContain('Group room-memory status')
-  expect(prompt?.match(/Watson likes mock legal rulings/gu)).toHaveLength(300)
-  expect(assistantConversationHistoryUtf8Bytes(prompt ?? '')).toBeGreaterThan(
+  expect(prompt.match(/Watson likes mock legal rulings/gu)).toHaveLength(300)
+  expect(assistantConversationHistoryUtf8Bytes(prompt)).toBeGreaterThan(
     retiredBodyByteThreshold,
   )
 })
@@ -187,7 +192,7 @@ test('accepts a multibyte room model beyond the retired authored-body limit', as
   await expect(readAssistantGroupRoomModelBody({ vaultRoot }))
     .resolves.toBe(largeBody)
   await expect(readAssistantGroupRoomModelPrompt({ vaultRoot }))
-    .resolves.toContain('🧠'.repeat(3_000))
+    .resolves.toMatchObject({ prompt: expect.stringContaining('🧠'.repeat(3_000)) })
 })
 
 test('rejects a serialized room-model page beyond the file-read ceiling', async () => {
@@ -231,7 +236,10 @@ test('rejects a serialized room-model page beyond the file-read ceiling', async 
       statPath: async () => ({ isFile: () => true, size: 1 }),
     },
   )).resolves.toEqual({ kind: 'unavailable' })
-  const prompt = await readAssistantGroupRoomModelPrompt({ vaultRoot })
+  const { bodyDigest, prompt } = await readAssistantGroupRoomModelPrompt({
+    vaultRoot,
+  })
+  expect(bodyDigest).toBeNull()
   expect(prompt).toContain('"roomModelStatus":"unavailable"')
   expect(prompt).not.toContain('tipsMarkdown')
 })
@@ -298,7 +306,7 @@ test('rejects raw Telegram sender ids and hides identifying stored state', async
     await writeFile(pagePath, buildRoomModelPage({ body }), 'utf8')
     await expect(readAssistantGroupRoomModelState({ vaultRoot }))
       .resolves.toEqual({ kind: 'unavailable' })
-    const prompt = await readAssistantGroupRoomModelPrompt({ vaultRoot })
+    const { prompt } = await readAssistantGroupRoomModelPrompt({ vaultRoot })
     expect(prompt).toContain('Group room-memory status')
     expect(prompt).toContain('"roomModelStatus":"unavailable"')
     expect(prompt).not.toContain(body)
@@ -369,7 +377,10 @@ test('renders truthful status for missing, inactive, and wrong-type room model p
   cleanupPaths.push(parentRoot)
   await initializeVault({ vaultRoot })
 
-  const missingPrompt = await readAssistantGroupRoomModelPrompt({ vaultRoot })
+  const missingResult = await readAssistantGroupRoomModelPrompt({ vaultRoot })
+  // A status prompt carries no body, so it names no digest.
+  expect(missingResult.bodyDigest).toBeNull()
+  const missingPrompt = missingResult.prompt
   expect(missingPrompt).toContain('Group room-memory status')
   expect(missingPrompt).toContain('"roomModelStatus":"missing"')
   expect(missingPrompt).toContain(
@@ -392,7 +403,9 @@ test('renders truthful status for missing, inactive, and wrong-type room model p
     body: '## Tips\n- one old bit',
     status: 'archived',
   }), 'utf8')
-  const inactivePrompt = await readAssistantGroupRoomModelPrompt({ vaultRoot })
+  const inactiveResult = await readAssistantGroupRoomModelPrompt({ vaultRoot })
+  expect(inactiveResult.bodyDigest).toBeNull()
+  const inactivePrompt = inactiveResult.prompt
   expect(inactivePrompt).toContain('"roomModelStatus":"inactive"')
   expect(inactivePrompt).toContain('currently inactive')
   expect(inactivePrompt).not.toContain('tipsMarkdown')
@@ -401,7 +414,8 @@ test('renders truthful status for missing, inactive, and wrong-type room model p
     body: '## Tips\n- one old bit',
     pageType: 'concept',
   }), 'utf8')
-  const unavailablePrompt = await readAssistantGroupRoomModelPrompt({ vaultRoot })
+  const { prompt: unavailablePrompt } =
+    await readAssistantGroupRoomModelPrompt({ vaultRoot })
   expect(unavailablePrompt).toContain('"roomModelStatus":"unavailable"')
   expect(unavailablePrompt).toContain('could not be loaded for this turn')
   expect(unavailablePrompt).not.toContain('tipsMarkdown')

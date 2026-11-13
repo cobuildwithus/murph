@@ -143,6 +143,7 @@ export async function executeCodexAssistantTurnAttempt(
     groupConversation: input.groupConversation === true,
     groupRoomModelMaintenanceAuthorized:
       input.groupRoomModelMaintenanceAuthorized === true,
+    groupRoomModelInjectedDigest: input.groupRoomModelInjectedDigest,
     memberMemoryMaintenanceAuthorized:
       input.memberMemoryMaintenanceAuthorized === true,
     hostedToolContext: input.hostedToolContext ?? null,

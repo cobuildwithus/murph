@@ -1734,6 +1734,50 @@ describe('Codex provider routing', () => {
     )
   })
 
+  it('forwards the digest of the room-model body this turn carries', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+    })
+    const input = {
+      channel: 'telegram',
+      deliverResponse: true,
+      prompt: 'Run the turn.',
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+    const sharedPlan = createSharedPlan()
+    const injectedDigest = 'c'.repeat(64)
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValueOnce(
+      createProviderAttemptResult(),
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValueOnce(createExecutionPlan({
+      input,
+      route,
+      sharedPlan,
+      turnId: 'turn-room-model-in-context',
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValueOnce(createAttemptPlan({
+      route,
+      routePlan: { groupRoomModelInjectedDigest: injectedDigest },
+      session,
+    }))
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: sharedPlan,
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-04-29T00:00:00.000Z',
+      turnId: 'turn-room-model-in-context',
+    })
+
+    expect(outcome.kind).toBe('succeeded')
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls.at(-1)?.[0]
+        ?.groupRoomModelInjectedDigest,
+    ).toBe(injectedDigest)
+  })
+
   it('does not wait for runtime issue recording on a successful turn', async () => {
     const route = createRoute()
     const session = createAssistantSession({
