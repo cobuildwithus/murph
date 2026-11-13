@@ -357,8 +357,9 @@ function gameResultForModel(response: GameToolResponse, request: OrdinaryGameReq
   const { loreGuidance: _guidance, loreFingerprint: _fingerprint, ...result } = response.result
   if (!result.state) return { ...response, result }
   const actedOn = request.action === 'read_game' ? null : request.action === 'game_photo' ? request.photo.gameId : request.update.gameId
+  // set_reminder may name no game, in which case every game it can apply to stays.
   const state = actedOn === null ? { ...result.state, games: result.state.games.map(game => gameForModel(game, true)) }
-    : { games: result.state.games.filter(game => game.id === actedOn).map(game => gameForModel(game, false)) }
+    : { games: result.state.games.filter(game => actedOn === undefined || game.id === actedOn).map(game => gameForModel(game, false)) }
   return { ...response, result: { ...result, state } }
 }
 

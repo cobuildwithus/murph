@@ -293,6 +293,12 @@ describe('game dynamic tools', () => {
       expect(shown).toEqual({ action: 'update_game', result: { ...result, state: { games: [group] } } })
       expect(guidance).toBe(says)
     }
+    const reminder = hostedGameToolResponseSchema.parse({ action: 'update_game', result: { status: 'ok', state, reaches: 'push' } })
+    const reminded = await execute({ messageRef: inputId, operation: 'set_reminder', on: true }, { ...context(), groupTool: { request: async () => reminder } })
+    expect(splitResult(reminded.rpcResult.contentItems[0]?.text)).toEqual({
+      shown: { action: 'update_game', result: { status: 'ok', state: { games: [games[0], group] }, reaches: 'push' } },
+      guidance: GAME_REMINDER_OUTCOME_GUIDANCE.push,
+    })
     const photo = hostedGameToolResponseSchema.parse({ action: 'game_photo', result: { status: 'ok', state, photoOutcome: 'saved' } })
     const saved = await executeMurphDynamicToolRequest({ request: parse('game_photo', { messageRef: inputId, operation: 'save', gameId: 'game_group' })!, hostedToolContext: { ...context(), groupTool: { request: async () => photo } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(splitResult(saved.rpcResult.contentItems[0]?.text)).toEqual({ shown: { action: 'game_photo', result: { status: 'ok', state: { games: [group] }, photoOutcome: 'saved' } }, guidance: GAME_PHOTO_OUTCOME_GUIDANCE.saved })
