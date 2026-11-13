@@ -14,7 +14,7 @@ import {
   APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
   listAppleHealthRelayConnectSources,
 } from "@/src/lib/device-sync/apple-health-relay-connect-sources";
-import { MOBVOI_HEALTH_CONNECT_SOURCE } from "@/app/(dashboard)/connect/health-connect-relay-connect-sources";
+import { MOBVOI_HEALTH_CONNECT_SOURCE } from "@/src/lib/device-sync/health-connect-relay-connect-sources";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import { buildAppleHealthRelaySetupGuide } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
@@ -214,7 +214,7 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
         src: "/brand-logos/connect/whoop.svg",
         width: 128,
       },
-      name: "Whoop",
+      name: "WHOOP",
       recoveryKind: "connection_reset",
     },
   },
@@ -311,7 +311,7 @@ const DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES: ConnectSourceCardStudyCase[] = [
         src: "/brand-logos/connect/whoop.svg",
         width: 128,
       },
-      name: "Whoop",
+      name: "WHOOP",
     },
   },
 ];

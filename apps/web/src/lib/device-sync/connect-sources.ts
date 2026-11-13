@@ -18,7 +18,15 @@ import {
 } from "@murphai/device-syncd/fitbit-migration";
 import type { HostedDeviceSyncSettingsSource } from "./settings-surface";
 import type { ConnectSource, LogoAsset } from "./connect-source-types";
-import { APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI } from "./apple-health-relay-connect-sources";
+import {
+  APPLE_HEALTH_RELAY_CONNECT_SOURCE_IDS,
+  APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
+} from "./apple-health-relay-connect-sources";
+import {
+  listHealthConnectRelayConnectSources,
+  MOBVOI_HEALTH_CONNECT_SOURCE,
+} from "./health-connect-relay-connect-sources";
+import { MURPH_IOS_APP_STORE_URL } from "@/src/lib/site-metadata";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
 
 type ConnectSourceUi = Omit<ConnectSource, "id">;
@@ -47,22 +55,15 @@ export type ConnectSourceConnectionState = {
   sourceId: string;
   state: "active" | "reauthorization_required";
 };
-export type ConnectSourceRecoveryKind = NonNullable<ConnectSource["recoveryKind"]>;
-export type ConnectSourceMigrationState = NonNullable<ConnectSource["migrationState"]>;
-export type ConnectSourceDisconnectScope = NonNullable<
+type ConnectSourceRecoveryKind = NonNullable<ConnectSource["recoveryKind"]>;
+type ConnectSourceMigrationState = NonNullable<ConnectSource["migrationState"]>;
+type ConnectSourceDisconnectScope = NonNullable<
   ConnectSource["disconnectScope"]
 >;
 
-const MURPH_IOS_APP_STORE_URL =
-  "https://apps.apple.com/us/app/murph-ai/id6786145859";
 const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>([
   "apple-health",
-  "coros",
-  "huawei-health",
-  "ringconn",
-  "suunto",
-  "xiaomi-mi-fitness",
-  "zepp",
+  ...APPLE_HEALTH_RELAY_CONNECT_SOURCE_IDS,
 ]);
 
 const CONNECT_SOURCE_UI = {
@@ -75,6 +76,7 @@ const CONNECT_SOURCE_UI = {
     unavailableActionUrl: MURPH_IOS_APP_STORE_URL,
   },
   ...APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
+  "mobvoi-health": MOBVOI_HEALTH_CONNECT_SOURCE,
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
     logo: logoAsset(
@@ -83,7 +85,7 @@ const CONNECT_SOURCE_UI = {
       96,
       15,
     ),
-    name: "Whoop",
+    name: "WHOOP",
   },
   mapmyfitness: {
     description: "Workouts, routes, pace, and distance.",
@@ -295,6 +297,24 @@ const CONNECT_SOURCE_UI = {
   },
 } satisfies Record<string, ConnectSourceUi>;
 
+export function resolveConnectSources(
+  settingsSources: readonly ConnectSettingsSourceMatch[] = [],
+): ConnectSource[] {
+  const sources = listVisibleDeviceConnectSources();
+  return sortConnectSourcesByConnectionState([
+    ...resolveConfiguredConnectSources(sources, {
+      connectionStates: resolveConnectSourceConnectionStates(sources, settingsSources),
+      historicalResetIncompleteSourceIds:
+        resolveHistoricalResetIncompleteConnectSourceIds(sources, settingsSources),
+    }),
+    ...listHealthConnectRelayConnectSources(),
+  ]);
+}
+
+export function connectSourcePngLogoPath(id: string): string | null {
+  return readConnectSourceUi(id)?.logo.src.replace(/\.svg$/u, ".png") ?? null;
+}
+
 export function listVisibleDeviceConnectSources(): ConnectSource[] {
   return DEVICE_CONNECT_SOURCES.flatMap((source) => {
     if (!isVisibleConnectSource(source)) {
@@ -302,29 +322,7 @@ export function listVisibleDeviceConnectSources(): ConnectSource[] {
     }
 
     const ui = readConnectSourceUi(source.connectSourceId);
-    return ui
-      ? [
-          {
-            description: ui.description,
-            id: source.connectSourceId,
-            logo: ui.logo,
-            name: ui.name,
-            ...(ui.setupGuideActionLabel
-              ? { setupGuideActionLabel: ui.setupGuideActionLabel }
-              : {}),
-            ...(ui.setupGuideId ? { setupGuideId: ui.setupGuideId } : {}),
-            ...(ui.unavailableActionLabel
-              ? { unavailableActionLabel: ui.unavailableActionLabel }
-              : {}),
-            ...(ui.unavailableActionUrl
-              ? { unavailableActionUrl: ui.unavailableActionUrl }
-              : {}),
-            ...(ui.unavailableMessage
-              ? { unavailableMessage: ui.unavailableMessage }
-              : {}),
-          },
-        ]
-      : [];
+    return ui ? [{ id: source.connectSourceId, ...ui }] : [];
   });
 }
 
@@ -342,20 +340,8 @@ function isVisibleConnectSource(
 export function resolveConfiguredConnectSources(
   sources: readonly ConnectSource[],
   options: {
-    connectedSourceIds?: ReadonlySet<string>;
-    disconnectConnectionIdBySourceId?: ReadonlyMap<string, string>;
-    disconnectScopeBySourceId?: ReadonlyMap<
-      string,
-      ConnectSourceDisconnectScope
-    >;
-    disconnectSourceProviderSlugBySourceId?: ReadonlyMap<string, string>;
+    connectionStates?: readonly ConnectSourceConnectionState[];
     historicalResetIncompleteSourceIds?: ReadonlySet<string>;
-    migrationStateBySourceId?: ReadonlyMap<string, ConnectSourceMigrationState>;
-    migrationRetrySourceIds?: ReadonlySet<string>;
-    reconnectProviderBySourceId?: ReadonlyMap<string, string>;
-    reconnectSourceIds?: ReadonlySet<string>;
-    reconnectTargetBySourceId?: ReadonlyMap<string, string>;
-    recoveryKindBySourceId?: ReadonlyMap<string, ConnectSourceRecoveryKind>;
   } = {},
 ): ConnectSource[] {
   const connectConfigBySourceId = new Map(
@@ -364,36 +350,39 @@ export function resolveConfiguredConnectSources(
     ).map((target) => [target.connectSourceId, target] as const),
   );
 
+  const connectionBySourceId = new Map(
+    options.connectionStates?.map((connection) => [connection.sourceId, connection]),
+  );
+
   return sortConnectSourcesByConnectionState(
     sources.map((source) => {
       const connectionAvailable = isDeviceConnectSourceAvailableForConnection(
         source.id,
       );
       const connectConfig = connectConfigBySourceId.get(source.id);
-      const migrationState = options.migrationStateBySourceId?.get(source.id);
+      const {
+        connectionId: disconnectConnectionId,
+        connectProvider,
+        connectTarget,
+        disconnectScope,
+        disconnectSourceProviderSlug,
+        migrationState,
+        migrationRetryRequired,
+        recoveryKind,
+        requiresReconnect: reconnect,
+        state,
+      } = connectionBySourceId.get(source.id) ?? {};
       const connected =
-        !migrationState && options.connectedSourceIds?.has(source.id) === true;
-      const recoveryKind = !connected
-        ? options.recoveryKindBySourceId?.get(source.id)
-        : undefined;
-      const requiresReconnect =
-        !connected &&
-        !recoveryKind &&
-        options.reconnectSourceIds?.has(source.id) === true;
+        !migrationState && !recoveryKind && !reconnect && state === "active";
+      const requiresReconnect = !recoveryKind && reconnect === true;
       const historicalResetIncomplete =
         !connected &&
         !recoveryKind &&
         !requiresReconnect &&
         options.historicalResetIncompleteSourceIds?.has(source.id) === true;
-      const disconnectConnectionId =
-        options.disconnectConnectionIdBySourceId?.get(source.id);
-      const disconnectScope = options.disconnectScopeBySourceId?.get(source.id);
-      const disconnectSourceProviderSlug =
-        options.disconnectSourceProviderSlugBySourceId?.get(source.id);
-      const reconnectProvider = options.reconnectProviderBySourceId?.get(
-        source.id,
-      );
-      const reconnectTarget = options.reconnectTargetBySourceId?.get(source.id);
+      const useReconnectTarget = reconnect || migrationState === "authorization_required";
+      const reconnectProvider = useReconnectTarget ? connectProvider : undefined;
+      const reconnectTarget = useReconnectTarget ? connectTarget : undefined;
       const resolvedConnectTarget = connectionAvailable
         ? (reconnectTarget ?? connectConfig?.connectTarget)
         : undefined;
@@ -416,7 +405,7 @@ export function resolveConfiguredConnectSources(
           : {}),
         ...(historicalResetIncomplete ? { historicalResetIncomplete } : {}),
         ...(migrationState ? { migrationState } : {}),
-        ...(options.migrationRetrySourceIds?.has(source.id)
+        ...(migrationRetryRequired
           ? { migrationRetryRequired: true }
           : {}),
         ...(recoveryKind ? { recoveryKind } : {}),

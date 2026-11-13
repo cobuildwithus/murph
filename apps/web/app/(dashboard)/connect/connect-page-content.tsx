@@ -2,15 +2,8 @@ import {
   normalizeDeviceConnectSourceId,
   normalizeDeviceSyncConnectTargetKey,
 } from "@murphai/device-syncd/connect-config";
-import {
-  listVisibleDeviceConnectSources,
-  resolveConfiguredConnectSources,
-  resolveConnectSourceConnectionStates,
-  resolveHistoricalResetIncompleteConnectSourceIds,
-  type ConnectSourceRecoveryKind,
-  type ConnectSourceMigrationState,
-  type ConnectSourceDisconnectScope,
-} from "@/src/lib/device-sync/connect-sources";
+import { resolveConnectSources } from "@/src/lib/device-sync/connect-sources";
+import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
   resolveHostedMurphContactOption,
@@ -28,26 +21,16 @@ import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
 import { ConnectSourcesGrid } from "./connect-page-client";
-import { listHealthConnectRelayConnectSources } from "./health-connect-relay-connect-sources";
 import type {
   ConnectCallbackInput,
   ConnectPageInitialLoadError,
   ConnectSource,
 } from "./connect-page-types";
 
-export {
-  resolveConfiguredConnectSources,
-  resolveConnectSourceConnectionStates,
-  resolveConnectedConnectSourceConnections,
-  resolveHistoricalResetIncompleteConnectSourceIds,
-} from "@/src/lib/device-sync/connect-sources";
-
 export type ConnectPageSearchParams = Record<
   string,
   string | string[] | undefined
 >;
-
-const CONNECTION_SOURCES: readonly ConnectSource[] = listVisibleDeviceConnectSources();
 
 export default async function ConnectPage({
   searchParams,
@@ -57,20 +40,7 @@ export default async function ConnectPage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const auth = await getHostedDashboardPageAuthSnapshot();
   const memberId = auth.authenticatedMember?.id ?? null;
-  const connectedSourceIds = new Set<string>();
-  const recoveryKindBySourceId = new Map<string, ConnectSourceRecoveryKind>();
-  const reconnectSourceIds = new Set<string>();
-  const reconnectProviderBySourceId = new Map<string, string>();
-  const reconnectTargetBySourceId = new Map<string, string>();
-  const disconnectConnectionIdBySourceId = new Map<string, string>();
-  const disconnectScopeBySourceId = new Map<
-    string,
-    ConnectSourceDisconnectScope
-  >();
-  const disconnectSourceProviderSlugBySourceId = new Map<string, string>();
-  const migrationStateBySourceId = new Map<string, ConnectSourceMigrationState>();
-  const migrationRetrySourceIds = new Set<string>();
-  let historicalResetIncompleteSourceIds = new Set<string>();
+  let settingsSources: HostedDeviceSyncSettingsSource[] = [];
   let initialLoadError: ConnectPageInitialLoadError | null = null;
   const [
     recoveryContactAction,
@@ -97,60 +67,7 @@ export default async function ConnectPage({
       const response = await buildHostedDeviceSyncSettingsResponse({
         member: auth.authenticatedMember,
       });
-      for (const connection of resolveConnectSourceConnectionStates(
-        CONNECTION_SOURCES,
-        response.sources,
-      )) {
-        const sourceId = connection.sourceId;
-        if (connection.recoveryKind) {
-          recoveryKindBySourceId.set(sourceId, connection.recoveryKind);
-        } else if (connection.requiresReconnect) {
-          reconnectSourceIds.add(sourceId);
-        } else if (connection.state === "active") {
-          connectedSourceIds.add(sourceId);
-        }
-        if (connection.migrationState) {
-          migrationStateBySourceId.set(sourceId, connection.migrationState);
-          connectedSourceIds.delete(sourceId);
-        }
-        if (connection.migrationRetryRequired) {
-          migrationRetrySourceIds.add(sourceId);
-        }
-        if (connection.connectionId) {
-          disconnectConnectionIdBySourceId.set(
-            sourceId,
-            connection.connectionId,
-          );
-        }
-        if (connection.disconnectScope) {
-          disconnectScopeBySourceId.set(sourceId, connection.disconnectScope);
-        }
-        if (connection.disconnectSourceProviderSlug) {
-          disconnectSourceProviderSlugBySourceId.set(
-            sourceId,
-            connection.disconnectSourceProviderSlug,
-          );
-        }
-        if (
-          connection.requiresReconnect ||
-          connection.migrationState === "authorization_required"
-        ) {
-          if (connection.connectProvider) {
-            reconnectProviderBySourceId.set(
-              sourceId,
-              connection.connectProvider,
-            );
-          }
-          if (connection.connectTarget) {
-            reconnectTargetBySourceId.set(sourceId, connection.connectTarget);
-          }
-        }
-      }
-      historicalResetIncompleteSourceIds =
-        resolveHistoricalResetIncompleteConnectSourceIds(
-          CONNECTION_SOURCES,
-          response.sources,
-        );
+      settingsSources = response.sources;
     } catch (error) {
       initialLoadError = isHostedOnboardingError(error)
         ? {
@@ -162,22 +79,7 @@ export default async function ConnectPage({
     }
   }
 
-  const sources = [
-    ...resolveConfiguredConnectSources(CONNECTION_SOURCES, {
-      connectedSourceIds,
-      disconnectConnectionIdBySourceId,
-      disconnectScopeBySourceId,
-      disconnectSourceProviderSlugBySourceId,
-      historicalResetIncompleteSourceIds,
-      migrationStateBySourceId,
-      migrationRetrySourceIds,
-      reconnectProviderBySourceId,
-      reconnectSourceIds,
-      reconnectTargetBySourceId,
-      recoveryKindBySourceId,
-    }),
-    ...listHealthConnectRelayConnectSources(),
-  ];
+  const sources = resolveConnectSources(settingsSources);
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-8 md:max-w-full">
