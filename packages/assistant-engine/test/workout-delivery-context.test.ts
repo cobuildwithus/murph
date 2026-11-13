@@ -98,7 +98,7 @@ describe('Codex workout delivery context', () => {
     observeCommand(tracker, {
       command: `vault-cli workout show ${currentWorkoutId} --format json`,
       id: 'show-current',
-      output: workoutShowResult(currentWorkoutId),
+      output: compactWorkoutShowResult(currentWorkoutId),
     })
 
     expect(tracker.readReferences(0)).toEqual([{
@@ -373,6 +373,20 @@ function workoutStartResult(
     title: 'Current workout',
     vault: '/vault',
     workout: null,
+  }
+}
+
+// `workout show` omits null, storage, and self-link fields.
+function compactWorkoutShowResult(eventId: string) {
+  return {
+    entity: {
+      data: { lifecycle: { revision: 1 } },
+      id: eventId,
+      kind: 'activity_session',
+      occurredAt: '2026-08-24T14:00:00.000Z',
+      title: 'Current workout',
+    },
+    vault: '/vault',
   }
 }
 

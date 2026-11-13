@@ -15128,7 +15128,7 @@
                         },
                         "includeDetails": {
                           "default": false,
-                          "description": "Include all typed fields and the complete narrative body without repeating frontmatter or truncating list summaries.",
+                          "description": "Include every typed field without truncating list summaries.",
                           "type": "boolean"
                         }
                       }

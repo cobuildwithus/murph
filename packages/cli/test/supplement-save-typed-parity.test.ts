@@ -636,7 +636,7 @@ test('supplement save rejects more than the canonical ingredient limit', async (
 })
 
 
-test('supplement detailed list preserves exact-read facts and body without duplicate frontmatter', async () => {
+test('supplement detailed list carries every exact-read fact once, without the generated body', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-supplement-inventory-')
   try {
     const cli = createSupplementCli()
@@ -660,7 +660,7 @@ test('supplement detailed list preserves exact-read facts and body without dupli
       await upsertRegimen({ vaultRoot, regimenId: saved.regimenId, title, kind: 'supplement',
         status, startedOn: '2026-04-01', note })
     }
-    type Entity = { id: string; markdown?: string | null; data: Record<string, unknown> }
+    type Entity = { id: string; path?: string; markdown?: string | null; data: Record<string, unknown> }
     const list = async (extra: string[]) => requireData((await runInProcessJsonCli<{ items: Entity[]; count: number }>(cli, [
       'supplement', 'list', '--status', 'active', '--limit', '50', ...extra, '--vault', vaultRoot,
     ])).envelope)
@@ -670,12 +670,14 @@ test('supplement detailed list preserves exact-read facts and body without dupli
       const shown = requireData((await runInProcessJsonCli<{ entity: Entity }>(cli, [
         'supplement', 'show', entity.id, '--vault', vaultRoot,
       ])).envelope).entity
-      assert.deepEqual(entity, { ...shown, markdown: parseFrontmatterDocument(shown.markdown ?? '').body.trim() })
+      const { path: ownPath, ...shownWithoutPath } = shown
+      assert.match(ownPath ?? '', /^bank\/regimens\/supplement\/.+\.md$/u)
+      assert.deepEqual(entity, shownWithoutPath)
+      assert.equal('markdown' in entity, false)
       assert.equal(entity.data.note, note)
       assert.deepEqual(entity.data.ingredients, ingredients.map(ingredient => ({
-        ...ingredient, active: true, label: null, note: null,
+        ...ingredient, active: true,
       })))
-      assert.equal(typeof entity.markdown, 'string')
     }
     assert.equal(detailed.items.filter(item => item.data.dose === 2).length, 1)
     assert.equal(detailed.items.filter(item => item.data.dose == null).length, 1)
@@ -683,6 +685,12 @@ test('supplement detailed list preserves exact-read facts and body without dupli
     assert.equal(summaries.count, 2)
     assert.ok(summaries.items.every(item => !('markdown' in item)))
     assert.ok(summaries.items.every(item => String(item.data.note).length < note.length))
+    assert.ok(summaries.items.every(item => item.data.ingredientsCount === 12))
+    assert.ok(summaries.items.every(item => (
+      JSON.stringify(item.data.ingredients) === JSON.stringify(
+        ingredients.slice(0, 6).map(({ compound, amount, unit }) => `${compound} ${amount} ${unit}`),
+      )
+    )))
   } finally {
     await rm(parentRoot, { recursive: true, force: true })
   }

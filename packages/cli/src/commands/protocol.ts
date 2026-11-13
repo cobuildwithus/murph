@@ -22,6 +22,10 @@ import {
   type VaultServices,
 } from "@murphai/vault-usecases";
 import { suggestedCommandsCta } from "./command-factory-primitives.js";
+import {
+  projectRecordListResult,
+  projectRecordShowResult,
+} from "./record-read-projection.js";
 
 const protocolSlugSchema = z
   .string()
@@ -227,14 +231,14 @@ export function registerProtocolCommands(
       limit: z.number().int().positive().max(200).default(10),
     }),
     output: healthListResultSchema,
-    run({ options }) {
-      return services.query.listRegimens({
+    async run({ options }) {
+      return projectRecordListResult(await services.query.listRegimens({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         kind: options.kind,
         status: options.status,
         limit: options.limit,
-      });
+      }));
     },
   });
 
@@ -245,12 +249,12 @@ export function registerProtocolCommands(
     description: "Show one private regimen record.",
     options: withBaseOptions(),
     output: healthShowResultSchema,
-    run({ args, options }) {
-      return services.query.showRegimen({
+    async run({ args, options }) {
+      return projectRecordShowResult(await services.query.showRegimen({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         id: args.id,
-      });
+      }));
     },
   });
 

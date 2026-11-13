@@ -371,6 +371,18 @@ Read surfaces intentionally separate summary from detail:
 
 - `show` returns the full canonical read entity, including `markdown` when that noun owns body text.
 - `list` returns summary rows, not many embedded `show` payloads.
+- Record reads (generic `show` and `list`, `event`, `meal`, `workout`, `measurement`,
+  `regimen`, `supplement`, the health-registry nouns, and the record surfaces of
+  `assistant onboarding resume-context`) state each fact once. An absent field
+  means none: no nulls, empty arrays, zero counts, or empty `links`. `data` drops
+  what the entity already says (`id`, `kind`, `title`, `occurredAt`, id aliases
+  such as `mealId`, a record's links to itself), storage detail (`schemaVersion`,
+  `docType`), and a device import's `dataOrigin` and `externalRef`, which become
+  `data.provider`. `markdown` and `excerpt` appear only when the body is not a
+  ledger record's own note or a registry body core generates from `data`.
+  `data.lifecycle.revision` stays the value for `--expected-revision`. `show`
+  keeps `rawRefs`, `timeZone`, and the record's own file `path`; list rows omit
+  all three, and a supplement list row summarizes each ingredient as text.
 - A text-filtered `blood-test list` row may add one bounded
   `data.matchedResult` containing only the matched analyte's answer-bearing
   scalars (`analyte`, numeric or text value, unit, comparator, flag, and compact
@@ -843,10 +855,14 @@ The `plan.operations` values are internal core plan operation names, not public 
     "kind": "meal",
     "title": "Lunch bowl",
     "occurredAt": "2026-03-12T12:15:00-05:00",
-    "path": "<path>",
-    "markdown": "# Lunch",
-    "data": {},
-    "links": []
+    "data": {
+      "id": "evt_123",
+      "dayKey": "2026-03-12",
+      "timeZone": "America/New_York",
+      "source": "manual",
+      "note": "Rice, salmon, and greens",
+      "lifecycle": { "revision": 1 }
+    }
   }
 }
 ```
@@ -875,7 +891,12 @@ The `plan.operations` values are internal core plan operation names, not public 
       "kind": "meal",
       "title": "Lunch bowl",
       "occurredAt": "2026-03-12T12:15:00-05:00",
-      "path": "<path>"
+      "data": {
+        "id": "evt_123",
+        "dayKey": "2026-03-12",
+        "source": "manual",
+        "note": "Rice, salmon, and greens"
+      }
     }
   ],
   "count": 1,

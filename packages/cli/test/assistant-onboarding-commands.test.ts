@@ -195,7 +195,16 @@ test('assistant onboarding resume-context batches setup reads into one snapshot'
   })
   const listGoals = vi.fn().mockResolvedValue({
     count: 1,
-    items: [{ id: 'goal_sleep', title: 'Sleep better' }],
+    items: [{
+      id: 'goal_sleep',
+      kind: 'goal',
+      title: 'Sleep better',
+      occurredAt: null,
+      path: 'bank/goals/sleep-better.md',
+      excerpt: 'Sleep better Status: active',
+      data: { goalId: 'goal_sleep', title: 'Sleep better', status: 'active' },
+      links: [],
+    }],
   })
   const listRegimens = vi.fn().mockResolvedValue({
     count: 0,
@@ -203,7 +212,9 @@ test('assistant onboarding resume-context batches setup reads into one snapshot'
   })
   const listSupplements = vi.fn().mockResolvedValue({
     count: 2,
-    items: [{ id: 'reg_creatine' }, { id: 'reg_magnesium' }],
+    items: ['reg_creatine', 'reg_magnesium'].map((id) => ({
+      id, kind: 'supplement', title: id, occurredAt: null, path: null, data: {}, links: [],
+    })),
   })
   const listConditions = vi.fn().mockRejectedValue(new Error('boom'))
   const listAllergies = vi.fn().mockResolvedValue({
@@ -212,7 +223,15 @@ test('assistant onboarding resume-context batches setup reads into one snapshot'
   })
   const listExperiments = vi.fn().mockResolvedValue({
     count: 1,
-    items: [{ id: 'exp_walks', status: 'active' }],
+    items: [{
+      id: 'exp_walks',
+      kind: 'experiment',
+      title: 'Walks',
+      occurredAt: null,
+      path: 'bank/experiments/walks.md',
+      data: { status: 'active' },
+      links: [],
+    }],
   })
   const listAccounts = vi.fn().mockResolvedValue({
     accounts: [{ id: 'dev_oura', provider: 'oura', status: 'active' }],
@@ -258,6 +277,12 @@ test('assistant onboarding resume-context batches setup reads into one snapshot'
   assert.equal(result.memory.recordCount, 1)
   assert.equal(result.goals.status, 'ok')
   assert.equal(result.goals.count, 1)
+  assert.deepEqual(result.goals.items, [{
+    id: 'goal_sleep',
+    kind: 'goal',
+    title: 'Sleep better',
+    data: { status: 'active' },
+  }])
   assert.equal(result.supplements.status, 'ok')
   assert.equal(result.supplements.count, 2)
   assert.equal(result.supplements.items.length, 1)

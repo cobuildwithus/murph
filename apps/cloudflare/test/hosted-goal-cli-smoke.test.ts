@@ -153,9 +153,9 @@ describe("runHostedGoalCliSmoke", () => {
       "lineage-goal-update-read",
       success({
         entity: {
+          title: "Improve my deep sleep",
           data: {
             status: "paused",
-            title: "Improve my deep sleep",
           },
         },
       }),
@@ -305,9 +305,9 @@ function createSmokeResponses(
       "legacy-goal-create-read",
       success({
         entity: {
+          title: "Hosted runner smoke legacy goal",
           data: {
             status: "active",
-            title: "Hosted runner smoke legacy goal",
           },
         },
       }),
@@ -320,9 +320,9 @@ function createSmokeResponses(
       "legacy-goal-update-read",
       success({
         entity: {
+          title: "Hosted runner smoke legacy goal",
           data: {
             status: "paused",
-            title: "Hosted runner smoke legacy goal",
           },
         },
       }),
@@ -335,10 +335,10 @@ function createSmokeResponses(
       "lineage-goal-create-read",
       success({
         entity: {
+          title: "Improve my deep sleep",
           data: {
             commonsGoalRef,
             status: "active",
-            title: "Improve my deep sleep",
           },
         },
       }),
@@ -351,10 +351,10 @@ function createSmokeResponses(
       "lineage-goal-update-read",
       success({
         entity: {
+          title: "Improve my deep sleep",
           data: {
             commonsGoalRef,
             status: "paused",
-            title: "Improve my deep sleep",
           },
         },
       }),

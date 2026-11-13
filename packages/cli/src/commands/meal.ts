@@ -20,6 +20,8 @@ import {
   listResultSchema,
   mealAddResultSchema,
   pathSchema,
+  recordListResultSchema,
+  recordShowResultSchema,
   showResultSchema,
   timeZoneSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
@@ -55,6 +57,10 @@ import {
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 import { publicValidationIssue } from './public-validation-issue.js'
+import {
+  projectRecordListResult,
+  projectRecordShowResult,
+} from './record-read-projection.js'
 
 const mealNameGuidance = MEAL_NAME_GUIDANCE
 const mealNameSchema = z.string().trim().describe(mealNameGuidance)
@@ -747,22 +753,22 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
       description: 'Show one meal by meal id.',
       argName: 'id',
       argSchema: mealLookupSchema,
-      output: showResultSchema,
+      output: recordShowResultSchema,
       async run(input) {
-        return showMealRecord(input.vault, input.id)
+        return projectRecordShowResult(await showMealRecord(input.vault, input.id))
       },
     },
     list: {
       description: 'List meal events with optional date bounds.',
       limitOption: commonListLimitOptionSchema,
-      output: listResultSchema,
+      output: recordListResultSchema,
       async run(input) {
-        return listMealRecords({
+        return projectRecordListResult(await listMealRecords({
           vault: input.vault,
           from: input.from,
           limit: input.limit,
           to: input.to,
-        })
+        }))
       },
     },
     manifest: {

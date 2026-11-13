@@ -159,7 +159,8 @@ test('supplement commands exercise typed save, read, compound, and stop paths in
     count: number
     items: Array<{
       excerpt?: string | null
-      slug: string
+      title?: string
+      data: Record<string, unknown>
       markdown?: string | null
     }>
   }>(cli, [
@@ -175,10 +176,13 @@ test('supplement commands exercise typed save, read, compound, and stop paths in
   assert.equal(listed.exitCode, null)
   assert.equal(requireData(listed.envelope).count >= 1, true)
   assert.equal('markdown' in (requireData(listed.envelope).items[0] ?? {}), false)
-  assert.match(
-    requireData(listed.envelope).items[0]?.excerpt ?? '',
-    /Liposomal Vitamin C/u,
-  )
+  // The generated body adds nothing the summary fields lack.
+  assert.equal('excerpt' in (requireData(listed.envelope).items[0] ?? {}), false)
+  assert.equal(requireData(listed.envelope).items[0]?.title, 'Liposomal Vitamin C')
+  assert.deepEqual(requireData(listed.envelope).items[0]?.data.ingredients, [
+    'Vitamin C (Ascorbic acid) 500 mg',
+  ])
+  assert.equal(requireData(listed.envelope).items[0]?.data.brand, 'LivOn Labs')
 
   const listedDefault = await runInProcessJsonCli<{
     filters: {
