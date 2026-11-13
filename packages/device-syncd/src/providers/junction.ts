@@ -1744,14 +1744,15 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
-  async function isJobSourceAdmittedBeforeProviderFetch(
+  async function isLegacyFitbitJobAdmittedBeforeProviderFetch(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
   ): Promise<boolean> {
     const sourceProviderSlug = canonicalizeJunctionProviderSlug(job.payload.sourceProviderSlug);
-    if (!sourceProviderSlug || (job.kind === "resource"
+    if (sourceProviderSlug !== JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG || (job.kind === "resource"
       && (job.payload.resource === COMPANION_HRV_RMSSD_RESOURCE
-        || job.payload.resource === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE))) {
+        || job.payload.resource === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE
+        || readJunctionSparseCalendarRefreshDay(job)))) {
       return true;
     }
     return isJunctionSourceAdmittedForImport(
@@ -1767,7 +1768,7 @@ export function createJunctionDeviceSyncProvider(
     passInventories?: Map<string, readonly JunctionProviderConnection[]>,
   ): Promise<ProviderJobResult> {
     const skippedOptionalResources: JunctionSkippedOptionalResource[] = [];
-    if (!await isJobSourceAdmittedBeforeProviderFetch(context, job)) {
+    if (!await isLegacyFitbitJobAdmittedBeforeProviderFetch(context, job)) {
       return {};
     }
 

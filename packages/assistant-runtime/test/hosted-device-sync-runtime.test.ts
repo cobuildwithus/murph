@@ -12856,7 +12856,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(result.processedJobs, 1);
       assert.equal(dirtyFetches, 1);
       assert.equal(snapshotFetches, 2);
-      assert.equal(sourceAuthorityFetches, 2);
+      assert.equal(sourceAuthorityFetches, 1);
       assert.equal(applyCalls, 2);
       assert.equal(result.postCheckpointRecord?.kind, "device-sync.dirty-processed-batch");
       if (result.postCheckpointRecord?.kind !== "device-sync.dirty-processed-batch") {

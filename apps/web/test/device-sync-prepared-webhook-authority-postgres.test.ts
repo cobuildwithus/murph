@@ -763,7 +763,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("binds reconstructed Google Health and legacy Fitbit history to the admitted source epoch", async () => {
+    it("admits reconstructed Google Health history without a legacy Fitbit migration hold", async () => {
       const sourceProviderSlug = "google_health";
       const fixture = await createFixture({
         sourceLastErrorCode: null,
@@ -814,9 +814,8 @@ describe.skipIf(!runPostgresProof)(
           store: fixture.store,
         });
 
-        await expect(consumeService.handlePreparedWebhook(prepared)).rejects.toMatchObject({
-          code: "WEBHOOK_SOURCE_NOT_READY",
-          retryable: true,
+        await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
         });
 
         expect(providerFetch).toHaveBeenCalledOnce();
@@ -845,18 +844,9 @@ describe.skipIf(!runPostgresProof)(
               sourceProviderSlug,
             }),
           }),
-          expect.objectContaining({
-            kind: "backfill",
-            payload: expect.objectContaining({
-              historicalProofFirstSeenAt: fixture.receivedAt.toISOString(),
-              historicalProofSourceProviderSlug: sourceProviderSlug,
-              sourceProviderSlug: "fitbit",
-            }),
-          }),
         ]));
         expect(jobs).not.toEqual(expect.arrayContaining([
           expect.objectContaining({
-            kind: "reconcile",
             payload: expect.objectContaining({ sourceProviderSlug: "fitbit" }),
           }),
         ]));
@@ -865,18 +855,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it.each([
-      {
-        fenceDuringAdmission: false,
-        label: "an existing disconnect fence",
-      },
-      {
-        fenceDuringAdmission: true,
-        label: "a disconnect fence installed between admission passes",
-      },
-    ])("does not authorize legacy Fitbit reads after $label", async ({
-      fenceDuringAdmission,
-    }) => {
+    it("admits Google Health history with an existing legacy Fitbit disconnect fence", async () => {
       const sourceProviderSlug = "google_health";
       const fixture = await createFixture({
         sourceLastErrorCode: null,
@@ -903,9 +882,6 @@ describe.skipIf(!runPostgresProof)(
         status: 200,
       }));
       const registry = createJunctionRegistry(providerFetch);
-      let restoreLegacySourceRead = () => {};
-      let legacySourceReadCount = 0;
-
       try {
         await fixture.prisma.deviceConnectionSource.delete({
           where: { id: fixture.sourceId },
@@ -913,9 +889,7 @@ describe.skipIf(!runPostgresProof)(
         await fixture.store.upsertConnectionSource({
           connectionId: fixture.connectionId,
           firstSeenAt: new Date(fixture.receivedAt.getTime() - 86_400_000).toISOString(),
-          lastErrorCode: fenceDuringAdmission
-            ? null
-            : DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+          lastErrorCode: DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
           lastSeenAt: fixture.receivedAt.toISOString(),
           sourceInstanceKey: fitbitSourceInstanceKey,
           sourceProviderSlug: "fitbit",
@@ -932,42 +906,11 @@ describe.skipIf(!runPostgresProof)(
           store: fixture.store,
         });
 
-        if (fenceDuringAdmission) {
-          const listLegacySources =
-            fixture.store.listBoundedConnectionSourcesForConnections.bind(fixture.store);
-          const legacySourceRead = vi.spyOn(
-            fixture.store,
-            "listBoundedConnectionSourcesForConnections",
-          ).mockImplementation(async (input) => {
-            legacySourceReadCount += 1;
-            if (legacySourceReadCount === 2) {
-              await fixture.observer.deviceConnectionSource.update({
-                data: {
-                  lastErrorCode: DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
-                  lastSeenAt: new Date(fixture.receivedAt.getTime() + 1).toISOString(),
-                },
-                where: {
-                  connectionId_sourceInstanceKey: {
-                    connectionId: fixture.connectionId,
-                    sourceInstanceKey: fitbitSourceInstanceKey,
-                  },
-                },
-              });
-            }
-            return listLegacySources(input);
-          });
-          restoreLegacySourceRead = () => legacySourceRead.mockRestore();
-        }
-
-        await expect(consumeService.handlePreparedWebhook(prepared)).rejects.toMatchObject({
-          code: "WEBHOOK_SOURCE_NOT_READY",
-          retryable: true,
+        await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
         });
 
         expect(providerFetch).toHaveBeenCalledOnce();
-        if (fenceDuringAdmission) {
-          expect(legacySourceReadCount).toBe(4);
-        }
         await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
           select: { firstSeenAt: true, status: true },
           where: {
@@ -997,7 +940,6 @@ describe.skipIf(!runPostgresProof)(
           }),
         ]));
       } finally {
-        restoreLegacySourceRead();
         await cleanupFixture(fixture);
       }
     });

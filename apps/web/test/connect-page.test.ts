@@ -5382,7 +5382,8 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
       }],
     );
     assert.equal(states.length, 1, value.name);
-    assert.deepEqual(states[0], {
+    // Settings may also carry unrelated source metadata such as lastDataAt.
+    assert.partialDeepStrictEqual(states[0], {
       connectionId: "dsc_junction_fitbit",
       requiresReconnect: false,
       sourceId: "fitbit",
