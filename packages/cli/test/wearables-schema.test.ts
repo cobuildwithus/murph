@@ -27,22 +27,10 @@ test("wearables activity schema preserves bounded workout features", () => {
       to: null,
     },
     items: [{
-      activityAverageHeartRate: compactResolvedMetric({
-        metric: "activityAverageHeartRate",
-        unit: "bpm",
-        value: 106,
-      }),
+      activityAverageHeartRate: 106,
       date: "2026-04-03",
-      minimumHeartRate: compactResolvedMetric({
-        metric: "minimumHeartRate",
-        unit: "bpm",
-        value: 52,
-      }),
-      providers: ["garmin"],
-      summaryConfidence: {
-        level: "high",
-        selectedProviders: ["garmin"],
-      },
+      minimumHeartRate: 52,
+      provider: "garmin",
       workoutFeatures: [{
         activityType: "cycling",
         averageCadence: 90,
@@ -56,14 +44,17 @@ test("wearables activity schema preserves bounded workout features", () => {
       }],
     }],
     count: 1,
+    units: { activityAverageHeartRate: "bpm", minimumHeartRate: "bpm" },
     vault: "/tmp/example-vault",
   });
 
   const workout = parsed.items[0]?.workoutFeatures?.[0];
   assert.ok(workout && "splits" in workout);
   assert.deepEqual(workout.splits, []);
-  assert.equal(parsed.items[0]?.activityAverageHeartRate?.value, 106);
-  assert.equal(parsed.items[0]?.minimumHeartRate?.value, 52);
+  assert.equal(parsed.items[0]?.activityAverageHeartRate, 106);
+  assert.equal(parsed.items[0]?.minimumHeartRate, 52);
+  assert.equal(parsed.items[0]?.provider, "garmin");
+  assert.deepEqual(parsed.units, { activityAverageHeartRate: "bpm", minimumHeartRate: "bpm" });
   assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.cadenceUnit, "rpm");
   assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.averagePowerWatts, 220);
   assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.averageSpeedMps, 5);
@@ -89,7 +80,7 @@ test("wearables activity schema preserves bounded workout features", () => {
   }).success, false);
 });
 
-test("wearables day schema preserves compact fallback metadata", () => {
+test("wearables day schema keeps fallback, conflict, low-confidence and unit details", () => {
   const parsed = wearablesDayResultSchema.parse({
     date: "2026-04-03",
     filters: {
@@ -97,71 +88,76 @@ test("wearables day schema preserves compact fallback metadata", () => {
     },
     summary: {
       activity: {
-        activityAverageHeartRate: compactResolvedMetric({
-          metric: "activityAverageHeartRate",
-          unit: "bpm",
-          value: 106,
-        }),
-        activityMinutes: compactResolvedMetric({ metric: "activityMinutes", unit: "minutes", value: 78 }),
-        averageHeartRate: compactResolvedMetric({ metric: "averageHeartRate", unit: "bpm", value: 76 }),
-        date: "2026-04-03",
-        highActivityMinutes: compactResolvedMetric({ metric: "highActivityMinutes", unit: "minutes", value: 5 }),
-        lowActivityMinutes: compactResolvedMetric({ metric: "lowActivityMinutes", unit: "minutes", value: 60 }),
-        lowestHeartRate: compactResolvedMetric({ metric: "lowestHeartRate", unit: "bpm", value: 44 }),
-        mediumActivityMinutes: compactResolvedMetric({ metric: "mediumActivityMinutes", unit: "minutes", value: 13 }),
-        minimumHeartRate: compactResolvedMetric({ metric: "minimumHeartRate", unit: "bpm", value: 52 }),
-        summaryConfidence: {
-          level: "high",
-        },
-        walkingAverageHeartRate: compactResolvedMetric({ metric: "walkingAverageHeartRate", unit: "bpm", value: 101 }),
+        activityAverageHeartRate: 106,
+        activityMinutes: 78,
+        averageHeartRate: 76,
+        confidence: "medium",
+        highActivityMinutes: 5,
+        lowActivityMinutes: 60,
+        lowestHeartRate: 44,
+        mediumActivityMinutes: 13,
+        minimumHeartRate: 52,
+        notes: ["Some metrics still conflict across providers: Steps."],
+        provider: "garmin",
+        steps: { confidence: "medium", conflictingProviders: ["oura"], value: 9_120 },
+        walkingAverageHeartRate: 101,
       },
+      confidence: "low",
       date: "2026-04-03",
-      providers: ["oura"],
+      providers: ["garmin", "oura"],
       sleep: {
-        date: "2026-04-03",
-        lowestSpo2: compactResolvedMetric({ metric: "lowestSpo2", value: 94 }),
+        confidence: "low",
+        hrv: { provider: "garmin", value: 51 },
+        lowestSpo2: 94,
+        notes: [
+          "Used sleep-session duration because total sleep minutes were unavailable.",
+          "The selected sleep session is a tentative provider estimate and may change.",
+        ],
         provider: "oura",
-        sessionMinutes: resolvedMetric({
-          fallbackFromMetric: "totalSleepMinutes",
-          fallbackReason: "Used sleep-session duration because total sleep minutes were unavailable.",
-          occurredAt: "2026-04-03T07:00:00.000Z",
-          provider: "oura",
-          recordedAt: "2026-04-03T07:05:00.000Z",
-          sourceKind: "sleep_session",
-          title: "Overnight sleep",
-          unit: "minutes",
-          value: 430,
-        }),
+        sessionMinutes: 430,
         sleepEndAt: "2026-04-03T07:00:00.000Z",
-        sleepLatencyMinutes: compactResolvedMetric({ metric: "sleepLatencyMinutes", unit: "minutes", value: 15 }),
+        sleepLatencyMinutes: { confidence: "low", value: 15 },
         sleepStartAt: "2026-04-02T23:50:00.000Z",
-        sleepWindowProvider: "oura",
-        summaryConfidence: {
-          level: "medium",
-          selectedProviders: ["oura"],
-        },
+        spo2: { unit: "fraction", value: 0.97 },
+        totalSleepMinutes: { fallbackFromMetric: "sessionMinutes", value: 430 },
       },
-      summaryConfidence: "medium",
+      sourceHealth: [{
+        conflictCount: 1,
+        firstDate: "2026-04-03",
+        lastDate: "2026-04-03",
+        provider: "garmin",
+        stalenessVsNewestDays: 2,
+      }],
+    },
+    units: {
+      activityAverageHeartRate: "bpm",
+      lowestSpo2: "%",
+      sessionMinutes: "minutes",
+      steps: "count",
+      totalSleepMinutes: "minutes",
     },
     vault: "/tmp/example-vault",
   });
 
-  assert.equal(parsed.summary?.activity?.activityMinutes?.value, 78);
-  assert.equal(parsed.summary?.activity?.activityAverageHeartRate?.value, 106);
-  assert.equal(parsed.summary?.activity?.minimumHeartRate?.value, 52);
-  assert.equal(parsed.summary?.activity?.lowActivityMinutes?.value, 60);
-  assert.equal(parsed.summary?.activity?.mediumActivityMinutes?.value, 13);
-  assert.equal(parsed.summary?.activity?.highActivityMinutes?.value, 5);
-  assert.equal(parsed.summary?.activity?.averageHeartRate?.value, 76);
-  assert.equal(parsed.summary?.activity?.walkingAverageHeartRate?.value, 101);
-  assert.equal(parsed.summary?.activity?.lowestHeartRate?.value, 44);
-  assert.equal(parsed.summary?.sleep?.sleepLatencyMinutes?.value, 15);
-  assert.equal(
-    parsed.summary?.sleep?.sessionMinutes?.fallbackReason,
-    "Used sleep-session duration because total sleep minutes were unavailable.",
-  );
-  assert.equal(parsed.summary?.sleep?.sessionMinutes?.fallbackFromMetric, "totalSleepMinutes");
-  assert.equal(parsed.summary?.sleep?.lowestSpo2?.metric, "lowestSpo2");
+  assert.equal(parsed.summary?.activity?.activityMinutes, 78);
+  assert.equal(parsed.summary?.activity?.provider, "garmin");
+  assert.equal(parsed.summary?.activity?.confidence, "medium");
+  assert.deepEqual(parsed.summary?.activity?.steps, {
+    confidence: "medium",
+    conflictingProviders: ["oura"],
+    value: 9_120,
+  });
+  assert.deepEqual(parsed.summary?.sleep?.hrv, { provider: "garmin", value: 51 });
+  assert.deepEqual(parsed.summary?.sleep?.sleepLatencyMinutes, { confidence: "low", value: 15 });
+  assert.deepEqual(parsed.summary?.sleep?.spo2, { unit: "fraction", value: 0.97 });
+  assert.deepEqual(parsed.summary?.sleep?.totalSleepMinutes, {
+    fallbackFromMetric: "sessionMinutes",
+    value: 430,
+  });
+  assert.equal(parsed.summary?.sleep?.confidence, "low");
+  assert.equal(parsed.summary?.confidence, "low");
+  assert.equal(parsed.summary?.sourceHealth?.[0]?.stalenessVsNewestDays, 2);
+  assert.equal(parsed.units?.totalSleepMinutes, "minutes");
   assert.equal("vault" in parsed, false);
 });
 
@@ -205,10 +201,11 @@ test("Junction activity heart-rate facts survive persistence, query compaction, 
     });
     const parsed = wearablesDayResultSchema.parse(compactDay);
 
-    assert.equal(parsed.summary?.activity?.activityAverageHeartRate?.value, 106);
-    assert.equal(parsed.summary?.activity?.activityAverageHeartRate?.provider, "garmin");
-    assert.equal(parsed.summary?.activity?.minimumHeartRate?.value, 52);
-    assert.equal(parsed.summary?.activity?.minimumHeartRate?.provider, "garmin");
+    assert.equal(parsed.summary?.activity?.activityAverageHeartRate, 106);
+    assert.equal(parsed.summary?.activity?.minimumHeartRate, 52);
+    assert.equal(parsed.summary?.activity?.provider, "garmin");
+    assert.equal(parsed.units?.activityAverageHeartRate, "bpm");
+    assert.equal(parsed.units?.minimumHeartRate, "bpm");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -225,37 +222,22 @@ test("additive wearables schemas stay compact and metric-aware", () => {
     summary: {
       day: {
         activity: {
-          activityAverageHeartRate: compactResolvedMetric({
-            metric: "activityAverageHeartRate",
-            unit: "bpm",
-            value: 106,
-          }),
-          date: "2026-04-05",
-          minimumHeartRate: compactResolvedMetric({
-            metric: "minimumHeartRate",
-            unit: "bpm",
-            value: 52,
-          }),
-          summaryConfidence: {
-            level: "high",
-          },
+          activityAverageHeartRate: 106,
+          minimumHeartRate: 52,
+          provider: "oura",
         },
         date: "2026-04-05",
-        notes: ["Latest wearable day was sourced from oura."],
         providers: ["oura"],
-        summaryConfidence: "high",
       },
       latestDate: "2026-04-05",
-      notes: ["Latest wearable day was sourced from oura."],
+      notes: ["Latest body-state summary date 2026-04-01 differs from the joined wearable latest day 2026-04-05."],
       providers: ["oura"],
       sleep: {
         date: "2026-04-05",
-        summaryConfidence: {
-          level: "high",
-        },
       },
       sourceHealth: [],
     },
+    units: { activityAverageHeartRate: "bpm", minimumHeartRate: "bpm" },
     vault: "/tmp/example-vault",
   });
 
@@ -269,13 +251,8 @@ test("additive wearables schemas stay compact and metric-aware", () => {
       windowDays: 7,
     },
     summary: {
-      confidence: {
-        candidateCount: 1,
-        conflictingProviders: [],
-        exactDuplicateCount: 0,
-        level: "high",
-        reasons: ["Selected Oura recovery summary."],
-      },
+      confidence: "medium",
+      conflictingProviders: ["garmin"],
       date: "2026-04-05",
       delta: -3,
       paths: ["derived/query/wearables.json"],
@@ -303,12 +280,9 @@ test("additive wearables schemas stay compact and metric-aware", () => {
       },
       recordedAt: "2026-04-05T07:05:00.000Z",
       recordIds: ["wearable_metric_01"],
-      requestedMetric: "resting-heart-rate",
-      resolvedAlias: "resting-heart-rate",
       summaryKind: "recovery",
       unit: "bpm",
       value: 55,
-      windowDays: 7,
     },
     vault: "/tmp/example-vault",
   });
@@ -323,12 +297,6 @@ test("additive wearables schemas stay compact and metric-aware", () => {
       windowDays: 7,
     },
     summary: {
-      confidence: {
-        candidateCount: 1,
-        conflictingProviders: [],
-        exactDuplicateCount: 0,
-        level: "high",
-      },
       date: "2026-04-05",
       delta: 6,
       max: 48,
@@ -337,22 +305,8 @@ test("additive wearables schemas stay compact and metric-aware", () => {
       notes: ["HRV improved over the recent window."],
       percentChange: 14.29,
       points: [
-        {
-          confidence: "high",
-          date: "2026-04-03",
-          provider: "oura",
-          recordedAt: "2026-04-03T07:05:00.000Z",
-          unit: "ms",
-          value: 42,
-        },
-        {
-          confidence: "high",
-          date: "2026-04-05",
-          provider: "oura",
-          recordedAt: "2026-04-05T07:05:00.000Z",
-          unit: "ms",
-          value: 48,
-        },
+        { confidence: "low", date: "2026-04-03", provider: "garmin", value: 42 },
+        { date: "2026-04-05", value: 48 },
       ],
       priorWindow: {
         average: 42,
@@ -372,12 +326,9 @@ test("additive wearables schemas stay compact and metric-aware", () => {
         to: "2026-04-05",
       },
       recordedAt: "2026-04-05T07:05:00.000Z",
-      requestedMetric: "hrv",
-      resolvedAlias: null,
       summaryKind: "sleep",
       unit: "ms",
       value: 48,
-      windowDays: 7,
     },
     vault: "/tmp/example-vault",
   });
@@ -395,12 +346,6 @@ test("additive wearables schemas stay compact and metric-aware", () => {
       notes: ["HRV improved meaningfully over the recent window."],
       signals: [
         {
-          confidence: {
-            candidateCount: 1,
-            conflictingProviders: [],
-            exactDuplicateCount: 0,
-            level: "high",
-          },
           date: "2026-04-05",
           delta: 6,
           metric: "hrv",
@@ -425,13 +370,9 @@ test("additive wearables schemas stay compact and metric-aware", () => {
             min: 48,
             to: "2026-04-05",
           },
-          recordedAt: "2026-04-05T07:05:00.000Z",
-          requestedMetric: "hrv",
-          resolvedAlias: null,
           summaryKind: "sleep",
           unit: "ms",
           value: 48,
-          windowDays: 7,
         },
       ],
       windowDays: 7,
@@ -440,12 +381,15 @@ test("additive wearables schemas stay compact and metric-aware", () => {
   });
 
   assert.equal(latestParsed.summary?.day.date, "2026-04-05");
-  assert.equal(latestParsed.summary?.day.activity?.activityAverageHeartRate?.value, 106);
-  assert.equal(latestParsed.summary?.day.activity?.minimumHeartRate?.value, 52);
+  assert.equal(latestParsed.summary?.day.activity?.activityAverageHeartRate, 106);
+  assert.equal(latestParsed.summary?.day.activity?.minimumHeartRate, 52);
+  assert.equal(latestParsed.units?.minimumHeartRate, "bpm");
   assert.equal(Object.hasOwn(latestParsed.summary as Record<string, unknown>, "sleep"), false);
   assert.equal(Object.hasOwn(latestParsed.summary as Record<string, unknown>, "sourceHealth"), false);
   assert.equal("vault" in latestParsed, false);
   assert.equal(metricLatestParsed.summary?.metric, "restingHeartRate");
+  assert.equal(metricLatestParsed.summary?.confidence, "medium");
+  assert.deepEqual(metricLatestParsed.summary?.conflictingProviders, ["garmin"]);
   assert.equal(
     Object.hasOwn(metricLatestParsed.summary as Record<string, unknown>, "paths"),
     false,
@@ -454,14 +398,14 @@ test("additive wearables schemas stay compact and metric-aware", () => {
     Object.hasOwn(metricLatestParsed.summary as Record<string, unknown>, "recordIds"),
     false,
   );
-  assert.equal(
-    Object.hasOwn(metricLatestParsed.summary?.confidence as Record<string, unknown>, "reasons"),
-    false,
-  );
   assert.equal("vault" in metricLatestParsed, false);
-  assert.equal(metricTrendParsed.summary?.windowDays, 7);
+  assert.deepEqual(metricTrendParsed.summary?.points, [
+    { confidence: "low", date: "2026-04-03", provider: "garmin", value: 42 },
+    { date: "2026-04-05", value: 48 },
+  ]);
   assert.equal("vault" in metricTrendParsed, false);
   assert.equal(driftParsed.summary?.signals[0]?.metric, "hrv");
+  assert.equal(Object.hasOwn(driftParsed.summary as Record<string, unknown>, "latest"), false);
   assert.equal("vault" in driftParsed, false);
 });
 
@@ -504,40 +448,3 @@ test("wearables schemas reject unresolved full metric envelopes", () => {
 
   assert.equal(parsed.success, false);
 });
-
-function resolvedMetric(
-  overrides: Partial<{
-    candidateCount: number;
-    confidence: "none" | "low" | "medium" | "high";
-    conflictingProviders: string[];
-    exactDuplicateCount: number;
-    fallbackFromMetric: string | null;
-    fallbackReason: string | null;
-    metric: string;
-    occurredAt: string | null;
-    provider: string | null;
-    recordedAt: string | null;
-    sourceKind: string | null;
-    title: string | null;
-    unit: string | null;
-    value: number | null;
-  }> = {},
-) {
-  return {
-    confidence: "medium" as const,
-    metric: "sleepTotalMinutes",
-    value: null,
-    ...overrides,
-  };
-}
-
-function compactResolvedMetric(overrides: Partial<ReturnType<typeof resolvedMetric>> = {}) {
-  return resolvedMetric({
-    confidence: "high",
-    metric: "sleepTotalMinutes",
-    provider: "oura",
-    unit: "minutes",
-    value: 430,
-    ...overrides,
-  });
-}

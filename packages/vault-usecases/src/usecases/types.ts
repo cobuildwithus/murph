@@ -587,10 +587,14 @@ export type WearablePublicMetricTrendSummary = JsonObject
 export type WearablePublicDriftSummary = JsonObject
 export type WearablePublicSleepPatternSummary = QueryWearableSleepPatternSummary
 
+/** Unit of each bare or unit-less metric value in a wearable result, keyed by metric. */
+export type WearableUnitsLegend = JsonObject
+
 export interface WearableDayResult {
   date: string
   filters: WearableDayFiltersResult
   summary: WearablePublicDaySummary | null
+  units?: WearableUnitsLegend
 }
 
 export interface WearableListFiltersResult {
@@ -605,6 +609,9 @@ export interface WearableListResult<TItem> {
   filters: WearableListFiltersResult
   items: TItem[]
   count: number
+  /** Notes that apply to every returned item. */
+  notes?: string[]
+  units?: WearableUnitsLegend
 }
 
 export type WearableSleepListResult = WearableListResult<WearablePublicSleepSummary>
@@ -616,6 +623,7 @@ export type WearableSourceListResult = WearableListResult<WearablePublicSourceHe
 export interface WearableLatestResult {
   filters: Omit<WearableListFiltersResult, "limit">
   summary: WearablePublicLatestSummary | null
+  units?: WearableUnitsLegend
 }
 
 export interface WearableMetricFiltersResult extends Omit<WearableListFiltersResult, "limit"> {

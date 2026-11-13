@@ -158,10 +158,17 @@ test('Junction composition and blood-pressure readings survive as canonical vaul
       })
     expect(bodyRead.count).toBe(1)
     expect(bodyRead.items[0]).toMatchObject({
-      bodyWaterPercentage: { provider: 'withings', unit: '%', value: 55.3 },
-      boneMassPercentage: { provider: 'withings', unit: '%', value: 4.2 },
-      muscleMassPercentage: { provider: 'withings', unit: '%', value: 42.7 },
-      visceralFatIndex: { provider: 'withings', unit: 'index', value: 7 },
+      bodyWaterPercentage: 55.3,
+      boneMassPercentage: 4.2,
+      muscleMassPercentage: 42.7,
+      provider: 'withings',
+      visceralFatIndex: 7,
+    })
+    expect(bodyRead.units).toMatchObject({
+      bodyWaterPercentage: '%',
+      boneMassPercentage: '%',
+      muscleMassPercentage: '%',
+      visceralFatIndex: 'index',
     })
 
     await expect(

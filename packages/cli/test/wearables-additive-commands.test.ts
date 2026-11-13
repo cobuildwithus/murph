@@ -31,33 +31,6 @@ function createWearablesCliAndServices() {
   return { cli, services }
 }
 
-function createMetricConfidence() {
-  return {
-    candidateCount: 1,
-    conflictingProviders: [],
-    exactDuplicateCount: 0,
-    level: 'high' as const,
-    reasons: [],
-  }
-}
-
-function createResolvedMetric(metric: string, value: number, unit: string) {
-  return {
-    candidateCount: 1,
-    confidence: 'high' as const,
-    conflictingProviders: [],
-    exactDuplicateCount: 0,
-    metric,
-    occurredAt: '2026-04-05T08:00:00.000Z',
-    provider: 'withings',
-    recordedAt: '2026-04-05T08:05:00.000Z',
-    sourceKind: 'body-summary',
-    title: `Withings ${metric}`,
-    unit,
-    value,
-  }
-}
-
 function createWindowStats(overrides: Partial<{
   average: number | null
   count: number
@@ -85,12 +58,10 @@ function createLatestSummary() {
       activity: null,
       bodyState: null,
       date: '2026-04-05',
-      notes: ['Latest wearable day was sourced from oura.'],
       providers: ['oura'],
       recovery: null,
       sleep: null,
       sourceHealth: [],
-      summaryConfidence: 'high' as const,
     },
     latestDate: '2026-04-05',
     notes: ['Latest wearable day was sourced from oura.'],
@@ -115,15 +86,11 @@ function createMetricLatestSummary(overrides: Partial<{
   recentWindow: ReturnType<typeof createWindowStats>
   recordedAt: string | null
   recordIds: string[]
-  requestedMetric: string
-  resolvedAlias: string | null
   summaryKind: 'activity' | 'bodyState' | 'recovery' | 'sleep'
   unit: string | null
   value: number | null
-  windowDays: number
 }> = {}) {
   return {
-    confidence: createMetricConfidence(),
     date: '2026-04-05',
     delta: null,
     max: 48,
@@ -144,12 +111,9 @@ function createMetricLatestSummary(overrides: Partial<{
     }),
     recordedAt: '2026-04-05T07:05:00.000Z',
     recordIds: ['wearable_metric_01'],
-    requestedMetric: 'hrv',
-    resolvedAlias: null,
     summaryKind: 'sleep' as const,
     unit: 'ms',
     value: 48,
-    windowDays: 7,
     ...overrides,
   }
 }
@@ -190,14 +154,19 @@ test('wearables additive commands return the shared normalized result envelopes'
         to: null,
       },
       items: [{
-        bodyWaterPercentage: createResolvedMetric('bodyWaterPercentage', 55.3, '%'),
-        boneMassPercentage: createResolvedMetric('boneMassPercentage', 4.2, '%'),
+        bodyWaterPercentage: 55.3,
+        boneMassPercentage: 4.2,
         date: '2026-04-05',
-        muscleMassPercentage: createResolvedMetric('muscleMassPercentage', 42.7, '%'),
-        notes: [],
-        summaryConfidence: { level: 'high' as const },
-        visceralFatIndex: createResolvedMetric('visceralFatIndex', 7, 'index'),
+        muscleMassPercentage: 42.7,
+        provider: 'withings',
+        visceralFatIndex: { confidence: 'low' as const, provider: 'garmin', value: 7 },
       }],
+      units: {
+        bodyWaterPercentage: '%',
+        boneMassPercentage: '%',
+        muscleMassPercentage: '%',
+        visceralFatIndex: 'index',
+      },
       vault,
     }),
   )
@@ -249,33 +218,13 @@ test('wearables additive commands return the shared normalized result envelopes'
             min: 54,
             to: '2026-04-05',
           }),
-          requestedMetric: 'resting-heart-rate',
-          resolvedAlias: 'resting-heart-rate',
           summaryKind: 'recovery',
           unit: 'bpm',
           value: 54,
         }),
         points: [
-          {
-            confidence: 'high' as const,
-            date: '2026-04-03',
-            paths: ['derived/query/wearables.json'],
-            provider: 'oura',
-            recordedAt: '2026-04-03T07:05:00.000Z',
-            recordIds: ['wearable_metric_00'],
-            unit: 'bpm',
-            value: 56,
-          },
-          {
-            confidence: 'high' as const,
-            date: '2026-04-05',
-            paths: ['derived/query/wearables.json'],
-            provider: 'oura',
-            recordedAt: '2026-04-05T07:05:00.000Z',
-            recordIds: ['wearable_metric_01'],
-            unit: 'bpm',
-            value: 54,
-          },
+          { date: '2026-04-03', value: 56 },
+          { date: '2026-04-05', value: 54 },
         ],
       },
       vault,
@@ -291,7 +240,6 @@ test('wearables additive commands return the shared normalized result envelopes'
         windowDays: 7,
       },
       summary: {
-        latest: createLatestSummary(),
         notes: ['HRV improved meaningfully over the recent window.'],
         signals: [
           createMetricLatestSummary({
@@ -405,11 +353,13 @@ test('wearables additive commands return the shared normalized result envelopes'
 
   const bodyResult = await runInProcessJsonCli<{
     items: Array<{
-      bodyWaterPercentage?: { value: number | null }
-      boneMassPercentage?: { value: number | null }
-      muscleMassPercentage?: { value: number | null }
-      visceralFatIndex?: { value: number | null }
+      bodyWaterPercentage?: number
+      boneMassPercentage?: number
+      muscleMassPercentage?: number
+      provider?: string
+      visceralFatIndex?: { confidence?: string; provider?: string; value: number | null }
     }>
+    units?: Record<string, string>
   }>(cli, [
     'wearables',
     'body',
@@ -419,10 +369,12 @@ test('wearables additive commands return the shared normalized result envelopes'
   ])
   assert.equal(bodyResult.exitCode, null)
   const bodyData = requireData(bodyResult.envelope)
-  assert.equal(bodyData.items[0]?.bodyWaterPercentage?.value, 55.3)
-  assert.equal(bodyData.items[0]?.boneMassPercentage?.value, 4.2)
-  assert.equal(bodyData.items[0]?.muscleMassPercentage?.value, 42.7)
-  assert.equal(bodyData.items[0]?.visceralFatIndex?.value, 7)
+  assert.equal(bodyData.items[0]?.bodyWaterPercentage, 55.3)
+  assert.equal(bodyData.items[0]?.boneMassPercentage, 4.2)
+  assert.equal(bodyData.items[0]?.muscleMassPercentage, 42.7)
+  assert.equal(bodyData.items[0]?.provider, 'withings')
+  assert.deepEqual(bodyData.items[0]?.visceralFatIndex, { confidence: 'low', provider: 'garmin', value: 7 })
+  assert.equal(bodyData.units?.visceralFatIndex, 'index')
   assert.deepEqual(listWearableBodyState.mock.calls[0]?.[0], {
     date: undefined,
     from: undefined,
@@ -440,7 +392,6 @@ test('wearables additive commands return the shared normalized result envelopes'
     }
     summary: {
       metric: string
-      requestedMetric: string
       value: number | null
     } | null
   }>(cli, [
@@ -461,7 +412,8 @@ test('wearables additive commands return the shared normalized result envelopes'
   const metricLatestData = requireData(metricLatestResult.envelope)
   assert.equal('vault' in metricLatestData, false)
   assert.equal(metricLatestData.summary?.metric, 'hrv')
-  assert.equal(metricLatestData.summary?.requestedMetric, 'hrv')
+  assert.equal(metricLatestData.filters.metric, 'hrv')
+  assert.equal(Object.hasOwn(metricLatestData.summary ?? {}, 'requestedMetric'), false)
   assert.deepEqual(showWearableMetricLatest.mock.calls[0]?.[0], {
     date: '2026-04-05',
     from: undefined,
@@ -521,6 +473,7 @@ test('wearables additive commands return the shared normalized result envelopes'
   const driftResult = await runInProcessJsonCli<{
     summary: {
       notes: string[]
+      signals: Array<{ metric: string }>
     } | null
   }>(cli, [
     'wearables',
@@ -540,6 +493,8 @@ test('wearables additive commands return the shared normalized result envelopes'
   assert.deepEqual(driftData.summary?.notes, [
     'HRV improved meaningfully over the recent window.',
   ])
+  assert.deepEqual(driftData.summary?.signals.map((signal) => signal.metric), ['hrv'])
+  assert.equal(Object.hasOwn(driftData.summary ?? {}, 'latest'), false)
   assert.deepEqual(showWearableDrift.mock.calls[0]?.[0], {
     date: '2026-04-05',
     from: undefined,
@@ -568,12 +523,9 @@ test('wearables metric latest preserves explicit activity heart-rate aliases', a
         max: 76,
         metric: 'averageHeartRate',
         min: 76,
-        requestedMetric: input.metric,
-        resolvedAlias: input.metric,
         summaryKind: 'activity',
         unit: 'bpm',
         value: 76,
-        windowDays: 1,
       }),
       vault,
     }),
@@ -585,9 +537,9 @@ test('wearables metric latest preserves explicit activity heart-rate aliases', a
   })
 
   const result = await runInProcessJsonCli<{
+    filters: { metric: string }
     summary: {
       metric: string
-      requestedMetric: string
       summaryKind: string
       value: number | null
     } | null
@@ -605,7 +557,7 @@ test('wearables metric latest preserves explicit activity heart-rate aliases', a
 
   assert.equal(result.exitCode, null)
   assert.equal(data.summary?.metric, 'averageHeartRate')
-  assert.equal(data.summary?.requestedMetric, 'activity-average-heart-rate')
+  assert.equal(data.filters.metric, 'activity-average-heart-rate')
   assert.equal(data.summary?.summaryKind, 'activity')
   assert.equal(data.summary?.value, 76)
   assert.equal(showWearableMetricLatest.mock.calls[0]?.[0].metric, 'activity-average-heart-rate')

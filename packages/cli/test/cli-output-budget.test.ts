@@ -263,14 +263,15 @@ test('wearables activity list keeps routine reads compact while explicit detail 
         }
         items: Array<Record<string, unknown> & {
           activityTypes?: string[]
-          activeCalories?: { confidence: string; metric: string; provider?: string; unit?: string; value: number | null }
+          activeCalories?: number
           date: string
-          distanceKm?: { confidence: string; metric: string; provider?: string; unit?: string; value: number | null }
-          sessionCount?: { confidence: string; metric: string; provider?: string; unit?: string; value: number | null }
-          sessionMinutes?: { confidence: string; metric: string; provider?: string; unit?: string; value: number | null }
-          steps?: { confidence: string; metric: string; provider?: string; unit?: string; value: number | null }
-          summaryConfidence?: { selectedProviders?: string[] }
+          distanceKm?: number
+          provider?: string
+          sessionCount?: number
+          sessionMinutes?: number
+          steps?: number
         }>
+        units?: Record<string, string>
       }
     }
     assert.equal(compact.ok, true)
@@ -285,42 +286,22 @@ test('wearables activity list keeps routine reads compact while explicit detail 
     assert.ok(compactDay)
     assert.equal(compactDay.date, '2026-08-31')
     assert.deepEqual([...(compactDay.activityTypes ?? [])].sort(), ['cycling', 'running'])
-    assert.deepEqual(compactDay.sessionCount, {
-      confidence: 'high',
-      metric: 'sessionCount',
-      provider: 'garmin',
-      unit: 'count',
-      value: 32,
+    // High-confidence values from the day's provider are bare numbers; the
+    // list-level legend carries each unit once.
+    assert.equal(compactDay.provider, 'garmin')
+    assert.equal(compactDay.sessionCount, 32)
+    assert.equal(compactDay.sessionMinutes, 960)
+    assert.equal(compactDay.steps, 12_345)
+    assert.equal(compactDay.activeCalories, 640)
+    assert.equal(compactDay.distanceKm, 10.5)
+    assert.deepEqual(compact.data.units, {
+      activeCalories: 'kcal',
+      distanceKm: 'km',
+      maxHeartRate: 'bpm',
+      sessionCount: 'count',
+      sessionMinutes: 'minutes',
+      steps: 'count',
     })
-    assert.deepEqual(compactDay.sessionMinutes, {
-      confidence: 'high',
-      metric: 'sessionMinutes',
-      provider: 'garmin',
-      unit: 'minutes',
-      value: 960,
-    })
-    assert.deepEqual(compactDay.steps, {
-      confidence: 'high',
-      metric: 'steps',
-      provider: 'garmin',
-      unit: 'count',
-      value: 12_345,
-    })
-    assert.deepEqual(compactDay.activeCalories, {
-      confidence: 'high',
-      metric: 'activeCalories',
-      provider: 'garmin',
-      unit: 'kcal',
-      value: 640,
-    })
-    assert.deepEqual(compactDay.distanceKm, {
-      confidence: 'high',
-      metric: 'distanceKm',
-      provider: 'garmin',
-      unit: 'km',
-      value: 10.5,
-    })
-    assert.deepEqual(compactDay.summaryConfidence?.selectedProviders, ['garmin'])
     assert.equal(Object.hasOwn(compactDay, 'workoutFeatures'), false)
 
     const detailedRaw = await runBudgetedRawCli(
@@ -469,7 +450,7 @@ test('wearables activity list keeps routine reads compact while explicit detail 
     )
     const typicalCompact = JSON.parse(typicalCompactRaw) as typeof compact
     const typicalDetailed = JSON.parse(typicalDetailedRaw) as typeof detailed
-    assert.equal(typicalCompact.data.items[0]?.sessionCount?.value, 2)
+    assert.equal(typicalCompact.data.items[0]?.sessionCount, 2)
     assert.equal(Object.hasOwn(typicalCompact.data.items[0] ?? {}, 'workoutFeatures'), false)
     assert.equal(typicalDetailed.data.items[0]?.workoutFeatures?.length, 2)
     assert.equal(

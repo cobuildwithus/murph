@@ -149,22 +149,15 @@ test("showWearableLatest forwards normalized surface filters to the shared query
       day: {
         date: "2026-04-04",
         providers: ["whoop"],
-        summaryConfidence: "high",
+        // High confidence and the day's own date are implied, so both drop out.
         sleep: {
-          date: "2026-04-04",
-          summaryConfidence: {
-            level: "high",
-            selectedProviders: ["whoop"],
-          },
-          totalSleepMinutes: {
-            confidence: "high",
-            metric: "totalSleepMinutes",
-            provider: "whoop",
-            unit: "minutes",
-            value: 420,
-          },
+          provider: "whoop",
+          totalSleepMinutes: 420,
         },
       },
+    },
+    units: {
+      totalSleepMinutes: "minutes",
     },
   });
   const serialized = JSON.stringify(result);
@@ -291,22 +284,12 @@ test("wearable day and drift outputs compact verbose metric envelopes", async ()
   });
 
   assert.deepEqual(day.summary?.sleep, {
-    date: "2026-04-04",
-    summaryConfidence: {
-      level: "high",
-      selectedProviders: ["whoop"],
-    },
-    totalSleepMinutes: {
-      confidence: "high",
-      metric: "totalSleepMinutes",
-      provider: "whoop",
-      unit: "minutes",
-      value: 420,
-    },
+    provider: "whoop",
+    totalSleepMinutes: 420,
   });
-  assert.equal(Object.hasOwn(drift.summary?.latest as Record<string, unknown>, "sleep"), false);
-  assert.equal(Object.hasOwn(drift.summary?.latest as Record<string, unknown>, "activity"), false);
-  assert.equal(Object.hasOwn(drift.summary?.latest as Record<string, unknown>, "sourceHealth"), false);
+  assert.deepEqual(day.units, { totalSleepMinutes: "minutes" });
+  // Drift returns its own signals and notes, never the embedded latest bundle.
+  assert.deepEqual(drift.summary, { notes: [], signals: [], windowDays: 7 });
 
   for (const compactOutput of [day, drift]) {
     const serialized = JSON.stringify(compactOutput);
@@ -418,8 +401,9 @@ test("metric and drift wearable service methods use the shared assistant-aligned
       windowDays: 7,
     },
     summary: {
-      windowDays: 7,
+      notes: [],
       signals: [],
+      windowDays: 7,
     },
   });
   assert.equal(loadQueryRuntime.mock.calls.length, 3);
