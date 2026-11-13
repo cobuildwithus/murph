@@ -6681,7 +6681,11 @@ settle a shared choice, never consent; the game tool owns the short setup/poll
 guidance and the generic challenge fallback explicitly defers to these tools.
 Only brief setup/poll triggers enter the initial tool catalog. The engine appends
 the full setup guidance to each successful accepted-input read_game result,
-alongside GAME_SELECTION_GUIDANCE when several games are active. Recap reads
+alongside GAME_SELECTION_GUIDANCE when several games are active. Within one
+provider turn each rule block is appended once; a later read points back to it,
+and a context compaction resets that. The model's copy omits lore keys, stake
+keys, finished games' days, asks and controls, and days not yet started; a write
+result shows only the game it acted on, without days. Recap reads
 remain isolated and retain their own memberId-keyed superlatives contract.
 
 Reads request `includePlayers: true` and receive two profile references for pairs
