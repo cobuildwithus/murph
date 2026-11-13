@@ -4642,14 +4642,17 @@ function groupSharedUnavailableToolResult(
 }
 
 /**
- * One read returns every member crossed with every requested scope. At the model
+ * One read returns every member crossed with every requested scope, and the
+ * result stays in the turn's context for every later model call. At the model
  * boundary, every projection is keyed by its exact scope and its grant/data pair
- * is collapsed to one four-state status. Non-workout record arrays remain
- * byte-identical. `workouts.v0` additionally compacts repeated day identity,
- * time semantics, completion watermark, and activity kinds because its
- * per-workout lists are the one record payload dense enough to need that extra
- * reduction. Encrypted stored records and the complete Web response retain
- * their validated shapes.
+ * is collapsed to one four-state status. Each record is its data fields plus its
+ * source label: the envelope's recordKey and occurredAt only restate the date
+ * and source, metricKey is fixed by the scope, and a unit shared by every record
+ * is stated once on the projection. `workouts.v0` additionally compacts
+ * repeated day identity, time semantics, completion watermark, and activity
+ * kinds because its per-workout lists are the densest record payload.
+ * Encrypted stored records and the complete Web response retain their
+ * validated shapes.
  * The model reads the four collapsed states from one field instead of decoding
  * the grant/data pair.
  */
@@ -4660,6 +4663,91 @@ function groupSharedProjectionStatus(
     return 'not_granted'
   }
   return projection.dataStatus
+}
+
+interface GroupSharedModelSource {
+  label: string
+  source: string
+}
+
+function isGroupSharedModelSource(
+  value: unknown,
+): value is GroupSharedModelSource {
+  return typeof value === 'object'
+    && value !== null
+    && 'label' in value
+    && typeof value.label === 'string'
+    && 'source' in value
+    && typeof value.source === 'string'
+}
+
+/**
+ * A source is named by its public label. The provider key is added only when
+ * two keys in the same projection share a label (Apple Health has two), so
+ * their values can still be told apart. No record data field is named
+ * `source` or `sourceKey`, so these never shadow one.
+ */
+function groupSharedModelSourceNamer(
+  sources: readonly (GroupSharedModelSource | undefined)[],
+): (source: GroupSharedModelSource | undefined) => {
+  source?: string
+  sourceKey?: string
+} {
+  const keysByLabel = new Map<string, Set<string>>()
+  for (const source of sources) {
+    if (source) {
+      keysByLabel.set(
+        source.label,
+        (keysByLabel.get(source.label) ?? new Set()).add(source.source),
+      )
+    }
+  }
+  return (source) => source === undefined
+    ? {}
+    : {
+        source: source.label,
+        ...((keysByLabel.get(source.label)?.size ?? 0) > 1
+          ? { sourceKey: source.source }
+          : {}),
+      }
+}
+
+interface GroupSharedModelWorkout {
+  fields: Record<string, unknown>
+  source?: GroupSharedModelSource
+}
+
+/**
+ * Activity kinds repeat on every workout and can be up to 80 characters, which
+ * made them the largest remaining budget dimension. A member's week uses only a
+ * handful of distinct kinds, so they are listed once and referenced by index.
+ */
+function parseGroupSharedModelWorkout(
+  workout: unknown,
+  kinds: string[],
+): GroupSharedModelWorkout | null {
+  const workoutEntries = Object.entries(workout as Record<string, unknown>)
+  const kind = workoutEntries.find(([key]) => key === 'kind')?.[1]
+  const source = workoutEntries.find(([key]) => key === 'source')?.[1]
+  if (
+    typeof kind !== 'string'
+    || (source !== undefined && !isGroupSharedModelSource(source))
+  ) {
+    return null
+  }
+  let kindIndex = kinds.indexOf(kind)
+  if (kindIndex === -1) {
+    kindIndex = kinds.push(kind) - 1
+  }
+  return {
+    fields: {
+      kindIndex,
+      ...Object.fromEntries(
+        workoutEntries.filter(([key]) => key !== 'kind' && key !== 'source'),
+      ),
+    },
+    ...(source === undefined ? {} : { source }),
+  }
 }
 
 function groupSharedWorkoutsModelProjection(
@@ -4674,10 +4762,7 @@ function groupSharedWorkoutsModelProjection(
   // always the day's workout array: a value that is sometimes an array and
   // sometimes a wrapper object would break the `days[date].some(...)` the
   // referee is instructed to run on an open local date.
-  const days: Record<string, unknown> = {}
-  // Activity kinds repeat on every workout and can be up to 80 characters, which
-  // made them the largest remaining budget dimension. A member's week uses only a
-  // handful of distinct kinds, so they are listed once and referenced by index.
+  const parsedDays: [string, GroupSharedModelWorkout[]][] = []
   const kinds: string[] = []
   let calendarClosedThroughDate: string | undefined
   let timeSemantics: string | undefined
@@ -4706,28 +4791,26 @@ function groupSharedWorkoutsModelProjection(
       return null
     }
     calendarClosedThroughDate = closedThrough
-    const dayWorkouts: unknown[] = []
+    const dayWorkouts: GroupSharedModelWorkout[] = []
     for (const workout of workouts) {
-      const workoutEntries = Object.entries(
-        workout as Record<string, unknown>,
-      )
-      const kind = workoutEntries.find(([key]) => key === 'kind')?.[1]
-      if (typeof kind !== 'string') {
+      const parsed = parseGroupSharedModelWorkout(workout, kinds)
+      if (!parsed) {
         return null
       }
-      let kindIndex = kinds.indexOf(kind)
-      if (kindIndex === -1) {
-        kindIndex = kinds.push(kind) - 1
-      }
-      dayWorkouts.push({
-        kindIndex,
-        ...Object.fromEntries(
-          workoutEntries.filter(([key]) => key !== 'kind'),
-        ),
-      })
+      dayWorkouts.push(parsed)
     }
-    days[date] = dayWorkouts
+    parsedDays.push([date, dayWorkouts])
   }
+  const nameSource = groupSharedModelSourceNamer(parsedDays.flatMap(
+    ([, dayWorkouts]) => dayWorkouts.map((workout) => workout.source),
+  ))
+  const days = Object.fromEntries(parsedDays.map(([date, dayWorkouts]) => [
+    date,
+    dayWorkouts.map((workout) => ({
+      ...workout.fields,
+      ...nameSource(workout.source),
+    })),
+  ]))
   return {
     ...(calendarClosedThroughDate === undefined
       ? {}
@@ -4741,6 +4824,55 @@ function groupSharedWorkoutsModelProjection(
     status: groupSharedProjectionStatus(projection),
     ...(timeSemantics === undefined ? {} : { timeSemantics }),
   }
+}
+
+function groupSharedRecordsModelProjection(
+  projection: AssistantHostedGroupSharedProjection,
+  reportingGaps: ReturnType<typeof getHostedGroupWearableReportingGaps>,
+): Record<string, unknown> {
+  const nameSource = groupSharedModelSourceNamer([
+    ...projection.records.map((record) => record.source),
+    ...reportingGaps.map((gap) => gap.source),
+  ])
+  const units = new Set(projection.records.map((record) =>
+    'unit' in record.data ? record.data.unit : undefined
+  ))
+  const [firstUnit] = units
+  // Every daily metric record restates its scope's unit; mixed units stay on
+  // each record.
+  const sharedUnit = units.size === 1 ? firstUnit : undefined
+  return {
+    ...(typeof projection.grantedAt === 'string'
+      ? { grantedAt: projection.grantedAt }
+      : {}),
+    records: projection.records.map((record) => ({
+      ...Object.fromEntries(Object.entries(record.data).filter(([key, value]) =>
+        key !== 'metricKey'
+        && (key !== 'unit' || (sharedUnit === undefined && value !== null))
+      )),
+      ...nameSource(record.source),
+    })),
+    ...(reportingGaps.length === 0
+      ? {}
+      : {
+          reportingGaps: reportingGaps.map(({ source, ...gap }) => ({
+            ...gap,
+            ...nameSource(source),
+          })),
+        }),
+    status: groupSharedProjectionStatus(projection),
+    ...(sharedUnit == null ? {} : { unit: sharedUnit }),
+  }
+}
+
+/** The returned records already show which dates have data. */
+function groupSharedDateCoverageModelResult(
+  coverage: NonNullable<
+    Extract<AssistantHostedGroupSharedReadResponse, { status: 'ok' }>['dateCoverage']
+  >,
+) {
+  const { availableDates, ...rest } = coverage
+  return { ...rest, availableDateCount: availableDates.length }
 }
 
 function groupSharedModelResult(
@@ -4763,9 +4895,11 @@ function groupSharedModelResult(
   const checkedAtMs = result.freshness ? Date.parse(result.freshness.checkedAt) : Date.now()
   return {
     ...(result.freshness ? { freshness: result.freshness } : {}),
-    ...(result.dateCoverage ? { dateCoverage: result.dateCoverage } : {}),
+    ...(result.dateCoverage
+      ? { dateCoverage: groupSharedDateCoverageModelResult(result.dateCoverage) }
+      : {}),
     members: result.members.map((member) => ({
-      // Empty handles and a null name carried no information but were
+      // Empty handles and null fields carried no information but were
       // serialized for every member on every read.
       ...(member.currentTurnHandles.length === 0
         ? {}
@@ -4774,21 +4908,20 @@ function groupSharedModelResult(
         ? {}
         : { displayName: member.displayName }),
       participantId: member.participantId,
-      ...(member.companionLastContactAt === undefined ? {} : { companionLastContactAt: member.companionLastContactAt }),
+      ...(member.companionLastContactAt == null
+        ? {}
+        : { companionLastContactAt: member.companionLastContactAt }),
       // Keyed by scope so each projection no longer restates its own key, and
       // the scope reads as a heading rather than a field to hunt for.
       projections: Object.fromEntries(member.projections.map((projection) => [
         projection.projectionScopeKey,
-        groupSharedWorkoutsModelProjection(projection) ?? {
-          ...(typeof projection.grantedAt === 'string'
-            ? { grantedAt: projection.grantedAt }
-            : {}),
-          records: projection.records,
-          ...(requirements ? {
-            reportingGaps: getHostedGroupWearableReportingGaps(projection, requirements, checkedAtMs),
-          } : {}),
-          status: groupSharedProjectionStatus(projection),
-        },
+        groupSharedWorkoutsModelProjection(projection)
+          ?? groupSharedRecordsModelProjection(
+            projection,
+            requirements
+              ? getHostedGroupWearableReportingGaps(projection, requirements, checkedAtMs)
+              : [],
+          ),
       ])),
     })),
     requestedProjectionScopeKeys: result.requestedProjectionScopeKeys,
@@ -5062,32 +5195,65 @@ async function executeGroupChallengeResponseCardAttachment(input: {
   }
 }
 
+/**
+ * Members are anonymous at the model boundary, so identical rows say nothing
+ * apart and are listed once with a `count`. A member with a disclosure grant
+ * keeps its own row: a group runtime cannot list memberships, so this is the
+ * only place ask_member can take its exact grantId from, and each grant stays
+ * on its one member beside the permission it covers. profile-name.v0 comes
+ * with membership itself, so it is not listed as a granted scope.
+ */
+function groupSummaryModelMembers(
+  members: HostedRuntimeGroupSummary['members'],
+) {
+  const rows: {
+    count?: number
+    disclosureGrants?: { grantId: string; permissionText: string }[]
+    grantedVaultShareProjectionScopes:
+      HostedRuntimeGroupSummary['members'][number]['grantedVaultShareProjectionScopes']
+    role: string
+  }[] = []
+  const anonymousRows = new Map<string, (typeof rows)[number]>()
+  for (const member of members) {
+    const row = {
+      grantedVaultShareProjectionScopes:
+        member.grantedVaultShareProjectionScopes.filter(
+          (scope) => scope.projectionKind !== 'profile-name.v0',
+        ),
+      role: member.role,
+    }
+    if (member.disclosureGrants?.length) {
+      rows.push({
+        disclosureGrants: member.disclosureGrants.map((grant) => ({
+          grantId: grant.grantId,
+          permissionText: grant.permissionText,
+        })),
+        ...row,
+      })
+      continue
+    }
+    const shape = JSON.stringify(row)
+    const existing = anonymousRows.get(shape)
+    if (existing) {
+      existing.count = (existing.count ?? 1) + 1
+      continue
+    }
+    anonymousRows.set(shape, row)
+    rows.push(row)
+  }
+  return rows
+}
+
+/**
+ * The internal group id and the kind lists that duplicate the scope lists are
+ * left out. The scope objects stay: offer_access takes them as they are.
+ */
 function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
   return {
     displayName: group.displayName,
-    id: group.id,
     kind: group.kind,
     memberCount: group.memberCount,
-    members: group.members.map((member) => ({
-      // A group runtime cannot list memberships, so this is the only place
-      // ask_member can take its exact grantId from. Each active grant stays on
-      // its (anonymous) member beside the permission it covers.
-      ...(member.disclosureGrants?.length
-        ? {
-            disclosureGrants: member.disclosureGrants.map((grant) => ({
-              grantId: grant.grantId,
-              permissionText: grant.permissionText,
-            })),
-          }
-        : {}),
-      grantedVaultShareProjectionKinds:
-        member.grantedVaultShareProjectionKinds,
-      grantedVaultShareProjectionScopes:
-        member.grantedVaultShareProjectionScopes,
-      role: member.role,
-    })),
-    requestedVaultShareProjectionKinds:
-      group.requestedVaultShareProjectionKinds,
+    members: groupSummaryModelMembers(group.members),
     requestedVaultShareProjectionScopes:
       group.requestedVaultShareProjectionScopes,
     status: group.status,
@@ -5124,6 +5290,32 @@ function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
                 displayName: participant.ownerAdvisoryName,
               }),
         })),
+      },
+    }
+  }
+  // A rename is only a provider request; the group summary it echoed back
+  // told the model nothing about the new title.
+  if (response.action === 'update_display_name') {
+    return {
+      action: response.action,
+      result: response.result.status === 'ok'
+        ? { status: response.result.status }
+        : {
+            status: response.result.status,
+            unavailableReason: response.result.unavailableReason,
+          },
+    }
+  }
+  // The model just sent this setup; only the outcome and its expiry are new.
+  if (
+    response.action === 'prepare_next_group'
+    && response.result.status === 'prepared'
+  ) {
+    return {
+      action: response.action,
+      result: {
+        expiresAt: response.result.expiresAt,
+        status: response.result.status,
       },
     }
   }
