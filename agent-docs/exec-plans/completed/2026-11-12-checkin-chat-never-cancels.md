@@ -1,6 +1,6 @@
 # Chat never cancels a game check-in
 
-Status: active
+Status: completed
 Created: 2026-11-12
 Updated: 2026-11-12
 
@@ -55,8 +55,9 @@ Updated: 2026-11-12
 2. Read the transcript as it stands at preparation; drop the bound parameter. Done.
 3. Make `conversationLaneSeq` optional in the three policy schemas. Done.
 4. Update tests and the architecture, security, product and state-machine docs. Done.
-5. Follow-up after the next runner deploy: stop writing `"0"`, then remove the
-   field once queued policies that carry it have expired.
+5. Not part of this plan, left as a follow-up once a runner built from this
+   change is deployed: stop writing `"0"`, then remove the field once queued
+   policies that carry it have expired.
 
 ## Decisions
 
@@ -84,3 +85,10 @@ Updated: 2026-11-12
   `game-private-evening-postgres` and `game-chat-delivery-authority`, 137 passed.
 - `pnpm --dir apps/web typecheck:prepared` and
   `pnpm --dir packages/hosted-execution typecheck`: passed.
+- Every PostgreSQL test that touches game check-in delivery, same database
+  lane: 391 passed.
+- ReviewGPT round 1 on `b7f698d530`: PASS with no findings, answered under the
+  tool's attestation floor and accepted under the standing short-pass rule.
+- CI's first run failed one PostgreSQL shard on an unrelated date-dependent
+  case in `game-private-activation-postgres.test.ts`, fixed in this branch.
+Completed: 2026-11-12
