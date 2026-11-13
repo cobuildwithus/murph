@@ -7,7 +7,6 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 
-import { suggestedCommandsCta } from './command-factory-primitives.js'
 
 const medicationSlugSchema = z
   .string()
@@ -193,28 +192,7 @@ export function registerMedicationCommands(
         vault: context.options.vault,
       })
 
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: 'regimen show',
-            args: {
-              id: saved.regimenId,
-            },
-            description: 'Show the saved historical medication course.',
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: 'regimen list',
-            description: 'List completed regimen records.',
-            options: {
-              status: 'completed',
-              vault: true,
-            },
-          },
-        ]),
-      })
+      return saved
     },
   })
 

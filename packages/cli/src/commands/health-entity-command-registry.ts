@@ -156,14 +156,7 @@ function createHealthEntityCrudConfig(
     payloadFile: descriptor.command.payloadFile,
     pluralNoun: descriptor.plural,
     services: bindCrudServices(services, descriptor),
-    showId: {
-      ...descriptor.command.showId,
-      fromImportJsonResult(result: object) {
-        return String(
-          (result as Record<string, unknown>)[descriptor.core.resultIdField] ?? "",
-        );
-      },
-    },
+    showId: descriptor.command.showId,
   };
 }
 

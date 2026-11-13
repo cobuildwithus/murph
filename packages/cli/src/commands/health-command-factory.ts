@@ -102,7 +102,6 @@ interface HealthCrudConfig<
   showId: {
     description: string
     example: string
-    fromImportJsonResult(result: TUpsert): string
   }
 }
 
@@ -406,34 +405,6 @@ function registerCrudPayloadSchemaCommand<
   )
 }
 
-function createCrudImportJsonCta<TUpsert extends object>(
-  config: Pick<
-    HealthCrudConfig<unknown, TUpsert, unknown, unknown>,
-    'groupName' | 'noun' | 'pluralNoun' | 'showId'
-  >,
-  result: TUpsert,
-) {
-  return suggestedCommandsCta([
-    {
-      command: `${config.groupName} show`,
-      args: {
-        id: config.showId.fromImportJsonResult(result),
-      },
-      description: `Show the saved ${config.noun}.`,
-      options: {
-        vault: true,
-      },
-    },
-    {
-      command: `${config.groupName} list`,
-      description: `List ${config.pluralNoun}.`,
-      options: {
-        vault: true,
-      },
-    },
-  ])
-}
-
 export function registerHealthCrudCommands<
   TScaffold,
   TUpsert extends object,
@@ -477,9 +448,7 @@ export function registerHealthCrudCommands<
         vault: context.options.vault,
       })
 
-      return context.ok(result, {
-        cta: createCrudImportJsonCta(config, result),
-      })
+      return result
     },
   })
 

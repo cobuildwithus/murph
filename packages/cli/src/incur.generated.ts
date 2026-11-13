@@ -193,12 +193,12 @@ declare module 'incur' {
       'measurement manifest': { args: { id: string }; options: { requestId?: string } }
       'measurement show': { args: { id: string }; options: { requestId?: string } }
       'medication history add': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; stoppedOn?: string; schedule?: string; substance?: string; dose?: number; unit?: string; group?: string; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[]; startedOn: string } }
-      'memory forget': { args: { memoryId: string }; options: { compact?: boolean } }
+      'memory forget': { args: { memoryId: string }; options: { compact?: boolean; full?: boolean } }
       'memory set-demographics': { args: {}; options: { compact?: boolean; birthYear?: number; age?: number; asOf?: string; biologicalSex?: "female" | "male"; clearBirth?: boolean; clearSex?: boolean } }
-      'memory set-name': { args: { displayName: string }; options: { compact?: boolean } }
+      'memory set-name': { args: { displayName: string }; options: { compact?: boolean; full?: boolean } }
       'memory show': { args: { memoryId?: string }; options: { recordOnly?: boolean; compact?: boolean } }
-      'memory update': { args: { memoryId: string; text: string }; options: { compact?: boolean; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
-      'memory upsert': { args: { text: string }; options: { compact?: boolean; section: "Identity" | "Preferences" | "Instructions" | "Context" } }
+      'memory update': { args: { memoryId: string; text: string }; options: { compact?: boolean; full?: boolean; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
+      'memory upsert': { args: { text: string }; options: { compact?: boolean; full?: boolean; section: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'profile set': { args: {}; options: { requestId?: string; bloodType: string; occurredAt?: string | string | string; source?: "manual" | "import" | "device" | "derived"; note?: string; rawRef?: string[] } }
       'profile show': { args: {}; options: { requestId?: string } }
       'protocol import-json': { args: {}; options: { requestId?: string; input: string } }

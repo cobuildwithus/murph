@@ -3776,7 +3776,11 @@
                       "additionalProperties": false,
                       "properties": {
                         "compact": {
-                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "description": "Accepted for compatibility; memory writes are already compact.",
+                          "type": "boolean"
+                        },
+                        "full": {
+                          "description": "Also return the full memory document and the affected record's storage metadata.",
                           "type": "boolean"
                         }
                       }
@@ -3792,7 +3796,7 @@
                       "additionalProperties": false,
                       "properties": {
                         "compact": {
-                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "description": "Accepted for compatibility; memory writes are already compact.",
                           "type": "boolean"
                         },
                         "birthYear": {
@@ -3841,7 +3845,11 @@
                       "additionalProperties": false,
                       "properties": {
                         "compact": {
-                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "description": "Accepted for compatibility; memory writes are already compact.",
+                          "type": "boolean"
+                        },
+                        "full": {
+                          "description": "Also return the full memory document and the affected record's storage metadata.",
                           "type": "boolean"
                         },
                         "section": {
@@ -3867,7 +3875,11 @@
                       "additionalProperties": false,
                       "properties": {
                         "compact": {
-                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "description": "Accepted for compatibility; memory writes are already compact.",
+                          "type": "boolean"
+                        },
+                        "full": {
+                          "description": "Also return the full memory document and the affected record's storage metadata.",
                           "type": "boolean"
                         },
                         "section": {
@@ -3893,7 +3905,11 @@
                       "additionalProperties": false,
                       "properties": {
                         "compact": {
-                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "description": "Accepted for compatibility; memory writes are already compact.",
+                          "type": "boolean"
+                        },
+                        "full": {
+                          "description": "Also return the full memory document and the affected record's storage metadata.",
                           "type": "boolean"
                         }
                       }

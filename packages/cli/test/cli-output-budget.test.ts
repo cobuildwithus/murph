@@ -279,7 +279,6 @@ test('wearables activity list keeps routine reads compact while explicit detail 
       date: '2026-08-31',
       from: '2026-08-31',
       to: '2026-08-31',
-      providers: [],
       limit: 3,
     })
     const compactDay = compact.data.items[0]
@@ -523,10 +522,8 @@ test('wearables activity list keeps routine reads compact while explicit detail 
     const rangeCompact = JSON.parse(rangeCompactRaw) as typeof compact
     const rangeDetailed = JSON.parse(rangeDetailedRaw) as typeof detailed
     assert.deepEqual(rangeCompact.data.filters, {
-      date: null,
       from: '2026-08-30',
       to: '2026-08-31',
-      providers: [],
       limit: 2,
     })
     assert.equal(rangeCompact.data.count, 2)

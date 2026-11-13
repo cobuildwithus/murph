@@ -13,7 +13,7 @@ The fixture lane owns the actual corpus under `fixtures/`, but this doc freezes 
 - One Markdown fixture each for goals, conditions, allergies, protocols, family members, and genetic variants.
 - One golden-output directory per documented baseline command.
 - Smoke expectations that describe:
-  - document and meal writes returning `lookupId` plus stable related ids
+  - document and meal writes returning stable `doc_*`/`meal_*` read ids plus the related event id
   - workout quick capture returning one queryable `evt_*` id for an `activity_session` event while preserving the freeform note text and any explicit structured strength exercise details
   - intervention quick capture returning one queryable `evt_*` id for an `intervention_session` event while preserving the freeform note text plus any inferred or explicit intervention type, duration, and protocol linkage
   - sample imports returning `lookupIds` plus an `xfm_*` batch id

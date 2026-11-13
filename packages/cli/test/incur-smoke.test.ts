@@ -3089,7 +3089,14 @@ for (const kind of ['provider', 'food', 'recipe'] as const) {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), `murph-${kind}-lifecycle-`))
     const runFreshCli = <TData = Record<string, unknown>>(args: string[]) =>
       runCli<TData>(args, { env: { MURPH_CLI_TEST_PERSISTENT_HARNESS: '0' } })
-    type SavedRecord = { lookupId: string; path: string; created: boolean }
+    // Save results name the id once; the duplicate lookupId is projected away.
+    type SavedRecord = Partial<Record<`${typeof kind}Id`, string>> & { path: string; created: boolean }
+    const savedId = (record: SavedRecord): string => {
+      const id = record[`${kind}Id`]
+      assert.ok(id)
+      assert.equal('lookupId' in record, false)
+      return id
+    }
     type ShownRecord = { entity: { id: string; path: string; data: { title: string } } }
     try {
       requireData(await runFreshCli(['init', '--vault', vaultRoot]))
@@ -3098,37 +3105,38 @@ for (const kind of ['provider', 'food', 'recipe'] as const) {
         '--vault', vaultRoot,
       ]))
       assert.equal(created.created, true)
+      const createdId = savedId(created)
       const shown = requireData(await runFreshCli<ShownRecord>([
-        kind, 'show', created.lookupId, '--vault', vaultRoot,
+        kind, 'show', createdId, '--vault', vaultRoot,
       ]))
-      assert.equal(shown.entity.id, created.lookupId)
+      assert.equal(shown.entity.id, createdId)
       assert.equal(shown.entity.data.title, 'Synthetic initial record')
 
       const updated = requireData(await runFreshCli<SavedRecord>([
         ...(kind === 'food'
-          ? [kind, 'rename', created.lookupId, '--title', 'Synthetic updated record']
-          : [kind, 'save', 'Synthetic updated record', '--id', created.lookupId]),
+          ? [kind, 'rename', createdId, '--title', 'Synthetic updated record']
+          : [kind, 'save', 'Synthetic updated record', '--id', createdId]),
         '--slug', 'synthetic-updated', '--vault', vaultRoot,
       ]))
       assert.equal(updated.created, false)
-      assert.equal(updated.lookupId, created.lookupId)
+      assert.equal(savedId(updated), createdId)
       assert.notEqual(updated.path, created.path)
       const persisted = await readFile(path.join(vaultRoot, updated.path), 'utf8')
       assert.match(persisted, /Synthetic updated record/u)
       await assert.rejects(readFile(path.join(vaultRoot, created.path), 'utf8'), { code: 'ENOENT' })
 
       const reopened = requireData(await runFreshCli<ShownRecord>([
-        kind, 'show', created.lookupId, '--vault', vaultRoot,
+        kind, 'show', createdId, '--vault', vaultRoot,
       ]))
       assert.equal(reopened.entity.path, updated.path)
       assert.equal(reopened.entity.data.title, 'Synthetic updated record')
       const listed = requireData(await runFreshCli<{ items: Array<{ id: string }> }>([
         kind, 'list', '--vault', vaultRoot,
       ]))
-      assert.deepEqual(listed.items.map((item) => item.id), [created.lookupId])
+      assert.deepEqual(listed.items.map((item) => item.id), [createdId])
 
       const rejected = await runFreshCli([
-        kind, 'save', 'Rejected update', '--id', created.lookupId,
+        kind, 'save', 'Rejected update', '--id', createdId,
         '--slug', '../outside', '--vault', vaultRoot,
       ])
       assert.equal(rejected.ok, false)

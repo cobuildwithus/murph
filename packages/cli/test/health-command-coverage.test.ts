@@ -75,7 +75,7 @@ test('generic reads preserve the request ID at the service boundary', async () =
   assert.equal(list.mock.calls[0]?.[0].vault, vaultRoot)
 })
 
-test('supplement services receive request IDs and stop returns actionable follow-ups', async () => {
+test('supplement services receive request IDs and stop returns its result without follow-ups', async () => {
   const { services, run } = createSliceCli()
   const stop = vi.spyOn(services.core, 'stopRegimen').mockResolvedValue({
     vault: vaultRoot,
@@ -128,14 +128,6 @@ test('supplement services receive request IDs and stop returns actionable follow
     vault: vaultRoot,
     requestId: 'req-boundary',
   }]])
-  assert.deepEqual(stopped.meta?.cta?.commands, [
-    {
-      command: 'vault-cli supplement show reg_magnesium --vault <vault>',
-      description: 'Show the stopped supplement record.',
-    },
-    {
-      command: 'vault-cli supplement list --status stopped --vault <vault>',
-      description: 'List stopped supplements.',
-    },
-  ])
+  // The stop result is the readback; it suggests no follow-up commands.
+  assert.equal(stopped.meta?.cta, undefined)
 })

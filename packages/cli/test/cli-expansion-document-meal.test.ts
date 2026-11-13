@@ -42,14 +42,12 @@ const sampleDocumentPath = path.join(
 interface DocumentImportEnvelope {
   documentId: string
   eventId: string
-  lookupId: string
   manifestFile: string
 }
 
 interface MealAddEnvelope {
   mealId: string
   eventId: string
-  lookupId: string
   occurredAt?: string | null
   note?: string | null
   source?: string | null
@@ -89,7 +87,6 @@ interface ShowEnvelope {
 
 interface DeleteEnvelope {
   entityId: string
-  lookupId: string
   kind: string
   deleted: true
   retainedPaths: string[]
@@ -118,7 +115,6 @@ interface ListEnvelope {
 
 interface ManifestEnvelope {
   entityId: string
-  lookupId: string
   kind: string
   manifestFile: string
   manifest: {
@@ -732,14 +728,14 @@ test.sequential(
       const manifest = await runSourceCli<ManifestEnvelope>([
         'document',
         'manifest',
-        currentDocument.lookupId,
+        currentDocument.documentId,
         '--vault',
         vaultRoot,
       ])
       assert.equal(manifest.ok, true)
       assert.equal(manifest.meta?.command, 'document manifest')
       assert.equal(requireData(manifest).entityId, currentDocument.documentId)
-      assert.equal(requireData(manifest).lookupId, currentDocument.lookupId)
+      assert.equal('lookupId' in requireData(manifest), false)
       assert.equal(requireData(manifest).kind, 'document')
       assert.match(requireData(manifest).manifestFile, /\/manifest(?:\.[^/]+)*\.json$/u)
       assert.equal(requireData(manifest).manifest.schemaVersion, 'murph.raw-import-manifest.v1')
@@ -754,7 +750,7 @@ test.sequential(
         requireData(manifest).manifest.rawDirectory,
         path.posix.dirname(requireData(manifest).manifest.artifacts[0]?.relativePath ?? ''),
       )
-      assert.equal(requireData(manifest).manifest.provenance.lookupId, currentDocument.lookupId)
+      assert.equal(requireData(manifest).manifest.provenance.lookupId, currentDocument.documentId)
       assert.equal(requireData(manifest).manifest.provenance.title, 'Lab Report')
       assert.equal(requireData(manifest).manifest.provenance.note, 'Fasted lipid panel.')
       assert.equal(requireData(manifest).manifest.artifacts[0]?.role, 'source_document')
@@ -802,7 +798,7 @@ test.sequential(
       const invalidManifest = await runSourceCli([
         'document',
         'manifest',
-        currentDocument.lookupId,
+        currentDocument.documentId,
         '--vault',
         vaultRoot,
       ])
@@ -857,7 +853,7 @@ test.sequential(
         await runSourceCli<ManifestEnvelope>([
           'meal',
           'manifest',
-          mealRecord.lookupId,
+          mealRecord.mealId,
           '--vault',
           vaultRoot,
         ]),
@@ -974,7 +970,7 @@ test.sequential(
       const deletedDocument = await runSourceCli<DeleteEnvelope>([
         'document',
         'delete',
-        documentRecord.lookupId,
+        documentRecord.documentId,
         '--vault',
         vaultRoot,
       ])
@@ -989,7 +985,7 @@ test.sequential(
       const missingDocument = await runSourceCli([
         'document',
         'show',
-        documentRecord.lookupId,
+        documentRecord.documentId,
         '--vault',
         vaultRoot,
       ])
@@ -999,7 +995,7 @@ test.sequential(
       const deletedMeal = await runSourceCli<DeleteEnvelope>([
         'meal',
         'delete',
-        mealRecord.lookupId,
+        mealRecord.mealId,
         '--vault',
         vaultRoot,
       ])
@@ -1014,7 +1010,7 @@ test.sequential(
       const missingMeal = await runSourceCli([
         'meal',
         'show',
-        mealRecord.lookupId,
+        mealRecord.mealId,
         '--vault',
         vaultRoot,
       ])
@@ -1153,13 +1149,13 @@ test.sequential(
       assert.equal(manifest.ok, true)
       assert.equal(manifest.meta?.command, 'meal manifest')
       assert.equal(requireData(manifest).entityId, currentMeal.mealId)
-      assert.equal(requireData(manifest).lookupId, currentMeal.lookupId)
+      assert.equal('lookupId' in requireData(manifest), false)
       assert.equal(requireData(manifest).kind, 'meal')
       assert.match(requireData(manifest).manifestFile, /\/manifest(?:\.[^/]+)*\.json$/u)
       assert.equal(requireData(manifest).manifest.importKind, 'meal')
       assert.equal(requireData(manifest).manifest.importId, currentMeal.mealId)
       assert.equal(requireData(manifest).manifest.source, 'device')
-      assert.equal(requireData(manifest).manifest.provenance.lookupId, currentMeal.lookupId)
+      assert.equal(requireData(manifest).manifest.provenance.lookupId, currentMeal.mealId)
       assert.equal(requireData(manifest).manifest.provenance.note, 'Eggs and avocado.')
       assert.equal(requireData(manifest).manifest.artifacts[0]?.role, 'photo')
     } finally {

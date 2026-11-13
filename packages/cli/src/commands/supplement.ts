@@ -5,10 +5,7 @@ import {
   healthListResultSchema,
   healthShowResultSchema,
 } from "@murphai/vault-usecases"
-import {
-  commonListLimitOptionSchema,
-  suggestedCommandsCta,
-} from "./command-factory-primitives.js"
+import { commonListLimitOptionSchema } from "./command-factory-primitives.js"
 import {
   localDateSchema,
   pathSchema,
@@ -320,28 +317,7 @@ export function registerSupplementCommands(
         requestId: requestIdFromOptions(context.options),
       })
 
-      return context.ok(result, {
-        cta: suggestedCommandsCta([
-          {
-            command: 'supplement show',
-            args: {
-              id: context.args.id,
-            },
-            description: 'Show the stopped supplement record.',
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: 'supplement list',
-            description: 'List stopped supplements.',
-            options: {
-              status: 'stopped',
-              vault: true,
-            },
-          },
-        ]),
-      })
+      return result
     },
   })
 
@@ -470,27 +446,7 @@ export function registerSupplementCommands(
         vault: context.options.vault,
       })
 
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: 'supplement show',
-            args: {
-              id: saved.regimenId,
-            },
-            description: 'Show the saved supplement record.',
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: 'supplement list',
-            description: 'List supplements.',
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      })
+      return saved
     },
   })
 

@@ -35,8 +35,6 @@ test('explicit JSON import commands accept stdin via --input -', async () => {
 
     const bloodTestImportJson = await runCli<{
       eventId: string
-      lookupId: string
-      ledgerFile: string
     }>(
       ['blood-test', 'import-json', '--input', '-', '--vault', vaultRoot],
       {
@@ -65,14 +63,8 @@ test('explicit JSON import commands accept stdin via --input -', async () => {
 
     assert.equal(bloodTestImportJson.ok, true)
     assert.match(requireData(bloodTestImportJson).eventId, /^evt_/u)
-    assert.equal(
-      requireData(bloodTestImportJson).lookupId,
-      requireData(bloodTestImportJson).eventId,
-    )
-    assert.equal(
-      requireData(bloodTestImportJson).ledgerFile,
-      'ledger/events/2026/2026-03.jsonl',
-    )
+    assert.equal('lookupId' in requireData(bloodTestImportJson), false)
+    assert.equal('ledgerFile' in requireData(bloodTestImportJson), false)
 
     const scheduledLogImportJson = await runCli<{
       scheduledLogId: string

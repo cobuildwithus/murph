@@ -25,7 +25,6 @@ import {
 import type { ZodIssue } from "@murphai/contracts/zod-runtime";
 import { Cli, z } from "incur";
 
-import { suggestedCommandsCta } from "./command-factory-primitives.js";
 import { createHealthEntityCrudGroup } from "./health-entity-command-registry.js";
 import { publicValidationIssue } from "./public-validation-issue.js";
 
@@ -834,27 +833,7 @@ export function registerBloodTestCommands(
       });
       const saved = toBloodTestSaveResult(context.options.vault, result);
 
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: "blood-test show",
-            args: {
-              id: saved.eventId,
-            },
-            description: "Show the saved blood test.",
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: "blood-test list",
-            description: "List blood tests.",
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      });
+      return saved;
     },
   });
 

@@ -17,7 +17,6 @@ import {
   deleteRecipeRecord,
   editRecipeRecord,
 } from '@murphai/vault-usecases/records'
-import { suggestedCommandsCta } from './command-factory-primitives.js'
 import { createRegistryDocEntityGroup } from './entity-command-groups.js'
 import {
   appendTypedClear,
@@ -509,27 +508,7 @@ export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
       )
       const saved = toRecipeUpsertResult(context.options.vault, result)
 
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: 'recipe show',
-            args: {
-              id: saved.recipeId,
-            },
-            description: 'Show the saved recipe record.',
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: 'recipe list',
-            description: 'List recipes.',
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      })
+      return saved
     },
   })
 

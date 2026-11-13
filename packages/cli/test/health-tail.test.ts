@@ -1455,8 +1455,6 @@ test("blood-test descriptor wiring exposes a dedicated noun while preserving the
 
     const importJsonResult = await runCli<{
       eventId: string;
-      lookupId: string;
-      ledgerFile: string;
       created: boolean;
     }>([
       "blood-test",
@@ -1495,12 +1493,9 @@ test("blood-test descriptor wiring exposes a dedicated noun while preserving the
 
     assert.equal(importJsonResult.ok, true);
     assert.match(eventId, /^evt_/u);
-    assert.equal(requireData(importJsonResult).lookupId, eventId);
+    assert.equal("lookupId" in requireData(importJsonResult), false);
     assert.equal(requireData(importJsonResult).created, true);
-    assert.equal(
-      requireData(importJsonResult).ledgerFile,
-      "ledger/events/2026/2026-03.jsonl",
-    );
+    assert.equal("ledgerFile" in requireData(importJsonResult), false);
     assert.equal(nounShow.ok, true);
     assert.equal(genericShow.ok, true);
     assert.equal(requireData(nounShow).entity.id, eventId);
@@ -1583,8 +1578,6 @@ test("immunization descriptor wiring exposes a dedicated event-backed noun", asy
 
     const importJsonResult = await runCli<{
       eventId: string;
-      lookupId: string;
-      ledgerFile: string;
       created: boolean;
     }>([
       "immunization",
@@ -1597,8 +1590,6 @@ test("immunization descriptor wiring exposes a dedicated event-backed noun", asy
     const eventId = requireData(importJsonResult).eventId;
     const saveResult = await runCli<{
       eventId: string;
-      lookupId: string;
-      ledgerFile: string;
       created: boolean;
     }>([
       "immunization",
@@ -1681,12 +1672,9 @@ test("immunization descriptor wiring exposes a dedicated event-backed noun", asy
     assert.equal(requireData(listAfterInvalid).count, 0);
     assert.equal(importJsonResult.ok, true);
     assert.match(eventId, /^evt_/u);
-    assert.equal(requireData(importJsonResult).lookupId, eventId);
+    assert.equal("lookupId" in requireData(importJsonResult), false);
     assert.equal(requireData(importJsonResult).created, true);
-    assert.equal(
-      requireData(importJsonResult).ledgerFile,
-      "ledger/events/2026/2026-03.jsonl",
-    );
+    assert.equal("ledgerFile" in requireData(importJsonResult), false);
     assert.equal(saveResult.ok, true);
     assert.match(requireData(saveResult).eventId, /^evt_/u);
     assert.equal(nounShow.ok, true);

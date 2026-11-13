@@ -2417,11 +2417,11 @@ test.sequential(
       ])
       const progress = await runSliceCli<{
         experimentId: string
-        lookupId: string
         slug: string
         asOf: string
         progress: {
-          schema: string
+          schemaVersion: string
+          experiment: { status: string; title: string }
           dayInRun: number | null
           phase: string
           adherence: {
@@ -2652,10 +2652,12 @@ test.sequential(
       assert.equal(progress.ok, true)
       assert.equal(progress.meta?.command, 'experiment progress')
       assert.equal(requireData(progress).experimentId, requireData(created).experimentId)
-      assert.equal(requireData(progress).lookupId, requireData(created).experimentId)
+      assert.equal('lookupId' in requireData(progress), false)
       assert.equal(requireData(progress).slug, 'focus-sprint')
       assert.equal(requireData(progress).asOf, '2026-04-20')
-      assert.equal(requireData(progress).progress.schema, 'murph.experiment-progress.v2')
+      assert.equal(requireData(progress).progress.schemaVersion, 'murph.experiment-progress.v2')
+      assert.equal('schema' in requireData(progress).progress, false)
+      assert.deepEqual(Object.keys(requireData(progress).progress.experiment).sort(), ['status', 'title'])
       assert.equal(requireData(progress).progress.phase, 'intervention')
       assert.equal(requireData(progress).progress.dayInRun, 20)
       assert.deepEqual(requireData(progress).progress.adherence, {

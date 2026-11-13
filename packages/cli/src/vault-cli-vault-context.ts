@@ -4,6 +4,10 @@ import type * as z from '@murphai/contracts/zod-runtime'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  projectVaultCliOutputSchema,
+  projectVaultCliRunResult,
+} from './vault-cli-result-projection.js'
+import {
   extractVaultOverride,
   type VaultOverrideParseResult,
 } from './vault-cli-vault-argv.js'
@@ -39,6 +43,7 @@ interface CommandGroupEntry {
 interface CommandDefinitionEntry {
   examples?: unknown
   options?: z.ZodObject<z.ZodRawShape>
+  output?: unknown
   run: CommandRun
   usage?: unknown
 }
@@ -117,6 +122,7 @@ function installVaultContextOnCommands(
     }
 
     entry.options = entry.options.omit({ vault: true })
+    entry.output = projectVaultCliOutputSchema(entry.output)
     entry.examples = stripVaultFromExamples(entry.examples)
     entry.usage = stripVaultFromExamples(entry.usage)
 
@@ -133,13 +139,16 @@ function installVaultContextOnCommands(
         )
       }
 
-      return run({
+      const result = run({
         ...runContext,
         options: {
           ...runContext.options,
           vault,
         },
       })
+      return result instanceof Promise
+        ? result.then(projectVaultCliRunResult)
+        : projectVaultCliRunResult(result)
     }
   }
 }

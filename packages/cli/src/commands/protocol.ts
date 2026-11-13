@@ -21,7 +21,6 @@ import {
   normalizeInputFileOption,
   type VaultServices,
 } from "@murphai/vault-usecases";
-import { suggestedCommandsCta } from "./command-factory-primitives.js";
 import {
   projectRecordListResult,
   projectRecordShowResult,
@@ -282,27 +281,7 @@ export function registerProtocolCommands(
         input: normalizeInputFileOption(context.options.input),
       });
 
-      return context.ok(result, {
-        cta: suggestedCommandsCta([
-          {
-            command: "regimen show",
-            args: {
-              id: result.regimenId,
-            },
-            description: "Show the imported regimen record.",
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: "regimen list",
-            description: "List regimens.",
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      });
+      return result;
     },
   });
 
@@ -471,27 +450,7 @@ export function registerProtocolCommands(
         vault: context.options.vault,
       });
 
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: "regimen show",
-            args: {
-              id: saved.regimenId,
-            },
-            description: "Show the saved regimen record.",
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: "regimen list",
-            description: "List regimens.",
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      });
+      return saved;
     },
   });
 
@@ -534,28 +493,7 @@ export function registerProtocolCommands(
         requestId: requestIdFromOptions(context.options),
       });
 
-      return context.ok(result, {
-        cta: suggestedCommandsCta([
-          {
-            command: "regimen show",
-            args: {
-              id: context.args.regimenId,
-            },
-            description: "Show the stopped regimen record.",
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: "regimen list",
-            description: "List stopped regimens.",
-            options: {
-              status: "stopped",
-              vault: true,
-            },
-          },
-        ]),
-      });
+      return result;
     },
   });
 

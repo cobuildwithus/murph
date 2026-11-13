@@ -10,7 +10,6 @@ import {
 import {
   createHealthEntityCrudGroup,
 } from "./health-entity-command-registry.js";
-import { suggestedCommandsCta } from "./command-factory-primitives.js";
 
 const allergySlugSchema = z
   .string()
@@ -157,27 +156,7 @@ export function registerAllergyCommands(
       );
       const saved = toAllergySaveResult(context.options.vault, result);
 
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: "allergy show",
-            args: {
-              id: saved.allergyId,
-            },
-            description: "Show the saved allergy record.",
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: "allergy list",
-            description: "List allergies.",
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      });
+      return saved;
     },
   });
 
