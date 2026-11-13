@@ -10206,6 +10206,7 @@ function makeFamilyStripeSubscription(input: {
       flexible: null,
       type: "classic",
     },
+    billing_schedules: [],
     billing_thresholds: null,
     cancel_at: input.cancelAt ?? null,
     cancel_at_period_end: input.cancelAtPeriodEnd ?? false,
@@ -10231,6 +10232,9 @@ function makeFamilyStripeSubscription(input: {
     id: subscriptionId,
     invoice_settings: {
       account_tax_ids: null,
+      custom_fields: null,
+      description: null,
+      footer: null,
       issuer: {
         type: "self",
       },
