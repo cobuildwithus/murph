@@ -3400,6 +3400,108 @@ describe("murph.group dynamic tool", () => {
     expect(groupRequest).not.toHaveBeenCalled();
   });
 
+  it("gives ask_member the exact grantId that read_current returned", async () => {
+    const permissionText = "Their weekly training plan";
+    const groupRequest = vi.fn<GroupToolRequest>(async (request) => {
+      if (request.action === "read_current") {
+        return {
+          action: "read_current",
+          result: {
+            disclosureGrantsTruncated: false,
+            group: {
+              displayName: "Challenge group",
+              id: "group_challenge",
+              kind: "friends",
+              memberCount: 2,
+              members: [
+                {
+                  disclosureGrants: [],
+                  grantedVaultShareProjectionKinds: [],
+                  grantedVaultShareProjectionScopes: [],
+                  handle: "+15551110003",
+                  memberId: "global_member_owner",
+                  role: "owner",
+                },
+                {
+                  disclosureGrants: [{ grantId: "hdg_server_issued", permissionText }],
+                  grantedVaultShareProjectionKinds: [],
+                  grantedVaultShareProjectionScopes: [],
+                  handle: "+15551110004",
+                  memberId: "global_member_granted",
+                  role: "member",
+                },
+              ],
+              requestedVaultShareProjectionKinds: [],
+              requestedVaultShareProjectionScopes: [],
+              status: "active",
+            },
+            nextDisclosureGrantCursor: null,
+            status: "ok",
+          },
+        };
+      }
+      if (request.action === "ask_member") {
+        return { action: "ask_member", result: { status: "accepted" } };
+      }
+      throw new Error(`Unexpected group action ${request.action}.`);
+    });
+    const hostedToolContext = createGroupHostedToolContext({
+      currentUserActionScope: () => ({
+        acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+        conversationId: "conversation_group",
+        conversationScope: "group",
+        inboundMailboxItemIds: ["mailbox_group"],
+        originSessionId: "session_group",
+        recipientKey: "recipient_group",
+      }),
+      groupRequest,
+    });
+    const execute = async (args: unknown) => {
+      const request = readMurphDynamicToolRequest(groupToolCall(args));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+      return await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot: null,
+      });
+    };
+
+    const readText = JSON.stringify(
+      readGroupToolPayload(await execute({ action: "read_current" })),
+    );
+    // The model sees the grant beside its permission, never whose it is.
+    expect(readText).not.toContain("global_member");
+    expect(readText).not.toContain("+1555111000");
+    const members: { disclosureGrants?: { grantId: string; permissionText: string }[] }[] =
+      JSON.parse(readText).result.group.members;
+    const grants = members.flatMap((member) => member.disclosureGrants ?? []);
+    expect(grants).toEqual([{ grantId: "hdg_server_issued", permissionText }]);
+
+    const asked = await execute({
+      action: "ask_member",
+      grantId: grants[0]?.grantId,
+      question: "What is on their plan this week?",
+    });
+
+    expect(asked.rpcResult.success).toBe(true);
+    expect(groupRequest).toHaveBeenLastCalledWith({
+      action: "ask_member",
+      grantId: "hdg_server_issued",
+      origin: {
+        assistantInputId: FRESH_ASSISTANT_INPUT_ID,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+      question: "What is on their plan this week?",
+    });
+  });
+
   it("injects scheduled occurrence authority for an internal member ask", async () => {
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "ask_member",

@@ -5069,6 +5069,17 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
     kind: group.kind,
     memberCount: group.memberCount,
     members: group.members.map((member) => ({
+      // A group runtime cannot list memberships, so this is the only place
+      // ask_member can take its exact grantId from. Each active grant stays on
+      // its (anonymous) member beside the permission it covers.
+      ...(member.disclosureGrants?.length
+        ? {
+            disclosureGrants: member.disclosureGrants.map((grant) => ({
+              grantId: grant.grantId,
+              permissionText: grant.permissionText,
+            })),
+          }
+        : {}),
       grantedVaultShareProjectionKinds:
         member.grantedVaultShareProjectionKinds,
       grantedVaultShareProjectionScopes:
