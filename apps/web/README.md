@@ -2401,12 +2401,19 @@ their saved counts and confirm both columns are absent after contraction.
 
 ## Workflow SDK v5
 
-Web uses `workflow@5.2.3`, including Core and Vercel World 5.2.3, Next
-5.0.6, World 5.0.5 and Local World 5.1.2. Keep the Zod 4.6.6 security
-override. Web also declares Zod 4.6.6 explicitly so removing the old SDK tree
+Web uses `workflow@5.5.0`, including Core and Vercel World 5.5.0, Next
+5.1.0, World 5.2.0 and Local World 5.3.0. Keep the Zod 4.6.7 security
+override. Web also declares Zod 4.6.7 explicitly so removing the old SDK tree
 does not downgrade unrelated optional peers to Zod 3. The schema regression
 test resolves Zod from the installed World
 and accepts unfinished runs with omitted terminal fields.
+
+New runs stay on the default spec; spec 9 (`WORKFLOW_SPEC_VERSION=9`) is
+opt-in and needs every deployment that shares the World upgraded first. Since
+Local World 5.3, each process writes a fresh `queue-auth-key` (and a
+`.gitignore`) into the local data directory in the background and refuses
+deliveries without it. A test World with a mocked queue should pass
+`queueAuthKey: "read"` so that write cannot race its cleanup.
 
 The Next wrapper uses v5 defaults; `workflows.lazyDiscovery` was removed.
 The generated flow route now handles steps as well as orchestration; there

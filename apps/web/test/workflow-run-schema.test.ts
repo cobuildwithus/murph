@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
 const worldRequire = createRequire(import.meta.resolve("@workflow/world"));
 
 describe("Workflow run schema under the security Zod override", () => {
-  it("uses Zod 4.6.6", () => {
-    expect(worldRequire("zod/package.json").version).toBe("4.6.6");
+  it("uses Zod 4.6.7", () => {
+    expect(worldRequire("zod/package.json").version).toBe("4.6.7");
   });
 
   it.each(["pending", "running"])("accepts omitted terminal fields on %s runs", (status) => {

@@ -182,7 +182,7 @@
     "mpg123-decoder": "1.0.3"
   },
   "devDependencies": {
-    "zod": "^4.5.4"
+    "zod": "^4.6.7"
   },
   "engines": {
     "node": ">=24.22.1"
