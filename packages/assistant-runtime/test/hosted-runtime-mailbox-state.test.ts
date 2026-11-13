@@ -28,6 +28,7 @@ import {
   type HostedSystemMailboxPendingItem,
   type HostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
+import { retireHostedCoveredDeviceHintsAfterImport } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH,
   HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
@@ -1148,6 +1149,53 @@ describe("hosted runtime system mailbox state", () => {
       await expect(resolveHostedSystemMailboxWakeCandidates({ now: () => now, vaultRoot }))
         .resolves.toMatchObject({ next: { at: now, executionClass: "default_owned", reason: "assistant" } });
       expect(await readHostedSystemMailboxState(vaultRoot)).toEqual(before);
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { reason: "fitbit_migration_successor_arrival", retired: true },
+    { reason: "future_work_kind", retired: false },
+  ])("retires only covered legacy migration hints behind an exact retry ($reason)", async ({ reason, retired }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-legacy-device-hint-"));
+    const now = "2026-04-27T00:00:00.000Z";
+    const retryAt = "2026-04-28T00:00:00.000Z";
+    const connectionId = "synthetic_connection";
+    const owner = buildRetainedDeviceSyncMailboxItem({
+      connectionId, itemId: "retained", mailboxLaneSeq: "1", retryAt,
+    });
+    const eventId = "device-sync:fitbit-migration-successor-arrival:synthetic";
+    const hint: HostedSystemMailboxPendingItem = {
+      ...buildPendingDeviceSyncMailboxItem({ itemId: "legacy_hint", mailboxLaneSeq: "2" }),
+      mailboxDedupeKey: eventId,
+      nextAttemptAt: retryAt,
+      wake: buildHostedExecutionDeviceSyncWake({
+        connectionId,
+        eventId,
+        expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+        hint: { reason },
+        occurredAt: now,
+        provider: "junction",
+        reason: "webhook_hint",
+        userId: "member_123",
+      }),
+    };
+    try {
+      await writeHostedMailboxImportState({
+        vaultRoot,
+        state: { ...createEmptyHostedMailboxImportState(), watermarks: { conversation: "0", system: "2" } },
+      });
+      await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [owner, hint] }));
+      expect(resolveHostedSystemMailboxProgress({
+        importedSeq: "2", now, state: await readHostedSystemMailboxState(vaultRoot),
+      })).toMatchObject({ handledThroughSeq: "1", firstPendingSeq: "2", deviceSyncContinuationSeqs: ["1"] });
+
+      await retireHostedCoveredDeviceHintsAfterImport({ now, vaultRoot });
+      const state = await readHostedSystemMailboxState(vaultRoot);
+      expect(state.pending).toEqual(retired ? [owner] : [owner, hint]);
+      expect(resolveHostedSystemMailboxProgress({ importedSeq: "2", now, state }).handledThroughSeq)
+        .toBe(retired ? "2" : "1");
     } finally {
       await rm(vaultRoot, { recursive: true, force: true });
     }
