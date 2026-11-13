@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Move from Fitbit to Google Health",
     "summary": "Connect Google Health to bring in your wearable history while your Fitbit connection is being retired.",
-    "details": "Your earlier Fitbit records remain available. Once Google Health is connected, Murph can use its data without waiting for a matching history or resource list.",
+    "details": "Your earlier Fitbit records remain available. Once Google Health is connected, Murph can use its data without waiting for a matching history or resource list. Shared board numbers favor a source that is still reporting when an older one goes stale.",
     "relevanceTags": ["wearables", "google-health", "fitbit"],
     "sourcePullRequests": []
   }

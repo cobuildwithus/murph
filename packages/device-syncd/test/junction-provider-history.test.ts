@@ -463,7 +463,69 @@ test("Junction supersedes every stale authorization-bound history job shape", as
   assert.equal(sourceWriteCount, 0);
 });
 
-test("Junction keeps a prepared Fitbit fact after revoke and starts no later Fitbit pull", async () => {
+test("Junction executes current-epoch Google Health history through canonical import", async () => {
+  const epoch = "2026-04-03T02:00:00.000Z";
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (request) => {
+    const pathname = new URL(readUrl(request)).pathname;
+    requests.push(pathname);
+    if (pathname.startsWith("/v2/user/providers/")) {
+      return createJsonResponse({ providers: [{
+        id: "provider-google-health-test",
+        slug: "google_health",
+        name: "Google Health",
+        status: "connected",
+        resource_availability: { activity: true },
+      }] });
+    }
+    if (pathname.startsWith("/v2/summary/activity/")) {
+      return createJsonResponse({ data: [{
+        connectionId: "provider-google-health-test",
+        date: "2026-04-02",
+        id: "google-health-history-day",
+        sourceProviderSlug: "google_health",
+        steps: 4_100,
+      }] });
+    }
+    throw new Error(`Unexpected request: ${pathname}`);
+  }, { summaryResources: ["activity"], timeseriesResources: [] });
+  const source = createConnectionSource({
+    firstSeenAt: epoch,
+    sourceProviderSlug: "google_health",
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1", sourceProviderSlug: "google_health",
+    }), "Google Health source key should exist."),
+  });
+  const imported: Array<{ resource: string; sourceProviderSlug: string }> = [];
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: [{ ...source, resourceCount: 1 }] }),
+    connectionSourceAdmissionMode: "listed_only",
+    listConnectionSources: async () => [source],
+    importSnapshot: async (snapshot) => {
+      const normalized = normalizeJunctionSnapshot(snapshot as JunctionSnapshotInput, {
+        defaultTimeZone: "UTC",
+      });
+      const evidence = deriveJunctionCanonicalCoverageEvidence(normalized.events ?? []);
+      imported.push(...evidence);
+      return { canonicalEventCount: normalized.events?.length ?? 0,
+        durableDeliveryAccepted: true, junctionCanonicalCoverage: evidence };
+    },
+    now: "2026-04-03T12:00:00.000Z",
+  });
+
+  await executeJunctionJob(provider, context, createJob("backfill", {
+    historicalProofFirstSeenAt: epoch,
+    historicalProofSourceProviderSlug: "google_health",
+    sourceProviderSlug: "google_health",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
+  }));
+
+  assert.ok(requests.some((path) => path.startsWith("/v2/summary/activity/")));
+  assert.deepEqual(imported, [{ resource: "activity", sourceProviderSlug: "google-health" }]);
+});
+
+test("Junction keeps a prepared Fitbit fact after revoke and skips a later admitted Fitbit job", async () => {
   const now = "2026-04-03T12:00:00.000Z";
   const requests: string[] = [];
   const provider = createJunctionProvider(async (request) => {
@@ -538,6 +600,59 @@ test("Junction keeps a prepared Fitbit fact after revoke and starts no later Fit
   await executeJunctionJob(provider, context, job("google_health"));
   assert.ok(committed.some((entry) => entry.sourceProviderSlug === "google-health"));
   assert.equal(liveSources[0]?.status, "disconnected");
+});
+
+test("Junction filters a Fitbit fetch when revocation lands after job admission", async () => {
+  let source = createConnectionSource({
+    sourceProviderSlug: "fitbit",
+    sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
+      connectionId: "acct-junction-1", sourceProviderSlug: "fitbit",
+    }), "Fitbit source key should exist."),
+  });
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (request) => {
+    const pathname = new URL(readUrl(request)).pathname;
+    requests.push(pathname);
+    if (pathname.startsWith("/v2/user/providers/")) {
+      source = { ...source, status: "disconnected", lastErrorCode: "USER_DISCONNECTED" };
+      return createJsonResponse({ providers: [{
+        id: "provider-fitbit-test", slug: "fitbit", name: "Fitbit", status: "connected",
+        resource_availability: { activity: true },
+      }] });
+    }
+    if (pathname.startsWith("/v2/summary/activity/")) {
+      return createJsonResponse({ data: [{
+        connectionId: "provider-fitbit-test", date: "2026-04-02",
+        id: "fitbit-fetched-day", sourceProviderSlug: "fitbit", steps: 4_000,
+      }] });
+    }
+    throw new Error(`Unexpected request: ${pathname}`);
+  }, { summaryResources: ["activity"], timeseriesResources: [] });
+  const imported: Array<{ resource: string; sourceProviderSlug: string }> = [];
+  const context = createJunctionJobContext({
+    account: createAccount({ sources: [{ ...source, resourceCount: 1 }] }),
+    connectionSourceAdmissionMode: "listed_only",
+    importSnapshot: async (snapshot) => {
+      const normalized = normalizeJunctionSnapshot(snapshot as JunctionSnapshotInput, {
+        defaultTimeZone: "UTC",
+      });
+      const evidence = deriveJunctionCanonicalCoverageEvidence(normalized.events ?? []);
+      imported.push(...evidence);
+      return { canonicalEventCount: normalized.events?.length ?? 0,
+        durableDeliveryAccepted: true, junctionCanonicalCoverage: evidence };
+    },
+    listConnectionSources: async () => [source],
+    now: "2026-04-03T12:00:00.000Z",
+  });
+
+  await executeJunctionJob(provider, context, createJob("reconcile", {
+    sourceProviderSlug: "fitbit",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    windowStart: "2026-04-02T00:00:00.000Z",
+  }));
+  assert.ok(requests.some((path) => path.startsWith("/v2/summary/activity/")));
+  assert.deepEqual(imported, []);
+  assert.equal(source.status, "disconnected");
 });
 
 test("Junction scheduled polling uses stable closed-day windows", () => {

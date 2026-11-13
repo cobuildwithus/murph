@@ -654,11 +654,13 @@ Local responsibilities:
 - Junction-backed reconcile of Garmin summaries, timeseries, sleep, activity, and other configured resources
 - local imports into the vault
 
-## Fitbit migration continuation
+## Fitbit to Google Health source cutover
 
-The browser owns presentation and explicit Google authorization only. Its persisted Google source `firstSeenAt` is also the authorization epoch used by both exact Google and Fitbit proof jobs. That existing epoch participates in their current job identity; stale queued, leased, retry, timeseries, or workout lineages cannot certify a later authorization. The wake-local hosted device-sync pass drains scheduled and webhook work, publishes source state, and then asks Web to attempt cutover. Web re-enters the existing connection mutation lock, rejects pending dirty state, evaluates importer-owned canonical evidence, and calls targeted provider revoke outside the transaction. A crash is recovered by probing that exact Fitbit provider source; only provider-confirmed inactivity is finalized locally. No migration table, queue, or second state owner exists.
+The browser presents one Fitbit / Pixel Watch connection card and requires explicit Google Health authorization. Web persists separate Fitbit and Google Health source rows. Google Health imports as an ordinary connected Junction source, including its original historical windows; no Fitbit coverage, resource parity, or fresh-data proof gates it. The Google Health source `firstSeenAt` is the authorization epoch for exact-source historical jobs. Jobs bound to an older epoch fail their next admission or lifecycle check.
 
-Deploy importer, Device Sync, and hosted-runtime consumers before the Web bundle so every cutover caller understands source-scoped evidence, per-resource fences, retry identity, and Google Health admission. Then deploy Web and smoke one explicit Google authorization. Temporary version skew leaves legacy Fitbit active rather than cutting over without complete evidence.
+After Google Health connects, the existing wake-local pass and bounded hosted maintenance ask Web to attempt the Fitbit cutover. The wake-local pass drains dirty work first, and Web refuses cutover while dirty work remains. Web claims the exact Fitbit source under the connection lock, calls targeted provider revoke outside the transaction, and finalizes only confirmed inactivity. An uncertain revoke keeps the claim fenced until an exact provider check resolves it. Jobs admitted after Fitbit is terminal start no source-scoped Fitbit pull; earlier admitted fetches may finish, and canonical import filters terminal-source data. Already prepared Fitbit facts may commit as ordinary overlapping source evidence.
+
+Before merge, establish and verify the Vercel Web build hold. Deploy the exact merged Cloudflare runner with immediate container rollout, verify its fingerprint and warm-image convergence, then restore Web builds and deploy the matching Web revision. The new runner is the rollback floor once Web admits previously held work. Web-first activation can admit Google Health jobs that the old runner silently filters. Release operations require their own authorization.
 
 ## Retired member-owned provider applications
 
