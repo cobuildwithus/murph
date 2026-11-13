@@ -322,6 +322,11 @@ export function connectSourcePath(id: string): "apple_health" | "apple_health_re
   return DISPLAY_ONLY_CONNECT_SOURCE_IDS.has(id) ? "apple_health_relay" : "web";
 }
 
+/** When data last arrived, carried only where the settings read says anything about it. */
+function lastDataAtField(source: { lastDataAt?: string | null }): { lastDataAt?: string | null } {
+  return source.lastDataAt === undefined ? {} : { lastDataAt: source.lastDataAt };
+}
+
 export function connectSourcePngLogoPath(id: string): string | null {
   return readConnectSourceUi(id)?.logo.src.replace(/\.svg$/u, ".png") ?? null;
 }
@@ -416,7 +421,7 @@ export function resolveConfiguredConnectSources(
           ? { disconnectSourceProviderSlug }
           : {}),
         ...(historicalResetIncomplete ? { historicalResetIncomplete } : {}),
-        ...(lastDataAt !== undefined ? { lastDataAt } : {}),
+        ...lastDataAtField({ lastDataAt }),
         ...(migrationState ? { migrationState } : {}),
         ...(migrationRetryRequired
           ? { migrationRetryRequired: true }
@@ -687,7 +692,7 @@ function resolveConnectSourceConnectionMatches(
             ? { recoveryKind: "connection_reset" as const }
             : {}),
           requiresReconnect: upstreamRequiresReconnect,
-          ...(upstreamSource.lastDataAt !== undefined ? { lastDataAt: upstreamSource.lastDataAt } : {}),
+          ...lastDataAtField(upstreamSource),
           sourceId,
           state: sourceState,
         });
