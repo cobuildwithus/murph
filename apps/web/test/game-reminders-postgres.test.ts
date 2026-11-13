@@ -48,13 +48,13 @@ async function member(zone = "UTC", capable = true, sweepAt = now) {
     topic: "ai.withmurph.app.dev", environment: "development", alertsAllowed: true, gameSessionId: sessionId, gameReminders: capable, updatedAt: now } });
   return id;
 }
-async function game(owner: string, task = "Walk", peer?: string, group = false) {
+async function game(owner: string, task = "Walk", peer?: string, group = false, dayOne = new Date("2026-11-06T00:00:00Z")) {
   const id = randomUUID();
   const words = { v: 1, versions: [{ n: 1, defaultTask: "Shared task", tasks: [{ seat: 0, text: task }, { seat: 1, text: "Peer private words" }], stakes: [] }] };
   const encrypted = await sealGameText({ field: "terms_words", memberId: owner, rowId: id, table: "game" }, JSON.stringify(words));
   await db.game.create({ data: { id, createdBy: owner, wordsOwnerMemberId: owner, status: "live", maxPlayers: group ? 10 : 2,
     terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [] }] }, termsWordsEncrypted: encrypted!,
-    players: { create: [owner, ...(peer ? [peer] : [])].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne: new Date("2026-11-06T00:00:00Z"), joinedAt: now })) } } });
+    players: { create: [owner, ...(peer ? [peer] : [])].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne, joinedAt: now })) } } });
   return id;
 }
 async function post(gameId: string, memberId: string) {
@@ -86,7 +86,10 @@ describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
   });
   it("round trips whole preferences through the command, ignores foreign ids and preserves Home bytes", async () => {
     const owner = await member(), foreign = await member(); m.actor = owner;
-    const first = await game(owner), second = await game(owner), other = await game(foreign);
+    // Home reads the database clock and settles games that are over, so these start on the real today, not the frozen one.
+    const today = new Date(new Date(vi.getRealSystemTime()).toISOString().slice(0, 10));
+    const live = (member: string) => game(member, "Walk", undefined, false, today);
+    const first = await live(owner), second = await live(owner), other = await live(foreign);
     const home = await readHome(owner);
     const saved = { ...preference, minutes: 1200, push: false, offGameIds: [first, other, randomUUID()] };
     expect(await (await PUT(request(saved))).json()).toEqual({ ok: true, ...saved, canText: false, offGameIds: [first] });

@@ -103,7 +103,7 @@ export async function readGameProposalDeliveryPlayers(key: string | null, contai
     if (!authority) throw new Error("Game missed-day authority is unavailable.");
     return authority;
   }
-  const match = /^(game-talk|game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-change-resolved|game-cancelled|game-recap|game-missed|game-challenge):([^:]+)/.exec(key ?? "");
+  const match = /^(game-both-win|game-talk|game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-change-resolved|game-cancelled|game-recap|game-missed|game-challenge):([^:]+)/.exec(key ?? "");
   if (!match) return undefined;
   const game = await getPrisma().game.findUnique({ where: { id: match[2] }, include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
   const audience = game ? await readGroupGameNoticeAuthority(game, containerMemberId) : null;

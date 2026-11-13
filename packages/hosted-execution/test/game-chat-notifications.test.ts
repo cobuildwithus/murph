@@ -381,3 +381,12 @@ it("activates show policy only for an explicitly selected pair", () => {
   expect(buildGameRecapInstructions([], undefined, true, true)).toBe(buildGameRecapInstructions([], undefined, true));
   expect(buildGameRecapInstructions([])).not.toContain("scene.murph");
 });
+
+
+it("both-win recap instructions preserve the earned meaning in both pair formats", async () => {
+  const { RECAP_SHOW_CRAFT } = await import("../src/recap-show-craft.ts");
+  const sentence = "When both players did every day and the game had a prize they both get, the chat line and the closing page say they both earned it, in their words for it. When either missed a day it lapsed: leave it out.";
+  expect(buildGameRecapInstructions([])).toContain(sentence);
+  expect(buildGameRecapInstructions([], undefined, false, true)).toContain(sentence);
+  expect(RECAP_SHOW_CRAFT).toContain(sentence);
+});
