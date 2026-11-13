@@ -101,10 +101,7 @@ import {
   parseHostedUsageDiagnosticsResponse,
   type HostedUsageDiagnosticsRequest,
 } from '@murphai/hosted-execution/usage-diagnostics'
-import {
-  projectUsageDiagnosticsForModel,
-  withUsageDiagnosticsDefaults,
-} from './dynamic-tools/usage-diagnostics.js'
+import { withUsageDiagnosticsDefaults } from './dynamic-tools/usage-diagnostics.js'
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
@@ -4276,7 +4273,7 @@ async function executeUsageDiagnosticsTool(
     const result = parseHostedUsageDiagnosticsResponse(
       await context.usageDiagnostics.read(withUsageDiagnosticsDefaults(request)),
     )
-    return toolTextResult(true, safeToolPayloadText(projectUsageDiagnosticsForModel(result)))
+    return toolTextResult(true, safeToolPayloadText(result))
   } catch (error) {
     return toolTextResult(false, 'usage diagnostics could not be read', 'handler_exception', error)
   }
