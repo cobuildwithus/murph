@@ -66,11 +66,12 @@ alone does not authorize a narrower product or another state owner.
 8. Refresh and verify the remote-tracking base using the explicit-refspec
    procedure in `verification-and-runtime.md`, then prove mergeability with
    `git merge-tree --write-tree HEAD origin/<base>`. Keep green required CI on
-   the PR-authored head. The branch rules do not require an up-to-date branch,
-   and each PR run already tests the head merged with the base as it stood when
-   the run started. Reconcile the base only for a real conflict, or when the
-   base has since changed code this PR calls or is called by, following the
-   review loop's Base-Update-Only Exception.
+   the PR-authored head. The branch rules do not require an up-to-date branch.
+   Reconcile the base only for a real conflict, or when the base has since
+   changed code this PR calls or is called by or a test its required checks
+   run, following the review loop's Base-Update-Only Exception. A PR run tests
+   GitHub's test merge of the head with the base, and marking the PR Ready
+   again does not refresh that merge after the base moves; only a push does.
 9. Report the outcome, evidence, and remaining risks or blockers. For a feature
    or fix, give the shortest practical verification steps and expected result.
    Keep an open PR's worktree. After confirmed merge or closure, retire it using
