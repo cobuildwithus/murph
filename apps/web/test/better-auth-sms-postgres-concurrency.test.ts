@@ -66,7 +66,18 @@ describe.skipIf(!enabled)("Twilio Verify challenge PostgreSQL composition", () =
     await expect(input.prepare(wrong)).rejects.toMatchObject({ code: "AUTH_CODE_INVALID" });
     expect(await input.verify(id, wrong)).toBe(false);
     expect(await input.verify(randomUUID(), code)).toBe(false);
+    await expect(input.prisma.$transaction(async (tx) => {
+      await lockHostedAuthOtpTx(tx, input.phoneNumber);
+      expect(await verifyHostedAuthSmsOtpTx({
+        adapter: hostedAuthTransactionAdapter(input.prisma, tx, {}), phoneNumber: input.phoneNumber, code, verificationId: id,
+      })).toBe(true);
+      throw new Error("Synthetic final commit failure");
+    })).rejects.toThrow("Synthetic final commit failure");
+    expect(await input.prepare(code)).toBe(id);
     expect(await input.verify(id, code)).toBe(true);
+    expect(await input.read()).toBeNull();
+    await expect(input.prepare(code)).rejects.toMatchObject({ code: "AUTH_CODE_INVALID" });
+    await expect(input.verify(id, code)).rejects.toMatchObject({ code: "AUTH_CODE_INVALID" });
     expect(input.verification.check).toHaveBeenCalledTimes(1);
     await sendHostedAuthSmsOtp(input);
     expect(await input.verify(id, code)).toBe(false);

@@ -72,13 +72,17 @@ export async function prepareHostedAuthSmsOtp(input: {
   return reserved.record.id;
 }
 
-/** Called only while the canonical login transaction holds the same OTP lock. */
+/** Consumes approval under the final sign-in/phone-change transaction's OTP lock. */
 export async function verifyHostedAuthSmsOtpTx(input: {
   adapter: DBAdapter; phoneNumber: string; code: string; verificationId: string;
 }): Promise<boolean> {
   const current = await readChallenge(input.adapter, input.phoneNumber);
-  return current.record.id === input.verificationId && current.state.verificationSid !== null
-    && current.state.approvedCode === approvedCodeDigest(current.record.id, input.code);
+  if (current.record.id !== input.verificationId || current.state.verificationSid === null
+    || current.state.approvedCode !== approvedCodeDigest(current.record.id, input.code)) return false;
+  // Own consumption independently of the plugin's verification identifier.
+  // A failed final commit rolls this deletion back, preserving approved retries.
+  await input.adapter.delete({ model: "verification", where: [{ field: "id", value: current.record.id }] });
+  return true;
 }
 
 async function readChallenge(adapter: DBAdapter, phoneNumber: string) {
