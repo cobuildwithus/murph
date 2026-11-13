@@ -146,7 +146,7 @@ describe('game dynamic tools', () => {
     const change = MURPH_UPDATE_GAME_TOOL.inputSchema.properties.change.properties
     expect(change.lengthDays).toMatchObject({ minimum: 3, maximum: 365 })
     expect(change.schedule.properties.count.maximum).toBe(365)
-    expect(change.stakes.items.properties.kind.enum).toEqual(['prize', 'dare'])
+    expect(change.stakes.items.properties.kind.enum).toEqual(['prize', 'dare', 'both_get'])
   })
   it('round-trips create and initial agreement without accepting an actor selector', async () => {
     const terms = { tasks: [{ memberId: 'player_sam', text: 'Read' }, { memberId: 'player_ava', text: 'Walk' }], schedule: { count: 3 }, stakes: [{ kind: 'dare', item: 'Sing' }], lengthDays: 7 }
@@ -587,6 +587,7 @@ it('both-win settled meaning is present in every read-facts block', () => {
 });
 
 
-it('both-win reader tool still exposes only the original prize and dare writer', () => {
-  expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.change.properties.stakes.items.properties.kind.enum).toEqual(['prize', 'dare']);
+it('both-win writer exposes the new change kind and exact pair guidance', () => {
+  expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.change.properties.stakes.items.properties.kind.enum).toEqual(['prize', 'dare', 'both_get']);
+  expect(GAME_PAIR_CHAT_GUIDANCE).toContain("Never propose one from your own idea or from a bare yes to your offer: ask what it should be.");
 });

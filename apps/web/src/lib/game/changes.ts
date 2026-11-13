@@ -1,7 +1,7 @@
 import { GAME_STAKE_KINDS, type GameChange, type GameChangeControls, type GamePendingChange, type GameSchedule } from "./contract";
 import { parseGameChange } from "./command";
 import { isRecord } from "../primitives";
-import { calendarPlayers, hasGameCheckInAttempt, currentTerms, gameDayOne, dayIndexAt, decideStartNow, firstScheduledDate, GameRuleError, GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, GAME_MAX_START_DAYS_OUT, isGameDue, remainingPlayers, reject, validSchedule, validNewStakes, type StoredStake, type RuleState, type NewTerms, type TermWords } from "./rules";
+import { calendarPlayers, hasGameCheckInAttempt, currentTerms, gameDayOne, dayIndexAt, decideStartNow, firstScheduledDate, GameRuleError, GAME_MIN_LENGTH_DAYS, GAME_MAX_LENGTH_DAYS, GAME_MAX_START_DAYS_OUT, isGameDue, remainingPlayers, reject, validSchedule, validChangedStakes, isBothWinEarnable, type StoredStake, type RuleState, type NewTerms, type TermWords } from "./rules";
 import { isPairRoster } from "./roster";
 import { acceptanceStartDate, addDays, gameLocalDate, weekdayOf } from "./time";
 
@@ -178,8 +178,8 @@ function decideChange(state: RuleState, actor: string, change: GameChange, now: 
   if (change.kind === "start_now") {
     return decideEarlierStartChange(state, change, now, controls, effectiveFromDay);
   }
-  assertEditableWords(state, change, controls, sealedWords);
-  // A new prize or dare replaces the whole game's, so it needs no future day.
+  assertEditableWords(state, change, controls, now, sealedWords);
+  // A prize change covers the whole game, so it needs no future day.
   if (isStakesOnlyChange(change, sealedWords)) return { change, effectiveFromDay: Math.min(effectiveFromDay, state.game.lengthDays), startsOn: null };
   const lengthDays = change.lengthDays ?? state.game.lengthDays;
   if ((change.lengthDays !== undefined && lengthDays < GAME_MIN_LENGTH_DAYS) || lengthDays <= effectiveFromDay || lengthDays > GAME_MAX_LENGTH_DAYS) reject("INVALID_REQUEST", "Keep the days already started and at least one future day, up to 365 days.");
@@ -274,15 +274,17 @@ function assertScheduledDayLeft(state: RuleState, fromDay: number, lengthDays: n
   reject("INVALID_REQUEST", "Keep at least one scheduled day in the rest of the game.");
 }
 
-function assertEditableWords(state: RuleState, change: Extract<GameChange, { kind: "edit" }>, controls: GameChangeControls, sealedWords?: SealedWordChanges): void {
+function assertEditableWords(state: RuleState, change: Extract<GameChange, { kind: "edit" }>, controls: GameChangeControls, now: Date, sealedWords?: SealedWordChanges): void {
   const stakes = change.stakes ?? sealedWords?.stakes;
-  if (stakes?.some(stake => stake.kind === "both_get")) reject("INVALID_REQUEST", "Choose one prize or dare.");
   if ((change.tasks || sealedWords?.tasksChanged) && !controls.canEditTasks) reject("INVALID_REQUEST", "Tasks lock once Day 1 begins.");
   if (stakes && !controls.canEditStakes) reject("INVALID_REQUEST", "This game is no longer open for changes.");
-  if (stakes && currentTerms(state.game.terms).stakes.some((stake) => ["prize", "dare"].includes(stake.kind))) validNewStakes(stakes);
+  if (stakes) validChangedStakes(state, stakes);
+  if (stakes?.some(stake => stake.kind === "both_get") && !isBothWinEarnable(state, now)) {
+    reject("INVALID_REQUEST", "A day has been missed, so a prize you both get can no longer be earned in this game.");
+  }
 }
 
-/** Only the prize or dare changes: no tasks, schedule, length or start. */
+/** Only prize words change: no tasks, schedule, length or start. */
 function isStakesOnlyChange(change: Extract<GameChange, { kind: "edit" }>, sealedWords?: SealedWordChanges): boolean {
   return Boolean(change.stakes ?? sealedWords?.stakes) && !change.tasks && !sealedWords?.tasksChanged
     && change.schedule === undefined && change.lengthDays === undefined && change.startsOn === undefined;

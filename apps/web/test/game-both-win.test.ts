@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { decideNewTerms, decideSettle, isBothWinEarnable, isBothWinOfferDue, mergeStakeSlots, parseStoredTerms, type RuleState, type StoredStake } from "../src/lib/game/rules";
-import { decideApprovedGameChange, decideGameChange, parsePendingGameChange } from "../src/lib/game/changes";
+import { decideNewTerms, decideSettle, isBothWinEarnable, isBothWinOfferDue, mergeStakeSlots, parseStoredTerms, validChangedStakes, type RuleState, type StoredStake } from "../src/lib/game/rules";
+import { decideApprovedGameChange, decideGameChange, gameChangeRefusal, parsePendingGameChange } from "../src/lib/game/changes";
 import { prepareGameChangeWords, readPendingGameChange } from "../src/lib/game/change-words";
 import { termsView, ticketView } from "../src/lib/game/views";
 import { buildRecapFallback } from "../src/lib/game/recap-fallback";
+import { parseGameChange } from "../src/lib/game/command";
+import { moderateGameCommand } from "../src/lib/game/moderation";
 import { addDays, dayStartInstant } from "../src/lib/game/time";
 
 vi.mock("../src/lib/game/crypto", () => ({
@@ -56,20 +58,60 @@ describe("both-win readers", () => {
     expect(mergeStakeSlots<StoredStake>([{ kind: "per_miss", key: "old" }], [replacement])).toEqual([replacement]);
     expect(mergeStakeSlots<StoredStake>([{ kind: "per_miss", key: "old" }, prize], [replacement])).toEqual([replacement]);
   });
-  it("accepts stored terms and pending asks but refuses every both_get writer on the reader branch", () => {
+  it("accepts both-win asks and sealed approvals while create and legacy games refuse them", () => {
     const s = state(); s.game.terms.versions[0].stakes.push(both);
     expect(parseStoredTerms(s.game.terms).versions[0].stakes).toEqual([prize, both]);
     const change = { kind: "edit" as const, stakes: [{ kind: "both_get" as const, item: "Dinner out together" }] };
     const pending = { v: 2, id: "proposal", proposedByMemberId: "ava", expectedTermsVersion: 1, effectiveFromDay: 5,
       startsOn: null, deliveryStatus: "conversation", origin: "chat", change: { kind: "edit" }, stakes: [both], termsWordsEncrypted: "sealed" };
     expect(parsePendingGameChange(pending)?.stakes).toEqual([both]);
-    expect(() => decideApprovedGameChange(s, "leo", parsePendingGameChange(pending)!, now(4))).toThrow("Choose one prize or dare.");
-    for (const kind of ["prize", "winner_gets", "per_miss"] as const) {
+    expect(() => decideApprovedGameChange(s, "leo", parsePendingGameChange(pending)!, now(4))).not.toThrow();
+    expect(() => decideGameChange(s, "ava", change, now(4))).not.toThrow();
+    for (const kind of ["winner_gets", "per_miss"] as const) {
       s.game.terms.versions[0].stakes = [{ ...prize, kind }];
-      expect(() => decideGameChange(s, "ava", change, now(4))).toThrow("Choose one prize or dare.");
+      expect(() => decideGameChange(s, "ava", change, now(4))).toThrow("A game can have one prize or dare and one prize you both get.");
     }
     expect(() => decideNewTerms({ tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Walk" }],
       schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: change.stakes }, { newKey: () => "key", today: "2030-03-31" })).toThrow("Choose one prize or dare.");
+  });
+  it("rejects duplicate slots, group and mixed legacy games, and more than two command entries", () => {
+    const s = state();
+    const message = "A game can have one prize or dare and one prize you both get.";
+    for (const delta of [[], [both, both], [prize, { ...prize, kind: "dare" as const }], [{ kind: "per_miss" as const, key: "legacy" }]]) {
+      expect(() => validChangedStakes(s, delta)).toThrow(message);
+    }
+    s.game.seats = 10; expect(() => validChangedStakes(s, [both])).toThrow(message);
+    s.game.seats = 2; s.game.terms.versions[0].stakes.push({ kind: "winner_gets", key: "legacy" });
+    expect(() => validChangedStakes(s, [both])).toThrow(message);
+    for (const stakes of [[], [prize, both, both]]) expect(() => parseGameChange({ kind: "edit", stakes })).toThrow(message);
+    expect(parseGameChange({ kind: "edit", stakes: [{ kind: "both_get", item: "Dinner" }] })).toMatchObject({ stakes: [{ kind: "both_get", item: "Dinner" }] });
+  });
+  it("refuses a new both-win prize after a miss, expires an older ask, and permits an ordinary prize edit", () => {
+    const s = state(); const change = { kind: "edit" as const, stakes: [{ kind: "both_get" as const, item: "Dinner" }] };
+    expect(() => decideGameChange(s, "ava", change, now(4))).not.toThrow();
+    const pending = { id: "proposal", proposedByMemberId: "ava", expectedTermsVersion: 1, effectiveFromDay: 5,
+      startsOn: null, deliveryStatus: "conversation" as const, origin: "chat" as const, change: { kind: "edit" as const }, stakes: [both] };
+    s.entries = s.entries.filter(entry => entry.memberId !== "leo" || entry.dayIndex !== 4);
+    const message = "A day has been missed, so a prize you both get can no longer be earned in this game.";
+    expect(() => decideGameChange(s, "ava", change, now(5))).toThrow(message);
+    expect(() => decideApprovedGameChange(s, "leo", pending, now(5))).toThrow(message);
+    expect(gameChangeRefusal(s, pending, now(5))).toBe(message);
+    s.game.terms.versions[0].stakes.push(both);
+    expect(() => decideGameChange(s, "ava", { kind: "edit", stakes: [{ kind: "prize", item: "Choose lunch" }] }, now(5))).not.toThrow();
+  });
+  it("moderates both-win money through the existing prize check", () => {
+    expect(() => moderateGameCommand({ type: "proposeChange", gameId: "game", proposalId: "proposal", expectedTermsVersion: 1,
+      change: { kind: "edit", stakes: [{ kind: "both_get", item: "50 dollars" }] } })).toThrow("This can't be posted.");
+  });
+  it("prepares a both-win delta while retaining the primary words and keys", async () => {
+    const s = state();
+    const words = { v: 1, versions: [{ n: 1, tasks: [], stakes: [{ key: "prize", item: "Choose lunch" }] }] };
+    const prepared = await prepareGameChangeWords({ id: "game", wordsOwnerMemberId: "ava", terms: JSON.parse(JSON.stringify(s.game.terms)),
+      termsWordsEncrypted: JSON.stringify(words) }, { kind: "edit", stakes: [{ kind: "both_get", item: "Dinner" }] }, 1);
+    expect(prepared.stakes).toEqual([{ kind: "both_get", key: expect.any(String) }]);
+    const next = JSON.parse(prepared.termsWordsEncrypted!).versions.at(-1);
+    expect(next.stakes).toEqual([{ key: "prize", item: "Choose lunch" }, { key: prepared.stakes![0].key, item: "Dinner" }]);
+    expect(next.stakes.map((stake: { key: string }) => stake.key)).toEqual(mergeStakeSlots(s.game.terms.versions[0].stakes, prepared.stakes!).map(stake => stake.key));
   });
   it.each([false, true])("keeps encrypted and structural keys equal for an older prize edit (both=%s)", async hasBoth => {
     const s = state(); if (hasBoth) s.game.terms.versions[0].stakes.push(both);
