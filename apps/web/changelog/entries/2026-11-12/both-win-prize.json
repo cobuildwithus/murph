@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-11-12",
+  "order": 500,
+  "item": {
+    "id": "both-win-prize",
+    "kind": "feature",
+    "priority": 1,
+    "title": "A prize you both get if you both finish",
+    "summary": "When you and a friend have both done every day late in a game, Murph offers in your group chat to add a prize you both get if you both finish. One of you names it and the other says yes.",
+    "details": "It sits beside the game's prize or dare, and it lapses if either of you misses a day. Murph offers once per game, in the morning, in two-player games with a group chat. You can also ask Murph to add one yourselves.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      4916,
+      4917,
+      4918
+    ]
+  }
+}
