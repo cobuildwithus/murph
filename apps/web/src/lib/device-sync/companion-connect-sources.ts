@@ -3,15 +3,12 @@ import "server-only";
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedHealthDataConsentState } from "../legal/consent";
 import { getPrisma } from "../prisma";
-import { APPLE_HEALTH_RELAY_CONNECT_SOURCE_IDS } from "./apple-health-relay-connect-sources";
 import { readAppleHealthRelaySetupStep } from "./apple-health-relay-setup-guide";
-import { connectSourcePngLogoPath, resolveConnectSources } from "./connect-sources";
+import { connectSourcePath, connectSourcePngLogoPath, resolveConnectSources } from "./connect-sources";
 import { buildHostedDeviceSyncSettingsResponse } from "./settings-service";
 import type { HostedDeviceSyncSettingsSource } from "./settings-surface";
 import { WHOOP_APPLE_HEALTH_SETUP_STEP } from "./whoop-apple-health-setup-guide";
 import { ZEPP_APPLE_HEALTH_SETUP_STEP } from "./zepp-apple-health-setup-guide";
-
-const relayIds = new Set<string>(APPLE_HEALTH_RELAY_CONNECT_SOURCE_IDS);
 
 export async function readCompanionConnectSources(
   member: Parameters<typeof buildHostedDeviceSyncSettingsResponse>[0]["member"],
@@ -40,7 +37,7 @@ export async function readCompanionConnectSources(
         id: row.id,
         name: row.name,
         logoPath: connectSourcePngLogoPath(row.id),
-        path: row.id === "apple-health" ? "apple_health" : relayIds.has(row.id) ? "apple_health_relay" : "web",
+        path: connectSourcePath(row.id),
         ...(step ? { relay: { stepTitle: step.title, stepDetail: step.detail } } : {}),
         ...(connected ? { connection: {
           state: needsAttention ? "needs_attention" : "connected",

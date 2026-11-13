@@ -312,6 +312,16 @@ export function resolveConnectSources(
   ]);
 }
 
+/**
+ * How a source connects: Apple Health itself and the wearables that come in
+ * through it connect in the Murph app; every other source signs in on its own
+ * website.
+ */
+export function connectSourcePath(id: string): "apple_health" | "apple_health_relay" | "web" {
+  if (id === "apple-health") return "apple_health";
+  return DISPLAY_ONLY_CONNECT_SOURCE_IDS.has(id) ? "apple_health_relay" : "web";
+}
+
 export function connectSourcePngLogoPath(id: string): string | null {
   return readConnectSourceUi(id)?.logo.src.replace(/\.svg$/u, ".png") ?? null;
 }
