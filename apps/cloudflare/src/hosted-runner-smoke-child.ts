@@ -1950,7 +1950,6 @@ async function runCodexVaultCliProof(input: {
         permissionProfile: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
       },
     ),
-    input.vaultRoot,
   );
   assertVaultShow(
     await runVaultJson("vault-show-explicit", [
@@ -2149,13 +2148,14 @@ async function runCodexVaultCliProof(input: {
   };
 }
 
-function assertMemoryShowProof(value: unknown, expectedVaultRoot: string): void {
+// vault-cli no longer echoes the vault root. vault-show-default proves which
+// vault resolved; this read proves the member workspace can read its memory.
+function assertMemoryShowProof(value: unknown): void {
   const result = readObject(value, "memory-show");
   const document = readObject(result.document, "memory-show.document");
   const records = readArray(document.records, "memory-show.document.records");
 
   if (
-    result.vault !== expectedVaultRoot ||
     document.exists !== true ||
     records.length === 0 ||
     result.memory !== null
