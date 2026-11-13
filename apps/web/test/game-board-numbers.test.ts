@@ -49,6 +49,37 @@ describe("pair board numbers", () => {
     const sameDates = [...rows("restingHeartRate", "a"), ...rows("restingHeartRate", "a", "2030-03-21", 7, 61)];
     expect(available([...b, ...sameDates])).toMatchObject({ latest: { value: 61 } });
   });
+  it("keeps overlapping Fitbit and Google Health steps on one board source", () => {
+    const records = [
+      ...rows("steps", "fitbit", window.from, 14, 6000, "count"),
+      ...rows("steps", "google_health", window.from, 14, 4100, "count"),
+    ];
+    const number = available(records, "steps");
+    expect(number).toMatchObject({ state: "available" });
+    if (number.state !== "available") throw new Error("Expected board steps");
+    expect(number.daily).toHaveLength(14);
+    expect(number.daily.every((point) => point.value === 6000 || point.value === 4100)).toBe(true);
+    expect(number.daily.some((point) => point.value === 10100)).toBe(false);
+  });
+  it("shows current Google Health steps after a formerly comparable Fitbit source stops reporting", () => {
+    const records = [
+      ...rows("steps", "fitbit", "2029-11-02", 60, 6000, "count"),
+      ...rows("steps", "fitbit", "2030-03-14", 10, 8000, "count"),
+      ...rows("steps", "google-health", "2030-03-28", 4, 4100, "count"),
+    ];
+    expect(available(records.filter((record) => record.source?.source === "fitbit"), "steps", "2030-01-01"))
+      .toMatchObject({ source: "fitbit", stale: true, comparison: expect.any(Object) });
+    const number = available(records, "steps", "2030-01-01");
+    expect(number).toMatchObject({
+      state: "available",
+      source: "google-health",
+      latest: { date: "2030-03-31", value: 4100 },
+      stale: false,
+      comparison: null,
+    });
+    if (number.state !== "available") throw new Error("Expected board steps");
+    expect(number.daily).toHaveLength(4);
+  });
   it("counts distinct days, rejects overlapping windows and keeps unknown sources display-only", () => {
     const sparse = [...rows(), ...rows("restingHeartRate", "oura", "2030-03-25", 3, 60)];
     expect(available([...sparse, ...sparse])).toMatchObject({ comparison: null });

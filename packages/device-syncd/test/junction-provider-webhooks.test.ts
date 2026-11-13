@@ -598,7 +598,7 @@ test("Junction historical sleep completion webhooks fetch the bounded summary wi
   }
 });
 
-test("Junction replays Google Health completion's original history window after Fitbit cutover", async () => {
+test("Junction admits Google Health completion's original window while Fitbit remains connected", async () => {
   const requests: URL[] = [];
   const snapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -649,7 +649,6 @@ test("Junction replays Google Health completion's original history window after 
       sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
         connectionId: "acct-junction-1", sourceProviderSlug,
       }), "Source key should be available."),
-      // No Fitbit canonical sleep coverage: this history is not replaced by cutover backfill.
       resourceAvailabilitySummary: sourceProviderSlug === "fitbit" ? {} : { sleep: true },
     }),
     resourceCount: sourceProviderSlug === "fitbit" ? 0 : 1,
@@ -663,12 +662,6 @@ test("Junction replays Google Health completion's original history window after 
     },
   });
   const job = createJob(prepared.kind, prepared.payload ?? {});
-  await executeJunctionJob(provider, context(), job);
-  assert.equal(requests.length, 0, "Web must retain this work while execution is fenced.");
-  assert.equal(snapshots.length, 0);
-
-  sources[0]!.status = "disconnected";
-  sources[0]!.lastErrorCode = "SOURCE_USER_DISCONNECTED";
   await executeJunctionJob(provider, context(), job);
   const fetch = requests.find((url) => url.pathname === "/v2/summary/sleep/junction-user-1");
   assert.ok(fetch);

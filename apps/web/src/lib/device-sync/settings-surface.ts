@@ -75,8 +75,6 @@ export interface HostedDeviceSyncSettingsUpstreamSource {
   connectSourceId?: string | null;
   connectTarget?: string | null;
   firstSeenAt?: string;
-  fitbitMigrationCoverageReady?: true;
-  historicalBackfillComplete?: true;
   lastDataAt?: string | null;
   lastErrorCode?: string | null;
   lastSeenAt?: string;
@@ -715,12 +713,6 @@ function toSettingsUpstreamSource(
     ...(includeMigrationTimeline
       ? {
           firstSeenAt: source.firstSeenAt,
-          ...(source.fitbitMigrationCoverageReady
-            ? { fitbitMigrationCoverageReady: true as const }
-            : {}),
-          ...(source.historicalBackfillComplete
-            ? { historicalBackfillComplete: true as const }
-            : {}),
           lastDataAt: source.lastDataAt ?? null,
           lastSeenAt: source.lastSeenAt,
         }

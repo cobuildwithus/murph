@@ -149,18 +149,12 @@ import type {
   DeviceProviderNormalizationContext,
   NormalizedDeviceBatch,
 } from "./types.ts";
-import {
-  applyJunctionCanonicalCoverageFence,
-  type JunctionCanonicalCoverageFence,
-} from "./junction-canonical-coverage.ts";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
 export {
   deriveJunctionCanonicalCoverageEvidence,
-  type JunctionCanonicalCoverageDerivationOptions,
   type JunctionCanonicalCoverageEvent,
   type JunctionCanonicalCoverageEvidence,
-  type JunctionCanonicalCoverageFence,
 } from "./junction-canonical-coverage.ts";
 
 export {
@@ -207,8 +201,6 @@ export interface JunctionSnapshotInput {
   summaries?: Record<string, unknown>;
   timeseries?: Record<string, unknown>;
   companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry;
-  canonicalCoverageFence?: JunctionCanonicalCoverageFence;
-  canonicalCoverageProviderPulledAt?: string;
 }
 
 export type JunctionTimeseriesWindowKind = "calendar_day" | "precise";
@@ -322,11 +314,6 @@ const junctionSnapshotSchema = z.object({
   summaries: z.record(z.string(), z.unknown()).optional(),
   timeseries: z.record(z.string(), z.unknown()).optional(),
   companionHrvRmssd: z.unknown().optional(),
-  canonicalCoverageFence: z.object({
-    coverageBoundaryByResource: z.record(z.string(), z.string().nullable()),
-    sourceProviderSlug: z.string(),
-  }).strict().optional(),
-  canonicalCoverageProviderPulledAt: z.string().optional(),
 }).catchall(z.unknown());
 
 const junctionCompanionHrvRmssdSnapshotEntrySchema = z.object({
@@ -1251,10 +1238,6 @@ export function normalizeJunctionSnapshot(
   normalizeSummaries(snapshot.summaries, context);
   normalizeTimeseries(snapshot.timeseries, context);
   normalizeCompanionHrvRmssd(companionHrvRmssd, context);
-  applyJunctionCanonicalCoverageFence(
-    events,
-    snapshot.canonicalCoverageFence,
-  );
   finalizeJunctionTemporalAuthoritativeSets(context);
   assertJunctionTimeseriesOutputBounds({
     eventCount: events.length,
@@ -6449,13 +6432,9 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
   ].every((records) => Array.isArray(records) && records.length === 0);
 
   const {
-    canonicalCoverageFence: _canonicalCoverageFence,
-    canonicalCoverageProviderPulledAt: _canonicalCoverageProviderPulledAt,
     strictSparseCalendarRepair: _strictSparseCalendarRepair,
     ...sanitizedSnapshot
   } = sanitized;
-  void _canonicalCoverageFence;
-  void _canonicalCoverageProviderPulledAt;
   void _strictSparseCalendarRepair;
 
   return stripUndefined({

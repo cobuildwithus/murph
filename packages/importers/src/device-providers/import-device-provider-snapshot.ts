@@ -393,9 +393,6 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
         ...resultRecord,
         junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(
           resultRecord.events.filter(isEventRecord),
-          {
-            providerPulledAt: resolveJunctionCoverageProviderPulledAt(input),
-          },
         ),
       }
     : resultRecord;
@@ -416,16 +413,6 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
     ...resultWithCoverage,
     deviceProviderSnapshotImportTiming: timing,
   } as TResult;
-}
-
-function resolveJunctionCoverageProviderPulledAt(input: unknown): string | undefined {
-  const request = deviceProviderSnapshotImportSchema.safeParse(input);
-  if (!request.success || request.data.provider !== "junction") {
-    return undefined;
-  }
-  const providerPulledAt = readPlainObject(request.data.snapshot)
-    ?.canonicalCoverageProviderPulledAt;
-  return typeof providerPulledAt === "string" ? providerPulledAt : undefined;
 }
 
 function readPlainObject(value: unknown): Record<string, unknown> | null {

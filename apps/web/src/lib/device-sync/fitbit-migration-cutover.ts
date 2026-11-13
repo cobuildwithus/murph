@@ -134,7 +134,8 @@ async function revokeAndFinalize(
         return result(input, await finalize(input, target, "user_disconnect"));
       }
     } catch {
-      // Restore the exact claim below so local Fitbit access remains active.
+      // Access is unknown. Keep the claim fenced until recovery can check it.
+      return result(input, "pending");
     }
     await restoreFailure(input, target);
     return result(input, "pending");

@@ -5,8 +5,6 @@ import {
 } from "@murphai/device-syncd/public-ingress";
 import {
   canonicalizeJunctionProviderSlug,
-  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
-  normalizeJunctionProviderSlug,
   type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
@@ -51,7 +49,6 @@ import {
   acceptHostedCompanionHrvRmssdObservation,
   beginHostedDeviceSyncConnectionSourceReconnect,
   buildHostedCompanionHrvRmssdDirtyResource,
-  buildHostedJunctionSourceEstablishmentWork,
   captureHostedDeviceSyncConnectionSourceReconnect,
   cleanupRejectedHostedDeviceSyncConnectionSource,
   disconnectHostedDeviceSyncConnection,
@@ -59,7 +56,6 @@ import {
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncUnknownWebhook,
   handleHostedDeviceSyncWebhookAccepted,
-  hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource,
   prepareHostedDeviceSyncConnectionSourceStart,
 } from "./wake-service";
 import { completeHostedGoogleHealthFitbitMigration } from "./fitbit-migration-cutover";
@@ -112,29 +108,9 @@ export class HostedDeviceSyncPublicIngressService {
             });
           }
 
-          const isGoogleHealthSource =
-            account.provider === "junction"
-            && normalizeJunctionProviderSlug(sourceProviderSlug)
-              === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG;
-          const legacySources = isGoogleHealthSource
-            ? await this.context.store.listConnectionSources(account.id)
-            : [];
-          const buildSourceConnectionWork =
-            provider.connectionHandler?.buildSourceConnectionWork;
-          const connectionWork = isGoogleHealthSource && buildSourceConnectionWork
-            ? buildHostedJunctionSourceEstablishmentWork({
-                buildSourceConnectionWork,
-                connectionWork: connection,
-                hasAuthorizedLegacyFitbitBackfillSource:
-                  hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource(legacySources),
-                now,
-                sourceProviderSlug,
-              })
-            : connection;
-
           await handleHostedDeviceSyncConnectionEstablished({
             account,
-            connection: connectionWork,
+            connection,
             connectionStartedAt: connectionStartedAt ?? null,
             now,
             sourceProviderSlug: sourceProviderSlug ?? null,

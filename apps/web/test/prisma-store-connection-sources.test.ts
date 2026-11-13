@@ -461,7 +461,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     });
   });
 
-  it("resets an explicitly restarted source epoch and preserves canonical coverage markers", async () => {
+  it("resets an explicitly restarted source epoch and drops obsolete coverage markers", async () => {
     const { store } = createSourceStore();
 
     await store.upsertConnectionSource({
@@ -514,8 +514,6 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
 
     expect(covered.resourceAvailabilitySummary).toEqual({
       activity: true,
-      canonicalCoverageBoundary_activity: "2026-08-12",
-      canonicalCoverageFinalizedAt_activity: "2026-08-13T01:00:00.000Z",
     });
   });
 

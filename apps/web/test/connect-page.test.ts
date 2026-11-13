@@ -5314,9 +5314,7 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
     status: "connected" as const,
   };
   const successor = {
-    fitbitMigrationCoverageReady: true as const,
     firstSeenAt: "2026-08-11T10:00:00.000Z",
-    historicalBackfillComplete: true as const,
     lastDataAt: "2026-08-11T10:05:00.000Z",
     lastSeenAt: "2026-08-11T10:06:00.000Z",
     providerLabel: "Google Health",
@@ -5338,12 +5336,13 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
       expected: {
         connectProvider: null,
         connectTarget: null,
-        migrationState: "verifying_successor",
+        disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+        migrationState: "cutover_ready",
       },
-      name: "legacy stays active while successor proof is incomplete",
+      name: "connected successor needs no fresh data or coverage marker",
       upstreamSources: [
         legacy,
-        { ...successor, fitbitMigrationCoverageReady: undefined },
+        { ...successor, lastDataAt: null },
       ],
     },
     {
@@ -5383,9 +5382,9 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
       }],
     );
     assert.equal(states.length, 1, value.name);
-    assert.deepEqual(states[0], {
+    // Settings may also carry unrelated source metadata such as lastDataAt.
+    assert.partialDeepStrictEqual(states[0], {
       connectionId: "dsc_junction_fitbit",
-      lastDataAt: value.upstreamSources.at(-1)?.lastDataAt ?? null,
       requiresReconnect: false,
       sourceId: "fitbit",
       state: "active",

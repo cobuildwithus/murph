@@ -5778,7 +5778,7 @@ removal condition are defined in
 
 ### Fitbit / Google Health source replacement
 
-Fitbit migration is a boundary transition inside the existing Junction connection. Importers own canonical daily/interval evidence, device-syncd owns source identities and provider calls, hosted runtime owns continuation, and Web owns the persisted connection lock and one-card projection. The public card may combine Fitbit and Pixel Watch, but stored authorities remain truthful as `fitbit` and `google_health`.
+Fitbit and Google Health are ordinary, distinct Junction source authorities inside one connection. Importers retain source-specific canonical facts and accepted source/resource receipts; the existing wearable, metric, and board readers select or partition overlapping facts. Web presents one Fitbit / Pixel Watch card while storing truthful `fitbit` and `google_health` rows. Google Health imports as soon as its source is connected. Web owns the existing lock and exactly-once attempt to revoke active Fitbit after Google Health authorization; the hosted runner owns bounded retry and source-epoch checks. A Fitbit import prepared before revocation may finish afterward, but terminal source authority prevents later Fitbit provider pulls and cannot be resurrected by runner projection. There is no migration coverage fence, resource-parity gate, or additional backfill requirement.
 
 ## Feedback diagnostic tasks
 
