@@ -128,7 +128,7 @@ describe.skipIf(!enabled)("tool failure indexed SQL", () => {
     expect(mocks.query).toHaveBeenCalledOnce();
   });
 
-  it("excludes validation, expected not-found/conflict, old and future rows", async () => {
+  it("excludes validation, expected not-found/conflict/limit, old and future rows", async () => {
     await seed(20, { reason: "invalid_input", stage: "validation" });
     await seed(20, { reason: "handler_exception", stage: "validation" });
     await seed(20, { kind: "schema_rejection" });
@@ -138,6 +138,7 @@ describe.skipIf(!enabled)("tool failure indexed SQL", () => {
     await seed(20, { reason: "not_found" });
     await seed(20, { reason: "conflict" });
     await seed(20, { reason: "unknown" });
+    await seed(20, { operation: "connected-apps-execute", reason: "limit_reached", stage: "admission", category: "unknown" });
     await seed(20, { at: new Date(+now - 3_600_000) });
     await seed(20, { at: new Date(+now + 1) });
     expect((await read()).backend).toMatchObject({ anomalous: false, count: 0 });

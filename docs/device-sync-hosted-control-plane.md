@@ -428,7 +428,32 @@ full accepted window and intentionally retaining new-format rows for one extra
   relative PNG logos, native/web paths, and shared Apple Health setup copy.
   Active access and health consent gate optional connection states and last-data
   timestamps; either refusal returns the same unconnected list. Unknown query
-  parameters are ignored. No health values or actions are returned.
+  parameters are ignored. No health values are returned. A connected source
+  that signs in on its own website lists `actions`: `sync` while the connection
+  is active, and `remove` only where removing stops that one source (never
+  during a Fitbit migration or when the source needs a reset that would
+  disconnect the shared account).
+- `POST /api/device-sync/companion/connect-sources/:sourceId/start` — bearer
+  auth with active access. Body `{ "appReturn": "ios" | "ios-dev" }`, a name
+  from a closed set and never a URL. Same checks as the browser start (offered,
+  health grant, WHOOP cap), with the reconnect target taken from the server's
+  own row. Returns `{ authorizationUrl, provider, completionProof }`.
+- `GET /api/device-sync/companion/connect-return/:app` — the provider's return
+  for an app-started connection. No session, no state read, no writes: a 302 to
+  the app's URL scheme carrying the provider's query when it is at most 2,048
+  characters.
+- `POST /api/device-sync/companion/connect-sources/complete` — bearer auth with
+  active access. Body `{ provider, query, completionProof }`, at most 4 KB. The
+  proof is checked first and a failed proof changes nothing; then the shared
+  callback runs with the member as owner. Returns the list.
+- `POST /api/device-sync/companion/connect-sources/:sourceId/disconnect` —
+  bearer auth; needs no active access or health grant because it only reduces
+  authority. Takes only the source id. Stops that one source or answers
+  `COMPANION_CONNECT_REFRESH_REQUIRED` (409) and changes nothing; it never
+  widens to the whole connection. Returns the list.
+- `POST /api/device-sync/companion/connect-sources/:sourceId/sync` — bearer
+  auth with active access. Queues the manual reconcile wake for the source's
+  active connection, bucketed to the minute.
 - `POST /api/device-sync/companion/admission`
 - `POST /api/device-sync/companion/sign-in-token`
 - `POST /api/device-sync/companion/hrv-rmssd`

@@ -90,6 +90,14 @@ it.each([null, "2026-11-12T09:41:00.000Z"])("returns source-specific arrival tim
   expect(body.sources[1].connection).toBeUndefined();
 });
 
+it("offers Sync now and Remove only where each means this one source", async () => {
+  settings([upstream("oura"), upstream("whoop_v2", { requiresReconnect: true }), upstream("garmin", { recoveryKind: "connection_reset" }), upstream("apple_health_kit")]);
+  const actions = Object.fromEntries((await payload()).sources
+    .filter((row: { connection?: unknown }) => row.connection)
+    .map((row: { id: string; connection: { actions: string[] } }) => [row.id, row.connection.actions]));
+  expect(actions).toEqual({ oura: ["sync", "remove"], whoop: ["remove"], garmin: [], "apple-health": [] });
+});
+
 it("keeps sibling arrival times separate", async () => {
   settings([upstream("oura"), upstream("whoop_v2", { lastDataAt: "2026-11-11T00:00:00.000Z" })]);
   const { sources } = await payload();
@@ -133,6 +141,7 @@ it.each(["authorization_required", "verifying_successor", "cutover_ready"])("pro
     state: state === "authorization_required" ? "needs_attention" : "connected",
     ...(state === "authorization_required" ? { reason: "fitbit_migration" } : {}),
     lastDataAt: state === "authorization_required" ? lastDataAt : successorAt,
+    actions: [],
   });
   expect(rows.map((row: { id: string }) => row.id)).toEqual(resolveConnectSources(sources).filter(row => !["mobvoi-health", "dexcom"].includes(row.id)).map(row => row.id));
 });

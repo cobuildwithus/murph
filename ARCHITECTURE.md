@@ -4154,6 +4154,23 @@ delivered without its initiating-browser proof consumes only the OAuth state
 and returns to Connect, so its transferable provider URL cannot be relayed
 later. This proof adds no durable state owner and never crosses hosts.
 
+The Murph app starts the same connection with its member bearer credential and
+never loads Murph's website to do it. The provider returns to a fixed bridge
+(`/api/device-sync/companion/connect-return/{ios|ios-dev}`) that reads no
+session or state, writes nothing, and only redirects the provider's short query
+to the app's own URL scheme. Junction keeps no return-URL allowlist, so the
+closed choice in shared ingress is the guard: a start names `ios` or `ios-dev`
+and ingress maps the name to a path under the public base; no caller-supplied
+URL reaches the provider, and only link flows may return to the app. Start
+returns a completion proof from the same authenticator under its own signing
+domain and token prefix, bound to the provider, OAuth state, member and app
+session. The app holds it in memory and posts it with the returned query to
+`connect-sources/complete`, which checks bearer and proof before the state is
+read, consumed or discarded, then runs the same shared-ingress callback with
+the member as `expectedOwnerId`. A failed proof changes nothing. A browser
+cookie proof cannot finish an app-started state, nor an app proof a
+browser-started one. The bridge URL alone finishes nothing.
+
 Before constructing shared ingress or starting provider authorization, Web
 rejects a callback hostname that differs from the authenticated start request.
 Hosted Web build validation applies the runtime precedence to both explicit
