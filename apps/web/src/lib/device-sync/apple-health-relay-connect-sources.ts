@@ -1,4 +1,4 @@
-import type { ConnectSource, LogoAsset } from "./connect-page-types";
+import type { ConnectSource, LogoAsset } from "./connect-source-types";
 
 type AppleHealthRelayConnectSourceUi = Omit<ConnectSource, "id">;
 
