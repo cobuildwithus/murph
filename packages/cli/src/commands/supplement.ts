@@ -12,10 +12,15 @@ import {
 import {
   localDateSchema,
   pathSchema,
-  readEntitySchema,
-  listEntitySchema,
+  recordListEntitySchema,
+  recordReadEntitySchema,
   savedEntitySnapshotSchema,
 } from "@murphai/operator-config/vault-cli-contracts"
+import {
+  projectRecordListEntity,
+  projectRecordReadEntity,
+  projectRecordShowResult,
+} from "./record-read-projection.js"
 import {
   searchSupplementLabels,
   searchSupplementLabelsBatch,
@@ -131,25 +136,31 @@ export function registerSupplementCommands(
         },
       },
     ],
-    hint: 'Use --status active for current supplements. Add --include-details for complete doses, ingredients, notes, and body text in one read; default summaries may be truncated. A full page may have more matches: raise --limit (maximum 200) before claiming a complete inventory.',
+    hint: 'Use --status active for current supplements. Add --include-details for complete doses, ingredients, and notes in one read; default summaries may be truncated. A full page may have more matches: raise --limit (maximum 200) before claiming a complete inventory.',
     options: withBaseOptions({
       limit: commonListLimitOptionSchema,
       status: statusOptionSchema,
       includeDetails: z.boolean().default(false).describe(
-        'Include all typed fields and the complete narrative body without repeating frontmatter or truncating list summaries.',
+        'Include every typed field without truncating list summaries.',
       ),
     }),
     output: healthListResultSchema.extend({
-      items: z.array(z.union([readEntitySchema, listEntitySchema])),
+      items: z.array(z.union([recordReadEntitySchema, recordListEntitySchema])),
     }),
     async run(context) {
-      return services.query.listSupplements({
+      const result = await services.query.listSupplements({
         limit: context.options.limit ?? 10,
         includeDetails: context.options.includeDetails,
         requestId: requestIdFromOptions(context.options),
         status: context.options.status,
         vault: context.options.vault,
       })
+      return {
+        ...result,
+        items: result.items.map((item) => context.options.includeDetails
+          ? projectRecordReadEntity(item, { path: false })
+          : projectRecordListEntity(item)),
+      }
     },
   })
 
@@ -173,11 +184,11 @@ export function registerSupplementCommands(
     options: withBaseOptions({}),
     output: healthShowResultSchema,
     async run(context) {
-      return services.query.showSupplement({
+      return projectRecordShowResult(await services.query.showSupplement({
         id: context.args.id,
         requestId: requestIdFromOptions(context.options),
         vault: context.options.vault,
-      })
+      }))
     },
   })
 

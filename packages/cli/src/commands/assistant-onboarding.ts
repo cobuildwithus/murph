@@ -18,6 +18,10 @@ import { emptyArgsSchema, requestIdFromOptions, withBaseOptions } from '@murphai
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
 import type { VaultServices } from '@murphai/vault-usecases'
+import {
+  projectRecordListEntity,
+  projectRecordListResult,
+} from './record-read-projection.js'
 
 function buildAssistantVaultResultPath(vault: string) {
   return {
@@ -339,23 +343,23 @@ export function registerAssistantOnboardingCommands(cli: Cli.Cli, vaultServices?
         }),
         readAssistantOnboardingResumeContextListSurface({
           limit,
-          read: () => services.query.listGoals({ ...commandContext, limit }),
+          read: async () => projectRecordListResult(await services.query.listGoals({ ...commandContext, limit })),
         }),
         readAssistantOnboardingResumeContextListSurface({
           limit,
-          read: () => services.query.listRegimens({ ...commandContext, limit }),
+          read: async () => projectRecordListResult(await services.query.listRegimens({ ...commandContext, limit })),
         }),
         readAssistantOnboardingResumeContextListSurface({
           limit,
-          read: () => services.query.listSupplements({ ...commandContext, limit }),
+          read: async () => projectRecordListResult(await services.query.listSupplements({ ...commandContext, limit })),
         }),
         readAssistantOnboardingResumeContextListSurface({
           limit,
-          read: () => services.query.listConditions({ ...commandContext, limit }),
+          read: async () => projectRecordListResult(await services.query.listConditions({ ...commandContext, limit })),
         }),
         readAssistantOnboardingResumeContextListSurface({
           limit,
-          read: () => services.query.listAllergies({ ...commandContext, limit }),
+          read: async () => projectRecordListResult(await services.query.listAllergies({ ...commandContext, limit })),
         }),
         readAssistantOnboardingResumeContextListSurface({
           limit,
@@ -367,7 +371,7 @@ export function registerAssistantOnboardingCommands(cli: Cli.Cli, vaultServices?
 
             return {
               count: result.count,
-              items: result.items,
+              items: result.items.map(projectRecordListEntity),
             }
           },
         }),

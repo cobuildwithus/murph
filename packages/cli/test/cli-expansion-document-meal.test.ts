@@ -79,7 +79,7 @@ interface ShowEnvelope {
     title: string | null
     occurredAt: string | null
     data: Record<string, unknown>
-    links: Array<{
+    links?: Array<{
       id: string
       kind: string
       queryable: boolean
@@ -108,7 +108,7 @@ interface ListEnvelope {
     kind: string
     excerpt?: string | null
     data: Record<string, unknown>
-    links: Array<{
+    links?: Array<{
       id: string
       kind: string
       queryable: boolean
@@ -1091,7 +1091,7 @@ test.sequential(
       assert.equal(requireData(showByMealId).entity.occurredAt, '2026-03-12T12:15:00.000Z')
       assert.equal(requireData(showByMealId).entity.data.source, 'device')
       assert.equal(requireData(showByMealId).entity.data.note, 'Eggs and avocado.')
-      assert.deepEqual(requireData(showByMealId).entity.links, [])
+      assert.equal(requireData(showByMealId).entity.links, undefined)
 
       const listedMeals = await runSourceCli<ListEnvelope>([
         'meal',
@@ -1114,10 +1114,12 @@ test.sequential(
         requireData(listedMeals).items.map((item) => item.id),
         [currentMeal.mealId],
       )
-      assert.match(requireData(listedMeals).items[0]?.excerpt ?? '', /Eggs and avocado/u)
+      // A meal's excerpt would only repeat its note.
+      assert.equal(requireData(listedMeals).items[0]?.data.note, 'Eggs and avocado.')
+      assert.equal('excerpt' in (requireData(listedMeals).items[0] ?? {}), false)
       assert.equal('markdown' in (requireData(listedMeals).items[0] ?? {}), false)
       assert.equal(requireData(listedMeals).items[0]?.data.source, 'device')
-      assert.deepEqual(requireData(listedMeals).items[0]?.links, [])
+      assert.equal(requireData(listedMeals).items[0]?.links, undefined)
       assert.equal(
         requireData(listedMeals).items.some((item) => item.id === olderMeal.mealId),
         false,

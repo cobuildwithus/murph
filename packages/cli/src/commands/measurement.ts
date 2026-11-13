@@ -6,10 +6,10 @@ import {
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   measurementAddResultSchema,
-  listResultSchema,
   localDateSchema,
   pathSchema,
-  showResultSchema,
+  recordListResultSchema,
+  recordShowResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   inputFileOptionSchema,
@@ -44,6 +44,10 @@ import {
   registerFactoryCommand,
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import {
+  projectRecordListResult,
+  projectRecordShowResult,
+} from './record-read-projection.js'
 
 function parseQualifierValue(rawValue: string): string | number | boolean {
   const trimmed = rawValue.trim()
@@ -434,9 +438,9 @@ export function registerMeasurementCommands(cli: Cli.Cli) {
       id: measurementLookupSchema,
     }),
     options: withBaseOptions(),
-    output: showResultSchema,
+    output: recordShowResultSchema,
     async run({ args, options }) {
-      return showMeasurementRecord(options.vault, args.id)
+      return projectRecordShowResult(await showMeasurementRecord(options.vault, args.id))
     },
   })
 
@@ -455,14 +459,14 @@ export function registerMeasurementCommands(cli: Cli.Cli) {
         },
         limit: commonListLimitOptionSchema,
       },
-      output: listResultSchema,
-      run(input) {
-        return listMeasurementRecords({
+      output: recordListResultSchema,
+      async run(input) {
+        return projectRecordListResult(await listMeasurementRecords({
           vault: input.vault,
           from: input.from,
           to: input.to,
           limit: input.limit,
-        })
+        }))
       },
     }),
   )

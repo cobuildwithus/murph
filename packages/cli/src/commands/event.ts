@@ -17,11 +17,11 @@ import {
 } from '@murphai/core'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
-  listItemSchema,
   localDateSchema,
   occurredAtOptionSchema,
   pathSchema,
-  showResultSchema,
+  recordListEntitySchema,
+  recordShowResultSchema,
   slugSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
@@ -50,6 +50,10 @@ import {
 } from './record-mutation-command-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 import { journalNotePresentationTags } from './journal-note-presentation.js'
+import {
+  projectRecordListResult,
+  projectRecordShowResult,
+} from './record-read-projection.js'
 import {
   createPayloadSchemaCommand,
   registerFactoryCommand,
@@ -110,7 +114,7 @@ const eventListResultSchema = z.object({
     experiment: slugSchema.nullable(),
     limit: z.number().int().positive().max(200),
   }),
-  items: z.array(listItemSchema),
+  items: z.array(recordListEntitySchema),
   count: z.number().int().nonnegative(),
   nextCursor: z.string().min(1).nullable(),
 })
@@ -417,13 +421,13 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
       description: 'Show one canonical event by event id.',
       argName: 'id',
       argSchema: eventIdSchema.describe('Canonical event id such as evt_<ULID>.'),
-      output: showResultSchema,
+      output: recordShowResultSchema,
       async run(input) {
-        return services.query.showEvent({
+        return projectRecordShowResult(await services.query.showEvent({
           eventId: input.id,
           vault: input.vault,
           requestId: input.requestId,
-        })
+        }))
       },
     },
     list: {
@@ -459,7 +463,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         .describe('Optional experiment slug filter for events linked to one experiment.'),
       output: eventListResultSchema,
       async run(input) {
-        return services.query.listEvents({
+        return projectRecordListResult(await services.query.listEvents({
           vault: input.vault,
           requestId: input.requestId,
           kind: input.kind,
@@ -468,7 +472,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
           tag: Array.isArray(input.tag) ? input.tag : undefined,
           experiment: input.experiment,
           limit: input.limit ?? 10,
-        })
+        }))
       },
     },
     additionalCommands: [

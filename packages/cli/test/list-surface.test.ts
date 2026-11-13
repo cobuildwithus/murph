@@ -265,7 +265,7 @@ test('goal list keeps status-only filters canonical', async () => {
         id: string
         kind: string
         data: Record<string, unknown>
-        links: Array<{ id: string }>
+        links?: Array<{ id: string }>
       }>
     }>([
       'goal',
@@ -296,7 +296,7 @@ test('goal list keeps status-only filters canonical', async () => {
     )
     assert.equal(requireData(result).items[0]?.kind, 'goal')
     assert.equal(requireData(result).items[0]?.data.status, 'active')
-    assert.deepEqual(requireData(result).items[0]?.links, [])
+    assert.equal(requireData(result).items[0]?.links, undefined)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

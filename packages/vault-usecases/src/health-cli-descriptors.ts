@@ -19,10 +19,10 @@ import type {
   HealthQueryShowServiceMethodName,
 } from "./health-cli-method-types.js";
 import {
-  listItemSchema,
   localDateSchema,
   pathSchema,
-  showResultSchema,
+  recordListEntitySchema,
+  recordShowResultSchema,
 } from "@murphai/operator-config/vault-cli-contracts";
 import {
   getHealthRegistryFamily,
@@ -113,7 +113,7 @@ export function createHealthScaffoldResultSchema<TNoun extends string>(noun: TNo
   });
 }
 
-export const healthShowResultSchema = showResultSchema;
+export const healthShowResultSchema = recordShowResultSchema;
 
 export const healthListFiltersSchema = z.object({
   from: localDateSchema.optional(),
@@ -127,7 +127,7 @@ export const healthListFiltersSchema = z.object({
 export const healthListResultSchema = z.object({
   vault: pathSchema,
   filters: healthListFiltersSchema,
-  items: z.array(listItemSchema),
+  items: z.array(recordListEntitySchema),
   count: z.number().int().nonnegative(),
   nextCursor: z.string().min(1).nullable(),
 });

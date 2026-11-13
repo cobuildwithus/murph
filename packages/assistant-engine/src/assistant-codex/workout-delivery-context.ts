@@ -1,7 +1,7 @@
 import type { AutomationContextReference } from '@murphai/contracts'
 import { resolveVaultCliCommandPath } from '@murphai/operator-config/command-helpers'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
-  showResultSchema,
   vaultCliBatchResultSchema,
   workoutAddResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
@@ -15,6 +15,15 @@ import { isCodexActionStructurallyFailed } from './action-outcome.js'
 import { resolveCodexVaultCliCommandArgv } from './command-family.js'
 
 const ACTIVITY_SESSION_KIND = 'activity_session'
+
+// Workout show returns a compact record and live workout commands a full one;
+// delivery context needs only the record identity from either.
+const workoutEntityResultSchema = z.object({
+  entity: z.object({
+    id: z.string().min(1),
+    kind: z.string().min(1),
+  }),
+})
 
 type WorkoutCommandKind = 'continue' | 'delete' | 'start'
 
@@ -272,7 +281,7 @@ function readWorkoutResultSessionId(
     const result = workoutAddResultSchema.safeParse(parsed)
     return result.success ? result.data.eventId : null
   }
-  const result = showResultSchema.safeParse(parsed)
+  const result = workoutEntityResultSchema.safeParse(parsed)
   return result.success && result.data.entity.kind === ACTIVITY_SESSION_KIND
     ? result.data.entity.id
     : null

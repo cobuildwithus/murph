@@ -58,7 +58,7 @@ test("registry imports project canonical fields through noun and generic reads",
     id: string;
     kind: string;
     data: Record<string, unknown>;
-    links: Array<{ id: string }>;
+    links?: Array<{ id: string }>;
   };
   try {
     assert.equal((await runCli(["init", "--vault", vaultRoot])).ok, true);
@@ -84,7 +84,7 @@ test("registry imports project canonical fields through noun and generic reads",
         for (const [field, expected] of Object.entries(scenario.expected)) {
           assert.deepEqual(entity.data[field], expected);
         }
-        assert.deepEqual(entity.links.map(link => link.id), scenario.links);
+        assert.deepEqual((entity.links ?? []).map(link => link.id), scenario.links);
       }
       for (const args of [[scenario.noun, "list"], ["list", "--kind", scenario.noun]]) {
         const result = await runCli<{ count: number; items: Entity[] }>([
@@ -549,6 +549,7 @@ test("goal import-json preserves omitted fields on patch updates", async () => {
     ]);
     const { envelope: shown } = await runInProcessJsonCli<{
       entity: {
+        title?: string;
         id: string;
         data: Record<string, unknown>;
       };
@@ -565,7 +566,7 @@ test("goal import-json preserves omitted fields on patch updates", async () => {
     assert.equal(patchTitle.ok, true);
     assert.equal(shown.ok, true);
     assert.equal(requireData(shown).entity.id, goalId);
-    assert.equal(requireData(shown).entity.data.title, "Sleep deeper");
+    assert.equal(requireData(shown).entity.title, "Sleep deeper");
     assert.equal(requireData(shown).entity.data.status, "completed");
     assert.equal(requireData(shown).entity.data.horizon, "short_term");
     assert.equal(requireData(shown).entity.data.priority, 2);
@@ -987,6 +988,7 @@ test("condition, allergy, and family patch upserts preserve omitted create-only 
     ]);
     const conditionShown = await runCli<{
       entity: {
+        title?: string;
         data: Record<string, unknown>;
       };
     }>([
@@ -1035,6 +1037,7 @@ test("condition, allergy, and family patch upserts preserve omitted create-only 
     ]);
     const allergyShown = await runCli<{
       entity: {
+        title?: string;
         data: Record<string, unknown>;
       };
     }>([
@@ -1083,6 +1086,7 @@ test("condition, allergy, and family patch upserts preserve omitted create-only 
     ]);
     const familyShown = await runCli<{
       entity: {
+        title?: string;
         data: Record<string, unknown>;
       };
     }>([
@@ -1096,20 +1100,20 @@ test("condition, allergy, and family patch upserts preserve omitted create-only 
     assert.equal(conditionCreated.ok, true);
     assert.equal(conditionPatched.ok, true);
     assert.equal(conditionShown.ok, true);
-    assert.equal(requireData(conditionShown).entity.data.title, "Migraine");
+    assert.equal(requireData(conditionShown).entity.title, "Migraine");
     assert.equal(requireData(conditionShown).entity.data.note, "Patch update preserved the title.");
 
     assert.equal(allergyCreated.ok, true);
     assert.equal(allergyPatched.ok, true);
     assert.equal(allergyShown.ok, true);
-    assert.equal(requireData(allergyShown).entity.data.title, "Peanut allergy");
+    assert.equal(requireData(allergyShown).entity.title, "Peanut allergy");
     assert.equal(requireData(allergyShown).entity.data.substance, "Peanut");
     assert.equal(requireData(allergyShown).entity.data.note, "Patch update preserved the substance.");
 
     assert.equal(familyCreated.ok, true);
     assert.equal(familyPatched.ok, true);
     assert.equal(familyShown.ok, true);
-    assert.equal(requireData(familyShown).entity.data.title, "Mother");
+    assert.equal(requireData(familyShown).entity.title, "Mother");
     assert.equal(requireData(familyShown).entity.data.relationship, "mother");
     assert.equal(requireData(familyShown).entity.data.note, "Patch update preserved the relationship.");
   } finally {
@@ -1274,6 +1278,7 @@ test("genetics import-json validates payloads through the shared schema and pres
     ]);
     const shown = await runCli<{
       entity: {
+        title?: string;
         data: Record<string, unknown>;
       };
     }>([
@@ -1296,7 +1301,7 @@ test("genetics import-json validates payloads through the shared schema and pres
     assert.equal(patched.ok, true);
     assert.equal(shown.ok, true);
     assert.equal(requireData(shown).entity.data.gene, "APOE");
-    assert.equal(requireData(shown).entity.data.title, "APOE e4 allele updated");
+    assert.equal(requireData(shown).entity.title, "APOE e4 allele updated");
     assert.equal(invalid.ok, false);
     assert.equal(invalid.error?.code, "invalid_payload");
     assert.match(invalid.error?.message ?? "", /genetics payload failed validation/i);
@@ -1933,9 +1938,9 @@ test("goal list and show preserve canonical links and strip reserved fields", as
       items: Array<{
         kind: string;
         title: string | null;
-        path: string | null;
+        path?: string;
         data: Record<string, unknown>;
-        links: Array<{ id: string }>;
+        links?: Array<{ id: string }>;
       }>;
     }>([
       "goal",
@@ -1947,10 +1952,10 @@ test("goal list and show preserve canonical links and strip reserved fields", as
       entity: {
         kind: string;
         title: string | null;
-        markdown: string | null;
-        path: string | null;
+        markdown?: string;
+        path?: string;
         data: Record<string, unknown>;
-        links: Array<{ id: string }>;
+        links?: Array<{ id: string }>;
       };
     }>([
       "show",
@@ -1964,7 +1969,7 @@ test("goal list and show preserve canonical links and strip reserved fields", as
     assert.equal(requireData(goalList).nextCursor, null);
     assert.equal(requireData(goalList).items[0]?.kind, "goal");
     assert.equal(requireData(goalList).items[0]?.title, "Recover better");
-    assert.equal(Boolean(requireData(goalList).items[0]?.path), true);
+    assert.equal(requireData(goalList).items[0]?.path, undefined);
     assert.equal("relativePath" in requireData(goalList).items[0]!.data, false);
     assert.equal("body" in requireData(goalList).items[0]!.data, false);
 
@@ -1972,10 +1977,7 @@ test("goal list and show preserve canonical links and strip reserved fields", as
     assert.equal(requireData(goalShow).entity.kind, "goal");
     assert.equal(requireData(goalShow).entity.title, "Recover better");
     assert.equal(Boolean(requireData(goalShow).entity.path), true);
-    assert.equal(
-      requireData(goalShow).entity.links.some((link) => link.id === goalId),
-      false,
-    );
+    assert.equal(requireData(goalShow).entity.links, undefined);
     assert.equal("relativePath" in requireData(goalShow).entity.data, false);
     assert.equal("body" in requireData(goalShow).entity.data, false);
   } finally {

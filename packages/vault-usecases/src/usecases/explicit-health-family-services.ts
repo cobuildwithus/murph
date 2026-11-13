@@ -58,7 +58,6 @@ import {
   toSavedEntitySnapshot,
   toSupplementListEntity,
   toSupplementReadEntity,
-  toSupplementDetailedListEntity,
 } from "./regimen-read-entities.js";
 import {
   normalizeRepeatableFlagOption,
@@ -1788,7 +1787,7 @@ export function createExplicitHealthQueryServices(
           status: input.status,
         },
         records.map((record: object) => input.includeDetails
-          ? toSupplementDetailedListEntity(record)
+          ? toSupplementReadEntity(record)
           : toSupplementListEntity(record)),
       );
     },

@@ -867,6 +867,38 @@ export const showResultSchema = z.object({
   entity: readEntitySchema,
 })
 
+// Record reads as the assistant sees them: absent means none, and nothing the
+// entity or `data` already says is repeated. `path` is the record's own file;
+// `markdown`/`excerpt` appear only when the body is not derived from `data`.
+export const recordReadEntitySchema = z.object({
+  id: z.string().min(1),
+  kind: z.string().min(1),
+  title: z.string().min(1).optional(),
+  occurredAt: isoTimestampSchema.optional(),
+  path: pathSchema.optional(),
+  markdown: z.string().optional(),
+  data: z.record(z.string(), z.unknown()),
+  links: z.array(entityRefSchema).optional(),
+})
+
+export const recordListEntitySchema = recordReadEntitySchema
+  .omit({
+    markdown: true,
+    path: true,
+  })
+  .extend({
+    excerpt: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('Compact excerpt of a body that `data` does not already hold.'),
+  })
+
+export const recordShowResultSchema = z.object({
+  vault: pathSchema,
+  entity: recordReadEntitySchema,
+})
+
 export const listFilterSchema = z.object({
   recordType: z
     .array(z.string().min(1))
@@ -922,6 +954,10 @@ export const listResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 })
 
+export const recordListResultSchema = listResultSchema.extend({
+  items: z.array(recordListEntitySchema),
+})
+
 export const deleteResultSchema = z.object({
   vault: pathSchema,
   entityId: z.string().min(1),
@@ -966,6 +1002,8 @@ export interface ListEntity extends Omit<ReadEntity, 'markdown' | 'data'> {
 }
 export type ListItem = ListEntity
 export type ShowResult = z.infer<typeof showResultSchema>
+export type RecordReadEntity = z.infer<typeof recordReadEntitySchema>
+export type RecordListEntity = z.infer<typeof recordListEntitySchema>
 export type ListFilters = z.infer<typeof listFilterSchema>
 export type ListResult = z.infer<typeof listResultSchema>
 export type ExportPackResult = z.infer<typeof exportPackResultSchema>
