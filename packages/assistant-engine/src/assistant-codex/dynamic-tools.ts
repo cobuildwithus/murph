@@ -102,6 +102,10 @@ import {
   type HostedUsageDiagnosticsRequest,
 } from '@murphai/hosted-execution/usage-diagnostics'
 import {
+  projectUsageDiagnosticsForModel,
+  withUsageDiagnosticsDefaults,
+} from './dynamic-tools/usage-diagnostics.js'
+import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
   type HostedPlanUsageStatus,
@@ -4269,8 +4273,10 @@ async function executeUsageDiagnosticsTool(
     return toolTextResult(false, 'usage diagnostics require a private conversation', 'authority_rejected')
   }
   try {
-    const result = parseHostedUsageDiagnosticsResponse(await context.usageDiagnostics.read(request))
-    return toolTextResult(true, safeToolPayloadText(result))
+    const result = parseHostedUsageDiagnosticsResponse(
+      await context.usageDiagnostics.read(withUsageDiagnosticsDefaults(request)),
+    )
+    return toolTextResult(true, safeToolPayloadText(projectUsageDiagnosticsForModel(result)))
   } catch (error) {
     return toolTextResult(false, 'usage diagnostics could not be read', 'handler_exception', error)
   }

@@ -60,7 +60,27 @@ describe('private usage diagnostics', () => {
     const result = await execute(hosted, { days: 7, limit: 10 })
     expect(hosted.usageDiagnostics?.read).toHaveBeenCalledExactlyOnceWith({ days: 7, limit: 10 })
     expect(result.rpcResult.success).toBe(true)
-    expect(JSON.parse(result.rpcResult.contentItems[0]?.text ?? '')).toEqual(syntheticUsageDiagnostics())
+    const report = syntheticUsageDiagnostics()
+    if (report.status !== 'available') throw new Error('Expected available usage')
+    // The description says omitted counts are zero; turns, records, costs,
+    // input/output tokens, tool bytes, rates and coverage flags always stay.
+    const { cacheWriteTokens: _write, unpricedRecords: _unpriced, ...row } = report.totals
+    const { allowanceExcludedRecords: _excluded, ...coverage } = report.coverage
+    expect(JSON.parse(result.rpcResult.contentItems[0]?.text ?? '')).toEqual({
+      ...report,
+      totals: row,
+      byModel: [{ ...row, model: 'gpt-6.1-sol', pricingBasis: 'standard' }],
+      bySource: [{ ...row, source: 'conversation' }],
+      topTurns: report.topTurns.map(({ cacheWriteTokens: _w, unpricedRecords: _u, ...turn }) => turn),
+      coverage,
+    })
+    expect(MURPH_USAGE_DIAGNOSTICS_TOOL.description).toContain('Omitted counts are zero.')
+  })
+  it('reads five turns unless the caller passes a limit', async () => {
+    const hosted = context()
+    expect((await execute(hosted, { days: 30 })).rpcResult.success).toBe(true)
+    expect(hosted.usageDiagnostics?.read).toHaveBeenCalledExactlyOnceWith({ days: 30, limit: 5 })
+    expect(MURPH_USAGE_DIAGNOSTICS_TOOL.description).toContain('covers 7 days and 5 turns')
   })
   it.each(['group', 'unverified-external', null] as const)('rejects non-private invocation scope %s', async (conversationScope) => {
     const hosted = context({ currentInvocationScope: () => ({ conversationScope, origin: {
