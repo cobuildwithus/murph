@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { executeDeviceDynamicTool, MURPH_DEVICE_TOOL, readDeviceDynamicToolRequest } from '../src/assistant-codex/dynamic-tools/device.js'
+import { buildToolCallValidationFeedback } from '../src/assistant/tool-validation-feedback.js'
 
 function readToolError(result: Awaited<ReturnType<typeof executeDeviceDynamicTool>>) {
   const text = result.rpcResult.contentItems[0]?.text ?? ''
@@ -72,13 +73,35 @@ async function executeDeviceFailure(
 
 describe('hosted device dynamic tool recovery', () => {
   it('exposes only account management and companion contact operations', () => {
-    const schema = JSON.parse(JSON.stringify(MURPH_DEVICE_TOOL.inputSchema))
-    const actions = schema.anyOf.map((variant: { properties: { action: { const: string } } }) => variant.properties.action.const)
-    expect([...new Set(actions)].sort()).toEqual([
+    type Variant = { oneOf?: Variant[]; properties?: { action: { const: string } } }
+    const collectActions = (variant: Variant): string[] => variant.oneOf
+      ? variant.oneOf.flatMap(collectActions)
+      : [variant.properties!.action.const]
+    const schema: Variant = JSON.parse(JSON.stringify(MURPH_DEVICE_TOOL.inputSchema))
+    expect([...new Set(collectActions(schema))].sort()).toEqual([
       'companion_status', 'configure_no_data_outreach', 'connect', 'list_accounts', 'reconcile',
     ])
     expect(readDeviceDynamicToolRequest({ tool: 'device', arguments: { action: 'vibrate' } })?.kind)
       .toBe('invalid-device-arguments')
+  })
+
+  it('returns only the called action\'s argument issues', async () => {
+    const feedback = async (args: unknown) => {
+      const request = readDeviceDynamicToolRequest({ tool: 'device', arguments: args })
+      if (request?.kind !== 'invalid-device-arguments') throw new Error('Expected rejected device arguments')
+      return JSON.parse(buildToolCallValidationFeedback(request.validationDigest, 'invalid_device_arguments'))
+    }
+    // A discriminated union reports the called branch only, without Zod's
+    // restated messages; an unknown action lists the valid actions once.
+    expect(await feedback({ action: 'connect' })).toEqual({ error: 'invalid_device_arguments',
+      validationIssues: [{ expected: 'string', code: 'invalid_type', path: ['provider'] }] })
+    expect(await feedback({ action: 'configure_no_data_outreach', mode: 'after_days', sourceProvider: 'garmin' }))
+      .toEqual({ error: 'invalid_device_arguments',
+        validationIssues: [{ expected: 'number', code: 'invalid_type', path: ['afterDays'] }] })
+    expect(await feedback({ action: 'vibrate' })).toEqual({ error: 'invalid_device_arguments',
+      validationIssues: [{ code: 'invalid_union', note: 'No matching discriminator', discriminator: 'action',
+        options: ['companion_status', 'list_accounts', 'connect', 'reconcile', 'configure_no_data_outreach'],
+        path: ['action'] }] })
   })
 
   for (const testCase of [
