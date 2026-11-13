@@ -2476,7 +2476,10 @@ and workout editor failures share `workout-card-editor`. Reported
 failures also count when their finite category is `unavailable`, `timeout`,
 `rate_limited`, or service HTTP `authority_rejected`. Schema rejections,
 validation-stage failures and routine invalid-input/not-found/conflict results
-do not; purely reported `unknown` results remain excluded. Unknown operations
+do not. Deliberate `limit_reached` refusals do not either, including a
+connected-app read the web tier rejects as larger than the model can read
+(`CONNECTED_APPS_RESULT_TOO_LARGE`); the model is told to narrow that read.
+Purely reported `unknown` results remain excluded. Unknown operations
 share a redacted `other_tool` bucket. SQL permits only
 registered operation labels, finite error categories and 40-character hex release
 SHAs; no member identifiers, summaries, private JSON or phone content leave SQL.

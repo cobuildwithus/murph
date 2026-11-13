@@ -64,6 +64,10 @@ const CONNECTED_APPS_AMBIGUOUS_EMAIL_SEND_MESSAGE =
 // untrusted proxy or provider body, so those failures report status alone.
 const CONNECTED_APPS_ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/u
 const CONNECTED_APPS_ERROR_MESSAGE_MAX_LENGTH = 300
+// The web tier refuses a read whose compacted result exceeds the model budget
+// and tells the model to narrow it. That is a deliberate limit on a too-broad
+// read, not a backend fault, so it must not count toward backend alerts.
+const CONNECTED_APPS_RESULT_TOO_LARGE_CODE = 'CONNECTED_APPS_RESULT_TOO_LARGE'
 
 export const MURPH_CONNECTED_APPS_MANAGE_TOOL = {
   namespace: 'murph',
@@ -233,8 +237,12 @@ export async function executeConnectedAppsDynamicTool(input: {
         'handler_exception', error,
       ), error)
     }
+    const failureReason =
+      readConnectedAppsControlPlaneFailure(error)?.code === CONNECTED_APPS_RESULT_TOO_LARGE_CODE
+        ? 'limit_reached'
+        : 'handler_exception'
     return withConnectedAppsToolFailureDetails(
-      connectedAppsTextResult(false, describeConnectedAppsFailure(error), 'handler_exception', error), error,
+      connectedAppsTextResult(false, describeConnectedAppsFailure(error), failureReason, error), error,
     )
   }
 }
