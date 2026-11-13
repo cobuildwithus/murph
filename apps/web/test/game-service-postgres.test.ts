@@ -2256,7 +2256,6 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const { requireGameMember } = await import("../src/lib/game/http/auth");
     const crypto = await import("../src/lib/game/crypto");
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 17).toString("base64url"));
     vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 9).toString("base64url"));
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "http://localhost:3237");

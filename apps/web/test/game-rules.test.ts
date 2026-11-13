@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { gameReminderReach, gameReminderWindow, reminderOpenDay } from "@/src/lib/game/reminders";
 import { gameChatProgress } from "@/src/lib/game/chat-progress";
 import type { GameEntryKind, GameSchedule } from "@/src/lib/game/contract";
-import { areGameDevToolsAllowed, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
+import { areGameDevToolsAllowed, gameOnSql, gameOnWhere, isGameEnabled, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
 import {
   assertGroupTermsOpen,
   decideCancelInvite,
@@ -675,65 +675,18 @@ describe("weekly game: dev time travel and start now", () => {
 });
 
 describe("weekly game: access", () => {
-  it("ships dark: on outside production, off in production unless enabled, allowlist narrows", () => {
-    expect(isGameEnabledFor(LEO, { NODE_ENV: "development" })).toBe(true);
-    expect(isGameEnabledFor(LEO, { NODE_ENV: "production" })).toBe(false);
-    expect(isGameEnabledFor(LEO, { MURPH_GAME_ENABLED: "true", NODE_ENV: "production" })).toBe(true);
-    expect(isGameEnabledFor(LEO, { MURPH_GAME_ENABLED: "false", NODE_ENV: "development" })).toBe(false);
-    const allowlisted = { MURPH_GAME_ENABLED: "true", MURPH_GAME_MEMBER_ALLOWLIST: `${AVA}, hbm_other`, NODE_ENV: "production" };
-    expect(isGameEnabledFor(AVA, allowlisted)).toBe(true);
-    expect(isGameEnabledFor(LEO, allowlisted)).toBe(false);
-    expect(isGameEnabled(allowlisted)).toBe(true);
+  it("ships dark: on outside production, off in production unless enabled", () => {
+    expect(isGameEnabled({ NODE_ENV: "development" })).toBe(true);
+    expect(isGameEnabled({ NODE_ENV: "production" })).toBe(false);
+    expect(isGameEnabled({ MURPH_GAME_ENABLED: "true", NODE_ENV: "production" })).toBe(true);
     expect(isGameEnabled({ MURPH_GAME_ENABLED: "false", NODE_ENV: "development" })).toBe(false);
   });
 
-  describe("invite-only: a game is on when one of its people is listed", () => {
-    const SAM = "hbm_sam";
-    const listedAva = { MURPH_GAME_ENABLED: "true", MURPH_GAME_MEMBER_ALLOWLIST: AVA, NODE_ENV: "production" };
-    const seats = (...memberIds: string[]) => memberIds.map((memberId) => ({ memberId }));
-
-    it("turns on a listed creator's game, invite and all, for the unlisted invitee", () => {
-      expect(isGameOn({ players: seats(AVA) }, listedAva)).toBe(true);
-      expect(isGameOn({ players: seats(AVA, LEO) }, listedAva)).toBe(true);
-      expect(isGameOn({ players: seats(LEO, AVA) }, listedAva)).toBe(true);
-    });
-
-    it("keeps a game between two unlisted members off", () => {
-      expect(isGameOn({ players: seats(LEO, SAM) }, listedAva)).toBe(false);
-      expect(isGameOn({ players: seats(LEO), invitees: [{ memberId: SAM }] }, listedAva)).toBe(false);
-      expect(isGameOn({ players: [] }, listedAva)).toBe(false);
-    });
-
-    it("refuses an unlisted member's fresh game, which has no one else in it", () => {
-      expect(isGameOn({ players: seats(LEO), invitees: [{ memberId: null }] }, listedAva)).toBe(false);
-      expect(isGameOn({ players: seats(LEO) }, listedAva)).toBe(false);
-    });
-
-    it("lets an unlisted member rematch the listed player, who is that invite's addressee", () => {
-      expect(isGameOn({ players: seats(LEO), invitees: [{ memberId: AVA }] }, listedAva)).toBe(true);
-    });
-
-    it("is off for everyone when the global switch is off, and on for every game with an empty list", () => {
-      const off = { MURPH_GAME_ENABLED: "false", MURPH_GAME_MEMBER_ALLOWLIST: AVA, NODE_ENV: "production" };
-      expect(isGameOn({ players: seats(AVA, LEO) }, off)).toBe(false);
-      expect(isGameOn({ players: seats(AVA), invitees: [{ memberId: AVA }] }, off)).toBe(false);
-      expect(gameOnWhere(off)).toEqual({ id: { in: [] } });
-      expect(gameOnSql("game", off).sql).toBe("FALSE");
-      const everyone = { MURPH_GAME_ENABLED: "true", NODE_ENV: "production" };
-      expect(isGameOn({ players: seats(LEO, SAM) }, everyone)).toBe(true);
-      expect(gameOnWhere(everyone)).toEqual({});
-      expect(gameOnSql("game", everyone).sql).toBe("TRUE");
-    });
-
-    it("states the same rule for database reads: a listed player or a listed addressee", () => {
-      expect(gameOnWhere(listedAva)).toEqual({ OR: [
-        { players: { some: { memberId: { in: [AVA] } } } },
-        { invitees: { some: { memberId: { in: [AVA] } } } },
-      ] });
-      const sql = gameOnSql("game", listedAva);
-      expect(sql.sql.replace(/\s+/gu, " ")).toBe("(EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id AND invited.member_id IN (?)) OR EXISTS (SELECT 1 FROM game_player listed WHERE listed.game_id = game.id AND listed.member_id IN (?)))");
-      expect(sql.values).toEqual([AVA, AVA]);
-    });
+  it.each([true, false])("keeps database filters in step with the switch (%s)", (enabled) => {
+    const env = { MURPH_GAME_ENABLED: String(enabled), NODE_ENV: "production" };
+    expect(gameOnWhere(env)).toEqual(enabled ? {} : { id: { in: [] } });
+    expect(gameOnSql(env).sql).toBe(enabled ? "TRUE" : "FALSE");
+    expect(gameOnSql(env).values).toEqual([]);
   });
 
   it("allows time travel everywhere except real production", () => {

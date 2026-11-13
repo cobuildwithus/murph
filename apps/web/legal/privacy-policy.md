@@ -143,7 +143,7 @@ If you play Murph's game, we collect:
 - **rep counts:** the game reads your iPhone's front camera to find your body's position and counts pushups on your iPhone. Camera frames are dropped right away and are never saved, shown, or sent. We receive only the rep card: the count, each rep's time and depth, and a heart rate summary if you add one;
 - **heart rate,** read over Bluetooth from a WHOOP you connect. Your iPhone shows your live heart rate while you get ready and while you record. We receive only the heart rate card for a recording, with its duration and average, low, and peak beats per minute, not each reading;
 - **routes** for a walk or run (see Location below);
-- **missed-day excuses:** the words you give for a missed day. If you explain by voice, your iPhone turns your speech into words and deletes the recording. Only the words are sent to us;
+- **missed-day excuses:** the words you give for a missed day;
 - **invite details:** if you pick someone from your contacts, their phone number stays on your iPhone and is used only to open a Messages draft that you send. The name, relationship, and photo you give them are kept as a private label that only you see;
 - **reports and blocks:** who you report or block, the reason and any note you add, and a copy of what you reported as it was at that moment; and
 - **notifications:** if you turn them on, a device address so we can tell you about new posts. These notifications don't include names, photos, tasks, or words.

@@ -12,7 +12,7 @@ import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNot
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readPendingGameChange } from "./change-words";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import type { GamePendingChange } from "./contract";
 import { buildGameProposalInstructions } from "@murphai/hosted-execution/runtime-control";
 export { buildGameProposalInstructions } from "@murphai/hosted-execution/runtime-control";
@@ -36,7 +36,7 @@ export async function deliverGameChangeProposal(gameId: string, proposalId: stri
   const proposal = game ? await readPendingGameChange(game) : null;
   if (!game || !["live", "negotiating"].includes(game.status) || isGameInviteExpired(game, now)
     || !proposal || proposal.id !== proposalId || !isPairRoster(game.players)) return false;
-  if (!isGameOn(game)) return false;
+  if (!isGameEnabled()) return false;
   if (proposal.origin === "chat") return false;
   const { phones, message } = await prepareGameChatPlayers(game, proposal);
   const players = gameMemberIds(game.players);
@@ -53,7 +53,7 @@ async function deliverGroupChangeProposal(gameId: string, proposalId: string, no
   const prisma = getPrisma();
   const { readCurrentGameChange, readGameChatProfiles, readGameNoticeRoom } = await import("./service");
   const current = await readCurrentGameChange(prisma, gameId, proposalId, now);
-  if (!current || !isGameOn(current.row)) return false;
+  if (!current || !isGameEnabled()) return false;
   const game = current.row;
   const proposal = await readPendingGameChange(game);
   if (!proposal || proposal.origin === "chat") return false;

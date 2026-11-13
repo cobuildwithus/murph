@@ -6183,10 +6183,9 @@ that just ended, with the existing clock slack at both boundaries.
 `PUT /blocks/:memberId`, `DELETE /blocks/:memberId`, and `POST /media`. Reads: `GET /home`,
 `GET /games/:id`, `GET /invites/:token`, `GET /media/:key`. They use a plain
 Better Auth bearer session, not the paid-member check, because invitees play
-free; the global flag hides every route. During allowlisted rollout, members
-may also enter through their enabled game or a valid invite. Owners of outgoing
-blocks retain admission to reach their own unblock controls after their last
-game ends; creation and individual game authorization remain unchanged. The invite preview and
+free; the global flag hides every route while off. When on, every signed-in
+member can enter and start games; individual game and content authorization
+still follow the roster and visibility rules. The invite preview and
 `/g/<token>` page are unauthenticated and honor only the global flag. Dev
 time-travel routes return 404 in real production; they move a per-game clock
 (`game.dev_clock_offset_ms`, added to the database clock as that game's "now"

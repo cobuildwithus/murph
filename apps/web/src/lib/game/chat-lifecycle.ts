@@ -21,7 +21,7 @@ import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-ide
 import { GameChatAudienceError, readGameChatAuthority, readGroupGameNoticeAuthority, bindPairGameChat, findExistingGameChat } from "./chat-membership";
 import { prepareGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "./chat-bootstrap";
 import { gameChatLifecycleEventId, gameMissedDayEventId, markGameChatGenerationQueuedTx, type GameChatLifecycleKind } from "./chat-lifecycle-receipt";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { parsePendingGameChange } from "./changes";
 import { deliverGameChangeProposal, readGameProposalDeliveryPlayers } from "./chat-delivery";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
@@ -318,7 +318,7 @@ async function processGameChallengeIntent(receipt: GameChatIntent, now: Date, pr
       data: { status: "skipped", skippedAt: now, skipReason: "game_lifecycle_superseded", retryAfterAt: null } });
     return false;
   }
-  if (!isGameOn(current.row)) return false;
+  if (!isGameEnabled()) return false;
   if (receipt.status === "generation_queued") return recoverGameNotificationWake(receipt.id, current.row.id, eventId!, now, "challenge");
   const instructions = await readGameChallengeInstructions(current);
   if (!instructions) return false;
@@ -477,7 +477,7 @@ export async function deliverGameChatLifecycle(gameId: string, kind: GameChatLif
     await prisma.hostedLinqDelivery.updateMany({ where: { source: "game_lifecycle", idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId), template: `game_${kind}`, status: "awaiting_generation" }, data: { status: "skipped", skippedAt: now, skipReason: "game_lifecycle_superseded", retryAfterAt: null } });
     return false;
   }
-  if (!isGameOn(game)) return false;
+  if (!isGameEnabled()) return false;
   const notice = parseGameResolutionNotice(eventId);
   if (notice) {
     const resolution = await readGameChangeResolution(prisma, gameId, notice.proposalId);
@@ -504,7 +504,7 @@ async function deliverGameTalk(gameId: string, proposalId: string | undefined, n
     return false;
   }
   const { game, actor, noteEncrypted } = current;
-  if (!isGameOn(game)) return false;
+  if (!isGameEnabled()) return false;
   if (receipt?.status === "generation_queued") return recoverGameNotificationWake(receipt.id, gameId, eventId, now, "talk");
   const players = game.players.flatMap(player => player.memberId && (game.maxPlayers !== 10 || !player.leftAt) ? [player.memberId] : []);
   if (game.maxPlayers === 10) {

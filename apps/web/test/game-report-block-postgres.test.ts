@@ -22,7 +22,7 @@ import { applyGameAccountDeletionTx, prepareGameAccountDeletion } from "@/src/li
 import { reserveGameChatLifecycleTx } from "@/src/lib/game/chat-lifecycle-receipt";
 import { openGameTexts } from "@/src/lib/game/crypto";
 import { readGameReportQueue, reviewGameReport } from "@/src/lib/game/report-review";
-import { canEnterGame, devSettleNow, devStartNow, readGame, readGameChatState, readHome, removeGamePostForReview, runGameCommand } from "@/src/lib/game/service";
+import { devSettleNow, devStartNow, readGame, readGameChatState, readHome, removeGamePostForReview, runGameCommand } from "@/src/lib/game/service";
 import { getPrisma } from "@/src/lib/prisma";
 
 const runPostgresProof = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -587,22 +587,6 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     expect(await run(reporter, report(gameId, { about: "post", entryId })))
       .toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
     expect(mocks.sendEmail).not.toHaveBeenCalled();
-  });
-
-  it("admits an unlisted reporter through the HTTP door after their invite closes", async () => {
-    const creator = await member("Alex"), reporter = await member("Sam"), outsider = await member("Jo");
-    const { gameId, token } = await invite(creator);
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", creator);
-    try {
-      expect(await canEnterGame(reporter, token)).toBe(true);
-      await ok(reporter, report(gameId, { gameId: undefined, token }));
-      await ok(creator, { type: "cancelInvite", gameId });
-      expect(await canEnterGame(reporter, token)).toBe(true);
-      expect(await canEnterGame(outsider, token)).toBe(false);
-      await deleteMember(creator);
-      expect(await canEnterGame(reporter, token)).toBe(true);
-      expect(await canEnterGame(outsider, token)).toBe(false);
-    } finally { vi.unstubAllEnvs(); }
   });
 
   it.each(["post", "player", "terms", "invite", "reply"] as const)("freezes the accepted alert inputs for a %s report", async kind => {

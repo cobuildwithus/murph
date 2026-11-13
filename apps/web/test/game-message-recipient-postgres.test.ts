@@ -88,7 +88,6 @@ async function liveGame(challenger: string, invitee: string) {
 describe.skipIf(!enabled)("Message on a live pair game texts the other player", () => {
   beforeAll(() => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     vi.stubEnv("VERCEL_ENV", "");
     vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 17).toString("base64url"));
     vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 9).toString("base64url"));

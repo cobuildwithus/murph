@@ -10,7 +10,7 @@ import { getPrisma } from "../prisma";
 import { lockGamePair } from "./blocks";
 import { isGameMemberSet, sameGameMembers } from "./roster";
 import { GAME_MAX_OPEN_PER_PAIR } from "./rules";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { normalizeHostedEmailAddress } from "../hosted-onboarding/contact-privacy";
 import { createHostedLinqParticipantContact, createHostedLinqParticipantContactLookupKeyReadCandidates } from "../hosted-onboarding/linq-participant-contact";
@@ -37,12 +37,7 @@ export async function readGameChatPlayerIds(containerMemberId: string, prisma: P
     select: { participants: { where: { removedAt: null }, select: { participantMemberId: true }, take: 11 } },
   });
   const players = container?.participants.map((participant) => participant.participantMemberId) ?? [];
-  return sameGamePlayers(players, players) && isGameAudienceOn(players) ? players : [];
-}
-
-/** Rollout follows the current room audience. */
-function isGameAudienceOn(playerMemberIds: readonly string[]): boolean {
-  return isGameOn({ players: playerMemberIds.map((memberId) => ({ memberId })) });
+  return sameGamePlayers(players, players) && isGameEnabled() ? players : [];
 }
 
 export function gamePairWhere(playerMemberIds: readonly string[]): Prisma.GameWhereInput {
@@ -77,7 +72,7 @@ export function gameChatPlayerIds(game: { maxPlayers?: number; status: string; p
 export async function readGameChatCandidateIds(playerMemberIds: readonly string[], multiplayer = true, containerMemberId?: string): Promise<string[]> {
   // Group projections require a bound room; roomless notice context stays pair-only.
   multiplayer = containerMemberId ? multiplayer : false;
-  if (((!multiplayer || !containerMemberId) && !sameGamePlayers(playerMemberIds, playerMemberIds)) || !isGameAudienceOn(playerMemberIds)) return [];
+  if (((!multiplayer || !containerMemberId) && !sameGamePlayers(playerMemberIds, playerMemberIds)) || playerMemberIds.length === 0 || !isGameEnabled()) return [];
   const prisma = getPrisma();
   const [active, settled] = await Promise.all([
     prisma.game.findMany({ where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), OR: [

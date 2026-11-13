@@ -24,7 +24,7 @@ import { isGameRecapGenerationRetired } from "./recap-witness";
 import { acceptedGameRecapMessage, gameRecapMessage } from "./recap-message";
 import { gameRecapToolResult, validateGameRecap, withValidGameSuperlatives, type GameRecapChatMessage } from "./recap";
 import { addressedGameRematchWhere, gameChatPlayerIds, gamePairWhere, readGameChatPlayerIds, readGameChatAudience, readGameChatAuthority, type GameChatAudience, hasGameChatRestriction, requireExactGameChat, sameGamePlayers } from "./chat-membership";
-import { isGameEnabled, isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "./audience";
 
 type Input = { audience?: GameChatAudience; multiplayer?: boolean; memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: HostedGameToolRequest; playerMemberIds?: readonly string[] };
@@ -44,7 +44,6 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
   try { playerMemberIds = input.audience?.memberIds ?? await requireExactGameChat(input.memberId, input.multiplayer); }
   catch { return { action: input.request.action, result: { status: "unavailable", error: "Use the game’s exact group chat with Murph, or start in the app." } }; }
   if (!supportsGameChatRoster(input, playerMemberIds) || !playerMemberIds.includes(actor)) return { action: input.request.action, result: { status: "unavailable", error: "game_player_unavailable" } };
-  if (!isGameOn({ players: playerMemberIds.map(memberId => ({ memberId })) })) return { action: input.request.action, result: { status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." } };
   let dayOutcome: Extract<Awaited<ReturnType<typeof runGameCommand>>, { ok: true }>["dayOutcome"];
   let photoResult: Awaited<ReturnType<typeof handleGameChatPhoto>> | null = null;
   if (input.request.action === "game_photo") {
@@ -162,8 +161,7 @@ async function handleScheduledGameRead(input: Input): Promise<HostedGameToolResp
     players = input.audience?.memberIds ?? await requireExactGameChat(input.memberId);
   }
   catch { return { action: "read_game", result: { status: "unavailable", error: "Use the game’s exact group chat with Murph, or start in the app." } }; }
-  if (!input.multiplayer && players.length !== 2) return { action: "read_game", result: { status: "unavailable", error: "game_player_unavailable" } };
-  if (!isGameOn({ players: players.map(memberId => ({ memberId })) })) return { action: "read_game", result: { status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." } };
+  if (players.length === 0 || !input.multiplayer && players.length !== 2) return { action: "read_game", result: { status: "unavailable", error: "game_player_unavailable" } };
   const state = await readGameToolState(input, players);
   const lore = await readGameToolLore(state, input.audience);
   return { action: "read_game", result: { status: "ok", state, ...lore } };
@@ -199,7 +197,7 @@ async function canRunGameChatRequestTx(input: Input, players: readonly string[],
     where: { OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled", ...(replayableApproval ? ["void" as const] : [])] } }, addressedGameRematchWhere(players), ...(input.multiplayer ? [{ chatContainerMemberId: input.memberId }] : [])], ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : input.request.action === "game_photo" ? { id: input.request.photo.gameId } : {}) },
     include: { invitees: true, players: { take: 11 } },
   });
-  if (!game || !isGameOn(game)) return false;
+  if (!game || !isGameEnabled()) return false;
   if (input.multiplayer) {
     if (!input.audience || !await readGameChatAuthority(game, input.memberId, input.audience, tx)) return false;
   } else if (game.maxPlayers === 10 || !areGamePlayersAllowed(game, players)) return false;
@@ -400,7 +398,7 @@ function readGameIncomingRoute(wake: HostedExecutionConversationMessageWake, con
 
 function areGamePlayersAllowed(game: Parameters<typeof gameChatPlayerIds>[0], expected: readonly string[]): boolean {
   const players = gameChatPlayerIds(game);
-  if (!isGameMemberSet(players) || !isGameOn(game)) return false;
+  if (!isGameMemberSet(players) || !isGameEnabled()) return false;
   return sameGamePlayers(players, expected);
 }
 

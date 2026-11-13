@@ -5,13 +5,16 @@ import path from "node:path";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ push: vi.fn().mockResolvedValue("sent"), reviewer: vi.fn() }));
+const mocks = vi.hoisted(() => ({ push: vi.fn().mockResolvedValue("sent"), reviewer: vi.fn(), auth: vi.fn(), readPhoto: vi.fn() }));
 vi.mock("@/src/lib/apple-push/send", async (original) => ({
   ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: mocks.push,
 }));
 vi.mock("@/src/lib/better-auth/review-account", async (original) => ({
   ...await original<typeof import("@/src/lib/better-auth/review-account")>(), readHostedAuthReviewMemberId: mocks.reviewer,
+  isHostedAuthReviewMember: async ({ memberId }: { memberId: string }) => memberId === await mocks.reviewer(),
 }));
+vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMemberAuth: mocks.auth }));
+vi.mock("@/app/app-review-game-photos", () => ({ readAppReviewGamePhoto: mocks.readPhoto }));
 // Real roots and sealing for the crypto case; only KMS is the local provider.
 vi.mock("@/src/lib/hosted-crypto/env", async () => {
   const { generateKeyPairSync } = await import("node:crypto");
@@ -36,7 +39,11 @@ vi.mock("@/src/lib/hosted-crypto/env", async () => {
 import {
   APP_REVIEW_PARTNER_MEMBER_ID,
   seedHostedOpsAppReviewGame,
+  refreshAppReviewGameForHome,
 } from "@/src/lib/hosted-ops/app-review-game";
+import { GET as homeRoute } from "../app/api/game/v1/home/route";
+import type { GameHomeView } from "@/src/lib/game/contract";
+import { addDays, dayStartInstant, gameLocalDate } from "@/src/lib/game/time";
 import { labelTarget, sealGameText } from "@/src/lib/game/crypto";
 import { readHome, runGameCommand } from "@/src/lib/game/service";
 import { prepareHostedDomainRootForWeb, revalidatePreparedHostedDomainRootForWebTx } from "@/src/lib/hosted-crypto/domain-root-store";
@@ -77,6 +84,30 @@ async function sideEffects() {
   return { events: [...new Set(events.map((event) => event.type))].sort(), linq: ids.length ? linq : 0, mailbox, push: mocks.push.mock.calls.length };
 }
 
+async function seedDaysAgo(days: number) {
+  const [{ now }] = await getPrisma().$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`;
+  const date = addDays(gameLocalDate(now, "America/Los_Angeles"), -days);
+  await seedHostedOpsAppReviewGame({ mode: "apply", now: dayStartInstant(date, "America/Los_Angeles"), readPhoto });
+}
+
+function partnerGames() {
+  return getPrisma().game.findMany({ where: { players: { some: { memberId: partner } } }, select: { id: true, status: true }, orderBy: { id: "asc" } });
+}
+
+async function routeHome(): Promise<GameHomeView> {
+  const response = await homeRoute(new Request("http://localhost/api/game/v1/home"));
+  expect(response.status).toBe(200);
+  return response.json();
+}
+
+function expectFreshHome(home: GameHomeView) {
+  expect(home.games.map(game => game.status)).toEqual(["live", "settled"]);
+  const live = home.games[0];
+  expect(live.players.find(player => player.isMe)?.dayIndex).toBe(2);
+  expect(live.days[2]).toMatchObject({ mine: null, others: [{ status: "locked", entry: null }] });
+  expect(live.days[2].others[0].preview?.mediaUrl).toBeTruthy();
+}
+
 describe.skipIf(!enabled)("App Review game seed against PostgreSQL", () => {
   beforeAll(async () => {
     mediaDir = await mkdtemp(path.join(process.env.MURPH_VITEST_TEMP_ROOT ?? tmpdir(), "app-review-game-media-"));
@@ -91,16 +122,18 @@ describe.skipIf(!enabled)("App Review game seed against PostgreSQL", () => {
 
   beforeEach(async () => {
     mocks.push.mockClear();
+    mocks.readPhoto.mockReset().mockImplementation(readPhoto);
     reviewer = `hbm_reviewtest_${randomUUID().slice(0, 8)}`;
     await getPrisma().hostedMember.create({ data: { billingStatus: "active", id: reviewer } });
     await provisionControlRoot(reviewer);
     mocks.reviewer.mockResolvedValue(reviewer);
+    mocks.auth.mockResolvedValue({ member: { id: reviewer } });
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", reviewer);
   });
 
   afterEach(async () => {
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
     await getPrisma().game.deleteMany({ where: { wordsOwnerMemberId: { in: [reviewer, partner] } } });
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: [reviewer, partner] } } });
   });
@@ -111,7 +144,7 @@ describe.skipIf(!enabled)("App Review game seed against PostgreSQL", () => {
     expect(summary).toMatchObject({
       action: "dry-run",
       blockers: [],
-      partner: { contactSurfaces: [], exists: false, gameEnabled: false, id: partner },
+      partner: { contactSurfaces: [], exists: false, gameEnabled: true, id: partner },
       plan: { live: { partnerPostedToday: true, round: 2, todayDay: 3 }, settled: { round: 1, scores: { partner: 3, reviewer: 4 } } },
       replacedGames: [],
       reviewMember: { gameEnabled: true, gameProfile: false, id: reviewer, phoneVerified: false, suspended: false },
@@ -130,8 +163,7 @@ describe.skipIf(!enabled)("App Review game seed against PostgreSQL", () => {
   });
 
   it("seeds a live game to play and a settled one with an IOU, without any send", async () => {
-    // Both on the list: only the partner's missing phone, email and push route keep sends away.
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", `${reviewer},${partner}`);
+    // Only the partner's missing phone, email and push route keep sends away.
     const applied = await seedHostedOpsAppReviewGame({ mode: "apply", readPhoto });
     expect(applied.created?.map((game) => game.status)).toEqual(["settled", "live"]);
 
@@ -160,6 +192,103 @@ describe.skipIf(!enabled)("App Review game seed against PostgreSQL", () => {
     const redeemed = await runGameCommand({ actorMemberId: reviewer, command: { ticketId: home.wallet.held[0].id, type: "redeem" } });
     expect(redeemed.ok).toBe(true);
     expect(await sideEffects()).toEqual({ events: ["app_review_seeded", "posted", "redeemed"], linq: 0, mailbox: 0, push: 0 });
+  });
+
+  it("shows Day 4, yesterday's locked photo and the settled IOU one game day after seeding", async () => {
+    await seedDaysAgo(1);
+    const home = await readHome(reviewer);
+    expect(home.games.map((game) => [game.status, game.round])).toEqual([["live", 2], ["settled", 1]]);
+    const live = home.games[0];
+    expect(live.players.find(player => player.isMe)?.dayIndex).toBe(3);
+    expect(live.days[2]).toMatchObject({ mine: null, others: [{ status: "locked", entry: null }] });
+    expect(live.days[3]).toMatchObject({ mine: null, others: [{ status: "none", entry: null }] });
+    expect(home.wallet.held).toEqual([expect.objectContaining({ status: "open" })]);
+  });
+
+  it.each([1, 3, 35])("refreshes Home after %s game days, then keeps the same games all day", async (days) => {
+    await seedDaysAgo(days);
+    const old = await partnerGames();
+    const home = await routeHome();
+    expectFreshHome(home);
+    expect(await getPrisma().game.count({ where: { id: { in: old.map(game => game.id) } } })).toBe(0);
+    const again = await routeHome();
+    expect(again.games.map(game => game.id)).toEqual(home.games.map(game => game.id));
+    expect(await sideEffects()).toEqual({ events: ["app_review_seeded"], linq: 0, mailbox: 0, push: 0 });
+  });
+
+  it("creates the initial seed on Home and preserves it despite unrelated seed constants changing", async () => {
+    const home = await routeHome();
+    expectFreshHome(home);
+    const live = home.games.find(game => game.status === "live")!;
+    await getPrisma().game.update({ where: { id: live.id }, data: { round: 4, lengthDays: 28, createdBy: reviewer } });
+    expect((await routeHome()).games.map(game => game.id)).toEqual(home.games.map(game => game.id));
+  });
+
+  it("concurrent Home reads both return the one replacement pair", async () => {
+    await seedDaysAgo(1);
+    const old = await partnerGames();
+    // Both requests must finish the initial freshness check before either can write.
+    let arrivals = 0;
+    let release!: () => void;
+    const ready = new Promise<void>(resolve => { release = resolve; });
+    mocks.readPhoto.mockImplementation(async (file: string) => {
+      if (file.endsWith("hero-at-home-static-stretching-latest.jpeg")) {
+        arrivals += 1;
+        if (arrivals === 2) release();
+        await ready;
+      }
+      return readPhoto(file);
+    });
+    const homes = await Promise.all([routeHome(), routeHome()]);
+    expect(arrivals).toBe(2);
+    homes.forEach(expectFreshHome);
+    expect(homes[0].games.map(game => game.id)).toEqual(homes[1].games.map(game => game.id));
+    const stored = await partnerGames();
+    expect(stored.map(game => game.status).sort()).toEqual(["live", "settled"]);
+    expect(stored.map(game => game.id).sort()).toEqual(homes[0].games.map(game => game.id).sort());
+    expect(stored.some(game => old.some(previous => previous.id === game.id))).toBe(false);
+  });
+
+  it("re-reads an initial Home that predates another completed refresh and reports no fictional writes", async () => {
+    await seedDaysAgo(1);
+    const initial = await readHome(reviewer);
+    const refreshed = await routeHome();
+    expect(await refreshAppReviewGameForHome({ memberId: reviewer, homeGameIds: initial.games.map(game => game.id), readPhoto })).toBe(true);
+    const [{ now }] = await getPrisma().$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`;
+    const skipped = await seedHostedOpsAppReviewGame({ mode: "apply", onlyIfStale: true, now, readPhoto });
+    expect(skipped.created).toEqual([]);
+    expect(skipped.replacedGames).toEqual([]);
+    expect((await routeHome()).games.map(game => game.id)).toEqual(refreshed.games.map(game => game.id));
+  });
+
+  it("an ordinary member's Home never touches the stale opponent games", async () => {
+    await seedDaysAgo(1);
+    const before = await partnerGames();
+    const other = `hbm_review_other_${randomUUID()}`;
+    await getPrisma().hostedMember.create({ data: { id: other } });
+    mocks.auth.mockResolvedValue({ member: { id: other } });
+    try {
+      mocks.readPhoto.mockClear();
+      expect((await routeHome()).games).toEqual([]);
+      expect(await partnerGames()).toEqual(before);
+      expect(mocks.readPhoto).not.toHaveBeenCalled();
+    } finally {
+      await getPrisma().hostedMember.delete({ where: { id: other } });
+    }
+  });
+
+  it.each(["block", "photo", "storage"])("serves the existing Home when refresh fails because of %s", async (failure) => {
+    await seedDaysAgo(1);
+    const before = await partnerGames();
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    if (failure === "block") await getPrisma().gameBlock.create({ data: { blockerMemberId: reviewer, blockedMemberId: partner } });
+    if (failure === "photo") mocks.readPhoto.mockRejectedValue(new Error("Synthetic private detail must not be logged"));
+    if (failure === "storage") vi.spyOn(await import("@/src/lib/game/media"), "isGameMediaStorageAvailable").mockReturnValue(false);
+    const expected = await readHome(reviewer);
+    const home = await routeHome();
+    expect(home.games.map(game => game.id)).toEqual(expected.games.map(game => game.id));
+    expect(await partnerGames()).toEqual(before);
+    expect(warning).toHaveBeenCalledExactlyOnceWith("App Review game refresh failed", failure === "photo" ? "Error" : "APP_REVIEW_GAME_BLOCKED");
   });
 
   it("replaces the partner's games on every run and keeps the reviewer's own name", async () => {
