@@ -20,6 +20,7 @@ describe("hosted Stripe payment notification email", () => {
     ["subscription_create", "subscription_create"],
     ["subscription_threshold", "subscription_threshold"],
     ["subscription_update", "subscription_update"],
+    ["future_billing_reason", "invoice"],
     [null, "invoice"],
   ] as const)(
     "classifies a positive invoice.paid with billing reason %s",
@@ -171,12 +172,7 @@ describe("hosted Stripe payment notification email", () => {
 
 function makeInvoicePaidEvent(overrides?: {
   amountPaid?: number | null;
-  billingReason?:
-    | "subscription_create"
-    | "subscription_cycle"
-    | "subscription_threshold"
-    | "subscription_update"
-    | null;
+  billingReason?: Stripe.Invoice["billing_reason"];
   customer?: string;
   customerEmail?: string;
 }): Stripe.Event {
