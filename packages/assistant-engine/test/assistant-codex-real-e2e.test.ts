@@ -50217,7 +50217,7 @@ function hostingGame(extra: Partial<HostingGame> = {}): HostingGame {
     pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: true, canEditTasks: true, canEditStakes: true, editableFromDay: 0 }, ...extra }
 }
 
-async function runHostingTurn(input: { name: string; prompt: string; state: HostingState; actor?: number; update?: (update: HostingUpdate) => void }) {
+async function runHostingTurn(input: { name: string; prompt: string; state: HostingState; actor?: number; update?: (update: HostingUpdate) => void | string }) {
   const config = await resolveRealCodexE2eConfig()
   const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-hosting-proof-'))
   const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
@@ -50229,7 +50229,8 @@ async function runHostingTurn(input: { name: string; prompt: string; state: Host
     calls.push(request)
     if (request.action === 'update_game') {
       if (!input.update) throw new Error('No game mutation authorized')
-      input.update(request.update)
+      const refusal = input.update(request.update)
+      if (refusal) return hostedGameToolResponseSchema.parse({ action: 'update_game', result: { status: 'rejected', error: refusal } })
       if (request.update.operation === 'set_reminder') return hostedGameToolResponseSchema.parse({ action: 'update_game', result: { status: 'ok', reaches: 'push' } })
     }
     else if (request.action !== 'read_game') throw new Error('No other game effect authorized')
@@ -50910,3 +50911,56 @@ describeRealCodex('both-win settled reader', () => {
     expect(result.reply).not.toMatch(/owe|debt|ticket|stake|wager|bet|—/iu);
   }, 360_000);
 });
+
+
+describeRealCodex('both-win player agreement', () => {
+  it('both-win agree proposes only the named shared prize and approves the other player yes', async () => {
+    const game = hostingGame({ id: 'both_win_agreement', maxPlayers: undefined, pendingInviteeCount: undefined, startsOn: '2030-03-01',
+      players: ['Ava', 'Leo'].map((firstName, seat) => ({ memberId: `player_${seat}`, firstName, seat, dayOne: '2030-03-01', timeZone: 'UTC' })) })
+    const state = { games: [game] }
+    const asked = await runHostingTurn({ name: 'both-win agree ask', state, prompt: 'Ava: Murph, add dinner out together as a prize we both get if we both do every day.',
+      update: update => {
+        expect(update).toMatchObject({ operation: 'propose', gameId: game.id, expectedTermsVersion: 1,
+          change: { kind: 'edit', stakes: [{ kind: 'both_get', item: expect.stringMatching(/dinner/iu) }] } })
+        if (update.operation !== 'propose') throw new Error('Expected a proposal')
+        expect(update.change).toEqual({ kind: 'edit', stakes: [{ kind: 'both_get', item: expect.any(String) }] })
+        game.pendingChange = { id: 'both_win_ask', proposedByMemberId: 'player_0', expectedTermsVersion: 1,
+          origin: 'chat', deliveryStatus: 'conversation', startsOn: null, effectiveFromDay: 6, change: update.change }
+      } })
+    expect(asked.calls.map(call => call.action)).toEqual(['read_game', 'update_game'])
+    expect(asked.reply).toMatch(/Leo/u); expect(asked.reply).toMatch(/\?/u)
+    expect(asked.saves).toHaveLength(0)
+    const approved = await runHostingTurn({ name: 'both-win agree yes', actor: 1, state,
+      prompt: `Murph just said: ${asked.reply}\nLeo: Yes, Murph.`, update: update => {
+        expect(update).toMatchObject({ operation: 'approve', gameId: game.id, proposalId: 'both_win_ask' })
+        game.pendingChange = null; game.terms.n = 2
+        game.terms.stakes.push({ kind: 'both_get', item: 'Dinner out together' })
+      } })
+    expect(approved.calls.map(call => call.action)).toEqual(['read_game', 'update_game'])
+    expect(approved.reply).not.toMatch(/\?|\bstake\b|owe/iu); expect(approved.saves).toHaveLength(0)
+  }, 360_000)
+
+  it('both-win bare yes asks what the prize should be without proposing one', async () => {
+    const game = hostingGame({ id: 'both_win_bare_yes', maxPlayers: undefined, pendingInviteeCount: undefined, startsOn: '2030-03-01',
+      players: ['Ava', 'Leo'].map((firstName, seat) => ({ memberId: `player_${seat}`, firstName, seat, dayOne: '2030-03-01', timeZone: 'UTC' })) })
+    const result = await runHostingTurn({ name: 'both-win bare yes', state: { games: [game] },
+      prompt: 'Murph offered Ava and Leo a prize they both get if they both finish every day, and said one names it and the other says yes. Nobody has named a prize. Ava: Sure, Murph.' })
+    expect(result.calls.map(call => call.action)).toEqual(['read_game']); expect(result.saves).toHaveLength(0)
+    expect(result.reply.match(/\?/gu)).toHaveLength(1)
+    expect(result.reply).toMatch(/prize|what.*(?:like|want|should|choose)/iu)
+    expect(result.reply).not.toMatch(/added|dinner|\bstake\b/iu)
+  }, 360_000)
+
+  it('both-win after-miss refusal says it cannot be earned once and does not retry', async () => {
+    const game = hostingGame({ id: 'both_win_refusal', maxPlayers: undefined, pendingInviteeCount: undefined, startsOn: '2030-03-01',
+      players: ['Ava', 'Leo'].map((firstName, seat) => ({ memberId: `player_${seat}`, firstName, seat, dayOne: '2030-03-01', timeZone: 'UTC' })) })
+    const result = await runHostingTurn({ name: 'both-win after-miss refusal', state: { games: [game] },
+      prompt: 'Ava: Murph, add dinner out together as a prize we both get for doing every day.', update: update => {
+        expect(update).toMatchObject({ operation: 'propose', change: { kind: 'edit', stakes: [{ kind: 'both_get', item: expect.any(String) }] } })
+        return 'A day has been missed, so a prize you both get can no longer be earned in this game.'
+      } })
+    expect(result.calls.map(call => call.action)).toEqual(['read_game', 'update_game']); expect(result.saves).toHaveLength(0)
+    expect(result.reply).toMatch(/missed/iu); expect(result.reply).toMatch(/no longer|can.t|cannot|can no longer/iu)
+    expect(result.reply).not.toMatch(/\?|\bstake\b|try again|(?<!no longer be )added/iu)
+  }, 360_000)
+})

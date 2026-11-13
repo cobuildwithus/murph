@@ -511,6 +511,19 @@ export function validNewStakes(stakes: readonly { kind: GameStakeKind }[]): void
   }
 }
 
+/** A modern pair can change either prize slot; legacy lists still replace as a whole. */
+export function validChangedStakes(state: RuleState, stakes: readonly { kind: GameStakeKind }[]): void {
+  const current = currentTerms(state.game.terms).stakes;
+  const legacy = current.some(stake => stake.kind === "winner_gets" || stake.kind === "per_miss");
+  const modern = current.some(stake => stake.kind === "prize" || stake.kind === "dare");
+  const both = stakes.filter(stake => stake.kind === "both_get").length;
+  const primary = stakes.filter(stake => stake.kind === "prize" || stake.kind === "dare").length;
+  if (both && (state.game.seats !== 2 || legacy || !modern)
+    || modern && !legacy && (!stakes.length || primary > 1 || both > 1 || primary + both !== stakes.length)) {
+    reject("INVALID_REQUEST", "A game can have one prize or dare and one prize you both get.");
+  }
+}
+
 /** Modern prizes occupy independent slots; legacy games retain whole-list replacement. */
 export function mergeStakeSlots<T extends { kind: GameStakeKind }>(current: readonly T[], delta: readonly T[]): T[] {
   if (current.some(stake => stake.kind === "winner_gets" || stake.kind === "per_miss")

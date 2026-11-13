@@ -832,7 +832,15 @@ resulting avatar. No private photo is shared with the subject or other players.
   Murph says both earned it; if either missed a day, it lapses without a ticket.
   Terms and views keep the prize or dare first. Prize edits preserve the unnamed
   both-win slot and its key; legacy kinds retain whole-list replacement. Rematches
-  compare the original prize or dare and never copy the both-win prize. Readers
+  compare the original prize or dare and never copy the both-win prize. A player
+  names a both-win prize in chat and the other agrees through the existing change
+  path. A delta names at most one prize or dare and one both-win prize. Group and
+  legacy-kind games cannot add one; create still accepts only one prize or dare.
+  Proposal and approval both reject a requested both-win prize after a closed
+  scheduled miss, using each player's clock and grace hour. An ask approved after
+  a miss expires; an ordinary prize edit remains valid after the shared prize
+  lapses. Any-N-days games can accept a requested prize until the game ends.
+  Readers
   accept this kind before any writer is enabled, including pending asks. Recap
   fallback names the earned prize when available, otherwise says both get their
   prize. Each ticket carries its stake kind. The
