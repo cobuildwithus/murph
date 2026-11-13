@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-13",
+  "order": 100,
+  "item": {
+    "id": "google-health-fitbit-switch",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Move from Fitbit to Google Health",
+    "summary": "Connect Google Health to bring in your wearable history while your Fitbit connection is being retired.",
+    "details": "Your earlier Fitbit records remain available. Once Google Health is connected, Murph can use its data without waiting for a matching history or resource list.",
+    "relevanceTags": ["wearables", "google-health", "fitbit"],
+    "sourcePullRequests": []
+  }
+}

@@ -14,7 +14,6 @@ import {
 import {
   DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE,
   isGoogleHealthFitbitMigrationLegacyTerminal,
-  isGoogleHealthFitbitMigrationSuccessorReady,
 } from "@murphai/device-syncd/fitbit-migration";
 import type { HostedDeviceSyncSettingsSource } from "./settings-surface";
 import type { ConnectSource, LogoAsset } from "./connect-source-types";
@@ -708,16 +707,7 @@ function resolveFitbitMigrationConnectionState(input: {
       normalizeDeviceSyncConnectTargetKey(source.sourceProviderSlug) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG &&
       isLiveJunctionUpstreamSource(source),
   );
-  const successorReady = successor
-    && successor.fitbitMigrationCoverageReady === true
-    ? isGoogleHealthFitbitMigrationSuccessorReady({
-        firstSeenAt: successor.firstSeenAt,
-        historicalBackfillComplete: successor.historicalBackfillComplete === true,
-        lastDataAt: successor.lastDataAt,
-        resourceCount: successor.resourceCount,
-        status: successor.status,
-      })
-    : false;
+  const successorReady = successor?.status === "connected";
   const successorNeedsAuthorization =
     !successor ||
     successor.status === "error" ||

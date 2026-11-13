@@ -25,7 +25,6 @@ import {
 import { test, vi } from "vitest";
 import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
 import { DeviceSyncError } from "../src/errors.ts";
-import { isGoogleHealthFitbitMigrationCutoverReady } from "../src/fitbit-migration.ts";
 import { HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT } from "../src/hosted-runtime.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
@@ -464,782 +463,81 @@ test("Junction supersedes every stale authorization-bound history job shape", as
   assert.equal(sourceWriteCount, 0);
 });
 
-test("Junction repeated authorization accepts only the current exact history proof", async () => {
-  const firstEpoch = "2026-04-03T01:00:00.000Z";
-  const currentEpoch = "2026-04-03T02:00:00.000Z";
-  const completedAtKey = "historicalBackfillCompletedAt";
-  let reauthorizeOnProviderRead = true;
-  let liveSources = [
-    createConnectionSource({
-      firstSeenAt: firstEpoch,
-      id: "source-google-health",
-      lastDataAt: null,
-      sourceProviderSlug: "google_health",
-    }),
-    createConnectionSource({
-      firstSeenAt: "2025-01-01T00:00:00.000Z",
-      id: "source-fitbit",
-      sourceProviderSlug: "fitbit",
-    }),
-  ];
-  const providers = [{
-    id: "provider-google-health-1",
-    name: "Google Health",
-    resource_availability: { activity: true },
-    slug: "google_health",
-    status: "connected",
-  }, {
-    id: "provider-fitbit-1",
-    name: "Fitbit",
-    resource_availability: { activity: true },
-    slug: "fitbit",
-    status: "connected",
-  }];
-  const provider = createJunctionProvider(async (request) => {
-    const url = new URL(readUrl(request));
-    if (url.pathname === "/v2/user/providers/junction-user-1") {
-      if (reauthorizeOnProviderRead) {
-        reauthorizeOnProviderRead = false;
-        liveSources = liveSources.map((source) =>
-          source.sourceProviderSlug === "google_health"
-            ? createConnectionSource({
-                ...source,
-                firstSeenAt: currentEpoch,
-                lastDataAt: "2026-04-03T02:05:00.000Z",
-                resourceAvailabilitySummary: { activity: true },
-              })
-            : source
-        );
-      }
-      return createJsonResponse({ providers });
-    }
-    if (url.pathname.startsWith("/v2/summary/")) {
-      return createJsonResponse({ data: [] });
-    }
-    throw new Error(`Unexpected request: ${url.toString()}`);
-  }, {
-    summaryResources: [],
-    timeseriesResources: [],
-  });
-  let completionWrites = 0;
-  const context = createJunctionJobContext({
-    account: createAccount({
-      sources: liveSources.map((source) => ({
-        ...source,
-        resourceCount: Object.keys(source.resourceAvailabilitySummary ?? {}).length,
-      })),
-    }),
-    connectionSourceAdmissionMode: "listed_only",
-    listConnectionSources: async () => liveSources,
-    now: "2026-04-03T03:00:00.000Z",
-    upsertConnectionSource: async (update) => {
-      const existingIndex = liveSources.findIndex((source) =>
-        source.sourceProviderSlug === update.sourceProviderSlug
-      );
-      const existing = liveSources[existingIndex];
-      const next = createConnectionSource({
-        ...(existing ?? {}),
-        ...update,
-        firstSeenAt: update.firstSeenAt ?? existing?.firstSeenAt ?? update.lastSeenAt,
-        id: existing?.id ?? `source-${update.sourceProviderSlug}`,
-        lastDataAt: update.lastDataAt === undefined
-          ? existing?.lastDataAt ?? null
-          : update.lastDataAt,
-        resourceAvailabilitySummary: update.resourceAvailabilitySummary
-          ?? existing?.resourceAvailabilitySummary
-          ?? {},
-      });
-      if (
-        typeof existing?.resourceAvailabilitySummary?.[completedAtKey] !== "string"
-        && typeof next.resourceAvailabilitySummary?.[completedAtKey] === "string"
-      ) {
-        completionWrites += 1;
-      }
-      liveSources = existingIndex < 0
-        ? [...liveSources, next]
-        : liveSources.map((source, index) => index === existingIndex ? next : source);
-      return next;
-    },
-  });
-  const job = (
-    sourceProviderSlug: "fitbit" | "google_health",
-    historicalProofFirstSeenAt?: string,
-  ) => createJob("backfill", {
-    ...(historicalProofFirstSeenAt
-      ? {
-          historicalProofFirstSeenAt,
-          historicalProofSourceProviderSlug: "google_health",
-        }
-      : {}),
-    sourceProviderSlug,
-    windowEnd: "2026-04-03T00:00:00.000Z",
-    windowStart: "2026-04-01T00:00:00.000Z",
-  });
-
-  await executeJunctionJob(provider, context, job("google_health", firstEpoch));
-  await executeJunctionJob(provider, context, job("fitbit", firstEpoch));
-  await executeJunctionJob(provider, context, job("google_health"));
-  assert.equal(completionWrites, 0);
-  assert.equal(isGoogleHealthFitbitMigrationCutoverReady({ sources: liveSources }), false);
-
-  await executeJunctionJob(provider, context, job("google_health", currentEpoch));
-  assert.equal(isGoogleHealthFitbitMigrationCutoverReady({ sources: liveSources }), false);
-  await executeJunctionJob(provider, context, job("fitbit", currentEpoch));
-  assert.equal(completionWrites, 2);
-  assert.equal(isGoogleHealthFitbitMigrationCutoverReady({ sources: liveSources }), true);
-});
-
-test("Junction source-scoped history completes only after terminal admitted work", async () => {
-  const completedAtKey = "historicalBackfillCompletedAt";
-
-  const runScenario = async (input: {
-    days: number;
-    failFirstTimeseriesPass?: boolean;
-    jobSourceProviderSlug?: "fitbit" | "google_health";
-    now?: string;
-    summaryRecordOnlyFirstAttempt?: boolean;
-    summaryRecordSource?: "fitbit" | "google_health" | null;
-    timeseriesRecordSource?: "fitbit" | "google_health" | null;
-    timeseriesResources: readonly string[];
-  }) => {
-    const requests: Array<{ method: string; url: URL }> = [];
-    let failTimeseries = input.failFirstTimeseriesPass === true;
-    let summaryRequestCount = 0;
-    const providers = [
-      {
-        id: "provider-fitbit-1",
-        slug: "fitbit",
-        name: "Fitbit",
-        status: "connected",
-        resource_availability: {
-          activity: true,
-          blood_oxygen: true,
-          blood_pressure: true,
-        },
-      },
-      {
-        id: "provider-google-health-1",
-        slug: "google_health",
-        name: "Google Health",
-        status: "connected",
-        resource_availability: {
-          activity: true,
-          heartrate: true,
-          steps: true,
-        },
-      },
-    ];
-    const provider = createJunctionProvider(async (request, init) => {
-      const url = new URL(readUrl(request));
-      requests.push({ method: String(init?.method ?? "GET"), url });
-      if (url.pathname === "/v2/user/providers/junction-user-1") {
-        return createJsonResponse({ providers });
-      }
-      if (url.pathname === "/v2/summary/activity/junction-user-1") {
-        summaryRequestCount += 1;
-        const includeRecord = Boolean(input.summaryRecordSource)
-          && (!input.summaryRecordOnlyFirstAttempt || summaryRequestCount === 1);
-        return createJsonResponse({
-          data: includeRecord
-            ? [{
-                connectionId: input.summaryRecordSource === "fitbit"
-                  ? "provider-fitbit-1"
-                  : "provider-google-health-1",
-                date: "2026-04-02",
-                id: `activity-${input.summaryRecordSource}`,
-                sourceProviderSlug: input.summaryRecordSource,
-                steps: 4321,
-              }]
-            : [],
-        });
-      }
-      if (url.pathname === "/v2/summary/sleep/junction-user-1") {
-        return createJsonResponse({ data: [] });
-      }
-      if (url.pathname === "/v2/summary/workouts/junction-user-1") {
-        return createJsonResponse({ data: [] });
-      }
-      if (url.pathname.startsWith("/v2/timeseries/")) {
-        if (failTimeseries) {
-          return new Response(JSON.stringify({ error: "temporary failure" }), {
-            headers: {
-              "Content-Type": "application/json",
-              "Retry-After": "0",
-            },
-            status: 500,
-          });
-        }
-        if (
-          input.timeseriesRecordSource
-          && url.pathname === "/v2/timeseries/junction-user-1/blood_oxygen/grouped"
-        ) {
-          return createJsonResponse({
-            groups: {
-              [input.timeseriesRecordSource]: [{
-                data: [{
-                  end: "2026-04-02T12:05:00.000Z",
-                  start: "2026-04-02T12:00:00.000Z",
-                  unit: "%",
-                  value: 97,
-                }],
-                source: {
-                  provider: input.timeseriesRecordSource,
-                  type: "watch",
-                },
-              }],
-            },
-          });
-        }
-        if (
-          input.timeseriesRecordSource
-          && url.pathname === "/v2/timeseries/junction-user-1/blood_pressure/grouped"
-        ) {
-          return createJsonResponse({
-            groups: {
-              [input.timeseriesRecordSource]: [{
-                data: [{
-                  diastolic: 80,
-                  systolic: 120,
-                  timestamp: "2026-04-02T12:00:00.000Z",
-                }],
-                source: {
-                  provider: input.timeseriesRecordSource,
-                  type: "cuff",
-                },
-              }],
-            },
-          });
-        }
-        return createJsonResponse({ data: [] });
-      }
-      throw new Error(`Unexpected request: ${url.toString()}`);
-    }, {
-      summaryBackfillDays: input.days,
-      summaryResources: ["activity", "sleep"],
-      timeseriesBackfillDays: input.days,
-      timeseriesResources: [...input.timeseriesResources],
-    });
-
-    let liveSources = [
-      createConnectionSource({
-        id: "source-fitbit",
-        sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
-          connectionId: "acct-junction-1",
-          sourceProviderSlug: "fitbit",
-        }), "Fitbit source key should be available."),
-        sourceProviderSlug: "fitbit",
-      }),
-      createConnectionSource({
-        id: "source-google-health",
-        sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
-          connectionId: "acct-junction-1",
-          sourceProviderSlug: "google_health",
-        }), "Google Health source key should be available."),
-        sourceProviderSlug: "google_health",
-      }),
-    ];
-    const importedSnapshots: unknown[] = [];
-    let completionWrites = 0;
-    const makeContext = (): ProviderJobContext => createJunctionJobContext({
-      account: createAccount({
-        sources: liveSources.map((source) => ({
-          ...source,
-          resourceCount: Object.keys(source.resourceAvailabilitySummary ?? {}).length,
-        })),
-      }),
-      connectionSourceAdmissionMode: "listed_only",
-      importSnapshot: async (snapshot) => {
-        const junctionSnapshot = snapshot as Parameters<typeof normalizeJunctionSnapshot>[0];
-        const normalized = normalizeJunctionSnapshot(junctionSnapshot, {
-          defaultTimeZone: "UTC",
-        });
-        const events = normalized.events ?? [];
-        if (events.length > 0) {
-          importedSnapshots.push(snapshot);
-        }
-        return {
-          canonicalEventCount: events.length,
-          durableDeliveryAccepted: events.length > 0,
-          junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(events, {
-            providerPulledAt: junctionSnapshot.canonicalCoverageProviderPulledAt,
-          }),
-        };
-      },
-      listConnectionSources: async (filter = {}) => liveSources.filter((source) =>
-        (!filter.sourceProviderSlug
-          || source.sourceProviderSlug === filter.sourceProviderSlug)
-        && (!filter.status || source.status === filter.status)
-      ),
-      ...(input.now ? { now: input.now } : {}),
-      upsertConnectionSource: async (update) => {
-        const existingIndex = liveSources.findIndex((source) =>
-          source.sourceProviderSlug === update.sourceProviderSlug
-        );
-        const existing = liveSources[existingIndex];
-        const next = createConnectionSource({
-          ...(existing ?? {}),
-          ...update,
-          id: existing?.id ?? `source-${update.sourceProviderSlug}`,
-          connectionId: "acct-junction-1",
-          displayName: update.displayName ?? existing?.displayName ?? null,
-          firstSeenAt: update.firstSeenAt ?? existing?.firstSeenAt ?? update.lastSeenAt,
-          lastDataAt: update.lastDataAt === undefined
-            ? existing?.lastDataAt ?? null
-            : update.lastDataAt,
-          resourceAvailabilitySummary: update.resourceAvailabilitySummary
-            ?? existing?.resourceAvailabilitySummary
-            ?? {},
-        });
-        const wasComplete = existing?.resourceAvailabilitySummary?.[completedAtKey];
-        const isComplete = next.resourceAvailabilitySummary?.[completedAtKey];
-        if (!wasComplete && typeof isComplete === "string") {
-          completionWrites += 1;
-        }
-        if (existingIndex < 0) {
-          liveSources = [...liveSources, next];
-        } else {
-          liveSources = liveSources.map((source, index) =>
-            index === existingIndex ? next : source
-          );
-        }
-        return next;
-      },
-    });
-
-    const windowEnd = "2026-04-03T00:00:00.000Z";
-    const windowStart = new Date(
-      Date.parse(windowEnd) - input.days * 24 * 60 * 60_000,
-    ).toISOString();
-    const jobSourceProviderSlug = input.jobSourceProviderSlug ?? "google_health";
-    let job = createJob("backfill", {
-      historicalProofFirstSeenAt: "2026-04-03T00:00:00.000Z",
-      historicalProofSourceProviderSlug: "google_health",
-      sourceProviderSlug: jobSourceProviderSlug,
-      windowEnd,
-      windowStart,
-    });
-    let processedJobs = 0;
-    let failedExecutions = 0;
-    let terminalJob = job;
-
-    for (let index = 0; index < 2_000; index += 1) {
-      assert.equal(job.payload.sourceProviderSlug, jobSourceProviderSlug);
-      let result: Awaited<ReturnType<typeof executeJunctionJob>>;
-      try {
-        result = await executeJunctionJob(provider, makeContext(), job);
-      } catch (error) {
-        if (!failTimeseries) {
-          throw error;
-        }
-        failedExecutions += 1;
-        failTimeseries = false;
-        assert.equal(
-          liveSources.find((source) => source.sourceProviderSlug === "google_health")
-            ?.resourceAvailabilitySummary?.[completedAtKey],
-          undefined,
-        );
-        // A fresh context models process restart before retrying the same durable job.
-        continue;
-      }
-      processedJobs += 1;
-      terminalJob = job;
-      const next = result.scheduledJobs?.find((candidate) =>
-        candidate.kind === "backfill"
-        && candidate.payload?.sourceProviderSlug === jobSourceProviderSlug
-      );
-      if (!next) {
-        return {
-          completionWrites,
-          failedExecutions,
-          importedSnapshots,
-          liveSources,
-          processedJobs,
-          providerRequests: requests.filter(({ url }) =>
-            url.pathname.includes("/summary/") || url.pathname.includes("/timeseries/")
-          ),
-          replayTerminal: async () =>
-            executeJunctionJob(provider, makeContext(), terminalJob),
-          requests,
-        };
-      }
-      assert.equal(
-        next.payload?.historicalProofFirstSeenAt,
-        "2026-04-03T00:00:00.000Z",
-      );
-      assert.equal(
-        next.payload?.historicalProofSourceProviderSlug,
-        "google_health",
-      );
-      assert.equal(liveSources.some((source) =>
-        typeof source.resourceAvailabilitySummary?.[completedAtKey] === "string"
-      ), false, "pending history must not certify terminal completion");
-      job = createJobFromInput(next, index);
-    }
-    throw new Error("Source-scoped Junction backfill did not terminate.");
-  };
-
-  const rejected = await runScenario({
-    days: 2,
-    summaryRecordOnlyFirstAttempt: true,
-    summaryRecordSource: "fitbit",
-    timeseriesResources: [],
-  });
-  const rejectedGoogle = rejected.liveSources.find((source) =>
-    source.sourceProviderSlug === "google_health"
-  );
-  assert.equal(
-    rejectedGoogle?.resourceAvailabilitySummary?.[completedAtKey],
-    undefined,
-  );
-  assert.equal(
-    rejected.liveSources.find((source) => source.sourceProviderSlug === "fitbit")
-      ?.status,
-    "connected",
-  );
-  assert.equal(rejected.importedSnapshots.length, 0);
-  assert.equal(rejected.completionWrites, 0);
-
-  const empty = await runScenario({
-    days: 2,
-    summaryRecordSource: null,
-    timeseriesResources: [],
-  });
-  assert.equal(
-    typeof empty.liveSources.find((source) =>
-      source.sourceProviderSlug === "google_health"
-    )?.resourceAvailabilitySummary?.[completedAtKey],
-    "string",
-  );
-  assert.equal(empty.importedSnapshots.length, 0);
-  assert.equal(empty.completionWrites, 1);
-
-  const rebuiltLegacy = await runScenario({
-    days: 2,
-    jobSourceProviderSlug: "fitbit",
-    summaryRecordSource: "fitbit",
-    timeseriesResources: [],
-  });
-  const rebuiltLegacySummary = rebuiltLegacy.liveSources.find((source) =>
-    source.sourceProviderSlug === "fitbit"
-  )?.resourceAvailabilitySummary;
-  assert.equal(typeof rebuiltLegacySummary?.[completedAtKey], "string");
-  assert.equal(
-    rebuiltLegacySummary?.canonicalCoverageBoundary_activity,
-    "2026-04-02",
-  );
-  assert.equal(
-    rebuiltLegacySummary?.canonicalCoverageFinalizedAt_activity,
-    null,
-  );
-
-  const rebuiltLegacyClosed = await runScenario({
-    days: 2,
-    jobSourceProviderSlug: "fitbit",
-    now: "2026-04-03T12:00:00.000Z",
-    summaryRecordSource: "fitbit",
-    timeseriesResources: [],
-  });
-  const rebuiltLegacyClosedSummary = rebuiltLegacyClosed.liveSources.find((source) =>
-    source.sourceProviderSlug === "fitbit"
-  )?.resourceAvailabilitySummary;
-  assert.equal(
-    rebuiltLegacyClosedSummary?.canonicalCoverageFinalizedAt_activity,
-    "2026-04-03T12:00:00.000Z",
-  );
-
-  const rebuiltLegacyTimeseries = await runScenario({
-    days: 2,
-    jobSourceProviderSlug: "fitbit",
-    now: "2026-04-03T12:00:00.000Z",
-    summaryRecordSource: null,
-    timeseriesRecordSource: "fitbit",
-    timeseriesResources: ["blood_oxygen"],
-  });
-  const rebuiltLegacyTimeseriesSummary = rebuiltLegacyTimeseries.liveSources.find(
-    (source) => source.sourceProviderSlug === "fitbit",
-  )?.resourceAvailabilitySummary;
-  assert.equal(typeof rebuiltLegacyTimeseriesSummary?.[completedAtKey], "string");
-  assert.equal(
-    rebuiltLegacyTimeseriesSummary?.canonicalCoverageBoundary_blood_oxygen,
-    "2026-04-02",
-  );
-  assert.equal(
-    rebuiltLegacyTimeseriesSummary?.canonicalCoverageFinalizedAt_blood_oxygen,
-    "2026-04-03T12:00:00.000Z",
-  );
-
-  const rebuiltLegacyInterval = await runScenario({
-    days: 2,
-    jobSourceProviderSlug: "fitbit",
-    summaryRecordSource: null,
-    timeseriesRecordSource: "fitbit",
-    timeseriesResources: ["blood_pressure"],
-  });
-  const rebuiltLegacyIntervalSummary = rebuiltLegacyInterval.liveSources.find(
-    (source) => source.sourceProviderSlug === "fitbit",
-  )?.resourceAvailabilitySummary;
-  assert.equal(typeof rebuiltLegacyIntervalSummary?.[completedAtKey], "string");
-  assert.equal(
-    rebuiltLegacyIntervalSummary?.canonicalCoverageBoundary_blood_pressure,
-    "2026-04-02T12:00:00.000Z",
-  );
-
-  const long = await runScenario({
-    days: 60,
-    failFirstTimeseriesPass: true,
-    summaryRecordSource: "google_health",
-    timeseriesResources: ["steps", "heartrate"],
-  });
-  assert.ok(
-    long.processedJobs < HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT,
-  );
-  assert.equal(long.failedExecutions, 1);
-  assert.equal(long.completionWrites, 1);
-  assert.equal(long.importedSnapshots.length, 0);
-  assert.equal(
-    long.liveSources.find((source) => source.sourceProviderSlug === "fitbit")
-      ?.status,
-    "connected",
-  );
-  assert.ok(
-    long.providerRequests.length > HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT,
-  );
-  for (const { url } of long.providerRequests) {
-    assert.equal(url.searchParams.get("provider"), "google_health");
-  }
-  assert.equal(long.requests.some(({ method }) => method === "DELETE"), false);
-  const stableKeys = long.liveSources.map((source) => source.sourceInstanceKey);
-  await long.replayTerminal();
-  assert.deepEqual(
-    long.liveSources.map((source) => source.sourceInstanceKey),
-    stableKeys,
-  );
-  assert.equal(long.importedSnapshots.length, 0);
-});
-
-test("Junction hosted bounded summaries finalize accepted Fitbit daily coverage", async () => {
+test("Junction keeps a prepared Fitbit fact after revoke and starts no later Fitbit pull", async () => {
   const now = "2026-04-03T12:00:00.000Z";
+  const requests: string[] = [];
   const provider = createJunctionProvider(async (request) => {
     const url = new URL(readUrl(request));
+    requests.push(url.pathname);
     if (url.pathname === "/v2/user/providers/junction-user-1") {
-      return createJsonResponse({
-        providers: [{
-          id: "provider-fitbit-1",
-          slug: "fitbit",
-          name: "Fitbit",
-          status: "connected",
-          resource_availability: { activity: true },
-        }, {
-          id: "provider-google-health-1",
-          slug: "google_health",
-          name: "Google Health",
-          status: "connected",
-          resource_availability: { activity: true },
-        }],
-      });
+      return createJsonResponse({ providers: [
+        { id: "provider-fitbit-1", slug: "fitbit", name: "Fitbit", status: "connected",
+          resource_availability: { activity: true } },
+        { id: "provider-google-health-1", slug: "google_health", name: "Google Health",
+          status: "connected", resource_availability: { activity: true } },
+      ] });
     }
     if (url.pathname === "/v2/summary/activity/junction-user-1") {
-      return createJsonResponse({
-        data: [{
-          connectionId: "provider-fitbit-1",
-          date: "2026-04-02",
-          id: "activity-fitbit-closed-day",
-          sourceProviderSlug: "fitbit",
-          steps: 4_321,
-        }],
-      });
+      return createJsonResponse({ data: [
+        { connectionId: "provider-fitbit-1", date: "2026-04-02", id: "fitbit-day",
+          sourceProviderSlug: "fitbit", steps: 4000 },
+        { connectionId: "provider-google-health-1", date: "2026-04-02", id: "google-day",
+          sourceProviderSlug: "google_health", steps: 4100 },
+      ] });
     }
     throw new Error(`Unexpected request: ${url.toString()}`);
-  }, {
-    summaryResources: ["activity"],
-    timeseriesResources: [],
-  });
-
+  }, { summaryResources: ["activity"], timeseriesResources: [] });
   let liveSources = [
-    createConnectionSource({
-      id: "source-fitbit",
-      resourceAvailabilitySummary: {
-        activity: true,
-        canonicalCoverageBoundary_activity: "2026-04-02",
-      },
+    createConnectionSource({ id: "source-fitbit", sourceProviderSlug: "fitbit",
       sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
-        connectionId: "acct-junction-1",
-        sourceProviderSlug: "fitbit",
-      }), "Fitbit source key should be available."),
-      sourceProviderSlug: "fitbit",
-    }),
-    createConnectionSource({
-      id: "source-google-health",
+        connectionId: "acct-junction-1", sourceProviderSlug: "fitbit",
+      }), "Fitbit source key should exist.") }),
+    createConnectionSource({ id: "source-google-health", sourceProviderSlug: "google_health",
       sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
-        connectionId: "acct-junction-1",
-        sourceProviderSlug: "google_health",
-      }), "Google Health source key should be available."),
-      sourceProviderSlug: "google_health",
-    }),
+        connectionId: "acct-junction-1", sourceProviderSlug: "google_health",
+      }), "Google Health source key should exist.") }),
   ];
+  const committed: Array<{ resource: string; sourceProviderSlug: string }> = [];
   const context = createJunctionJobContext({
-    account: createAccount({
-      sources: liveSources.map((source) => ({
-        ...source,
-        resourceCount: Object.keys(source.resourceAvailabilitySummary ?? {}).length,
-      })),
-    }),
+    account: createAccount({ sources: liveSources.map((source) => ({ ...source, resourceCount: 1 })) }),
     connectionSourceAdmissionMode: "listed_only",
     importSnapshot: async (snapshot) => {
-      const junctionSnapshot = snapshot as Parameters<typeof normalizeJunctionSnapshot>[0];
-      const events = normalizeJunctionSnapshot(junctionSnapshot, {
+      const normalized = normalizeJunctionSnapshot(snapshot as JunctionSnapshotInput, {
         defaultTimeZone: "UTC",
-      }).events ?? [];
-      return {
-        canonicalEventCount: events.length,
-        durableDeliveryAccepted: events.length > 0,
-        junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(events, {
-          providerPulledAt: junctionSnapshot.canonicalCoverageProviderPulledAt,
-        }),
-      };
+      });
+      const evidence = deriveJunctionCanonicalCoverageEvidence(normalized.events ?? []);
+      if (evidence.some((entry) => entry.sourceProviderSlug === "fitbit")) {
+        // Web finalizes revoke after the runner's last source read but before this write.
+        liveSources = liveSources.map((source) => source.sourceProviderSlug === "fitbit"
+          ? { ...source, status: "disconnected", lastErrorCode: "USER_DISCONNECTED" }
+          : source);
+      }
+      committed.push(...evidence);
+      return { canonicalEventCount: normalized.events?.length ?? 0,
+        durableDeliveryAccepted: true, junctionCanonicalCoverage: evidence };
     },
     listConnectionSources: async (filter = {}) => liveSources.filter((source) =>
       (!filter.sourceProviderSlug || source.sourceProviderSlug === filter.sourceProviderSlug)
       && (!filter.status || source.status === filter.status)
     ),
     now,
-    shouldYield: () => false,
-    upsertConnectionSource: async (update) => {
-      const existingIndex = liveSources.findIndex((source) =>
-        source.sourceProviderSlug === update.sourceProviderSlug
-      );
-      const existing = liveSources[existingIndex];
-      const next = createConnectionSource({
-        ...(existing ?? {}),
-        ...update,
-        id: existing?.id ?? `source-${update.sourceProviderSlug}`,
-        connectionId: "acct-junction-1",
-        displayName: update.displayName ?? existing?.displayName ?? null,
-        firstSeenAt: update.firstSeenAt ?? existing?.firstSeenAt ?? update.lastSeenAt,
-        resourceAvailabilitySummary: update.resourceAvailabilitySummary
-          ?? existing?.resourceAvailabilitySummary
-          ?? {},
-      });
-      liveSources = existingIndex < 0
-        ? [...liveSources, next]
-        : liveSources.map((source, index) => index === existingIndex ? next : source);
-      return next;
-    },
   });
-
-  await executeJunctionJob(provider, context, createJob("reconcile", {
-    sourceProviderSlug: "fitbit",
+  const job = (sourceProviderSlug: string) => createJob("reconcile", {
+    sourceProviderSlug,
     windowEnd: "2026-04-03T00:00:00.000Z",
     windowStart: "2026-04-02T00:00:00.000Z",
-  }));
-
-  const legacySummary = liveSources.find((source) =>
-    source.sourceProviderSlug === "fitbit"
-  )?.resourceAvailabilitySummary;
-  assert.equal(legacySummary?.canonicalCoverageBoundary_activity, "2026-04-02");
-  assert.equal(legacySummary?.canonicalCoverageFinalizedAt_activity, now);
-});
-
-test("Junction hosted bounded summaries enforce terminal Fitbit coverage on Google", async () => {
-  const now = "2026-04-03T12:00:00.000Z";
-  const provider = createJunctionProvider(async (request) => {
-    const url = new URL(readUrl(request));
-    if (url.pathname === "/v2/user/providers/junction-user-1") {
-      return createJsonResponse({
-        providers: [{
-          id: "provider-google-health-1",
-          slug: "google_health",
-          name: "Google Health",
-          status: "connected",
-          resource_availability: { activity: true },
-        }],
-      });
-    }
-    if (url.pathname === "/v2/summary/activity/junction-user-1") {
-      return createJsonResponse({
-        data: [{
-          connectionId: "provider-google-health-1",
-          date: "2026-04-02",
-          id: "activity-google-overlap",
-          sourceProviderSlug: "google_health",
-          steps: 4_321,
-        }],
-      });
-    }
-    throw new Error(`Unexpected request: ${url.toString()}`);
-  }, {
-    summaryResources: ["activity"],
-    timeseriesResources: [],
   });
-  const sources = [
-    createConnectionSource({
-      id: "source-fitbit",
-      lastErrorCode: null,
-      resourceAvailabilitySummary: {
-        activity: true,
-        canonicalCoverageBoundary_activity: "2026-04-02",
-      },
-      sourceProviderSlug: "fitbit",
-      status: "disconnected",
-    }),
-    createConnectionSource({
-      firstSeenAt: "2026-04-03T00:00:00.000Z",
-      id: "source-google-health",
-      lastDataAt: "2026-04-03T01:00:00.000Z",
-      resourceAvailabilitySummary: {
-        activity: true,
-        historicalBackfillCompletedAt: "2026-04-03T00:30:00.000Z",
-      },
-      sourceProviderSlug: "google_health",
-    }),
-  ];
-  const importedSnapshots: JunctionSnapshotInput[] = [];
-  let canonicalEventCount = -1;
-  await executeJunctionJob(
-    provider,
-    createJunctionJobContext({
-      account: createAccount({
-        sources: sources.map((source) => ({
-          ...source,
-          resourceCount: Object.keys(source.resourceAvailabilitySummary ?? {}).length,
-        })),
-      }),
-      connectionSourceAdmissionMode: "listed_only",
-      importSnapshot: async (snapshot) => {
-        const importedSnapshot = snapshot as Parameters<typeof normalizeJunctionSnapshot>[0];
-        importedSnapshots.push(importedSnapshot);
-        canonicalEventCount = normalizeJunctionSnapshot(importedSnapshot, {
-          defaultTimeZone: "UTC",
-        }).events?.length ?? 0;
-        return {
-          canonicalEventCount,
-          durableDeliveryAccepted: canonicalEventCount > 0,
-        };
-      },
-      listConnectionSources: async (filter = {}) => sources.filter((source) =>
-        (!filter.sourceProviderSlug || source.sourceProviderSlug === filter.sourceProviderSlug)
-        && (!filter.status || source.status === filter.status)
-      ),
-      now,
-      shouldYield: () => false,
-    }),
-    createJob("reconcile", {
-      sourceProviderSlug: "google_health",
-      windowEnd: "2026-04-03T00:00:00.000Z",
-      windowStart: "2026-04-02T00:00:00.000Z",
-    }),
-  );
 
-  const importedSnapshot = requireValue(
-    importedSnapshots[0],
-    "Bounded Google summary should reach the canonical importer.",
-  );
-  assert.deepEqual(importedSnapshot.canonicalCoverageFence, {
-    coverageBoundaryByResource: { activity: "2026-04-02" },
-    sourceProviderSlug: "google_health",
-  });
-  assert.equal(importedSnapshot.canonicalCoverageProviderPulledAt, now);
-  assert.equal(canonicalEventCount, 0);
+  await executeJunctionJob(provider, context, job("fitbit"));
+  assert.equal(liveSources[0]?.status, "disconnected");
+  assert.ok(committed.some((entry) => entry.sourceProviderSlug === "fitbit"));
+  const pullsAtTerminal = requests.filter((path) => path.includes("/summary/activity/")).length;
+  await executeJunctionJob(provider, context, job("fitbit"));
+  assert.equal(requests.filter((path) => path.includes("/summary/activity/")).length,
+    pullsAtTerminal);
+  await executeJunctionJob(provider, context, job("google_health"));
+  assert.ok(committed.some((entry) => entry.sourceProviderSlug === "google-health"));
+  assert.equal(liveSources[0]?.status, "disconnected");
 });
 
 test("Junction scheduled polling uses stable closed-day windows", () => {

@@ -5,11 +5,7 @@ import type {
 } from "@murphai/device-syncd/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
-  DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX,
-  DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX,
-  DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY,
-  readDeviceSyncSourceCanonicalCoverageBoundary,
-  readDeviceSyncSourceCanonicalCoverageFinalizedAt,
+  isDeviceSyncSourceResourceAvailabilityMetadataKey,
 } from "@murphai/device-syncd/fitbit-migration";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
 import {
@@ -1060,6 +1056,8 @@ function sanitizeSummaryKey(value: string): string | null {
     || key.length > 64
     || !SAFE_SUMMARY_KEY_PATTERN.test(key)
     || isBlockedSourceSummaryKey(key)
+    || (isDeviceSyncSourceResourceAvailabilityMetadataKey(key)
+      && key !== "sourceInstanceKeyFallback")
   ) {
     return null;
   }
@@ -1068,7 +1066,7 @@ function sanitizeSummaryKey(value: string): string | null {
 }
 
 function sanitizeSummaryScalar(
-  key: string,
+  _key: string,
   value: unknown,
 ): boolean | number | string | null | undefined {
   if (value === null) {
@@ -1088,43 +1086,6 @@ function sanitizeSummaryScalar(
   }
 
   const normalized = normalizeNullableString(value);
-
-  if (
-    key === DEVICE_SYNC_SOURCE_HISTORICAL_BACKFILL_COMPLETED_AT_KEY
-  ) {
-    if (!normalized || normalized.length > 64) {
-      return undefined;
-    }
-    const timestampMs = Date.parse(normalized);
-    return Number.isFinite(timestampMs)
-      && new Date(timestampMs).toISOString() === normalized
-      ? normalized
-      : undefined;
-  }
-
-  if (key.startsWith(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX)) {
-    if (!normalized || normalized.length > 64) {
-      return undefined;
-    }
-    const resource = key.slice(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_BOUNDARY_KEY_PREFIX.length);
-    return readDeviceSyncSourceCanonicalCoverageBoundary(
-      { [key]: normalized },
-      resource,
-    ) ?? undefined;
-  }
-
-  if (key.startsWith(DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX)) {
-    if (!normalized || normalized.length > 64) {
-      return undefined;
-    }
-    const resource = key.slice(
-      DEVICE_SYNC_SOURCE_CANONICAL_COVERAGE_FINALIZED_AT_KEY_PREFIX.length,
-    );
-    return readDeviceSyncSourceCanonicalCoverageFinalizedAt(
-      { [key]: normalized },
-      resource,
-    ) ?? undefined;
-  }
 
   if (
     !normalized
