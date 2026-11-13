@@ -16,16 +16,21 @@ const HOSTED_CONNECTED_APPS_HTML_MIN_LENGTH = 200;
 const HOSTED_CONNECTED_APPS_HTML_TAG_SENTINEL =
   /<(?:!doctype|html|body|head|table|div|p|span|br|a\s|img|h[1-6]|td|tr|style|script)\b/iu;
 // Encoded MIME bodies and attachments live under these keys (Gmail
-// `payload.parts[].body.data` and `raw`, Outlook `contentBytes`). Text decodes
-// in place so the HTML strip still applies; binary means nothing to the model,
-// so only its size survives. No other key is decoded: identifiers, page tokens
-// and plain strings can look like base64 too.
+// `payload.parts[].body.data` and `raw`, Outlook `contentBytes`). UTF-8 text
+// decodes in place so the HTML strip still applies. Bytes become a size note
+// only when the part declares a binary type; text that is not clean UTF-8 keeps
+// its original encoding. No other key is decoded: identifiers, page tokens and
+// plain strings can look like base64 too.
 const HOSTED_CONNECTED_APPS_ENCODED_KEYS = new Set(["contentBytes", "data", "raw"]);
 const HOSTED_CONNECTED_APPS_ENCODED_MIN_LENGTH = 512;
 const HOSTED_CONNECTED_APPS_ENCODED_PATTERN = /^[A-Za-z0-9+/_-]+={0,2}$/u;
 const HOSTED_CONNECTED_APPS_CONTROL_CHARACTER_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/u;
-// A Gmail message already carries its decoded body as `messageText`, so the
-// encoded copies under `payload` repeat it (twice for multipart/alternative).
+const HOSTED_CONNECTED_APPS_BINARY_TYPE_PATTERN = /^(?:image|audio|video|font|application)\//iu;
+const HOSTED_CONNECTED_APPS_TEXTUAL_APPLICATION_TYPE_PATTERN =
+  /^application\/(?:[\w.+-]*\+)?(?:json|xml|ics|javascript)\b/iu;
+// A Gmail message carries its decoded body as `messageText`. A decoded part
+// is dropped only when its text is found verbatim (ignoring whitespace) in
+// that body; anything else is kept.
 const HOSTED_CONNECTED_APPS_DUPLICATE_BODY_TEXT = "[omitted: same text as messageText]";
 // Full-format messages carry dozens of transport headers (Received,
 // DKIM-Signature, ARC-*). A header list is recognized by those markers and
@@ -147,20 +152,23 @@ export const hostedConnectedAppsResponseSchema = z
 // meaning: HTML markup, encoded MIME bodies and attachments, and mail transport
 // headers. Every other value passes through unchanged.
 export function compactHostedConnectedAppsResult(value: unknown): unknown {
-  return compactConnectedAppsValue(value, null, "none");
+  return compactConnectedAppsValue(value, null, { messageText: null, partType: null });
 }
 
-// "payload": inside a Gmail message that also has `messageText`.
-// "text-body": the `body` of a text/plain or text/html part of that payload.
-type ConnectedAppsBodyScope = "none" | "payload" | "text-body";
+interface ConnectedAppsEncodedContext {
+  // Whitespace-normalized compacted `messageText` of the enclosing message.
+  messageText: string | null;
+  // Declared MIME type of the part an encoded value belongs to.
+  partType: string | null;
+}
 
 function compactConnectedAppsValue(
   value: unknown,
   key: string | null,
-  scope: ConnectedAppsBodyScope,
+  context: ConnectedAppsEncodedContext,
 ): unknown {
   if (typeof value === "string") {
-    return compactConnectedAppsString(value, key, scope);
+    return compactConnectedAppsString(value, key, context);
   }
   if (Array.isArray(value)) {
     const items = isMailTransportHeaderList(value)
@@ -168,78 +176,91 @@ function compactConnectedAppsValue(
         String((header as { name: string }).name).toLowerCase(),
       ))
       : value;
-    return items.map((item) => compactConnectedAppsValue(item, key, scope));
+    return items.map((item) => compactConnectedAppsValue(item, key, context));
   }
   if (value !== null && typeof value === "object") {
     const record = value as Record<string, unknown>;
+    const messageText = context.messageText
+      ?? (typeof record.messageText === "string" && record.messageText.length > 0
+        ? normalizeConnectedAppsText(stripHtmlWhenMarkup(record.messageText))
+        : null);
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(record)) {
-      out[k] = compactConnectedAppsValue(v, k, childBodyScope(record, k, scope));
+      out[k] = compactConnectedAppsValue(v, k, {
+        messageText: k === "payload" || context.messageText !== null ? messageText : null,
+        partType: readConnectedAppsPartType(record, k) ?? context.partType,
+      });
     }
     return out;
   }
   return value;
 }
 
-function childBodyScope(
-  record: Record<string, unknown>,
-  key: string,
-  scope: ConnectedAppsBodyScope,
-): ConnectedAppsBodyScope {
-  if (scope === "none") {
-    return key === "payload" && typeof record.messageText === "string" && record.messageText.length > 0
-      ? "payload"
-      : "none";
-  }
-  if (scope === "payload" && key === "body") {
-    const textPart = typeof record.mimeType === "string"
-      && /^text\/(?:plain|html)$/iu.test(record.mimeType)
-      && !record.filename;
-    return textPart ? "text-body" : "payload";
-  }
-  return scope;
+// Gmail declares a part's type beside its `body`; Outlook declares an
+// attachment's type beside its `contentBytes`; Gmail `raw` is a whole message.
+function readConnectedAppsPartType(record: Record<string, unknown>, key: string): string | null {
+  if (key === "body" && typeof record.mimeType === "string") return record.mimeType;
+  if (key === "contentBytes" && typeof record.contentType === "string") return record.contentType;
+  if (key === "raw") return "message/rfc822";
+  return null;
 }
 
 function compactConnectedAppsString(
   value: string,
   key: string | null,
-  scope: ConnectedAppsBodyScope,
+  context: ConnectedAppsEncodedContext,
 ): string {
-  const decoded = key !== null && HOSTED_CONNECTED_APPS_ENCODED_KEYS.has(key)
-    ? decodeConnectedAppsEncodedBlob(value)
-    : null;
-  if (decoded?.kind === "text" && scope === "text-body" && key === "data") {
-    return HOSTED_CONNECTED_APPS_DUPLICATE_BODY_TEXT;
+  if (key === null || !HOSTED_CONNECTED_APPS_ENCODED_KEYS.has(key)) {
+    return stripHtmlWhenMarkup(value);
   }
-  const text = decoded?.text ?? value;
-  if (text.length < HOSTED_CONNECTED_APPS_HTML_MIN_LENGTH) return text;
-  if (!HOSTED_CONNECTED_APPS_HTML_TAG_SENTINEL.test(text)) return text;
-  return stripHtmlForHostedConnectedAppsResult(text);
+  const bytes = decodeConnectedAppsEncodedBytes(value);
+  if (bytes === null) return stripHtmlWhenMarkup(value);
+  const text = readConnectedAppsUtf8Text(bytes);
+  if (text === null) {
+    const declaredBinary = context.partType !== null
+      && HOSTED_CONNECTED_APPS_BINARY_TYPE_PATTERN.test(context.partType)
+      && !HOSTED_CONNECTED_APPS_TEXTUAL_APPLICATION_TYPE_PATTERN.test(context.partType);
+    return declaredBinary ? `[binary data omitted: ${bytes.byteLength} bytes]` : value;
+  }
+  const compacted = stripHtmlWhenMarkup(text);
+  const normalized = normalizeConnectedAppsText(compacted);
+  return context.messageText !== null && normalized.length > 0 && context.messageText.includes(normalized)
+    ? HOSTED_CONNECTED_APPS_DUPLICATE_BODY_TEXT
+    : compacted;
 }
 
-function decodeConnectedAppsEncodedBlob(
-  value: string,
-): { kind: "binary" | "text"; text: string } | null {
+function stripHtmlWhenMarkup(value: string): string {
+  if (value.length < HOSTED_CONNECTED_APPS_HTML_MIN_LENGTH) return value;
+  if (!HOSTED_CONNECTED_APPS_HTML_TAG_SENTINEL.test(value)) return value;
+  return stripHtmlForHostedConnectedAppsResult(value);
+}
+
+function normalizeConnectedAppsText(value: string): string {
+  return value.replace(/\s+/gu, " ").trim();
+}
+
+function decodeConnectedAppsEncodedBytes(value: string): Uint8Array | null {
   if (
     value.length < HOSTED_CONNECTED_APPS_ENCODED_MIN_LENGTH
     || !HOSTED_CONNECTED_APPS_ENCODED_PATTERN.test(value)
   ) {
     return null;
   }
-  let bytes: Uint8Array;
   try {
     const standard = value.replace(/-/gu, "+").replace(/_/gu, "/");
     const binary = atob(standard.padEnd(Math.ceil(standard.length / 4) * 4, "="));
-    bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
   } catch {
     return null;
   }
-  const omitted = { kind: "binary" as const, text: `[binary data omitted: ${bytes.byteLength} bytes]` };
+}
+
+function readConnectedAppsUtf8Text(bytes: Uint8Array): string | null {
   try {
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    return HOSTED_CONNECTED_APPS_CONTROL_CHARACTER_PATTERN.test(text) ? omitted : { kind: "text", text };
+    return HOSTED_CONNECTED_APPS_CONTROL_CHARACTER_PATTERN.test(text) ? null : text;
   } catch {
-    return omitted;
+    return null;
   }
 }
 
