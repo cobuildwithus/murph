@@ -1,6 +1,7 @@
 export interface PackageCoveragePlanEntry {
   readonly dir: string;
   readonly shard: string;
+  readonly vitestShards?: number;
 }
 
 export interface ReleaseVerificationPlanValidation {
@@ -24,7 +25,7 @@ export function packageCoverageDirsForShard(
 ): string[];
 
 export function packageCoverageMatrix(repoRoot?: string): {
-  include: Array<{ shard: string }>;
+  include: Array<{ shard: string; package_shard: string; vitest_shard: string }>;
 };
 
 export function hostedWebTestMatrix(repoRoot?: string): {

@@ -103,6 +103,33 @@ function readMatrixShardNames(value: unknown): string[] {
   });
 }
 
+function readPackageMatrixEntries(value: unknown): Array<{
+  packageShard: string;
+  shard: string;
+  vitestShard: string;
+}> {
+  if (!isRecord(value) || !Array.isArray(value.include)) {
+    throw new Error("Expected a matrix object with an include array.");
+  }
+
+  return value.include.map((entry) => {
+    if (
+      !isRecord(entry)
+      || typeof entry.shard !== "string"
+      || typeof entry.package_shard !== "string"
+      || typeof entry.vitest_shard !== "string"
+      || Object.keys(entry).length !== 3
+    ) {
+      throw new Error("Expected shard, package_shard, and vitest_shard strings.");
+    }
+    return {
+      packageShard: entry.package_shard,
+      shard: entry.shard,
+      vitestShard: entry.vitest_shard,
+    };
+  });
+}
+
 function discoverCoveragePackageDirs(): string[] {
   const packagesRoot = path.join(repoRoot, "packages");
 
@@ -160,17 +187,42 @@ describe("release verification executable lanes", () => {
       const hostedWebMatrix: unknown = JSON.parse(
         outputEntries.hosted_web_test_matrix ?? "",
       );
-      const packageShards = readMatrixShardNames(packageMatrix);
-      expect(packageShards).toEqual([
-        "cli",
-        "assistant-engine",
-        "assistant-runtime",
-        "platform-b1",
-        "platform-a",
-        "platform-b2",
-        "hosted-local-harness",
+      const packageEntries = readPackageMatrixEntries(packageMatrix);
+      // A file split is safe only when its runners own every slice exactly
+      // once: a repeated or missing `i/n` would leave tests that never run.
+      expect(packageEntries).toEqual([
+        { shard: "cli 1/2", packageShard: "cli", vitestShard: "1/2" },
+        { shard: "cli 2/2", packageShard: "cli", vitestShard: "2/2" },
+        { shard: "assistant-engine 1/3", packageShard: "assistant-engine", vitestShard: "1/3" },
+        { shard: "assistant-engine 2/3", packageShard: "assistant-engine", vitestShard: "2/3" },
+        { shard: "assistant-engine 3/3", packageShard: "assistant-engine", vitestShard: "3/3" },
+        { shard: "assistant-runtime 1/2", packageShard: "assistant-runtime", vitestShard: "1/2" },
+        { shard: "assistant-runtime 2/2", packageShard: "assistant-runtime", vitestShard: "2/2" },
+        { shard: "platform-b1", packageShard: "platform-b1", vitestShard: "" },
+        { shard: "platform-a", packageShard: "platform-a", vitestShard: "" },
+        { shard: "platform-b2", packageShard: "platform-b2", vitestShard: "" },
+        { shard: "hosted-local-harness", packageShard: "hosted-local-harness", vitestShard: "" },
       ]);
-      expect(new Set(packageShards).size).toBe(packageShards.length);
+      expect(new Set(packageEntries.map(({ shard }) => shard)).size)
+        .toBe(packageEntries.length);
+      const slicesByPackageShard = new Map<string, string[]>();
+      for (const { packageShard, vitestShard } of packageEntries) {
+        slicesByPackageShard.set(packageShard, [
+          ...(slicesByPackageShard.get(packageShard) ?? []),
+          vitestShard,
+        ]);
+      }
+      for (const [packageShard, slices] of slicesByPackageShard) {
+        expect(
+          slices,
+          `${packageShard} must run unsplit once or own slices 1..n once each`,
+        ).toEqual(
+          slices.length === 1
+            ? [""]
+            : slices.map((_, index) => `${index + 1}/${slices.length}`),
+        );
+      }
+      const packageShards = [...slicesByPackageShard.keys()];
       expect(readMatrixShardNames(hostedWebMatrix)).toEqual([
         "1/4",
         "2/4",
