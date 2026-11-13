@@ -467,6 +467,16 @@ above. The derived route accepts only the closed overnight summary contract,
 reuses one active member-owned Junction connection, and never establishes or
 reactivates a lane from data ingress.
 
+Each `connect-sources` row may carry `sourceProviderSlug`, the slug
+`GET /api/device-sync/companion/status?sourceProviderSlug=` takes for that
+source's own receipt times; a wearable that comes in through Apple Health has
+none. A `needs_attention` connection carries `reason`: `reconnect` (sign in
+again), `fitbit_migration` (sign in to Google Health), `connection_reset` (the
+old connection must go first, which removes the shared account, so only the
+website does it) or `reset_unfinished` (an earlier reset left the old
+connection in the wearable's own account). Both are additive; older app builds
+ignore them.
+
 ### Hosted agent sessions
 
 - `POST /api/device-sync/agents/pair`
