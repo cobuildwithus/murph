@@ -233,6 +233,8 @@ test('representative default read commands stay within the agent-visible output 
     const output = await runBudgetedRawCli(cli, args, demoVaultRoot)
     assertOk(label, output)
     assertWithinBudget(label, output)
+    // The assistant reads this text; indentation was ~30% of its tokens.
+    assert.equal(output, JSON.stringify(JSON.parse(output)), `${label} JSON output is not compact`)
   }
 }, OUTPUT_BUDGET_TIMEOUT_MS)
 

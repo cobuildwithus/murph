@@ -789,6 +789,26 @@ index 37aab660515f1efba4ad1f0c7d94423a73e492c4..10969d34504e3635af171e9919b9dec3
  }
  /** Returns true if the response body is a stream that should be consumed incrementally. */
  export function isStreamingResponse(response) {
+diff --git a/dist/Formatter.js b/dist/Formatter.js
+index 43342243991d9d04ec1b67ae223454bdd0741a82..338f33eb087b5d50c2caa63d21b49d885ac5ad8d 100644
+--- a/dist/Formatter.js
++++ b/dist/Formatter.js
+@@ -10,12 +10,13 @@ export function format(value, fmt = 'toon') {
+             const trimmed = value.trim();
+             if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+                 try {
+-                    return JSON.stringify(JSON.parse(value), null, 2);
++                    // Murph: JSON output is read by an agent; indentation is token overhead.
++                    return JSON.stringify(JSON.parse(value));
+                 }
+                 catch { }
+             }
+         }
+-        return Json.stringify(value, 2);
++        return Json.stringify(value);
+     }
+     if (fmt === 'yaml')
+         return Yaml.loadSync().stringify(value);
 diff --git a/dist/Mcp.js b/dist/Mcp.js
 index 3102a678e6c37a08be9e735485e3e1187619ea88..fba0397ef2ab2775600a3a08310d057d8b949f29 100644
 --- a/dist/Mcp.js
@@ -1321,7 +1341,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 @@ -71,6 +71,35 @@ async function serve(
    }
  }
-
+ 
 +function expectSafeValidationEnvelope(
 +  output: string,
 +  field: 'arguments' | 'config' | 'input',
@@ -1356,7 +1376,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
      for (const response of responses)
 @@ -488,13 +517,43 @@ describe('config defaults', () => {
    })
-
+ 
    test('fails when an explicit config file is missing', async () => {
 +    const privateMarker = 'private-marker-that-must-not-echo'
      const { exitCode, output } = await serve(createConfigCli('config'), [
@@ -1398,34 +1418,34 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 +      })
 +    }
    })
-
+ 
    test('fails on invalid JSON config files', async () => {
 @@ -502,7 +561,7 @@ describe('config defaults', () => {
-
+ 
      const { exitCode, output } = await serve(createConfigCli(), ['echo'])
      expect(exitCode).toBe(1)
 -    expect(output).toContain('Invalid JSON config file')
 +    expectSafeValidationEnvelope(output, 'config')
    })
-
+ 
    test('fails when the config file top level is not an object', async () => {
 @@ -510,7 +569,7 @@ describe('config defaults', () => {
-
+ 
      const { exitCode, output } = await serve(createConfigCli(), ['echo'])
      expect(exitCode).toBe(1)
 -    expect(output).toContain('expected a top-level object')
 +    expectSafeValidationEnvelope(output, 'config')
    })
-
+ 
    test('fails when the selected config section is not an object', async () => {
 @@ -518,7 +577,7 @@ describe('config defaults', () => {
-
+ 
      const { exitCode, output } = await serve(createConfigCli(), ['echo'])
      expect(exitCode).toBe(1)
 -    expect(output).toContain("Invalid config section for 'echo'")
 +    expectSafeValidationEnvelope(output, 'config')
    })
-
+ 
    test('fails validation when config option values are invalid', async () => {
 @@ -788,13 +847,13 @@ describe('config defaults', () => {
    test('--config without a value produces an error', async () => {
@@ -1434,26 +1454,26 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 -    expect(output).toContain('Missing value for flag')
 +    expectSafeValidationEnvelope(output, 'arguments')
    })
-
+ 
    test('--config= (empty value) produces an error', async () => {
      const { exitCode, output } = await serve(createConfigCli('config'), ['echo', '--config='])
      expect(exitCode).toBe(1)
 -    expect(output).toContain('Missing value for flag')
 +    expectSafeValidationEnvelope(output, 'arguments')
    })
-
+ 
    test('--no-settings works with custom flag name', async () => {
 @@ -1179,7 +1238,7 @@ describe('serve', () => {
      expect(output).toContain('Error: missing required argument <name>')
    })
-
+ 
 -  test('ValidationError preserves Zod messages in machine output', async () => {
 +  test('ValidationError sanitizes Zod messages in machine output', async () => {
      const cli = Cli.create('test')
      cli.command('send', {
        options: z.object({ address: z.string().min(32) }),
 @@ -1190,17 +1249,24 @@ describe('serve', () => {
-
+ 
      const { output, exitCode } = await serve(cli, ['send', '--address', 'abc', '--format', 'json'])
      expect(exitCode).toBe(1)
 -    expect(JSON.parse(output)).toMatchObject({
@@ -1477,7 +1497,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
      })
 +    expect(output).not.toContain('abc')
    })
-
+ 
    test('ValidationError shows invalid option messages in TTY', async () => {
 @@ -1216,10 +1282,8 @@ describe('serve', () => {
      const { output, exitCode } = await serve(cli, ['send', '--address', 'abc'])
@@ -1490,7 +1510,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 +    expect(output).toContain('Error: invalid value for --address: This field is invalid.')
 +    expect(output).not.toContain('abc')
    })
-
+ 
    test('ValidationError shows missing required options in TTY', async () => {
 @@ -1251,9 +1315,7 @@ describe('serve', () => {
      const { output, exitCode } = await serve(cli, ['list', '--state', 'invalid'])
@@ -1501,7 +1521,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 -    )
 +    expect(output).toContain('Error: invalid value for --state: This field is invalid.')
    })
-
+ 
    test('ValidationError shows positional refinement messages in TTY', async () => {
 @@ -1271,7 +1333,8 @@ describe('serve', () => {
      const { output, exitCode } = await serve(cli, ['get', 'abc'])
@@ -1511,7 +1531,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 +    expect(output).toContain('Error: invalid value for <id>: This field is invalid.')
 +    expect(output).not.toContain('abc')
    })
-
+ 
    test('agent is true when not TTY', async () => {
 @@ -2897,7 +2960,7 @@ describe('env', () => {
      const { output, exitCode } = await serve(cli, ['deploy'], { env: {} })
@@ -1520,7 +1540,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 -    expect(output).toContain('Error: missing required environment variable API_TOKEN')
 +    expect(output).toContain('Error: invalid value for <input>: This field is invalid.')
    })
-
+ 
    test('env validation error for invalid var shows human message in TTY', async () => {
 @@ -2915,9 +2978,8 @@ describe('env', () => {
      const { output, exitCode } = await serve(cli, ['deploy'], { env: { API_TOKEN: 'short' } })
@@ -1532,12 +1552,12 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 +    expect(output).toContain('Error: invalid value for <input>: This field is invalid.')
 +    expect(output).not.toContain('short')
    })
-
+ 
    test('env with defaults works when var is unset', async () => {
 @@ -4288,6 +4350,23 @@ describe('outputPolicy', () => {
      expect(output).toContain('requestId: default-id')
    })
-
+ 
 +  test('e2e: invalid vars initialization stays an unexpected typed error', async () => {
 +    let handlerCalls = 0
 +    const cli = Cli.create('test', {
@@ -1580,7 +1600,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 @@ -5215,15 +5292,22 @@ describe('Command.execute', () => {
        version: undefined,
      })
-
+ 
 -    expect(result).toMatchObject({
 +    expect(result).toEqual({
        ok: false,
@@ -1605,7 +1625,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 @@ -5456,6 +5540,47 @@ describe('fetch', () => {
      `)
    })
-
+ 
 +  test('malformed and non-object JSON bodies cannot execute an optional write command', async () => {
 +    const privateMarker = 'private-http-body-marker'
 +    let handlerCalls = 0
@@ -1674,7 +1694,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 +      ],
 +    })
    })
-
+ 
    test('validation error includes fieldErrors for body options', async () => {
 @@ -5540,9 +5680,22 @@ describe('fetch', () => {
      )
@@ -1700,7 +1720,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 +      ],
      })
    })
-
+ 
 @@ -5567,11 +5720,18 @@ describe('fetch', () => {
        ok: false,
        error: {
@@ -1721,36 +1741,36 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
          ],
        },
 @@ -6796,7 +6956,7 @@ describe('globals', () => {
-
+ 
      const { output, exitCode } = await serve(cli, ['--limit', 'not-a-number', 'ping'])
      expect(exitCode).toBe(1)
 -    expect(output).toContain('Invalid input')
 +    expectSafeValidationEnvelope(output, 'input')
    })
-
+ 
    test('globals position is flexible', async () => {
 @@ -6891,7 +7051,7 @@ describe('globals', () => {
-
+ 
      const { output, exitCode } = await serve(cli, ['--rpc-url'])
      expect(exitCode).toBe(1)
 -    expect(output).toContain('Missing value for flag')
 +    expectSafeValidationEnvelope(output, 'arguments')
    })
-
+ 
    test('global alias collision with -h throws at create() time', () => {
 @@ -6925,7 +7085,7 @@ describe('globals', () => {
-
+ 
      const { output, exitCode } = await serve(cli, ['--limit', 'abc', 'ping'])
      expect(exitCode).toBe(1)
 -    expect(output).toContain('UNKNOWN')
 +    expectSafeValidationEnvelope(output, 'input')
      ;(process.stdout as any).isTTY = true
    })
-
+ 
 @@ -6979,14 +7139,116 @@ test('--format rejects invalid format values', async () => {
    expect(output).toMatch(/invalid|unsupported|unknown.*format/i)
  })
-
+ 
 -test('--token-limit with non-numeric value errors', async () => {
 -  const cli = Cli.create('test').command('hello', {
 -    run: (c) => c.ok({ message: 'hello world' }),
@@ -1778,7 +1798,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 +      return c.ok({ message: 'hello world' })
 +    },
    })
-
+ 
 -  const { exitCode, output } = await serve(cli, ['hello', '--token-limit', 'foo', '--json'])
 -  expect(exitCode).toBe(1)
 -  expect(output).not.toContain('NaN')
@@ -1868,7 +1888,7 @@ index 11cbea6eb2ee7fb4fc03bb44b830a2b8d9030c8a..cc7f52ac00abb01fb8d69505798adaf7
 +  })
 +  expect(handlerCalls).toBe(1)
  })
-
+ 
  test('--token-offset with non-numeric value errors', async () => {
 diff --git a/src/Cli.ts b/src/Cli.ts
 index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a6380a346fe 100644
@@ -1895,7 +1915,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a63
 @@ -773,6 +775,32 @@ async function serveImpl(
      stdout(s.endsWith('\n') ? s : `${s}\n`)
    }
-
+ 
 +  function writeSafeError(
 +    error: unknown,
 +    output: { format?: Formatter.Format | undefined; fullOutput: boolean },
@@ -2024,7 +2044,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a63
        })
        exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1)
 @@ -1961,14 +1973,7 @@ async function serveImpl(
-
+ 
      write({
        ok: false,
 -      error: {
@@ -2042,7 +2062,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a63
 @@ -2231,17 +2236,6 @@ async function fetchImpl(
      return new Response('Not Found', { status: 404 })
    }
-
+ 
 -  // Parse options from search params (GET) or body (non-GET)
 -  let inputOptions: Record<string, unknown> = {}
 -  if (req.method === 'GET') for (const [key, value] of url.searchParams) inputOptions[key] = value
@@ -2067,7 +2087,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a63
        {
          ok: false,
 @@ -2300,7 +2294,7 @@ async function fetchImpl(
-
+ 
    const { command, path, rest } = resolved
    const groupMiddlewares = 'middlewares' in resolved ? resolved.middlewares : []
 -  return executeCommand(path, command, rest, inputOptions, req, start, {
@@ -2086,7 +2106,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a63
 @@ -2323,6 +2316,34 @@ async function executeCommand(
      })
    }
-
+ 
 +  function invalidJsonInputResponse() {
 +    return jsonResponse(
 +      {
@@ -2178,7 +2198,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a63
 @@ -2740,6 +2751,32 @@ declare namespace serveImpl {
  /** @internal Extracts built-in flags from argv. */
  const validFormats = new Set(['toon', 'json', 'yaml', 'md', 'jsonl'] as const)
-
+ 
 +function requestedOutput(argv: string[]): {
 +  format?: Formatter.Format | undefined
 +  fullOutput: boolean
@@ -2298,7 +2318,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a63
 +      cause: error instanceof Error ? error : undefined,
 +    })
    }
-
+ 
    let parsed: unknown
 @@ -2944,6 +3004,7 @@ async function readJsonConfig(
    } catch (error) {
@@ -2322,7 +2342,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a63
        message: `Invalid config section for '${path}': expected an object`,
 +      kind: 'config_invalid',
      })
-
+ 
    const options = node.options
 @@ -2980,6 +3043,7 @@ function extractCommandSection(
    if (!isRecord(options))
@@ -2335,7 +2355,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a63
 @@ -3444,6 +3508,14 @@ export const toRootOptions = new WeakMap<Cli, z.ZodObject<any>>()
  /** @internal Maps CLI instances to whether config file loading is enabled. */
  export const toConfigEnabled = new WeakMap<Cli, boolean>()
-
+ 
 +/** Computes the deterministic skill-sync hash for a fully registered CLI. */
 +export function skillHash(cli: Cli): string {
 +  const commands = toCommands.get(cli)
@@ -2346,7 +2366,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a63
 +
  /** @internal Maps CLI instances to their output policy. */
  const toOutputPolicy = new WeakMap<Cli, OutputPolicy>()
-
+ 
 @@ -3491,6 +3563,7 @@ type CtaBlock<commands extends CommandsMap = Commands> = {
  function formatHumanError(error: {
    code: string
@@ -2362,7 +2382,7 @@ index 5989aec498d50d33f77cba278c2c6e3422e0c2fd..3b799ee9fccda1c65e00c62fd5463a63
 +  if (error.hint) out += `\n\nHint: ${error.hint}`
    return out
  }
-
+ 
 @@ -3638,20 +3712,10 @@ async function handleStreaming(
            JSON.stringify({
              type: 'error',
@@ -2671,7 +2691,7 @@ index 84b0b997a1ccdd02f4a847ee7135805583476224..04b0c7186f967daaddaff018676e3f3e
 @@ -71,6 +81,128 @@ export declare namespace IncurError {
    }
  }
-
+ 
 +/** The shared machine error-envelope shape. */
 +export type ErrorEnvelope = {
 +  code: string
@@ -2803,14 +2823,14 @@ index 84b0b997a1ccdd02f4a847ee7135805583476224..04b0c7186f967daaddaff018676e3f3e
    fieldErrors: FieldError[]
 +  /** Schema-owned validation issues that are safe to expose in machine output. */
 +  publicIssues: ValidationError.PublicIssue[]
-
+ 
    constructor(options: ValidationError.Options) {
      super(options.message, options.cause ? { cause: options.cause } : undefined)
      this.fieldErrors = options.fieldErrors ?? []
 +    this.publicIssues = options.publicIssues ?? []
    }
  }
-
+ 
  export declare namespace ValidationError {
 +  type PublicIssue = {
 +    code?: string | undefined
@@ -2837,14 +2857,14 @@ index 84b0b997a1ccdd02f4a847ee7135805583476224..04b0c7186f967daaddaff018676e3f3e
 +  kind: ParseError.Kind
 +  /** Optional argv rejection class; non-enumerable so error envelopes and serialization are unchanged. */
 +  declare readonly reason?: ParseError.Reason | undefined
-
+ 
    constructor(options: ParseError.Options) {
      super(options.message, options.cause ? { cause: options.cause } : undefined)
 +    this.kind = options.kind ?? 'arguments'
 +    if (options.reason) Object.defineProperty(this, 'reason', { value: options.reason })
    }
  }
-
+ 
  export declare namespace ParseError {
 +  type Kind = 'arguments' | 'config_missing' | 'config_invalid' | 'config_unavailable'
 +  type Reason = 'unknown_flag' | 'missing_value'
@@ -2906,7 +2926,7 @@ index 2f9b5b7ec400597c2d93e432fd720032772340a7..48b0bc92848cfa4a302e6fd218d5d9e1
 @@ -152,7 +160,11 @@ export function buildRequest(input: FetchInput): Request {
      if (!input.headers.has('content-type')) input.headers.set('content-type', 'application/json')
    }
-
+ 
 -  return new Request(url.toString(), init)
 +  try {
 +    return new Request(url.toString(), init)
@@ -2914,8 +2934,68 @@ index 2f9b5b7ec400597c2d93e432fd720032772340a7..48b0bc92848cfa4a302e6fd218d5d9e1
 +    throw new ParseError({ message: 'Invalid fetch request options.' })
 +  }
  }
-
+ 
  /** Returns true if the response body is a stream that should be consumed incrementally. */
+diff --git a/src/Formatter.test.ts b/src/Formatter.test.ts
+index e1f01091f0eb7c72facd03d577054ee2c65d70aa..3f1e15123d19ac645fd86e9ec01231d862985d03 100644
+--- a/src/Formatter.test.ts
++++ b/src/Formatter.test.ts
+@@ -55,20 +55,12 @@ describe('format', () => {
+ 
+   test('formats as JSON', () => {
+     const result = Formatter.format({ message: 'hello' }, 'json')
+-    expect(result).toMatchInlineSnapshot(`
+-      "{
+-        "message": "hello"
+-      }"
+-    `)
++    expect(result).toMatchInlineSnapshot(`"{"message":"hello"}"`)
+   })
+ 
+   test('formats bigint values as strings in JSON', () => {
+     const result = Formatter.format({ expiry: 2461152330n }, 'json')
+-    expect(result).toMatchInlineSnapshot(`
+-      "{
+-        "expiry": "2461152330"
+-      }"
+-    `)
++    expect(result).toMatchInlineSnapshot(`"{"expiry":"2461152330"}"`)
+   })
+ 
+   test('formats as YAML', () => {
+@@ -92,12 +84,7 @@ describe('format', () => {
+ 
+   test('formats JSON object strings as JSON', () => {
+     const result = Formatter.format('{"url":"https://example.com/","title":""}', 'json')
+-    expect(result).toMatchInlineSnapshot(`
+-      "{
+-        "url": "https://example.com/",
+-        "title": ""
+-      }"
+-    `)
++    expect(result).toMatchInlineSnapshot(`"{"url":"https://example.com/","title":""}"`)
+   })
+ 
+   test('formats number value', () => {
+diff --git a/src/Formatter.ts b/src/Formatter.ts
+index b0abe45c69bf2aad2d75cfe00c11a781353723b6..37309383b5321579e4bb6fc4f9c0f1232103d73c 100644
+--- a/src/Formatter.ts
++++ b/src/Formatter.ts
+@@ -14,11 +14,12 @@ export function format(value: unknown, fmt: Format = 'toon'): string {
+       const trimmed = value.trim()
+       if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+         try {
+-          return JSON.stringify(JSON.parse(value), null, 2)
++          // Murph: JSON output is read by an agent; indentation is token overhead.
++          return JSON.stringify(JSON.parse(value))
+         } catch {}
+       }
+     }
+-    return Json.stringify(value, 2)
++    return Json.stringify(value)
+   }
+   if (fmt === 'yaml') return Yaml.loadSync().stringify(value)
+   if (fmt === 'md') return formatMarkdown(value)
 diff --git a/src/Mcp.test.ts b/src/Mcp.test.ts
 index 40a6308362959e0da509a033e15409ebb5caac61..8f9b06bd8657fa8e47899b8bab7ba4ec70753ff1 100644
 --- a/src/Mcp.test.ts
@@ -2923,7 +3003,7 @@ index 40a6308362959e0da509a033e15409ebb5caac61..8f9b06bd8657fa8e47899b8bab7ba4ec
 @@ -486,16 +486,79 @@ describe('Mcp', () => {
      expect(callRes.result.content).toEqual([{ type: 'text', text: '{"count":2}' }])
    })
-
+ 
 -  test('tools/call validation error includes fieldErrors', async () => {
 -    const tool = Mcp.collectTools(createTestCommands(), []).find((tool) => tool.name === 'echo')!
 -    const result = await Mcp.callTool(tool, { message: 123 })
@@ -3004,7 +3084,7 @@ index 40a6308362959e0da509a033e15409ebb5caac61..8f9b06bd8657fa8e47899b8bab7ba4ec
 +    expect(JSON.stringify(callRes)).not.toContain(privateMarker)
 +    expect(JSON.stringify(callRes)).not.toContain('UNKNOWN')
    })
-
+ 
    test('tools/call with nested group command', async () => {
 diff --git a/src/Mcp.ts b/src/Mcp.ts
 index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..d7cd439f953bea7286d9c1caa986c62a0476dcc4 100644
@@ -3019,7 +3099,7 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..d7cd439f953bea7286d9c1caa986c62a
 +} from '@modelcontextprotocol/server'
  import type { Readable, Writable } from 'node:stream'
  import { z } from 'zod'
-
+ 
  import * as Command from './internal/command.js'
 +import { toErrorEnvelope } from './Errors.js'
  import { formatCtaBlock, type FormattedCtaBlock, renderCtaText } from './internal/cta.js'
@@ -3027,7 +3107,7 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..d7cd439f953bea7286d9c1caa986c62a
  import type { Handler as MiddlewareHandler } from './middleware.js'
 +import * as Parser from './Parser.js'
  import * as Schema from './Schema.js'
-
+ 
  /** Starts a stdio MCP server that exposes commands as tools. */
 @@ -162,7 +168,7 @@ export async function callTool(
        }
@@ -3050,7 +3130,7 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..d7cd439f953bea7286d9c1caa986c62a
 +    ...(tool.annotations ? { annotations: tool.annotations } : undefined),
 +    ...(tool.instructions ? { _meta: { instructions: tool.instructions } } : undefined),
 +  }
-
+ 
 -  server.registerTool(
 -    tool.name,
 -    {
@@ -3081,7 +3161,7 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..d7cd439f953bea7286d9c1caa986c62a
 +    callTool(tool, {}, callOptions(options, extra)),
    )
  }
-
+ 
 @@ -313,32 +321,39 @@ function registerDiscoveryTools(
    options: registerTools.Options,
  ) {
@@ -3092,7 +3172,7 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..d7cd439f953bea7286d9c1caa986c62a
 +    query: z.string().default('').describe('Capability to find. Empty lists all tools.'),
 +  })
 +  const detailsSchema = z.object({ name: z.string().min(1).describe('Exact tool name.') })
-
+ 
    server.registerTool(
      'search_tools',
      {
@@ -3139,7 +3219,7 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..d7cd439f953bea7286d9c1caa986c62a
 +      }
      },
    )
-
+ 
 @@ -347,20 +362,25 @@ function registerDiscoveryTools(
      {
        description:
@@ -3177,7 +3257,7 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..d7cd439f953bea7286d9c1caa986c62a
 +      }
      },
    )
-
+ 
 @@ -369,15 +389,20 @@ function registerDiscoveryTools(
      {
        description:
@@ -3205,7 +3285,7 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..d7cd439f953bea7286d9c1caa986c62a
 +      }
      },
    )
-
+ 
 @@ -386,24 +411,24 @@ function registerDiscoveryTools(
      {
        description:
@@ -3234,7 +3314,7 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..d7cd439f953bea7286d9c1caa986c62a
      },
    )
  }
-
+ 
 -type CallParams = {
 -  name: string
 -  arguments: Record<string, unknown>
@@ -3246,7 +3326,7 @@ index 716177719c71b148af4d8b9e5b2eb0c0960ecb79..d7cd439f953bea7286d9c1caa986c62a
 @@ -481,6 +506,36 @@ function toolError(message: string) {
    return { ...toolResult({ error: message }), isError: true }
  }
-
+ 
 +function toolInputError(error: unknown) {
 +  return { ...toolResult(toErrorEnvelope(error)), isError: true }
 +}
@@ -3287,13 +3367,13 @@ index 1d213851af660eb7dee9dd73f9c4cf24b854ae6d..00733e4f139e186110f3aec8fa20965d
 @@ -1,4 +1,4 @@
 -import { Parser, z } from 'incur'
 +import { Errors, Parser, z } from 'incur'
-
+ 
  describe('parse', () => {
    test('returns empty args and options when no schemas', () => {
 @@ -152,6 +152,28 @@ describe('parse', () => {
      ).toThrow(expect.objectContaining({ name: 'Incur.ParseError' }))
    })
-
+ 
 +  test('marks argv rejections with a private non-enumerable reason', () => {
 +    const options = z.object({ state: z.string() })
 +    const reasonOf = (argv: string[]) => {
@@ -3322,7 +3402,7 @@ index 1d213851af660eb7dee9dd73f9c4cf24b854ae6d..00733e4f139e186110f3aec8fa20965d
 @@ -202,6 +224,55 @@ describe('parse', () => {
      }
    })
-
+ 
 +  test('exposes only the top-level schema field in a public error envelope', () => {
 +    try {
 +      Parser.parse([], {
@@ -3433,22 +3513,22 @@ index 7f0966b703dfef00377025109cbf97d7ab4ff9c3..71b0045e1bb9e13c06367105afdae299
          }
 @@ -109,7 +109,7 @@ export function parse<
    }
-
+ 
    // Validate args through zod
 -  const args = argsSchema ? zodParse(argsSchema, rawArgs) : {}
 +  const args = argsSchema ? zodParse(argsSchema, rawArgs, { exposeSchemaFields: true }) : {}
-
+ 
    const rawDefaults = normalizeOptionDefaults(defaults, optionsSchema, optionNames)
-
+ 
 @@ -123,7 +123,9 @@ export function parse<
    const mergedOptions = { ...rawDefaults, ...rawArgvOptions }
-
+ 
    // Validate options through zod
 -  const parsedOptions = optionsSchema ? zodParse(optionsSchema, mergedOptions) : {}
 +  const parsedOptions = optionsSchema
 +    ? zodParse(optionsSchema, mergedOptions, { exposeSchemaFields: true })
 +    : {}
-
+ 
    return { args, options: parsedOptions } as parse.ReturnType<args, options>
  }
 @@ -195,17 +197,26 @@ function normalizeOptionDefaults(
@@ -3467,7 +3547,7 @@ index 7f0966b703dfef00377025109cbf97d7ab4ff9c3..71b0045e1bb9e13c06367105afdae299
 +      })
      return {}
    }
-
+ 
    const normalized: Record<string, unknown> = {}
    for (const [rawName, value] of Object.entries(defaults)) {
      const name = normalizeOptionName(rawName, optionNames)
@@ -3482,7 +3562,7 @@ index 7f0966b703dfef00377025109cbf97d7ab4ff9c3..71b0045e1bb9e13c06367105afdae299
    return normalized
 @@ -262,7 +273,11 @@ function setOption(
  }
-
+ 
  /** Wraps zod schema.parse(), converting ZodError to ValidationError. */
 -export function zodParse(schema: z.ZodObject<any>, data: Record<string, unknown>) {
 +export function zodParse<const schema extends z.ZodObject<any>>(
@@ -3522,7 +3602,7 @@ index 7f0966b703dfef00377025109cbf97d7ab4ff9c3..71b0045e1bb9e13c06367105afdae299
      })
    }
  }
-
+ 
 +export declare namespace zodParse {
 +  type Options = {
 +    /** Expose only top-level schema-owned field names in public error envelopes. */
@@ -3541,23 +3621,23 @@ index 7f0966b703dfef00377025109cbf97d7ab4ff9c3..71b0045e1bb9e13c06367105afdae299
 +    if (!Object.prototype.hasOwnProperty.call(current, part)) return false
      current = (current as any)[part]
    }
-
+ 
 @@ -454,7 +494,7 @@ export function parseGlobals<const globals extends z.ZodObject<any>>(
    for (const [name, value] of Object.entries(rawOptions))
      rawOptions[name] = coerce(value, name, schema)
-
+ 
 -  const parsed = zodParse(schema, rawOptions) as z.output<globals>
 +  const parsed = zodParse(schema, rawOptions, { exposeSchemaFields: true }) as z.output<globals>
    return { parsed, rest }
  }
-
+ 
 diff --git a/src/SyncSkills.ts b/src/SyncSkills.ts
 index 138dee8673273e410e89bfca48fe6bfbb309c2ed..c8dbf295780609a50c2016480a210741ada33ed4 100644
 --- a/src/SyncSkills.ts
 +++ b/src/SyncSkills.ts
 @@ -72,10 +72,9 @@ export async function sync(
      }
-
+ 
      // Write skills hash + names for staleness detection
 -    const hashEntries = collectSkillCommands(commands, [], new Map(), options.rootCommand)
      writeMeta(
@@ -3570,7 +3650,7 @@ index 138dee8673273e410e89bfca48fe6bfbb309c2ed..c8dbf295780609a50c2016480a210741
 @@ -189,6 +188,14 @@ export async function list(
    return skills.sort((a, b) => a.name.localeCompare(b.name))
  }
-
+ 
 +/** @internal Computes the exact command-tree hash stored by `sync()`. */
 +export function commandHash(
 +  commands: Map<string, any>,
@@ -3593,11 +3673,11 @@ index 86d4c2dd470cd1a9e936e5f4e969117f890af611..f8e8ff6d30d4cc60c48b8964d1d6ca9c
 -    expect(output).toContain('sort')
 +    expect(output).toContain('This field is invalid.')
    })
-
+ 
    test('missing required arg fails validation', async () => {
 @@ -228,24 +228,35 @@ describe('args and options', () => {
    })
-
+ 
    test('unknown flag returns error', async () => {
 -    const { output, exitCode } = await serve(createApp(), ['ping', '--unknown-flag'])
 +    const privateMarker = 'private-marker-that-must-not-echo'
@@ -3620,7 +3700,7 @@ index 86d4c2dd470cd1a9e936e5f4e969117f890af611..f8e8ff6d30d4cc60c48b8964d1d6ca9c
 +    expect(output).not.toContain(privateMarker)
 +    expect(output).not.toContain('sensitive-value')
    })
-
+ 
    test('unknown flag shows human error in TTY', async () => {
 +    const privateMarker = 'private-marker-that-must-not-echo'
      ;(process.stdout as any).isTTY = true
@@ -3641,7 +3721,7 @@ index 86d4c2dd470cd1a9e936e5f4e969117f890af611..f8e8ff6d30d4cc60c48b8964d1d6ca9c
 +    expect(output).not.toContain('sensitive-value')
    })
  })
-
+ 
 @@ -571,6 +582,7 @@ describe('error handling', () => {
      expect(json(output)).toMatchInlineSnapshot(`
        {
@@ -3668,7 +3748,7 @@ index 86d4c2dd470cd1a9e936e5f4e969117f890af611..f8e8ff6d30d4cc60c48b8964d1d6ca9c
 +      ],
 +    })
    })
-
+ 
    test('command not found returns error envelope', async () => {
 diff --git a/src/internal/command.ts b/src/internal/command.ts
 index 01f2c4a12c2a93a3bdbb39b1405327fd033bc840..23c0c995e02e4357a6cdf2411a1a4eb186aeb8b4 100644
@@ -3676,17 +3756,17 @@ index 01f2c4a12c2a93a3bdbb39b1405327fd033bc840..23c0c995e02e4357a6cdf2411a1a4eb1
 +++ b/src/internal/command.ts
 @@ -1,7 +1,7 @@
  import { z } from 'zod'
-
+ 
  import type { FieldError } from '../Errors.js'
 -import { IncurError, ValidationError } from '../Errors.js'
 +import { IncurError, toErrorEnvelope } from '../Errors.js'
  import type { Context as MiddlewareContext, Handler as MiddlewareHandler } from '../middleware.js'
  import * as Parser from '../Parser.js'
-
+ 
 @@ -52,7 +52,7 @@ export async function execute(command: any, options: execute.Options): Promise<e
    const displayName = options.displayName ?? name
    const parseMode = options.parseMode ?? 'argv'
-
+ 
 -  const varsMap: Record<string, unknown> = varsSchema ? varsSchema.parse({}) : {}
 +  let varsMap: Record<string, unknown> = {}
    let result: execute.Result | undefined
@@ -3712,17 +3792,17 @@ index 01f2c4a12c2a93a3bdbb39b1405327fd033bc840..23c0c995e02e4357a6cdf2411a1a4eb1
 +        ? Parser.zodParse(command.options, split.options, { exposeSchemaFields: true })
 +        : {}
      }
-
+ 
      // Parse env
 @@ -172,6 +178,8 @@ export async function execute(command: any, options: execute.Options): Promise<e
    }
-
+ 
    try {
 +    varsMap = varsSchema ? varsSchema.parse({}) : {}
 +
      // Parse CLI-level env
      const cliEnv = envSchema ? Parser.parseEnv(envSchema, envSource) : {}
-
+ 
 @@ -233,22 +241,9 @@ export async function execute(command: any, options: execute.Options): Promise<e
        await runCommand()
      }

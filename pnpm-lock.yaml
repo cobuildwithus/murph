@@ -89,7 +89,7 @@ patchedDependencies:
     hash: 753e3dd3975254bf8793addb8f0e8df9b2d0ede4f44603f0f876763171938f3a
     path: patches/frog@1.1.0.patch
   incur@0.5.1:
-    hash: 176de4224f3882268de92c7a86ff6ae0b56834d12bb90bf72dedeeef22e682d9
+    hash: f3dbc4e2d1cbcd80ff8271d52e3ac51a522d2c53d945e201d66816b2038608f6
     path: patches/incur@0.5.1.patch
   wrangler@4.93.0:
     hash: 4034c9d23db261a0da21ef2d5ffa979a0ed4af7e395e09b0ac27db76ead6b83b
@@ -668,7 +668,7 @@ importers:
         version: 2.3.1
       incur:
         specifier: 0.5.1
-        version: 0.5.1(patch_hash=176de4224f3882268de92c7a86ff6ae0b56834d12bb90bf72dedeeef22e682d9)
+        version: 0.5.1(patch_hash=f3dbc4e2d1cbcd80ff8271d52e3ac51a522d2c53d945e201d66816b2038608f6)
       mpg123-decoder:
         specifier: 1.0.3
         version: 1.0.3
@@ -13687,7 +13687,7 @@ snapshots:
       yaml: 2.9.1
       zod: 4.6.7
 
-  incur@0.5.1(patch_hash=176de4224f3882268de92c7a86ff6ae0b56834d12bb90bf72dedeeef22e682d9):
+  incur@0.5.1(patch_hash=f3dbc4e2d1cbcd80ff8271d52e3ac51a522d2c53d945e201d66816b2038608f6):
     dependencies:
       '@cfworker/json-schema': 4.1.6
       '@modelcontextprotocol/server': 2.0.0-alpha.4
