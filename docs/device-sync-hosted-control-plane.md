@@ -423,11 +423,17 @@ full accepted window and intentionally retaining new-format rows for one extra
 
 ### Hosted companion routes
 
+- `GET /api/device-sync/companion/connect-sources` — first-party member bearer
+  auth; read-only schema version 1 with resolver-ordered source IDs, names,
+  relative PNG logos, native/web paths, and shared Apple Health setup copy.
+  Active access and health consent gate optional connection states and last-data
+  timestamps; either refusal returns the same unconnected list. Unknown query
+  parameters are ignored. No health values or actions are returned.
 - `POST /api/device-sync/companion/admission`
 - `POST /api/device-sync/companion/sign-in-token`
 - `POST /api/device-sync/companion/hrv-rmssd`
 
-All are Privy-bearer-authenticated and consent-gated. Admission validates its
+The POST routes are bearer-authenticated and consent-gated. Admission validates its
 complete bounded optional-time-zone body before canonical member mutation and
 uses the canonical signup-welcome route without suppressing trial activation;
 it does not enter device sync. Sign-in honors the

@@ -48,6 +48,7 @@ export type ConnectSourceConnectionState = {
   connectTarget: string | null;
   disconnectScope?: ConnectSourceDisconnectScope;
   disconnectSourceProviderSlug?: string;
+  lastDataAt?: string | null;
   migrationState?: ConnectSourceMigrationState;
   migrationRetryRequired?: boolean;
   recoveryKind?: ConnectSourceRecoveryKind;
@@ -366,6 +367,7 @@ export function resolveConfiguredConnectSources(
         connectTarget,
         disconnectScope,
         disconnectSourceProviderSlug,
+        lastDataAt,
         migrationState,
         migrationRetryRequired,
         recoveryKind,
@@ -404,6 +406,7 @@ export function resolveConfiguredConnectSources(
           ? { disconnectSourceProviderSlug }
           : {}),
         ...(historicalResetIncomplete ? { historicalResetIncomplete } : {}),
+        ...(lastDataAt !== undefined ? { lastDataAt } : {}),
         ...(migrationState ? { migrationState } : {}),
         ...(migrationRetryRequired
           ? { migrationRetryRequired: true }
@@ -674,6 +677,7 @@ function resolveConnectSourceConnectionMatches(
             ? { recoveryKind: "connection_reset" as const }
             : {}),
           requiresReconnect: upstreamRequiresReconnect,
+          ...(upstreamSource.lastDataAt !== undefined ? { lastDataAt: upstreamSource.lastDataAt } : {}),
           sourceId,
           state: sourceState,
         });
@@ -741,6 +745,8 @@ function resolveFitbitMigrationConnectionState(input: {
       : successorNeedsAuthorization
         ? "authorization_required"
         : "verifying_successor",
+    lastDataAt: [legacy.lastDataAt, successor?.lastDataAt]
+      .filter((at): at is string => Boolean(at)).sort().at(-1) ?? null,
     requiresReconnect: false,
     sourceId: "fitbit",
     state: input.sourceState,
