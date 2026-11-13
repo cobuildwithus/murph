@@ -201,6 +201,17 @@ hashes. Use the included reconstruction instructions to compare complete
 patched owners. This source is part of the guarded snapshot; no inline encoded
 package or separate unguarded archive is needed.
 
+### Review third-party dependency upgrades
+
+The snapshot never carries third-party package source. A prompt that asks the
+reviewer to audit an upgraded library's own internals therefore returns
+`INVALID` for missing implementation evidence. Scope a dependency-upgrade round
+to Murph-owned code and configuration instead: every caller of an upgraded
+package, the overrides and manifests, the lockfile resolution, and the changed
+tests. Put the release notes checked against those callers, and the tests that
+execute the installed versions, in the PR body as the evidence for dependency
+behavior. Missing third-party source is then out of scope, not an evidence gap.
+
 ## Finding Disposition Boundary
 
 Every final `FINDINGS` result uses this parent-owned disposition boundary.
