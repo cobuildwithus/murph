@@ -15,12 +15,12 @@ const input = { gameId: "game-a", maxPlayers: 2, actor: "leo", clock,
     { memberId: "ava", timeZone: "America/New_York", dayOne: "2026-11-11" },
     { memberId: "leo", timeZone: "Pacific/Auckland", dayOne: "2026-11-11" },
   ] } };
-const liveGame = () => ({ status: "live", players: [{ memberId: "ava", leftAt: null }, { memberId: "leo", leftAt: null }], invitees: [] });
+const liveGame = () => ({ status: "live", players: [{ memberId: "ava", leftAt: null }, { memberId: "leo", leftAt: null }] });
 
 describe("pair invite acceptance push", () => {
   beforeEach(() => {
     vi.resetAllMocks(); vi.useFakeTimers(); vi.setSystemTime(clock);
-    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     m.routes.mockResolvedValue([{ userId: "ava", ...target, gameSessionId: "session-ava" }]);
     m.route.mockResolvedValue({ userId: "ava" }); m.game.mockResolvedValue(liveGame());
     m.block.mockResolvedValue(null); m.send.mockResolvedValue("sent");
@@ -75,12 +75,11 @@ describe("pair invite acceptance push", () => {
     expect(await prepareGameAcceptNotification(tx, input)).toBeNull();
   });
 
-  it.each(["missing", "settled", "void", "off", "allowlist", "left", "removed", "blocked", "route", "expired", "read-failed"])("sends nothing when the %s recheck fails", async reason => {
+  it.each(["missing", "settled", "void", "off", "left", "removed", "blocked", "route", "expired", "read-failed"])("sends nothing when the %s recheck fails", async reason => {
     const notification = await prepareGameAcceptNotification(tx, input);
     if (reason === "missing") m.game.mockResolvedValue(null);
     if (reason === "settled" || reason === "void") m.game.mockResolvedValue({ ...liveGame(), status: reason });
     if (reason === "off") vi.stubEnv("MURPH_GAME_ENABLED", "false");
-    if (reason === "allowlist") vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "sam");
     if (reason === "left") m.game.mockResolvedValue({ ...liveGame(), players: [{ memberId: "ava", leftAt: clock }] });
     if (reason === "removed") m.game.mockResolvedValue({ ...liveGame(), players: [{ memberId: "leo", leftAt: null }] });
     if (reason === "blocked") m.block.mockResolvedValue({ blockerMemberId: "ava" });

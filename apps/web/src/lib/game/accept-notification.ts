@@ -7,7 +7,7 @@ import type { ApplePushRequest } from "../apple-push/send";
 import { companionPushRouteRegistrationSchema } from "../companion/push-route";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { deliverGamePush, readGamePushRoutes } from "./push-delivery";
 import type { Schedule } from "./rules";
 import { addDays, daysBetween, dayStartInstant } from "./time";
@@ -57,9 +57,9 @@ export async function deliverGameAcceptNotification(notification: PreparedAccept
   await deliverGamePush(notification, async () => {
     const db = getPrisma();
     const row = await db.game.findUnique({ where: { id: notification.gameId }, select: {
-      status: true, players: { select: { memberId: true, leftAt: true } }, invitees: { select: { memberId: true } },
+      status: true, players: { select: { memberId: true, leftAt: true } },
     } });
-    if (!row || row.status !== "live" || !isGameOn(row)
+    if (!row || row.status !== "live" || !isGameEnabled()
       || !row.players.some(player => player.memberId === notification.memberId && !player.leftAt)) return false;
     return !await db.gameBlock.findFirst({ where: { OR: [
       { blockerMemberId: notification.memberId, blockedMemberId: notification.actor },
