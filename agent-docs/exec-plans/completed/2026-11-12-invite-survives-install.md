@@ -1,6 +1,6 @@
 # Invite survives the install
 
-Status: active
+Status: completed
 Created: 2026-11-12
 Updated: 2026-11-12
 Review: ReviewGPT architecture review, 2026-11-12, one round (Mountain lane, GPT Pro); findings and outcomes under Review findings
@@ -204,8 +204,19 @@ both P2, plus notes.
    preview is read again signed in, 404 means none). **Accepted as app test
    requirements.**
 
+## Outcome
+
+- Server: cobuildwithus/murph#4907. Final ReviewGPT round 1 on the first
+  head: PASS, no findings. After that, `main` was merged in three times (the
+  allowlist removal, the republished legal documents, the accept push); only
+  tests, the route's guard and the legal text and PDFs changed.
+- App: cobuildwithus/murph-ios#578. Review rounds 1 and 2 each found one High
+  bug in how long a found invite stays on the phone; both fixed. Round 3:
+  PASS.
+
 ## Verification
 
 - Server: focused game service and route tests, workspace typecheck.
 - App: lint, both schemes build, changed test classes once, evidence captures
   on a private simulator.
+Completed: 2026-11-12
