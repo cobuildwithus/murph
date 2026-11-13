@@ -288,6 +288,29 @@ page opens on the Web. Builds before the game send the link to the app without
 the game until they update. The page's Open in Murph
 button opens `ai.withmurph.app://invite/<token>`; `MURPH_GAME_APP_URL_SCHEME`
 overrides the scheme (local stacks use the Debug app's `ai.withmurph.app.dev`).
+For a picked contact whose invite is not bound to a member, a one-on-one invite
+stores the contact's hashed lookup key on its unbound seat, never the address.
+Typed-name invites have no key. Accepting or claiming the seat through Talk it
+over clears the key, as does calling off, blocking or expiring the game.
+An unread expired invite keeps its key until the existing settlement path runs.
+Account deletion clears keys matching the member's currently verified contacts,
+including rotation read candidates, without changing contact-only invitations,
+labels, seats or events. A contact match alone does not make them a participant.
+Group invitation keys keep their existing lifetime.
+
+`GET /api/game/v1/me/invite` requires a bearer session and the game switch,
+like every game route, and returns `{ ok: true, token: string | null }` with private/no-store
+headers. It finds the newest open one-on-one invite matching a verified contact,
+ordered by creation time then id descending. Before limiting candidates to five,
+it excludes games that are off, expired on the normal clock, called off, created
+by the caller or a deleted challenger, already played by the caller, or blocked
+either way. Development clock offsets are checked after the query. Stored live
+or negotiating games with the challenger also exclude a candidate; reports do
+not. The lookup never settles or writes anything, and returns null when games
+are disabled or no candidate qualifies. Preview and acceptance repeat their own
+checks. The app can pass the token through its existing held-invite path after
+sign-in; typed-name invitations still need the original link.
+
 Its link preview (`/g/<token>/opengraph-image`) shows an open invite as a ticket
 with the challenger's first name against "You", both tasks, the days, and the
 stake, titled "<Name> challenged you"; the name the challenger typed for the
@@ -299,7 +322,7 @@ the public API returns the same 404 shape and the page and Open Graph image show
 generic unavailable content. Closed previews never decrypt names or terms.
 Authenticated readers retain used/expired status and their own Talk delivery
 receipt; cancellation adds only `reason: "cancelled"`, never an inviter name.
-Open invite previews are unchanged. A game's
+Public open invite previews are unchanged. A game's
 players keep its invite token after it goes live (a spent token can't be
 accepted again), so reopening your own link is recognized as yours.
 Either seated player can cancel an invited or negotiating game with
@@ -394,8 +417,13 @@ Private photos stay stored while hidden and appear again if the person removes
 their own photo. Shared recap exports use only each person's own profile photo,
 never private contact overrides. Daily challenge photos remain separate.
 Profile media is authenticated: the owner, existing game participants and an
-addressed rematch's participants can read the current profile photo. Public
-invite previews never include profile photos. Removing a profile photo clears
+addressed rematch's participants can read the current profile photo.
+Public invite previews never include profile photos. A signed-in member reading
+an open one-on-one invite gets the challenger's current profile photo through
+optional `inviterAvatarUrl`, a short-lived signed link. Invitation, profile,
+expiry, blocks and reports are rechecked before signing; no photo or unavailable
+signed media returns null. Public pages and share cards keep the initial.
+Removing a profile photo clears
 this default without deleting other people's private contact choices.
 
 Either player can set or change their private photo of someone they play or

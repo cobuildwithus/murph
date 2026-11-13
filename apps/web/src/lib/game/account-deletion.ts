@@ -9,6 +9,7 @@ import { parseGameTalkPayload } from "./talk";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { labelTarget, openGameTexts, sealGameText } from "./crypto";
 import { GAME_ROSTER_CHANGE_REASON, resolveGroupGameChangeTx } from "./change-resolution";
+import { readGameVerifiedContacts, verifiedGameContactKeys } from "./audience";
 
 const GAME_DELETION_PAGE_SIZE = 100;
 const ACTIVE = new Set(["invited", "negotiating", "live"]);
@@ -36,7 +37,11 @@ interface PreparedGame {
     departures: { seat: number; joined: boolean; labels: DepartedLabel[] }[];
   };
 }
-export interface PreparedGameAccountDeletion { games: PreparedGame[]; more: boolean }
+export interface PreparedGameAccountDeletion {
+  games: PreparedGame[];
+  more: boolean;
+  contacts: { memberId: string; contacts: Awaited<ReturnType<typeof readGameVerifiedContacts>> }[];
+}
 
 function participantOf(memberIds: readonly string[]): Prisma.GameWhereInput {
   return { OR: [
@@ -75,9 +80,10 @@ function fingerprint(row: GameRow): string {
 /** Prepare one residual page, with crypto outside transactions and game locks. */
 export async function prepareGameAccountDeletion(input: { memberIds: readonly string[]; prisma: Db }): Promise<PreparedGameAccountDeletion> {
   const leaving = new Set(input.memberIds);
-  const [rows, noteCount] = await Promise.all([
+  const [rows, noteCount, contacts] = await Promise.all([
     readAffectedGames(input.prisma, input.memberIds),
     input.prisma.gameEvent.count({ where: noteSelector(input.memberIds), take: GAME_DELETION_PAGE_SIZE + 1 }),
+    Promise.all(input.memberIds.map(async memberId => ({ memberId, contacts: await readGameVerifiedContacts(memberId) }))),
   ]);
   const more = rows.length > GAME_DELETION_PAGE_SIZE || noteCount > GAME_DELETION_PAGE_SIZE;
   const plans = rows.slice(0, GAME_DELETION_PAGE_SIZE).map(row => ({ row, survivors: participants(row).filter(player => !leaving.has(player.memberId)),
@@ -118,7 +124,22 @@ export async function prepareGameAccountDeletion(input: { memberIds: readonly st
     if (!termsWordsEncrypted) throw new Error("Game words transfer returned no ciphertext.");
     games.push({ id: row.id, fingerprint: fingerprint(row), kept: { owner, termsWordsEncrypted, departures } });
   }
-  return { games, more };
+  return { games, more, contacts };
+}
+
+/**
+ * A contact match never makes someone a participant. Forget only the key on
+ * one-on-one invites sent to their number, while verified identity rows still
+ * exist, including rotation read keys.
+ */
+async function forgetContactInviteKeysTx(tx: Prisma.TransactionClient, leaving: readonly string[], prepared: PreparedGameAccountDeletion["contacts"]): Promise<void> {
+  for (const contact of prepared) {
+    if (!leaving.includes(contact.memberId)) continue;
+    const keys = await verifiedGameContactKeys(tx, contact.memberId, contact.contacts);
+    if (keys.length) await tx.gameInvitee.updateMany({ where: {
+      memberId: null, recipientLookupKey: { in: keys }, game: { maxPlayers: 2 },
+    }, data: { recipientLookupKey: null } });
+  }
 }
 
 /** Apply one page under caller-held member locks; prove the final page before key removal. */
@@ -168,6 +189,7 @@ export async function applyGameAccountDeletionTx(input: { memberIds: readonly st
   const counts = { calledOff, deleted, kept: current.length - deleted };
   if (input.prepared.more) return counts;
   await assertGameDeletionCompleteTx(tx, leaving);
+  await forgetContactInviteKeysTx(tx, leaving, input.prepared.contacts);
   // Cancelled/expired invitations need no crypto plan, but keep no lookup or label.
   await tx.gameInvitee.updateMany({ where: { memberId: { in: leaving } }, data: { memberId: null, recipientLookupKey: null, pendingLabel: Prisma.DbNull } });
   await tx.gameEvent.updateMany({ where: { actor: { in: leaving } }, data: { actor: "system" } });
