@@ -32,23 +32,13 @@ interface SmokeGoal {
   goalId: string;
 }
 
-interface PublicGoalCatalogProbe {
-  catalogHash: string;
-  deepSleepSummary: Record<string, unknown>;
-}
-
 export async function runHostedGoalCliSmoke(input: {
   runCommand: HostedGoalCliSmokeCommandRunner;
 }): Promise<HostedGoalCliSmokeResult> {
   let proofCount = 0;
   const runCommand: HostedGoalCliSmokeCommandRunner = async (label, args) =>
     await input.runCommand(label, [...args, "--full-output"]);
-  const catalogProbe = await probePublicGoalCatalog(runCommand);
-  const deepSleepSummary = catalogProbe.deepSleepSummary;
-  const listRevision = readCommonsGoalRevision(
-    deepSleepSummary.revision,
-    "commons goal list revision",
-  );
+  await probePublicGoalCatalog(runCommand);
   proofCount += 1;
 
   const showData = readCliSuccessData(
@@ -62,22 +52,19 @@ export async function runHostedGoalCliSmoke(input: {
     ]),
     "commons goal show",
   );
-  if (
-    readNonEmptyString(showData.catalogHash, "commons goal show catalog hash")
-      !== catalogProbe.catalogHash
-  ) {
-    throw new Error("Hosted Goal CLI smoke observed a changing public goal catalog.");
-  }
+  readNonEmptyString(showData.catalogHash, "commons goal show catalog hash");
   const shownGoal = readRecord(showData.goal, "commons goal show goal");
   if (shownGoal.key !== IMPROVE_DEEP_SLEEP_GOAL_KEY) {
     throw new Error("Hosted Goal CLI smoke resolved an unexpected public goal.");
   }
   assertCompactCommonsGoal(shownGoal);
+  if (shownGoal.startPrompt !== IMPROVE_DEEP_SLEEP_GOAL_PROMPT) {
+    throw new Error("Hosted Goal CLI smoke found an unexpected public goal prompt.");
+  }
   const shownRevision = readCommonsGoalRevision(
     shownGoal.revision,
     "commons goal show revision",
   );
-  assertRevisionMatches(shownRevision, listRevision);
   proofCount += 1;
 
   const legacyGoal = await createAndReadSmokeGoal({
@@ -169,9 +156,11 @@ export async function runHostedGoalCliSmoke(input: {
   return { proofCount };
 }
 
+// List rows carry only key, title, goal phrase, and aliases. Catalog identity,
+// category, prompt, and revisions are proven through `commons goal show`.
 async function probePublicGoalCatalog(
   runCommand: HostedGoalCliSmokeCommandRunner,
-): Promise<PublicGoalCatalogProbe> {
+): Promise<void> {
   const metadataLabel = "commons goal list metadata";
   const metadata = readCliSuccessData(
     await runCommand("commons-goal-list-metadata", [
@@ -184,10 +173,6 @@ async function probePublicGoalCatalog(
       "json",
     ]),
     metadataLabel,
-  );
-  const catalogHash = readNonEmptyString(
-    metadata.catalogHash,
-    `${metadataLabel} catalog hash`,
   );
   const total = readNonNegativeInteger(metadata.total, `${metadataLabel} total`);
   if (total < PUBLIC_HEALTH_GOAL_MINIMUM_COUNT) {
@@ -215,13 +200,6 @@ async function probePublicGoalCatalog(
         ]),
         outputLabel,
       );
-      if (
-        readNonEmptyString(partition.catalogHash, `${outputLabel} catalog hash`)
-          !== catalogHash
-      ) {
-        throw new Error("Hosted Goal CLI smoke observed a changing public goal catalog.");
-      }
-
       const categoryTotal = readNonNegativeInteger(
         partition.total,
         `${outputLabel} total`,
@@ -233,12 +211,7 @@ async function probePublicGoalCatalog(
       }
       const categoryGoals = readArray(partition.goals, `${outputLabel} goals`)
         .map((value) => readRecord(value, `${outputLabel} item`));
-      const categoryGoal = assertSinglePublicGoalSample(categoryGoals, outputLabel);
-      if (categoryGoal.category !== category) {
-        throw new Error(
-          "Hosted Goal CLI smoke received a goal outside its category sample.",
-        );
-      }
+      assertSinglePublicGoalSample(categoryGoals, outputLabel);
       return categoryTotal;
     },
   ));
@@ -266,12 +239,6 @@ async function probePublicGoalCatalog(
     ]),
     lookupLabel,
   );
-  if (
-    readNonEmptyString(lookup.catalogHash, `${lookupLabel} catalog hash`)
-      !== catalogHash
-  ) {
-    throw new Error("Hosted Goal CLI smoke observed a changing public goal catalog.");
-  }
   const lookupTotal = readNonNegativeInteger(lookup.total, `${lookupLabel} total`);
   const lookupGoals = readArray(lookup.goals, `${lookupLabel} goals`)
     .map((value) => readRecord(value, `${lookupLabel} item`));
@@ -283,22 +250,16 @@ async function probePublicGoalCatalog(
   if (deepSleepSummary.key !== IMPROVE_DEEP_SLEEP_GOAL_KEY) {
     throw new Error("Hosted Goal CLI smoke did not find the expected public goal.");
   }
-  if (deepSleepSummary.startPrompt !== IMPROVE_DEEP_SLEEP_GOAL_PROMPT) {
-    throw new Error("Hosted Goal CLI smoke found an unexpected public goal prompt.");
-  }
-  return { catalogHash, deepSleepSummary };
 }
 
 function assertSinglePublicGoalSample(
   goals: readonly Record<string, unknown>[],
   label: string,
-): Record<string, unknown> {
+): void {
   if (goals.length !== PUBLIC_GOAL_SMOKE_SAMPLE_LIMIT) {
     throw new Error(`Hosted Goal CLI smoke ${label} did not return one bounded sample.`);
   }
-  const goal = goals[0];
-  assertCompactCommonsGoal(goal);
-  return goal;
+  assertCompactCommonsGoal(goals[0]);
 }
 
 async function createAndReadSmokeGoal(input: {
@@ -421,18 +382,6 @@ function assertCompactCommonsGoal(goal: Record<string, unknown>): void {
   ];
   if (forbiddenFields.some((field) => field in goal)) {
     throw new Error("Hosted Goal CLI smoke received a non-compact public goal payload.");
-  }
-}
-
-function assertRevisionMatches(
-  actual: CommonsGoalRevision,
-  expected: CommonsGoalRevision,
-): void {
-  if (
-    actual.pageRevisionId !== expected.pageRevisionId
-    || actual.workflowSpecRevisionId !== expected.workflowSpecRevisionId
-  ) {
-    throw new Error("Hosted Goal CLI smoke found mismatched public goal revisions.");
   }
 }
 

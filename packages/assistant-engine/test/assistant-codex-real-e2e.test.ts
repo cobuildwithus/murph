@@ -6316,7 +6316,7 @@ describe('real Codex live fixture contracts', () => {
           },
         },
       )).resolves.toMatchObject({
-        stdout: expect.stringContaining('"query"'),
+        stdout: expect.stringContaining('"candidates"'),
       })
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
