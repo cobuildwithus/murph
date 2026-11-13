@@ -300,6 +300,33 @@ describe('connected-app caught failures through dispatch, classification and san
     expectNoPrivateContent(result)
   })
 
+  it('labels the web read-budget refusal as a limit without changing its guidance', async () => {
+    // Production shape of the web tier's compacted-result refusal.
+    const guidance = 'That request returned more than Murph can read at once. Ask for fewer results, a narrower time range, or one item at a time.'
+    const error = Object.freeze({ code: 'CONNECTED_APPS_RESULT_TOO_LARGE', status: 413, statusCode: 413,
+      retryable: false, detail: guidance })
+    const limit = { failureStage: 'admission', failureReason: 'limit_reached', errorCategory: 'unknown',
+      connectedAppsHttpStatus: 413 }
+    for (const { tool, args, diagnostic, text } of [
+      { tool: 'connected_apps_execute', args: executeArgs(), diagnostic: limit,
+        text: `connected apps request failed with CONNECTED_APPS_RESULT_TOO_LARGE (HTTP 413): ${guidance}. Repeating this call unchanged will fail the same way; change the request or tell the user what is wrong.` },
+      { tool: 'connected_apps_search', args: { query: privateValue }, diagnostic: limit,
+        text: `connected apps request failed with CONNECTED_APPS_RESULT_TOO_LARGE (HTTP 413): ${guidance}. Repeating this call unchanged will fail the same way; change the request or tell the user what is wrong.` },
+      // A write's result exists only after the write ran, so it stays an ambiguous write.
+      { tool: 'connected_apps_execute', args: executeArgs('GMAIL_SEND_EMAIL'),
+        diagnostic: { ...baseDiagnostic, connectedAppsHttpStatus: 413 }, text: emailRecovery },
+    ]) {
+      const request = vi.fn<AssistantConnectedAppsPort['request']>().mockRejectedValue(error)
+      const result = await dispatch(dispatchInput(args, { request }, tool))
+      expect(request).toHaveBeenCalledOnce()
+      expect(result.rpcResult).toEqual({ success: false, contentItems: [{ type: 'inputText', text }] })
+      expect(result.failureDiagnostic).toEqual(diagnostic)
+      expect(result.runtimeIssueInputs).toHaveLength(1)
+      expect(result.runtimeIssueInputs![0]!.details).toMatchObject({ ...diagnostic, diagnosticRole: 'classification' })
+      expectNoPrivateContent(result)
+    }
+  })
+
   it('keeps a nearby valid read unchanged and never harvests HTTP status from a result', async () => {
     const response = Object.freeze({ result: Object.freeze({ status: 413, text: '<p>Synthetic result</p>' }) })
     const before = JSON.stringify(response)
