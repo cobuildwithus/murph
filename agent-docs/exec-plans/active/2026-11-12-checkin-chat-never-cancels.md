@@ -22,8 +22,9 @@ Updated: 2026-11-12
 
 - A new conversation message no longer makes any of the three check-ins stale
   at reservation, publication, recovery or egress.
-- A post, departure, opt-out, terms change, expiry and the unanswered-evening
-  pause still stop a prepared check-in.
+- A post, departure, terms change and expiry still stop a prepared check-in.
+  For the two evening check-ins, so do a reminder opt-out and the
+  unanswered-evening pause.
 - A runner built before this change still parses every policy Web writes.
 
 ## Scope
@@ -64,6 +65,16 @@ Updated: 2026-11-12
 - Keep one rule: game facts gate delivery, chat is evidence for the model.
 - No prompt change. Each prompt already tells the model to omit what a player
   clearly answered and to stay quiet when nothing remains.
+- Codex deep review, accepted: stale watermark wording in one test title and
+  the testing map; a private-evening case in the schema test; recovery after
+  chat in the Web tests.
+- Codex deep review, rejected: making a reminder opt-out stop the missed-day
+  message. That message has never read `reminder_off` at reservation,
+  publication or egress, so the old rule only stopped it by accident when the
+  opt-out arrived as a chat message. Whether the opt-out should cover it is a
+  product question outside this fix.
+- Left alone: the unused `memberIds` parameter of `isEveningBatchCurrentTx`,
+  which predates this change.
 
 ## Verification
 

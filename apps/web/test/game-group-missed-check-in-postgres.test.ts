@@ -272,7 +272,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
   });
 
   const eveningAt = new Date("2030-03-04T20:05:00Z");
-  it("reserves one evening per room and date, and freezes the addressed batch and watermark", async () => {
+  it("reserves one evening per room and date, and freezes the addressed batch", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(3), id = await f.addGame();
     const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
@@ -393,7 +393,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(await db.$transaction(tx => isEveningBatchCurrentTx(prepared!.policy, prepared!.memberIds, prepared!.audience, tx, eveningAt))).toBe(false);
   });
 
-  it("publishes an evening witness, reads it from the mailbox for final authority, and still sends after room chatter", async () => {
+  it("publishes an evening witness, reads it from the mailbox for final authority, and stays sendable through recovery and egress after room chatter", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(3), id = await f.addGame();
     const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
@@ -403,6 +403,9 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(authority?.policy.batch[0]?.gameId).toBe(id);
     expect(await db.$transaction(tx => isEveningBatchCurrentTx(authority!.policy, authority!.memberIds, authority!.audience, tx, eveningAt))).toBe(true);
     await conversation(f, "Anyone reading something good?");
+    await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: { retryAfterAt: eveningAt } });
+    await drainGameChatLifecycle({ now: eveningAt });
+    expect((await receipt(eventId)).status).toBe("generation_queued");
     const send = () => db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, deliveryIdempotencyKey: eventId,
       containerMemberId: f.roomId, playerMemberIds: authority!.memberIds, audience: authority!.audience,
       eveningPolicy: authority!.policy, now: eveningAt }));
@@ -895,11 +898,14 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await receipt(authority.policy.eventId)).status).toBe("generation_queued");
   });
 
-  it.each(["I missed my post because my train was cancelled.", "Anyone reading something good?"])("still sends after room conversation that arrived once it was queued: %s", async text => {
+  it.each(["I missed my post because my train was cancelled.", "Anyone reading something good?"])("stays sendable through recovery and dispatch after room conversation: %s", async text => {
     const f = await fixture(), id = await f.addGame(), authority = await publish(f.roomId, [id]);
     const appended = await conversation(f, text);
     await db.hostedMailboxItem.update({ where: { id: appended.mailboxItemId }, data: { consumedAt: now } });
     expect(await readGameChatTranscript({ containerMemberId: f.roomId, playerNamesByMemberId: [{ memberId: f.people[0]!.id, name: "Alex (1)" }], since: new Date(`${date}T00:00:00Z`) })).toEqual([{ playerName: "Alex (1)", text }]);
+    await db.hostedLinqDelivery.update({ where: { id: (await receipt(authority.policy.eventId)).id }, data: { retryAfterAt: now } });
+    await drainGameChatLifecycle({ now });
+    expect((await receipt(authority.policy.eventId)).status).toBe("generation_queued");
     expect((await db.$transaction(tx => assertAndDispatch(authority, tx))).claimed).toBe(true);
     expect(await reserveGroupGameMissedDay(f.roomId, [id], now)).toBe(0);
     expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId, kind: "assistant.notification.requested" } })).toBe(1);

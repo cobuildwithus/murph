@@ -2190,7 +2190,7 @@ loopback database lane. It proves the twenty-game bound, room keyset pages,
 Tokyo/Los Angeles mixed-room horizons, shared pair/group locks, immutable quiet
 and rewritten receipt claims, encrypted mailbox/receipt rollback and pointer
 recovery, mutation/publication/dispatch races, historical versus new departures,
-conversation watermark invalidation and exact final audience authority.
+delivery that survives new room conversation, and exact final audience authority.
 `game-missed-check-in.test.ts` owns canonical schedule/join/grace/DST boundaries.
 Hosted-execution's `game-group-missed.test.ts` and Web's delivery-authority suite
 materialize pinned historical readers to exercise both skew directions; the
