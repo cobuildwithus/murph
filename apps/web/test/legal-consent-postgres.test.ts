@@ -19,7 +19,7 @@ if (databaseUrl) {
   if (
     !["postgres:", "postgresql:"].includes(url.protocol)
     || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
-    || !/^\/(murph_consent_test|murph_dev_[a-z0-9_]+)$/u.test(url.pathname)
+    || !/^\/(murph_consent_test|murph_dev_[a-z0-9_]+|murph_test_[a-z0-9_]+)$/u.test(url.pathname)
   ) {
     throw new Error("Consent proof requires a dedicated local test database.");
   }

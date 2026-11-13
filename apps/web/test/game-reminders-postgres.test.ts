@@ -69,7 +69,7 @@ const preference = { minutes: 1140, push: true, text: false, offGameIds: [] as s
 describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(now);
-    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     vi.resetAllMocks(); m.send.mockResolvedValue("sent");
   });
   afterEach(async () => {

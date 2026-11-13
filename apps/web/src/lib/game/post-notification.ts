@@ -6,7 +6,7 @@ import { type ApplePushRequest } from "../apple-push/send";
 import { companionPushRouteRegistrationSchema } from "../companion/push-route";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { dayIndexAt, eligibleFromDay, hasUnlockedDay, indexGameEntries, isScheduledDay, liveEntry, parseStoredTerms, type RuleState } from "./rules";
 import { addDays, dayStartInstant, gameLocalDate } from "./time";
 
@@ -51,7 +51,7 @@ export async function claimGamePostNotification(tx: NotificationTx, input: {
   state: RuleState; actor: string; clock: Date; entryId: string; dayIndex: number;
 }): Promise<ClaimedPostNotification[]> {
   const { state, actor, clock, dayIndex } = input;
-  if (state.game.status !== "live" || !isGameOn({ players: state.players, invitees: state.game.invitees }) || !isScheduledDay(state, dayIndex)) return [];
+  if (state.game.status !== "live" || !isGameEnabled() || !isScheduledDay(state, dayIndex)) return [];
   const candidate = state.entries.find(entry => entry.id === input.entryId);
   if (!candidate || candidate.memberId !== actor || candidate.attempt !== 1 || candidate.withdrawnAt || candidate.kind === "excuse") return [];
   const recipients = state.players.filter(player => player.memberId !== actor && !player.leftAt && dayIndex >= eligibleFromDay(state, player));
@@ -128,12 +128,11 @@ export async function deliverGamePostNotification(notification: ClaimedPostNotif
 async function stillValid(notification: ClaimedPostNotification): Promise<boolean> {
   const db = getPrisma();
   const row = await db.game.findUnique({ where: { id: notification.gameId }, include: {
-    invitees: { select: { memberId: true } },
     players: { include: { entries: { where: { dayIndex: notification.dayIndex }, select: {
       id: true, memberId: true, dayIndex: true, attempt: true, withdrawnAt: true, receivedAt: true,
     } } } },
   } });
-  if (!row || (row.status !== "live" && row.status !== "settled") || !isGameOn(row)) return false;
+  if (!row || (row.status !== "live" && row.status !== "settled") || !isGameEnabled()) return false;
   const recipient = row.players.find(player => player.memberId === notification.memberId && !player.leftAt);
   if (!recipient?.timeZone || gameLocalDate(new Date(), recipient.timeZone) !== notification.day) return false;
   const entries = row.players.flatMap(player => player.entries);

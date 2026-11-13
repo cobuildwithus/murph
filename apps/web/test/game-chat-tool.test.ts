@@ -77,22 +77,6 @@ describe("game chat tool authority", () => {
     expect((await handleGameChatTool(update)).result.status).toBe("unavailable");
     expect(m.run).not.toHaveBeenCalled(); expect(m.read).not.toHaveBeenCalled(); expect(m.exact).not.toHaveBeenCalled();
   });
-  it("is unavailable when neither player is on the game list", async () => {
-    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "third_synthetic");
-    expect((await handleGameChatTool(read)).result).toEqual({ status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." });
-    expect((await handleGameChatTool(update)).result.status).toBe("unavailable");
-    const creation = { operation: "create" as const, gameId: "game_disabled", terms: {
-      tasks: [{ memberId: actor, text: "Walk" }, { memberId: "other_synthetic", text: "Read" }],
-      schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: "prize" as const, item: "Lunch" }],
-    } };
-    expect((await handleGameChatTool({ ...read, request: { action: "update_game", origin, update: creation } })).result).toEqual({ status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." });
-    expect(m.run).not.toHaveBeenCalled(); expect(m.read).not.toHaveBeenCalled(); expect(m.profiles).not.toHaveBeenCalled();
-  });
-  it.each([actor, "other_synthetic"])("lets either player act when one of them is listed (%s only)", async (allowed) => {
-    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", allowed);
-    expect((await handleGameChatTool(update)).result.status).toBe("ok");
-    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor }));
-  });
   it("returns player references only to marked reads, preserving old strict readers", async () => {
     const players = [{ memberId: actor, firstName: "Ava", timeZone: "UTC" }, { memberId: "other_synthetic", firstName: null, timeZone: null }];
     m.profiles.mockResolvedValue(players);
@@ -123,6 +107,15 @@ describe("game chat tool authority", () => {
     expect(m.access).toHaveBeenCalledExactlyOnceWith(group, expect.anything());
     expect(m.wake).not.toHaveBeenCalled(); expect(m.sender).not.toHaveBeenCalled(); expect(m.run).not.toHaveBeenCalled(); expect(m.photo).not.toHaveBeenCalled();
   });
+  it("refuses a capable scheduled read with no member identities", async () => {
+    m.audience.mockResolvedValue({ memberIds: [], threadId: "chat_synthetic" });
+    const result = await handleGameChatTool({ ...read, multiplayer: true, request: {
+      action: "read_game", origin: { kind: "automation_occurrence", automationId: "automation_game_read", occurrenceAt: "2030-04-01T20:00:00Z" },
+    } });
+    expect(result.result.status).toBe("unavailable");
+    expect(m.read).not.toHaveBeenCalled();
+  });
+
   it("keeps the full roster proof for a capable scheduled read", async () => {
     const audience = { memberIds: [actor, "other_synthetic"], threadId: "chat_synthetic", contacts: [{ kind: "email", value: "a@example.test" }, { kind: "email", value: "b@example.test" }, { kind: "email", value: "unresolved@example.test" }], keys: { current: "key", candidates: ["key"] } };
     m.audience.mockResolvedValue(audience);
@@ -134,7 +127,7 @@ describe("game chat tool authority", () => {
     const request = { ...read, request: { action: "read_game" as const, origin: { kind: "automation_occurrence" as const, automationId: "automation_game_read", occurrenceAt: "2030-04-01T20:00:00Z" }, includePlayers: true as const } };
     if (failure === "changed") m.exact.mockRejectedValue(new Error("Roster changed"));
     if (failure === "extra") m.exact.mockResolvedValue([actor, "other_synthetic", "third_synthetic"]);
-    if (failure === "disabled") { vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "third_synthetic"); }
+    if (failure === "disabled") vi.stubEnv("MURPH_GAME_ENABLED", "false");
     if (failure === "runtime" || failure === "access") {
       m[failure].mockRejectedValue(new Error("Authority expired"));
       await expect(handleGameChatTool(request)).rejects.toThrow("Authority expired");

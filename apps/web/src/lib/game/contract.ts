@@ -68,7 +68,7 @@ export interface GameTermsInput {
 }
 
 /**
- * A daily artifact, or an excuse for a missed day (on-device transcript only).
+ * A daily artifact, or a 1–500-character excuse for a missed day.
  * No audio, raw heart-rate samples, or route coordinates are stored.
  */
 export const GAME_ENTRY_KINDS = ["photo", "heart_rate", "words", "route", "reps", "excuse"] as const;
@@ -528,7 +528,7 @@ export interface GameView {
 export interface GameHomeView {
   canStartGroups?: boolean;
   me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null };
-  /** Invite-only: whether this member may start a fresh game. Anyone may rematch. Older apps ignore it. */
+  /** Whether the global game switch is on. Older apps ignore it. */
   canStartGames: boolean;
   /**
    * Games and tickets with people you blocked are left out. Everyone you
@@ -672,7 +672,8 @@ export type GameErrorCode =
    * waits until the member agrees to their current versions. `details` names
    * the scope and its documents with those versions.
    */
-  | "TERMS_REQUIRED";
+  | "TERMS_REQUIRED"
+  | "HEALTH_DATA_REQUIRED";
 
 export interface GameError {
   code: GameErrorCode;

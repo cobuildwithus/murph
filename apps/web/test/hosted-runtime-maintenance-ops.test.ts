@@ -92,7 +92,6 @@ describe("hosted runtime maintenance ops", () => {
     vi.setSystemTime(new Date("2026-10-22T12:00:00.000Z"));
     vi.clearAllMocks();
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     process.env.HOSTED_OPS_MEMBER_IDS = "member_ops";
     process.env.HOSTED_APP_SESSION_HMAC_KEY = Buffer.alloc(32, 7).toString("base64url");
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});

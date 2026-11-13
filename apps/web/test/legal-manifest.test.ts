@@ -49,12 +49,12 @@ test("legal manifest keeps the current PDF set versioned and deterministic", () 
   }
 
   const expectedVersions = new Map([
-    ["consumer-health-data-notice", "2026-07-23"],
-    ["health-ai-safety-disclosure", "2026-07-23"],
-    ["legal-documents", "2026-10-26"],
-    ["privacy-policy", "2026-10-26"],
-    ["subprocessors", "2026-09-02"],
-    ["terms-of-service", "2026-10-26"],
+    ["consumer-health-data-notice", "2026-11-12"],
+    ["health-ai-safety-disclosure", "2026-11-12"],
+    ["legal-documents", "2026-11-12"],
+    ["privacy-policy", "2026-11-12"],
+    ["subprocessors", "2026-11-12"],
+    ["terms-of-service", "2026-11-12"],
   ]);
 
   for (const document of manifest.documents) {
@@ -78,6 +78,6 @@ test("legal manifest keeps the current PDF set versioned and deterministic", () 
   assert.equal(consumerHealthNotice?.latest.path, "/legal/consumer-health-data-notice.pdf");
   assert.equal(
     consumerHealthNotice?.versions[0]?.path,
-    "/legal/consumer-health-data-notice-2026-07-23.pdf",
+    "/legal/consumer-health-data-notice-2026-11-12.pdf",
   );
 });

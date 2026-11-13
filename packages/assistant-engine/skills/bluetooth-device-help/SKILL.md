@@ -27,10 +27,9 @@ supported. Older bands are not supported yet, so say that plainly and stop the
 pairing steps. Promise live heart rate for another brand or for Android only
 when Murph's product information confirms it.
 
-Live heart rate is part of Murph's game, which is invite only. The Connect
-WHOOP button is on the game's heart rate screen. Mention the game or that
-screen only after the member mentions the game. Until then, ask what Murph
-shows them.
+Live heart rate is part of Murph's game. The Connect WHOOP button is on the
+game's heart rate screen. Mention the game or that screen only after the
+member mentions the game. Until then, ask what Murph shows them.
 
 This connection does not need WHOOP's Heart Rate Broadcast switch, an Apple
 Health import, or reconnecting a cloud account, so offer none of those as

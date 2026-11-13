@@ -10,7 +10,7 @@ import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppe
 import { assertHostedDirectAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { readMyGameReminderProjection } from "./direct-tool";
 import { currentTerms, parseStoredTerms } from "./rules";
 import { carryOverGameReminderPreferencesTx } from "./reminder-preferences";
@@ -119,9 +119,9 @@ export async function reconcilePrivateGameActivations(now = new Date(), options:
 
 export async function isPrivateKickoffCurrentTx(policy: HostedGamePrivateKickoffPolicy, tx: Prisma.TransactionClient, now: Date): Promise<boolean> {
   if (!enabled() || now >= new Date(policy.expiresAt) || !await canTextGameReminders(policy.memberId, tx)) return false;
-  const game = await tx.game.findUnique({ where: { id: policy.gameId }, select: { status: true, invitees: { select: { memberId: true } },
+  const game = await tx.game.findUnique({ where: { id: policy.gameId }, select: { status: true,
     players: { select: { memberId: true, leftAt: true } } } });
-  return game?.status === "live" && isGameOn(game) && game.players.some(player => player.memberId === policy.memberId && !player.leftAt);
+  return game?.status === "live" && isGameEnabled() && game.players.some(player => player.memberId === policy.memberId && !player.leftAt);
 }
 
 export async function readPrivateKickoffDeliveryAuthority(eventId: string, memberId: string) {

@@ -570,6 +570,7 @@ export interface CodexAppServerTurnInput {
   // Sent on every turn/start: a value selects the tier, null explicitly
   // resets a sticky thread-level override back to the default tier.
   serviceTier?: AssistantProviderServiceTier | null
+  promptCacheRetention?: '12h' | null
   progressDelivery?: AssistantProgressDelivery | null
   hostedToolContext?: AssistantHostedToolContext | null
   providerRequestOrdinal?: number | null

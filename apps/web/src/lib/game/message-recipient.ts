@@ -2,7 +2,7 @@ import "server-only";
 
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { getPrisma } from "../prisma";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { isHiddenBy, readGameBlocks } from "./blocks";
 import { gamePairWhere } from "./chat-membership";
 
@@ -35,7 +35,7 @@ export async function readGameMessageRecipient(gameId: string, viewerId: string)
       invitees: { select: { memberId: true } },
     },
   });
-  if (!game || !isGameOn(game)) return undefined;
+  if (!game || !isGameEnabled()) return undefined;
   const me = game.players.find(player => player.memberId === viewerId);
   if (!me || me.leftAt) return undefined;
   if (game.maxPlayers !== 2) return null;

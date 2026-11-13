@@ -32,7 +32,7 @@ async function claim(s = state(), at = clock, actor = "p0") {
 describe("one daily game notifier", () => {
   beforeEach(() => {
     vi.resetAllMocks(); vi.useFakeTimers(); vi.setSystemTime(clock);
-    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     m.previous.mockResolvedValue([]); m.blocks.mockResolvedValue([]); m.report.mockResolvedValue(null);
     m.claims.mockImplementation(async ({ data }) => ({ count: data.length }));
     m.route.mockResolvedValue({ userId: "p1" }); m.send.mockResolvedValue("sent"); m.update.mockResolvedValue({ count: 1 });
@@ -126,14 +126,14 @@ describe("one daily game notifier", () => {
     expect(m.update.mock.calls[0][0].data.payload.outcome).toBe("failed");
     m.send.mockResolvedValue("unregistered"); await deliverGamePostNotification(n); expect(m.forget).toHaveBeenCalledExactlyOnceWith("p1", target.token);
   });
-  it("honors rollout and invalid or unenrolled routes", async () => {
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "unrelated"); expect(await claim()).toEqual([]);
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "p1"); expect(await claim()).toHaveLength(1);
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "p2");
-    const invited = state(); invited.game.invitees = [{ memberId: "p2", seat: 2 }];
-    const [notification] = await claim(invited); await deliverGamePostNotification(notification);
-    expect(m.send).toHaveBeenCalledOnce();
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "p1");
+  it("honors the switch at claim and delivery, and refuses unenrolled routes", async () => {
+    vi.stubEnv("MURPH_GAME_ENABLED", "false"); expect(await claim()).toEqual([]);
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
+    const [notification] = await claim();
+    vi.stubEnv("MURPH_GAME_ENABLED", "false");
+    await deliverGamePostNotification(notification);
+    expect(m.send).not.toHaveBeenCalled();
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     m.routes.mockResolvedValue([{ userId: "p1", ...target, gameSessionId: null }]);
     expect(await claimGamePostNotification(tx, { state: state(), clock, actor: "p0", entryId: "post-p0", dayIndex: 0 })).toEqual([]);
   });

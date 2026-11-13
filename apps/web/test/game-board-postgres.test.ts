@@ -111,7 +111,7 @@ beforeEach(() => {
   vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 9).toString("base64url"));
   vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://example.test");
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-05T12:00:00Z"));
-  vi.clearAllMocks(); mocks.afterDecrypt.mockResolvedValue(undefined); mocks.wake.mockResolvedValue(undefined); process.env.MURPH_GAME_ENABLED = "true"; delete process.env.MURPH_GAME_BOARD_ENABLED; delete process.env.MURPH_GAME_MEMBER_ALLOWLIST;
+  vi.clearAllMocks(); mocks.afterDecrypt.mockResolvedValue(undefined); mocks.wake.mockResolvedValue(undefined); process.env.MURPH_GAME_ENABLED = "true"; delete process.env.MURPH_GAME_BOARD_ENABLED;
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 afterAll(async () => {

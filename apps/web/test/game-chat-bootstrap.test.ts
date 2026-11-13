@@ -24,7 +24,7 @@ vi.mock("../src/lib/hosted-onboarding/linq-delivery-store", () => ({ buildHosted
 vi.mock("../src/lib/hosted-onboarding/linq-observability-identifiers", () => ({ createHostedLinqDeliveryIdempotencyLookupKey: (key: string) => `hash:${key}` }));
 vi.mock("../src/lib/hosted-onboarding/linq-participant-contact", () => ({ createHostedLinqParticipantContactLookupKey: () => "phone-key" }));
 vi.mock("../src/lib/hosted-routing/thread-container-service", () => ({ prepareHostedThreadContainerBootstrap: m.prepareContainer, createHostedGameThreadContainerTx: m.createContainer, prepareHostedThreadContainerDeliveryRoute: m.prepareRoute, attachHostedThreadContainerBootstrapRouteTx: m.attachRoute }));
-vi.mock("../src/lib/game/access", () => ({ isGameOn: () => true }));
+vi.mock("../src/lib/game/access", () => ({ isGameEnabled: () => true }));
 vi.mock("../src/lib/game/chat-membership", () => ({ bindPairGameChat: async () => null, readPairGameChatTx: async () => null, isExactGameChat: (chat: { exact: boolean }) => chat.exact }));
 import { handleGameChatBootstrapControl, prepareGameChatBootstrap, reconcileFrozenGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "../src/lib/game/chat-bootstrap";
 const gameId = "game_sample";
@@ -254,6 +254,15 @@ describe("generated game chat bootstrap", () => {
     expect(await call("send", "Do not send")).toMatchObject({ result: { status: "unavailable" } });
     expect(m.create).not.toHaveBeenCalled(); expect(m.claim).not.toHaveBeenCalled();
   });
+  it("refuses dispatch if the frozen pair loses all member identities before the final lock", async () => {
+    m.lines.mockImplementation(async () => {
+      if (m.frozen) m.game.mockResolvedValue({ ...game(), players: game().players.map(player => ({ ...player, memberId: null })) });
+      return [{ phoneNumber: "+15555550100", phoneNumberLookupKey: "line", maxNewConversationsPerDay: 10 }];
+    });
+    await expect(call("send", "Synthetic kickoff")).rejects.toThrow("Game chat delivery is unavailable.");
+    expect(m.create).not.toHaveBeenCalled();
+  });
+
   it("rejects current runtime authority loss before frozen message dispatch", async () => {
     m.runtime.mockRejectedValue(new Error("Stale runtime"));
     await expect(call("send", "Do not send")).rejects.toThrow("Stale runtime");

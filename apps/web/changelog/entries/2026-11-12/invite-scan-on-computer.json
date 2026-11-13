@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-12",
+  "order": 310,
+  "item": {
+    "id": "invite-scan-on-computer",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Game invites opened on a computer show a code to scan",
+    "summary": "Open a game invite link on a computer and the invite now sits beside a code; point your phone's camera at it and the same invite opens on your phone.",
+    "details": "With Murph installed the invite opens in the app. Without it, your phone shows the invite with Get the app. An invite that was used, called off or ran out shows no code.",
+    "relevanceTags": ["games", "invites"],
+    "sourcePullRequests": [4909]
+  }
+}

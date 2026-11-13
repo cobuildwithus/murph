@@ -957,6 +957,7 @@ function buildAssistantNotificationInput(
 
 function withPairShowTarget(notificationInput: AssistantNotificationInput, wake: HostedExecutionAssistantNotificationRequestedWake, executionContext: AssistantExecutionContext): void {
   if (wake.notification.responsePolicy?.kind === "require_game_recap" && wake.notification.responsePolicy.show) {
+    notificationInput.serviceTier = "flex";
     notificationInput.assistantTargetOverride = { model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
       modelProvider: resolveHostedOperatorModelProvider(executionContext.hosted?.defaultTarget?.modelProvider) };
   }

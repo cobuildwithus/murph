@@ -4,7 +4,7 @@ import type { ApplePushRequest } from "../apple-push/send";
 import { companionPushRouteRegistrationSchema } from "../companion/push-route";
 import { getPrisma } from "../prisma";
 import { sha256Hex } from "../primitives";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { openGameTexts } from "./crypto";
 import { deliverGamePush, readGamePushRoutes } from "./push-delivery";
 import { gameReminderWindow, reminderOpenDay } from "./reminders";
@@ -31,7 +31,7 @@ async function readOpenGames(memberIds: string[], now: Date) {
     const window = gameReminderWindow(now, profile.timeZone, profile.reminderMinutes);
     if (!window || profile.players.length > GAMES_PER_MEMBER) return [];
     const open = profile.players.flatMap(seat => {
-      if (!isGameOn(seat.game) || seat.entries.length > ENTRIES_PER_SEAT) return [];
+      if (!isGameEnabled() || seat.entries.length > ENTRIES_PER_SEAT) return [];
       try {
         const state = toRuleState(seat.game, seat.entries);
         const player = state.players.find(player => player.memberId === profile.memberId);

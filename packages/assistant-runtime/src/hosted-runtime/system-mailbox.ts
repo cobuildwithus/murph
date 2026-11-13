@@ -14,8 +14,10 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
-import type {
-  AssistantExecutionContext,
+import {
+  computeAssistantAutoReplyRetryAt,
+  isAssistantProviderCapacityError,
+  type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 
 import { HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT } from "../hosted-device-sync-limits.ts";
@@ -669,9 +671,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         status: "processed",
       };
     }
-    const nextWakeAt = new Date(
-      Date.parse(startedAt) + hostedSystemMailboxExecutionRetryDelayMs(prepared, startedAt),
-    ).toISOString();
+    const nextWakeAt = hostedSystemMailboxExecutionRetryAt(prepared, startedAt, error);
     await updateHostedSystemMailboxPendingItem({
       item: {
         ...prepared,
@@ -1943,6 +1943,15 @@ function earliestHostedSystemMailboxWakeAt(left: string | null, right: string | 
   }
 
   return Date.parse(left) <= Date.parse(right) ? left : right;
+}
+
+function hostedSystemMailboxExecutionRetryAt(item: HostedSystemMailboxPendingItem, startedAt: string, error: unknown): string {
+  const recapCapacityRetryAt = item.wake.kind === "assistant.notification.requested"
+    && item.wake.notification.responsePolicy?.kind === "require_game_recap"
+    && item.wake.notification.responsePolicy.show
+    && isAssistantProviderCapacityError(error)
+    ? computeAssistantAutoReplyRetryAt(error) : null;
+  return recapCapacityRetryAt ?? new Date(Date.parse(startedAt) + hostedSystemMailboxExecutionRetryDelayMs(item, startedAt)).toISOString();
 }
 
 function hostedSystemMailboxExecutionRetryDelayMs(

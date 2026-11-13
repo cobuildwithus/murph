@@ -1060,6 +1060,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "America/New_York");
     const stranger = await member("Sam", "UTC");
+    const { recordHostedLaunchRequiredConsent } = await import("@/src/lib/legal/consent");
+    for (const memberId of [leo, ava]) await recordHostedLaunchRequiredConsent({ memberId, prisma: getPrisma(), scope: "launch.health-data" });
     const { gameId } = await startGame(leo, ava, { terms: { ...TERMS, checkInKind: "heart_rate" } });
     // A retained heart-rate-only game still enforces its stored requirement.
     const stored = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } });
@@ -2281,7 +2283,6 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const { requireGameMember } = await import("../src/lib/game/http/auth");
     const crypto = await import("../src/lib/game/crypto");
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 17).toString("base64url"));
     vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 9).toString("base64url"));
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "http://localhost:3237");

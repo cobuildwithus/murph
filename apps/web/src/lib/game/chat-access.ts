@@ -161,7 +161,7 @@ export async function readGameChatFundingRooms(input: {
         ))
         AND NOT EXISTS (SELECT 1 FROM game_block blocked
           WHERE blocked.blocker_member_id = ANY(${restrictedMembers}) AND blocked.blocked_member_id = ANY(${restrictedMembers}))
-        AND ${gameOnSql("game")}
+        AND ${gameOnSql()}
         AND NOT EXISTS (
           SELECT 1 FROM hosted_member person
           WHERE person.id = ANY(${restrictedMembers}) AND (

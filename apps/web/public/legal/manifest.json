@@ -7,19 +7,19 @@
       "effectiveDate": "2026-04-09",
       "id": "privacy-policy",
       "latest": {
-        "bytes": 96185,
+        "bytes": 98766,
         "path": "/legal/privacy.pdf",
-        "sha256": "8cfd852e1078672e7ca03ac542e1a6da1169c38c53a7ffd28e44fa7cd5ca4e0e"
+        "sha256": "f516c7b7eb2becfa730f9ddd82fee583a12d3c6d3937d33b91dfb7aa1dbaf607"
       },
-      "lastUpdated": "2026-10-26",
+      "lastUpdated": "2026-11-12",
       "source": "apps/web/legal/privacy-policy.md",
       "title": "Murph Privacy Policy",
-      "version": "2026-10-26",
+      "version": "2026-11-12",
       "versions": [
         {
-          "bytes": 96185,
-          "path": "/legal/privacy-2026-10-26.pdf",
-          "sha256": "8cfd852e1078672e7ca03ac542e1a6da1169c38c53a7ffd28e44fa7cd5ca4e0e"
+          "bytes": 98766,
+          "path": "/legal/privacy-2026-11-12.pdf",
+          "sha256": "f516c7b7eb2becfa730f9ddd82fee583a12d3c6d3937d33b91dfb7aa1dbaf607"
         }
       ]
     },
@@ -28,46 +28,46 @@
       "effectiveDate": "2026-10-26",
       "id": "terms-of-service",
       "latest": {
-        "bytes": 106145,
+        "bytes": 106562,
         "path": "/legal/terms.pdf",
-        "sha256": "f3d7be192d682192a7b7cc1a704d82b5104cee234f4b80bbaa247d65ed4b8726"
+        "sha256": "7fb47b4b574492329772681e827d47a0af1dab28f4af51289b310190c82f94f0"
       },
-      "lastUpdated": "2026-10-26",
+      "lastUpdated": "2026-11-12",
       "source": "apps/web/legal/terms-of-service.md",
       "title": "Murph Terms of Service",
-      "version": "2026-10-26",
+      "version": "2026-11-12",
       "versions": [
         {
-          "bytes": 106145,
-          "path": "/legal/terms-2026-10-26.pdf",
-          "sha256": "f3d7be192d682192a7b7cc1a704d82b5104cee234f4b80bbaa247d65ed4b8726"
+          "bytes": 106562,
+          "path": "/legal/terms-2026-11-12.pdf",
+          "sha256": "7fb47b4b574492329772681e827d47a0af1dab28f4af51289b310190c82f94f0"
         }
       ]
     },
     {
       "aliases": [
         {
-          "bytes": 40073,
+          "bytes": 41711,
           "path": "/legal/consumer-health-data-privacy.pdf",
-          "sha256": "77d9416217169e80db7d57d4ba345a06205d5e1e54f64618cf37fa7db6386d94"
+          "sha256": "94228e6b78a15cc1e4e69483ee60c3dd16af82b128e65c12a9e44a59ff3ec631"
         }
       ],
       "effectiveDate": "2026-04-29",
       "id": "consumer-health-data-notice",
       "latest": {
-        "bytes": 40073,
+        "bytes": 41711,
         "path": "/legal/consumer-health-data-notice.pdf",
-        "sha256": "77d9416217169e80db7d57d4ba345a06205d5e1e54f64618cf37fa7db6386d94"
+        "sha256": "94228e6b78a15cc1e4e69483ee60c3dd16af82b128e65c12a9e44a59ff3ec631"
       },
-      "lastUpdated": "2026-07-23",
+      "lastUpdated": "2026-11-12",
       "source": "apps/web/legal/consumer-health-data-notice.md",
       "title": "Murph Consumer Health Data Notice",
-      "version": "2026-07-23",
+      "version": "2026-11-12",
       "versions": [
         {
-          "bytes": 40073,
-          "path": "/legal/consumer-health-data-notice-2026-07-23.pdf",
-          "sha256": "77d9416217169e80db7d57d4ba345a06205d5e1e54f64618cf37fa7db6386d94"
+          "bytes": 41711,
+          "path": "/legal/consumer-health-data-notice-2026-11-12.pdf",
+          "sha256": "94228e6b78a15cc1e4e69483ee60c3dd16af82b128e65c12a9e44a59ff3ec631"
         }
       ]
     },
@@ -76,19 +76,19 @@
       "effectiveDate": "2026-04-29",
       "id": "health-ai-safety-disclosure",
       "latest": {
-        "bytes": 12517,
+        "bytes": 12953,
         "path": "/legal/health-ai-safety-disclosure.pdf",
-        "sha256": "d915d36a3926292fe200c69d3212b17f2220285886b51edbb5f0a8ce6ca61a0f"
+        "sha256": "d030addfc79aee5e7052d900952e1ecfa8dc0d8968826b71895b77123cef4808"
       },
-      "lastUpdated": "2026-07-23",
+      "lastUpdated": "2026-11-12",
       "source": "apps/web/legal/health-ai-safety-disclosure.md",
       "title": "Murph Health AI Safety Disclosure",
-      "version": "2026-07-23",
+      "version": "2026-11-12",
       "versions": [
         {
-          "bytes": 12517,
-          "path": "/legal/health-ai-safety-disclosure-2026-07-23.pdf",
-          "sha256": "d915d36a3926292fe200c69d3212b17f2220285886b51edbb5f0a8ce6ca61a0f"
+          "bytes": 12953,
+          "path": "/legal/health-ai-safety-disclosure-2026-11-12.pdf",
+          "sha256": "d030addfc79aee5e7052d900952e1ecfa8dc0d8968826b71895b77123cef4808"
         }
       ]
     },
@@ -97,19 +97,19 @@
       "effectiveDate": "2026-04-29",
       "id": "subprocessors",
       "latest": {
-        "bytes": 28963,
+        "bytes": 30681,
         "path": "/legal/subprocessors.pdf",
-        "sha256": "6be078cc8e3f9bc663752817ceeb7f118cddd4d832f4ab6025711e1f7f87de66"
+        "sha256": "c2ae44f791c909e91c59014df12ab6d37bf209ce8b828f5f4b2eb3015f7cd854"
       },
-      "lastUpdated": "2026-09-02",
+      "lastUpdated": "2026-11-12",
       "source": "apps/web/legal/subprocessors.md",
       "title": "Murph Subprocessors, Model Providers, and Connected Services",
-      "version": "2026-09-02",
+      "version": "2026-11-12",
       "versions": [
         {
-          "bytes": 28963,
-          "path": "/legal/subprocessors-2026-09-02.pdf",
-          "sha256": "6be078cc8e3f9bc663752817ceeb7f118cddd4d832f4ab6025711e1f7f87de66"
+          "bytes": 30681,
+          "path": "/legal/subprocessors-2026-11-12.pdf",
+          "sha256": "c2ae44f791c909e91c59014df12ab6d37bf209ce8b828f5f4b2eb3015f7cd854"
         }
       ]
     },
@@ -118,19 +118,19 @@
       "effectiveDate": "2026-04-29",
       "id": "legal-documents",
       "latest": {
-        "bytes": 4614,
+        "bytes": 4615,
         "path": "/legal/legal-documents.pdf",
-        "sha256": "b45b9ac2c886c84f0e606d66962e09db007e4a3e6e1890c6890a714ed165900b"
+        "sha256": "149a513a1d57da751ecc999d2481e1481cb2557c68c2ffc2e542ed788034b77f"
       },
-      "lastUpdated": "2026-10-26",
+      "lastUpdated": "2026-11-12",
       "source": "apps/web/legal/legal-documents.md",
       "title": "Murph Legal Documents",
-      "version": "2026-10-26",
+      "version": "2026-11-12",
       "versions": [
         {
-          "bytes": 4614,
-          "path": "/legal/legal-documents-2026-10-26.pdf",
-          "sha256": "b45b9ac2c886c84f0e606d66962e09db007e4a3e6e1890c6890a714ed165900b"
+          "bytes": 4615,
+          "path": "/legal/legal-documents-2026-11-12.pdf",
+          "sha256": "149a513a1d57da751ecc999d2481e1481cb2557c68c2ffc2e542ed788034b77f"
         }
       ]
     }

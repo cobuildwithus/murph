@@ -46,6 +46,7 @@ import type {
   CodexAppServerLiveTurn,
 } from '../../assistant-codex.js'
 import { extractCodexAppServerUserMessageImages } from '../../assistant-codex/images.js'
+import { isAssistantProviderCapacityError } from '../automation/auto-reply-retry.js'
 
 const ASSISTANT_PROVIDER_PROMPT_SIZE_TRACE_SCHEMA =
   'murph.assistant-provider-prompt-size-diagnostics.v1'
@@ -211,6 +212,7 @@ export async function executeCodexAssistantTurnAttempt(
       ? undefined
       : providerConfig.policy.sandbox ?? undefined,
     serviceTier: input.serviceTier ?? null,
+    promptCacheRetention: input.promptCacheRetention,
     turnTrigger: input.turnTrigger,
     vaultRoot: input.vaultRoot ?? null,
     voiceMemoRuntime,
@@ -226,7 +228,8 @@ export async function executeCodexAssistantTurnAttempt(
     const failureContext = knownFailureContext ??
       readCodexAppServerTurnFailureContext(failureError)
     const rawEvents = failureContext?.jsonEvents ?? []
-    const usage = rawEvents.length > 0
+    const recapCapacityRefusal = isRecapCapacityRefusal(input, failureError)
+    const usage = rawEvents.length > 0 || recapCapacityRefusal
       ? extractCodexAssistantProviderUsage({
           providerConfig,
           rawEvents,
@@ -257,7 +260,7 @@ export async function executeCodexAssistantTurnAttempt(
             rawEvents,
           }
         : {}),
-      ...(hasCodexAssistantProviderUsageData(usage) ? { usage } : {}),
+      ...(hasCodexAssistantProviderUsageData(usage) || recapCapacityRefusal ? { usage } : {}),
     }
   }
   try {
@@ -501,6 +504,13 @@ function redactCodexProviderFailureText(input: {
   }
 
   return redacted
+}
+
+function isRecapCapacityRefusal(input: AssistantProviderTurnExecutionInput, error: unknown): boolean {
+  // Keep tier evidence even for a refusal with no billable token counters.
+  // If earlier requests produced usage, extraction above still preserves it.
+  return input.hostedToolContext?.currentGameRecapScope?.()?.show === true
+    && isAssistantProviderCapacityError(error)
 }
 
 function hasCodexAssistantProviderUsageData(

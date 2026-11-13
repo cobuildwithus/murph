@@ -198,6 +198,7 @@ export type AssistantCodexTurnRecoveryOutcome =
       error: unknown
       providerRequestOutcome: Exclude<AssistantProviderRequestOutcome, 'succeeded'>
       assistantContractFingerprint: string
+      transcriptBoundary?: ExecutedAssistantProviderTurnResult['transcriptBoundary']
       codexContinuation: AssistantCodexContinuation
       codexRolloutRelativePath: string | null
       codexThreadId: string | null
@@ -647,6 +648,7 @@ async function executeAssistantCodexAttempt(
         failedAttemptAcceptedNoReplyDeliveryContextOrdinals,
       reactions: failedAttemptReactions,
       assistantContractFingerprint: attemptPlan.routePlan.assistantContractFingerprint,
+      transcriptBoundary: attemptPlan.routePlan.transcriptBoundary,
       route: attemptPlan.route,
       rawEvents: failedAttemptRawEvents,
       session,
@@ -828,9 +830,7 @@ function buildCodexAttemptProviderInput(
       sandbox: resolveCodexAttemptSandbox(capabilities, attemptPlan),
     },
     turn: {
-      abortSignal: serviceTier === 'flex'
-        ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
-        : executionPlan.input.abortSignal,
+      abortSignal: resolveCodexAttemptAbortSignal(executionPlan, serviceTier),
       askGrokTurnState: input.askGrokTurnState,
       analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
       activeTurnId: executionPlan.turnId,
@@ -957,6 +957,10 @@ function buildCodexAttemptProviderInput(
         : attemptPlan.routePlan.resume,
       // Per-turn execution policy from the message input, not route identity.
       serviceTier,
+      promptCacheRetention: resolveConversationPromptCacheRetention({
+        profile: executionPlan.profile,
+        turnTrigger: executionPlan.input.turnTrigger,
+      }),
       turnTrigger: executionPlan.input.turnTrigger,
       sessionContext: attemptPlan.routePlan.sessionContext
         ? {
@@ -980,6 +984,21 @@ function buildCodexAttemptProviderInput(
       workingDirectory: attemptPlan.routePlan.workingDirectory,
     },
   }
+}
+
+// Isolated conversation profiles include notifications and recap shows.
+// New profiles and triggers keep provider defaults unless explicitly added here.
+function resolveConversationPromptCacheRetention(input: {
+  profile: Pick<AssistantCodexTurnExecutionPlan['profile'], 'promptProfile' | 'threadScope'>
+  turnTrigger?: AssistantCodexTurnExecutionPlan['input']['turnTrigger']
+}): '12h' | null {
+  return input.profile.promptProfile === 'conversation'
+    && input.profile.threadScope === 'session-thread'
+    && (input.turnTrigger == null
+      || input.turnTrigger === 'manual-ask'
+      || input.turnTrigger === 'automation-auto-reply')
+    ? '12h'
+    : null
 }
 
 function normalizeAssistantProviderAttemptMetadata(
@@ -1095,6 +1114,7 @@ function resolveCodexAttemptServiceTier(input: {
   const priorityUntil = Date.parse(input.env[HOSTED_ASSISTANT_PRIORITY_UNTIL_ENV] ?? '')
   const remainingMs = priorityUntil - Date.now()
   if (requestedServiceTier === null
+    && !executionContext.hosted.gameRecapScope?.show
     && profile.promptProfile === 'conversation'
     && turn.turnTrigger !== 'automation-cron'
     && !turn.scheduledOccurrenceAt
@@ -1132,6 +1152,13 @@ function composeAssistantProviderFlexDeadlineSignal(
 ): AbortSignal {
   const deadline = AbortSignal.timeout(ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS)
   return signal ? AbortSignal.any([signal, deadline]) : deadline
+}
+
+function resolveCodexAttemptAbortSignal(plan: AssistantCodexTurnExecutionPlan, tier: AssistantProviderServiceTier | null) {
+  // Recap capacity time belongs to the durable retry owner, not active writing.
+  return tier === 'flex' && !plan.executionContext?.hosted?.gameRecapScope?.show
+    ? composeAssistantProviderFlexDeadlineSignal(plan.input.abortSignal)
+    : plan.input.abortSignal
 }
 
 function readAssistantErrorCode(error: unknown): string | null {

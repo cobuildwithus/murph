@@ -321,6 +321,34 @@ describe("game recap generation retirement", () => {
     } finally { await workspace.cleanup(); }
   });
 
+  it("durably re-wakes the same recap at the capacity backoff without consuming it", async () => {
+    const workspace = await createHostedRuntimeWorkspace("recap-capacity-");
+    const notification = wake();
+    if (notification.notification.responsePolicy?.kind !== "require_game_recap") throw new Error("Expected recap");
+    notification.notification.responsePolicy.show = true;
+    const runtime = createRuntime({ groupToolPort: { request: async () => response() } });
+    mocks.executeHostedMailboxEvent.mockRejectedValue(new VaultCliError("ASSISTANT_CODEX_FAILED", "Synthetic capacity refusal", { codexErrorInfo: "flexUnavailable" }));
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse(FIXED_NOW));
+    try {
+      await enqueueHostedSystemMailboxItem({ item: createResolvedNotificationItem({ dedupeKey: eventId }), wake: notification, vaultRoot: workspace.vaultRoot });
+      const result = await prepareHostedSystemMailboxItemForCheckpoint({ executionContext: null, now: () => FIXED_NOW,
+        runtime, runtimeEnv: {}, vaultRoot: workspace.vaultRoot });
+      const retryAt = "2026-04-27T00:05:00.000Z";
+      expect(result).toMatchObject({ status: "retryable_failed", nextWakeAt: retryAt });
+      const [retained] = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+      expect(retained).toMatchObject({ wake: notification, status: "pending", attemptCount: 1, nextAttemptAt: retryAt });
+      expect(await prepareHostedSystemMailboxItemForCheckpoint({ executionContext: null, now: () => "2026-04-27T00:04:59.999Z",
+        runtime, runtimeEnv: {}, vaultRoot: workspace.vaultRoot })).toBeNull();
+      vi.mocked(Date.now).mockReturnValue(Date.parse(retryAt));
+      await prepareHostedSystemMailboxItemForCheckpoint({ executionContext: null, now: () => retryAt,
+        runtime, runtimeEnv: {}, vaultRoot: workspace.vaultRoot });
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([
+        expect.objectContaining({ itemId: retained.itemId, wake: notification, attemptCount: 2, nextAttemptAt: "2026-04-27T00:10:00.000Z" }),
+      ]);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(2);
+    } finally { vi.restoreAllMocks(); await workspace.cleanup(); }
+  });
+
   it.each(["retired", "unavailable", "ok", "missing", "other", "mismatch"] as const)("prepares %s recap work before model execution", async scenario => {
     const request = vi.fn<NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]>().mockResolvedValue(
       response(scenario === "retired" ? "recap_generation_retired" : scenario === "unavailable" ? "recap_authority_unavailable" : undefined));

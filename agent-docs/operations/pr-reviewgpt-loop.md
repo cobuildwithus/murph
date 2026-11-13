@@ -318,16 +318,17 @@ the current user explicitly asks for it.
    the full PR body, current patch,
    exact round metadata, and guarded repository snapshot to `codebase.zip`:
 
-   Full snapshots include `patches/codex-websocket-ack.patch` even when unchanged,
-   because the hosted runner applies that production-source patch during its
-   native Codex build. Keep it with the Dockerfiles in the mandatory snapshot paths.
+   Full snapshots include `patches/codex-websocket-ack.patch` and
+   `patches/codex-prompt-cache-retention.patch` even when unchanged,
+   because the hosted runner applies both production-source patches during its
+   native Codex build. Keep them with the Dockerfiles in the mandatory snapshot paths.
 
-   When the PR changes that patch, the existing packager also includes complete
+   When the PR changes either patch, the existing packager also includes complete
    patched native text files and the bounded
    configuration/instruction/authentication/transport/recovery owner list under
    `review-gpt-pr-context/dependencies/codex-<version>/`. It reads the reviewed
-   commit's package pin, Docker source SHA, and patch, verifies the official
-   upstream tag, and applies the patch only to an isolated Git index. The
+   commit's package pin, Docker source SHA, and patches, verifies the official
+   upstream tag, and applies the ordered patches only to an isolated Git index. The
    provenance manifest records file hashes and omitted generated/binary paths.
    No upstream code runs; unavailable source, mismatched pins, unsafe paths,
    failed patch application, or exceeded bounds stop packaging.
