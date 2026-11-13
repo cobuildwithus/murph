@@ -17,7 +17,7 @@ export type Weekday = (typeof GAME_WEEKDAYS)[number];
  */
 export type GameSchedule = { days: Weekday[] } | { count: number };
 
-export const GAME_STAKE_KINDS = ["winner_gets", "per_miss", "prize", "dare"] as const;
+export const GAME_STAKE_KINDS = ["winner_gets", "per_miss", "prize", "dare", "both_get"] as const;
 export type GameStakeKind = (typeof GAME_STAKE_KINDS)[number];
 
 export interface GameStake {

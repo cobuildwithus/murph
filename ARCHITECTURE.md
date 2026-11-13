@@ -6099,6 +6099,10 @@ words, route and reps, and stores per-poster sealed summaries in nullable
 decryption. New writes require 3–365 days (default seven) and one prize
 or dare; legacy lengths and stakes keep their read/settlement semantics. Both
 new pair stake kinds issue one loser-to-winner ticket, none for a tie or perfect game.
+An optional pair `both_get` entry issues two single-seat reciprocal tickets only
+when both players have zero misses. The prize or dare remains first; slot merges
+preserve an unnamed entry and its key in structural terms and encrypted words.
+Compatible stored and hosted readers precede the change writer and offer trigger.
 Ticket views derive kind from the existing stake key; no duplicate kind is stored.
 Pair tasks lock when either player's Day 1 begins; the prize or dare stays
 changeable by mutual agreement until settlement is due. Acceptance/approval uses the actor's local

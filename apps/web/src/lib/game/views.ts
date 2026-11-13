@@ -182,7 +182,7 @@ export function termsView(state: RuleState, words: TermWords, multiplayer = fals
     fromDay: version.fromDay,
     n: version.n,
     schedule: version.schedule,
-    stakes: version.stakes.map((stake) => ({ item: stakeItem(words, stake.key), key: stake.key, kind: stake.kind })),
+    stakes: [...version.stakes].sort((a, b) => Number(a.kind === "both_get") - Number(b.kind === "both_get")).map((stake) => ({ item: stakeItem(words, stake.key), key: stake.key, kind: stake.kind })),
     tasks: state.game.seats === 10 && versionWords.defaultTask !== undefined ? groupTasksView(state, versionWords)
       : versionWords.tasks.map((task) => ({ seat: task.seat, text: task.text })),
   };

@@ -276,6 +276,7 @@ function assertScheduledDayLeft(state: RuleState, fromDay: number, lengthDays: n
 
 function assertEditableWords(state: RuleState, change: Extract<GameChange, { kind: "edit" }>, controls: GameChangeControls, sealedWords?: SealedWordChanges): void {
   const stakes = change.stakes ?? sealedWords?.stakes;
+  if (stakes?.some(stake => stake.kind === "both_get")) reject("INVALID_REQUEST", "Choose one prize or dare.");
   if ((change.tasks || sealedWords?.tasksChanged) && !controls.canEditTasks) reject("INVALID_REQUEST", "Tasks lock once Day 1 begins.");
   if (stakes && !controls.canEditStakes) reject("INVALID_REQUEST", "This game is no longer open for changes.");
   if (stakes && currentTerms(state.game.terms).stakes.some((stake) => ["prize", "dare"].includes(stake.kind))) validNewStakes(stakes);

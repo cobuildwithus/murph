@@ -156,6 +156,30 @@ describe.skipIf(!enabled)("recap moderation witness PostgreSQL proof", () => {
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: members.splice(0) } } });
   });
 
+  it.each(["earned", "lapsed", "absent"] as const)("both-win fallback is saved and replayed unchanged: %s", async kind => {
+    const f = await fixture();
+    vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
+    for (const [seat, memberId] of f.players.entries()) await f.db.gameProfile.update({ where: { memberId }, data: {
+      firstNameEncrypted: (await sealGameText({ table: "game_profile", field: "first_name", rowId: memberId, memberId }, seat ? "Leo" : "Ava"))! } });
+    const stakes = [{ key: "prize", kind: "prize" }, ...(kind === "absent" ? [] : [{ key: "both", kind: "both_get" }])];
+    const words = { v: 1, versions: [{ n: 1, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }],
+      stakes: [{ key: "prize", item: "Choose lunch" }, { key: "both", item: "dinner out together" }] }] };
+    await f.db.game.update({ where: { id: f.gameId }, data: {
+      terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 7 }, stakes }] },
+      termsWordsEncrypted: (await sealGameText({ table: "game", field: "terms_words", rowId: f.gameId, memberId: f.players[0]! }, JSON.stringify(words)))!,
+      result: { v: 1, termsVersion: 1, scores: f.players.map((memberId, seat) => ({ memberId, seat, score: kind === "lapsed" ? 6 : 7, misses: kind === "lapsed" ? 1 : 0 })) },
+    } });
+    const complete = () => handleGameChatTool({ memberId: f.room, runtimeIdentity: null, request: {
+      action: "read_game", origin: { kind: "game_recap", gameId: f.gameId, eventId: f.eventId }, recapRead: { kind: "recover", failed: true },
+    } });
+    const result = await complete();
+    const line = kind === "earned" ? "Both of you did every day. You both get dinner out together." : `The game ended in a ${kind === "lapsed" ? "6–6" : "7–7"} tie.`;
+    expect(result.result.chatLine?.split("\n")[0]).toBe(line);
+    expect((await readGame(f.gameId, f.players[0]!))?.recap?.chatLine).toBe(line);
+    expect(await complete()).toEqual(result);
+    expect(await dispatch(f)).toBe(true);
+  });
+
   it.each([false, true])('completes failed shows: regeneration=%s', async regeneration => {
     const initial = await fixture();
     const f = regeneration ? await regenerate(initial) : initial;
