@@ -70,8 +70,9 @@ alone does not authorize a narrower product or another state owner.
    Reconcile the base only for a real conflict, or when the base has since
    changed code this PR calls or is called by or a test its required checks
    run, following the review loop's Base-Update-Only Exception. A PR run tests
-   GitHub's test merge of the head with the base, and marking the PR Ready
-   again does not refresh that merge after the base moves; only a push does.
+   GitHub's test merge of the head with the base. That merge can stay on an
+   older base after the base moves, and marking the PR Ready again does not
+   reliably refresh it; a push does.
 9. Report the outcome, evidence, and remaining risks or blockers. For a feature
    or fix, give the shortest practical verification steps and expected result.
    Keep an open PR's worktree. After confirmed merge or closure, retire it using
