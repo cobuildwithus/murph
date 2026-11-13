@@ -637,8 +637,13 @@ The composed `pnpm hosted-local e2e hosted-web-browser-smoke --profile e2e:stub`
 
 ## Source contracts
 
-The implementation is pinned to Better Auth 1.7.3 and exercises its installed
-adapter, OTP and session code. Public contracts: [adapter factory](https://better-auth.com/docs/guides/create-a-db-adapter),
+The implementation is pinned to Better Auth 1.7.22 and exercises its installed
+adapter, OTP and session code. The Twilio SMS challenge row is keyed by the raw
+phone number and consumed by `verifyHostedAuthSmsOtpTx` inside the final
+transaction; it does not rely on the phone plugin's own
+`phone-number-otp-<phone>` row, which Better Auth 1.7.16 introduced. Change-email
+codes use the plugin's `change-email-otp-<userId>:<newEmail>` key.
+Public contracts: [adapter factory](https://better-auth.com/docs/guides/create-a-db-adapter),
 [email OTP](https://better-auth.com/docs/plugins/email-otp),
 [phone OTP](https://better-auth.com/docs/plugins/phone-number), and
 [sessions](https://better-auth.com/docs/concepts/session-management).

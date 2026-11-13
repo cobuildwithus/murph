@@ -29,10 +29,8 @@ function otpIdentifier(input: Input): string {
   const { change } = input;
   if (change.operation !== "set" || !change.value || change.method === "telegram") throw invalidCode();
   if (change.method === "phone") return change.value;
-  const email = input.prepared.current.user.email;
-  if (typeof email !== "string") throw invalidCode();
-  // The pinned email plugin binds change-email proof to both old and new email.
-  return `change-email-otp-${email}-${change.value}`;
+  // The pinned email plugin binds change-email proof to the user and new email.
+  return `change-email-otp-${input.prepared.current.user.id}:${change.value}`;
 }
 
 export async function sendHostedCredentialOtp(input: Input & { delivery: HostedAuthDelivery }): Promise<void> {

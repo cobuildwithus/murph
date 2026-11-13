@@ -1,5 +1,6 @@
 import { removeHostedMemberLinkedAccountProjectionTx } from "../src/lib/hosted-onboarding/linked-account-removal";
 import { randomUUID } from "node:crypto";
+import type { AuthRecord } from "../src/lib/better-auth/record";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const provider = vi.hoisted(() => ({ signal: vi.fn(), codes: new Map<string, string>(), telegram: vi.fn(), key: vi.fn() }));
@@ -439,7 +440,6 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       expect((await registerPasskey(request("/api/settings/approval-passkeys/register", { initialToken: initial.token, response: key.registration(true, initial.options.challenge) }))).status).toBe(200);
       const initialMethods = await (await loginMethods(request("/api/settings/login-methods", {}))).json();
       const email: string | null = initialMethods.methods.email;
-      const initialUserEmail = (await readHostedLoginMethods(f.prisma, f.memberId)).user.email;
       const touchedCodes: HostedCredentialChange[] = [];
       try {
         await run({ ...f, email, request,
@@ -474,7 +474,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
         });
       } finally {
         for (const change of touchedCodes) {
-          const identifier = change.method === "phone" ? change.value! : `change-email-otp-${initialUserEmail}-${change.value}`;
+          const identifier = change.method === "phone" ? change.value! : `change-email-otp-${f.memberId}:${change.value}`;
           await hostedAuthAdapter(f.prisma)({}).deleteMany({ model: "verification", where: [{ field: "identifier", value: identifier }] });
         }
       }
@@ -1010,6 +1010,25 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect(await getHostedAppSessionFromRequest(f.request("/home", {}, otherCookie))).toBeNull();
     expect((await getHostedAppSessionFromRequest(f.request("/home", {})))?.member.id).toBe(f.memberId);
     expect((await removeCredential(f.request("/api/settings/login-methods/remove", { change, authorization }))).status).toBe(409);
+  }));
+
+  it("replaces the previous email-change code on resend", () => withCredentialMember(async (f) => {
+    const change: HostedCredentialChange = { method: "email", operation: "set", expectedIdentity: f.email,
+      value: `resend-${randomUUID()}@example.test` };
+    const previousCode = await f.send(change);
+    const adapter = hostedAuthAdapter(f.prisma)({});
+    const where = [{ field: "identifier", value: `change-email-otp-${f.memberId}:${change.value}` }];
+    const previous = await adapter.findOne<AuthRecord>({ model: "verification", where });
+    expect(previous).not.toBeNull();
+    const code = await f.send(change);
+    expect(await adapter.count({ model: "verification", where })).toBe(1);
+    expect(await adapter.findOne({ model: "verification", where: [{ field: "id", value: previous!.id }] })).toBeNull();
+    const authorization = await f.authorize(change);
+    if (previousCode !== code) {
+      expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code: previousCode, authorization }))).status).toBe(400);
+    }
+    expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }))).status).toBe(200);
+    expect((await readHostedMemberEmailAuthorization(f))?.verifiedEmail?.address).toBe(change.value);
   }));
 
   it.each(["email", "phone"] as const)("rolls back %s proof, canonical writes, approval and revocation on a database failure", (method) => withCredentialMember(async (f) => {

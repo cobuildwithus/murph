@@ -80,7 +80,7 @@
     "@vercel/functions": "3.11.2",
     "@vercel/oidc": "^3.4.1",
     "@vercel/speed-insights": "2.1.0",
-    "better-auth": "1.7.7",
+    "better-auth": "1.7.22",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "google-auth-library": "11.3.4",
