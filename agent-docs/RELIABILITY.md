@@ -1902,6 +1902,11 @@ Current product admission, delivery and native runtime safety rules remain.
   Different deadlines, fresh/due hints, authority or ordering barriers, and
   invalid continuation projections remain independent pending work. Exact
   provider retry jobs remain intact until their existing deadline.
+  The retired `fitbit_migration_successor_arrival` webhook hint carried no jobs
+  or scopes and its Web producer returned a retryable admission after append.
+  It may retire as a plain hint only through the existing pristine, same-epoch,
+  exact-owner, equal-retry coverage path; the webhook transport retains the
+  original event for re-admission. Unknown hint reasons remain barriers.
   The retained wake's job hints suppress provider scheduling,
   and each local job keeps its own `availableAt`, so these bounded passes neither
   run the later mailbox item out of order nor bypass provider backoff.

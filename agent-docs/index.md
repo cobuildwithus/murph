@@ -1,3 +1,8 @@
+Retired Fitbit migration successor mailbox hints use the existing retained
+device-sync owner for safe retirement. [Reliability](RELIABILITY.md) owns the
+contract; the [execution record](exec-plans/completed/2026-11-13-legacy-fitbit-mailbox-hint.md)
+records the focused proof.
+
 The [consent when needed plan](exec-plans/completed/2026-11-12-consent-when-needed.md)
 tracks the server and app handoff. [Legal consent](../docs/legal-consent-implementation.md)
 and [Weekly Game](product-specs/weekly-game.md) own game-only access, the heart-rate

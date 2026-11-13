@@ -867,12 +867,14 @@ export function isHostedPlainDeviceSyncWakeHint(item: HostedSystemMailboxPending
 }
 
 export function isHostedPlainDeviceSyncWakeHintReason(reason: string | null | undefined): boolean {
-  // These producers store their work in canonical dirty state, which the
-  // retained connection owner fetches on its admitted pass.
+  // Current producers store work in canonical dirty state. The retired Fitbit
+  // migration hint carried no jobs; its Web admission returned a retryable error
+  // after append, leaving the original event with the webhook transport.
   return reason == null
     || reason === "webhook_dirty_transition"
     || reason === "companion_health_metadata"
-    || reason === "companion_hrv_rmssd";
+    || reason === "companion_hrv_rmssd"
+    || reason === "fitbit_migration_successor_arrival";
 }
 
 export interface HostedDeviceHintCoverage {
