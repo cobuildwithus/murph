@@ -6,6 +6,12 @@ import { readHostedAppSessionHmacKey } from "../hosted-onboarding/app-session-co
 
 const HOSTED_DEVICE_SYNC_CALLBACK_PROOF_DOMAIN =
   "murph.hosted-device-sync-browser-callback";
+// The app's completion proof has its own signing domain and token prefix, so a
+// browser cookie value can never finish an app-started connection or the reverse.
+const HOSTED_DEVICE_SYNC_APP_COMPLETION_PROOF_DOMAIN =
+  "murph.hosted-device-sync-app-completion";
+const HOSTED_DEVICE_SYNC_APP_COMPLETION_PROOF_TOKEN_PREFIX =
+  "murph_device_sync_app_completion_v1";
 const HOSTED_DEVICE_SYNC_CALLBACK_PROOF_VERSION = 1;
 const HOSTED_DEVICE_SYNC_CALLBACK_PROOF_MAX_AGE_SECONDS = 15 * 60;
 const HOSTED_DEVICE_SYNC_CALLBACK_PROOF_TOKEN_PREFIX = "murph_device_sync_callback_v1";
@@ -13,13 +19,54 @@ const HOSTED_DEVICE_SYNC_PROVIDER_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 const HOSTED_DEVICE_SYNC_STATE_PATTERN = /^[A-Za-z0-9_-]{16,128}$/u;
 const SHA256_BASE64URL_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 
-export function buildHostedDeviceSyncCallbackProof(input: {
+type HostedDeviceSyncCallbackProofScope = { domain: string; tokenPrefix: string };
+const BROWSER_CALLBACK_PROOF_SCOPE: HostedDeviceSyncCallbackProofScope = {
+  domain: HOSTED_DEVICE_SYNC_CALLBACK_PROOF_DOMAIN,
+  tokenPrefix: HOSTED_DEVICE_SYNC_CALLBACK_PROOF_TOKEN_PREFIX,
+};
+const APP_COMPLETION_PROOF_SCOPE: HostedDeviceSyncCallbackProofScope = {
+  domain: HOSTED_DEVICE_SYNC_APP_COMPLETION_PROOF_DOMAIN,
+  tokenPrefix: HOSTED_DEVICE_SYNC_APP_COMPLETION_PROOF_TOKEN_PREFIX,
+};
+
+type HostedDeviceSyncCallbackProofBinding = {
   memberId: string;
   now?: Date;
   provider: string;
   sessionId: string;
   state: string;
-}): { cookie: string; expiresAt: Date } {
+};
+
+export function buildHostedDeviceSyncCallbackProof(
+  input: HostedDeviceSyncCallbackProofBinding,
+): { cookie: string; expiresAt: Date } {
+  const proof = buildHostedDeviceSyncCallbackProofToken(BROWSER_CALLBACK_PROOF_SCOPE, input);
+
+  return {
+    cookie: buildHostedDeviceSyncCallbackProofCookie({
+      maxAgeSeconds: HOSTED_DEVICE_SYNC_CALLBACK_PROOF_MAX_AGE_SECONDS,
+      provider: proof.provider,
+      value: proof.token,
+    }),
+    expiresAt: proof.expiresAt,
+  };
+}
+
+/**
+ * The proof the Murph app holds in memory between starting a connection and
+ * finishing it. It binds the member, the app session that started, the
+ * provider, the pending state and a 15-minute expiry, like the browser cookie.
+ */
+export function buildHostedDeviceSyncAppCompletionProof(
+  input: HostedDeviceSyncCallbackProofBinding,
+): string {
+  return buildHostedDeviceSyncCallbackProofToken(APP_COMPLETION_PROOF_SCOPE, input).token;
+}
+
+function buildHostedDeviceSyncCallbackProofToken(
+  scope: HostedDeviceSyncCallbackProofScope,
+  input: HostedDeviceSyncCallbackProofBinding,
+): { expiresAt: Date; provider: string; token: string } {
   const provider = requireHostedDeviceSyncProvider(input.provider);
   const state = requireHostedDeviceSyncState(input.state);
   const now = input.now ?? new Date();
@@ -31,26 +78,18 @@ export function buildHostedDeviceSyncCallbackProof(input: {
     throw new TypeError("Hosted device-sync callback proof expiry is invalid.");
   }
 
-  const authenticator = createHostedDeviceSyncCallbackProofAuthenticator({
+  const authenticator = createHostedDeviceSyncCallbackProofAuthenticator(scope, {
     expiresAtMs,
     memberId: input.memberId,
     provider,
     sessionId: input.sessionId,
     state,
   });
-  const token = [
-    HOSTED_DEVICE_SYNC_CALLBACK_PROOF_TOKEN_PREFIX,
-    expiresAtMs,
-    authenticator,
-  ].join(".");
 
   return {
-    cookie: buildHostedDeviceSyncCallbackProofCookie({
-      maxAgeSeconds: HOSTED_DEVICE_SYNC_CALLBACK_PROOF_MAX_AGE_SECONDS,
-      provider,
-      value: token,
-    }),
     expiresAt,
+    provider,
+    token: [scope.tokenPrefix, expiresAtMs, authenticator].join("."),
   };
 }
 
@@ -69,25 +108,54 @@ export function readHostedDeviceSyncCallbackProofError(input: {
   sessionId: string;
   state: string | null;
 }): HostedDeviceSyncCallbackProofError | null {
+  return readHostedDeviceSyncCallbackProofTokenError(BROWSER_CALLBACK_PROOF_SCOPE, {
+    ...input,
+    readToken: (provider) => readCookieFromRequest(
+      input.request,
+      hostedDeviceSyncCallbackProofCookieName(provider),
+    ),
+  });
+}
+
+/** Checks a proof the app sent back in a request body, never one from a URL or cookie. */
+export function readHostedDeviceSyncAppCompletionProofError(input: {
+  completionProof: string | null;
+  memberId: string;
+  now?: Date;
+  provider: string;
+  sessionId: string;
+  state: string | null;
+}): HostedDeviceSyncCallbackProofError | null {
+  return readHostedDeviceSyncCallbackProofTokenError(APP_COMPLETION_PROOF_SCOPE, {
+    ...input,
+    readToken: () => input.completionProof,
+  });
+}
+
+function readHostedDeviceSyncCallbackProofTokenError(
+  scope: HostedDeviceSyncCallbackProofScope,
+  input: {
+    memberId: string;
+    now?: Date;
+    provider: string;
+    readToken: (provider: string) => string | null;
+    sessionId: string;
+    state: string | null;
+  },
+): HostedDeviceSyncCallbackProofError | null {
   const provider = normalizeHostedDeviceSyncProvider(input.provider);
   const state = normalizeHostedDeviceSyncState(input.state);
   if (!provider || !state) {
     return "CALLBACK_STATE_INVALID";
   }
 
-  const tokenValue = readCookieFromRequest(
-    input.request,
-    hostedDeviceSyncCallbackProofCookieName(provider),
-  );
+  const tokenValue = input.readToken(provider);
   if (!tokenValue) {
     return "CALLBACK_PROOF_MISSING";
   }
 
   const tokenParts = tokenValue.split(".");
-  if (
-    tokenParts.length !== 3
-    || tokenParts[0] !== HOSTED_DEVICE_SYNC_CALLBACK_PROOF_TOKEN_PREFIX
-  ) {
+  if (tokenParts.length !== 3 || tokenParts[0] !== scope.tokenPrefix) {
     return "CALLBACK_PROOF_MALFORMED";
   }
 
@@ -106,7 +174,7 @@ export function readHostedDeviceSyncCallbackProofError(input: {
     return "CALLBACK_PROOF_EXPIRED";
   }
 
-  const expectedAuthenticator = createHostedDeviceSyncCallbackProofAuthenticator({
+  const expectedAuthenticator = createHostedDeviceSyncCallbackProofAuthenticator(scope, {
     expiresAtMs,
     memberId: input.memberId,
     provider,
@@ -123,15 +191,18 @@ export function readHostedDeviceSyncCallbackState(url: URL): string | null {
   );
 }
 
-function createHostedDeviceSyncCallbackProofAuthenticator(input: {
-  expiresAtMs: number;
-  memberId: string;
-  provider: string;
-  sessionId: string;
-  state: string;
-}): string {
+function createHostedDeviceSyncCallbackProofAuthenticator(
+  scope: HostedDeviceSyncCallbackProofScope,
+  input: {
+    expiresAtMs: number;
+    memberId: string;
+    provider: string;
+    sessionId: string;
+    state: string;
+  },
+): string {
   const payload = JSON.stringify([
-    HOSTED_DEVICE_SYNC_CALLBACK_PROOF_DOMAIN,
+    scope.domain,
     HOSTED_DEVICE_SYNC_CALLBACK_PROOF_VERSION,
     input.expiresAtMs,
     input.provider,

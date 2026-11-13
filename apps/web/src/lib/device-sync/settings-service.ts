@@ -22,11 +22,16 @@ export async function buildHostedDeviceSyncSettingsResponse(input: {
   member: Pick<HostedMember, "billingStatus" | "id" | "suspendedAt">;
   prisma?: HostedOnboardingReadClient;
   publicBaseUrl?: string | null;
+  // Only for finding what a member may disconnect: reducing authority stays
+  // possible without product access. Every read of sources keeps the check.
+  toDisconnect?: true;
 }): Promise<HostedDeviceSyncSettingsResponse> {
-  await assertActiveHostedMemberAccessAllowed({
-    memberId: input.member.id,
-    prisma: input.prisma,
-  });
+  if (!input.toDisconnect) {
+    await assertActiveHostedMemberAccessAllowed({
+      memberId: input.member.id,
+      prisma: input.prisma,
+    });
+  }
   const env = readHostedDeviceSyncEnvironment(process.env);
 
   return buildHostedDeviceSyncSettingsSurfaceResponse({

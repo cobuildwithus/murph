@@ -513,6 +513,78 @@ test("public ingress rejects callback-required connection starts without callbac
   );
 });
 
+test("public ingress returns a link flow to the app only through a named bridge from the closed set", async () => {
+  const callbackUrls: string[] = [];
+  const linkProvider = createFakeProvider({
+    provider: "junction",
+    credentialPolicy: { kind: "provider_config", providerConfigKey: "junction" },
+    descriptor: {
+      provider: "junction",
+      displayName: "Junction",
+      transportModes: ["external_link", "scheduled_poll"],
+      connection: { kind: "external_link", callbackPath: "/connect/junction/callback" },
+      normalization: { metricFamilies: ["activity"], snapshotParser: "schema" },
+      sourcePriorityHints: { defaultPriority: 60, metricFamilies: { activity: 60 } },
+    },
+    async beginConnection(input) {
+      callbackUrls.push(input.callbackUrl);
+      return {
+        authorizationUrl: `https://junction.example/link?murph_state=${input.state}`,
+        connectionSeed: {
+          externalAccountId: "external-account-1",
+          credential: { kind: "provider_config", providerConfigKey: "junction" },
+        },
+      };
+    },
+  });
+  const oauthUrls: string[] = [];
+  const oauthProvider = createFakeProvider({
+    buildConnectUrl(context) {
+      oauthUrls.push(context.callbackUrl);
+      return `https://example.test/oauth?state=${context.state}`;
+    },
+  });
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([linkProvider, oauthProvider]),
+    store: new InMemoryPublicIngressStore(),
+  });
+
+  await ingress.startConnection({ provider: "junction", ownerId: "<REDACTED_OWNER_ID>" });
+  await ingress.startConnection({ provider: "junction", ownerId: "<REDACTED_OWNER_ID>", appReturn: null });
+  await ingress.startConnection({ provider: "junction", ownerId: "<REDACTED_OWNER_ID>", appReturn: "ios" });
+  await ingress.startConnection({ provider: "junction", ownerId: "<REDACTED_OWNER_ID>", appReturn: "ios-dev" });
+  assert.deepEqual(callbackUrls, [
+    "https://sync.example.test/device-sync/connect/junction/callback",
+    "https://sync.example.test/device-sync/connect/junction/callback",
+    "https://sync.example.test/device-sync/companion/connect-return/ios",
+    "https://sync.example.test/device-sync/companion/connect-return/ios-dev",
+  ]);
+
+  const refused = (error: unknown) =>
+    error instanceof DeviceSyncError
+    && error.code === "CONNECTION_APP_RETURN_NOT_SUPPORTED"
+    && error.httpStatus === 400;
+  for (const appReturn of ["website", "https://attacker.example.test/return", "toString", "__proto__", ""]) {
+    await assert.rejects(
+      () => ingress.startConnection({
+        provider: "junction",
+        ownerId: "<REDACTED_OWNER_ID>",
+        // A name outside the closed set must fail even if a caller defeats the type.
+        appReturn: appReturn as "ios",
+      }),
+      refused,
+    );
+  }
+  // An OAuth completion replays its return URL to the provider, so it cannot return to the app.
+  await assert.rejects(
+    () => ingress.startConnection({ provider: oauthProvider.provider, appReturn: "ios" }),
+    refused,
+  );
+  assert.equal(callbackUrls.length, 4);
+  assert.deepEqual(oauthUrls, []);
+});
+
 test("public ingress persists validated provider-config connection seeds before external-link redirects", async () => {
   const store = new InMemoryPublicIngressStore();
   const provider = createFakeProvider({
