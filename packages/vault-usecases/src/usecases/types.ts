@@ -612,6 +612,9 @@ export interface WearableListResult<TItem> {
   /** Notes that apply to every returned item. */
   notes?: string[]
   units?: WearableUnitsLegend
+  /** Present only when matching summaries were left out by the limit. */
+  truncated?: true
+  remaining?: number
 }
 
 export type WearableSleepListResult = WearableListResult<WearablePublicSleepSummary>
@@ -1521,7 +1524,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
       from?: string
       to?: string
       providers?: string[]
-      limit: number
+      limit?: number
     },
   ): Promise<WearableSleepListResult>
   listWearableActivity(
@@ -1530,7 +1533,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
       from?: string
       to?: string
       providers?: string[]
-      limit: number
+      limit?: number
       includeWorkoutDetails?: boolean
       includeWorkoutSummaries?: boolean
     },
@@ -1541,7 +1544,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
       from?: string
       to?: string
       providers?: string[]
-      limit: number
+      limit?: number
     },
   ): Promise<WearableBodyStateListResult>
   listWearableRecovery(
@@ -1550,7 +1553,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
       from?: string
       to?: string
       providers?: string[]
-      limit: number
+      limit?: number
     },
   ): Promise<WearableRecoveryListResult>
   listWearableSources(
@@ -1559,7 +1562,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
       from?: string
       to?: string
       providers?: string[]
-      limit: number
+      limit?: number
     },
   ): Promise<WearableSourceListResult>
   exportPack(

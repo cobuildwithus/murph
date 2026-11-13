@@ -10678,8 +10678,7 @@
                                   }
                                 },
                                 "limit": {
-                                  "default": 3,
-                                  "description": "Maximum number of daily summaries to return. Defaults to 3.",
+                                  "description": "Maximum number of daily summaries to return. Defaults to the whole --date/--from/--to range up to 14 days, or the newest 3 without a date filter. A cut result sets `truncated` and `remaining`.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
@@ -10789,8 +10788,7 @@
                                   }
                                 },
                                 "limit": {
-                                  "default": 3,
-                                  "description": "Maximum number of daily summaries to return. Defaults to 3.",
+                                  "description": "Maximum number of daily summaries to return. Defaults to the whole --date/--from/--to range up to 14 days, or the newest 3 without a date filter. A cut result sets `truncated` and `remaining`.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
@@ -10858,8 +10856,7 @@
                                   }
                                 },
                                 "limit": {
-                                  "default": 3,
-                                  "description": "Maximum number of daily summaries to return. Defaults to 3.",
+                                  "description": "Maximum number of daily summaries to return. Defaults to the whole --date/--from/--to range up to 14 days, or the newest 3 without a date filter. A cut result sets `truncated` and `remaining`.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
@@ -10917,8 +10914,7 @@
                                   }
                                 },
                                 "limit": {
-                                  "default": 3,
-                                  "description": "Maximum number of daily summaries to return. Defaults to 3.",
+                                  "description": "Maximum number of daily summaries to return. Defaults to the whole --date/--from/--to range up to 14 days, or the newest 3 without a date filter. A cut result sets `truncated` and `remaining`.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
@@ -10976,8 +10972,7 @@
                                   }
                                 },
                                 "limit": {
-                                  "default": 3,
-                                  "description": "Maximum number of daily summaries to return. Defaults to 3.",
+                                  "description": "Maximum number of daily summaries to return. Defaults to the whole --date/--from/--to range up to 14 days, or the newest 3 without a date filter. A cut result sets `truncated` and `remaining`.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200

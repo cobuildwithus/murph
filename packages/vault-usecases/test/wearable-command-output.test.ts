@@ -310,3 +310,20 @@ test("drift returns its signals and notes without the latest bundle", () => {
   assert.equal(signals.every((signal) => !Object.hasOwn(signal, "recordedAt")), true);
   assert.equal(drift?.windowDays, 7);
 });
+
+test("trend points and drift signals are never cut below what the query bounded", () => {
+  // --window-days allows 30 points; the default drift list has 13 signals.
+  const points = Array.from({ length: 30 }, (_, index) => ({
+    confidence: "high",
+    date: `2026-03-${String(index + 1).padStart(2, "0")}`,
+    provider: "oura",
+    unit: "ms",
+    value: 40 + index,
+  }));
+  const trend = compactWearableMetricSummary(metricSummary({ points }));
+  assert.equal((trend?.points as unknown[]).length, 30);
+
+  const signals = Array.from({ length: 13 }, (_, index) => metricSummary({ metric: `metric${index}` }));
+  const drift = compactWearableDriftSummary({ notes: [], signals, windowDays: 7 });
+  assert.equal((drift?.signals as unknown[]).length, 13);
+});

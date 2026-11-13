@@ -1141,7 +1141,7 @@ function createIntegratedQueryServices(): QueryServices {
       from?: string
       to?: string
       providers?: string[]
-      limit: number
+      limit?: number
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
@@ -1153,7 +1153,7 @@ function createIntegratedQueryServices(): QueryServices {
       from?: string
       to?: string
       providers?: string[]
-      limit: number
+      limit?: number
       includeWorkoutDetails?: boolean
       includeWorkoutSummaries?: boolean
     }) {
@@ -1163,28 +1163,28 @@ function createIntegratedQueryServices(): QueryServices {
         input.vault,
         normalized.queryFilters,
       )
-      const outputItems = input.includeWorkoutDetails
-        ? rawItems
-        : rawItems.map((item) => {
-            const summary: Record<string, unknown> = { ...item }
-            if (input.includeWorkoutSummaries) {
-              summary.workoutFeatures = item.workoutFeatures.map(({ splits: _splits, ...workout }) => ({
-                ...workout,
-                splitsOmitted: true,
-              }))
-            } else {
-              delete summary.workoutFeatures
-            }
-            return summary
-          })
-      return wearableListResult(normalized.filters, outputItems)
+      return wearableListResult(normalized.filters, rawItems, (item) => {
+        if (input.includeWorkoutDetails) {
+          return item
+        }
+        const summary: Record<string, unknown> = { ...item }
+        if (input.includeWorkoutSummaries) {
+          summary.workoutFeatures = item.workoutFeatures.map(({ splits: _splits, ...workout }) => ({
+            ...workout,
+            splitsOmitted: true,
+          }))
+        } else {
+          delete summary.workoutFeatures
+        }
+        return summary
+      })
     },
     async listWearableBodyState(input: CommandContext & {
       date?: string
       from?: string
       to?: string
       providers?: string[]
-      limit: number
+      limit?: number
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
@@ -1196,7 +1196,7 @@ function createIntegratedQueryServices(): QueryServices {
       from?: string
       to?: string
       providers?: string[]
-      limit: number
+      limit?: number
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
@@ -1208,7 +1208,7 @@ function createIntegratedQueryServices(): QueryServices {
       from?: string
       to?: string
       providers?: string[]
-      limit: number
+      limit?: number
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
@@ -1269,16 +1269,22 @@ function createIntegratedQueryServices(): QueryServices {
   } satisfies QueryServices
 }
 
-function wearableListResult<TFilters extends { limit: number }>(
+// Lists are newest first. The query returns every summary in the requested
+// range, so a cut page says how many matching summaries it left out.
+function wearableListResult<TFilters extends { limit: number }, TItem>(
   filters: TFilters,
-  rawItems: readonly unknown[],
+  rawItems: readonly TItem[],
+  projectItem: (item: TItem) => unknown = (item) => item,
 ) {
-  const list = compactWearableList(rawItems.slice(0, filters.limit))
+  const page = rawItems.slice(0, filters.limit)
+  const list = compactWearableList(page.map(projectItem))
+  const remaining = rawItems.length - page.length
 
   return {
     filters,
     ...list,
     count: list.items.length,
+    ...(remaining > 0 ? { truncated: true as const, remaining } : {}),
   }
 }
 
@@ -1428,12 +1434,18 @@ function normalizeWearableSleepPatternInput(input: {
   }
 }
 
+// Without --limit, a date range returns every day in it up to this cap
+// (two weeks of the richest summaries stays inside the agent-visible output
+// budget) and an open read returns the newest few.
+const WEARABLE_LIST_RANGE_DEFAULT_LIMIT = 14
+const WEARABLE_LIST_RECENT_DEFAULT_LIMIT = 3
+
 function normalizeWearableSummaryInput(input: {
   date?: string
   from?: string
   to?: string
   providers?: string[]
-  limit: number
+  limit?: number
 }): {
   filters: {
     date: string | null
@@ -1446,11 +1458,13 @@ function normalizeWearableSummaryInput(input: {
     from?: string
     to?: string
     providers?: string[]
-    limit: number
   }
 } {
   const normalized = normalizeWearableSurfaceInput(input)
-  const limit = normalizeWearableLimit(input.limit)
+  const hasDateFilter = normalized.filters.from !== null || normalized.filters.to !== null
+  const limit = input.limit === undefined
+    ? hasDateFilter ? WEARABLE_LIST_RANGE_DEFAULT_LIMIT : WEARABLE_LIST_RECENT_DEFAULT_LIMIT
+    : normalizeWearableLimit(input.limit)
 
   return {
     filters: {
@@ -1468,7 +1482,6 @@ function normalizeWearableSummaryInput(input: {
             to: normalized.queryFilters.to,
           }),
       providers: normalized.queryFilters.providers,
-      limit,
     },
   }
 }

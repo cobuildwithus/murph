@@ -261,6 +261,8 @@ test('wearables activity list keeps routine reads compact while explicit detail 
           providers: string[]
           limit: number
         }
+        remaining?: number
+        truncated?: true
         items: Array<Record<string, unknown> & {
           activityTypes?: string[]
           activeCalories?: number
@@ -280,8 +282,9 @@ test('wearables activity list keeps routine reads compact while explicit detail 
       date: '2026-08-31',
       from: '2026-08-31',
       to: '2026-08-31',
-      limit: 3,
+      limit: 14,
     })
+    assert.equal(compact.data.truncated, undefined)
     const compactDay = compact.data.items[0]
     assert.ok(compactDay)
     assert.equal(compactDay.date, '2026-08-31')
@@ -539,6 +542,10 @@ test('wearables activity list keeps routine reads compact while explicit detail 
     assert.equal(limitOne.data.count, 1)
     assert.equal(limitOne.data.filters.limit, 1)
     assert.equal(limitOne.data.items[0]?.date, rangeCompact.data.items[0]?.date)
+    // A cut page says so instead of leaving count === limit as the only hint.
+    assert.equal(limitOne.data.truncated, true)
+    assert.equal(limitOne.data.remaining, 1)
+    assert.equal(rangeCompact.data.truncated, undefined)
 
     const compactBytes = Buffer.byteLength(compactRaw, 'utf8')
     const detailedBytes = Buffer.byteLength(detailedRaw, 'utf8')
@@ -563,6 +570,134 @@ test('wearables activity list keeps routine reads compact while explicit detail 
         savedBytesVsBaseline: WEARABLE_ACTIVITY_OVERSIZED_BASELINE_BYTES - compactBytes,
       })}\n`,
     )
+  } finally {
+    await rm(vaultRoot, {
+      force: true,
+      recursive: true,
+    })
+  }
+}, OUTPUT_BUDGET_TIMEOUT_MS)
+
+function syntheticRangeDates(days: number): string[] {
+  return Array.from({ length: days }, (_, index) =>
+    new Date(Date.parse('2026-08-01T12:00:00.000Z') + index * 86_400_000).toISOString().slice(0, 10))
+}
+
+// Every sleep metric from one ring, a second device that disagrees on every
+// activity day and on the last three nights: a rich two-device vault. Sleep is
+// the largest family per day (about 0.9K pretty chars a night, 1K when two
+// devices conflict), which is what sizes the 14-day default range cap.
+async function seedSyntheticWearableRangeFixture(vaultRoot: string, dates: readonly string[]): Promise<void> {
+  await coreRuntime.initializeVault({
+    createdAt: '2026-07-01T00:00:00.000Z',
+    timezone: 'UTC',
+    vaultRoot,
+  })
+  const sleepDatesByProvider = { oura: dates, garmin: dates.slice(-3) }
+  const sleep = (['oura', 'garmin'] as const).flatMap((provider, providerIndex) => sleepDatesByProvider[provider].map((date, index) => ({
+    id: `synthetic-sleep-${provider}-${date}`,
+    sourceProviderSlug: provider,
+    calendar_date: date,
+    type: 'long_sleep',
+    bedtime_start: `${date}T00:${String(10 + index).padStart(2, '0')}:00.000Z`,
+    bedtime_end: `${date}T07:${String(5 + index).padStart(2, '0')}:00.000Z`,
+    total: 25_200 + index * 120 + providerIndex * 600,
+    deep: 4_800,
+    rem: 6_000,
+    light: 14_400,
+    awake: 2_400,
+    efficiency: 0.88,
+    latency: 600,
+    average_hrv: 45 + providerIndex * 9,
+    hr_lowest: 52,
+    hr_average: 58,
+    score: 80 + (index % 7),
+    respiratory_rate: 14.5,
+    sleep_consistency: 77,
+    sleep_performance: 88,
+    blood_oxygen: 96.4,
+    skin_temperature_delta: 0.12,
+  })))
+  const activity = ['oura', 'garmin'].flatMap((provider, providerIndex) => dates.map((date, index) => ({
+    id: `synthetic-activity-${provider}-${date}`,
+    sourceProviderSlug: provider,
+    observedAt: `${date}T23:00:00.000Z`,
+    calendar_date: date,
+    steps: 7_000 + index * 311 + providerIndex * 900,
+    activeCalories: 350 + providerIndex * 80,
+    distance: 6_000 + providerIndex * 700,
+    restingHeartRate: 54 + providerIndex * 4,
+  })))
+  await importDeviceProviderSnapshot(
+    {
+      provider: 'junction',
+      sourceKind: 'poll',
+      deliveryMode: 'scheduled_reconcile',
+      vaultRoot,
+      snapshot: {
+        importedAt: '2026-09-01T00:00:00.000Z',
+        summaries: { activity, sleep },
+      },
+    },
+    { corePort: coreRuntime },
+  )
+}
+
+test('wearables date-range lists return the whole range up to the cap and mark any cut', async () => {
+  const cli = createVaultCli()
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-wearable-range-budget-'))
+  const dates = syntheticRangeDates(20)
+  type RangeList = {
+    ok: true
+    data: {
+      count: number
+      filters: { limit: number }
+      items: Array<{ date: string }>
+      remaining?: number
+      truncated?: true
+    }
+  }
+  const read = async (args: readonly string[], options: { budgeted?: boolean } = {}) => {
+    const raw = await runBudgetedRawCli(cli, args, vaultRoot)
+    assertOk(args.join(' '), raw)
+    if (options.budgeted ?? true) {
+      assertWithinBudget(args.join(' '), raw)
+    }
+    return JSON.parse(raw) as RangeList
+  }
+
+  try {
+    await seedSyntheticWearableRangeFixture(vaultRoot, dates)
+
+    // A week-long range used to stop at 3 days with no sign of the rest.
+    for (const family of ['sleep', 'activity', 'recovery'] as const) {
+      const week = await read(['wearables', family, 'list', '--from', dates[13]!, '--to', dates[19]!])
+      assert.equal(week.data.count, 7, family)
+      assert.equal(week.data.filters.limit, 14, family)
+      assert.equal(week.data.truncated, undefined, family)
+      assert.equal(week.data.remaining, undefined, family)
+
+      // Past the cap the newest days come back, and the cut is explicit.
+      const wide = await read(['wearables', family, 'list', '--from', dates[0]!, '--to', dates[19]!])
+      assert.equal(wide.data.count, 14, family)
+      assert.equal(wide.data.truncated, true, family)
+      assert.equal(wide.data.remaining, 6, family)
+      assert.deepEqual(wide.data.items.map((item) => item.date), [...dates].reverse().slice(0, 14), family)
+    }
+
+    // An explicit --limit is the caller's own budget choice.
+    const all = await read(
+      ['wearables', 'sleep', 'list', '--from', dates[0]!, '--to', dates[19]!, '--limit', '20'],
+      { budgeted: false },
+    )
+    assert.equal(all.data.count, 20)
+    assert.equal(all.data.truncated, undefined)
+
+    const recent = await read(['wearables', 'sleep', 'list'])
+    assert.equal(recent.data.count, 3)
+    assert.equal(recent.data.filters.limit, 3)
+    assert.equal(recent.data.truncated, true)
+    assert.equal(recent.data.remaining, 17)
   } finally {
     await rm(vaultRoot, {
       force: true,

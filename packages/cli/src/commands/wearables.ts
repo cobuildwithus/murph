@@ -306,12 +306,23 @@ const wearableListNotesSchema = z
   .optional()
   .describe('Notes that apply to every returned item.')
 
+const wearableListTruncationShape = {
+  remaining: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('Matching summaries not returned; narrow --to or raise --limit to read them.'),
+  truncated: z.literal(true).optional(),
+}
+
 export const wearablesSleepListResultSchema = z.object({
   filters: wearableListFiltersSchema,
   items: z.array(wearableSleepSummarySchema),
   count: z.number().int().nonnegative(),
   notes: wearableListNotesSchema,
   units: wearableUnitsSchema.optional(),
+  ...wearableListTruncationShape,
 })
 
 export const wearablesActivityListResultSchema = z.object({
@@ -320,6 +331,7 @@ export const wearablesActivityListResultSchema = z.object({
   count: z.number().int().nonnegative(),
   notes: wearableListNotesSchema,
   units: wearableUnitsSchema.optional(),
+  ...wearableListTruncationShape,
 })
 
 export const wearablesBodyStateListResultSchema = z.object({
@@ -328,6 +340,7 @@ export const wearablesBodyStateListResultSchema = z.object({
   count: z.number().int().nonnegative(),
   notes: wearableListNotesSchema,
   units: wearableUnitsSchema.optional(),
+  ...wearableListTruncationShape,
 })
 
 export const wearablesRecoveryListResultSchema = z.object({
@@ -336,6 +349,7 @@ export const wearablesRecoveryListResultSchema = z.object({
   count: z.number().int().nonnegative(),
   notes: wearableListNotesSchema,
   units: wearableUnitsSchema.optional(),
+  ...wearableListTruncationShape,
 })
 
 export const wearablesSourcesListResultSchema = z.object({
@@ -344,6 +358,7 @@ export const wearablesSourcesListResultSchema = z.object({
   count: z.number().int().nonnegative(),
   notes: wearableListNotesSchema,
   units: wearableUnitsSchema.optional(),
+  ...wearableListTruncationShape,
 })
 
 const wearableSleepNumericPatternSchema = z.object({
@@ -686,8 +701,10 @@ function withWearableListOptions() {
       .int()
       .positive()
       .max(200)
-      .default(3)
-      .describe('Maximum number of daily summaries to return. Defaults to 3.'),
+      .optional()
+      .describe(
+        'Maximum number of daily summaries to return. Defaults to the whole --date/--from/--to range up to 14 days, or the newest 3 without a date filter. A cut result sets `truncated` and `remaining`.',
+      ),
   })
 }
 

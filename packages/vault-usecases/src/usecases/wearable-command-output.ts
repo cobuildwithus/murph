@@ -38,8 +38,6 @@ const DAY_SOURCE_HEALTH_DROPPED_KEYS = new Set([
 ])
 const OMIT_COMPACT_WEARABLE_VALUE = Symbol("omit compact wearable value")
 const COMPACT_WEARABLE_ARRAY_LIMIT = 8
-const COMPACT_WEARABLE_DRIFT_SIGNAL_LIMIT = 8
-const COMPACT_WEARABLE_TREND_POINT_LIMIT = 14
 const COMPACT_WEARABLE_STRING_LENGTH = 160
 const COMPACT_WEARABLE_VALUE_DECIMALS = 1e4
 // Notes that only restate a value, provider, or window the output already carries.
@@ -113,9 +111,9 @@ export function compactWearableDriftSummary(value: unknown): JsonObject | null {
   }
 
   const latestNotes = isRecord(value.latest) ? readStrings(value.latest.notes) : []
+  // Bounded upstream by the fixed default signal list, so every signal is kept.
   const signals = (Array.isArray(value.signals) ? value.signals : [])
     .filter(isRecord)
-    .slice(0, COMPACT_WEARABLE_DRIFT_SIGNAL_LIMIT)
     .map((signal) => compactMetricSummary(signal, { trendPoints: false }))
   const ownNotes = compactNotes(readStrings(value.notes), new Set(latestNotes))
   const notes = uniqueStrings([...ownNotes, ...collectRepeatedSignalNotes(signals)])
@@ -332,9 +330,9 @@ function compactMetricSummary(
   }
   setNotes(compact, compactNotes(readStrings(summary.notes)))
   if (options.trendPoints && Array.isArray(summary.points)) {
+    // Bounded upstream by --window-days (at most 30), so every point is kept.
     compact.points = summary.points
       .filter(isRecord)
-      .slice(0, COMPACT_WEARABLE_TREND_POINT_LIMIT)
       .map((point) => compactTrendPoint(point, compact))
   }
   return compact
@@ -526,14 +524,6 @@ function compactWearableArrayLimitForKey(key: string): number {
 
   if (key === "splits") {
     return 64
-  }
-
-  if (key === "signals") {
-    return COMPACT_WEARABLE_DRIFT_SIGNAL_LIMIT
-  }
-
-  if (key === "points") {
-    return COMPACT_WEARABLE_TREND_POINT_LIMIT
   }
 
   return COMPACT_WEARABLE_ARRAY_LIMIT

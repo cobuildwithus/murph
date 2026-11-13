@@ -375,10 +375,11 @@ test('wearables additive commands return the shared normalized result envelopes'
   assert.equal(bodyData.items[0]?.provider, 'withings')
   assert.deepEqual(bodyData.items[0]?.visceralFatIndex, { confidence: 'low', provider: 'garmin', value: 7 })
   assert.equal(bodyData.units?.visceralFatIndex, 'index')
+  // Without --limit the service picks the default from the date filters.
   assert.deepEqual(listWearableBodyState.mock.calls[0]?.[0], {
     date: undefined,
     from: undefined,
-    limit: 3,
+    limit: undefined,
     providers: [],
     requestId: null,
     to: undefined,
