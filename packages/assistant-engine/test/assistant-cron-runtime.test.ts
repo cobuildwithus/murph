@@ -733,6 +733,8 @@ describe('assistant cron runtime orchestration', () => {
     const job = await addAssistantCronJob({
       name: 'linq-current-route-job',
       prompt: 'Send the check-in.',
+      // A one-time schedule must be in the future, so pin the clock it is checked against.
+      now: new Date('2026-12-01T12:00:00.000Z'),
       schedule: {
         at: '2026-12-08T12:00:00.000Z',
         kind: 'at',
@@ -770,6 +772,7 @@ describe('assistant cron runtime orchestration', () => {
       addAssistantCronJob({
         name: 'linq-missing-route-job',
         prompt: 'Send the check-in.',
+        now: new Date('2026-12-01T12:00:00.000Z'),
         schedule: {
           at: '2026-12-08T12:00:00.000Z',
           kind: 'at',
