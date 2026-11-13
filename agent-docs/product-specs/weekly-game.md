@@ -27,6 +27,18 @@ that predate the code see an ordinary refusal, so turn it on only once a build
 that handles it is out. Pair moves made in Murph's chat retain that behavior. Group chat mutations
 apply the same current-terms check before calling the canonical command.
 
+Game-only members can play with the Terms grant and no health grant, without
+companion admission, starter usage or a personal runtime. Only `heart_rate`
+posts and `reps` posts carrying `data.heartRate` require
+`launch.health-data = granted`. The canonical post mutation locks the member
+before the game and reads the grant inside that transaction, so a withdrawal
+committed during preparation wins. Missing and revoked grants return HTTP 403
+with `HEALTH_DATA_REQUIRED`, `Allow health data to post a heart rate.`, and
+`retryable: false` in the ordinary error envelope. Older clients receive an
+ordinary refusal. Photos, words, routes and plain rep counts require no health
+grant. Shared-room funding and the existing explicit-withdrawal restrictions
+on chat and recaps stay unchanged.
+
 ### App Review demo games
 
 The configured review member gets a fixture opponent, a settled game with an

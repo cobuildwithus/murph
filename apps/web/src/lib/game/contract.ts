@@ -672,7 +672,8 @@ export type GameErrorCode =
    * waits until the member agrees to their current versions. `details` names
    * the scope and its documents with those versions.
    */
-  | "TERMS_REQUIRED";
+  | "TERMS_REQUIRED"
+  | "HEALTH_DATA_REQUIRED";
 
 export interface GameError {
   code: GameErrorCode;

@@ -1,7 +1,7 @@
 # Murph Terms of Service
 
 **Effective Date:** October 26, 2026
-**Last Updated:** October 26, 2026
+**Last Updated:** November 12, 2026
 **Company:** Just Cobuild, Co. ("**Murph**," "**we**," "**us**," or "**our**")
 
 These Terms of Service ("**Terms**") govern your access to and use of Murph's hosted websites, hosted applications, hosted onboarding flows, hosted settings pages, hosted APIs, hosted messaging features, hosted integrations, and related managed services that link to these Terms (collectively, the "**Hosted Service**").
@@ -255,6 +255,8 @@ Murph may offer a game for two people. Each player picks a daily task and posts 
 **No money.** You may not play a game for money or for anything with a cash value, such as cash, gift cards, payment app transfers, or crypto, and you may not use a game to bet or wager. Our word check refuses many prizes and dares that mention money, but not every one, and we may end any game that breaks this rule.
 
 **Pick safe tasks and dares.** You choose your task and the prize or dare, and you decide whether to do it. Pick something that is safe for you and legal where you are, and don't pressure anyone to do something unsafe. Stop if anything hurts, makes you dizzy, or feels wrong. Sections 3 and 4 apply to every task and dare. Murph does not supervise games and, to the extent the law allows, is not responsible for any injury, loss, or damage caused by a task or dare.
+
+**AI host.** Murph hosts games with AI. Our AI providers read what players post in a game, including photos, and the game's group chat, to run the game and make its recap. A recap can include pictures made by AI that show the players. Our Privacy Policy names the providers and says what they receive.
 
 **What other players see.** What you post in a game is shown to the other player. Murph may also text both players about the game in a group chat, and everyone in that chat can see what is sent there. Our Privacy Policy explains what we collect for games and who sees it.
 
