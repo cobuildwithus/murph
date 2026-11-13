@@ -53,7 +53,6 @@ describe("public invite preview privacy", () => {
     db.game.findUnique.mockReset();
     db.game.findFirst.mockReset();
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
   });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
@@ -67,6 +66,8 @@ describe("public invite preview privacy", () => {
     ["settled", { status: "settled" }],
     ["void", { status: "void" }],
     ["deleted inviter", { creator: null }],
+    ["empty group", { maxPlayers: 10, players: [] }],
+    ["group with only deleted identities", { maxPlayers: 10, players: [{ ...player, memberId: null }], invitees: [{ memberId: null }] }],
     ["closed group", { status: "settled", maxPlayers: 10 }],
     ["full group", { status: "live", maxPlayers: 10, players: Array.from({ length: 10 }, (_, seat) => ({ ...player, seat })) }],
     ["unknown state", { status: "unknown" }],

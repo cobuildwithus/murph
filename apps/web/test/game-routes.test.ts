@@ -23,7 +23,8 @@ const mocks = vi.hoisted(() => ({
   devSettleNow: vi.fn(),
   devStartNow: vi.fn(),
   getPrisma: vi.fn(),
-  canEnterGame: vi.fn(),
+  reviewMember: vi.fn(),
+  refreshReviewGame: vi.fn(),
   control: null as null | { gameImageDelivery: ReturnType<typeof vi.fn>; putGameImage?: (input: { bytes: Uint8Array; contentType: "image/jpeg" | "image/heic"; mediaId: string; userId: string }) => Promise<void> },
   mediaKeyPrefixFor: vi.fn(),
   readGameReplyAudio: vi.fn(),
@@ -43,7 +44,6 @@ vi.mock("@/src/lib/game/service", () => ({
   devAdvanceDays: mocks.devAdvanceDays,
   devSettleNow: mocks.devSettleNow,
   devStartNow: mocks.devStartNow,
-  canEnterGame: mocks.canEnterGame,
   mediaKeyPrefixFor: mocks.mediaKeyPrefixFor,
   readGameReplyAudio: mocks.readGameReplyAudio,
   readGame: mocks.readGame,
@@ -53,6 +53,9 @@ vi.mock("@/src/lib/game/service", () => ({
   readGameInviteForMember: mocks.readGameInviteForMember,
   runGameCommand: mocks.runGameCommand,
 }));
+
+vi.mock("@/src/lib/better-auth/review-account", () => ({ isHostedAuthReviewMember: mocks.reviewMember }));
+vi.mock("@/src/lib/hosted-ops/app-review-game", () => ({ refreshAppReviewGameForHome: mocks.refreshReviewGame }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requireHostedMemberAuthFromBearerToken: mocks.requireHostedMemberAuthFromBearerToken,
@@ -171,7 +174,9 @@ describe("weekly game routes", () => {
     mocks.getPrisma.mockReturnValue({});
     mocks.requireHostedMemberAuthFromBearerToken.mockImplementation(async () => ({ member: { id: signedInAs }, kind: "better-auth", sessionId: "synthetic-session", credential: "synthetic-token",
       proof: { credentialDigest: Buffer.alloc(32), expiresAt: new Date("2030-01-01"), row: { model: "session", id: "synthetic-session", memberId: signedInAs } } }));
-    mocks.canEnterGame.mockResolvedValue(true);
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
+    mocks.reviewMember.mockResolvedValue(false);
+    mocks.refreshReviewGame.mockResolvedValue(false);
     mocks.mediaKeyPrefixFor.mockImplementation((memberId: string) => `game/${memberId}/`);
     mocks.readGameReplyAudio.mockResolvedValue(new Uint8Array([1, 2, 3]));
     mocks.readGame.mockResolvedValue(VIEW);
@@ -378,8 +383,8 @@ describe("weekly game routes", () => {
   });
 
   describe("flag", () => {
-    it("hides every signed-in route as 404 when the game is off for the member", async () => {
-      mocks.canEnterGame.mockResolvedValue(false);
+    it("hides every signed-in route as 404 when the global switch is off", async () => {
+      vi.stubEnv("MURPH_GAME_ENABLED", "false");
 
       const responses = await Promise.all([
         routes.home.GET(new Request(`${BASE}/home`)),
@@ -389,51 +394,57 @@ describe("weekly game routes", () => {
         routes.upload.POST(uploadRequest()),
         routes.media.GET(new Request(`${BASE}/media/x`), params({ key: ["x"] })),
         routes.startNow.POST(new Request(`${BASE}/dev/games/${GAME_ID}/start-now`, { method: "POST" }), params({ id: GAME_ID })),
+        routes.myInvite.GET(new Request(`${BASE}/me/invite`)),
       ]);
 
       for (const response of responses) {
         expect(response.status).toBe(404);
         expect((await response.json()).error.code).toBe("GAME_DISABLED");
       }
-      expect(mocks.canEnterGame).toHaveBeenCalledWith(LEO, null);
+      expect(mocks.readGameInviteForMember).not.toHaveBeenCalled();
       expect(mocks.readHome).not.toHaveBeenCalled();
       expect(mocks.readHistory).not.toHaveBeenCalled();
       expect(mocks.runGameCommand).not.toHaveBeenCalled();
       expect(mocks.devStartNow).not.toHaveBeenCalled();
     });
 
-    it("lets an invite route vouch with its own token", async () => {
-      mocks.canEnterGame.mockImplementation(async (_memberId: string, token: string | null) => token === "tok_open");
-      const accepted = await routes.accept.POST(writeRequest("POST", "/invites/tok_open/accept", { termsVersion: 1, timeZone: "UTC" }), params({ token: "tok_open" }));
-      expect(accepted.status).toBe(200);
-      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
-      const negotiated = await routes.negotiate.POST(writeRequest("POST", "/invites/tok_open/negotiate", { termsVersion: 1 }), params({ token: "tok_open" }));
-      expect(negotiated.status).toBe(200);
-      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
-      const other = await routes.accept.POST(writeRequest("POST", "/invites/tok_other/accept", { termsVersion: 1, timeZone: "UTC" }), params({ token: "tok_other" }));
-      expect(other.status).toBe(404);
-      expect((await other.json()).error.code).toBe("GAME_DISABLED");
-      expect(mocks.runGameCommand).toHaveBeenCalledTimes(2);
-      // Before accepting, the invite's own token also lets its holder report it or block who sent it.
-      const reported = await routes.inviteReports.POST(writeRequest("POST", "/invites/tok_open/reports", { reportId: "report_1", reason: "money", about: "terms" }), params({ token: "tok_open" }));
-      expect(reported.status).toBe(200);
-      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
-      const blocked = await routes.inviteBlock.PUT(writeRequest("PUT", "/invites/tok_open/block"), params({ token: "tok_open" }));
-      expect(blocked.status).toBe(200);
-      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
-    });
-
-    it("reads the invite an app is holding from its header on any other route", async () => {
-      mocks.canEnterGame.mockImplementation(async (_memberId: string, token: string | null) => token === "tok_open");
-      mocks.readHome.mockResolvedValue({ canStartGames: false, games: [], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } });
+    it("ignores the held-invite header sent by installed apps", async () => {
+      mocks.readHome.mockResolvedValue({ canStartGames: true, games: [], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } });
       const held = await routes.home.GET(new Request(`${BASE}/home`, { headers: { authorization: "Bearer token", "x-murph-game-invite": "tok_open" } }));
       expect(held.status).toBe(200);
-      expect(await held.json()).toMatchObject({ ok: true, canStartGames: false });
-      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, "tok_open");
-      const bare = await routes.home.GET(new Request(`${BASE}/home`));
-      expect(bare.status).toBe(404);
-      expect(mocks.canEnterGame).toHaveBeenLastCalledWith(LEO, null);
-      expect(mocks.readHome).toHaveBeenCalledTimes(1);
+      expect(await held.json()).toMatchObject({ ok: true, canStartGames: true });
+      expect((await routes.home.GET(new Request(`${BASE}/home`))).status).toBe(200);
+      vi.stubEnv("MURPH_GAME_ENABLED", "false");
+      expect((await routes.home.GET(new Request(`${BASE}/home`, { headers: { "x-murph-game-invite": "tok_open" } }))).status).toBe(404);
+      expect(mocks.readHome).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("App Review Home refresh", () => {
+    const initial = { canStartGames: true, games: [], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } };
+    it("starts the ordinary Home read in parallel with review-member detection and never refreshes it", async () => {
+      let finish!: (value: boolean) => void;
+      mocks.reviewMember.mockImplementation(() => new Promise<boolean>(resolve => { finish = resolve; }));
+      mocks.readHome.mockResolvedValue(initial);
+      const response = routes.home.GET(new Request(`${BASE}/home`));
+      await vi.waitFor(() => expect(mocks.readHome).toHaveBeenCalledOnce());
+      expect(mocks.reviewMember).toHaveBeenCalledOnce();
+      finish(false);
+      expect((await response).status).toBe(200);
+      expect(mocks.refreshReviewGame).not.toHaveBeenCalled();
+      expect(mocks.readHome).toHaveBeenCalledOnce();
+    });
+
+    it.each([false, true])("reads Home again only when the review refresh requests it (%s)", async (refreshed) => {
+      mocks.reviewMember.mockResolvedValue(true);
+      mocks.refreshReviewGame.mockResolvedValue(refreshed);
+      mocks.readHome.mockResolvedValueOnce(initial).mockResolvedValue({ ...initial, games: [VIEW] });
+      const response = await routes.home.GET(new Request(`${BASE}/home`, { headers: { "x-murph-game-multiplayer": "1" } }));
+      expect(response.status).toBe(200);
+      expect((await response.json()).games).toEqual(refreshed ? [VIEW] : []);
+      expect(mocks.refreshReviewGame).toHaveBeenCalledExactlyOnceWith({ memberId: LEO, homeGameIds: [], readPhoto: expect.any(Function) });
+      expect(mocks.readHome).toHaveBeenCalledTimes(refreshed ? 2 : 1);
+      expect(mocks.readHome).toHaveBeenLastCalledWith(LEO, true, expect.objectContaining({ member: { id: LEO } }));
     });
   });
 
@@ -980,7 +991,6 @@ describe("weekly game routes", () => {
 
   describe("invite recovery", () => {
     it.each(["synthetic-invite", null])("returns %s using only the bearer session", async token => {
-      mocks.canEnterGame.mockResolvedValue(false);
       mocks.readGameInviteForMember.mockResolvedValue(token);
       const request = new Request(`${BASE}/me/invite`, { headers: { Authorization: "Bearer synthetic-session" } });
       const response = await routes.myInvite.GET(request);
@@ -990,7 +1000,6 @@ describe("weekly game routes", () => {
       expect(response.headers.get("referrer-policy")).toBe("no-referrer");
       expect(mocks.requireHostedMemberAuthFromBearerToken).toHaveBeenCalledWith(request, expect.anything());
       expect(mocks.readGameInviteForMember).toHaveBeenCalledWith(LEO);
-      expect(mocks.canEnterGame).not.toHaveBeenCalled();
     });
 
     it.each<HeadersInit>([{}, { Cookie: "synthetic-browser-session" }, { Authorization: "Bearer revoked-session" }])("requires a current bearer session before lookup", async headers => {
@@ -999,7 +1008,6 @@ describe("weekly game routes", () => {
       expect(response.status).toBe(401);
       expect(await response.json()).toMatchObject({ error: { code: "UNAUTHENTICATED", message: "Sign in to continue." } });
       expect(mocks.readGameInviteForMember).not.toHaveBeenCalled();
-      expect(mocks.canEnterGame).not.toHaveBeenCalled();
     });
   });
 

@@ -1731,20 +1731,30 @@ identity compatibility floor described in the migration section.
 
 The production smoke also runs one real `gpt-6-luna` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-6-luna` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: each enabled behavioral smoke phase runs one bounded model turn per attempt, and a retried attempt (a container that never started, or a pre-rollout container) can run it again; an image release checks the isolated artifact before serving replacement and retains the existing post-rollout checks; the flag remains disabled in per-PR CI and hosted-local E2E.
 
-## Native prompt-cache defaults
+## Native prompt-cache retention
 
-Codex requests use the provider's default prompt-cache policy for every turn and
-compaction. No custom lifetime selection or scheduling label is sent. Supported
-current models default to thirty-minute cache writes; implicit caching and native
-cache keys remain unchanged. This removes the optional twelve-hour write premium
-and the native lifetime-accounting extension.
+The runner's separate prompt-cache patch sends `prompt_cache_options.ttl = "12h"`
+only for opted-in session conversation reply turns on supported managed-key
+models. The label is per turn, so tool continuations, the closing call after
+`finish_without_reply`, and same-thread reconsideration retain twelve hours.
+Scheduled (`automation-cron`), notification, operator, recap, idle and in-turn
+compaction, and unrecognized turns omit the option and use the provider's
+thirty-minute default. Implicit caching, native cache keys, and thread identity
+remain unchanged.
 
-Keep the existing Web and TypeScript twelve-hour usage readers: older runners and
-persisted usage records can still carry that subset during convergence or replay.
-No migration or historical repricing is needed. Stock native aggregate cache-write
-counts price new default-lifetime requests correctly. Deploy the matching runner
-image and verify the request diagnostics no longer contain an explicit cache TTL.
-Long-gap cache hits may change; no cache-hit or latency guarantee is made.
+The existing Web and TypeScript readers already preserve and price the native
+twelve-hour write subset; Web needs no change for this rollout. Build the patched
+runner base, then deploy the runner application with its TypeScript opt-in and
+both native patches. During mixed versions, an old native binary ignores the
+label and an old application omits it; both retain provider-default behavior.
+Rollback to the previous runner is compatible with the existing usage readers.
+After deploy, confirm the deployed image fingerprint and compare bounded usage
+aggregates: fresh reply rows with twelve-hour writes should carry
+`rawUsageJson.cacheWrite12hInputTokens` within aggregate `cacheWriteTokens`;
+cron rows should have no twelve-hour subset. Cache-hit-only reply rows may have
+no writes. No historical repricing or migration is needed. A thirty-minute request can read
+a twelve-hour prefix, while a twelve-hour request rewrites a thirty-minute
+prefix; compaction replaces that prefix.
 See the [OpenAI cache lifetime contract](https://developers.openai.com/api/docs/guides/prompt-caching#cache-lifetime).
 
 ## OpenAI-only inference cutover
@@ -2480,17 +2490,18 @@ which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
 The base Dockerfile builds the CLI from checksum-pinned Codex 0.167.1 source
-with `patches/codex-websocket-ack.patch`, preserving the matching release's Code Mode
-host and sandbox resources. The sole patch adds a 15-second first-frame
+with `patches/codex-websocket-ack.patch` and
+`patches/codex-prompt-cache-retention.patch`, preserving the matching release's Code Mode
+host and sandbox resources. The WebSocket patch adds a 15-second first-frame
 WebSocket timeout; subsequent frames retain the native stream idle timeout. Browser live voice and its native adapter
 are retired. The Web page, public and internal call admission, invocation media
 retention and Worker Live forwarding are removed; historical mailbox/usage
 readers remain. Roll out Web retirement before the new runner so old browser
 clients cannot start calls against the retired native interface.
 
-Both Dockerfile and patch enter the source fingerprint. The native package records
-the upstream revision and patch digest in `murph-source-revision`. Regenerate the
-patch against the exact source tag, run affected upstream
+The Dockerfile and both patches enter the source fingerprint. The native package records
+the upstream revision and combined patch digest in `murph-source-revision`. Regenerate the
+patches against the exact source tag, run affected upstream
 Rust tests and `pnpm --dir apps/cloudflare verify:codex-upstream-source`, and keep
 the npm helper checksum aligned. The permission-sandbox lane verifies the image's
 websocket fallback, provider conformance and sandbox boundaries. Cold builds need
@@ -2508,7 +2519,16 @@ Murph keeps permanent HTTP rejections terminal while preserving recovery for
 transport failures, timeouts, throttling, and server failures. The new
 `flexUnavailable`, `serverOverloaded`, and `policyCapacityUnavailable`
 classifications use Murph's existing five-minute capacity retry; none triggers
-connection recovery or a higher-priced service-tier fallback. `modelNotFound`
+connection recovery. Recap show writing is the owner-authorized exception to
+remaining on Flex indefinitely: its retained first-attempt time permits standard
+service on the next attempt at or after twenty minutes. A standard-tier capacity
+failure settles through existing failed-recap recovery instead of extending the
+retry budget. The existing system mailbox owns re-wakes, and existing session
+snapshots retain the recap's native binding. Media authority remains in the
+per-turn host-memory map, so a new attempt regenerates earlier media rather than
+trusting files or metadata retained in the writable vault. There is no durable
+media provenance receipt, in-process capacity wait or new invocation deadline.
+Other turns keep their existing tier policy. No Web schema or wire change is required. `modelNotFound`
 remains terminal even when provider prose contains a retry or rate-limit hint.
 Codex 0.167.1 defaults fresh native memory profiles to v2, but the shared hosted
 config still disables the memory feature, generation, and use. Its newly stable

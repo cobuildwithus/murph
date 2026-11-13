@@ -31,6 +31,7 @@ export async function computeRunnerBaseImageSourceFingerprint(): Promise<string>
   for (const source of [
     "Dockerfile.cloudflare-hosted-runner-base",
     "patches/codex-websocket-ack.patch",
+    "patches/codex-prompt-cache-retention.patch",
   ]) {
     const content = await readFile(path.join(repoRoot, source));
     hash.update(`${source}\0${content.length}\0`).update(content);

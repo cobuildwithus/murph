@@ -1257,23 +1257,26 @@ See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle
 
 The runner base image owns the native Codex build. Its Dockerfile pins the upstream
 release archive, Rust builder, and matching npm helper package, applies
-`patches/codex-websocket-ack.patch`, and replaces only the CLI. The bundled Code Mode
-host, shell resources, and sandbox helper remain from the same release. The image
-records the upstream revision and patch SHA-256 in `murph-source-revision`.
+`patches/codex-websocket-ack.patch` and
+`patches/codex-prompt-cache-retention.patch`, and replaces only the CLI. The bundled
+Code Mode host, shell resources, and sandbox helper remain from the same release. The image
+records the upstream revision and combined patch SHA-256 in `murph-source-revision`.
 Cargo concurrency is capped at two jobs so a high CPU count does not expand the
 native build's memory demand; the upstream release optimization profile is kept.
 
-The sole native customization bounds the first WebSocket response frame to
+The WebSocket customization bounds the first WebSocket response frame to
 15 seconds while preserving the normal stream idle timeout after acknowledgement.
 This recovers silently dropped warm sockets without interrupting valid slow
-reasoning or compaction. Config loading and prompt caching use upstream defaults.
+reasoning or compaction. The separate cache patch opts conversation reply turns
+into twelve-hour retention and preserves lifetime usage; other turns and
+compaction keep provider defaults. Config loading uses upstream defaults.
 Isolated provider fixtures prove hosted behavior; local subscription journeys
 reuse personal configuration and are developer evidence, not isolated proof.
 
 Browser live voice and its native wire adapter are retired; the Worker denies
 public Live creation and attachment. Historical usage remains readable.
 
-`runner:docker:base` fingerprints both the complete Dockerfile and patch. Native
+`runner:docker:base` fingerprints the complete Dockerfile and both patches. Native
 helpers come directly from the matching checksum-pinned npm platform archive;
 neither helper extraction nor Rust compilation depends on the runtime Node image.
 A Node-only refresh changes the final image fingerprint while leaving native

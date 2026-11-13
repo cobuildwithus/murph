@@ -49,7 +49,7 @@ function key(memberId: string, on = date) { return createHostedLinqDeliveryIdemp
 describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
   beforeEach(() => {
     vi.stubEnv("MURPH_GAME_PRIVATE_REMINDERS_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     m.covered.mockReset().mockResolvedValue(false);
   });
   afterEach(async () => {

@@ -522,15 +522,17 @@ test("next.config traces every selectable contact-card avatar into its route", (
   );
 });
 
-test("next.config traces the App Review game seed's photos into its ops route", () => {
+test("next.config traces the App Review game photos into both seed routes", () => {
+  const photos = [
+    "public/design-assets/hero-at-home-static-stretching-latest.jpeg",
+    "public/design-assets/hero-morning-outdoor-light-exposure.jpeg",
+    "public/design-assets/hero-walking-after-every-meal.jpeg",
+  ];
   assert.deepEqual(
     [...(productionNextConfig.outputFileTracingIncludes?.["/api/ops/app-review-game"] ?? [])].sort(),
-    [
-      "public/design-assets/hero-at-home-static-stretching-latest.jpeg",
-      "public/design-assets/hero-morning-outdoor-light-exposure.jpeg",
-      "public/design-assets/hero-walking-after-every-meal.jpeg",
-    ],
+    photos,
   );
+  assert.deepEqual([...(productionNextConfig.outputFileTracingIncludes?.["/api/game/v1/home"] ?? [])].sort(), photos);
 });
 
 test("next.config disables the Turbopack dev filesystem cache by default and honors explicit opt-in", () => {

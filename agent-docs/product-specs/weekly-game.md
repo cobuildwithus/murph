@@ -3,22 +3,14 @@
 ## Status
 
 MVP backend implemented and dark: off in production unless
-`MURPH_GAME_ENABLED=true`. Unset means on outside production only. A non-empty
-`MURPH_GAME_MEMBER_ALLOWLIST` makes it invite only (`isGameOn` in
-`apps/web/src/lib/game/access.ts`): a game is on when at least one of its people
-is listed, its players or a rematch's addressee, so an open invite is on when its
-creator is listed. Listed members can do everything. Anyone else can accept an
-invite to a game that is on, play it fully (posts, changes, settle, tickets,
-Murph's chat and pushes), see it on Home, and rematch its other player in either
-direction, but can't start a fresh game (`GAME_DISABLED`); Home's
-`canStartGames` says which. A game that is off is invisible to everyone. The
-HTTP door admits an unlisted member only when they're in a game that is on
-(settled included) or hold an open invite to one: the accept and negotiate routes
-vouch with their path token, and other routes may carry the held token in the
-`X-Murph-Game-Invite` header so a new invitee can load Home and set a name before
-accepting. Everyone else sees every game route as missing. Removing a listed
-member turns their unlisted opponents' games off, mid-game included. The iOS
-client is the Murph app.
+`MURPH_GAME_ENABLED=true`. Unset means on outside production only.
+`isGameEnabled()` in `apps/web/src/lib/game/access.ts` is the access switch:
+when on, every signed-in member can start, accept and play games. Each command
+and read still checks the player's roster and content access. When off, game
+routes and game content are invisible to everyone. Home retains the boolean
+`canStartGames`, which follows this switch, and multiplayer Home retains
+`canStartGroups`, which follows `areGameGroupsEnabled()` alone. Installed apps'
+`X-Murph-Game-Invite` header is ignored. The iOS client is the Murph app.
 
 With `MURPH_GAME_REQUIRE_CURRENT_TERMS=true` (unset or anything else is off, and
 off changes nothing), the HTTP door also refuses creating, accepting,
@@ -34,6 +26,39 @@ shows Murph's Terms step, records the grant, and sends the write again. Clients
 that predate the code see an ordinary refusal, so turn it on only once a build
 that handles it is out. Pair moves made in Murph's chat retain that behavior. Group chat mutations
 apply the same current-terms check before calling the canonical command.
+
+Game-only members can play with the Terms grant and no health grant, without
+companion admission, starter usage or a personal runtime. Only `heart_rate`
+posts and `reps` posts carrying `data.heartRate` require
+`launch.health-data = granted`. The canonical post mutation locks the member
+before the game and reads the grant inside that transaction, so a withdrawal
+committed during preparation wins. Missing and revoked grants return HTTP 403
+with `HEALTH_DATA_REQUIRED`, `Allow health data to post a heart rate.`, and
+`retryable: false` in the ordinary error envelope. Older clients receive an
+ordinary refusal. Photos, words, routes and plain rep counts require no health
+grant. Shared-room funding and the existing explicit-withdrawal restrictions
+on chat and recaps stay unchanged.
+
+### App Review demo games
+
+The configured review member gets a fixture opponent, a settled game with an
+open IOU, and a live 30-day game on Day 3 with the opponent's photo today locked.
+Home checks review membership in parallel with its normal read. Only that
+member refreshes the seed when there is no live game shared with the fixture
+opponent whose Day 1 matches the seed's current Pacific game day minus two.
+Freshness uses PostgreSQL's clock, as normal Home reads do, without development
+time travel. The seed uses that same instant, with the 3 AM Pacific boundary.
+
+The existing seed apply path rechecks freshness under the pair lock, so
+concurrent Home requests create one replacement pair. Home reads again after a
+refresh, including when another request refreshed after its initial read.
+A block, unavailable storage or another seed failure leaves the initial Home
+available and logs only an error code or name. Ordinary members never reseed.
+No daily operator rerun is needed; an explicit Ops apply still always replaces
+the fixture games. Rows are written directly with no push, chat, Linq or email,
+and the opponent stays unreachable. Without refresh, a seed one game day old
+still shows the live game on Day 4, yesterday's locked photo and the settled
+IOU; there is no opponent post for today.
 
 ## Group lifecycle staging
 
@@ -220,8 +245,8 @@ Open capable previews include `maxPlayers`, `group`, nullable `expiresAt` and
 `alreadyIn` is authenticated-only: joined nonstarter count, at most two own
 profile names and the first named player's signed own photo. Block and report
 masks apply before signing; private contact labels never enter this preview.
-Home computes `canStartGroups` per request from the admission switch and member
-allowlist. Both server create and join retain the admission gate.
+Home computes `canStartGroups` per request from the group admission switch.
+Both server create and join retain the admission gate.
 
 The public Web invite page and its metadata/image renderer opt into multiplayer
 without a member identity. An open group headline is "<Starter> started a
@@ -273,8 +298,8 @@ including rotation read candidates, without changing contact-only invitations,
 labels, seats or events. A contact match alone does not make them a participant.
 Group invitation keys keep their existing lifetime.
 
-`GET /api/game/v1/me/invite` requires a bearer session, bypasses game-entry
-admission, and returns `{ ok: true, token: string | null }` with private/no-store
+`GET /api/game/v1/me/invite` requires a bearer session and the game switch,
+like every game route, and returns `{ ok: true, token: string | null }` with private/no-store
 headers. It finds the newest open one-on-one invite matching a verified contact,
 ordered by creation time then id descending. Before limiting candidates to five,
 it excludes games that are off, expired on the normal clock, called off, created
@@ -468,11 +493,9 @@ resulting avatar. No private photo is shared with the subject or other players.
   consumed. A blocked peer suppresses completion wording. No content or names
   enter pushes except the recipient's own task words in a daily reminder.
   Missed-day chat is separate from these push milestones.
-- **Excuses.** An excuse explains a missed day in a few words: the phone
-  transcribes the voice note on-device and sends only the transcript (1-500
-  characters); no audio is uploaded or stored, and it's never replayed. It
-  applies to the player's most recent past scheduled day with no photo and no
-  excuse yet, never today. It neither scores nor unlocks.
+- **Excuses.** An excuse explains a missed day in a few words (1-500
+  characters). It applies to the player's most recent past scheduled day with
+  no photo and no excuse yet, never today. It neither scores nor unlocks.
 - **Post to unlock.** A posted partner day exposes only its posting time and
   optional device-rendered blur preview until you post that day. No words,
   summary data or entry id is exposed while locked. On the viewer's today
@@ -621,7 +644,23 @@ resulting avatar. No private photo is shared with the subject or other players.
   source authority; writing preferences stay in the craft guide. An accepted
   event replays its canonical result through the existing outbox.
 
-  Initial generation failure publishes a plain result from canonical facts.
+  Only the show-writing notification runs on OpenAI Flex. Its first attempt
+  starts a twenty-minute capacity budget, retained with the generation's native
+  Codex binding in an unbound assistant execution session. Flex capacity refusals
+  keep that notification pending on the existing five-minute mailbox retry; the first
+  attempt starting at or after twenty minutes uses standard service. If that
+  standard attempt also fails for capacity, it takes the existing failed-recap
+  settlement path rather than extending capacity retries. Retries resume the
+  same native thread and recover an accepted story before provider work. Media
+  provenance and song timing remain in per-turn host memory. After a failure,
+  the next attempt cannot submit files generated by the earlier attempt and
+  must regenerate the media it uses; retaining the thread does not retain media
+  authority. No durable media provenance receipts are stored in the vault.
+  The budget never interrupts a slow generation. Images and songs retain their
+  separate provider settings, and writing keeps default prompt-cache retention.
+
+  Non-capacity initial generation failure, or capacity failure on the standard
+  fallback attempt, publishes a plain result from canonical facts.
   An interrupted initial generation also has a read-only result projection after
   the existing UI wait. Failed regeneration preserves the prior recap and assets,
   silently retires the queued generation and permits a later regeneration ID.
@@ -1249,8 +1288,8 @@ its eligible groups the normal included group usage allowance without granting
 the players personal AI access. Duplicate rooms share the primary game allowance;
 they do not create more included credit. An expanded duplicate room proves eligibility
 from its own bound pair game, then derives its allowance beneficiary from the
-same primary-pair selector as an exact room. Suspension, withdrawn health-data consent, the game
-feature flag and member allowlist still apply. Tasks can change, with the other player's yes, until either player's Day 1
+same primary-pair selector as an exact room. Suspension, withdrawn health-data
+consent and the global game switch still apply. Tasks can change, with the other player's yes, until either player's Day 1
 begins, including on a live game that has not reached Day 1. The prize or dare
 can change the same way until the game is due: the new one counts for the whole
 game, and a stake-only change needs no future unstarted day, so it works on the
@@ -1357,7 +1396,7 @@ cancellation use the existing moves. A poll vote never starts a game. Chat moves
 continue to bypass the HTTP `MURPH_GAME_REQUIRE_CURRENT_TERMS` door.
 
 Fresh-game access, moderation, ten-open-games cap and settled same-pair rematch
-chain rules are the app's rules, including the unlisted-player rematch exception.
+chain rules are the app's rules.
 New game IDs are game_ followed by at least 20 random lowercase letters and
 digits, never names, dates or terms. Creation retries reuse that ID; a waiting
 duplicate is not another game. Creating

@@ -1008,12 +1008,12 @@ export function searchGeneratedHealthCommonsKnowledge() {
     });
   });
 
-  it("rejects a prepared runner bundle after only the native Codex patch changes", async () => {
+  it.each(["codex-websocket-ack.patch", "codex-prompt-cache-retention.patch"])("rejects a prepared runner bundle after only %s changes", async (patchName) => {
     const sourceFixture = await createDeployArtifactSourceFixture();
     const fixture = await createDeployArtifactFixture(sourceFixture);
     await mkdir(path.join(sourceFixture.repoRoot, "patches"), { recursive: true });
     await writeFile(
-      path.join(sourceFixture.repoRoot, "patches", "codex-websocket-ack.patch"),
+      path.join(sourceFixture.repoRoot, "patches", patchName),
       "synthetic native compatibility patch\n",
       "utf8",
     );

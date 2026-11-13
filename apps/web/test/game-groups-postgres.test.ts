@@ -172,6 +172,16 @@ describe("group admission switch and audience keys", () => {
 });
 
 describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
+  it.each([false, true])("refuses bearer admission to a group without member identities (retained seats: %s)", async (retained) => {
+    const starter = await person(), invited = await person(), stranger = await person();
+    const game = await create(starter, [invited]);
+    await db.gameInvitee.updateMany({ where: { gameId: game.id }, data: { memberId: null } });
+    if (retained) await db.gamePlayer.updateMany({ where: { gameId: game.id }, data: { memberId: null, leftAt: createdAt } });
+    else await db.gamePlayer.deleteMany({ where: { gameId: game.id } });
+    expect(await run(stranger.id, join(game.token))).toMatchObject({ ok: false, error: { code: "GAME_NOT_FOUND" } });
+    expect(await db.gamePlayer.count({ where: { gameId: game.id, memberId: stranger.id } })).toBe(0);
+  });
+
   it("preserves hidden invitation tasks through live editable round-trips and allows invited removal", async () => {
     const [starter, joined, invited] = await Promise.all([person(), person(), person()]);
     const ownTask = { seat: 2, text: "Read a chapter" };
@@ -783,7 +793,6 @@ describe.skipIf(!enabled)("multiplayer HTTP contract and privacy", () => {
     expect(authenticated.preview).toMatchObject({ alreadyIn: { count: 1, firstNames: ["Bailey"], avatarUrl: null }, yourTask: "Walk in the park" });
     vi.stubEnv("MURPH_GAME_GROUPS_ENABLED", "false"); expect((await readHome(a.id, true)).canStartGroups).toBe(false);
     vi.stubEnv("MURPH_GAME_GROUPS_ENABLED", "true"); expect((await readHome(a.id, true)).canStartGroups).toBe(true);
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", b.id); expect((await readHome(a.id, true)).canStartGroups).toBe(false);
     expect(await readHome(a.id)).not.toHaveProperty("canStartGroups");
   });
 });

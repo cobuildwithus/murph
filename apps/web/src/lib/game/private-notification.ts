@@ -9,7 +9,7 @@ import { acquireHostedMailboxCausalAppendLockTx, appendPreparedHostedMailboxEnve
 import { assertHostedDirectAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { readMyGameReminderProjection } from "./direct-tool";
 import { roomCoversEveningGame } from "./evening-check-in";
 import { gameReminderWindow, reminderOpenDay } from "./reminders";
@@ -36,7 +36,7 @@ async function currentEvening(memberId: string, date: string, now: Date, db: Pri
   for (const game of loaded) {
     const seat = seats.find(seat => seat.gameId === game.row.id);
     const player = game.state.players.find(player => player.memberId === memberId && !player.leftAt);
-    if (!seat || !player || !isGameOn(game.row) || await roomCoversEveningGame(game.row.chatContainerMemberId, game.row.id, now)) continue;
+    if (!seat || !player || !isGameEnabled() || await roomCoversEveningGame(game.row.chatContainerMemberId, game.row.id, now)) continue;
     const dayIndex = reminderOpenDay(game.state, player, new Date(now.getTime() + Number(game.row.devClockOffsetMs)), seat.reminderEveryDay);
     if (dayIndex !== null) batch.push({ gameId: game.row.id, termsVersion: currentTerms(game.state.game.terms).n, dayIndex });
   }

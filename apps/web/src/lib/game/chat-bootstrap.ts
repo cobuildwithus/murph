@@ -25,7 +25,7 @@ import { getPrisma } from "../prisma";
 import { bindPairGameChat, readPairGameChatTx, isExactGameChat } from "./chat-membership";
 import { GAME_MAX_OPEN_PER_PAIR } from "./rules";
 import { parsePendingGameChange } from "./changes";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { markGameChatGenerationQueuedTx } from "./chat-lifecycle-receipt";
 
 const PAYLOAD_SCHEMA = "game_chat_bootstrap_v1";
@@ -189,7 +189,7 @@ function readBootstrapGame(gameId: string) { return getPrisma().game.findUnique(
 function samePlayers(a: readonly { memberId: string | null }[], b: readonly { memberId: string | null }[]) { return isPairRoster(a) && isPairRoster(b) && a.every((player) => b.some((other) => other.memberId === player.memberId)); }
 function samePhones(a: readonly string[], b: readonly string[]) { return isPairRoster(a) && isPairRoster(b) && new Set(b).size === b.length && a.every((phone) => b.includes(phone)); }
 async function bootstrapEventCurrent(game: { maxPlayers?: number; id: string; status: string; pendingChange: unknown; players: readonly { memberId: string | null }[] }, eventId: string, db: Prisma.TransactionClient = getPrisma()): Promise<boolean> {
-  if (game.maxPlayers === 10 || !isPairRoster(game.players) || game.players.some(player => player.memberId === null) || !isGameOn(game)) return false;
+  if (game.maxPlayers === 10 || !isPairRoster(game.players) || game.players.some(player => player.memberId === null) || !isGameEnabled()) return false;
   if (eventId.startsWith(`game-talk:${game.id}:`)) return Boolean(await readCurrentGameTalk(db, game.id, eventId.slice(`game-talk:${game.id}:`.length), new Date()));
   if (eventId.startsWith(`game-change-cancelled:${game.id}:`)) return ["live", "negotiating"].includes(game.status);
   if (eventId === `game-started:${game.id}`) return game.status === "live";
@@ -288,7 +288,7 @@ async function finishBootstrap(input: ControlInput, receipt: FrozenReceipt, trus
       await authorizeBootstrapEffectTx(input, tx, trustedRecovery);
       await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
       const current = await tx.game.findUnique({ where: { id: input.request.gameId }, include: { players: { select: { memberId: true }, take: 3 } } });
-      if (!current || !isPairRoster(current.players) || !isGameOn(current)) throw new Error("Game chat delivery is unavailable.");
+      if (!current || !isPairRoster(current.players) || !current.players.some(player => player.memberId !== null) || !isGameEnabled()) throw new Error("Game chat delivery is unavailable.");
       return current.status === "live" || current.status === "negotiating";
     });
     if (!active) { await skipBootstrapRecovery(receipt.id); return unavailable(); }

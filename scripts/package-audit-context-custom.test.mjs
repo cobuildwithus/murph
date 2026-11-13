@@ -83,6 +83,7 @@ test("full audit packaging includes unchanged native patch and skill imports and
     const dependencies = [
       ...["normalize", "fetch-preview", "ocr-preview"].map(name => `${skillRoot}/${name}.mjs`),
       "patches/codex-websocket-ack.patch",
+      "patches/codex-prompt-cache-retention.patch",
       "patches/@example__unchanged@1.0.0.patch",
     ];
     const excluded = [

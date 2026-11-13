@@ -35,6 +35,7 @@ const dockerfileText = [
   "",
 ].join("\n");
 const codexPatchText = "synthetic native compatibility patch\n";
+const retentionPatchText = "synthetic prompt cache patch\n";
 
 describe("runner base image preparation", () => {
   afterEach(() => vi.useRealTimers());
@@ -52,7 +53,9 @@ describe("runner base image preparation", () => {
 
       const content = String(sourcePath).endsWith("codex-websocket-ack.patch")
         ? codexPatchText
-        : dockerfileText;
+        : String(sourcePath).endsWith("codex-prompt-cache-retention.patch")
+          ? retentionPatchText
+          : dockerfileText;
       return encoding ? content : Buffer.from(content);
     });
     vi.mocked(spawn).mockImplementation(() => {
@@ -121,13 +124,17 @@ describe("runner base image preparation", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it("invalidates a prepared image when only the native patch changes", async () => {
+  it.each(["codex-websocket-ack.patch", "codex-prompt-cache-retention.patch"])("invalidates a prepared image when only %s changes", async (changedPatch) => {
     const { computeRunnerBaseImageSourceFingerprint } = await import("../scripts/runner-base-image.ts");
     const before = await computeRunnerBaseImageSourceFingerprint();
     vi.mocked(readFile).mockImplementation(async (sourcePath) => Buffer.from(
-      String(sourcePath).endsWith("codex-websocket-ack.patch")
-        ? `${codexPatchText}new shutdown fix\n`
-        : dockerfileText,
+      String(sourcePath).endsWith(changedPatch)
+        ? "changed native patch\n"
+        : String(sourcePath).endsWith("codex-websocket-ack.patch")
+          ? codexPatchText
+          : String(sourcePath).endsWith("codex-prompt-cache-retention.patch")
+            ? retentionPatchText
+            : dockerfileText,
     ));
     expect(await computeRunnerBaseImageSourceFingerprint()).not.toBe(before);
   });
@@ -138,7 +145,9 @@ describe("runner base image preparation", () => {
     vi.mocked(readFile).mockImplementation(async (sourcePath) => Buffer.from(
       String(sourcePath).endsWith("codex-websocket-ack.patch")
         ? codexPatchText
-        : dockerfileText.replace("24.22.1", "24.22.2"),
+        : String(sourcePath).endsWith("codex-prompt-cache-retention.patch")
+          ? retentionPatchText
+          : dockerfileText.replace("24.22.1", "24.22.2"),
     ));
     expect(await computeRunnerBaseImageSourceFingerprint()).not.toBe(before);
   });
@@ -154,10 +163,10 @@ describe("runner base image preparation", () => {
     expect(nativeStages).toContain("https://registry.npmjs.org/@openai/codex/-/codex-${CODEX_CLI_VERSION}-linux-x64.tgz");
   });
 
-  it("cannot reuse an image when the pinned native patch is missing", async () => {
+  it.each(["codex-websocket-ack.patch", "codex-prompt-cache-retention.patch"])("cannot reuse an image when %s is missing", async (missingPatch) => {
     const { prepareRunnerBaseImage } = await import("../scripts/runner-base-image.ts");
     vi.mocked(readFile).mockImplementation(async (sourcePath) => {
-      if (String(sourcePath).endsWith("codex-websocket-ack.patch")) {
+      if (String(sourcePath).endsWith(missingPatch)) {
         throw new Error("native patch missing");
       }
       return Buffer.from(dockerfileText);
@@ -552,5 +561,7 @@ function expectedFingerprint(): string {
     .update(Buffer.from(dockerfileText))
     .update(`patches/codex-websocket-ack.patch\0${Buffer.byteLength(codexPatchText)}\0`)
     .update(Buffer.from(codexPatchText))
+    .update(`patches/codex-prompt-cache-retention.patch\0${Buffer.byteLength(retentionPatchText)}\0`)
+    .update(Buffer.from(retentionPatchText))
     .digest("hex");
 }

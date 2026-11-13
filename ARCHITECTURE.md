@@ -2964,12 +2964,13 @@ Wire contracts live in [iOS Meals and private numbers](agent-docs/product-specs/
   compatible older producers simply externalize sooner using the same formats.
 - Hosted conversation startup performs no integration-ingest archive recovery sweep. Canonical source resolution repairs only an encountered duplicate closed shard, re-enumerating it under the existing write lock and retaining full content validation. The idle archive owner still handles global maintenance; unrelated historical conflicts do not block a plain conversation. Initial target selection and the first mailbox import reuse the configuration already resolved by the operator-config owner. Later wake imports read current configuration through their existing path. Web sidecar payload reads similarly receive the immutable item already read by admission, while the payload query retains its live retention relation predicate.
 - Closed event-ledger and audit archiving precede the integration-ingest archive action in that same `idle_shutdown` maintenance step. All three share the existing total 30-second archive budget: a foreground wake aborts the work, while valid closed event and audit months are streamed into verified Brotli archives before the snapshot. Event and audit storage share the core-owned directory-bound JSONL archive implementation, including content-receipt append, rollback and exact duplicate repair. Audit queries and document provenance retain logical paths; independent audit receipt replay retains identity-based reconciliation. Archive-aware readers and writers ship together, and older plain-only audit readers are not a supported rollback after archival. Remaining plain months are the durable continuation, so this adds no queue, cursor, or second maintenance owner.
-- Native Codex Responses requests use the provider's default prompt-cache lifetime
-  without a custom retention policy or scheduled-turn label. Historical
-  twelve-hour cache-write counts remain readable as a subset of aggregate writes
-  through the TypeScript usage readers and Web allowance owner, which applies
-  their longer write rate once. Missing lifetime evidence retains legacy pricing.
-  Rollout ordering lives in `apps/cloudflare/DEPLOY.md`.
+- Native Codex Responses requests opt into twelve-hour prompt-cache retention
+  only for session conversation reply turns. The per-turn label applies to their
+  tool continuations, silence closing calls, and same-thread reconsideration.
+  Scheduled, notification, operator, recap, and compaction requests retain the
+  provider's thirty-minute default. Native usage preserves twelve-hour writes as
+  a subset of aggregate writes; TypeScript and Web price that subset once at the
+  longer rate. Rollout ordering lives in `apps/cloudflare/DEPLOY.md`.
 - OpenAI Responses HTTP bodies enforce the same subscription-access decision as Images API egress when a native image tool is requested. A Responses WebSocket handshake cannot inspect later frames, so it is admitted only when that access is allowed; otherwise the Worker answers 426 and native Codex uses HTTPS for the session. The Worker passes admitted upgrades through unaccepted and never relays frames. See [Starter image access](agent-docs/product-specs/starter-usage.md#text-entry-and-image-access).
 - Foreground assistant automation-directory receipts include an immediate assistant wake in the same status-only `canonical_runtime_commit` that publishes the receipt-log ref and retains the prior snapshot ref. The committed workspace wake is durable product truth. Web checkpoints send no Temporal signal; a successful final ownership release emits an attempt-ended hint after the response, without an actionability pre-read. Temporal invalidates its wait for every ended attempt and clears accepted ownership only for a matching identity.
 - Browser-vault replica refresh is normal hosted runtime work, not a detached container side path. Web owns browser-session freshness backstops for missing, unreadable, age-expired, generation-mismatched, or client-known-outdated replica refs and represents refreshes as low-priority system-mailbox runtime work after the browser response; source-hash freshness belongs to the assistant runtime because it can restore and hash canonical query sources. The shared browser-replica contract owns one current projection generation carried by both the encrypted payload and its published ref. Missing or mismatched generations remain readable for deploy compatibility but are always stale; any projection-shape or interpretation change that makes old sidecars incomplete must bump the shared generation instead of adding route-specific checks. Generation 10 atomically names one legacy compatibility monolith, fixed encrypted `core`, `labs`, and `metrics-index` children, and 32 deterministic encrypted metric buckets under that one ref and data-key envelope. Core carries canonical experiment entities but no derived experiment cards or saved outcomes; the metrics index retains saved outcomes for complete private export. The retired card array remains empty in the core wire payload for older Web readers. Each child independently chooses bounded gzip or identity encoding before encryption; shared replica readers request only their required fixed children and metric buckets, and distinguish unloaded series from genuinely empty series. Complete export is the only all-bucket consumer and processes buckets sequentially. Cloudflare stays a thin runner: it selects authenticated ciphertext objects but never decrypts health data or owns route interpretation. The assistant runtime builds the replica from one strict canonical snapshot under the restored `vaultRoot`, derives metrics in memory without touching the local SQLite projection, uses a stable canonical query-source hash that excludes mtimes and runtime paths, checks the hash again before publish, and may publish an empty current replica when query-visible content was deleted. Replica writes must use the runtime browser-vault store under the active write fence, and the old container `/internal/browser-vault-refresh` path is removed; deploy-skew callers receive an explicit removed response instead of executing a half-removed write path. Before publication, the per-user runner records one top-level planned ref as the durable delayed-cleanup obligation, admits the complete bounded-concurrency object set under the active write fence, and waits for every object write to settle. Account deletion stops the runner and drains or expires that exact admitted publication before its final prefix sweep. The orphan-cleanup alarm waits 65 minutes, re-reads the Web-owned current workspace ref, and deletes the non-current top-level object plus its deterministic children while retaining failed deletions for retry; current replicas therefore cannot use a blanket age-based R2 lifecycle rule. Browser-vault replica writes remain capped at 50 MiB. Wake or host preemption retains the current mailbox item only after every started local child settles; timeout, source change, publication conflict, generic failure, and oversized output terminally advance it so unchanged maintenance cannot block shared runtime control. A later browser freshness request can enqueue fresh work. These outcomes do not block foreground assistant work, outbox delivery, runtime-owned idle checkpoints, or runner alarms. Web and Worker/runner skew stays fail-soft by serving readable stale replicas during the documented reader-first rollout, while the first bucketed publication establishes the bucket-aware Worker/runner as a hard rollback floor.
@@ -3049,10 +3050,11 @@ or public Live provider forwarding. Historical voice mailbox and usage records
 retain their existing readers; pending voice delivery fails terminally without
 provider entry or a fallback to another channel. Messaging voice memos remain
 supported. Codex uses the pinned 0.167.1 release with `patches/codex-websocket-ack.patch`
-only for a 15-second first-frame WebSocket acknowledgement bound. Later frames
-retain the native stream idle timeout. Prompt caching uses provider defaults;
-historical twelve-hour usage remains readable through the existing accounting
-readers.
+for a 15-second first-frame WebSocket acknowledgement bound. Later frames
+retain the native stream idle timeout. The separate
+`patches/codex-prompt-cache-retention.patch` opts conversation reply turns into
+twelve-hour caching; other turns and compaction use provider defaults. Existing
+accounting readers price the native twelve-hour write subset.
 
 For established hosted conversation work, the first fresh auto-reply-enabled
 pre-pass Linq or Telegram input candidate staged after restore and final Codex
@@ -5848,7 +5850,18 @@ The runtime-orphan kind constraint is unchanged.
 
 
 Pair shows use the existing recap notification on GPT-6.1 Sol with the normal
-hosted group turn sandbox, cwd and tool surface. `read_game` returns scoped game
+hosted group turn sandbox, cwd and tool surface. Writing uses Flex with a
+twenty-minute capacity budget in an unbound per-generation assistant session;
+the system mailbox retries Flex capacity failures at five-minute intervals,
+resuming that session's native binding. The next attempt at or after twenty
+minutes uses standard service, without interrupting active generation.
+Standard-tier capacity failure settles through existing template or
+remake-retirement recovery. The room session owns context and delivery.
+Media provenance and song timing stay in the per-turn host-memory map. A retry
+resumes the native thread but must regenerate media from an earlier failed
+attempt: existing files and writer-writable metadata cannot confer media
+authority. No durable media provenance receipts are written or read.
+`read_game` returns scoped game
 material, shared chat and lore directly; the host resolves reference-photo IDs.
 Pair recap identity references include each player's own profile photo and the
 contact photo saved by the other player, attributed only to the pictured subject.
@@ -6172,10 +6185,9 @@ that just ended, with the existing clock slack at both boundaries.
 `PUT /blocks/:memberId`, `DELETE /blocks/:memberId`, and `POST /media`. Reads: `GET /home`,
 `GET /games/:id`, `GET /invites/:token`, `GET /media/:key`. They use a plain
 Better Auth bearer session, not the paid-member check, because invitees play
-free; the global flag hides every route. During allowlisted rollout, members
-may also enter through their enabled game or a valid invite. Owners of outgoing
-blocks retain admission to reach their own unblock controls after their last
-game ends; creation and individual game authorization remain unchanged. The invite preview and
+free; the global flag hides every route while off. When on, every signed-in
+member can enter and start games; individual game and content authorization
+still follow the roster and visibility rules. The invite preview and
 `/g/<token>` page are unauthenticated and honor only the global flag. Dev
 time-travel routes return 404 in real production; they move a per-game clock
 (`game.dev_clock_offset_ms`, added to the database clock as that game's "now"

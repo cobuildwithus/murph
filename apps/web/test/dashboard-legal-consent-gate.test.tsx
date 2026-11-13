@@ -517,36 +517,14 @@ test("a consent preview uses only its injected in-memory acceptance owner", asyn
   expect(rendered.reload).not.toHaveBeenCalled();
 });
 
-test("settings keeps the consent gate when launch consent is missing", async () => {
+test.each([
+  ["both grants missing", {}],
+  ["health missing", { launchLegalGranted: true }],
+  ["health revoked", { launchLegalGranted: true, launchHealthDataRevoked: true }],
+] as const)("Settings stays reachable with %s", async (_label, grants) => {
   const rendered = await renderClientComponent(
     createElement(DashboardLegalConsentGate, {
-      initialStatus: createLaunchConsentStatus(),
-    }),
-    {
-      location: {
-        hash: "#data-privacy",
-        href: "https://app.example.test/settings#data-privacy",
-        origin: "https://app.example.test",
-        pathname: "/settings",
-        search: "",
-      },
-      requireButton: false,
-    },
-  );
-  cleanupRender = rendered.cleanup;
-
-  expect(rendered.container.querySelector(
-    '[data-dashboard-legal-consent-gate="true"]',
-  )).toBeTruthy();
-});
-
-test("settings remains available after explicit health-data withdrawal", async () => {
-  const rendered = await renderClientComponent(
-    createElement(DashboardLegalConsentGate, {
-      initialStatus: createLaunchConsentStatus({
-        launchHealthDataRevoked: true,
-        launchLegalGranted: true,
-      }),
+      initialStatus: createLaunchConsentStatus(grants),
     }),
     {
       location: {
@@ -599,7 +577,7 @@ test("a member asked for the Terms again gets one Agree step that says what chan
 
   expect(rendered.container.textContent).toContain("Review what changed");
   expect(rendered.container.textContent).toContain(
-    "We updated Murph's legal documents. We added rules for games. Accept the current versions to get your full dashboard back.",
+    "We updated Murph's legal documents. We added how Murph's AI hosts games and makes recaps. Accept the current versions to get your full dashboard back.",
   );
   expectNoLaunchCheckboxes(rendered.container);
 
@@ -774,7 +752,7 @@ test("the games line shows only when the Terms step is pending", async () => {
   cleanupRender = rendered.cleanup;
 
   expect(rendered.container.textContent).toContain("Review what changed");
-  expect(rendered.container.textContent).not.toContain("We added rules for games.");
+  expect(rendered.container.textContent).not.toContain("We added how Murph's AI hosts games and makes recaps.");
 });
 
 function expectNoLaunchCheckboxes(container: HTMLElement) {

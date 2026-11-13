@@ -288,7 +288,6 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     let phoneOrdinal = 0;
     beforeEach(() => {
       vi.stubEnv("MURPH_GAME_ENABLED", "true");
-      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     });
     afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
@@ -361,7 +360,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(await readGameInviteForMember(f.ava)).toBe(expected);
     });
 
-    it.each(["expired", "dev expired", "called off", "blocked", "blocked by", "self", "player", "left player", "deleted challenger", "unverified", "typed name", "bound seat", "group", "game off"])("excludes %s invites", async exclusion => {
+    it.each(["expired", "dev expired", "called off", "blocked", "blocked by", "self", "player", "left player", "deleted challenger", "unverified", "typed name", "bound seat", "group"])("excludes %s invites", async exclusion => {
       const f = await pickedInvite();
       const db = getPrisma();
       if (exclusion === "expired") await db.game.update({ where: { id: f.gameId }, data: { inviteExpiresAt: new Date(0) } });
@@ -379,7 +378,6 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       if (exclusion === "typed name") await db.gameInvitee.updateMany({ where: { gameId: f.gameId }, data: { recipientLookupKey: null } });
       if (exclusion === "bound seat") await db.gameInvitee.updateMany({ where: { gameId: f.gameId }, data: { memberId: f.ava } });
       if (exclusion === "group") await db.game.update({ where: { id: f.gameId }, data: { maxPlayers: 10 } });
-      if (exclusion === "game off") vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", f.ava);
       expect(await readGameInviteForMember(f.ava)).toBeNull();
     });
 
@@ -1189,6 +1187,8 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "America/New_York");
     const stranger = await member("Sam", "UTC");
+    const { recordHostedLaunchRequiredConsent } = await import("@/src/lib/legal/consent");
+    for (const memberId of [leo, ava]) await recordHostedLaunchRequiredConsent({ memberId, prisma: getPrisma(), scope: "launch.health-data" });
     const { gameId } = await startGame(leo, ava, { terms: { ...TERMS, checkInKind: "heart_rate" } });
     // A retained heart-rate-only game still enforces its stored requirement.
     const stored = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } });
@@ -2410,7 +2410,6 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const { requireGameMember } = await import("../src/lib/game/http/auth");
     const crypto = await import("../src/lib/game/crypto");
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 17).toString("base64url"));
     vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 9).toString("base64url"));
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "http://localhost:3237");

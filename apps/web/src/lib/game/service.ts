@@ -38,7 +38,7 @@ import { gameReminderReach } from "./reminders";
 import { GAME_REMINDER_OFF_CHOICE_EVENT, recordGameReminderPreferencesTx } from "./reminder-preferences";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { createHostedLinqParticipantContact } from "../hosted-onboarding/linq-participant-contact";
-import { areGameDevToolsAllowed, areGameGroupsEnabled, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
+import { areGameDevToolsAllowed, areGameGroupsEnabled, gameOnSql, gameOnWhere, isGameEnabled, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import { parseGameAcceptance, parseGameCommand, type GameCommand } from "./command";
 import type { GameReminders } from "./contract";
 import { addressedGameInvite, lockGameAudience, prepareGameAudience, readGameVerifiedContacts, verifiedGameContactKeys } from "./audience";
@@ -142,6 +142,7 @@ import {
 import { parseGameTalkPayload, readGroupTalkInvitation } from "./talk";
 import { GAME_ENDED_CHANGE_REASON, GAME_ROSTER_CHANGE_REASON, resolveGroupGameChangeTx } from "./change-resolution";
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
+import { readHostedHealthDataConsentState } from "../legal/consent";
 import { departedLabels } from "./account-deletion";
 import { gameMemberIds, hasGameIdentity } from "./roster";
 import { areGamePlayersBlocked, GAME_BLOCK_LIMIT, isHiddenBy, lockGamePair, readGameBlocks, type GameBlocks } from "./blocks";
@@ -450,7 +451,7 @@ async function gameChatCreateCommand(input: Parameters<typeof runGameChatUpdate>
 /** The app uses join for a yes, negotiate for an unseated invitee's counter. */
 async function gameChatTermsCommand(input: Parameters<typeof runGameChatUpdate>[0], update: Extract<HostedGameUpdate, { operation: "approve" | "propose" }>): Promise<{ command: unknown } | { result: GameCommandResult }> {
   const row = await getPrisma().game.findUnique({ where: { id: update.gameId }, include: { invitees: true, players: true } });
-  if (!row || !await gameChatContextCurrent(row, input) || !isGameOn(row)) reject("NOT_A_PLAYER", "This game belongs to its players.");
+  if (!row || !await gameChatContextCurrent(row, input) || !isGameEnabled()) reject("NOT_A_PLAYER", "This game belongs to its players.");
   if (row.maxPlayers === 10 && update.operation === "propose" && update.change.kind === "edit") reject("INVALID_REQUEST", "Ask for group changes with edit_terms and a new proposalId.");
   if (update.operation === "propose" && (row.status !== "invited" || row.maxPlayers === 10)) {
     return { command: { type: "proposeChange", gameId: update.gameId, proposalId: update.proposalId, expectedTermsVersion: update.expectedTermsVersion, change: update.change } };
@@ -613,8 +614,9 @@ async function runLocked(
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
     if (locked.length === 0) reject("GAME_NOT_FOUND", "Game not found.");
     const [loaded] = await loadGames(tx, [gameId]);
-    // Nobody acts on a game that is off, whatever they hold.
-    if (context.actor !== SYSTEM_ACTOR && !isGameOn(loaded.row)) reject("GAME_NOT_FOUND", "Game not found.");
+    // A held invite cannot revive an identity-less game or bypass the switch.
+    if (context.actor !== SYSTEM_ACTOR && (!isGameEnabled()
+      || ![...loaded.row.players, ...loaded.row.invitees].some(person => person.memberId !== null))) reject("GAME_NOT_FOUND", "Game not found.");
     if (context.chatContainerMemberId && !await gameChatContextCurrent(loaded.row, context, tx)) {
       reject("NOT_A_PLAYER", "This game belongs to the players in this chat.");
     }
@@ -847,7 +849,7 @@ async function createGroupGame(context: CommandContext, command: Extract<GameCom
   const chat = await prepareGameChat({ actor, members: [actor, ...prepared.invitees.map(invitee => invitee.memberId)],
     handles: prepared.handles, room: context.chatContainerMemberId ?? prepared.room ?? undefined, audienceKeys: prepared.keys.candidates });
 
-  if (!isGameOn({ players: [{ memberId: actor }], invitees: prepared.invitees })) reject("GAME_DISABLED", "Starting a game is invite only for now.");
+  if (!isGameEnabled()) reject("GAME_DISABLED", "Games are unavailable right now.");
   const open = await prisma.game.findMany({ where: { audienceKey: { in: prepared.keys.candidates }, status: "live" }, select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR });
   await loadCurrent(open.map(game => game.id), true, actor);
   const token = randomBytes(24).toString("base64url");
@@ -953,8 +955,7 @@ async function isGameCreationReplay(tx: Pick<Tx, "game">, actor: string, gameId:
 
 async function readGameCreationRematch(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>, chatOther?: string) {
   const rematch = command.previousGameId ? await readRematch(context.actor, command.previousGameId) : null;
-  // A listed creator starts fresh games; an unlisted player may rematch an on-game.
-  if (!isGameOn({ players: [{ memberId: context.actor }], invitees: [{ memberId: rematch?.opponentMemberId ?? null }] })) reject("GAME_DISABLED", "Starting a game is invite only for now.");
+  if (!isGameEnabled()) reject("GAME_DISABLED", "Games are unavailable right now.");
   if (chatOther && rematch && rematch.opponentMemberId !== chatOther) reject("NOT_A_PLAYER", "Rematch a settled game with the other person in this chat.");
   if (rematch && command.previousGameId) await assertLatestInChain(context.actor, rematch.opponentMemberId, command.previousGameId, context.now ?? new Date());
   return rematch;
@@ -1401,7 +1402,18 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
   ]);
   const captureAgeMs = command.captureAgeMs ?? null;
   let notification: Awaited<ReturnType<typeof claimGamePostNotification>> = [];
-  await runLocked(gameId, context, async ({ clock, loaded, now, tx }) => {
+  const needsHealthData = kind === "heart_rate"
+    || kind === "reps" && command.data && "heartRate" in command.data && command.data.heartRate !== undefined;
+  const postContext = needsHealthData ? { ...context, beforeMutationTx: async (tx: Tx) => {
+    await context.beforeMutationTx?.(tx);
+    // Member before game, as in account deletion. NO KEY UPDATE excludes the
+    // revocation lock without blocking unrelated game foreign-key checks.
+    await lockHostedMemberRow(tx, actor, { noKeyUpdate: true });
+    if (await readHostedHealthDataConsentState({ memberId: actor, prisma: tx }) !== "granted") {
+      reject("HEALTH_DATA_REQUIRED", "Allow health data to post a heart rate.");
+    }
+  } } : context;
+  await runLocked(gameId, postContext, async ({ clock, loaded, now, tx }) => {
     // A repeat of a post that already landed (a retry, or the same tap twice) changes nothing.
     const existing = await tx.gameEntry.findUnique({ select: { memberId: true, gameId: true }, where: { id: entryId } });
     if (existing) {
@@ -1480,7 +1492,7 @@ async function readableReply(gameId: string, replyId: string, viewer: string) {
     select: { id: true, entryId: true, authorMemberId: true, kind: true } });
   if (!reply) return null;
   const [loaded] = await loadGames(db, [gameId]);
-  if (!loaded || !isGameOn(loaded.row) || !replyReadAccess(viewer, reply, await readReplyContext(db, loaded, viewer))) return null;
+  if (!loaded || !isGameEnabled() || !replyReadAccess(viewer, reply, await readReplyContext(db, loaded, viewer))) return null;
   return reply;
 }
 
@@ -2540,11 +2552,11 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     orderBy: { createdAt: "desc" }, include: { invitees: true, players: true } });
   const audience = prepared ?? (candidates.some(row => row.maxPlayers === 10) ? await readGameChatAudience(containerMemberId) : undefined);
   const context = { chatContainerMemberId: containerMemberId, chatPlayerMemberIds: playerMemberIds, chatAudience: audience };
-  const allowed = await Promise.all(candidates.map(async row => isGameOn(row) && await gameChatContextCurrent(row, context) ? row.id : null));
+  const allowed = await Promise.all(candidates.map(async row => isGameEnabled() && await gameChatContextCurrent(row, context) ? row.id : null));
   const current = await loadCurrent(allowed.filter((id): id is string => id !== null), true, actorMemberId, actorMemberId ? containerMemberId : undefined);
   const loadedById = new Map(current.games.map((game) => [game.row.id, game]));
   const rows = [];
-  for (const { row } of current.games) if (isGameOn(row) && await gameChatContextCurrent(row, context)) rows.push(row);
+  for (const { row } of current.games) if (isGameEnabled() && await gameChatContextCurrent(row, context)) rows.push(row);
   const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: [...new Set(rows.flatMap(row => row.maxPlayers === 10 ? row.players.filter(player => !player.leftAt).filter(hasGameIdentity).map(player => player.memberId) : gameChatPlayerIds(row)))] } },
     select: { memberId: true, firstNameEncrypted: true } });
   const plain = await openGameTexts([
@@ -3079,39 +3091,12 @@ export async function readGame(gameId: string, memberId: string, multiplayer = f
  * while it's still an invite (only they can accept it).
  */
 function canView(game: LoadedGame, memberId: string): boolean {
-  if (!isGameOn(game.row)) return false;
+  if (!isGameEnabled()) return false;
   const player = playerFor(game.state, memberId);
   if (player) return !player.leftAt;
   // Also after its challenger left: the invitee sees it called off.
   return game.row.invitees.some(invitee => invitee.memberId === memberId)
     && (game.row.status === "invited" || game.row.players.some(player => player.leftAt !== null));
-}
-
-/**
- * The HTTP door. A listed member may use every route. Anyone else enters only
- * for a game that is on: one they play or are the addressed rematch invitee
- * of, or the open invite they're holding, so a new invitee can set up and
- * accept. Owners of outgoing blocks or reports may also enter to unblock or
- * retry an accepted report after the source is gone. Each command still checks
- * its own game, so this grants no game access.
- */
-export async function canEnterGame(memberId: string, inviteToken: string | null): Promise<boolean> {
-  if (isGameEnabledFor(memberId)) return true;
-  if (!isGameEnabled()) return false;
-  const prisma = getPrisma();
-  const yours = await prisma.game.findFirst({ select: { id: true }, where: { AND: [
-    { OR: [{ players: { some: { memberId } } }, { invitees: { some: { memberId } } }] },
-    { status: { in: ["invited", "negotiating", "live", "settled"] } },
-    gameOnWhere(),
-  ] } });
-  if (yours) return true;
-  if (await prisma.gameBlock.findFirst({ select: { blockedMemberId: true }, where: { blockerMemberId: memberId } })) return true;
-  if (await prisma.gameReport.findFirst({ select: { id: true }, where: { reporterMemberId: memberId } })) return true;
-  if (!inviteToken) return false;
-  const invite = await prisma.game.findUnique({ include: { invitees: true, players: true }, where: { inviteTokenHash: sha256Hex(inviteToken) } });
-  if (!invite || !(invite.status === "invited" || invite.maxPlayers === 10 && invite.status === "live") || !isGameOn(invite)) return false;
-  if (invite.maxPlayers === 2 && invite.invitees.some(invitee => invitee.memberId !== null) && !invite.invitees.some(invitee => invitee.memberId === memberId)) return false;
-  return invite.inviteExpiresAt === null || invite.inviteExpiresAt.getTime() > gameNow(await databaseNow(prisma), invite).getTime();
 }
 
 /**
@@ -3182,7 +3167,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
       WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL
         AND game.status IN ('invited', 'negotiating', 'live', 'settled', 'void')
         AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
-        AND ${gameOnSql("game")}
+        AND ${gameOnSql()}
         AND NOT EXISTS (SELECT 1 FROM game_event event WHERE event.game_id = game.id AND event.type = 'cancelled')
       ORDER BY CASE game.status WHEN 'live' THEN 0 WHEN 'negotiating' THEN 1 WHEN 'invited' THEN 2 ELSE 3 END,
         seat.joined_at DESC, seat.game_id DESC
@@ -3225,8 +3210,8 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
   return {
     blocked,
     games: views,
-    canStartGames: isGameEnabledFor(memberId),
-    ...(multiplayer ? { canStartGroups: areGameGroupsEnabled() && isGameEnabledFor(memberId) } : {}),
+    canStartGames: isGameEnabled(),
+    ...(multiplayer ? { canStartGroups: areGameGroupsEnabled() } : {}),
     me: { usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       // Expired tickets stay where they were, marked expired.
@@ -3260,7 +3245,7 @@ export async function readHistory(memberId: string, multiplayer = false): Promis
         ON game.max_players = 2 AND opponent.game_id = game.id AND opponent.member_id <> ${memberId}
       WHERE game.status = 'settled'
         AND game.settled_at IS NOT NULL
-        AND ${gameOnSql("game")}
+        AND ${gameOnSql()}
         AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
         AND (game.max_players = 10 OR (opponent.member_id IS NOT NULL
         AND (SELECT count(*) FROM game_player roster WHERE roster.game_id = game.id) = 2
@@ -3382,7 +3367,7 @@ export async function readInvitePreview(token: string, multiplayer = false, memb
   });
   if (!row || (!multiplayer && row.maxPlayers !== 2)) return null;
   if (memberId && row.players.some(player => player.memberId === memberId && player.leftAt)) return null;
-  if (!isGameOn(row)) return null;
+  if (![...row.players, ...row.invitees].some(person => person.memberId !== null)) return null;
   const blocks = memberId ? await readGameBlocks(getPrisma(), memberId, gameMemberIds(row.players)) : null;
   if (row.createdBy && blocks && isHiddenBy(blocks, row.createdBy)) return null;
   const now = gameNow(await databaseNow(getPrisma()), row);
@@ -3586,7 +3571,7 @@ async function authorizeReads(memberId: string, mediaKeys: readonly string[], mo
               AND report.reported_member_id = requested.owner)
           AND EXISTS (
             SELECT 1 FROM game
-            WHERE ${gameOnSql("game")} AND ${mode.multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
+            WHERE ${gameOnSql()} AND ${mode.multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
               AND NOT EXISTS (SELECT 1 FROM game_player departed
                 WHERE departed.game_id = game.id AND departed.member_id = ${memberId} AND departed.left_at IS NOT NULL)
               AND (EXISTS (SELECT 1 FROM game_player player
@@ -3602,7 +3587,7 @@ async function authorizeReads(memberId: string, mediaKeys: readonly string[], mo
         JOIN game_player viewer ON viewer.game_id = game.id AND viewer.member_id = ${memberId} AND viewer.left_at IS NULL
         WHERE entry.member_id = requested.owner AND entry.media_keys @> ARRAY[requested.key]::text[]
           AND entry.attempt > 0 AND entry.withdrawn_at IS NULL
-          AND ${gameOnSql("game")} AND ${mode.multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
+          AND ${gameOnSql()} AND ${mode.multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
           AND NOT EXISTS (SELECT 1 FROM game_report report
             WHERE report.entry_id = entry.id AND report.reporter_member_id = ${memberId})
           AND (${mode.unlocked ? Prisma.sql`(game.status = 'settled' OR EXISTS (

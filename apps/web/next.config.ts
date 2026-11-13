@@ -340,6 +340,7 @@ export function buildHostedWebNextConfig(
       "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
       "/api/ops/app-review-game": APP_REVIEW_GAME_PHOTO_TRACE_INCLUDES,
+      "/api/game/v1/home": APP_REVIEW_GAME_PHOTO_TRACE_INCLUDES,
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
     },
     outputFileTracingRoot: path.resolve(appDir, "../.."),

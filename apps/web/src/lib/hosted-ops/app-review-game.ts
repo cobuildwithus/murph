@@ -8,10 +8,10 @@ import { readHostedAuthReviewMemberId } from "../better-auth/review-account";
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
 import { prepareHostedDomainRootForWeb, revalidatePreparedHostedDomainRootForWebTx } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
-import { isGameEnabledFor, mediaKeyPrefixFor } from "../game/access";
+import { isGameEnabled, mediaKeyPrefixFor } from "../game/access";
 import { areGamePlayersBlocked, lockGamePair } from "../game/blocks";
 import { sealGameText, type GameSealTarget } from "../game/crypto";
 import { isGameMediaStorageAvailable, putGameMedia } from "../game/media";
@@ -31,8 +31,8 @@ import { addDays, dayStartInstant, gameLocalDate } from "../game/time";
  * App Review cannot invite a real second player, so the configured review
  * account gets a fixture opponent and two games with it: one settled with an
  * IOU the reviewer holds, and a long live rematch where the opponent has
- * posted today. Every run replaces the opponent's games with fresh ones dated
- * from now, so it is safe to repeat before each submission.
+ * posted today. The review account's Home read refreshes a stale seed each
+ * Pacific game day; an explicit Ops apply always replaces the games.
  *
  * Rows are written directly. No game command, history-driven chat notice,
  * push, Linq or email path runs, and the opponent has no phone, email, push
@@ -45,7 +45,7 @@ export type HostedOpsAppReviewGamePhotoReader = (publicPath: string) => Promise<
 
 export const APP_REVIEW_PARTNER_MEMBER_ID = "hbm_appReviewPartner";
 export const APP_REVIEW_GAME_TIME_ZONE = "America/Los_Angeles";
-/** Synthetic marketing art the site already serves; traced into the ops route. */
+/** Synthetic marketing art the site already serves; traced into the Ops and Home routes. */
 export const APP_REVIEW_GAME_PHOTOS = {
   porch: "/design-assets/hero-morning-outdoor-light-exposure.jpeg",
   stretch: "/design-assets/hero-at-home-static-stretching-latest.jpeg",
@@ -152,6 +152,8 @@ export async function seedHostedOpsAppReviewGame(input: {
   now?: Date;
   prisma?: PrismaClient;
   readPhoto?: HostedOpsAppReviewGamePhotoReader;
+  /** Home refresh only. An explicit Ops apply always replaces. */
+  onlyIfStale?: boolean;
 }): Promise<HostedOpsAppReviewGameSummary> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
@@ -172,7 +174,43 @@ export async function seedHostedOpsAppReviewGame(input: {
   }
   const readPhoto = input.readPhoto;
   if (!readPhoto) throw new Error("The App Review game needs its photos.");
-  return runWithHostedDomainRootUnwrapCache(() => apply({ inspected, members, now, prisma, readPhoto }));
+  return runWithHostedDomainRootUnwrapCache(() => apply({ inspected, members, now, prisma, readPhoto, onlyIfStale: input.onlyIfStale }));
+}
+
+function liveDayOne(now: Date): Date {
+  return new Date(`${addDays(seedToday(now), LIVE_GAME.dayOneOffset)}T00:00:00Z`);
+}
+
+async function findFreshLiveGame(db: Prisma.TransactionClient | PrismaClient, members: Members, now: Date) {
+  const dayOne = liveDayOne(now);
+  return db.game.findFirst({ select: { id: true }, where: {
+    status: "live",
+    AND: [
+      { players: { some: { memberId: members.reviewer, dayOne } } },
+      { players: { some: { memberId: members.partner, dayOne } } },
+    ],
+  } });
+}
+
+/** Called only for the configured review member. Never lets a failed refresh break Home.
+ * Returns true also when another Home read refreshed first under the pair lock.
+ */
+export async function refreshAppReviewGameForHome(input: { memberId: string; homeGameIds: readonly string[]; prisma?: PrismaClient; readPhoto: HostedOpsAppReviewGamePhotoReader }): Promise<boolean> {
+  try {
+    const prisma = input.prisma ?? getPrisma();
+    // Use Home's database clock, without a development time-travel offset.
+    const [{ now }] = await prisma.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`;
+    const members = { reviewer: input.memberId, partner: APP_REVIEW_PARTNER_MEMBER_ID };
+    const fresh = await findFreshLiveGame(prisma, members, now);
+    // The initial Home can predate a concurrent refresh that already committed.
+    if (fresh) return !input.homeGameIds.includes(fresh.id);
+    await seedHostedOpsAppReviewGame({ mode: "apply", now, prisma, readPhoto: input.readPhoto, onlyIfStale: true });
+    return true;
+  } catch (error) {
+    const code = isHostedOnboardingError(error) ? error.code : error instanceof Error ? error.name : "UNKNOWN";
+    console.warn("App Review game refresh failed", code);
+    return false;
+  }
 }
 
 async function apply(input: {
@@ -181,6 +219,7 @@ async function apply(input: {
   now: Date;
   prisma: PrismaClient;
   readPhoto: HostedOpsAppReviewGamePhotoReader;
+  onlyIfStale?: boolean;
 }): Promise<HostedOpsAppReviewGameSummary> {
   const { members, now, prisma } = input;
   // Game words seal under each member's control root. The partner's first
@@ -190,8 +229,9 @@ async function apply(input: {
     prepareHostedDomainRootForWeb({ domain: "control", prepareMissing: false, prisma, reason: "hosted-ops.app-review-game", userId: members.reviewer }),
   ]);
   const prepared = await prepare(members, now, input.readPhoto);
-  await prisma.$transaction(async (tx) => {
+  const applied = await prisma.$transaction(async (tx) => {
     await lockGamePair(tx, members.reviewer, members.partner);
+    if (input.onlyIfStale && await findFreshLiveGame(tx, members, now)) return false;
     await tx.hostedMember.createMany({ data: [{ id: members.partner }], skipDuplicates: true });
     // Owner-before-game lock order, as in account deletion and game commands.
     const locked = await tx.$queryRaw<{ id: string; suspended_at: Date | null }[]>`
@@ -233,9 +273,10 @@ async function apply(input: {
     const [settled, live] = prepared.games;
     await writeGame(tx, settled, members, prepared, null);
     await writeGame(tx, live, members, prepared, settled.id);
+    return true;
   });
-  return { ...summarize("applied", await inspect(prisma, members.reviewer), prepared.games, now, input.inspected.replacedGames),
-    created: prepared.games.map((game) => ({ id: game.id, round: game.seed.round, status: game.seed.settled ? "settled" : "live" })) };
+  return { ...summarize("applied", await inspect(prisma, members.reviewer), prepared.games, now, applied ? input.inspected.replacedGames : []),
+    created: applied ? prepared.games.map((game) => ({ id: game.id, round: game.seed.round, status: game.seed.settled ? "settled" : "live" })) : [] };
 }
 
 // ------------------------------------------------------------------ inspect
@@ -322,7 +363,7 @@ function summarize(
     partner: {
       contactSurfaces: inspected.partnerSurfaces,
       exists: inspected.partnerExists,
-      gameEnabled: isGameEnabledFor(APP_REVIEW_PARTNER_MEMBER_ID),
+      gameEnabled: isGameEnabled(),
       id: APP_REVIEW_PARTNER_MEMBER_ID,
     },
     plan: {
@@ -347,7 +388,7 @@ function summarize(
     },
     replacedGames: replaced,
     reviewMember: {
-      gameEnabled: inspected.reviewer ? isGameEnabledFor(inspected.reviewer) : false,
+      gameEnabled: inspected.reviewer ? isGameEnabled() : false,
       gameProfile: inspected.reviewerGameProfile,
       id: inspected.reviewer,
       phoneVerified: inspected.reviewerPhoneVerified,

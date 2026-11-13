@@ -71,7 +71,6 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
     m.eligible = true;
     vi.stubEnv("MURPH_GAME_PRIVATE_REMINDERS_ENABLED", "true");
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
   });
   afterEach(async () => {
     await cleanupGameFixtures(db, members);
@@ -341,9 +340,9 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
     await db.gamePlayer.update({ where: { gameId_memberId: { gameId: id, memberId: a } }, data: { leftAt: now } });
     expect(await current()).toBe(false);
     await db.gamePlayer.update({ where: { gameId_memberId: { gameId: id, memberId: a } }, data: { leftAt: null } });
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "someone-else");
+    vi.stubEnv("MURPH_GAME_ENABLED", "false");
     expect(await current()).toBe(false);
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     await db.game.update({ where: { id }, data: { status: "settled" } });
     expect(await current()).toBe(false);
     expect(await db.$transaction(tx => isPrivateKickoffCurrentTx(policy, tx, new Date(policy.expiresAt)))).toBe(false);

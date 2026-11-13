@@ -168,6 +168,10 @@ narrowed to the cases that still need it.
   clock offset are checked after it, since SQL cannot apply a per-row offset.
 - The photo is a signed link checked in its own small helper next to the
   preview, following `inviteAlreadyIn`; media route access is unchanged.
+- After the allowlist was removed on `main`, the lookup route uses the same
+  `requireGameMember` guard as every other game route instead of its own
+  bearer check; with the switch off it answers `GAME_DISABLED`, which the app
+  reads as no invite.
 - The policy text changes without a new policy version or regenerated PDFs.
   Publishing a version re-asks every player, which is the owner's call.
 

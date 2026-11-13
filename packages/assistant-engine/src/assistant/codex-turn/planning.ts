@@ -865,7 +865,7 @@ function resolveRouteNativeResumeThreadId({
         )
     )
   const nativeResumeEnabled =
-    input.profile.threadScope === 'session-thread'
+    input.profile.threadScope === 'session-thread' || input.executionContext?.hosted?.gameRecapScope?.show === true
   const resumeCodexThreadId =
     nativeResumeEnabled &&
     resumeBinding !== null &&
@@ -1403,6 +1403,7 @@ export async function resolveAssistantRouteTurnPlan(
     threadStartDeveloperInstructions,
     dynamicTools,
   })
+  assertRecapContinuationCompatible(input, resumeCodexThreadId)
   const conversationHistoryMessages =
     await resolveCommittedTranscriptHistoryMessages(resumeCodexThreadId)
   const shouldPrepareBootstrapContext = resumeCodexThreadId === null
@@ -1960,6 +1961,13 @@ function hasProductFeedbackAuthority(
   return resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? []).length > 0
     || resolveUsageOptimizerFeedbackScope({ conversationScope, executionContext: input.executionContext,
       messageInput: input.input }) !== null
+}
+
+function assertRecapContinuationCompatible(input: AssistantRouteTurnPlanInput, threadId: string | null): void {
+  if (input.executionContext?.hosted?.gameRecapScope?.show
+    && readAssistantCodexResume(input.session) !== null && threadId === null) {
+    throw new Error('Recap continuation is incompatible with the current provider thread.')
+  }
 }
 
 function recapShowTools(dynamicTools: ReturnType<typeof resolveMurphDynamicTools>, context: AssistantHostedToolContext | null | undefined): ReturnType<typeof resolveMurphDynamicTools> {

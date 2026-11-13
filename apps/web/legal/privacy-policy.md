@@ -1,7 +1,7 @@
 # Murph Privacy Policy
 
 **Effective Date:** April 9, 2026  
-**Last Updated:** October 26, 2026
+**Last Updated:** November 12, 2026
 
 Murph (“**Murph**,” “**we**,” “**us**,” or “**our**”) provides software and services designed to help people understand their bodies and lives better through tools such as health journaling, meal tracking, wearable and device sync, messaging-based interactions, hosted onboarding, invite, import, export, and related local or hosted experiences.
 
@@ -143,16 +143,22 @@ If you play Murph's game, we collect:
 - **rep counts:** the game reads your iPhone's front camera to find your body's position and counts pushups on your iPhone. Camera frames are dropped right away and are never saved, shown, or sent. We receive only the rep card: the count, each rep's time and depth, and a heart rate summary if you add one;
 - **heart rate,** read over Bluetooth from a WHOOP you connect. Your iPhone shows your live heart rate while you get ready and while you record. We receive only the heart rate card for a recording, with its duration and average, low, and peak beats per minute, not each reading;
 - **routes** for a walk or run (see Location below);
-- **missed-day excuses:** the words you give for a missed day. If you explain by voice, your iPhone turns your speech into words and deletes the recording. Only the words are sent to us;
-- **invite details:** if you pick someone from your contacts, their phone number is sent to Murph to check whether it belongs to someone you have played. Murph does not store the number. We keep a hashed lookup value with the invite so we can show it to that person if they sign in with the same number. We remove that value when the invite is accepted or ends. The name, relationship, and photo you give them are kept as a private label that only you see;
+- **missed-day excuses:** the words you give for a missed day;
+- **invite details:** if you pick someone from your contacts, their phone number is sent to Murph to check whether it belongs to someone you have played. Murph does not store the number. We keep a hashed lookup value with the invite so we can show it to that person if they sign in with the same number. We remove that value when the invite is accepted or ends. The name, relationship, and photo you give them are kept as a private label that only you see. Murph's AI can use that photo as a guide when it draws that person in a recap (see Recaps below);
 - **reports and blocks:** who you report or block, the reason and any note you add, and a copy of what you reported as it was at that moment; and
 - **notifications:** if you turn them on, a device address so we can tell you about new posts. These notifications don't include names, photos, tasks, or words.
 
 Before a photo you take in the game leaves your iPhone, the app removes its location and camera details. We encrypt game words and numbers at rest, and we show game photos only through short-lived links to people allowed to see them.
 
+**Why we collect game data.** We collect your game photos, words, rep counts and routes because the game you asked to play cannot run without them. We do not sell them or use them for advertising. Heart rate is health data: the app asks for your permission before your first heart rate post, and you can withdraw that permission in Settings.
+
+**Murph's AI hosts the game.** Murph is an AI. To host a game, our AI model provider, OpenAI, receives what the players post in it (photos, words, results, and numbers such as rep counts, heart rate summaries and route distance), each player's first name and profile photo, and the messages and photos sent in the game's group chat. OpenAI processes this content for us, on our instructions, under terms that do not let it use the content to train its models. We never ask an AI model to work out who a person is or to match a face to a name.
+
+**Recaps.** When a game ends, Murph makes a recap for its players from the content above. A recap can include pictures made by AI that show the players in a scene from their game. To draw a player, OpenAI's image model receives photos of that player as a guide to how they look: their profile photo, the photos they posted in this game, recent photos they posted in earlier games with the same person, and the photo the other player gave Murph for them as a private label, if there is one. A recap can also include a short song made by ElevenLabs from a description of the sound and lyrics about the game, which can include players' first names. ElevenLabs does not receive photos.
+
 **Location.** The route feature uses your iPhone's precise location only while you use the app, and only after you allow it. iOS asks the first time you tap Start, and Murph never asks for location all the time. Once you have allowed it, opening the route screen finds where you are so the map can show it before you start. Between Start and Stop, it keeps recording while your phone is locked, and iOS shows its location indicator. Your location points stay in memory on your iPhone and are never sent or saved. When you tap Send, we receive one map image of your route, plus its distance, its time, and whether it was a walk or a run. The map leaves out the start and end of your route. If your route passes the same place again in the middle, such as a second lap past where you started, the map can still show that place, and for a very short route the part that is left is still close to where you started.
 
-**Group chat.** When a game starts, Murph may text both players about it in an iMessage group. Murph writes those messages with help from its AI providers, using shared game details such as names, tasks, the prize or dare, the schedule, and who has posted. Messages and photos you send in that chat are handled like any other message to Murph (see Section 6), and a photo you send there can be saved as your game photo for the day.
+**Group chat.** When a game starts, Murph may text both players about it in an iMessage group. Murph writes those messages with help from its AI providers, using shared game details such as names, tasks, the prize or dare, the schedule, and who has posted. Murph's AI reads the messages and photos sent in that chat to host the game: to reply, keep track of the game, remind players and make the recap. A photo you send there can be saved as your game photo for the day.
 
 **Word check.** Before words are posted in a game, our own servers check them against a short list of words and phrases and refuse ones that match, such as money in a prize or dare, clearly dangerous challenges, telling someone to hurt themselves, slurs, and explicit sexual words. The check is limited and does not catch everything. No outside company does this check.
 
