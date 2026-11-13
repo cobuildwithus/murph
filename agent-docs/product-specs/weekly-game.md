@@ -610,8 +610,9 @@ resulting avatar. No private photo is shared with the subject or other players.
   and group facts from up to twenty games; pair-only timing and copy stay the
   same. Pre-join, off/open, any-N and incomplete days do not qualify. Corrected
   misses, terms or room changes, unsafe audiences and any new departure suppress
-  an already-prepared message. Any conversation received since transcript capture
-  also suppresses it, even unrelated chatter. Quiet and suppressed turns consume
+  an already-prepared message. Chat never does: Murph reads the day's chat when it
+  writes the message and stays quiet about anything a player already explained,
+  at its own judgment. Quiet and suppressed turns consume
   the daily claim; replay never creates a replacement message. Earlier historical
   departures do not stop future eligible dates. A check-in that cannot go out
   within two hours of its claim is dropped, never sent late.
@@ -930,9 +931,9 @@ even after failure or a newly closed day.
 
 One private evening check-in may follow an hour after the member's reminder time
 on an open day, within a 30-minute window, when text is on and no room check-in
-covers that game. It uses only the member's own unfinished tasks, a frozen batch
-and direct-conversation watermark, and the room check-in's unanswered-evening
-pause. It remains subject to the 90-day engagement pause. On activation, the
+covers that game. It uses only the member's own unfinished tasks, a frozen batch,
+and the room check-in's unanswered-evening pause. A new message from the member
+does not cancel it. It remains subject to the 90-day engagement pause. On activation, the
 member's reminder opt-out and count-game cadence carry from a validated previous
 game, then the latest same-people game if there is no lineage. An explicit choice
 for the new game wins over carry-over, including a delayed activation retry.

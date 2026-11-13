@@ -69,6 +69,12 @@ describe("game evening check-in contract", () => {
     expect(parseHostedExecutionWake(input)).toEqual(input);
     expect(parseHostedExecutionWake(wake())).toEqual(wake());
   });
+  it("accepts both policies with and without the retired chat position", () => {
+    const { conversationLaneSeq: _room, ...roomOnly } = policy, { conversationLaneSeq: _evening, ...eveningOnly } = evening;
+    expect(gameGroupMissedCheckInPolicySchema.parse(roomOnly)).toEqual(roomOnly);
+    expect(gameEveningCheckInPolicySchema.parse(eveningOnly)).toEqual(eveningOnly);
+    expect(gameEveningCheckInPolicySchema.parse(evening)).toEqual(evening);
+  });
   it.each([{ eventId: "wrong" }, { batch: [] }, { conversationLaneSeq: "-1" }, { expiresAt: "wrong" },
     { batch: [evening.batch[0], evening.batch[0]] }, { batch: [{ ...evening.batch[0], memberIds: ["one", "one"] }] },
     { batch: [{ ...evening.batch[0], termsVersion: 0 }] }])("rejects invalid witness fields: %j", change => {

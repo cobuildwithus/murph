@@ -590,7 +590,7 @@ async function deliverGroupMissedDayLifecycle(roomId: string, firstMissedDate: s
   const { names, tasks } = await readGameMissedCheckInWords(prepared.games, firstMissedDate);
   const transcript = await readGameChatTranscript({ containerMemberId: roomId,
     playerNamesByMemberId: [...names].map(([memberId, name]) => ({ memberId, name })),
-    since: new Date(`${firstMissedDate}T00:00:00.000Z`), throughConversationLaneSeq: prepared.policy.conversationLaneSeq });
+    since: new Date(`${firstMissedDate}T00:00:00.000Z`) });
   const idsByName = new Map([...names].map(([id, name]) => [name, id]));
   const instructions = buildGameMissedDayInstructions({ group: true, firstMissedDate,
     transcript: transcript.map(message => ({ ...message, memberId: idsByName.get(message.playerName)! })),
@@ -627,7 +627,7 @@ async function deliverGameEveningLifecycle(roomId: string, date: string, now: Da
   if (!midnight.length) return false;
   const transcript = await readGameChatTranscript({ containerMemberId: roomId,
     playerNamesByMemberId: [...names].map(([memberId, name]) => ({ memberId, name })),
-    since: new Date(Math.min(...midnight)), throughConversationLaneSeq: prepared.policy.conversationLaneSeq });
+    since: new Date(Math.min(...midnight)) });
   const idsByName = new Map([...names].map(([id, name]) => [name, id]));
   const players = [...names].flatMap(([memberId, playerName]) => {
     const ownTasks = prepared.policy.batch.flatMap(game => game.memberIds.includes(memberId)
