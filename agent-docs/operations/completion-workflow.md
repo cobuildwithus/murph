@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-11-06
+Last verified: 2026-11-12
 
 Use `agent-workflow-routing.md` for task scope, checkout, and plan/commit choice.
 Use `verification-and-runtime.md` for checks. This document owns completion;
@@ -32,13 +32,17 @@ alone does not authorize a narrower product or another state owner.
 3. Make the changelog decision. Use `.agents/skills/write-changelog/SKILL.md`
    for a member-visible outcome; internal-only changes record a concrete reason.
    Write the complete PR body using the contract below.
-4. Commit and push the candidate; open the PR as draft. For an intermediate
-   plan-bearing commit, keep the plan active. `scripts/committer` takes explicit
-   files and rejects directory targets; `scripts/finish-task` expands directories
-   and closes the plan for the final commit. A PR with known edits still needed
-   stays draft. Before every subsequent push to an existing owned PR, follow
-   the verification guide's Draft-before-push sequence. The author owns
-   Draft/Ready and no background controller changes that state.
+4. Commit and push the candidate; open the PR as draft. Close the plan in the
+   candidate commit with `scripts/finish-task`, so the head that enters CI
+   already carries the archived plan and no closeout push follows. Keep the
+   plan active only for an intermediate commit that is not yet the candidate.
+   `scripts/committer` takes explicit files and rejects directory targets;
+   `scripts/finish-task` expands directories and closes the plan. Push
+   anything that needs the PR number, such as a changelog item's
+   `sourcePullRequests`, while the PR is still draft. A PR with known edits
+   still needed stays draft. Before every subsequent push to an existing owned
+   PR, follow the verification guide's Draft-before-push sequence. The author
+   owns Draft/Ready and no background controller changes that state.
 5. Once focused proof and parent candidate review pass and the pushed head is
    the intended candidate, mark the PR Ready. Start final ReviewGPT immediately
    when eligible, concurrently with CI. Follow the review loop's exact-head
@@ -48,17 +52,25 @@ alone does not authorize a narrower product or another state owner.
    ReviewGPT `FINDINGS` result, follow its Finding Disposition Boundary before mutation;
    continue in-scope remediation without requesting user resumption. Re-establish
    readiness after any new push. Never rerun a review only to obtain agreement on a rejected finding.
-7. Perform the parent's final review after remediation. Close the active plan
-   and commit through `scripts/finish-task`; mark Draft before pushing and verify
-   the resulting head.
-   Include every public-safe Frog entry created or modified during the task in that same scoped commit.
+7. Perform the parent's final review after remediation. When a fix changes
+   what the archived plan records, correct the plan in that fix commit; until
+   the PR merges it is still the task's record. Every push to a Ready PR costs
+   a full required CI run on the new head, so do not push a commit whose only
+   content is plan closure, a wording touch-up, or a base update the merge path
+   does not need. If the plan is somehow still active here, close it with
+   `scripts/finish-task`, mark Draft before pushing, and verify the resulting
+   head.
+   Include every public-safe Frog entry created or modified during the task in a scoped commit that carries task work.
    A behavior-changing final edit needs the applicable checks and follows the review loop's step 7;
    explanatory docs and isolated proof additions follow the review loop's exemptions.
 8. Refresh and verify the remote-tracking base using the explicit-refspec
    procedure in `verification-and-runtime.md`, then prove mergeability with
    `git merge-tree --write-tree HEAD origin/<base>`. Keep green required CI on
-   the PR-authored head. Reconcile the base when the authorized merge path
-   needs it, following the review loop's Base-Update-Only Exception.
+   the PR-authored head. The branch rules do not require an up-to-date branch,
+   and each PR run already tests the head merged with the base as it stood when
+   the run started. Reconcile the base only for a real conflict, or when the
+   base has since changed code this PR calls or is called by, following the
+   review loop's Base-Update-Only Exception.
 9. Report the outcome, evidence, and remaining risks or blockers. For a feature
    or fix, give the shortest practical verification steps and expected result.
    Keep an open PR's worktree. After confirmed merge or closure, retire it using
