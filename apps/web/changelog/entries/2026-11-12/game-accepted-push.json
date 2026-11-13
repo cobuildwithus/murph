@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-12",
+  "order": 400,
+  "item": {
+    "id": "game-accepted-push",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Know when your friend says yes",
+    "summary": "When a friend shakes on your game invite, your phone tells you: \"They shook on it.\" and the day your game starts.",
+    "details": "You need notifications turned on for Murph. The notification never shows names or what the game is.",
+    "relevanceTags": [
+      "games",
+      "notifications"
+    ],
+    "sourcePullRequests": [
+      4904
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { afterEach, test, vi } from "vitest";
@@ -27,6 +27,24 @@ test("every listed connect source has a name, a website logo, and a PNG logo", (
         existsSync(path.join(process.cwd(), "apps/web/public", logoPath)),
         `${logoPath} should exist under apps/web/public`,
       );
+    }
+  }
+});
+
+test("the production admission smoke looks up connect sources by names the page still uses", () => {
+  // That smoke runs only after a merge, so a rename here would otherwise fail production admission unseen.
+  const smoke = readFileSync(
+    path.join(process.cwd(), "apps/web/scripts/run-hosted-local-browser-smoke.ts"),
+    "utf8",
+  );
+  const pinned = [...smoke.matchAll(/aria-label="Connect ([^"]+)"/gu)].map((match) => match[1]!);
+  assert.ok(pinned.length > 0, "the smoke should look up at least one source's Connect button");
+  const names = new Set(resolveConnectSources().map((source) => source.name));
+
+  for (const name of pinned) {
+    assert.ok(names.has(name), `the smoke looks for "Connect ${name}", but no connect source is named "${name}"`);
+    for (const text of [`/^${name}$/u`, `"Connect ${name} to Murph"`, `"Continue to ${name}"`]) {
+      assert.ok(smoke.includes(text), `the smoke should still look for ${text}`);
     }
   }
 });

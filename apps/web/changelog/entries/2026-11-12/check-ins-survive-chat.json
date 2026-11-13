@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-12",
+  "order": 200,
+  "item": {
+    "id": "check-ins-survive-chat",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Game check-ins go out when the chat is busy",
+    "summary": "Murph's evening check-in and its missed-day message now send even if someone texts the group while Murph is writing them.",
+    "details": "Before, any new message in those few seconds cancelled the check-in for the whole day. Murph still leaves out anyone who already said they did it, will do it or won't, and still says nothing once everyone has posted.",
+    "relevanceTags": ["games", "group-chat"],
+    "sourcePullRequests": [4921]
+  }
+}

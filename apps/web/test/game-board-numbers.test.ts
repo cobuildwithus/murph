@@ -24,7 +24,7 @@ function person(id: string, number: BoardNumber, inARow = 0): BoardPerson {
 
 describe("pair board numbers", () => {
   it.each(BOARD_METRICS)("preserves unavailable states for %s", metric => {
-    for (const [state, expected] of [["not_granted", "not_shared"], ["pending", "pending"], ["hidden", "hidden"]] as const) {
+    for (const [state, expected] of [["not_granted", "not_shared"], ["pending", "pending"]] as const) {
       expect(boardNumber(metric, { state, records: [] }, window, window.from)).toEqual({ state: expected });
     }
     expect(boardNumber(metric, { state: "missing", records: [] }, window, window.from))

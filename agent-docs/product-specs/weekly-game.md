@@ -288,6 +288,29 @@ page opens on the Web. Builds before the game send the link to the app without
 the game until they update. The page's Open in Murph
 button opens `ai.withmurph.app://invite/<token>`; `MURPH_GAME_APP_URL_SCHEME`
 overrides the scheme (local stacks use the Debug app's `ai.withmurph.app.dev`).
+For a picked contact whose invite is not bound to a member, a one-on-one invite
+stores the contact's hashed lookup key on its unbound seat, never the address.
+Typed-name invites have no key. Accepting or claiming the seat through Talk it
+over clears the key, as does calling off, blocking or expiring the game.
+An unread expired invite keeps its key until the existing settlement path runs.
+Account deletion clears keys matching the member's currently verified contacts,
+including rotation read candidates, without changing contact-only invitations,
+labels, seats or events. A contact match alone does not make them a participant.
+Group invitation keys keep their existing lifetime.
+
+`GET /api/game/v1/me/invite` requires a bearer session and the game switch,
+like every game route, and returns `{ ok: true, token: string | null }` with private/no-store
+headers. It finds the newest open one-on-one invite matching a verified contact,
+ordered by creation time then id descending. Before limiting candidates to five,
+it excludes games that are off, expired on the normal clock, called off, created
+by the caller or a deleted challenger, already played by the caller, or blocked
+either way. Development clock offsets are checked after the query. Stored live
+or negotiating games with the challenger also exclude a candidate; reports do
+not. The lookup never settles or writes anything, and returns null when games
+are disabled or no candidate qualifies. Preview and acceptance repeat their own
+checks. The app can pass the token through its existing held-invite path after
+sign-in; typed-name invitations still need the original link.
+
 Its link preview (`/g/<token>/opengraph-image`) shows an open invite as a ticket
 with the challenger's first name against "You", both tasks, the days, and the
 stake, titled "<Name> challenged you"; the name the challenger typed for the
@@ -299,7 +322,7 @@ the public API returns the same 404 shape and the page and Open Graph image show
 generic unavailable content. Closed previews never decrypt names or terms.
 Authenticated readers retain used/expired status and their own Talk delivery
 receipt; cancellation adds only `reason: "cancelled"`, never an inviter name.
-Open invite previews are unchanged. A game's
+Public open invite previews are unchanged. A game's
 players keep its invite token after it goes live (a spent token can't be
 accepted again), so reopening your own link is recognized as yours.
 Either seated player can cancel an invited or negotiating game with
@@ -394,8 +417,13 @@ Private photos stay stored while hidden and appear again if the person removes
 their own photo. Shared recap exports use only each person's own profile photo,
 never private contact overrides. Daily challenge photos remain separate.
 Profile media is authenticated: the owner, existing game participants and an
-addressed rematch's participants can read the current profile photo. Public
-invite previews never include profile photos. Removing a profile photo clears
+addressed rematch's participants can read the current profile photo.
+Public invite previews never include profile photos. A signed-in member reading
+an open one-on-one invite gets the challenger's current profile photo through
+optional `inviterAvatarUrl`, a short-lived signed link. Invitation, profile,
+expiry, blocks and reports are rechecked before signing; no photo or unavailable
+signed media returns null. Public pages and share cards keep the initial.
+Removing a profile photo clears
 this default without deleting other people's private contact choices.
 
 Either player can set or change their private photo of someone they play or
@@ -448,6 +476,14 @@ resulting avatar. No private photo is shared with the subject or other players.
   Relative dates use the acting message’s occurrence time in that player’s
   game timezone, including its 3am boundary; delayed processing cannot shift
   the chosen day. Missing or ambiguous occurrence timestamps need clarification.
+- **Accept notifications.** An invite acceptance that activates a pair game sends
+  the other player one push per game: "They shook on it." / "Your game starts
+  today.", "tomorrow.", a weekday (2–6 days away), or a short date (7+ days away).
+  Words use the written Day 1 and real calendar date in the recipient's frozen
+  zone; expiry is the following date's 3am. `game_accepted` requires alerts,
+  not reminders; live game, participation, blocks and route are rechecked.
+  The activating accept runs once under the game lock, so no separate receipt
+  is kept; a send never retries. Kickoff chat and private kickoff are unchanged.
 - **Post notifications.** One notifier owns two recipient-local daily slots:
   the first eligible peer artifact, then completion ("Everyone's in but you."
   or "Everyone's in."). Incomplete artifacts count as submitted; excuses do
@@ -574,8 +610,9 @@ resulting avatar. No private photo is shared with the subject or other players.
   and group facts from up to twenty games; pair-only timing and copy stay the
   same. Pre-join, off/open, any-N and incomplete days do not qualify. Corrected
   misses, terms or room changes, unsafe audiences and any new departure suppress
-  an already-prepared message. Any conversation received since transcript capture
-  also suppresses it, even unrelated chatter. Quiet and suppressed turns consume
+  an already-prepared message. Chat never does: Murph reads the day's chat when it
+  writes the message and stays quiet about anything a player already explained,
+  at its own judgment. Quiet and suppressed turns consume
   the daily claim; replay never creates a replacement message. Earlier historical
   departures do not stop future eligible dates. A check-in that cannot go out
   within two hours of its claim is dropped, never sent late.
@@ -894,9 +931,9 @@ even after failure or a newly closed day.
 
 One private evening check-in may follow an hour after the member's reminder time
 on an open day, within a 30-minute window, when text is on and no room check-in
-covers that game. It uses only the member's own unfinished tasks, a frozen batch
-and direct-conversation watermark, and the room check-in's unanswered-evening
-pause. It remains subject to the 90-day engagement pause. On activation, the
+covers that game. It uses only the member's own unfinished tasks, a frozen batch,
+and the room check-in's unanswered-evening pause. A new message from the member
+does not cancel it. It remains subject to the 90-day engagement pause. On activation, the
 member's reminder opt-out and count-game cadence carry from a validated previous
 game, then the latest same-people game if there is no lineage. An explicit choice
 for the new game wins over carry-over, including a delayed activation retry.

@@ -1141,7 +1141,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
 }
 
 export interface HostedGroupBoardProjection {
-  state: "hidden" | "not_granted" | "pending" | "missing" | "available";
+  state: "not_granted" | "pending" | "missing" | "available";
   records: HostedRuntimeGroupSharedRecord[];
 }
 
@@ -1191,8 +1191,7 @@ export async function readHostedGroupBoardData(input: {
   const capture: Extract<HostedGroupSharedReadCapture, { status: "ok" }> = {
     status: "ok", connections: [], grants,
     members: captured.members.map(member => ({ memberId: member.memberId, participantId: member.id, currentTurnHandles: [] })),
-    shares: grants.filter(grant => captured.readableIds.has(grant.id)
-      && (viewerMembership !== null || grant.grantorMemberId === input.viewerId))
+    shares: grants.filter(grant => captured.readableIds.has(grant.id))
       .map(grant => ({ ...grant, ciphertext: undefined })),
   };
   // Key access and decryption stay outside both authority transactions.
@@ -1201,7 +1200,7 @@ export async function readHostedGroupBoardData(input: {
   const current = await captureAuthority();
   if (!current) return null;
   const membershipId = current.members.find(member => member.memberId === input.viewerId)?.id ?? null;
-  const viewerCurrent = viewerMembership !== null && viewerMembership === membershipId;
+  if (viewerMembership !== membershipId) return null;
   return {
     membershipId,
     myScopes: current.grants.filter(grant => grant.grantorMemberId === input.viewerId).map(grant => grant.projectionScopeKey),
@@ -1212,8 +1211,7 @@ export async function readHostedGroupBoardData(input: {
       const projections = scopeKeys.map(projectionScopeKey => {
         let projection: HostedGroupBoardProjection;
         const grant = current.grants.find(grant => grant.grantorMemberId === memberId && grant.projectionScopeKey === projectionScopeKey);
-        if (memberId !== input.viewerId && !viewerCurrent) projection = { state: "hidden", records: [] };
-        else if (!grant) projection = { state: "not_granted", records: [] };
+        if (!grant) projection = { state: "not_granted", records: [] };
         else {
           const exact = grants.some(previous => previous.id === grant.id && previous.grantedAt.getTime() === grant.grantedAt.getTime());
           const records = exact && sameMembership && current.readableIds.has(grant.id)
