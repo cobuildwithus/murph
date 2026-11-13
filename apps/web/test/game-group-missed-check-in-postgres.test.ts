@@ -15,7 +15,7 @@ import { readGroupMissedDayDeliveryAuthority, prepareGroupMissedDay, reserveGrou
 import { gameEveningEventId, isEveningBatchCurrentTx, prepareGameEveningCheckIn, readGameEveningDeliveryAuthority, reserveGameEveningCheckIn } from "@/src/lib/game/evening-check-in";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
-import { advanceHostedMailboxConsumedSeqByLane, acquireHostedMailboxCausalAppendLockTx, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
+import { advanceHostedMailboxConsumedSeqByLane, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
 import { recordHostedLinqRuntimeProviderDispatchFenceTx } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { createHostedEmailLookupKey, createHostedExternalThreadIdentityLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -272,7 +272,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
   });
 
   const eveningAt = new Date("2030-03-04T20:05:00Z");
-  it("reserves one evening per room and date, and freezes the addressed batch and watermark", async () => {
+  it("reserves one evening per room and date, and freezes the addressed batch", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(3), id = await f.addGame();
     const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
@@ -377,7 +377,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(await receipt(eventId)).toMatchObject({ status: "skipped", skipReason: "game_evening_expired" });
   });
 
-  it.each(["post", "leave", "opt-out", "terms", "message"] as const)("makes a frozen evening stale after %s", async mutation => {
+  it.each(["post", "leave", "opt-out", "terms"] as const)("makes a frozen evening stale after %s", async mutation => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(3), id = await f.addGame();
     const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
@@ -390,11 +390,10 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     if (mutation === "opt-out") await db.gamePlayer.update({ where: { gameId_seat: { gameId: id, seat: 1 } }, data: { reminderOff: true } });
     if (mutation === "terms") await db.game.update({ where: { id }, data: { terms: { v: 1, versions: [{ n: 2, fromDay: 0,
       schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [] }] } } });
-    if (mutation === "message") await conversation(f, "I'm doing my task today.");
     expect(await db.$transaction(tx => isEveningBatchCurrentTx(prepared!.policy, prepared!.memberIds, prepared!.audience, tx, eveningAt))).toBe(false);
   });
 
-  it("publishes an evening witness and reads it from the mailbox for final authority", async () => {
+  it("publishes an evening witness, reads it from the mailbox for final authority, and stays sendable through recovery and egress after room chatter", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(3), id = await f.addGame();
     const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
@@ -403,10 +402,16 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     const authority = await readGameEveningDeliveryAuthority(eventId, f.roomId);
     expect(authority?.policy.batch[0]?.gameId).toBe(id);
     expect(await db.$transaction(tx => isEveningBatchCurrentTx(authority!.policy, authority!.memberIds, authority!.audience, tx, eveningAt))).toBe(true);
-    await conversation(f, "I'll do it today.");
-    await expect(db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, deliveryIdempotencyKey: eventId,
+    await conversation(f, "Anyone reading something good?");
+    await db.hostedLinqDelivery.update({ where: { id: (await receipt(eventId)).id }, data: { retryAfterAt: eveningAt } });
+    await drainGameChatLifecycle({ now: eveningAt });
+    expect((await receipt(eventId)).status).toBe("generation_queued");
+    const send = () => db.$transaction(tx => assertGameProposalDeliveryCurrentTx({ tx, deliveryIdempotencyKey: eventId,
       containerMemberId: f.roomId, playerMemberIds: authority!.memberIds, audience: authority!.audience,
-      eveningPolicy: authority!.policy, now: eveningAt }))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+      eveningPolicy: authority!.policy, now: eveningAt }));
+    await expect(send()).resolves.toBe(true);
+    await db.gameEntry.create({ data: { id: randomUUID(), gameId: id, memberId: f.people[0]!.id, dayIndex: 0, attempt: 1, kind: "words", receivedAt: eveningAt } });
+    await expect(send()).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 
   it("pauses after three accepted scheduled evenings even when delivery metadata was rewritten", async () => {
@@ -893,27 +898,26 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await receipt(authority.policy.eventId)).status).toBe("generation_queued");
   });
 
-  it.each(["I missed my post because my train was cancelled.", "Anyone reading something good?"])("suppresses delayed replay after committed room conversation: %s", async text => {
+  it.each(["I missed my post because my train was cancelled.", "Anyone reading something good?"])("stays sendable through recovery and dispatch after room conversation: %s", async text => {
     const f = await fixture(), id = await f.addGame(), authority = await publish(f.roomId, [id]);
     const appended = await conversation(f, text);
     await db.hostedMailboxItem.update({ where: { id: appended.mailboxItemId }, data: { consumedAt: now } });
     expect(await readGameChatTranscript({ containerMemberId: f.roomId, playerNamesByMemberId: [{ memberId: f.people[0]!.id, name: "Alex (1)" }], since: new Date(`${date}T00:00:00Z`) })).toEqual([{ playerName: "Alex (1)", text }]);
-    expect(await readGameChatTranscript({ containerMemberId: f.roomId, playerNamesByMemberId: [{ memberId: f.people[0]!.id, name: "Alex (1)" }], since: new Date(`${date}T00:00:00Z`), throughConversationLaneSeq: authority.policy.conversationLaneSeq })).toEqual([]);
-    await expect(db.$transaction(tx => assertAndDispatch(authority, tx))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
     await db.hostedLinqDelivery.update({ where: { id: (await receipt(authority.policy.eventId)).id }, data: { retryAfterAt: now } });
-    expect(await drainGameChatLifecycle({ now })).toMatchObject({ queued: 0 });
-    expect((await receipt(authority.policy.eventId)).status).toBe("skipped");
+    await drainGameChatLifecycle({ now });
+    expect((await receipt(authority.policy.eventId)).status).toBe("generation_queued");
+    expect((await db.$transaction(tx => assertAndDispatch(authority, tx))).claimed).toBe(true);
     expect(await reserveGroupGameMissedDay(f.roomId, [id], now)).toBe(0);
     expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId, kind: "assistant.notification.requested" } })).toBe(1);
   });
 
-  it("suppresses an explanation received between transcript capture and publication", async () => {
+  it("publishes when the room writes between transcript capture and publication", async () => {
     const f = await fixture(), id = await f.addGame();
     expect(await reserveGroupGameMissedDay(f.roomId, [id], now)).toBe(1);
-    proof.afterPrepare = async () => { await conversation(f, "I already explained my missing post."); };
-    expect(await drainGameChatLifecycle({ now })).toMatchObject({ queued: 0 });
-    expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId, kind: "assistant.notification.requested" } })).toBe(0);
-    expect((await receipt(gameGroupMissedDayEventId(f.roomId, date))).status).toBe("skipped");
+    proof.afterPrepare = async () => { await conversation(f, "Anyone reading something good?"); };
+    expect(await drainGameChatLifecycle({ now })).toMatchObject({ queued: 1 });
+    expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId, kind: "assistant.notification.requested" } })).toBe(1);
+    expect((await receipt(gameGroupMissedDayEventId(f.roomId, date))).status).toBe("generation_queued");
   });
 
   it("serializes overlapping batches supplied in opposite orders without deadlock", async () => {
@@ -933,19 +937,6 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     await db.hostedLinqDelivery.update({ where: { id: claimed.id }, data: { status: "awaiting_generation", retryAfterAt: now } });
     expect(await drainGameChatLifecycle({ now })).toMatchObject({ queued: 1 });
     expect(await db.hostedMailboxItem.count({ where: { userId: f.roomId } })).toBe(1);
-  });
-
-  it.each(["conversation", "system"])("rechecks only the conversation watermark after a %s write", async lane => {
-    const f = await fixture(), id = await f.addGame(), authority = await publish(f.roomId, [id]);
-    await db.$transaction(async tx => {
-      await acquireHostedMailboxCausalAppendLockTx({ tx, userId: f.roomId });
-      await tx.hostedMailboxItem.create({ data: { id: randomUUID(), userId: f.roomId, lane, laneSeq: 999n,
-        dedupeKey: randomUUID(), kind: lane === "conversation" ? "conversation.message" : "assistant.notification.requested", occurredAt: now, payloadSchema: "synthetic-unused" } });
-    });
-    if (lane === "conversation") {
-      await expect(db.$transaction(tx => assertAndDispatch(authority, tx))).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
-      expect(await reserveGroupGameMissedDay(f.roomId, [id], now)).toBe(0);
-    } else expect((await db.$transaction(tx => assertAndDispatch(authority, tx))).claimed).toBe(true);
   });
 
   it("holds game locks until dispatch claims, even with reverse batch ordering", async () => {

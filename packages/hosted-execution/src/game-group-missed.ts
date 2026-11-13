@@ -5,6 +5,8 @@ export const GAME_MISSED_ROOM_MAX_GAMES = 20;
 const identity = z.string().min(1).max(200).regex(/^[^:]+$/u);
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u);
 const unique = (values: readonly string[]) => new Set(values).size === values.length;
+// Retired: chat no longer gates a check-in. Web writes "0" until every runner accepts its absence; then drop both.
+const retiredConversationLaneSeq = z.string().regex(/^(0|[1-9]\d{0,18})$/u).optional();
 
 export const gameGroupMissedCheckInPolicySchema = z.object({
   kind: z.literal("game_group_missed_check_in"),
@@ -12,7 +14,7 @@ export const gameGroupMissedCheckInPolicySchema = z.object({
   roomId: identity,
   firstMissedDate: date,
   pairFingerprint: z.string().regex(/^[a-f0-9]{32}$/u),
-  conversationLaneSeq: z.string().regex(/^(0|[1-9]\d{0,18})$/u),
+  conversationLaneSeq: retiredConversationLaneSeq,
   batch: z.array(z.object({
     gameId: identity,
     termsVersion: z.number().int().positive(),
@@ -37,7 +39,7 @@ export const gameEveningCheckInPolicySchema = z.object({
   roomId: identity,
   date,
   expiresAt: z.string().datetime({ offset: true }),
-  conversationLaneSeq: z.string().regex(/^(0|[1-9]\d{0,18})$/u),
+  conversationLaneSeq: retiredConversationLaneSeq,
   batch: z.array(z.object({
     gameId: identity,
     termsVersion: z.number().int().positive(),
@@ -53,7 +55,7 @@ export type HostedGameEveningCheckInPolicy = z.infer<typeof gameEveningCheckInPo
 export const gamePrivateEveningCheckInPolicySchema = z.object({
   kind: z.literal("game_private_evening_check_in"), eventId: z.string(), memberId: identity, date,
   expiresAt: z.string().datetime({ offset: true }),
-  conversationLaneSeq: z.string().regex(/^(0|[1-9]\d{0,18})$/u),
+  conversationLaneSeq: retiredConversationLaneSeq,
   batch: z.array(z.object({ gameId: identity, termsVersion: z.number().int().positive(), dayIndex: z.number().int().min(0).max(364) }).strict())
     .min(1).max(GAME_MISSED_ROOM_MAX_GAMES),
 }).strict().refine(policy => policy.eventId === `game-evening-private:${policy.memberId}:${policy.date}`
