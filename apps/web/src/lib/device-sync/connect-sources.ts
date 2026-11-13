@@ -85,9 +85,7 @@ const CONNECT_SOURCE_UI = {
       96,
       15,
     ),
-    // The production admission smoke (scripts/run-hosted-local-browser-smoke.ts)
-    // finds this card, its Connect button and its dialog by this exact name.
-    name: "Whoop",
+    name: "WHOOP",
   },
   mapmyfitness: {
     description: "Workouts, routes, pace, and distance.",
