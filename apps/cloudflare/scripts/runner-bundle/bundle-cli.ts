@@ -500,14 +500,12 @@ async function assertVaultCliBundleParity(input: {
       const unbundledMemory = assertVaultCliMemoryShowResult({
         expectedExists: fixtureCase.expectedExists,
         expectedRecords: fixtureCase.expectedRecords,
-        expectedVaultRoot: fixtureCase.vaultRoot,
         label: `unbundled ${fixtureCase.label} memory`,
         result: results.unbundled,
       });
       const bundledMemory = assertVaultCliMemoryShowResult({
         expectedExists: fixtureCase.expectedExists,
         expectedRecords: fixtureCase.expectedRecords,
-        expectedVaultRoot: fixtureCase.vaultRoot,
         label: `bundled ${fixtureCase.label} memory`,
         result: results.bundled,
       });
@@ -605,7 +603,6 @@ function throwVaultCliParityMismatch(input: {
 function assertVaultCliMemoryShowResult(input: {
   expectedExists: boolean;
   expectedRecords: "empty" | "populated";
-  expectedVaultRoot: string;
   label: string;
   result: VaultCliParityResult;
 }): VaultCliMemoryShowResult {
@@ -630,8 +627,9 @@ function assertVaultCliMemoryShowResult(input: {
   if (
     input.result.status !== 0 ||
     input.result.stderr.length !== 0 ||
-    !isDeepStrictEqual(Object.keys(root).sort(), ["document", "memory", "vault"]) ||
-    root.vault !== input.expectedVaultRoot ||
+    // vault-cli no longer echoes the vault root; the populated and missing
+    // fixtures still prove which vault each process read.
+    !isDeepStrictEqual(Object.keys(root).sort(), ["document", "memory"]) ||
     document.exists !== input.expectedExists ||
     (input.expectedRecords === "empty"
       ? records.length !== 0
@@ -645,7 +643,6 @@ function assertVaultCliMemoryShowResult(input: {
   return {
     document,
     memory: null,
-    vault: root.vault,
   };
 }
 
@@ -685,7 +682,6 @@ function normalizeVaultCliMissingMemoryResult(
       markdown: input.document.markdown.replaceAll(readTime, "<read-time>"),
     },
     memory: null,
-    vault: input.vault,
   };
 }
 
@@ -721,7 +717,6 @@ interface VaultCliParityResult {
 interface VaultCliMemoryShowResult {
   document: MemoryDocumentSnapshot;
   memory: null;
-  vault: string;
 }
 
 function runVaultCliParityProbe(input: {

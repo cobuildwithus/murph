@@ -140,7 +140,6 @@ function buildCanonicalMemoryShowBranch(input: {
     "      updatedAt: exists ? readTimestamp : null,",
     "    },",
     "    memory: null,",
-    "    vault,",
     "  }));",
     ...(input.missingExitFailure
       ? ["  if (!exists) {", "    process.exitCode = 1;", "  }"]
