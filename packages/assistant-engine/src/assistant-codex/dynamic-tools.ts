@@ -4350,6 +4350,10 @@ function projectHostedPlanUsageForAssistant(input: HostedPlanUsageStatus) {
     recommendedAction,
     scheduledPlan,
     subscriptionActionQuote,
+    // The quote and recommended action carry the target plan, and the usage
+    // skill reads remainingPercent; usedPercent is always 100 minus it.
+    recommendedPlanCode: undefined,
+    usedPercent: undefined,
   }
 }
 

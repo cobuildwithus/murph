@@ -1913,10 +1913,10 @@ describe('hosted domain dynamic tools', () => {
       action: 'connect',
       provider: 'whoop',
     }, { signal: abortController.signal })
+    // The Web route sends the same URL as authorizationUrl; only connectUrl is read.
     expect(readResultPayload(result)).toEqual({
       action: 'connect',
       link: {
-        authorizationUrl: 'https://connect.example.test/authorize',
         connectUrl: 'https://connect.example.test/start',
         expiresAt: '2026-07-16T12:05:00.000Z',
         provider: 'whoop',

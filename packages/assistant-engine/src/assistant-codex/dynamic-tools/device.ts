@@ -486,8 +486,9 @@ function serializeDeviceToolResponse(
     : response.action === 'connect'
       ? {
           action: response.action,
+          // The Web route sets authorizationUrl to the same connectUrl that
+          // the description and skills tell the model to send.
           link: {
-            authorizationUrl: response.link.authorizationUrl,
             connectUrl: response.link.connectUrl,
             expiresAt: response.link.expiresAt,
             provider: response.link.provider,
