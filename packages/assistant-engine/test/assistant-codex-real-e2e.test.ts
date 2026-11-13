@@ -50961,6 +50961,6 @@ describeRealCodex('both-win player agreement', () => {
       } })
     expect(result.calls.map(call => call.action)).toEqual(['read_game', 'update_game']); expect(result.saves).toHaveLength(0)
     expect(result.reply).toMatch(/missed/iu); expect(result.reply).toMatch(/no longer|can.t|cannot|can no longer/iu)
-    expect(result.reply).not.toMatch(/\?|\bstake\b|try again|added/iu)
+    expect(result.reply).not.toMatch(/\?|\bstake\b|try again|(?<!no longer be )added/iu)
   }, 360_000)
 })
