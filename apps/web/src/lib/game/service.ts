@@ -127,6 +127,7 @@ import { deleteEntryReplyTx, readReplyReportedMembers, replyEligibility, replyMe
 import { inspectReplyAudio } from "./reply-audio";
 import { claimGameReplyNotification, sendGameReplyNotificationAfterResponse } from "./reply-notification";
 import { claimGamePostNotification, sendGamePostNotificationAfterResponse } from "./post-notification";
+import { prepareGameAcceptNotification, sendGameAcceptNotificationAfterResponse } from "./accept-notification";
 import {
   buildGameHistoryView,
   buildGameView,
@@ -1099,8 +1100,9 @@ async function accept(context: CommandContext, command: AcceptInviteBody, gameId
   const row = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId }, select: { maxPlayers: true } });
   const contacts = row.maxPlayers === 10 ? await readGameVerifiedContacts(actor) : [];
   let expired = false;
+  let notification: Awaited<ReturnType<typeof prepareGameAcceptNotification>> = null;
   await runLocked(gameId, row.maxPlayers === 2 ? withPairLock(context, creator!) : context, async locked => {
-    const { loaded, now, tx } = locked;
+    const { clock, loaded, now, tx } = locked;
     const { row } = loaded;
     if (row.maxPlayers === 10 && !areGameGroupsEnabled()) reject("GAME_DISABLED", "Group games aren't available yet.");
     if (row.maxPlayers === 2) await rejectBlockedJoin(tx, creator!, actor);
@@ -1120,12 +1122,14 @@ async function accept(context: CommandContext, command: AcceptInviteBody, gameId
     const activates = decision.activates ?? true;
     if (activates) await tx.game.update({ data: { startedAt: decision.startedAt, status: "live" }, where: { id: row.id } });
     await acceptInvitation(tx, row, actor, decision.seat);
+    if (activates) notification = await prepareGameAcceptNotification(tx, { gameId, maxPlayers: row.maxPlayers, actor, schedule: decision, clock });
     return [
       ...(!claimed ? [{ payload: { seat: decision.seat }, type: "joined" as const }] : []),
       ...(activates ? [{ payload: { startNow: false }, type: "started" as const }] : []),
     ];
   });
   if (expired) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
+  sendGameAcceptNotificationAfterResponse(notification);
 }
 
 /** Everyone's time zone freezes at go-live, from their profile as of now. */

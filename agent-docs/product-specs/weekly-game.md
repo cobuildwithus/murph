@@ -476,6 +476,14 @@ resulting avatar. No private photo is shared with the subject or other players.
   Relative dates use the acting message’s occurrence time in that player’s
   game timezone, including its 3am boundary; delayed processing cannot shift
   the chosen day. Missing or ambiguous occurrence timestamps need clarification.
+- **Accept notifications.** An invite acceptance that activates a pair game sends
+  the other player one push per game: "They shook on it." / "Your game starts
+  today.", "tomorrow.", a weekday (2–6 days away), or a short date (7+ days away).
+  Words use the written Day 1 and real calendar date in the recipient's frozen
+  zone; expiry is the following date's 3am. `game_accepted` requires alerts,
+  not reminders; live game, participation, blocks and route are rechecked.
+  The activating accept runs once under the game lock, so no separate receipt
+  is kept; a send never retries. Kickoff chat and private kickoff are unchanged.
 - **Post notifications.** One notifier owns two recipient-local daily slots:
   the first eligible peer artifact, then completion ("Everyone's in but you."
   or "Everyone's in."). Incomplete artifacts count as submitted; excuses do
