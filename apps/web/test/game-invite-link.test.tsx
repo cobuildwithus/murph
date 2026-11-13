@@ -15,6 +15,8 @@ vi.mock("next/image", () => ({
   },
 }));
 
+const INVITE_URL = "https://www.withmurph.ai/g/tok_synthetic";
+
 const OPEN: GameInvitePreview = {
   expiresAt: "2026-10-23T15:00:00.000Z",
   inviterFirstName: "Leo",
@@ -32,15 +34,15 @@ const OPEN: GameInvitePreview = {
 describe("weekly game invite link", () => {
   it("preserves the pair page and share card byte for byte", () => {
     expect(renderToStaticMarkup(createElement(GameInviteView, {
-      appUrl: "ai.withmurph.app://invite/synthetic", preview: OPEN,
+      appUrl: "ai.withmurph.app://invite/synthetic", inviteUrl: INVITE_URL, preview: OPEN,
     }))).toMatchSnapshot("pair page");
     expect(renderToStaticMarkup(createElement(GameInviteShareCard, { preview: OPEN })))
       .toMatchSnapshot("pair share card");
     const capable = { ...OPEN, maxPlayers: 2 as const, alreadyIn: { count: 0, firstNames: [], avatarUrl: null } };
     expect(renderToStaticMarkup(createElement(GameInviteView, {
-      appUrl: "ai.withmurph.app://invite/synthetic", preview: capable,
+      appUrl: "ai.withmurph.app://invite/synthetic", inviteUrl: INVITE_URL, preview: capable,
     }))).toBe(renderToStaticMarkup(createElement(GameInviteView, {
-      appUrl: "ai.withmurph.app://invite/synthetic", preview: OPEN,
+      appUrl: "ai.withmurph.app://invite/synthetic", inviteUrl: INVITE_URL, preview: OPEN,
     })));
     expect(renderToStaticMarkup(createElement(GameInviteShareCard, { preview: capable })))
       .toBe(renderToStaticMarkup(createElement(GameInviteShareCard, { preview: OPEN })));
@@ -59,7 +61,7 @@ describe("weekly game invite link", () => {
 
   it("discloses a required check-in before acceptance, including legacy photos", () => {
     if (OPEN.status !== "open") throw new Error("Expected open fixture");
-    const render = (preview: GameInvitePreview) => renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview }));
+    const render = (preview: GameInvitePreview) => renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", inviteUrl: INVITE_URL, preview }));
     expect(render(OPEN)).toContain("Prove it with a photo.");
     expect(render(OPEN)).toContain("Weekdays for a week. Starts once you say yes.");
     expect(render(OPEN)).not.toContain("paste it in Murph");
@@ -69,7 +71,7 @@ describe("weekly game invite link", () => {
   });
 
   it("shows the invitee's task first, as You, and never a private name", () => {
-    const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview: OPEN }));
+    const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", inviteUrl: INVITE_URL, preview: OPEN }));
     expect(html).toContain("Leo challenged you.");
     expect(html.indexOf("10 min abs")).toBeLessThan(html.indexOf("100 pushups"));
     expect(html.indexOf(">You<")).toBeLessThan(html.indexOf("10 min abs"));
@@ -79,28 +81,45 @@ describe("weekly game invite link", () => {
 
   it("puts that link on the page's Open it link", () => {
     const appUrl = gameInviteAppUrl("tok_1", { MURPH_GAME_APP_URL_SCHEME: "ai.withmurph.app.dev" });
-    const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl, preview: OPEN }));
+    const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl, inviteUrl: INVITE_URL, preview: OPEN }));
     expect(html).toContain('href="ai.withmurph.app.dev://invite/tok_1"');
     expect(html).toContain("Already have Murph?");
     expect(html).not.toContain("murphv2://");
     expect(html).not.toContain("Copy link");
     // A closed invite offers no app link.
-    expect(renderToStaticMarkup(createElement(GameInviteView, { appUrl, preview: { status: "used" } }))).not.toContain(appUrl);
+    expect(renderToStaticMarkup(createElement(GameInviteView, { appUrl, inviteUrl: INVITE_URL, preview: { status: "used" } }))).not.toContain(appUrl);
   });
 
   it("leads with Get the app, the App Store, for a phone without the app", () => {
     const appStore = 'href="https://apps.apple.com/us/app/murph-ai/id6786145859"';
-    const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview: OPEN }));
+    const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", inviteUrl: INVITE_URL, preview: OPEN }));
     expect(html).toContain(appStore);
     expect(html).toContain("Get the app");
     expect(html.indexOf(appStore)).toBeLessThan(html.indexOf("Already have Murph?"));
-    expect(renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview: { status: "used" } }))).not.toContain(appStore);
+    expect(renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", inviteUrl: INVITE_URL, preview: { status: "used" } }))).not.toContain(appStore);
+  });
+
+  it("gives a wide view a code for the invite's own link, and only while the invite is open", () => {
+    const render = (inviteUrl: string, preview: GameInvitePreview | null) => renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", inviteUrl, preview }));
+    const html = render(INVITE_URL, OPEN);
+    expect(html).toContain("Scan to play.");
+    expect(html).toContain("Point your phone&#x27;s camera here.");
+    // The code is drawn into the page itself, from the link it was given and nothing else.
+    const code = (markup: string) => /<div[^>]*role="img"[^>]*>(<svg.*?<\/svg>)<\/div>/u.exec(markup)?.[1];
+    expect(code(html)).toBeDefined();
+    expect(code(render(INVITE_URL, OPEN))).toBe(code(html));
+    expect(code(render("https://www.withmurph.ai/g/tok_other", OPEN))).not.toBe(code(html));
+    expect(html).not.toContain(INVITE_URL);
+    for (const closed of [{ status: "used" }, { status: "expired" }, null] satisfies Array<GameInvitePreview | null>) {
+      expect(render(INVITE_URL, closed)).not.toContain("Scan to play.");
+      expect(code(render(INVITE_URL, closed))).toBeUndefined();
+    }
   });
 
   it("puts a dare on the loser's pink slip", () => {
     if (OPEN.status !== "open") throw new Error("Expected open fixture");
     const html = renderToStaticMarkup(createElement(GameInviteView, {
-      appUrl: "ai.withmurph.app://invite/synthetic",
+      appUrl: "ai.withmurph.app://invite/synthetic", inviteUrl: INVITE_URL,
       preview: { ...OPEN, terms: { ...OPEN.terms, stakes: [{ item: "sing at karaoke", key: "gsk_dare", kind: "dare" }] } },
     }));
     expect(html).toContain("The loser has to");
@@ -115,7 +134,7 @@ it.each([
   [{ status: "expired" }, "This invite ran out.", "It wasn&#x27;t shaken on in time. Ask for a new one."],
   [null, "This link isn&#x27;t available.", "Check the link, or ask for a new one."],
 ] satisfies Array<[GameInvitePreview | null, string, string]>)("explains the closed invite cause in the app's words", (preview, title, detail) => {
-  const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", preview }));
+  const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", inviteUrl: INVITE_URL, preview }));
   expect(html).toContain(title);
   expect(html).toContain(detail);
   expect(html).not.toContain("Get the app");

@@ -1,4 +1,6 @@
 import { recordAcceptedRecap } from '../assistant-codex/dynamic-tools/games.js'
+import { prepareRecapExecution } from './recap-execution.js'
+import { isAssistantProviderCapacityError } from './automation/auto-reply-retry.js'
 import { deliverAssistantGameBootstrapMessage, prepareAssistantGameBootstrap, recoverAssistantGameBootstrapResult } from './game-chat-bootstrap.js'
 import type { HostedGameChatBootstrapResult, HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateEveningCheckInPolicy, HostedGamePrivateKickoffPolicy } from '@murphai/hosted-execution/runtime-control'
 import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
@@ -494,6 +496,9 @@ export async function sendAssistantNotificationLocal(
         const recapPreparation = await prepareRecapNotification(hostedExecutionContext, hostedToolContext)
         if (recapPreparation.kind !== 'continue') return withPostTurnDeliveryExpectations(await completePreparedRecapNotification(recapPreparation, {
           firstContactDocIds, input, messageInput, resolved, sharedPlan }))
+        const recapExecution = await prepareRecapExecution({ vault: input.vault,
+          hosted: hostedExecutionContext, session: resolved.session, serviceTier: messageInput.serviceTier })
+        messageInput.serviceTier = recapExecution.serviceTier
         const notificationProviderRequestStarted =
           messageInput.onProviderRequestStarted ?? null
         let notificationProviderRequestStartedAt: string | undefined
@@ -521,12 +526,13 @@ export async function sendAssistantNotificationLocal(
           plan: sharedPlan,
           progressDelivery,
           profile: notificationTurnProfile,
-          resolvedSession: resolved.session,
+          resolvedSession: recapExecution.providerSession,
           route,
           turnCreatedAt,
           turnId,
           hostedToolContext,
         })
+        recapExecution.restoreRoomSession(providerOutcome)
         if (providerOutcome.kind === 'failed_terminal') {
           const nonReplayableProviderWork =
             resolveAssistantNotificationProviderNonReplayableWork({
@@ -557,6 +563,7 @@ export async function sendAssistantNotificationLocal(
             providerResult: failedProviderResult,
             turnId,
           })
+          await recapExecution.retain(providerOutcome)
           throw annotateAssistantNotificationError(
             providerOutcome.error,
             {
@@ -594,6 +601,7 @@ export async function sendAssistantNotificationLocal(
           providerResult,
           turnId,
         })
+        await recapExecution.retain(providerOutcome)
         const providerValidationErrorDetails = {
           ...buildAssistantNotificationObservabilityDetails({
             stage: 'provider',
@@ -908,7 +916,8 @@ export async function sendAssistantNotificationLocal(
           session: committedDeliveryOutcome.session,
         })
       } catch (error) {
-        const completed = await completeFailedRecap(error, hostedExecutionContext, hostedToolContext, savedGameRecapChatLine)
+        const completed = await completeFailedRecap(error, hostedExecutionContext, hostedToolContext, savedGameRecapChatLine,
+          messageInput.serviceTier === 'flex')
         return withPostTurnDeliveryExpectations(await completePreparedRecapNotification(completed, {
           firstContactDocIds, input, messageInput, resolved, sharedPlan }))
       } finally {
@@ -2306,8 +2315,13 @@ async function prepareRecapNotification(hosted: AssistantHostedExecutionContext 
 }
 
 async function completeFailedRecap(error: unknown, hosted: AssistantHostedExecutionContext | null | undefined,
-  context: ReturnType<typeof createAssistantHostedToolContext> | null, savedChatLine: string | null) {
+  context: ReturnType<typeof createAssistantHostedToolContext> | null, savedChatLine: string | null,
+  onFlex: boolean) {
   if (!hosted?.gameRecapScope?.show || savedChatLine !== null) throw error
+  // Inside the Flex budget, keep unfinished writing on the exact generation
+  // instead of sealing a template (or retiring a remake), so the mailbox can
+  // retry capacity. Once on the standard tier, failures settle as before.
+  if (onFlex && isAssistantProviderCapacityError(error)) throw error
   const completed = await prepareRecapNotification(hosted, context, true)
   if (completed.kind === 'continue') throw error
   return completed

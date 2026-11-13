@@ -4,7 +4,7 @@ import { cache } from "react";
 import { gameInviteAppUrl } from "@/src/lib/game/access";
 import { readInvitePreview } from "@/src/lib/game/service";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
-import { createMurphOgImageRef, createMurphPageMetadata, MURPH_NOINDEX_PAGE_ROBOTS } from "@/src/lib/site-metadata";
+import { createMurphOgImageRef, createMurphPageMetadata, MURPH_NOINDEX_PAGE_ROBOTS, MURPH_PUBLIC_SITE_URL } from "@/src/lib/site-metadata";
 
 import { GameInviteView } from "./game-invite-view";
 import { inviteShareCopy } from "./invite-copy";
@@ -43,7 +43,11 @@ export default async function GameInvitePage(props: GameInvitePageProps) {
     <main className="flex min-h-dvh flex-col bg-[#1C1915]">
       {/* The night ground reaches past the page: overscroll and Safari's bars. */}
       <style>{"html,body{background:#1C1915}"}</style>
-      <GameInviteView appUrl={gameInviteAppUrl(token)} preview={await readPreview(token)} />
+      <GameInviteView
+        appUrl={gameInviteAppUrl(token)}
+        inviteUrl={`${MURPH_PUBLIC_SITE_URL}/g/${encodeURIComponent(token)}`}
+        preview={await readPreview(token)}
+      />
     </main>
   );
 }

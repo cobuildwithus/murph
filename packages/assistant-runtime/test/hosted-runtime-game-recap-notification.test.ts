@@ -55,6 +55,7 @@ describe("hosted game recap notification", () => {
         groupToolPort: { request: async () => ({ action: "read_game", result: { status: "ok", recapGame: {} } }) }, vaultRoot: "/synthetic-vault", wake });
       const input = mocks.sendAssistantNotification.mock.lastCall?.[0] as AssistantNotificationInput;
       expect(input.assistantTargetOverride?.model).toBe(show ? "gpt-6.1-sol" : undefined);
+      expect(input.serviceTier ?? null).toBe(show ? "flex" : null);
       expect(input.executionContext?.hosted?.gameRecapScope?.show).toBe(show ? true : undefined);
     }
   });
@@ -69,6 +70,7 @@ describe("hosted game recap notification", () => {
     const input = mocks.sendAssistantNotification.mock.calls[0]![0] as AssistantNotificationInput;
     expect(input.executionContext?.hosted?.gameMissedCheckInScope).toEqual(policy);
     expect(input.executionContext?.hosted?.gameRecapScope).toBeUndefined();
+    expect(input.serviceTier ?? null).toBeNull();
     expect(input.executionContext?.hosted?.groupTool).toBeUndefined();
     expect(input.responsePolicy).toEqual(policy);
     mocks.sendAssistantNotification.mockClear();

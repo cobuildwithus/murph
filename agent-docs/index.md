@@ -7,7 +7,7 @@ post gate and Settings access without health consent.
 
 The local architecture and test cleanup checkpoint is recorded in [radical simplicity](exec-plans/completed/2026-11-11-radical-simplicity.md), with findings and retained-proof mappings in the [codebase audit](references/codebase-simplicity-audit-2026-11-11.md). The [PR review record](exec-plans/completed/2026-11-11-simplicity-pr-release.md) records implementation and review; [PR #4866](https://github.com/cobuildwithus/murph/pull/4866) tracks remaining merges and the single final Cloudflare deployment. Live game editing remains supported; categorical oxygen screening is retired in favor of numerical summaries.
 
-The [App Review server fixes plan](exec-plans/active/2026-11-12-app-review-server-fixes.md)
+The [App Review server fixes plan](exec-plans/completed/2026-11-12-app-review-server-fixes.md)
 records opening the game to every member, the review account's Home refresh and
 the removed speech wording. The [weekly game spec](product-specs/weekly-game.md)
 owns the current contract.
@@ -106,7 +106,8 @@ Residual game deletion, the final key-dependency proof and surviving group
 invitation authority are owned by [Weekly Game](product-specs/weekly-game.md)
 and [Architecture](../ARCHITECTURE.md#weekly-game). Local proof is recorded in
 the [execution record](exec-plans/completed/2026-11-06-game-deletion-progress-survivors.md).
-Recap generation retirement and terminal tool responses are owned by [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game); the consumer-first activation gate and local proof are recorded in [the execution record](exec-plans/completed/2026-11-06-recap-generation-activation.md).
+Recap generation retirement, Flex capacity fallback and terminal tool responses are owned by [Weekly Game](product-specs/weekly-game.md), the [assistant engine](../packages/assistant-engine/README.md#usage-record-identity) and [Architecture](../ARCHITECTURE.md#weekly-game); the consumer-first activation gate and local proof are recorded in [the execution record](exec-plans/completed/2026-11-06-recap-generation-activation.md).
+The Flex budget, durable retry, standard-tier failure settlement, per-attempt media authority and pricing proof are recorded in [the recap Flex execution record](exec-plans/completed/2026-11-12-recap-flex.md).
 A pair recap generation a block already ended answers the same terminal value, and a block row stays uncertain. A group block keeps the game in its room with its receipts, so waiting notices and the recap send once it lifts; [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game) own that rule. The group block change is recorded in [its plan](exec-plans/completed/2026-11-06-group-block-keeps-room.md).
 
 A second rematch ask never agrees to the first: it gets the open-rematch conflict, and the member answers the offer on Home; [Weekly Game](product-specs/weekly-game.md) and [Architecture](../ARCHITECTURE.md#weekly-game) own the rule.
