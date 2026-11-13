@@ -33,7 +33,7 @@
   "dependencies": {
     "@murphai/core": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "zxing-wasm": "3.0.3"
+    "zxing-wasm": "3.1.6"
   },
   "engines": {
     "node": ">=24.22.1"

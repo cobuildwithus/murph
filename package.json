@@ -92,13 +92,13 @@
     "@murphai/hosted-local-harness": "workspace:*",
     "@types/babel__traverse": "^7.28.0",
     "@types/node": "^25.6.2",
-    "@vitest/coverage-v8": "^4.1.6",
+    "@vitest/coverage-v8": "^4.1.12",
     "frog": "1.1.0",
-    "pg": "8.21.0",
+    "pg": "8.23.1",
     "tsrs": "0.18.0-ts7.1.0-dev.20260929",
-    "tsx": "^4.20.6",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.0.12",
-    "vitest": "^4.1.6"
+    "vite": "^8.3.8",
+    "vitest": "^4.1.12"
   }
 }

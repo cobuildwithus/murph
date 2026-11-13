@@ -29,14 +29,13 @@ overrides:
   '@cobuild/review-gpt@0.5.157>incur': 0.4.25
   '@cloudflare/vitest-pool-workers@0.16.3>esbuild': 0.28.1
   '@coinbase/cdp-sdk@1.48.3>axios': 1.20.0
-  '@lob/lob-typescript-sdk@1.4.0>axios': 1.20.0
-  '@hono/node-server@1.19.14>hono': 4.13.11
+  '@hono/node-server@1.19.14>hono': 4.13.18
   '@metamask/sdk-communication-layer@0.33.1>uuid': 11.1.1
   '@metamask/sdk@0.33.1>uuid': 11.1.1
   '@metamask/utils@8.5.0>uuid': 11.1.1
   '@metamask/utils@9.3.0>uuid': 11.1.1
   '@metamask/utils@11.11.0>uuid': 11.1.1
-  '@modelcontextprotocol/sdk@1.29.0>hono': 4.13.11
+  '@modelcontextprotocol/sdk@1.29.0>hono': 4.13.18
   '@privy-io/js-sdk-core@0.62.0>js-cookie': 3.0.8
   '@privy-io/react-auth@3.24.0>js-cookie': 3.0.8
   '@solana/rpc-subscriptions-channel-websocket@5.5.1>ws': 8.21.0
@@ -47,52 +46,55 @@ overrides:
   "body-parser@>=1.0.0 <1.20.9": 1.20.9
   "body-parser@>=2.0.0 <2.4.0": 2.4.0
   engine.io-client@6.6.4>ws: 8.21.0
-  express-rate-limit@8.3.2>ip-address: 10.3.1
-  express@4.22.1>qs: 6.15.2
-  express@5.2.1>qs: 6.15.2
+  express-rate-limit@8.3.2>ip-address: 10.7.6
+  express@4.22.1>qs: 6.16.2
+  express@5.2.1>qs: 6.16.2
   isows@1.0.6>ws: 8.21.0
   isows@1.0.7>ws: 8.21.0
   'minimatch@>=10.0.0>brace-expansion': 5.0.12
   miniflare@4.20260507.1>ws: 8.21.0
   miniflare@4.20260518.0>ws: 8.21.0
-  porto@0.2.35>hono: 4.13.11
+  porto@0.2.35>hono: 4.13.18
   protobufjs: 7.6.5
-  tsx@4.21.0>esbuild: 0.28.1
   viem@2.23.2>ws: 8.21.0
   viem@2.36.0>ws: 8.21.0
   viem@2.47.12>ws: 8.21.0
-  vite@8.0.12>esbuild: 0.28.1
   wrangler@4.90.0>esbuild: 0.28.1
   wrangler@4.93.0>esbuild: 0.28.1
-  'ajv@8.18.0>fast-uri': 3.1.7
-  'ajv@8.20.0>fast-uri': 3.1.7
+  'ajv@8.18.0>fast-uri': 3.1.9
+  'ajv@8.20.0>fast-uri': 3.1.9
   'fast-xml-parser@5.7.2>fast-xml-builder': 1.2.0
-  "undici@>=7.0.0 <7.30.1": 7.30.1
-  "zod@>=4.0.0 <4.6.6": 4.6.6
-  "vite@8.0.12": 8.1.6
+  "undici@>=7.0.0 <7.30.2": 7.30.2
+  "zod@>=4.0.0 <4.6.7": 4.6.7
+  "vite@>=8.0.0 <8.3.8": 8.3.8
   "brace-expansion@>=2.0.0 <2.1.7": 2.1.7
   "brace-expansion@>=5.0.0 <5.0.12": 5.0.12
   "js-yaml@>=4.0.0 <4.3.2": 4.3.2
-  "fast-uri@>=3.0.0 <3.1.7": 3.1.7
+  "fast-uri@>=3.0.0 <3.1.9": 3.1.9
   "sharp@>=0.34.0 <0.35.5": 0.35.5
   "nanoid@>=3.0.0 <3.3.18": 3.3.18
   "nanoid@>=5.0.0 <5.1.16": 5.1.16
   "postcss@>=8.0.0 <8.5.23": 8.5.23
   "browserslist@>=4.0.0 <4.28.7": 4.28.7
-  "mysql2@>=3.0.0 <3.22.0": 3.22.0
+  "mysql2@>=3.0.0 <3.23.1": 3.24.4
   "@toon-format/toon@2.2.0": 2.3.1
   "@xhmikosr/decompress@11.1.3": 11.1.4
   "piscina@4.9.3": 4.9.4
   "source-map-js@1.2.1": 1.2.2
   "proxy-addr@2.0.7": 2.0.8
   "@modelcontextprotocol/sdk@1.29.0": 1.32.0
-  "follow-redirects@1.16.0": 1.16.1
+  "follow-redirects@>=1.16.0 <1.16.3": 1.16.3
   "brace-expansion@>=1.0.0 <1.1.21": 1.1.21
   "tar@>=7.0.0 <7.5.21": 7.5.21
   "@grpc/grpc-js@>=1.14.0 <1.14.5": 1.14.5
   "tinypool@2.1.0": 2.1.2
   "handlebars@4.7.9": 4.7.10
-  "hono@4.12.25": 4.13.11
+  "hono@>=4.0.0 <4.13.16": 4.13.18
+  "postcss-selector-parser@>=7.0.0 <7.1.6": 7.1.8
+  "@babel/core@>=7.0.0 <7.29.6": 7.29.13
+  "valibot@>=1.0.0 <1.4.2": 1.4.2
+  "@hono/node-server@>=1.0.0 <1.19.18": 1.19.19
+  "@opentelemetry/core@>=2.0.0 <2.8.0": 2.12.1
 minimumReleaseAgeExclude:
   - '@cobuild/repo-tools@0.1.18'
   - '@cobuild/review-gpt@0.5.157'
