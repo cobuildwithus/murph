@@ -6638,17 +6638,19 @@ async function executeGroupEmailEffect(input: {
         return toolTextResult(false, 'group email send could not be accepted', 'action_result_mismatch')
       }
       input.hostedToolContext?.recordGroupEmailSendResult?.(result)
-      const skippedNoEmailMemberIds =
-        'skippedNoEmailMemberIds' in result.result
-          ? result.result.skippedNoEmailMemberIds
-          : []
+      // Skipped member ids are internal identifiers: the recorder above keeps
+      // them for private diagnostics, and the model gets only their count.
+      const { skippedNoEmailMemberIds, ...sendResult } = {
+        skippedNoEmailMemberIds: [] as readonly string[],
+        ...result.result,
+      }
       return {
         ...toolTextResult(
           !isGroupEmailAllRecipientSendFailure(result),
           safeToolPayloadText({
             action: 'send_email',
             result: {
-              ...result.result,
+              ...sendResult,
               missingVerifiedEmailCount: skippedNoEmailMemberIds.length,
             },
           }),

@@ -6418,6 +6418,49 @@ describe("murph.group email actions", () => {
     });
   });
 
+  it("reports skipped email recipients to the model only as a count", async () => {
+    const sendResult = {
+      participantCount: 4,
+      skippedNoEmailMemberIds: ["member_without_email_a", "member_without_email_b"],
+      status: "sent" as const,
+    };
+    const recordGroupEmailSendResult = vi.fn();
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "send_email",
+      html: "<p>Weekly update</p>",
+      subject: "Weekly update",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: {
+        ...createGroupHostedToolContext({
+          groupEmailRequest: async () => ({ action: "send_email", result: sendResult }),
+        }),
+        recordGroupEmailSendResult,
+      },
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "send_email",
+      result: { missingVerifiedEmailCount: 2, participantCount: 4, status: "sent" },
+    });
+    // The private diagnostics recorder still gets the exact ids.
+    expect(recordGroupEmailSendResult).toHaveBeenCalledWith({
+      action: "send_email",
+      result: sendResult,
+    });
+  });
+
   it("uses ordinary reporting reads for email-eligible members and their exact plain metric grants", async () => {
     const requestedScopes = [
       { projectionKind: "steps-days.v0" as const },
