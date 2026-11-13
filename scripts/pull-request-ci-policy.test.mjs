@@ -46,6 +46,9 @@ test("release admission requires every actual shard to succeed", async () => {
 test("a file-split package shard runs its own slice and nothing runs a split it cannot honor", async () => {
   const source = await workflow("host-support.yml");
   const name = "Run package coverage shard";
+  // The step's inputs must come from the plan's matrix entry, not a constant.
+  assert.ok(source.includes("          PACKAGE_SHARD: ${{ matrix.package_shard }}\n"));
+  assert.ok(source.includes("          VITEST_SHARD: ${{ matrix.vitest_shard }}\n"));
   const bin = await mkdtemp(path.join(tmpdir(), "murph-package-shard-"));
   try {
     // Record the test command instead of running it; the plan lookup is real.
@@ -77,6 +80,18 @@ test("a file-split package shard runs its own slice and nothing runs a split it 
   } finally {
     await rm(bin, { force: true, recursive: true });
   }
+});
+
+test("every PostgreSQL shard index the workflow starts selects against the same count", async () => {
+  // The runner picks files by index modulo count, so a matrix that starts
+  // fewer indexes than the count it passes would leave files that never run.
+  const source = await workflow("host-support.yml");
+  const job = source.split("  release-web-postgres-linux:\n")[1].split(/^  [a-z]/mu)[0];
+  const indexes = JSON.parse(/^ {8}shard: (\[[0-9, ]+\])$/mu.exec(job)[1]);
+  const count = Number(/--shard \$\{\{ matrix\.shard \}\}\/([0-9]+)$/mu.exec(job)[1]);
+  assert.deepEqual(indexes, Array.from({ length: count }, (_, index) => index + 1));
+  assert.match(job, new RegExp(`^ {6}max-parallel: ${count}$`, "mu"));
+  assert.match(job, new RegExp(`\\(\\$\\{\\{ matrix\\.shard \\}\\}/${count}\\)$`, "mu"));
 });
 
 test("billing admission requires live proof only for scheduled runs", async () => {

@@ -230,7 +230,7 @@ canonical authenticated metadata lookup followed by the allowed local byte
 download while rejecting the bridge-origin direct locator. Full Linux container
 reachability, image normalization, and final replies remain hosted E2E proof.
 
-`node scripts/run-postgres-tests.mjs --shard 1/4` runs the first of four
+`node scripts/run-postgres-tests.mjs --shard 1/5` runs the first of five
 required PostgreSQL shards. Host Support prepares an isolated PostgreSQL 17
 service with the checked-in Prisma migrations, then discovers Web tests that
 declare a `MURPH_TEST_*POSTGRES*` flag and all `*.db.test.ts` files. The runner

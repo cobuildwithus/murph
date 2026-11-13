@@ -376,15 +376,15 @@ jobs:
         run: pnpm --dir apps/web verify
 
   release-web-postgres-linux:
-    name: Release Web PostgreSQL (${{ matrix.shard }}/4)
+    name: Release Web PostgreSQL (${{ matrix.shard }}/5)
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 5
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
     services:
       postgres:
         image: postgres:17
@@ -435,7 +435,7 @@ jobs:
         run: pnpm --dir apps/web prisma:migrate:deploy
 
       - name: Run discovered PostgreSQL test shard
-        run: node scripts/run-postgres-tests.mjs --shard ${{ matrix.shard }}/4
+        run: node scripts/run-postgres-tests.mjs --shard ${{ matrix.shard }}/5
 
   release-cloudflare-verification-linux:
     name: Release Cloudflare verification (ubuntu)
