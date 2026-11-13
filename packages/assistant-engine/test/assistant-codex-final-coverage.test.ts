@@ -1533,7 +1533,7 @@ describe('Codex provider routing', () => {
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(providerInput?.serviceTier).toBe(scenario.expected)
     if (scenario.expected === 'flex' && !('recap' in scenario)) {
-      expect(timeoutSpy).toHaveBeenCalledWith(600_000)
+      expect(timeoutSpy).toHaveBeenCalledWith(1_200_000)
       expect(providerInput?.abortSignal).not.toBe(upstreamAbort.signal)
     } else {
       expect(timeoutSpy).not.toHaveBeenCalled()

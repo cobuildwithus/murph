@@ -214,3 +214,112 @@ describe("hosted connected-app contracts", () => {
     ).toBe("execute");
   });
 });
+
+type CompactedPart = { body: { attachmentId?: string; data?: string }; parts: CompactedPart[] };
+type CompactedMessage = {
+  attachmentList: { attachmentId: string }[];
+  messageText: string;
+  payload: { headers: { name: string; value: string }[]; parts: CompactedPart[] };
+};
+
+describe("connected-app result compaction beyond markup", () => {
+  const encode = (text: string) => Buffer.from(text, "utf8").toString("base64url");
+  const htmlBody = `<html><body><p>Your flight to Denver is confirmed.</p>`
+    + `<p>Departs ${"Monday 7:05am, gate B12. ".repeat(30)}</p></body></html>`;
+  const plainBody = `Your flight to Denver is confirmed. ${"Departs Monday 7:05am, gate B12. ".repeat(30)}`;
+  const binary = Buffer.from(Uint8Array.from({ length: 900 }, (_, index) => index % 256)).toString("base64");
+  const longAttachmentId = "ANGjdJ8" + "x".repeat(700);
+  const transportHeaders = [
+    ...Array.from({ length: 6 }, (_, index) => ({ name: "Received", value: `from relay${index}.example.test by mx.example.test` })),
+    { name: "DKIM-Signature", value: "v=1; a=rsa-sha256; d=example.test; b=" + "a".repeat(300) },
+    { name: "ARC-Seal", value: "i=1; a=rsa-sha256; b=" + "b".repeat(300) },
+    { name: "X-Google-Smtp-Source", value: "c".repeat(120) },
+    { name: "Return-Path", value: "<bounce@example.test>" },
+    { name: "MIME-Version", value: "1.0" },
+  ];
+  const readableHeaders = [
+    { name: "From", value: "Example Air <trips@example.test>" },
+    { name: "To", value: "member@example.test" },
+    { name: "Subject", value: "Your trip is confirmed" },
+    { name: "Date", value: "Fri, 13 Nov 2026 08:00:00 -0500" },
+  ];
+  const message = () => ({
+    messageId: "msg-1",
+    messageText: htmlBody,
+    subject: "Your trip is confirmed",
+    attachmentList: [{ attachmentId: longAttachmentId, filename: "itinerary.pdf" }],
+    payload: {
+      mimeType: "multipart/mixed",
+      headers: [...transportHeaders, ...readableHeaders],
+      parts: [
+        { mimeType: "multipart/alternative", parts: [
+          { mimeType: "text/plain", filename: "", body: { size: plainBody.length, data: encode(plainBody) } },
+          { mimeType: "text/html", filename: "", body: { size: htmlBody.length, data: encode(htmlBody) } },
+        ] },
+        { mimeType: "image/png", filename: "logo.png", body: { size: 900, data: binary } },
+        { mimeType: "application/pdf", filename: "itinerary.pdf", body: { attachmentId: longAttachmentId, size: 52_000 } },
+      ],
+    },
+  });
+
+  it("drops encoded body copies, transport headers and binary data from a full Gmail message", () => {
+    const raw = { data: { messages: [message()], nextPageToken: encode("p".repeat(600)) }, successful: true };
+    const compacted = compactHostedConnectedAppsResult(raw) as {
+      data: { messages: CompactedMessage[]; nextPageToken: string };
+    };
+    const [compactedMessage] = compacted.data.messages;
+    const [alternative, image, pdf] = compactedMessage!.payload.parts;
+
+    expect(compactedMessage!.payload.headers).toEqual(readableHeaders);
+    expect(alternative!.parts.map((part) => part.body.data)).toEqual([
+      "[omitted: same text as messageText]", "[omitted: same text as messageText]",
+    ]);
+    expect(image!.body.data).toBe("[binary data omitted: 900 bytes]");
+    // Identifiers, page tokens and the body the model reads are kept.
+    expect(pdf!.body.attachmentId).toBe(longAttachmentId);
+    expect(compactedMessage!.attachmentList[0]!.attachmentId).toBe(longAttachmentId);
+    expect(compacted.data.nextPageToken).toBe(raw.data.nextPageToken);
+    expect(compactedMessage!.messageText).toContain("Your flight to Denver is confirmed.");
+    expect(compactedMessage!.messageText).not.toContain("<p>");
+
+    const before = serializeHostedConnectedAppsResult(raw)!.length;
+    const after = serializeHostedConnectedAppsResult(compacted)!.length;
+    expect(after).toBeLessThan(before / 2);
+    expect(compactHostedConnectedAppsResult(compacted)).toEqual(compacted);
+  });
+
+  it("decodes an encoded text body that has no messageText copy", () => {
+    const { messageText: _messageText, ...withoutText } = message();
+    const compacted = compactHostedConnectedAppsResult(withoutText) as CompactedMessage;
+    const [alternative] = compacted.payload.parts;
+    expect(alternative!.parts[0]!.body.data).toBe(plainBody);
+    expect(alternative!.parts[1]!.body.data).toContain("Your flight to Denver is confirmed.");
+    expect(alternative!.parts[1]!.body.data).not.toContain("<p>");
+  });
+
+  it("leaves calendar events and name/value lists without mail transport headers alone", () => {
+    const events = {
+      kind: "calendar#events",
+      etag: "\"p33c9\"",
+      items: [{
+        kind: "calendar#event",
+        etag: "\"3381\"",
+        id: "evt1",
+        summary: "Long run",
+        start: { dateTime: "2026-11-14T08:00:00-05:00" },
+        attendees: [{ email: "member@example.test", self: true, responseStatus: "accepted" }],
+        fields: [{ name: "Pace", value: "8:30" }, { name: "From", value: "Coach" }],
+      }],
+    };
+    expect(compactHostedConnectedAppsResult(events)).toEqual(events);
+  });
+
+  it("decodes only encoded-content keys, never identifiers or base64-looking text", () => {
+    const opaque = "A".repeat(800);
+    const kebab = "private-synthetic-provider-data".repeat(40);
+    const value = {
+      description: "word ".repeat(200), syncToken: opaque, threadIds: [opaque], note: kebab, attachmentId: kebab,
+    };
+    expect(compactHostedConnectedAppsResult(value)).toEqual(value);
+  });
+});
