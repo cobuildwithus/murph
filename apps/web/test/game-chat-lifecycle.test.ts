@@ -100,16 +100,22 @@ describe("durable game chat lifecycle", () => {
 
   it.each(["awaiting_generation", "generation_queued"])("both-win publishes or recovers one bound offer: %s", async status => {
     m.receipts.mockResolvedValue([{ ...receipt, status, template: "game_both_win", idempotencyKey: "hash:game-both-win:game" }]);
-    m.bothCurrent.mockResolvedValue({ state: { players: players.map(memberId => ({ memberId })),
+    m.bothCurrent.mockResolvedValue({ row: { startedAt: new Date("2026-01-01T00:00:00.000Z") }, state: { players: players.map(memberId => ({ memberId })),
       entries: players.map(memberId => ({ memberId, dayIndex: 4, kind: "words", withdrawnAt: null })) } });
-    m.state.mockResolvedValue({ games: [{ id: "game", lengthDays: 7, players: players.map((memberId, seat) => ({ memberId, seat, firstName: seat ? "Leo" : "Ava" })),
-      terms: { tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Walk" }] } }] });
+    const seats = players.map((memberId, seat) => ({ memberId, seat, firstName: seat ? "Leo" : "Ava" }));
+    m.state.mockResolvedValue({ games: [{ id: "game", status: "live", lengthDays: 7, players: seats,
+      terms: { tasks: [{ seat: 0, text: "Read" }, { seat: 1, text: "Walk" }], stakes: [{ kind: "prize", item: "Choose lunch" }] } },
+    { id: "earlier", status: "settled", lengthDays: 5, players: seats, terms: { tasks: [], stakes: [{ kind: "dare", item: "Sing" }, { kind: "both_get", item: "Tacos" }] } },
+    { id: "group", status: "settled", maxPlayers: 10, lengthDays: 5, players: seats, terms: { tasks: [], stakes: [{ kind: "prize", item: "Group prize" }] } }] });
+    m.transcript.mockResolvedValue([{ playerName: "Ava", text: "ramen after this", sentAt: "2026-01-02T00:00:00.000Z" }]);
     if (status === "generation_queued") m.mailbox.mockResolvedValue({ id: "mailbox", consumedAt: null });
     await expect(drainGameChatLifecycle({ now })).resolves.toEqual({ attempted: 1, queued: 1, deferred: 0 });
     if (status === "awaiting_generation") {
       const notice = m.prepare.mock.calls[0][0].envelope.notification;
       expect(notice).toMatchObject({ deliveryIdempotencyKey: "game-both-win:game", responsePolicy: { kind: "require_send" }, deliveryDispatchMode: "queue-only" });
-      expect(JSON.parse(notice.instructions.split("\n").at(-1))).toEqual({ players: [{ firstName: "Ava", task: "Read" }, { firstName: "Leo", task: "Walk" }], dayReached: 5, lengthDays: 7 });
+      expect(JSON.parse(notice.instructions.split("\n").at(-1))).toEqual({ players: [{ firstName: "Ava", task: "Read" }, { firstName: "Leo", task: "Walk" }], dayReached: 5, lengthDays: 7,
+        currentPrize: "Choose lunch", earlierPrizes: ["Sing"], transcript: [{ playerName: "Ava", text: "ramen after this" }] });
+      expect(m.transcript).toHaveBeenCalledWith({ containerMemberId: "room", playerNamesByMemberId: seats.map(({ memberId, firstName }) => ({ memberId, name: firstName })), since: new Date("2026-01-01T00:00:00.000Z") });
     } else expect(m.prepare).not.toHaveBeenCalled();
     expect(m.signal).toHaveBeenCalledOnce(); expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
   });

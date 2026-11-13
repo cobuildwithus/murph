@@ -323,6 +323,11 @@ back to now). No new timer or sweep is added, and delivery never repeats the
 morning window check. Generation, queued wake recovery and final dispatch
 skip an offer that is no longer due, has a waiting change or has lost its chat;
 a skipped receipt is never offered again.
+The offer notice carries the pair's first names and tasks, the current prize
+or dare, the prize or dare of their earlier settled pair games in the room
+state, and the latest 40 messages the two players sent in that same room since
+the game started, read with the bounded reader the missed-day notice uses. It
+carries no private label and nothing from another room.
 Game evening room check-ins validate their frozen game and chat witness but do
 not inherit the game-proposal inactivity exemption. They stay subject to the
 90-day pause, the three-accepted-evening unanswered pause and the half-hour

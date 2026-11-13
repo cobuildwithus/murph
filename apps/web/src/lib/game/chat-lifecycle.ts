@@ -699,7 +699,8 @@ async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMembe
   if (kind === "both_win") {
     const { isBothWinOfferCurrent, readGameChatState } = await import("./service");
     const current = await isBothWinOfferCurrent(getPrisma(), game.id, now);
-    const shared = current && (await readGameChatState(game.chatContainerMemberId!, players)).games.find(candidate => candidate.id === game.id);
+    const room = current ? (await readGameChatState(game.chatContainerMemberId!, players)).games : [];
+    const shared = room.find(candidate => candidate.id === game.id);
     if (!current || !shared) {
       await skipGameNotice(createHostedLinqDeliveryIdempotencyLookupKey(gameChatLifecycleEventId(game.id, kind)), getPrisma(), now);
       return null;
@@ -707,8 +708,17 @@ async function lifecycleInstructions(game: Pick<Game, "id" | "chatContainerMembe
     const dayReached = Math.min(...current.state.players.map(player => Math.max(...current.state.entries
       .filter(entry => entry.memberId === player.memberId && !entry.withdrawnAt && !entry.incomplete && entry.kind !== "excuse")
       .map(entry => entry.dayIndex + 1))));
+    // The same bounded same-room reader the missed-day and evening notices use.
+    const { readGameChatTranscript } = await import("./chat-tool");
+    const transcript = await readGameChatTranscript({ containerMemberId: game.chatContainerMemberId!,
+      playerNamesByMemberId: shared.players.map(player => ({ memberId: player.memberId, name: player.firstName })),
+      since: current.row.startedAt ?? current.row.createdAt });
+    const prize = (candidate: typeof shared) => candidate.terms.stakes.find(stake => stake.kind !== "both_get")?.item ?? "";
     return buildGameBothWinOfferInstructions({ players: shared.players.map(player => ({ firstName: player.firstName,
-      task: shared.terms.tasks.find(task => task.seat === player.seat)?.text ?? "" })), dayReached, lengthDays: shared.lengthDays });
+      task: shared.terms.tasks.find(task => task.seat === player.seat)?.text ?? "" })), dayReached, lengthDays: shared.lengthDays,
+      currentPrize: prize(shared),
+      earlierPrizes: room.filter(candidate => candidate.status === "settled" && candidate.maxPlayers !== 10).map(prize).filter(Boolean),
+      transcript: transcript.slice(-40).map(({ playerName, text }) => ({ playerName, text })) });
   }
   if (kind === "cancelled") return await wasCalledOff(game.id) ? buildGameCalledOffInstructions() : buildGameInviteCancelledInstructions(game.maxPlayers === 10);
   const { readGameNoticeRoom } = await import("./service");
