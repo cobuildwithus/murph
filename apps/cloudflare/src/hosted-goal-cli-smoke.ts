@@ -331,7 +331,8 @@ async function readSmokeGoal(input: {
     input.label,
   );
   const entity = readRecord(shown.entity, `${input.label} entity`);
-  return readRecord(entity.data, `${input.label} data`);
+  // The title lives on the entity; record data no longer repeats it.
+  return { ...readRecord(entity.data, `${input.label} data`), title: entity.title };
 }
 
 function assertSmokeGoalState(
