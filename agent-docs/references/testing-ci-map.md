@@ -230,7 +230,7 @@ canonical authenticated metadata lookup followed by the allowed local byte
 download while rejecting the bridge-origin direct locator. Full Linux container
 reachability, image normalization, and final replies remain hosted E2E proof.
 
-`node scripts/run-postgres-tests.mjs --shard 1/4` runs the first of four
+`node scripts/run-postgres-tests.mjs --shard 1/5` runs the first of five
 required PostgreSQL shards. Host Support prepares an isolated PostgreSQL 17
 service with the checked-in Prisma migrations, then discovers Web tests that
 declare a `MURPH_TEST_*POSTGRES*` flag and all `*.db.test.ts` files. The runner
@@ -1210,6 +1210,7 @@ boundaries are owned by `agent-docs/operations/verification-and-runtime.md`.
   image that predates the source retries on each checkout's exact image. See
   [the benchmark contract](../../packages/core/bench/README.md#required-one-vcpu-regression-check)
   for budgets, reproduction, and limits; this is not production sizing approval.
+- The release plan's `vitestShards` count splits the CLI, Assistant Engine and Assistant Runtime test files across that many runners with `vitest --shard i/n`; every file still runs once with the same isolation and worker settings, and `scripts/release-verification-lanes.test.ts` requires each split to own slices `1/n` through `n/n` exactly once.
 - The runner-bundle total-output gate measures the independently emitted vault
   CLI `.bundle` and runner entrypoint `dist-bundled` roots separately. Each
   surface receives the existing `max(96 KiB, floor(1% of exact base total))`
