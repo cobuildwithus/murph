@@ -350,8 +350,8 @@ importers:
         specifier: 16.4.6
         version: 16.4.6(@babel/core@7.29.13)(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@25.6.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       openai:
-        specifier: 6.45.0
-        version: 6.45.0(@smithy/signature-v4@5.7.5)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.6.7)
+        specifier: 7.55.0
+        version: 7.55.0(@smithy/signature-v4@5.7.5)(google-auth-library@11.3.4)(undici@7.30.2)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.6.7)
       pg:
         specifier: 8.23.1
         version: 8.23.1
@@ -516,8 +516,8 @@ importers:
         specifier: workspace:*
         version: link:../vault-usecases
       openai:
-        specifier: 6.45.0
-        version: 6.45.0(@smithy/signature-v4@5.7.5)(ws@8.22.2(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.6.7)
+        specifier: 7.55.0
+        version: 7.55.0(@smithy/signature-v4@5.7.5)(google-auth-library@11.3.4)(undici@7.30.2)(ws@8.22.2(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.6.7)
       sharp:
         specifier: 0.35.5
         version: 0.35.5(@types/node@25.6.2)
@@ -673,8 +673,8 @@ importers:
         specifier: 1.0.3
         version: 1.0.3
       openai:
-        specifier: 6.45.0
-        version: 6.45.0(@smithy/signature-v4@5.7.5)(ws@8.22.2(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.6.7)
+        specifier: 7.55.0
+        version: 7.55.0(@smithy/signature-v4@5.7.5)(google-auth-library@11.3.4)(undici@7.30.2)(ws@8.22.2(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.6.7)
       sharp:
         specifier: 0.35.5
         version: 0.35.5(@types/node@25.6.2)
@@ -6843,13 +6843,16 @@ packages:
     resolution: {integrity: sha512-XgFPPM+B28FtCCgSb9I+s9szOC1vZRSwgWsRUA5ylIxRTgKozqjOCrVOqGsYABPYK5qnfqClxZTFBa8PKt2v6Q==}
     engines: {node: '>=12'}
 
-  openai@6.45.0:
-    resolution: {integrity: sha512-5DQVNErssk0afNpTTHUm/qZPU4iKR9OYdNid8Ib4puq4gHNNvGWZht2zY4h9a8JMF949Ik6m8gQutllVPbjdnw==}
+  openai@7.55.0:
+    resolution: {integrity: sha512-0r4snVSRN46m4wL2vXCW5Xw6CKGPbdNI8t79KZOpe8GKKPmhL8peDXN8YOY/2ipsOVWSfsP/vgkLjTmWB+kMug==}
+    engines: {node: '>=22.0.0'}
     peerDependencies:
       '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
       '@smithy/hash-node': '>=4.3.0 <5'
       '@smithy/signature-v4': '>=5.4.0 <6'
-      ws: ^8.18.0
+      google-auth-library: '>=9.15.1 <12'
+      undici: 7.30.2
+      ws: ^8.21.0
       zod: 4.6.7
     peerDependenciesMeta:
       '@aws-sdk/credential-provider-node':
@@ -6857,6 +6860,10 @@ packages:
       '@smithy/hash-node':
         optional: true
       '@smithy/signature-v4':
+        optional: true
+      google-auth-library:
+        optional: true
+      undici:
         optional: true
       ws:
         optional: true
@@ -14565,15 +14572,19 @@ snapshots:
       is-docker: 2.2.1
       is-wsl: 2.2.0
 
-  openai@6.45.0(@smithy/signature-v4@5.7.5)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.6.7):
+  openai@7.55.0(@smithy/signature-v4@5.7.5)(google-auth-library@11.3.4)(undici@7.30.2)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.6.7):
     optionalDependencies:
       '@smithy/signature-v4': 5.7.5
+      google-auth-library: 11.3.4
+      undici: 7.30.2
       ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       zod: 4.6.7
 
-  openai@6.45.0(@smithy/signature-v4@5.7.5)(ws@8.22.2(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.6.7):
+  openai@7.55.0(@smithy/signature-v4@5.7.5)(google-auth-library@11.3.4)(undici@7.30.2)(ws@8.22.2(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.6.7):
     optionalDependencies:
       '@smithy/signature-v4': 5.7.5
+      google-auth-library: 11.3.4
+      undici: 7.30.2
       ws: 8.22.2(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       zod: 4.6.7
 

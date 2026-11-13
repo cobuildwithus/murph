@@ -265,21 +265,6 @@ export async function classifyHostedLinqFirstContactAdmission(input: {
     const errorResponse = requestState.errorResponse;
     if (errorResponse) {
       const providerError = await readHostedLinqFirstContactAdmissionProviderError(errorResponse);
-      if (isHostedLinqFirstContactAdmissionQuotaExhausted({
-        providerError,
-        status: errorResponse.status,
-      })) {
-        const decision = buildHostedLinqFirstContactAdmissionAllow({
-          confidence: 1,
-          source: "deterministic",
-        });
-        logHostedLinqFirstContactAdmissionDecision(input.request, {
-          ...decision,
-          model: environment.linqFirstContactAdmissionModel,
-        });
-        return decision;
-      }
-
       throw buildHostedLinqFirstContactAdmissionUnavailableError({
         cause: providerError.message
           ? new Error(`OpenAI Responses API error: ${providerError.message}`)
@@ -293,21 +278,6 @@ export async function classifyHostedLinqFirstContactAdmission(input: {
 
     if (error instanceof APIError && typeof error.status === "number") {
       const providerError = readHostedLinqFirstContactAdmissionApiError(error);
-      if (isHostedLinqFirstContactAdmissionQuotaExhausted({
-        providerError,
-        status: error.status,
-      })) {
-        const decision = buildHostedLinqFirstContactAdmissionAllow({
-          confidence: 1,
-          source: "deterministic",
-        });
-        logHostedLinqFirstContactAdmissionDecision(input.request, {
-          ...decision,
-          model: environment.linqFirstContactAdmissionModel,
-        });
-        return decision;
-      }
-
       throw buildHostedLinqFirstContactAdmissionUnavailableError({
         cause: providerError.message
           ? new Error(`OpenAI Responses API error: ${providerError.message}`)
@@ -1028,35 +998,6 @@ function createHostedLinqFirstContactAdmissionOpenAiFetch(
 function readBoundedProviderErrorString(value: unknown): string | undefined {
   const text = readString(value);
   return text ? text.slice(0, 240) : undefined;
-}
-
-function isHostedLinqFirstContactAdmissionQuotaExhausted(input: {
-  providerError: {
-    code?: string;
-    message?: string;
-    type?: string;
-  };
-  status: number;
-}): boolean {
-  if (input.status !== 429) {
-    return false;
-  }
-
-  const code = input.providerError.code?.toLowerCase();
-  const type = input.providerError.type?.toLowerCase();
-  const message = input.providerError.message?.toLowerCase() ?? "";
-  return code === "insufficient_quota"
-    || code === "billing_hard_limit_reached"
-    || type === "insufficient_quota"
-    || type === "billing_hard_limit_reached"
-    || (
-      message.includes("exceeded your current quota")
-      && message.includes("billing")
-    )
-    || message.includes("insufficient quota")
-    || message.includes("billing hard limit")
-    || message.includes("out of credits")
-    || message.includes("credit balance");
 }
 
 function buildHostedLinqFirstContactAdmissionUnavailableError(input: {

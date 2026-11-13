@@ -132,7 +132,7 @@
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@murphai/vault-usecases": "workspace:*",
-    "openai": "6.45.0",
+    "openai": "7.55.0",
     "sharp": "0.35.5"
   },
   "engines": {
