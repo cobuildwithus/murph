@@ -50964,3 +50964,59 @@ describeRealCodex('both-win player agreement', () => {
     expect(result.reply).not.toMatch(/\?|\bstake\b|try again|(?<!no longer be )added/iu)
   }, 360_000)
 })
+
+
+describeRealCodex('both-win host offer', () => {
+  async function offer(name: string, fixture: { currentPrize: string; earlierPrizes: string[]; transcript: Array<{ playerName: string; text: string }> }): Promise<string> {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-both-win-offer-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameBothWinOfferInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const events: unknown[] = []
+      const result = await sendAssistantNotificationLocal({ actorId: null, bindingDeliveryTarget: 'both-win-room', channel: 'linq',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'both-win-room', deliveryIdempotencyKey: 'game-both-win:synthetic', deliveryDedupeToken: 'game-both-win:synthetic',
+        responsePolicy: { kind: 'require_send' }, executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'both-win-room', userEnvKeys: [] } },
+        identityId: null, instructions: buildGameBothWinOfferInstructions({ players: [{ firstName: 'Ava', task: 'Read a chapter' }, { firstName: 'Leo', task: 'Walk outside' }], dayReached: 5, lengthDays: 7, ...fixture }),
+        threadId: 'both-win-room', threadIsDirect: false, onTraceEvent: event => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env }, turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory })
+      const reply = result.response ?? ''
+      process.stdout.write(`[both-win offer ${name}] ${reply}\n`)
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      expect(result.decision.kind).toBe('send_message'); expect(result.deliveryOutcome?.kind).toBe('queued')
+      expect(await listAssistantOutboxIntents(workingDirectory)).toHaveLength(1)
+      expect(reply).toMatch(/Ava/u); expect(reply).toMatch(/Leo/u); expect(reply).toMatch(/prize/iu)
+      expect(reply).toMatch(/every day|each day/iu); expect(reply).toMatch(/both/iu)
+      expect(reply).toMatch(/yes|agree/iu)
+      expect((reply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+      expect(reply).not.toMatch(/—|\s-\s|\b(?:score|scores|stake|bet|wager|winnings|ticket|dare|miss|missed|reminder|reminders)\b|I.ve (?:added|chosen)|your prize is/iu)
+      expect(reply).not.toMatch(/\$|\b(?:cash|money|beer|wine|drinks?|cocktails?)\b/iu)
+      expect(reply.length).toBeLessThan(700)
+      return reply
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths]) }
+  }
+
+  it('both-win offer draws its one example from the room and the pair\'s prizes', async () => {
+    const reply = await offer('rich', { currentPrize: 'Breakfast in bed', earlierPrizes: ['Pick the next movie', 'A coffee run'], transcript: [
+      { playerName: 'Leo', text: 'walked to the ramen place and back, counts double' },
+      { playerName: 'Ava', text: 'you only walk when noodles are involved' },
+      { playerName: 'Ava', text: 'chapter 12 done. we are still doing the lake trail on Saturday right' },
+      { playerName: 'Leo', text: 'yes if you stop reading on the trail' },
+      { playerName: 'Ava', text: 'the noodle tax is real' },
+      { playerName: 'Leo', text: 'finished my walk in the rain. I deserve soup' },
+    ] })
+    expect(reply).toMatch(/ramen|noodle|soup|lake|trail|movie|coffee/iu)
+    expect(reply).not.toMatch(/breakfast in bed/iu)
+  }, 360_000)
+
+  it('both-win offer falls back to a small plain example when the room gives nothing', async () => {
+    const reply = await offer('thin', { currentPrize: 'Bragging rights', earlierPrizes: [], transcript: [
+      { playerName: 'Leo', text: 'done' }, { playerName: 'Ava', text: 'done' },
+    ] })
+    expect(reply).not.toMatch(/bragging/iu)
+  }, 360_000)
+})

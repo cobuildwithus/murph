@@ -1,7 +1,7 @@
 import "server-only";
 
 import { Prisma } from "@prisma/client";
-import { formatTimeZoneDateTimeParts, resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
+import { morningAfter } from "./time";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
 import { buildGamePrivateKickoffInstructions, gamePrivateKickoffPolicySchema, type HostedGamePrivateKickoffPolicy } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
@@ -24,19 +24,6 @@ function rhythm(game: { terms: Prisma.JsonValue; lengthDays: number }) {
   const schedule = currentTerms(parseStoredTerms(game.terms)).schedule;
   return JSON.stringify({ lengthDays: game.lengthDays, schedule: "days" in schedule
     ? { days: [...new Set(schedule.days)].sort((a, b) => a - b) } : schedule });
-}
-
-function morningAfter(now: Date, zone: string): Date | null {
-  try {
-    const local = formatTimeZoneDateTimeParts(now, zone);
-    const minutes = local.hour * 60 + local.minute;
-    if (minutes >= 9 * 60 && minutes < 21 * 60) return now;
-    const day = minutes >= 21 * 60 ? new Date(`${local.dayKey}T00:00:00Z`) : null;
-    if (day) day.setUTCDate(day.getUTCDate() + 1);
-    const date = day?.toISOString().slice(0, 10) ?? local.dayKey;
-    const resolved = resolveFloatingIsoTimestampInTimeZone(`${date}T09:00:00`, zone);
-    return resolved ? new Date(resolved.timestamp) : null;
-  } catch { return null; }
 }
 
 /** The existing game event is the one-time activation marker, including silent rematches. */

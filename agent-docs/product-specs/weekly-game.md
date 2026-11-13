@@ -826,6 +826,21 @@ resulting avatar. No private photo is shared with the subject or other players.
   answers the terminal value for them. Keep compatible Web and runtime readers while
   any remains. Accepted replacements
   are canonical: old ciphertext is not retained, and sent messages cannot be undone.
+- **Both-win offer.** A live pair on a set-days schedule, with a prize or dare
+  and no shared prize, qualifies when neither has a closed scheduled miss, both
+  have completed at least `ceil(2 * S / 3)` of the game's `S` scheduled days, and
+  each still has an unfinished scheduled day that is not closed. There is no
+  Day 3 floor and no automatic offer on any-N-days schedules. A post, counted
+  day or restored day reserves one `game-both-win:<gameId>` receipt when the
+  chat is bound and no change is waiting. The receipt keeps the game id as its
+  source reference, including for block cleanup. It waits until the later
+  player's `morningAfter` time: now within 09:00 to 21:00, otherwise their next
+  09:00, falling back to now if a time cannot be resolved. The cron checks the
+  held time; delivery does not repeat the time-window check. Generation, queued
+  wake recovery and final dispatch rejudge currentness. A miss, finish, waiting
+  change, accepted shared prize or lost chat skips it permanently. Murph names
+  both players and offers the choice; it never chooses or records a prize by
+  itself. This adds no timer, sweep, feature flag or provider policy.
 - **Tickets.** A prize or dare makes the loser owe the winner one ticket; a tie
   or all-perfect game owes nothing for that prize or dare. A pair can also carry
   a `both_get` prize: a perfect result issues two tickets for it, one each way.

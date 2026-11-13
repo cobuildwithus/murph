@@ -6,7 +6,7 @@ import { termsView, ticketView } from "../src/lib/game/views";
 import { buildRecapFallback } from "../src/lib/game/recap-fallback";
 import { parseGameChange } from "../src/lib/game/command";
 import { moderateGameCommand } from "../src/lib/game/moderation";
-import { addDays, dayStartInstant } from "../src/lib/game/time";
+import { addDays, dayStartInstant, morningAfter } from "../src/lib/game/time";
 
 vi.mock("../src/lib/game/crypto", () => ({
   openGameTexts: async (items: { value: string }[]) => items.map(item => item.value),
@@ -179,5 +179,27 @@ describe("both-win currentness needed by the reader dispatch guard", () => {
     expect(isBothWinOfferDue(s, now(5))).toBe(false);
     const missed = state(7, 5); missed.entries[0].incomplete = true;
     expect(isBothWinOfferDue(missed, now(4))).toBe(false);
+  });
+});
+
+
+describe("both-win trigger calendar", () => {
+  it("requires seven of ten weekdays in a fourteen-day game", () => {
+    const s = state(14, 9); s.game.terms.versions[0].schedule = { days: [0, 1, 2, 3, 4] };
+    s.entries = s.entries.filter(entry => entry.dayIndex !== 5 && entry.dayIndex !== 6);
+    expect(isBothWinOfferDue(s, now(8))).toBe(true);
+    s.entries.pop(); expect(isBothWinOfferDue(s, now(8))).toBe(false);
+  });
+  it.each([
+    ["2030-04-05T08:59:00Z", "2030-04-05T09:00:00Z"],
+    ["2030-04-05T09:00:00Z", "2030-04-05T09:00:00Z"],
+    ["2030-04-05T14:00:00Z", "2030-04-05T14:00:00Z"],
+    ["2030-04-05T20:59:00Z", "2030-04-05T20:59:00Z"],
+    ["2030-04-05T21:00:00Z", "2030-04-06T09:00:00Z"],
+  ])("preserves morningAfter unchanged at %s", (instant, expected) => {
+    expect(morningAfter(new Date(instant), "UTC")).toEqual(new Date(expected));
+  });
+  it("returns null when a player's morning cannot be resolved", () => {
+    expect(morningAfter(now(4), "Invalid/Zone")).toBeNull();
   });
 });

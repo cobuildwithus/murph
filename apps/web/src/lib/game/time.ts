@@ -78,3 +78,16 @@ export function recapPostedAt(instant: Date, timeZone: string): { local: string;
   const offset = value("timeZoneName").replace("GMT", "").replace("−", "-") || "+00:00";
   return { local: `${value("year")}-${value("month")}-${value("day")}T${value("hour")}:${value("minute")}:${value("second")}${offset}`, timeZone, instant: instant.toISOString() };
 }
+
+export function morningAfter(now: Date, zone: string): Date | null {
+  try {
+    const local = formatTimeZoneDateTimeParts(now, zone);
+    const minutes = local.hour * 60 + local.minute;
+    if (minutes >= 9 * 60 && minutes < 21 * 60) return now;
+    const day = minutes >= 21 * 60 ? new Date(`${local.dayKey}T00:00:00Z`) : null;
+    if (day) day.setUTCDate(day.getUTCDate() + 1);
+    const date = day?.toISOString().slice(0, 10) ?? local.dayKey;
+    const resolved = resolveFloatingIsoTimestampInTimeZone(`${date}T09:00:00`, zone);
+    return resolved ? new Date(resolved.timestamp) : null;
+  } catch { return null; }
+}
