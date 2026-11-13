@@ -157,7 +157,7 @@ afterEach(async () => {
 })
 
 describe('Codex dynamic tool runtime routing', () => {
-  it('gives group_room_model the digest of the page this turn already carries', async () => {
+  it('gives group_room_model the digest of the page this turn carries until a compaction', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-room-model-in-context-work-',
     )
@@ -188,7 +188,7 @@ describe('Codex dynamic tool runtime routing', () => {
       workingDirectory,
     })).resolves.toMatchObject({ finalMessage: 'done' })
 
-    expect(codexMocks.groupRoomModelInjectedDigests).toEqual(['e'.repeat(64)])
+    expect(codexMocks.groupRoomModelInjectedDigests).toEqual(['e'.repeat(64), null])
   })
 
   it('does not run an accepted member-memory mutation after the turn aborts', async () => {
@@ -963,6 +963,25 @@ async function runScriptedGroupRoomModelShowTurn(
     },
   }))
   await child.waitForRpcId(71)
+  // A compaction can summarize the injected page away, so a later show must
+  // not be told the body is still in context.
+  child.stdout.write(jsonLine({
+    method: 'thread/compacted',
+    params: { threadId: 'thread-room-model-in-context', turnId: 'turn-room-model-in-context' },
+  }))
+  child.stdout.write(jsonLine({
+    id: 72,
+    method: 'item/tool/call',
+    params: {
+      arguments: { action: 'show' },
+      callId: 'call-72',
+      namespace: 'murph',
+      threadId: 'thread-room-model-in-context',
+      tool: MURPH_GROUP_ROOM_MODEL_TOOL.name,
+      turnId: 'turn-room-model-in-context',
+    },
+  }))
+  await child.waitForRpcId(72)
   child.stdout.write(jsonLine({
     method: 'item/completed',
     params: {

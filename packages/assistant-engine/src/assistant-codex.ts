@@ -3276,6 +3276,9 @@ async function runCodexAppServerTurnOnProcess(
     readProjectionScopeKeyBatches: [],
     roster: null,
   }
+  // A compaction can summarize away the injected room-model page, after which
+  // show must return the body again.
+  let groupRoomModelDigestInContext = input.groupRoomModelInjectedDigest ?? null
   const automationRelativeDateReferenceWindows: Array<
     AssistantAcceptedTurnInputReferenceWindow | null
   > = [
@@ -4763,7 +4766,7 @@ async function runCodexAppServerTurnOnProcess(
           assistantStyleSettingsOverlay,
           groupRoomModelMaintenanceAuthorized:
             input.groupRoomModelMaintenanceAuthorized === true,
-          groupRoomModelInjectedDigest: input.groupRoomModelInjectedDigest,
+          groupRoomModelInjectedDigest: groupRoomModelDigestInContext,
           memberMemoryMaintenanceAuthorized:
             input.memberMemoryMaintenanceAuthorized === true,
           abortSignal: input.abortSignal
@@ -5155,6 +5158,7 @@ async function runCodexAppServerTurnOnProcess(
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
     observeCodexContextCompactionActivity(finalResponseCompletion, message)
     forgetGameRulesAfterCompaction(groupSharedReadTurnState, message)
+    if (isCodexContextCompactionCompletion(message)) groupRoomModelDigestInContext = null
 
     const normalizedEvent = normalizeCodexEvent(message)
     recordProviderEventReceipt(normalizedEvent)
