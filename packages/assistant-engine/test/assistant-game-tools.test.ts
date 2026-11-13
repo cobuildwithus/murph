@@ -5,12 +5,12 @@ import { normalizeAssistantExecutionContext } from '../src/assistant/execution-c
 import { describe, expect, it, vi } from 'vitest'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { executeMurphDynamicToolRequest, resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
-import { GAME_GROUP_CHAT_GUIDANCE, GAME_SETUP_CHAT_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_PAIR_CHAT_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE, GAME_READ_FACTS_GUIDANCE, GAME_PLAY_AGAIN_GUIDANCE, GAME_PAIR_AGREE_GUIDANCE, GAME_GROUP_JOIN_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_UPDATE_RESULT_GUIDANCE, GAME_DAY_OUTCOME_GUIDANCE, GAME_REMINDER_OUTCOME_GUIDANCE, GAME_PHOTO_OUTCOME_GUIDANCE, GAME_REFUSAL_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.js'
+import { GAME_GROUP_CHAT_GUIDANCE, GAME_SETUP_CHAT_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_PAIR_CHAT_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE, GAME_READ_FACTS_GUIDANCE, GAME_PLAY_AGAIN_GUIDANCE, GAME_PAIR_AGREE_GUIDANCE, GAME_GROUP_JOIN_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_UPDATE_RESULT_GUIDANCE, GAME_DAY_OUTCOME_GUIDANCE, GAME_REMINDER_OUTCOME_GUIDANCE, GAME_PHOTO_OUTCOME_GUIDANCE, GAME_REFUSAL_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE, GAME_RULES_REPEAT_POINTER } from '../src/assistant-codex/dynamic-tools/games.js'
 import { resolveAssistantGameHostDynamicTools } from '../src/assistant/codex-turn/planning.js'
 import { MURPH_FINISH_WITHOUT_REPLY_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import { createAssistantHostedToolContext, type AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
 import { parseHostedRuntimeGroupToolRequest, parseHostedRuntimeGroupToolResponse } from '@murphai/hosted-execution/parsers'
-import type { HostedGameRecap } from '@murphai/hosted-execution/runtime-control'
+import { hostedGameToolResponseSchema, type HostedGameRecap } from '@murphai/hosted-execution/runtime-control'
 const inputId = 'ain_' + 'a'.repeat(32)
 const secondInput = 'ain_' + 'b'.repeat(32)
 const origin = { kind: 'accepted_input' as const, assistantInputId: inputId }
@@ -31,6 +31,25 @@ async function execute(args: unknown, ctx = context()) {
   if (!request) throw new Error('Expected request')
   return executeMurphDynamicToolRequest({ request, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
 }
+/** A complete pair game as the hosted schema returns it; overrides replace fields and merge into terms. */
+function chatGame({ terms, ...overrides }: Record<string, unknown> & { terms?: Record<string, unknown> } = {}) {
+  return { id: 'game_synthetic', status: 'live', lengthDays: 7, startsOn: '2030-03-04',
+    terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: 'Walk' }, { seat: 1, text: 'Read' }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize', item: 'Pick dinner' }], ...terms },
+    players: [{ memberId: 'player_maya', seat: 0, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'America/New_York' }],
+    pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, editableFromDay: 1 }, ...overrides }
+}
+/** Both players' days from 2030-03-04, as the hosted progress block lists them. */
+function chatProgress(currentDayIndex: number | null, statuses: readonly string[]) {
+  return { checkedAt: '2030-03-06T16:00:00.000Z', players: ['player_maya', 'player_sam'].map(memberId => ({ memberId, score: 1, target: 7, currentDayIndex,
+    currentEntryId: null, attemptsRemaining: currentDayIndex === null ? 0 : 2, days: statuses.map((status, dayIndex) => ({ dayIndex, date: `2030-03-0${dayIndex + 4}`, status })) })) }
+}
+/** The JSON a result shows the model, and the guidance after it. */
+function splitResult(text: string | undefined) {
+  const value = text ?? ''
+  const end = value.indexOf('\n')
+  return { shown: JSON.parse(end < 0 ? value : value.slice(0, end)), guidance: end < 0 ? '' : value.slice(end + 1) }
+}
+const sharedReadTurn = () => ({ invalid: false, readProjectionScopeKeyBatches: [], roster: null })
 describe('game dynamic tools', () => {
   it('offers a member-only reminder tool on direct accepted input and rejects group scope', async () => {
     const requestPort = vi.fn(async () => ({ action: 'my_game_reminders' as const, result: { status: 'ok' as const, reaches: 'none' as const } }))
@@ -58,7 +77,7 @@ describe('game dynamic tools', () => {
     { label: 'settled both-win pair beside a live group', games: [{ status: 'settled', terms: { stakes: [{ kind: 'both_get', item: 'Dinner out together' }] } }, { status: 'live', maxPlayers: 10 }], carries: ['again', 'group', 'day', 'reminder'] },
     { label: 'live pair and settled group', games: [{ status: 'live' }, { status: 'settled', maxPlayers: 10 }], carries: ['again', 'pair', 'day', 'reminder'] },
   ])('carries each rule block once, and only for what the room holds: $label', async ({ games, carries }) => {
-    const requestPort = vi.fn().mockResolvedValue({ action: 'read_game', result: { status: 'ok', state: { games } } })
+    const requestPort = vi.fn().mockResolvedValue({ action: 'read_game', result: { status: 'ok', state: { games: games.map(game => chatGame(game)) } } })
     const result = await executeMurphDynamicToolRequest({ request: parse('read_game', {})!, hostedToolContext: { ...context(), groupTool: { request: requestPort } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     const text = result.rpcResult.contentItems[0]?.text ?? ''
     for (const guidance of [GAME_READ_FACTS_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE]) expect(text.split(guidance)).toHaveLength(2)
@@ -68,11 +87,11 @@ describe('game dynamic tools', () => {
   })
 
   it.each([
-    { label: 'an accepted invitation', args: { operation: 'approve', gameId: 'game_synthetic', expectedTermsVersion: 1 }, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'live', pendingChange: null }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.joined },
-    { label: 'a yes that applies an ask', args: approval, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'live', pendingChange: null }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.applied },
-    { label: 'a yes that still needs more', args: approval, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'live', pendingChange: { id: 'proposal_synthetic' } }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.counted },
-    { label: 'the yes that ends a game', args: approval, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'void', pendingChange: null }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.ended },
-    { label: 'a no', args: { ...approval, operation: 'decline' }, result: { status: 'ok', state: { games: [{ id: 'game_synthetic', status: 'live', pendingChange: null }] } }, says: GAME_UPDATE_RESULT_GUIDANCE.declined },
+    { label: 'an accepted invitation', args: { operation: 'approve', gameId: 'game_synthetic', expectedTermsVersion: 1 }, result: { status: 'ok', state: { games: [chatGame()] } }, says: GAME_UPDATE_RESULT_GUIDANCE.joined },
+    { label: 'a yes that applies an ask', args: approval, result: { status: 'ok', state: { games: [chatGame()] } }, says: GAME_UPDATE_RESULT_GUIDANCE.applied },
+    { label: 'a yes that still needs more', args: approval, result: { status: 'ok', state: { games: [chatGame({ pendingChange: { id: 'proposal_synthetic' } })] } }, says: GAME_UPDATE_RESULT_GUIDANCE.counted },
+    { label: 'the yes that ends a game', args: approval, result: { status: 'ok', state: { games: [chatGame({ status: 'void' })] } }, says: GAME_UPDATE_RESULT_GUIDANCE.ended },
+    { label: 'a no', args: { ...approval, operation: 'decline' }, result: { status: 'ok', state: { games: [chatGame()] } }, says: GAME_UPDATE_RESULT_GUIDANCE.declined },
     { label: 'a cancelled game', args: { operation: 'cancel_game', gameId: 'game_synthetic' }, result: { status: 'ok', state: { games: [] } }, says: GAME_UPDATE_RESULT_GUIDANCE.ended },
     { label: 'a day marked not done', args: { operation: 'mark_incomplete', gameId: 'game_synthetic', date: '2030-03-04' }, result: { status: 'ok', dayOutcome: { date: '2030-03-04', status: 'marked_incomplete' } }, says: GAME_DAY_OUTCOME_GUIDANCE.marked_incomplete },
     { label: 'a reminder that cannot arrive', args: { operation: 'set_reminder', minutes: 1080 }, result: { status: 'ok', reaches: 'none' }, says: GAME_REMINDER_OUTCOME_GUIDANCE.none },
@@ -82,7 +101,9 @@ describe('game dynamic tools', () => {
   ])('ends an update result with what to say about $label', async ({ args, result, says }) => {
     const response = { action: 'update_game', result }
     const output = await execute({ messageRef: inputId, ...args }, { ...context(), groupTool: { request: vi.fn().mockResolvedValue(response) } })
-    expect(output.rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response) + (says ? '\n' + says : ''))
+    const { shown, guidance } = splitResult(output.rpcResult.contentItems[0]?.text)
+    expect(shown).toMatchObject({ action: 'update_game', result: { status: result.status } })
+    expect(guidance).toBe(says)
   })
   it.each([
     { label: 'an offer', result: { status: 'ok', photoOutcome: 'offer' }, says: GAME_PHOTO_OUTCOME_GUIDANCE.offer },
@@ -97,7 +118,7 @@ describe('game dynamic tools', () => {
 
   it('uses group-only guidance for two-person group games and accepts starter edit_terms', async () => {
     const response = { action: 'read_game', result: { status: 'ok', state: { games: [
-      { id: 'game_group_one', maxPlayers: 10, status: 'invited' }, { id: 'game_group_two', maxPlayers: 10, status: 'invited' },
+      chatGame({ id: 'game_group_one', maxPlayers: 10, status: 'invited' }), chatGame({ id: 'game_group_two', maxPlayers: 10, status: 'invited' }),
     ] } } }
     const requestPort = vi.fn().mockResolvedValue(response)
     const result = await executeMurphDynamicToolRequest({ request: parse('read_game', { messageRef: inputId })!, hostedToolContext: { ...context(), groupTool: { request: requestPort } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
@@ -112,18 +133,22 @@ describe('game dynamic tools', () => {
 
   it('reads a scheduled group occurrence without a message selector or write guidance', async () => {
     const scheduledOrigin = { kind: 'automation_occurrence' as const, automationId: 'automation_game_read', occurrenceAt: '2030-04-01T20:00:00Z' }
-    const response = { action: 'read_game' as const, result: { status: 'ok' as const, state: { games: [{ status: 'live' }, { status: 'live' }] } } }
+    const response = { action: 'read_game' as const, result: { status: 'ok' as const, state: { games: [chatGame({ id: 'game_synthetic_0' }), chatGame({ id: 'game_synthetic_1' })] } } }
     const requestPort = vi.fn().mockResolvedValue(response)
     const ctx: AssistantHostedToolContext = { ...context(), groupTool: { request: requestPort }, currentUserActionScope: () => null,
       currentInvocationScope: () => ({ conversationScope: 'group', origin: scheduledOrigin }) }
-    const result = await executeMurphDynamicToolRequest({ request: parse('read_game', { messageRef: 'ignored-stale-ref' })!, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    const turn = sharedReadTurn()
+    const read = () => executeMurphDynamicToolRequest({ request: parse('read_game', { messageRef: 'ignored-stale-ref' })!, hostedToolContext: ctx, groupSharedReadTurnState: turn, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    const result = await read()
     expect(result.rpcResult.success).toBe(true)
     expect(requestPort).toHaveBeenCalledExactlyOnceWith({ action: 'read_game', origin: scheduledOrigin, includePlayers: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response) + '\n' + GAME_READ_FACTS_GUIDANCE)
+    expect((await read()).rpcResult.contentItems[0]?.text).toBe(JSON.stringify(response) + '\n' + GAME_RULES_REPEAT_POINTER)
+    requestPort.mockClear()
     expect((await execute(approval, ctx)).rpcResult.success).toBe(false)
     const photo = await executeMurphDynamicToolRequest({ request: parse('game_photo', { messageRef: inputId, operation: 'save', gameId: 'game_synthetic' })!, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(photo.rpcResult.success).toBe(false)
-    expect(requestPort).toHaveBeenCalledTimes(1)
+    expect(requestPort).not.toHaveBeenCalled()
   })
   it.each(['direct', 'missing', 'accepted_input'] as const)('rejects a read without group occurrence authority: %s', async (kind) => {
     port.mockClear()
@@ -208,7 +233,7 @@ describe('game dynamic tools', () => {
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), groupTool: { request: async () => response } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     const text = result.rpcResult.contentItems[0]?.text
     expect(text).toContain(GAME_SHARED_SETUP_GUIDANCE)
-    if (!guided) expect(text).toBe(JSON.stringify(response) + '\n' + [GAME_READ_FACTS_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, ...(statuses.some(status => status === 'settled') ? [GAME_PLAY_AGAIN_GUIDANCE] : []), GAME_PAIR_CHAT_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_REMINDER_GUIDANCE].join('\n'))
+    if (!guided) expect(splitResult(text).guidance).toBe([GAME_READ_FACTS_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, ...(statuses.some(status => status === 'settled') ? [GAME_PLAY_AGAIN_GUIDANCE] : []), GAME_PAIR_CHAT_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_REMINDER_GUIDANCE].join('\n'))
     else {
       expect(text).toContain(GAME_SELECTION_GUIDANCE)
       expect(text).toContain('game_synthetic_0')
@@ -227,6 +252,71 @@ describe('game dynamic tools', () => {
     }
     const update = await execute(approval)
     expect(update.rpcResult.contentItems[0]?.text).not.toContain(GAME_SETUP_CHAT_GUIDANCE)
+  })
+  it('shows an open game whole with its started days, and a finished game without days, asks or controls', async () => {
+    const pendingChange = { id: 'proposal_synthetic', proposedByMemberId: 'player_maya', expectedTermsVersion: 1, change: { kind: 'edit', lengthDays: 10 }, effectiveFromDay: 3, deliveryStatus: 'sent', startsOn: null }
+    // Day 3 is a day off ahead of today and day 4 has not started; neither is shown.
+    const live = chatGame({ id: 'game_live', terms: { stakes: [{ kind: 'prize', item: 'Pick dinner', key: 'stake_live' }] }, pendingChange })
+    const result = { scores: [{ memberId: 'player_maya', seat: 0, score: 3, misses: 0 }, { memberId: 'player_sam', seat: 1, score: 2, misses: 1 }],
+      tickets: [{ owedByMemberId: 'player_sam', owedToMemberId: 'player_maya', what: 'Pick dinner', status: 'open', count: 1 }] }
+    const closed = { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null }
+    const { pendingChange: _none, changeControls: _closed, ...settled } = chatGame({ id: 'game_done', status: 'settled', terms: { stakes: [{ kind: 'dare', item: 'Sing', key: 'stake_done' }] }, result })
+    const players = [{ memberId: 'player_maya', firstName: 'Maya', timeZone: 'America/New_York', isSender: true }, { memberId: 'player_sam', firstName: 'Sam', timeZone: 'America/New_York', isSender: false }]
+    const photoCheckIn = { introductionAvailable: false, hasPendingOffer: false }
+    const response = hostedGameToolResponseSchema.parse({ action: 'read_game', result: { status: 'ok', loreGuidance: 'Keep the lore.', loreFingerprint: 'a'.repeat(32), state: { players, photoCheckIn, games: [
+      { ...live, progress: chatProgress(2, ['posted', 'missed', 'due', 'off', 'upcoming']) },
+      { ...settled, pendingChange: null, changeControls: closed, progress: chatProgress(null, ['posted', 'missed', 'posted']) },
+    ] } } })
+    const output = await executeMurphDynamicToolRequest({ request: parse('read_game', { messageRef: inputId })!, hostedToolContext: { ...context(), groupTool: { request: async () => response } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    const text = output.rpcResult.contentItems[0]?.text
+    expect(text).not.toMatch(/lore|checkedAt|stake_live|stake_done|"key"|upcoming|dayIndex/u)
+    const days = { '2030-03-04': 'posted', '2030-03-05': 'missed', '2030-03-06': 'due' }
+    expect(splitResult(text).shown).toEqual({ action: 'read_game', result: { status: 'ok', state: { players, photoCheckIn, games: [
+      { ...live, terms: { ...live.terms, stakes: [{ kind: 'prize', item: 'Pick dinner' }] }, progress: { players: ['player_maya', 'player_sam'].map(memberId => ({ memberId, score: 1, target: 7, currentDayIndex: 2, currentEntryId: null, attemptsRemaining: 2, days })) } },
+      { ...settled, terms: { ...settled.terms, stakes: [{ kind: 'dare', item: 'Sing' }] } },
+    ] } } })
+  })
+  it('shows a write only the game it acted on, without its days or the several-games rule', async () => {
+    const pendingChange = { id: 'proposal_group', proposedByMemberId: 'player_maya', expectedTermsVersion: 3, change: { kind: 'call_off' }, effectiveFromDay: 3,
+      votes: [{ memberId: 'player_maya', vote: 'yes' }], yesNeeded: 1, deliveryStatus: 'conversation', startsOn: null }
+    const group = chatGame({ id: 'game_group', maxPlayers: 10, pendingInviteeCount: 0, terms: { defaultTask: 'Walk', n: 3 }, pendingChange })
+    const games = [chatGame({ id: 'game_other', terms: { tasks: [{ seat: 0, text: 'Plank' }, { seat: 1, text: 'Plank' }] } }), { ...group, progress: chatProgress(2, ['posted', 'posted', 'due']) }]
+    const state = { games, photoCheckIn: { introductionAvailable: true, hasPendingOffer: true } }
+    const writes = [
+      { args: { ...approval, gameId: 'game_group', proposalId: 'proposal_group' }, result: { status: 'ok', state }, says: GAME_UPDATE_RESULT_GUIDANCE.counted },
+      { args: { operation: 'mark_complete', gameId: 'game_group', date: '2030-03-05' }, result: { status: 'ok', state, dayOutcome: { date: '2030-03-05', status: 'credited' } }, says: GAME_DAY_OUTCOME_GUIDANCE.credited },
+    ]
+    for (const { args, result, says } of writes) {
+      const response = hostedGameToolResponseSchema.parse({ action: 'update_game', result })
+      const output = await execute({ messageRef: inputId, ...args }, { ...context(), groupTool: { request: async () => response } })
+      const { shown, guidance } = splitResult(output.rpcResult.contentItems[0]?.text)
+      expect(shown).toEqual({ action: 'update_game', result: { ...result, state: { games: [group] } } })
+      expect(guidance).toBe(says)
+    }
+    const photo = hostedGameToolResponseSchema.parse({ action: 'game_photo', result: { status: 'ok', state, photoOutcome: 'saved' } })
+    const saved = await executeMurphDynamicToolRequest({ request: parse('game_photo', { messageRef: inputId, operation: 'save', gameId: 'game_group' })!, hostedToolContext: { ...context(), groupTool: { request: async () => photo } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(splitResult(saved.rpcResult.contentItems[0]?.text)).toEqual({ shown: { action: 'game_photo', result: { status: 'ok', state: { games: [group] }, photoOutcome: 'saved' } }, guidance: GAME_PHOTO_OUTCOME_GUIDANCE.saved })
+  })
+  it('returns each rule block once per provider turn and points back to it on a later read', async () => {
+    const live = { action: 'read_game', result: { status: 'ok', state: { games: [chatGame()] } } }
+    const withFinished = { action: 'read_game', result: { status: 'ok', state: { games: [chatGame(), chatGame({ id: 'game_done', status: 'settled', result: null })] } } }
+    const requestPort = vi.fn().mockResolvedValue(live)
+    const read = async (turn: ReturnType<typeof sharedReadTurn>) => splitResult((await executeMurphDynamicToolRequest({ request: parse('read_game', {})!, hostedToolContext: { ...context(), groupTool: { request: requestPort } },
+      groupSharedReadTurnState: turn, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })).rpcResult.contentItems[0]?.text)
+    const rules = [GAME_READ_FACTS_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, GAME_PAIR_CHAT_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_REMINDER_GUIDANCE].join('\n')
+    const turn = sharedReadTurn()
+    expect((await read(turn)).guidance).toBe(rules)
+    const again = await read(turn)
+    expect(again.guidance).toBe(GAME_RULES_REPEAT_POINTER)
+    expect(again.shown.result.state.games).toHaveLength(1)
+    // A finished game adds only the rule that was not returned yet.
+    requestPort.mockResolvedValueOnce(withFinished)
+    expect((await read(turn)).guidance).toBe([GAME_RULES_REPEAT_POINTER, GAME_PLAY_AGAIN_GUIDANCE].join('\n'))
+    // A write in the same turn carries only what to say about it, never the rules or the pointer.
+    const write = await executeMurphDynamicToolRequest({ request: parse('update_game', approval)!, hostedToolContext: context(), groupSharedReadTurnState: turn, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(splitResult(write.rpcResult.contentItems[0]?.text).guidance).toBe(GAME_UPDATE_RESULT_GUIDANCE.ended)
+    // The next provider turn starts again with every rule.
+    expect((await read(sharedReadTurn())).guidance).toBe(rules)
   })
   it('makes uncertainty truthful and does not retry a mutation', async () => {
     port.mockClear(); port.mockRejectedValueOnce(new Error('Synthetic interrupted response'))

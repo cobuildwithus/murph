@@ -1444,7 +1444,8 @@ a new game leaves other games alone. Ambiguous new-versus-change asks need one
 clarification.
 
 Setup and poll guidance is returned by the engine on each successful ordinary
-`read_game`, alongside the existing multiple-game selection guidance. Shared setup
+`read_game`, alongside the existing multiple-game selection guidance; a later
+read in the same provider turn points back to the blocks it already returned. Shared setup
 and the poll paragraph appear once, followed by scoped rules for every pair/group
 mode present, including settled groups. Rules apply to the selected game's
 maxPlayers, never the number currently seated. The initial

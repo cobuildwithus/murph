@@ -1312,6 +1312,8 @@ export interface MurphGroupSharedReadTurnState {
     string,
     CurrentSenderTurnDecisionClaim
   >
+  /** Game rule blocks read_game already returned in this provider turn. */
+  gameRulesSent?: Set<string>
   invalid: boolean
   readProjectionScopeKeyBatches: string[][]
   roster: Array<{
@@ -4355,7 +4357,7 @@ async function executeCurrentConversationTool(
   switch (request.kind) {
     case 'usage-diagnostics': return executeUsageDiagnosticsTool(hostedToolContext, request.request)
     case 'leave-group': return executeLeaveGroupTool({ request: request.request, context: hostedToolContext })
-    case 'game': return executeGameTool({ request: request.request, context: hostedToolContext })
+    case 'game': return executeGameTool({ request: request.request, context: hostedToolContext, turnState: input.groupSharedReadTurnState ?? null })
     case 'poll': return executeConversationPollTool({ request: request.request, context: hostedToolContext })
     case 'plan-usage': return executePlanUsageTool({ request: request.request, hostedToolContext })
     case 'imessage-contact': return executeIMessageContactTool({ hostedToolContext })

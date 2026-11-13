@@ -1,6 +1,6 @@
 import { recapAssetSchema, gameRecapDraftSchema } from '@murphai/contracts/recap-show'
 import * as z from '@murphai/contracts/zod-runtime'
-import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse } from '@murphai/hosted-execution/runtime-control'
+import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameChatState, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 import { toolTextResult } from '../tool-failure-diagnostics.js'
@@ -79,13 +79,15 @@ export const GAME_GROUP_MODE_GUIDANCE = [
   'Prove it: only the challenged player can concede their own day. Do not judge the evidence or ask the group for a verdict.',
 ].join('\n')
 /** Added while a game is live: how a player corrects one of their own days. */
-export const GAME_DAY_CORRECTION_GUIDANCE = "Correcting a day: when a player says they did not finish a day, call update_game mark_incomplete with that date. When a player says they did a day, or asks you to count it, call mark_complete with that date. Take their word: do not ask for proof, do not put it to the other players, and do not offer this unasked. The post for a counted day is the player's own words, so leave text out unless they give the words for the post (for example \"make my post say: ...\") or are answering your question about what it should say; then pass their words exactly as written. Both calls act only on the speaker's own days in a live game in this chat, and need gameId and date but no proposalId and nobody's approval. Work out the date from the message's Occurred at time, converted to the speaker's timeZone: before 3 AM, today is the previous calendar date and yesterday is the day before that; from 3 AM on, today is that calendar date. Do not use progress.checkedAt or the current time. If there is no timestamp, or the message covers a range of times, ask once which day. A refusal names its rule: an open day is still theirs to post, and a day off, or a game that requires a photo or heart rate, cannot be counted this way."
+export const GAME_DAY_CORRECTION_GUIDANCE = "Correcting a day: when a player says they did not finish a day, call update_game mark_incomplete with that date. When a player says they did a day, or asks you to count it, call mark_complete with that date. Take their word: do not ask for proof, do not put it to the other players, and do not offer this unasked. The post for a counted day is the player's own words, so leave text out unless they give the words for the post (for example \"make my post say: ...\") or are answering your question about what it should say; then pass their words exactly as written. Both calls act only on the speaker's own days in a live game in this chat, and need gameId and date but no proposalId and nobody's approval. Work out the date from the message's Occurred at time, converted to the speaker's timeZone: before 3 AM, today is the previous calendar date and yesterday is the day before that; from 3 AM on, today is that calendar date. Do not use the current time. If there is no timestamp, or the message covers a range of times, ask once which day. A refusal names its rule: an open day is still theirs to post, and a day off, or a game that requires a photo or heart rate, cannot be counted this way."
 /** Added while a game is waiting or live. */
 export const GAME_REMINDER_GUIDANCE = "Reminders: when a player asks for a reminder for their own game, call update_game set_reminder with minutes after midnight in their local time. It is never a new room automation, and an older scheduled room reminder is left to finish on its own. Leave on out for a change of time; pass on together with gameId only when they ask to switch one game's reminders on or off. Ask which task only when several games could fit. A reminder belongs to the player who asked: never set another player's reminder from someone else's words or a group vote."
 /** What a read carries when the room's only games are group games that people are still joining. */
 export const GAME_GROUP_CHAT_GUIDANCE = [GAME_SETUP_CHAT_GUIDANCE, GAME_GROUP_JOIN_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE].join('\n')
 /** With several games in one room, a move acts on the one game it can mean, or asks once. */
-export const GAME_SELECTION_GUIDANCE = "\nSeveral games are open in this chat, and each update_game or game_photo call acts on exactly one gameId. First work out which games the message can apply to. For marking a day not done: games where the speaker has a post on that date. For counting a day as done: games where that date does not show as posted (a missed day and a day marked not done both show as unposted). For a change: games it would actually change. For a yes or no: the asks waiting on the speaker. For a photo nobody asked you to save: the speaker's games whose task it shows. For a photo they ask you to save: the game they name, or the photo offer waiting on them. Then choose among those only from the speaker's own words: task words in this message or the one they just sent, or their answer to your question. Do not choose by which game came up last, a recent notice, another player's messages, or the newest or first game. If exactly one game fits, act on it. If several fit, make no update_game or game_photo call and ask one short question that names only those games by their tasks, such as \"Which game, steps or plank?\", then act on the answer. The photo rules still decide whether a photo gets any reply or save. Talk about progress one named task at a time. Lore is shared by everyone who plays in this chat."
+export const GAME_SELECTION_GUIDANCE = "Several games are open in this chat, and each update_game or game_photo call acts on exactly one gameId. First work out which games the message can apply to. For marking a day not done: games where the speaker has a post on that date. For counting a day as done: games where that date does not show as posted (a missed day and a day marked not done both show as unposted). For a change: games it would actually change. For a yes or no: the asks waiting on the speaker. For a photo nobody asked you to save: the speaker's games whose task it shows. For a photo they ask you to save: the game they name, or the photo offer waiting on them. Then choose among those only from the speaker's own words: task words in this message or the one they just sent, or their answer to your question. Do not choose by which game came up last, a recent notice, another player's messages, or the newest or first game. If exactly one game fits, act on it. If several fit, make no update_game or game_photo call and ask one short question that names only those games by their tasks, such as \"Which game, steps or plank?\", then act on the answer. The photo rules still decide whether a photo gets any reply or save. Talk about progress one named task at a time. Lore is shared by everyone who plays in this chat."
+/** Stands in for rule blocks an earlier read_game already returned in this provider turn. */
+export const GAME_RULES_REPEAT_POINTER = 'The rules in the earlier read_game result in this turn still apply.'
 /** What to say after a successful update_game, appended to the result of the call it describes. */
 export const GAME_UPDATE_RESULT_GUIDANCE = {
   created: "The game is created and waiting. Reply with one short invitation that names each task, the prize or dare, the schedule (say \"every day\" when it is every day), the length and the start, and asks each other player to agree for themselves. With no picked date, the yes that starts the game sets the start: that same day when it arrives from 3 AM up to 3 PM, otherwise the next game day. So do not promise a start today. If another player's own message in this turn already says yes to these same terms, call update_game approve now with that message's messageRef and expectedTermsVersion set to terms.n, and do not ask them again.",
@@ -321,6 +323,7 @@ async function executeGameLoreTool(input: {
 async function executeOrdinaryGameTool(input: {
   request: Extract<GameDynamicRequest, { action: 'read_game' | 'update_game' | 'game_photo' }>
   context: AssistantHostedToolContext | null
+  turnState: GameRulesTurnState | null
 }) {
   const tool = input.context?.groupTool
   const scope = input.context?.currentUserActionScope?.()
@@ -330,34 +333,83 @@ async function executeOrdinaryGameTool(input: {
   const origin = { kind: 'accepted_input' as const, assistantInputId }
   try {
     const result = await tool.request(input.request.action === 'read_game' ? { action: 'read_game', origin, includePlayers: true } : input.request.action === 'game_photo' ? { action: 'game_photo', origin, photo: input.request.photo } : { action: 'update_game', origin, update: input.request.update })
-    return toolTextResult(true, JSON.stringify(result) + gameResultGuidance(result.result, input.request))
+    return toolTextResult(true, JSON.stringify(gameResultForModel(result, input.request)) + gameResultGuidance(result.result, input.request, input.turnState))
   } catch (error) {
     return toolTextResult(false, 'The game action could not be confirmed. Read the game to check its current state before claiming a change applied.', 'handler_exception', error)
   }
 }
 
-type GameToolResult = Awaited<ReturnType<NonNullable<AssistantHostedToolContext["groupTool"]>["request"]>>["result"]
+type GameToolResponse = Awaited<ReturnType<NonNullable<AssistantHostedToolContext["groupTool"]>["request"]>>
+type GameToolResult = GameToolResponse["result"]
 type OrdinaryGameRequest = Extract<GameDynamicRequest, { action: 'read_game' | 'update_game' | 'game_photo' }>
+type ChatGame = HostedGameChatState['games'][number]
+/** The rule blocks read_game has returned in this provider turn, kept on the dynamic tools' per-turn state. */
+export type GameRulesTurnState = { gameRulesSent?: Set<string> }
+const OPEN_GAME_STATUSES: readonly string[] = ['live', 'negotiating', 'invited']
+
+/**
+ * What the model sees of a game result. The lore keys feed the turn prompt, not the model. A read
+ * returns every game, and a finished one only its terms, players and result. A write returns only
+ * the game it acted on, without its days, because the read before it in this turn has the rest.
+ */
+function gameResultForModel(response: GameToolResponse, request: OrdinaryGameRequest) {
+  if (!('state' in response.result)) return response
+  const { loreGuidance: _guidance, loreFingerprint: _fingerprint, ...result } = response.result
+  if (!result.state) return { ...response, result }
+  const actedOn = request.action === 'read_game' ? null : request.action === 'game_photo' ? request.photo.gameId : request.update.gameId
+  const state = actedOn === null ? { ...result.state, games: result.state.games.map(game => gameForModel(game, true)) }
+    : { games: result.state.games.filter(game => game.id === actedOn).map(game => gameForModel(game, false)) }
+  return { ...response, result: { ...result, state } }
+}
+
+/** Stake keys are app bookkeeping. A finished game has no days, asks or controls left to act on. */
+function gameForModel(game: ChatGame, withDays: boolean) {
+  const terms = { ...game.terms, stakes: game.terms.stakes.map(({ key: _key, ...stake }) => stake) }
+  if (!OPEN_GAME_STATUSES.includes(game.status)) {
+    const { progress: _progress, changeControls: _changeControls, pendingChange: _pendingChange, ...finished } = game
+    return { ...finished, terms }
+  }
+  const { progress, ...open } = game
+  return { ...open, terms, ...(withDays && progress ? { progress: progressForModel(progress) } : {}) }
+}
+
+/** Each player's started days as date to status. Days ahead are known from the terms. */
+function progressForModel(progress: NonNullable<ChatGame['progress']>) {
+  return { players: progress.players.map(({ days, ...player }) => ({ ...player, days: Object.fromEntries(days
+    .filter(day => day.status !== 'upcoming' && day.dayIndex <= (player.currentDayIndex ?? Infinity))
+    .map(day => [day.date, day.status])) })) }
+}
 
 /**
  * The rules a result carries. A read carries the rules for what the room holds right now, so a room
  * with no game carries only how to start one. A write carries what to say about what it returned.
  */
-function gameResultGuidance(payload: GameToolResult, request: OrdinaryGameRequest): string {
+function gameResultGuidance(payload: GameToolResult, request: OrdinaryGameRequest, turnState: GameRulesTurnState | null): string {
   const games = ('state' in payload ? payload.state?.games : undefined) ?? []
-  const open = games.filter(game => ['live', 'negotiating', 'invited'].includes(game.status))
-  const selection = open.length > 1 ? GAME_SELECTION_GUIDANCE : ''
-  if (request.action === 'read_game') return payload.status === 'ok' ? selection + '\n' + gameReadGuidance(games, open) : selection
+  if (request.action === 'read_game') {
+    if (payload.status !== 'ok') return ''
+    const open = games.filter(game => OPEN_GAME_STATUSES.includes(game.status))
+    return '\n' + unsentGameRules([...(open.length > 1 ? [GAME_SELECTION_GUIDANCE] : []), ...gameReadGuidance(games, open)], turnState).join('\n')
+  }
   const said = payload.status !== 'ok' ? gameRefusalGuidance(payload, request.action)
     : request.action === 'game_photo' ? ('photoOutcome' in payload && payload.photoOutcome ? GAME_PHOTO_OUTCOME_GUIDANCE[payload.photoOutcome] : '')
     : gameUpdateGuidance(payload, request.update, games)
-  return selection + (said ? '\n' + said : '')
+  return said ? '\n' + said : ''
+}
+
+/** Rule blocks an earlier read in this provider turn returned are replaced by one pointer to it. */
+function unsentGameRules(rules: readonly string[], turnState: GameRulesTurnState | null): readonly string[] {
+  if (!turnState) return rules
+  const sent = turnState.gameRulesSent ??= new Set()
+  const unsent = rules.filter(rule => !sent.has(rule))
+  for (const rule of unsent) sent.add(rule)
+  return unsent.length < rules.length ? [GAME_RULES_REPEAT_POINTER, ...unsent] : unsent
 }
 
 type GameRuleFacts = { status: string; maxPlayers?: number | null; pendingInviteeCount?: number | null }
 
 /** The rules for what the room holds right now. `open` is the subset of `games` still in play. */
-function gameReadGuidance(games: readonly GameRuleFacts[], open: readonly GameRuleFacts[]): string {
+function gameReadGuidance(games: readonly GameRuleFacts[], open: readonly GameRuleFacts[]): string[] {
   const pair = open.filter(game => game.maxPlayers !== 10)
   const group = open.filter(game => game.maxPlayers === 10)
   const live = open.some(game => game.status === 'live')
@@ -369,7 +421,7 @@ function gameReadGuidance(games: readonly GameRuleFacts[], open: readonly GameRu
     ...(group.some(game => game.status === 'invited' || (game.pendingInviteeCount ?? 0) > 0) ? [GAME_GROUP_JOIN_GUIDANCE] : []),
     ...(group.length ? [GAME_GROUP_MODE_GUIDANCE] : []),
     ...(live ? [GAME_DAY_CORRECTION_GUIDANCE] : []),
-    ...(open.length ? [GAME_REMINDER_GUIDANCE] : [])].join('\n')
+    ...(open.length ? [GAME_REMINDER_GUIDANCE] : [])]
 }
 
 /** What to say after a successful update, worked out from the operation and the state it returned. */
@@ -405,7 +457,7 @@ function gameRefusalGuidance(payload: GameToolResult, action: 'update_game' | 'g
   return code === 'PROFILE_REQUIRED' || code === 'CONTENT_NOT_ALLOWED' ? GAME_REFUSAL_GUIDANCE[code] : ''
 }
 
-export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null }) {
+export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null; turnState?: GameRulesTurnState | null }) {
   if (input.request.action === 'write_recap_file') return executeRecapFileWrite({ context: input.context, draftPath: input.request.draftPath })
   if (input.request.action === 'my_game_reminders') {
     const scope = input.context?.currentUserActionScope?.()
@@ -422,15 +474,16 @@ export async function executeGameTool(input: { request: GameDynamicRequest; cont
   const recapResult = await executeTrustedGameRecapTool(input)
   if (recapResult) return recapResult
   if (input.request.action === 'write_recap') return toolTextResult(false, 'write_recap is available only in the bound game recap turn.', 'authority_rejected')
+  const turnState = input.turnState ?? null
   if (input.request.action === 'read_game') {
-    const scheduledRead = await executeScheduledGameRead(input.context)
+    const scheduledRead = await executeScheduledGameRead(input.context, turnState)
     if (scheduledRead) return scheduledRead
   }
-  return executeOrdinaryGameTool({ ...input, request: input.request })
+  return executeOrdinaryGameTool({ context: input.context, request: input.request, turnState })
 }
 
 /** A verified scheduled occurrence reads the bound room's shared game state; it never acts for a player. */
-async function executeScheduledGameRead(context: AssistantHostedToolContext | null) {
+async function executeScheduledGameRead(context: AssistantHostedToolContext | null, turnState: GameRulesTurnState | null) {
   const tool = context?.groupTool
   if (!tool || context?.currentUserActionScope?.()?.acceptedInputIds.length) return null
   const invocation = context?.currentInvocationScope?.()
@@ -438,7 +491,8 @@ async function executeScheduledGameRead(context: AssistantHostedToolContext | nu
   const { automationId, occurrenceAt } = invocation.origin
   try {
     const result = await tool.request({ action: 'read_game', origin: { kind: 'automation_occurrence', automationId, occurrenceAt }, includePlayers: true })
-    return toolTextResult(true, JSON.stringify(result) + (result.result.status === 'ok' ? '\n' + GAME_READ_FACTS_GUIDANCE : ''))
+    return toolTextResult(true, JSON.stringify(gameResultForModel(result, { action: 'read_game' }))
+      + (result.result.status === 'ok' ? '\n' + unsentGameRules([GAME_READ_FACTS_GUIDANCE], turnState).join('\n') : ''))
   } catch (error) {
     return toolTextResult(false, 'The game state could not be read.', 'handler_exception', error)
   }

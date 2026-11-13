@@ -87,6 +87,7 @@ import type {
   MurphDynamicToolReactionPatch,
   MurphDynamicToolReplyTargetPatch,
   MurphDynamicToolRequest,
+  MurphGroupSharedReadTurnState,
 } from './assistant-codex/dynamic-tools.js'
 import {
   type AssistantStyleTurnSettingsOverlay,
@@ -418,6 +419,16 @@ function observeCodexContextCompactionActivity(
     || isCodexContextCompactionCompletion(message)
   ) {
     tracker.observeProviderActivity()
+  }
+}
+
+// A compaction can summarize away an earlier read_game result, so the next read returns its rules again.
+function forgetGameRulesAfterCompaction(
+  turnState: MurphGroupSharedReadTurnState,
+  message: CodexRpcMessage,
+): void {
+  if (isCodexContextCompactionCompletion(message)) {
+    turnState.gameRulesSent?.clear()
   }
 }
 
@@ -5141,6 +5152,7 @@ async function runCodexAppServerTurnOnProcess(
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
     observeCodexContextCompactionActivity(finalResponseCompletion, message)
+    forgetGameRulesAfterCompaction(groupSharedReadTurnState, message)
 
     const normalizedEvent = normalizeCodexEvent(message)
     recordProviderEventReceipt(normalizedEvent)
