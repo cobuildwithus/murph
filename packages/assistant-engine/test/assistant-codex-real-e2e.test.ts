@@ -2310,26 +2310,31 @@ const FOCUSED_COMPOSED_ACTIVITY: readonly FocusedActivityDay[] = [
   { date: '2026-01-02', provider: 'oura', value: 6200 },
 ]
 
+function readFocusedStepsValue(steps: unknown): unknown {
+  return typeof steps === 'number' ? steps : readRecord(steps)?.value
+}
+
 function expectFocusedActivityProjectionOutput(
   output: string, expected: readonly FocusedActivityDay[] = FOCUSED_OURA_ACTIVITY,
 ): void {
   if (output.trimStart().startsWith('{')) {
     const document = readRecord(JSON.parse(output))
-    expect(document?.ok === true ? document.data : document).toMatchObject({
-      count: expected.length,
-      items: expected.map(({ date, provider, value }) => ({ date, steps: { value, unit: 'count', provider } })),
-    })
+    // A day carries its family provider once and units come from one legend.
+    // Steps are a bare number, or {value, confidence, conflictingProviders}
+    // when another provider disagreed; the losing value itself stays private.
+    const data = readRecord(document?.ok === true ? document.data : document)
+    expect(data).toMatchObject({ count: expected.length, units: { steps: 'count' } })
+    const items = Array.isArray(data?.items) ? data.items.map(item => readRecord(item)) : []
+    expect(items.map(item => [item?.date, item?.provider, readFocusedStepsValue(item?.steps)]))
+      .toEqual(expected.map(({ date, provider, value }) => [date, provider, value]))
   } else {
     expect(output).toMatch(new RegExp(`^\\s*count: ${expected.length}$`, 'mu'))
-    expect(output).toMatch(new RegExp(`^\\s*items\\[${expected.length}\\]:$`, 'mu'))
-    for (const { date } of expected) expect(output).toMatch(new RegExp(`^\\s*(?:- )?date: ${date}$`, 'mu'))
-    const steps = [...output.matchAll(/^([ \t]+)steps:\r?\n((?:\1[ \t]+[^\r\n]*(?:\r?\n|$))+)/gmu)].map(match => match[2]!)
-    expect(steps).toHaveLength(expected.length)
-    expected.forEach(({ provider, value }, index) => {
-      expect(steps[index]).toMatch(new RegExp(`^\\s*provider: ${provider}$`, 'mu'))
-      expect(steps[index]).toMatch(/^\s*unit: count$/mu)
-      expect(steps[index]).toMatch(new RegExp(`^\\s*value: ${value}$`, 'mu'))
-    })
+    expect(output).toMatch(/^\s*steps: count$/mu)
+    for (const { date, provider, value } of expected) {
+      expect(output).toContain(date)
+      expect(output).toMatch(new RegExp(`\\b${provider}\\b`, 'u'))
+      expect(output).toMatch(new RegExp(`\\b${value}\\b`, 'u'))
+    }
   }
   expect(output).not.toMatch(/\breasons\b|scored highest|daily cumulative lower-bound/iu)
   const absent = FOCUSED_ACTIVITY_STEP_VALUES.filter(value => !expected.some(day => day.value === value))
@@ -6161,8 +6166,8 @@ describe('real Codex live fixture contracts', () => {
       expect(imported.items).toHaveLength(1)
       expect(imported.items[0]).toMatchObject({
         activityTypes: ['running'],
-        sessionMinutes: { value: 24 },
-        distanceKm: { value: 3.8624256 },
+        sessionMinutes: 24,
+        distanceKm: 3.8624,
       })
     } finally {
       await removeRealCodexTemporaryPath(vaultRoot)
@@ -21580,20 +21585,20 @@ function readFocusedSleepCommand(command: string): string {
 function expectFocusedSleepReadOutput(output: string): void {
   if (output.trimStart().startsWith('{')) {
     const document = readRecord(JSON.parse(output))
-    expect(document?.ok === true ? document.data : document).toMatchObject({ count: 1, items: [{
-      date: '2026-01-03', provider: 'oura',
-      totalSleepMinutes: { value: 450, unit: 'minutes', provider: 'oura' },
-    }] })
+    // The night carries its family provider once; units come from one legend.
+    expect(document?.ok === true ? document.data : document).toMatchObject({
+      count: 1,
+      units: { totalSleepMinutes: 'minutes' },
+      items: [{ date: '2026-01-03', provider: 'oura', totalSleepMinutes: 450 }],
+    })
     return
   }
-  // Default TOON: bind provenance and duration to the same metric, not another field.
+  // Default TOON keeps the same facts: date, the family provider, the value and its unit.
   expect(output).toMatch(/^\s*count: 1$/mu)
-  expect(output).toMatch(/^\s*items\[1\]:$/mu)
-  expect(output).toMatch(/^\s*- date: 2026-01-03$/mu)
-  const totalSleep = output.match(/^([ \t]+)totalSleepMinutes:\r?\n((?:\1[ \t]+[^\r\n]*(?:\r?\n|$))+)/mu)?.[2] ?? ''
-  expect(totalSleep).toMatch(/^\s*provider: oura$/mu)
-  expect(totalSleep).toMatch(/^\s*unit: minutes$/mu)
-  expect(totalSleep).toMatch(/^\s*value: 450$/mu)
+  expect(output).toContain('2026-01-03')
+  expect(output).toMatch(/\boura\b/u)
+  expect(output).toMatch(/\b450\b/u)
+  expect(output).toMatch(/^\s*totalSleepMinutes: minutes$/mu)
 }
 
 describe('focused sleep read production contract', () => {
@@ -21646,8 +21651,7 @@ describe('focused sleep read production contract', () => {
       const json = await execFileAsync(path.join(binDirectory, 'vault-cli'), [...args, '--format', 'json'])
       expectFocusedSleepReadOutput(json.stdout)
       expect(JSON.parse(json.stdout)).toMatchObject({ count: 1, items: [{
-        date: '2026-01-03', totalSleepMinutes: { value: 450, unit: 'minutes', provider: 'oura' },
-        timeInBedMinutes: { value: 480 },
+        date: '2026-01-03', provider: 'oura', totalSleepMinutes: 450, timeInBedMinutes: { value: 480 },
       }] })
       const toon = await execFileAsync(path.join(binDirectory, 'vault-cli'), args)
       expectFocusedSleepReadOutput(toon.stdout)
