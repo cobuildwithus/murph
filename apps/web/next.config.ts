@@ -94,6 +94,12 @@ const OG_SHARE_ASSET_TRACE_INCLUDES = [
   "app/fonts/*.ttf",
   "public/logo.svg",
 ];
+// The connect link's preview joins the Murph icon and a source's own icon,
+// both read from public/ at render time.
+const CONNECT_LINK_OG_ICON_TRACE_INCLUDES = [
+  "public/brand-logos/connect/*.png",
+  "public/brand-logos/murph-logo-avatar-light.png",
+];
 // The App Review game seed posts these synthetic site images as its opponent's photos.
 const APP_REVIEW_GAME_PHOTO_TRACE_INCLUDES = [
   "public/design-assets/hero-morning-outdoor-light-exposure.jpeg",
@@ -337,6 +343,7 @@ export function buildHostedWebNextConfig(
       // dynamic invite/group/biomarker unfurls that are never
       // prerendered. Share-card route handlers are keyed explicitly.
       "/opengraph-image": OG_SHARE_ASSET_TRACE_INCLUDES,
+      "/connect/*/opengraph-image": CONNECT_LINK_OG_ICON_TRACE_INCLUDES,
       "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
       "/api/ops/app-review-game": APP_REVIEW_GAME_PHOTO_TRACE_INCLUDES,

@@ -24,6 +24,8 @@ vi.mock("next/og", () => ({
 
 const { readInvitePreview } = await import("@/src/lib/game/service");
 const { GET } = await import("@/app/api/game/v1/invites/[token]/route");
+// The page reads the device from the request; these tests are an iPhone.
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148" }) }));
 const { default: Page, generateMetadata } = await import("@/app/g/[token]/page");
 const { default: Image } = await import("@/app/g/[token]/opengraph-image");
 const props = { params: Promise.resolve({ token: "synthetic-invite" }) };
