@@ -1,6 +1,6 @@
 # Ask for health data when it is needed, not at sign-up
 
-Status: active (server and app pull requests open; not merged or deployed)
+Status: completed
 Created: 2026-11-12
 Updated: 2026-11-12
 Review: reviewed once by ReviewGPT (GPT-6 Pro, architecture preset) on 2026-11-12
@@ -806,3 +806,4 @@ confirm the Chat surface. review lane B's app bundle is one Brave version behind
 the installed browser and its profile lock is stale, so it cannot launch.
 review lane C offered no Pro model. The review ran on review lane D, the fourth lane in the
 repo's own pool (`agent-docs/operations/pr-reviewgpt-loop.md`).
+Completed: 2026-11-12

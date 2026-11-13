@@ -1,4 +1,4 @@
-The [consent when needed plan](exec-plans/active/2026-11-12-consent-when-needed.md)
+The [consent when needed plan](exec-plans/completed/2026-11-12-consent-when-needed.md)
 tracks the server and app handoff. [Legal consent](../docs/legal-consent-implementation.md)
 and [Weekly Game](product-specs/weekly-game.md) own game-only access, the heart-rate
 post gate and Settings access without health consent.
