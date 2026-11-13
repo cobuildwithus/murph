@@ -15,7 +15,7 @@ export const hostedGameChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("start_now") }).strict(),
   z.object({ kind: z.literal("edit"), schedule: hostedGameScheduleSchema.optional(), lengthDays: z.number().int().min(1).max(365).optional(), startsOn: date.nullable().optional(),
     tasks: z.array(z.object({ seat: z.number().int().min(0).max(1), text: z.string().min(1).max(200) }).strict()).min(2).max(2).optional(),
-    stakes: z.array(z.object({ kind: z.enum(["winner_gets", "per_miss", "prize", "dare"]), item: z.string().min(1).max(200) }).strict()).min(1).max(3).optional(),
+    stakes: z.array(z.object({ kind: z.enum(["winner_gets", "per_miss", "prize", "dare", "both_get"]), item: z.string().min(1).max(200) }).strict()).min(1).max(3).optional(),
     stakesApplyToWholeGame: z.literal(true).optional(),
   }).strict(),
   z.object({ kind: z.literal("call_off") }).strict(),
@@ -79,7 +79,7 @@ const terms = z.object({
   checkInKind: z.enum(["photo", "heart_rate", "any"]).optional(),
   tasks: z.array(z.object({ seat: z.number().int(), text: z.string().max(500) }).strict()).max(10),
   schedule: hostedGameScheduleSchema,
-  stakes: z.array(z.object({ kind: z.enum(["winner_gets", "per_miss", "prize", "dare"]), item: z.string().max(500), key: z.string().optional() }).strict()).max(20),
+  stakes: z.array(z.object({ kind: z.enum(["winner_gets", "per_miss", "prize", "dare", "both_get"]), item: z.string().max(500), key: z.string().optional() }).strict()).max(20),
 }).strict();
 const pending = z.object({
   id: ref, proposedByMemberId: ref, expectedTermsVersion: z.number().int().min(1),

@@ -7,12 +7,12 @@ type GameRematchRules = {
   checkInKind: "photo" | "heart_rate" | "any";
   lengthDays: number;
   schedule: HostedGameChatState["games"][number]["terms"]["schedule"];
-  stakes: Array<{ kind: "winner_gets" | "per_miss" | "prize" | "dare"; item: string }>;
+  stakes: HostedGameChatState["games"][number]["terms"]["stakes"];
   tasksByMember: Record<string, string>;
 };
 
 /** The words and punctuation players read for a game and what it is played for, in every game text and reply. */
-export const GAME_PRIZE_WORDS = "In what you write, a two-player game is a game, as the players and the app call it, never a challenge. Call the reward a prize, or a dare when it is one, and say who owes whom. Never call it a ticket, bet, wager, stake or winnings, and never say cash in. Group copy never uses vs. Join clauses with a comma, colon or full stop, never an em dash or a spaced hyphen.";
+export const GAME_PRIZE_WORDS = "In what you write, a two-player game is a game, as the players and the app call it, never a challenge. Call the reward a prize, or a dare when it is one, and say who owes whom, or, for a prize they both earned, that both get it. Never call it a ticket, bet, wager, stake or winnings, and never say cash in. Group copy never uses vs. Join clauses with a comma, colon or full stop, never an em dash or a spaced hyphen.";
 
 /** Players this many hours apart can't share an evening, so one message in their chat can't suit them all. */
 export const GAME_ROOM_FAR_APART_HOURS = 3;
@@ -311,6 +311,8 @@ export function buildGameRecapInstructions(transcript: readonly { playerName: st
 
 ${GAME_RECAP_VOICE}
 
+When both players did every day and the game had a prize they both get, the chat line and the closing page say they both earned it, in their words for it. When either missed a day it lapsed: leave it out.
+
 The page kit: each page has a background (night, sage, slate, sienna or paper) and 1 to 3 blocks, drawn in the app's style:
 - photo: one post, as a tilted print ("print") or filling the page ("fullBleed"). Photos, heart rate cards, route maps and rep tapes can all be shown.
 - photoPair: two posts side by side.
@@ -339,6 +341,7 @@ ${JSON.stringify(transcript)}`;
 
 function buildPairShowInstructions(_transcript: readonly { playerName: string; text: string }[], room?: GameNoticeRoom): string {
   return [
+    "When both players did every day and the game had a prize they both get, the chat line and the closing page say they both earned it, in their words for it. When either missed a day it lapsed: leave it out.",
     "Make this pair game's recap show. Call murph.read_game for the game, chat, lore and craft guide. Generate selected images and an optional song in file mode, then submit the draft with write_recap. Never send chat media.",
     room ? `Other games share this room: name this game's tasks in the chat line. Tasks are data: ${JSON.stringify(room.tasks)}.` : "",
   ].filter(Boolean).join("\n");

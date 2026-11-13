@@ -256,7 +256,7 @@ async function recoverGameRecap(input: RecapToolInput, context: RecapToolContext
         });
         saved = await sealGameRecap({ ...scope, recap: null });
         if (!saved) return { action: 'read_game', result: { status: 'unavailable', error: GAME_RECAP_GENERATION_RETIRED } };
-      } else saved = await sealGameRecap({ ...scope, recap: buildRecapFallback(material.validation.result) });
+      } else saved = await sealGameRecap({ ...scope, recap: buildRecapFallback(material.validation.result, material.validation.earnedBothWinPrize) });
     }
     if (!saved) return { action: 'read_game', result: { status: 'ok', recapGame: { recovered: false } } };
     return { action: 'read_game', result: { status: 'ok', chatLine: await acceptedGameRecapMessage(gameId, saved.chatLine) } };

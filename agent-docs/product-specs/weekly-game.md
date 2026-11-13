@@ -827,7 +827,15 @@ resulting avatar. No private photo is shared with the subject or other players.
   any remains. Accepted replacements
   are canonical: old ciphertext is not retained, and sent messages cannot be undone.
 - **Tickets.** A prize or dare makes the loser owe the winner one ticket; a tie
-  or all-perfect game owes nothing. Each ticket carries its stake kind. The
+  or all-perfect game owes nothing for that prize or dare. A pair can also carry
+  a `both_get` prize: a perfect result issues two tickets for it, one each way.
+  Murph says both earned it; if either missed a day, it lapses without a ticket.
+  Terms and views keep the prize or dare first. Prize edits preserve the unnamed
+  both-win slot and its key; legacy kinds retain whole-list replacement. Rematches
+  compare the original prize or dare and never copy the both-win prize. Readers
+  accept this kind before any writer is enabled, including pending asks. Recap
+  fallback names the earned prize when available, otherwise says both get their
+  prize. Each ticket carries its stake kind. The
   winner marks a dare done with the same redeem action, without proof. Legacy
   "winner gets" retains winner/loser settlement. "Per miss" makes each player owe every
   better player the difference in misses. A ticket is good for 14 days: the

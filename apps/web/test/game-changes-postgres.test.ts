@@ -1,3 +1,5 @@
+import { prepareGameChangeWords } from "../src/lib/game/change-words";
+import { currentTerms, mergeStakeSlots } from "../src/lib/game/rules";
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -46,6 +48,30 @@ const fence = async () => {};
 describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL", () => {
   afterAll(async () => { await cleanupGameFixtures(getPrisma(), members);
     await getPrisma().hostedMember.deleteMany({where:{id:{in:members}}}); });
+  it("both-win reader Home and room projections survive future terms and pending asks", async () => {
+    const { a, b, room, gameId } = await setup();
+    await run(a, { type: "setProfile", firstName: "Ava", timeZone: "America/New_York" });
+    await run(b, { type: "setProfile", firstName: "Leo", timeZone: "America/New_York" });
+    const db = getPrisma();
+    const row = await db.game.findUniqueOrThrow({ where: { id: gameId } });
+    const prepared = await prepareGameChangeWords(row, { kind: "edit", stakes: [{ kind: "both_get", item: "Dinner out together" }] }, 1);
+    await db.game.update({ where: { id: gameId }, data: { pendingChange: toPrismaJsonObject({ v: 2, id: "both_proposal", proposedByMemberId: a,
+      expectedTermsVersion: 1, effectiveFromDay: 1, change: { kind: "edit" }, startsOn: null, origin: "chat", deliveryStatus: "conversation", ...prepared }) } });
+    // Reader A understands the envelope; its no-writer approval rule expires the ask on maintenance.
+    expect((await readHome(a)).games.some(game => game.id === gameId)).toBe(true);
+    expect((await readGameChatState(room, [a, b])).games.some(game => game.id === gameId)).toBe(true);
+    const previous = currentTerms(parseStoredTerms(row.terms));
+    await db.game.update({ where: { id: gameId }, data: { termsWordsEncrypted: prepared.termsWordsEncrypted,
+      terms: toPrismaJsonObject({ v: 1, versions: [{ ...previous, n: 2, stakes: mergeStakeSlots(previous.stakes, prepared.stakes!) }] }) } });
+    for (const viewer of [a, b]) expect((await readHome(viewer)).games.find(game => game.id === gameId)?.terms.stakes.map(stake => stake.kind)).toEqual(["prize", "both_get"]);
+    expect((await readGameChatState(room, [a, b])).games.find(game => game.id === gameId)?.terms.stakes.map(stake => stake.kind)).toEqual(["prize", "both_get"]);
+    const asked = await run(a, { type: "proposeChange", gameId, proposalId: "ordinary_prize", expectedTermsVersion: 2,
+      change: { kind: "edit", stakes: [{ kind: "dare", item: "Sing" }] } }, { chatContainerMemberId: room, beforeMutationTx: fence });
+    expect(asked.ok).toBe(true);
+    expect(await run(b, { type: "respondChange", gameId, proposalId: "ordinary_prize", decision: "approve" }, { chatContainerMemberId: room, beforeMutationTx: fence })).toMatchObject({ ok: true });
+    expect((await readGame(gameId, a))?.terms.stakes.map(stake => [stake.kind, stake.item])).toEqual([["dare", "Sing"], ["both_get", "Dinner out together"]]);
+  });
+
   it("returns the accepted proposal before optional delivery and retains it when that delivery fails", async () => {
     const { a, gameId } = await setup();
     const db = getPrisma(), proposalId = randomUUID();
