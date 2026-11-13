@@ -9,6 +9,7 @@ import { sealGameText } from "@/src/lib/game/crypto";
 import { activatePrivateGamePlayers, isPrivateKickoffCurrentTx, privateKickoffEventId, publishPrivateKickoff, reconcilePrivateGameActivations } from "@/src/lib/game/private-kickoff";
 import { readMyGameReminderProjection } from "@/src/lib/game/direct-tool";
 import { runGameCommand } from "@/src/lib/game/service";
+import { gameLocalDate } from "@/src/lib/game/time";
 import * as reminderPreferences from "@/src/lib/game/reminder-preferences";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
@@ -319,8 +320,8 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
 
   it("projects only the requesting member's task and own status", async () => {
     const a = await member("Alex"), b = await member("Sam");
-    // The projection reads the real clock, so this game starts today rather than on the fixture's fixed date.
-    const id = await game([a, b], { dayOne: new Date(new Date().toISOString().slice(0, 10)) });
+    // The projection reads the real clock, so this game starts on the game's own today (a game day runs 3am to 3am).
+    const id = await game([a, b], { dayOne: new Date(gameLocalDate(new Date(), "UTC")) });
     const projection = await readMyGameReminderProjection(a);
     expect(projection?.games).toEqual([{ id, task: "Task 0", schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, today: "open",
       otherFirstNames: ["Sam"], on: true, everyDay: false }]);
