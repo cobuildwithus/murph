@@ -11,11 +11,36 @@ export const HOSTED_CONNECTED_APPS_RESULT_MAX_BYTES = 120_000;
 // FETCH_MESSAGE_BY_MESSAGE_ID) and similar markup-heavy payloads. The model
 // processes plain text just as well and pays per token for every markup
 // character, so strip HTML to text before serializing. Only strings that look
-// HTML-shaped get touched; everything else (descriptions, slugs, schemas)
-// passes through unchanged.
+// HTML-shaped get stripped; descriptions, slugs and schemas pass through.
 const HOSTED_CONNECTED_APPS_HTML_MIN_LENGTH = 200;
 const HOSTED_CONNECTED_APPS_HTML_TAG_SENTINEL =
   /<(?:!doctype|html|body|head|table|div|p|span|br|a\s|img|h[1-6]|td|tr|style|script)\b/iu;
+// Encoded MIME bodies and attachments live under these keys (Gmail
+// `payload.parts[].body.data` and `raw`, Outlook `contentBytes`). UTF-8 text
+// decodes in place so the HTML strip still applies. Bytes become a size note
+// only when the part declares a binary type; text that is not clean UTF-8 keeps
+// its original encoding. No other key is decoded: identifiers, page tokens and
+// plain strings can look like base64 too.
+const HOSTED_CONNECTED_APPS_ENCODED_KEYS = new Set(["contentBytes", "data", "raw"]);
+const HOSTED_CONNECTED_APPS_ENCODED_MIN_LENGTH = 512;
+const HOSTED_CONNECTED_APPS_ENCODED_PATTERN = /^[A-Za-z0-9+/_-]+={0,2}$/u;
+const HOSTED_CONNECTED_APPS_CONTROL_CHARACTER_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/u;
+const HOSTED_CONNECTED_APPS_BINARY_TYPE_PATTERN = /^(?:image|audio|video|font|application)\//iu;
+const HOSTED_CONNECTED_APPS_TEXTUAL_APPLICATION_TYPE_PATTERN =
+  /^application\/(?:[\w.+-]*\+)?(?:json|xml|ics|javascript)\b/iu;
+// A Gmail message carries its decoded body as `messageText`. A decoded part
+// is dropped only when its text is found verbatim (ignoring whitespace) in
+// that body; anything else is kept.
+const HOSTED_CONNECTED_APPS_DUPLICATE_BODY_TEXT = "[omitted: same text as messageText]";
+// Full-format messages carry dozens of transport headers (Received,
+// DKIM-Signature, ARC-*). A header list is recognized by those markers and
+// keeps only what a person reads.
+const HOSTED_CONNECTED_APPS_MAIL_TRANSPORT_HEADERS = new Set([
+  "authentication-results", "dkim-signature", "mime-version", "received", "return-path",
+]);
+const HOSTED_CONNECTED_APPS_MAIL_READABLE_HEADERS = new Set([
+  "bcc", "cc", "date", "from", "list-unsubscribe", "message-id", "reply-to", "sender", "subject", "to",
+]);
 
 export const hostedConnectedAppsToolkitSchema = z
   .string()
@@ -123,28 +148,131 @@ export const hostedConnectedAppsResponseSchema = z
   })
   .strict();
 
-// Walks the provider result and replaces any HTML-shaped string with its
-// stripped plain-text equivalent. Non-string values, short strings, and
-// strings without HTML tag markers pass through untouched, so this only
-// affects payloads that would otherwise burn tokens on markup (chiefly Gmail
-// message bodies).
+// Walks the provider result and removes what costs tokens without carrying
+// meaning: HTML markup, encoded MIME bodies and attachments, and mail transport
+// headers. Every other value passes through unchanged.
 export function compactHostedConnectedAppsResult(value: unknown): unknown {
+  return compactConnectedAppsValue(value, null, { messageText: null, partType: null });
+}
+
+interface ConnectedAppsEncodedContext {
+  // Whitespace-normalized compacted `messageText` of the enclosing message.
+  messageText: string | null;
+  // Declared MIME type of the part an encoded value belongs to.
+  partType: string | null;
+}
+
+function compactConnectedAppsValue(
+  value: unknown,
+  key: string | null,
+  context: ConnectedAppsEncodedContext,
+): unknown {
   if (typeof value === "string") {
-    if (value.length < HOSTED_CONNECTED_APPS_HTML_MIN_LENGTH) return value;
-    if (!HOSTED_CONNECTED_APPS_HTML_TAG_SENTINEL.test(value)) return value;
-    return stripHtmlForHostedConnectedAppsResult(value);
+    return compactConnectedAppsString(value, key, context);
   }
   if (Array.isArray(value)) {
-    return value.map((item) => compactHostedConnectedAppsResult(item));
+    const items = isMailTransportHeaderList(value)
+      ? value.filter((header) => HOSTED_CONNECTED_APPS_MAIL_READABLE_HEADERS.has(
+        String((header as { name: string }).name).toLowerCase(),
+      ))
+      : value;
+    return items.map((item) => compactConnectedAppsValue(item, key, context));
   }
   if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const messageText = context.messageText
+      ?? (typeof record.messageText === "string" && record.messageText.length > 0
+        ? normalizeConnectedAppsText(stripHtmlWhenMarkup(record.messageText))
+        : null);
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = compactHostedConnectedAppsResult(v);
+    for (const [k, v] of Object.entries(record)) {
+      out[k] = compactConnectedAppsValue(v, k, {
+        messageText: k === "payload" || context.messageText !== null ? messageText : null,
+        partType: readConnectedAppsPartType(record, k) ?? context.partType,
+      });
     }
     return out;
   }
   return value;
+}
+
+// Gmail declares a part's type beside its `body`; Outlook declares an
+// attachment's type beside its `contentBytes`; Gmail `raw` is a whole message.
+function readConnectedAppsPartType(record: Record<string, unknown>, key: string): string | null {
+  if (key === "body" && typeof record.mimeType === "string") return record.mimeType;
+  if (key === "contentBytes" && typeof record.contentType === "string") return record.contentType;
+  if (key === "raw") return "message/rfc822";
+  return null;
+}
+
+function compactConnectedAppsString(
+  value: string,
+  key: string | null,
+  context: ConnectedAppsEncodedContext,
+): string {
+  if (key === null || !HOSTED_CONNECTED_APPS_ENCODED_KEYS.has(key)) {
+    return stripHtmlWhenMarkup(value);
+  }
+  const bytes = decodeConnectedAppsEncodedBytes(value);
+  if (bytes === null) return stripHtmlWhenMarkup(value);
+  const text = readConnectedAppsUtf8Text(bytes);
+  if (text === null) {
+    const declaredBinary = context.partType !== null
+      && HOSTED_CONNECTED_APPS_BINARY_TYPE_PATTERN.test(context.partType)
+      && !HOSTED_CONNECTED_APPS_TEXTUAL_APPLICATION_TYPE_PATTERN.test(context.partType);
+    return declaredBinary ? `[binary data omitted: ${bytes.byteLength} bytes]` : value;
+  }
+  const compacted = stripHtmlWhenMarkup(text);
+  const normalized = normalizeConnectedAppsText(compacted);
+  return context.messageText !== null && normalized.length > 0 && context.messageText.includes(normalized)
+    ? HOSTED_CONNECTED_APPS_DUPLICATE_BODY_TEXT
+    : compacted;
+}
+
+function stripHtmlWhenMarkup(value: string): string {
+  if (value.length < HOSTED_CONNECTED_APPS_HTML_MIN_LENGTH) return value;
+  if (!HOSTED_CONNECTED_APPS_HTML_TAG_SENTINEL.test(value)) return value;
+  return stripHtmlForHostedConnectedAppsResult(value);
+}
+
+function normalizeConnectedAppsText(value: string): string {
+  return value.replace(/\s+/gu, " ").trim();
+}
+
+function decodeConnectedAppsEncodedBytes(value: string): Uint8Array | null {
+  if (
+    value.length < HOSTED_CONNECTED_APPS_ENCODED_MIN_LENGTH
+    || !HOSTED_CONNECTED_APPS_ENCODED_PATTERN.test(value)
+  ) {
+    return null;
+  }
+  try {
+    const standard = value.replace(/-/gu, "+").replace(/_/gu, "/");
+    const binary = atob(standard.padEnd(Math.ceil(standard.length / 4) * 4, "="));
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+function readConnectedAppsUtf8Text(bytes: Uint8Array): string | null {
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return HOSTED_CONNECTED_APPS_CONTROL_CHARACTER_PATTERN.test(text) ? null : text;
+  } catch {
+    return null;
+  }
+}
+
+function isMailTransportHeaderList(value: unknown[]): boolean {
+  let transport = false;
+  for (const item of value) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) return false;
+    const { name, value: headerValue } = item as Record<string, unknown>;
+    if (typeof name !== "string" || typeof headerValue !== "string") return false;
+    transport ||= HOSTED_CONNECTED_APPS_MAIL_TRANSPORT_HEADERS.has(name.toLowerCase());
+  }
+  return transport;
 }
 
 // Serializes a compacted result and fails closed when it exceeds the assistant

@@ -128,7 +128,11 @@ import { classifyAssistantReaction } from './reaction-routing.js'
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
-const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 600_000
+// Whole-turn bound for a Flex attempt. Scheduled jobs for members with busy
+// connected accounts legitimately run 8-10 minutes on Flex; at ten minutes they
+// were killed near the end and restarted from scratch on the cron backoff.
+// Fresh member input still preempts a scheduled turn, so this never delays a reply.
+const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 1_200_000
 const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
   'features.apps': false,
   'features.browser_use': false,
