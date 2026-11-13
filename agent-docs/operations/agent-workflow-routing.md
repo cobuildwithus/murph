@@ -114,9 +114,11 @@ requires explicit cleanup authorization. Report any retirement blocker.
 
 Same-turn completion permits a scoped commit unless the user says `review first`
 or `do not commit`. Use `scripts/committer "summary" <file>...` for work without
-an active plan or an intermediate candidate commit. Use
-`scripts/finish-task <active-plan> "summary" <path>...` for the final plan-bearing
-commit; it archives the plan and expands directory arguments. Preserve task-owned
+an active plan or an intermediate commit. Use
+`scripts/finish-task <active-plan> "summary" <path>...` for the candidate commit
+of plan-bearing work, before the PR is marked Ready; it archives the plan and
+expands directory arguments. A separate closeout push after CI has run costs
+another full CI run. Preserve task-owned
 Frog entries. When overlapping edits block a safe final commit, archive a done
 or abandoned plan with `scripts/close-exec-plan.sh` and report the blocker.
 
