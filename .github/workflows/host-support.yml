@@ -210,7 +210,8 @@ jobs:
     strategy:
       fail-fast: false
       # The validated release plan isolates CLI, Assistant Engine, Assistant
-      # Runtime, and Hosted Local Harness, with three platform groups.
+      # Runtime, and Hosted Local Harness, with three platform groups, and
+      # splits the three long owners' test files across runners by file.
       # Package commands remain serial; Assistant Engine and Assistant Runtime
       # each run two isolated test files at a time with serial in-file suites.
       matrix: ${{ fromJSON(needs.release-verification-plan-linux.outputs.package_matrix) }}
@@ -242,29 +243,37 @@ jobs:
         run: pnpm health-commons:generate
 
       - name: Prepare built CLI runtime artifacts
-        if: ${{ matrix.shard == 'cli' || matrix.shard == 'assistant-engine' }}
+        if: ${{ matrix.package_shard == 'cli' || matrix.package_shard == 'assistant-engine' }}
         run: pnpm build:test-runtime:prepared
 
       - name: Verify CLI runtime artifacts
-        if: ${{ matrix.shard == 'cli' }}
+        if: ${{ matrix.package_shard == 'cli' }}
         run: pnpm --dir packages/cli exec tsx scripts/verify-runtime-artifacts.ts
 
       - name: Run package coverage shard
         shell: bash
+        env:
+          PACKAGE_SHARD: ${{ matrix.package_shard }}
+          # Empty unless the release plan splits this package's files; then
+          # this runner owns files i of n and its siblings own the rest.
+          VITEST_SHARD: ${{ matrix.vitest_shard }}
         run: |
           set -euo pipefail
-          package_dirs="$(node scripts/release-verification-plan.mjs --package-dirs "${{ matrix.shard }}")"
+          package_dirs="$(node scripts/release-verification-plan.mjs --package-dirs "$PACKAGE_SHARD")"
           if [[ -z "$package_dirs" ]]; then
-            echo "Release package shard '${{ matrix.shard }}' matched zero packages." >&2
+            echo "Release package shard '$PACKAGE_SHARD' matched zero packages." >&2
             exit 1
           fi
 
           while IFS= read -r package_dir; do
             [[ -n "$package_dir" ]] || continue
             if [[ "$package_dir" == "packages/cli" ]]; then
-              env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage
+              env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage ${VITEST_SHARD:+--shard "$VITEST_SHARD"}
             elif [[ "$package_dir" == "packages/assistant-engine" || "$package_dir" == "packages/assistant-runtime" ]]; then
-              env MURPH_VITEST_FILE_PARALLELISM=1 MURPH_VITEST_MAX_WORKERS=2 pnpm --dir "$package_dir" test:coverage
+              env MURPH_VITEST_FILE_PARALLELISM=1 MURPH_VITEST_MAX_WORKERS=2 pnpm --dir "$package_dir" test:coverage ${VITEST_SHARD:+--shard "$VITEST_SHARD"}
+            elif [[ -n "$VITEST_SHARD" ]]; then
+              echo "Release package shard '$PACKAGE_SHARD' has a file split but no runner for it." >&2
+              exit 1
             else
               env MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage
             fi
@@ -367,15 +376,15 @@ jobs:
         run: pnpm --dir apps/web verify
 
   release-web-postgres-linux:
-    name: Release Web PostgreSQL (${{ matrix.shard }}/4)
+    name: Release Web PostgreSQL (${{ matrix.shard }}/5)
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 5
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
     services:
       postgres:
         image: postgres:17
@@ -426,7 +435,7 @@ jobs:
         run: pnpm --dir apps/web prisma:migrate:deploy
 
       - name: Run discovered PostgreSQL test shard
-        run: node scripts/run-postgres-tests.mjs --shard ${{ matrix.shard }}/4
+        run: node scripts/run-postgres-tests.mjs --shard ${{ matrix.shard }}/5
 
   release-cloudflare-verification-linux:
     name: Release Cloudflare verification (ubuntu)
@@ -468,6 +477,82 @@ jobs:
 
       - name: Run Cloudflare verification
         run: pnpm --dir apps/cloudflare verify
+
+  release-hosted-web-browser-smoke-linux:
+    name: Release hosted Web browser smoke (ubuntu)
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: murph_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d murph_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    # Production admission runs this scenario on every main commit, after the
+    # merge. Run the same scenario against the same production Web build here,
+    # so a change that breaks it fails its pull request instead of main. The
+    # environment mirrors the admission build in
+    # temporal-web-deployment-admission.yml and the private integration lane.
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_test
+      HOSTED_EMAIL_DOMAIN: mail.example.test
+      HOSTED_EMAIL_FROM_ADDRESS: assistant@mail.example.test
+      HOSTED_EMAIL_LOCAL_PART: assistant
+      HOSTED_EMAIL_SIGNING_SECRET: hosted-local-email-signing-key
+      MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB: "1"
+      MURPH_E2E_STREAM_DEV_LOGS: "1"
+      MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "4"
+      NEXT_DIST_DIR_MODE: smoke
+      NEXT_DIST_DIR_SUFFIX: murph-cloud-integration
+      NEXT_PUBLIC_PRIVY_APP_ID: cm_app_smoke_placeholder1
+      PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key
+    steps:
+      - name: Reject draft pull request proof
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: |
+          echo "::error::Mark the pull request ready for review to run exact-head CI."
+          exit 1
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Expose pinned Codex CLI
+        run: echo "$GITHUB_WORKSPACE/packages/assistant-engine/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Install Playwright Chromium
+        timeout-minutes: 14
+        run: scripts/install-playwright-chromium.sh
+
+      - name: Build admission-shaped hosted Web production dist
+        run: |
+          pnpm --dir packages/hosted-execution build
+          pnpm --dir apps/web build
+
+      - name: Run the production admission browser smoke
+        run: pnpm hosted-local e2e hosted-web-browser-smoke
 
   production-runner-bundle-budget-linux:
     name: Production runner bundle budget (ubuntu)
@@ -609,6 +694,7 @@ jobs:
       - release-web-tests-linux
       - release-web-postgres-linux
       - release-cloudflare-verification-linux
+      - release-hosted-web-browser-smoke-linux
       - release-fixture-coverage-linux
       - production-runner-bundle-budget-linux
     if: ${{ !cancelled() }}
@@ -628,12 +714,13 @@ jobs:
           WEB_TEST_RESULT: ${{ needs.release-web-tests-linux.result }}
           WEB_POSTGRES_RESULT: ${{ needs.release-web-postgres-linux.result }}
           CLOUDFLARE_RESULT: ${{ needs.release-cloudflare-verification-linux.result }}
+          BROWSER_SMOKE_RESULT: ${{ needs.release-hosted-web-browser-smoke-linux.result }}
           FIXTURE_RESULT: ${{ needs.release-fixture-coverage-linux.result }}
           BUNDLE_RESULT: ${{ needs.production-runner-bundle-budget-linux.result }}
         shell: bash
         run: |
           set -euo pipefail
-          for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$WEB_POSTGRES_RESULT" "$CLOUDFLARE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
+          for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$WEB_POSTGRES_RESULT" "$CLOUDFLARE_RESULT" "$BROWSER_SMOKE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
             if [[ "$result" != "success" ]]; then
               echo "Release proof requires every release shard to succeed." >&2
               exit 1

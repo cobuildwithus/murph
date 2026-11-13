@@ -369,3 +369,24 @@ it("accepts durable recap retirement in the existing error field", () => {
   expect(GAME_RECAP_GENERATION_RETIRED).toBe("recap_generation_retired");
   expect(hostedGameToolResponseSchema.parse(response)).toEqual(response);
 });
+
+
+it("both-win rollback-floor readers accept waiting asks, terms and reciprocal settled tickets", () => {
+  const base = { ...game, players: game.players.map((player, seat) => ({ ...player, firstName: seat ? "Leo" : "Ava" })),
+    terms: { ...game.terms, stakes: [{ kind: "prize", item: "Choose lunch" }, { kind: "both_get", item: "Dinner out together" }] } };
+  const pendingChange = { id: "proposal_both", proposedByMemberId: "player_first", expectedTermsVersion: 1,
+    origin: "chat", deliveryStatus: "conversation", effectiveFromDay: 5, startsOn: null,
+    change: { kind: "edit", stakes: [{ kind: "both_get", item: "Dinner out together" }] } };
+  const result = { scores: base.players.map(player => ({ memberId: player.memberId, seat: player.seat, score: 5, misses: 0 })),
+    tickets: base.players.map((player, seat) => ({ owedToMemberId: player.memberId,
+      owedByMemberId: base.players[1 - seat].memberId, what: "Dinner out together", count: 1, status: "open" })) };
+  for (const fixture of [{ ...base, pendingChange }, base, { ...base, status: "settled", result }]) {
+    const wire = response(fixture);
+    expect(parseHostedRuntimeGroupToolResponse(wire)).toEqual(wire);
+  }
+  expect(parseHostedRuntimeGroupToolRequest({ action: "update_game", origin,
+    update: { operation: "propose", gameId: game.id, proposalId: "proposal_both", expectedTermsVersion: 1, change: pendingChange.change } })).toMatchObject({ action: "update_game" });
+  expect(hostedGameToolRequestSchema.safeParse({ action: "update_game", origin,
+    update: { operation: "create", gameId: game.id, terms: { tasks: base.players.map(player => ({ memberId: player.memberId, text: "Walk" })),
+      schedule: game.terms.schedule, stakes: pendingChange.change.stakes } } }).success).toBe(false);
+});

@@ -15,6 +15,10 @@ implementation, deployment, rollback, or incident response; follow the live
 owner documents indexed in `agent-docs/index.md`. When they conflict, the live
 owner document prevails and the completed snapshot remains unchanged.
 
+A plan archived in an open PR's candidate commit is still that task's record:
+correct it in the PR's later commits when a fix changes what it says. It
+becomes immutable when the PR merges.
+
 ## Lifecycle Scripts
 
 - Create a plan: `bash scripts/open-exec-plan.sh <slug> "<title>"`
@@ -46,5 +50,6 @@ contract changes; use the lifecycle above when the work needs a plan.
 ## Completion Rule
 
 If a task used an execution plan and the task is done or abandoned, close that plan before handoff. Prefer `bash scripts/finish-task ...` when the task is also ready to commit.
+For PR work, that is the candidate commit, before the PR is marked Ready: a closeout pushed after CI has run costs another full CI run for a docs-only change.
 `scripts/finish-task` closes the plan and creates a scoped commit containing the closed plan plus the resolved task paths.
 If overlapping dirty-tree work makes an exact scoped commit unsafe, run `bash scripts/close-exec-plan.sh <active-plan-path>` anyway; do not leave closed work stranded under `active/`.

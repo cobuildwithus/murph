@@ -28,7 +28,7 @@ import { markLocallyDisconnectedSources } from "../app/(dashboard)/connect/conne
 
 const WHOOP_SOURCE = {
   id: "whoop",
-  name: "WHOOP",
+  name: "Whoop",
   description: "Recovery, strain, sleep, and heart rate.",
   logo: {
     className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
@@ -805,7 +805,7 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
   const sources = [
     {
       id: "whoop",
-      name: "WHOOP",
+      name: "Whoop",
       description: "Recovery.",
       logo,
     },
@@ -1385,18 +1385,18 @@ test("ConnectPage marks explicit and upstream Junction sources connected from ho
   ]);
 
   assert.match(markup, /Oura connected/);
-  assert.match(markup, /WHOOP connected/);
+  assert.match(markup, /Whoop connected/);
   assert.equal(markup.match(/data-connection-state="connected"/gu)?.length, 2);
   assert.match(markup, /aria-label="Disconnect Oura"/u);
-  assert.match(markup, /aria-label="Disconnect WHOOP"/u);
+  assert.match(markup, /aria-label="Disconnect Whoop"/u);
   assert.ok(
-    sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "WHOOP"),
+    sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"),
   );
   assert.ok(
-    sourceHeadingIndex(markup, "WHOOP") < sourceHeadingIndex(markup, "Garmin"),
+    sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "Garmin"),
   );
   assert.doesNotMatch(markup, /aria-label="Connect Oura"/u);
-  assert.doesNotMatch(markup, /aria-label="Connect WHOOP"/u);
+  assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });
 
 test("ConnectPage marks iOS Apple Health Junction SDK source connected from hosted state", async () => {
@@ -1476,10 +1476,10 @@ test("ConnectPage shows source-scoped disconnects for multi-source Junction acco
   ]);
 
   assert.match(markup, /Apple Health connected/u);
-  assert.match(markup, /WHOOP connected/u);
+  assert.match(markup, /Whoop connected/u);
   assert.equal(markup.match(/data-connection-state="connected"/gu)?.length, 2);
   assert.match(markup, /aria-label="Disconnect Apple Health"/u);
-  assert.match(markup, /aria-label="Disconnect WHOOP"/u);
+  assert.match(markup, /aria-label="Disconnect Whoop"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect account"/u);
 });
 
@@ -1681,19 +1681,19 @@ test.each([
     },
   ]);
 
-  assert.match(markup, /WHOOP needs reconnect/);
-  assert.match(markup, /Please reconnect WHOOP to resume syncing\./u);
+  assert.match(markup, /Whoop needs reconnect/);
+  assert.match(markup, /Please reconnect Whoop to resume syncing\./u);
   assert.match(markup, /data-connection-state="needs-access"/u);
-  assert.match(markup, /aria-label="Reconnect WHOOP"/u);
-  assert.doesNotMatch(markup, /aria-label="Disconnect WHOOP"/u);
-  assert.doesNotMatch(markup, /WHOOP connected/u);
-  assert.doesNotMatch(markup, /aria-label="Connect WHOOP"/u);
+  assert.match(markup, /aria-label="Reconnect Whoop"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Whoop"/u);
+  assert.doesNotMatch(markup, /Whoop connected/u);
+  assert.doesNotMatch(markup, /aria-label="Connect Whoop"/u);
 });
 
 test.each([
   {
     name: "explicit sources",
-    label: "WHOOP",
+    label: "Whoop",
     providerFilter: undefined,
     connection: { connectSourceId: "whoop", upstreamSources: [] },
   },
@@ -1752,11 +1752,11 @@ test("ConnectPage preserves unambiguous Junction source reconnects with upstream
     },
   ]);
 
-  assert.match(markup, /WHOOP needs reconnect/u);
-  assert.match(markup, /Please reconnect WHOOP to resume syncing\./u);
-  assert.match(markup, /aria-label="Reconnect WHOOP"/u);
+  assert.match(markup, /Whoop needs reconnect/u);
+  assert.match(markup, /Please reconnect Whoop to resume syncing\./u);
+  assert.match(markup, /aria-label="Reconnect Whoop"/u);
   assert.match(markup, /data-connection-state="needs-access"/u);
-  assert.doesNotMatch(markup, /WHOOP connected/u);
+  assert.doesNotMatch(markup, /Whoop connected/u);
 });
 
 test("ConnectPage lets active state win when duplicate rows mention the same source", async () => {
@@ -2120,11 +2120,11 @@ test("ConnectPage adds source-scoped disconnects beside Junction reconnect actio
   ]);
 
   assert.match(markup, /Garmin needs reconnect/u);
-  assert.match(markup, /WHOOP needs reconnect/u);
+  assert.match(markup, /Whoop needs reconnect/u);
   assert.match(markup, /aria-label="Reconnect Garmin"/u);
-  assert.match(markup, /aria-label="Reconnect WHOOP"/u);
+  assert.match(markup, /aria-label="Reconnect Whoop"/u);
   assert.match(markup, /aria-label="Disconnect Garmin"/u);
-  assert.match(markup, /aria-label="Disconnect WHOOP"/u);
+  assert.match(markup, /aria-label="Disconnect Whoop"/u);
   assert.doesNotMatch(markup, /aria-label="Disconnect account"/u);
 });
 
@@ -2216,11 +2216,11 @@ test("ConnectPage keeps multi-source Junction historical recovery on disconnect,
   ]);
 
   assert.match(markup, /Garmin needs a fresh connection/u);
-  assert.match(markup, /WHOOP connected/u);
+  assert.match(markup, /Whoop connected/u);
   assert.doesNotMatch(markup, /aria-label="Reconnect Garmin"/u);
   assert.doesNotMatch(markup, /aria-label="Connect Garmin"/u);
   assert.equal(markup.match(/aria-label="Disconnect account"/gu)?.length, 1);
-  assert.match(markup, /aria-label="Disconnect WHOOP"/u);
+  assert.match(markup, /aria-label="Disconnect Whoop"/u);
 });
 
 test("SourceCard offers account reset without an unavailable reconnect", async () => {
@@ -2544,7 +2544,7 @@ test("connect source card design study renders the production action states", as
   assert.match(markup, /aria-label="Retry Fitbit migration now"/u);
   assert.match(markup, />Retry now<\/button>/u);
   assert.match(markup, /Dexcom connections are coming soon\./u);
-  assert.match(markup, /WHOOP needs a fresh connection/u);
+  assert.match(markup, /Whoop needs a fresh connection/u);
   assert.match(markup, /aria-label="Disconnect account"/u);
   assert.match(markup, /Peloton could not open\. Please try again\./u);
 });
@@ -2771,7 +2771,7 @@ test("ConnectSourcesGrid signs in on the page for a pending device connect inten
   );
 
   await vi.waitFor(() => {
-    assert.match(rendered.container.textContent ?? "", /Sign in to connect WHOOP\./u);
+    assert.match(rendered.container.textContent ?? "", /Sign in to connect Whoop\./u);
   });
 
   assert.equal(mocks.authDialogProps?.open, false);
@@ -3026,7 +3026,7 @@ test("ConnectSourcesGrid explains Vital before redeeming a WHOOP device connect 
             src: "/brand-logos/connect/whoop.svg",
             width: 44,
           },
-          name: "WHOOP",
+          name: "Whoop",
         },
       ],
     }),
@@ -3041,7 +3041,7 @@ test("ConnectSourcesGrid explains Vital before redeeming a WHOOP device connect 
   await vi.waitFor(() => {
     assert.match(
       rendered.container.textContent ?? "",
-      /Connect WHOOP\./u,
+      /Connect Whoop\./u,
     );
   });
   assert.equal(fetch.mock.calls.length, 0);
@@ -3049,13 +3049,13 @@ test("ConnectSourcesGrid explains Vital before redeeming a WHOOP device connect 
 
   const continueButton = [
     ...rendered.container.querySelectorAll("button"),
-  ].find((button) => button.textContent === "Continue to WHOOP");
+  ].find((button) => button.textContent === "Continue to Whoop");
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
   await clickButton(rendered, continueButton);
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
-    assert.match(rendered.container.textContent ?? "", /Connecting WHOOP/u);
+    assert.match(rendered.container.textContent ?? "", /Connecting Whoop/u);
   });
   assert.equal(rendered.assign.mock.calls.length, 0);
   assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
@@ -3200,7 +3200,7 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
   assert.equal(contactLink.textContent, "Open Messages");
   assert.match(
     contactLink.getAttribute("aria-label") ?? "",
-    /fresh WHOOP connection link/,
+    /fresh Whoop connection link/,
   );
   assert.equal(rendered.assign.mock.calls.length, 0);
 
@@ -3240,10 +3240,10 @@ test("ConnectSourcesGrid offers a retry of the same link when an intent cannot s
   );
 
   await vi.waitFor(() => {
-    assert.match(rendered.container.textContent ?? "", /WHOOP didn’t connect\./u);
+    assert.match(rendered.container.textContent ?? "", /Whoop didn’t connect\./u);
   });
   assert.match(rendered.container.textContent ?? "", /Nothing changed\. Try again\./u);
-  assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting WHOOP/u);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Whoop/u);
 
   const retryButton = [...rendered.container.querySelectorAll("button")]
     .find((button) => button.textContent === "Try again");
@@ -3281,7 +3281,7 @@ test("ConnectSourcesGrid settles an intent for a source that is already connecte
   );
 
   await vi.waitFor(() => {
-    assert.match(rendered.container.textContent ?? "", /WHOOP is connected\./u);
+    assert.match(rendered.container.textContent ?? "", /Whoop is connected\./u);
   });
   assert.equal(fetch.mock.calls.length, 0);
 
@@ -3290,7 +3290,7 @@ test("ConnectSourcesGrid settles an intent for a source that is already connecte
   assert.ok(exploreButton instanceof rendered.window.HTMLButtonElement);
   await clickButton(rendered, exploreButton);
 
-  assert.doesNotMatch(rendered.container.textContent ?? "", /WHOOP is connected\./u);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Whoop is connected\./u);
   assert.ok(
     rendered.container.querySelector("input[aria-label='Search sources']"),
   );
@@ -3367,7 +3367,7 @@ test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches cap
   });
 
   assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
-  assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting WHOOP/);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Whoop/);
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
     /This link isn’t working\./,
@@ -3720,7 +3720,7 @@ test.each([
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
-    assert.match(rendered.container.textContent ?? "", /Connecting WHOOP/);
+    assert.match(rendered.container.textContent ?? "", /Connecting Whoop/);
   });
 
   for (const authenticated of scenario.authenticated) {
@@ -3828,14 +3828,14 @@ test("ConnectSourcesGrid disconnects a connected source after confirmation", asy
   );
 
   const disconnectButton = rendered.container.querySelector(
-    "button[aria-label='Disconnect WHOOP']",
+    "button[aria-label='Disconnect Whoop']",
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
   assert.equal(disconnectButton.textContent, "Disconnect");
 
   await clickButton(rendered, disconnectButton);
 
-  assert.match(rendered.container.textContent ?? "", /Disconnect WHOOP\?/);
+  assert.match(rendered.container.textContent ?? "", /Disconnect Whoop\?/);
   const confirmButton = [...rendered.container.querySelectorAll("button")]
     .filter((button) => button.textContent === "Disconnect")
     .at(-1);
@@ -3848,7 +3848,7 @@ test("ConnectSourcesGrid disconnects a connected source after confirmation", asy
     assert.equal(fetch.mock.calls.length, 1);
     assert.match(
       rendered.container.textContent ?? "",
-      /Disconnected WHOOP\. Your history is still saved\./,
+      /Disconnected Whoop\. Your history is still saved\./,
     );
   });
 
@@ -3864,9 +3864,9 @@ test("ConnectSourcesGrid disconnects a connected source after confirmation", asy
     method: "POST",
     keepalive: false,
   });
-  assert.match(rendered.container.textContent ?? "", /WHOOP not connected/);
+  assert.match(rendered.container.textContent ?? "", /Whoop not connected/);
   assert.equal(
-    rendered.container.querySelector("button[aria-label='Connect WHOOP']")
+    rendered.container.querySelector("button[aria-label='Connect Whoop']")
       ?.textContent,
     "Connect",
   );
@@ -3953,14 +3953,14 @@ test("ConnectSourcesGrid disconnects one reconnect-required Junction source with
 
   await vi.waitFor(() => {
     assert.match(rendered.container.textContent ?? "", /Oura not connected/u);
-    assert.match(rendered.container.textContent ?? "", /WHOOP connected/u);
+    assert.match(rendered.container.textContent ?? "", /Whoop connected/u);
   });
   assert.equal(
     fetch.mock.calls[0]?.[0],
     `/api/settings/device-sync/connections/${sharedConnectionId}/sources/oura/disconnect`,
   );
   assert.ok(
-    rendered.container.querySelector("button[aria-label='Disconnect WHOOP']"),
+    rendered.container.querySelector("button[aria-label='Disconnect Whoop']"),
   );
   const connectButton = rendered.container.querySelector(
     "button[aria-label='Connect Oura']",
@@ -4470,14 +4470,14 @@ test("ConnectSourcesGrid keeps a shared historical-reset disconnect open for ret
     }),
   );
 
-  // Start the shared-account disconnect from the healthy WHOOP card, not the
+  // Start the shared-account disconnect from the healthy Whoop card, not the
   // Garmin card that carries the historical reset.
   const disconnectButton = [
     ...rendered.container.querySelectorAll(
       "button[aria-label='Disconnect account']",
     ),
   ].find((button) =>
-    button.closest("div.relative")?.textContent?.includes("WHOOP"),
+    button.closest("div.relative")?.textContent?.includes("Whoop"),
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
@@ -4533,7 +4533,7 @@ test("ConnectSourcesGrid keeps ordinary failed revokes on the disconnect path", 
   );
 
   const disconnectButton = rendered.container.querySelector(
-    "button[aria-label='Disconnect WHOOP']",
+    "button[aria-label='Disconnect Whoop']",
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
@@ -4560,9 +4560,9 @@ test("ConnectSourcesGrid keeps ordinary failed revokes on the disconnect path", 
     rendered.container.textContent ?? "",
     /historical reset/iu,
   );
-  assert.match(rendered.container.textContent ?? "", /Disconnect WHOOP\?/);
+  assert.match(rendered.container.textContent ?? "", /Disconnect Whoop\?/);
   assert.equal(
-    rendered.container.querySelector("button[aria-label='Connect WHOOP']"),
+    rendered.container.querySelector("button[aria-label='Connect Whoop']"),
     null,
   );
 
@@ -4592,14 +4592,14 @@ test("ConnectSourcesGrid shows reconnect guidance without a disconnect action", 
 
   assert.match(
     rendered.container.textContent ?? "",
-    /Please reconnect WHOOP to resume syncing\./,
+    /Please reconnect Whoop to resume syncing\./,
   );
   assert.equal(
-    rendered.container.querySelector("button[aria-label='Disconnect WHOOP']"),
+    rendered.container.querySelector("button[aria-label='Disconnect Whoop']"),
     null,
   );
   const reconnectButton = rendered.container.querySelector(
-    "button[aria-label='Reconnect WHOOP']",
+    "button[aria-label='Reconnect Whoop']",
   );
   assert.ok(reconnectButton instanceof rendered.window.HTMLButtonElement);
   assert.equal(reconnectButton.textContent, "Reconnect");
@@ -4635,7 +4635,7 @@ test("ConnectSourcesGrid shows disconnect failures inside the confirmation dialo
       {
         error: {
           code: "DEVICE_SYNC_DISCONNECT_FAILED",
-          message: "We could not disconnect WHOOP right now.",
+          message: "We could not disconnect Whoop right now.",
         },
       },
       { status: 502 },
@@ -4657,7 +4657,7 @@ test("ConnectSourcesGrid shows disconnect failures inside the confirmation dialo
   );
 
   const disconnectButton = rendered.container.querySelector(
-    "button[aria-label='Disconnect WHOOP']",
+    "button[aria-label='Disconnect Whoop']",
   );
   assert.ok(disconnectButton instanceof rendered.window.HTMLButtonElement);
 
@@ -4673,12 +4673,12 @@ test("ConnectSourcesGrid shows disconnect failures inside the confirmation dialo
   await vi.waitFor(() => {
     const alert = rendered.container.querySelector("[role='alert']");
     assert.ok(alert);
-    assert.equal(alert.textContent, "We could not disconnect WHOOP right now.");
+    assert.equal(alert.textContent, "We could not disconnect Whoop right now.");
   });
-  assert.match(rendered.container.textContent ?? "", /Disconnect WHOOP\?/);
-  assert.match(rendered.container.textContent ?? "", /WHOOP connected/);
+  assert.match(rendered.container.textContent ?? "", /Disconnect Whoop\?/);
+  assert.match(rendered.container.textContent ?? "", /Whoop connected/);
   assert.equal(
-    rendered.container.querySelector("button[aria-label='Connect WHOOP']"),
+    rendered.container.querySelector("button[aria-label='Connect Whoop']"),
     null,
   );
 
@@ -4795,7 +4795,7 @@ test("ConnectPage shows callback success with the original source label", async 
   assert.match(markup, /Connected Oura\./);
   assert.match(markup, /data-connection-state="connected"/u);
   assert.ok(
-    sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "WHOOP"),
+    sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"),
   );
   assert.doesNotMatch(markup, /aria-label="Connect Oura"/u);
 });
@@ -4860,7 +4860,7 @@ test("ConnectPage shows rejected callback errors with the original source label"
   );
 
   assert.match(markup, /Unable to finish connection/);
-  assert.match(markup, /WHOOP was not connected this time\./);
+  assert.match(markup, /Whoop was not connected this time\./);
 });
 
 test("ConnectPage shows fallback callback errors with the original source label", async () => {
@@ -5039,7 +5039,7 @@ test("resolveConfiguredConnectSources keeps Fitbit on its dedicated Junction dis
     width: 44,
   };
   const resolved = resolveConfiguredConnectSources([
-    { id: "whoop", name: "WHOOP", description: "Recovery.", logo },
+    { id: "whoop", name: "Whoop", description: "Recovery.", logo },
     { id: "fitbit", name: "Fitbit", description: "Activity.", logo },
   ]);
 
@@ -5067,7 +5067,7 @@ test("Vital disclosure follows reconnect and fresh providers across local discon
   const resolved = resolveConfiguredConnectSources(
     [
       { id: "oura", name: "Oura", description: "Sleep.", logo },
-      { id: "whoop", name: "WHOOP", description: "Recovery.", logo },
+      { id: "whoop", name: "Whoop", description: "Recovery.", logo },
     ],
     {
       connectionStates: ["oura", "whoop"].map((sourceId) => ({
@@ -5385,6 +5385,7 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
     // Settings may also carry unrelated source metadata such as lastDataAt.
     assert.partialDeepStrictEqual(states[0], {
       connectionId: "dsc_junction_fitbit",
+      lastDataAt: value.upstreamSources.at(-1)?.lastDataAt ?? null,
       requiresReconnect: false,
       sourceId: "fitbit",
       state: "active",

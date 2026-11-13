@@ -22,6 +22,7 @@ export type ConnectSource = {
   disconnectSourceProviderSlug?: string;
   historicalResetIncomplete?: boolean;
   id: string;
+  lastDataAt?: string | null;
   logo: LogoAsset;
   migrationState?:
     | "authorization_required"

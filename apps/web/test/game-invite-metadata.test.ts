@@ -6,6 +6,8 @@ import type { GameInvitePreview } from "@/src/lib/game/contract";
 
 const mocks = vi.hoisted(() => ({ readInvitePreview: vi.fn() }));
 
+// The page reads the device from the request; these tests are an iPhone.
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148" }) }));
 vi.mock("@/src/lib/game/service", () => ({ readInvitePreview: mocks.readInvitePreview }));
 vi.mock("@/app/_og/og-shared", () => ({
   loadMurphHeroOgAssets: async () => ({ fonts: [] }),

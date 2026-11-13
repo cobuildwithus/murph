@@ -59,8 +59,9 @@ the expensive workflows automatically.
 Before pushing a new head to an existing owned PR, explicitly mark it Draft
 and make the push conditional on that command succeeding. From the PR's owned
 branch, use `gh pr ready <number> --undo && git push origin HEAD` (substitute the
-verified PR remote when it is not `origin`). This ordering applies to remediation,
-base reconciliation, and final plan-closeout commits as well as routine edits.
+verified PR remote when it is not `origin`). This ordering applies to remediation
+and base reconciliation as well as routine edits. The plan is closed in the
+candidate commit, so a plan closeout is not a later push.
 After the push succeeds, verify the remote head and re-establish the candidate
 conditions above before running `gh pr ready <number>`.
 

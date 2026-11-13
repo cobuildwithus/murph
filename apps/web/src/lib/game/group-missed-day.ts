@@ -5,7 +5,7 @@ import { GAME_MISSED_ROOM_MAX_GAMES, gameGroupMissedCheckInPolicySchema, type Ho
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { getPrisma } from "../prisma";
-import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxMaxSeqByLane, readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
+import { readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { isGameEnabled } from "./access";
 import { gameGroupLoreFingerprint } from "./audience";
 import { GameChatAudienceError, readGameChatAuthority, readGameChatAudience, type GameChatAudience } from "./chat-membership";
@@ -84,28 +84,29 @@ export async function reserveGroupGameMissedDay(roomId: string, gameIds: readonl
     const policy = gameGroupMissedCheckInPolicySchema.parse({ kind: "game_group_missed_check_in", roomId, firstMissedDate,
       eventId: gameGroupMissedDayEventId(roomId, firstMissedDate), batch, pairFingerprint: room.pairFingerprint, conversationLaneSeq: "0" });
     const added = await getPrisma().$transaction(tx => reserveGameMissedDayTx({ roomId, firstMissedDate, dueAt, now, tx,
-      beforeClaim: tx => isGroupMissedDayBatchCurrentTx(policy, room.audience, tx, now, false),
+      beforeClaim: tx => isGroupMissedDayBatchCurrentTx(policy, room.audience, tx, now),
     }));
     if (added) reserved += 1;
   }
   return reserved;
 }
 
-/** Freeze the transcript at the mailbox's conversation boundary, before decryption. */
 export async function prepareGroupMissedDay(roomId: string, firstMissedDate: string, now: Date) {
   const room = await readGroupMissedDayRoom(roomId);
   if (!room) return null;
   const batch = freezeBatch(room.games, firstMissedDate, now);
   if (!batch.some(game => game.misses.length)) return null;
-  const [watermark] = await readHostedMailboxMaxSeqByLane({ userId: roomId, lanes: ["conversation"] });
   const policy = gameGroupMissedCheckInPolicySchema.parse({ kind: "game_group_missed_check_in", roomId, firstMissedDate,
-    eventId: gameGroupMissedDayEventId(roomId, firstMissedDate), batch, pairFingerprint: room.pairFingerprint, conversationLaneSeq: watermark.maxSeq });
+    eventId: gameGroupMissedDayEventId(roomId, firstMissedDate), batch, pairFingerprint: room.pairFingerprint, conversationLaneSeq: "0" });
   return { ...room, policy };
 }
 
-/** Locks remain held by the caller through publication or the provider dispatch claim. */
+/**
+ * Locks remain held by the caller through publication or the provider dispatch claim.
+ * Game facts decide currentness. Chat never does: what people said is the model's evidence, not a gate.
+ */
 export async function isGroupMissedDayBatchCurrentTx(policy: HostedGameGroupMissedCheckInPolicy, audience: GameChatAudience,
-  tx: Prisma.TransactionClient, now: Date, checkConversation = true): Promise<boolean> {
+  tx: Prisma.TransactionClient, now: Date): Promise<boolean> {
   const ids = policy.batch.map(game => game.gameId).sort();
   await tx.$queryRaw`SELECT id FROM game WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
   const games = await loadGameMissedCheckInGames(tx, ids);
@@ -119,14 +120,9 @@ export async function isGroupMissedDayBatchCurrentTx(policy: HostedGameGroupMiss
     }
     if (!await readGameChatAuthority(row, policy.roomId, audience, tx)) return false;
   }
-  if (groupCount === 0 || JSON.stringify(freezeBatch(games, policy.firstMissedDate, now))
-    !== JSON.stringify([...policy.batch].sort((a, b) => a.gameId.localeCompare(b.gameId)).map(game => ({ ...game,
-      remainingMemberIds: [...game.remainingMemberIds].sort(), misses: [...game.misses].sort((a, b) => a.memberId.localeCompare(b.memberId)) })))) return false;
-  if (!checkConversation) return true;
-  // Inbound appends use this same lock. Notification-lane writes do not change the watermark.
-  await acquireHostedMailboxCausalAppendLockTx({ tx, userId: policy.roomId });
-  const [watermark] = await readHostedMailboxMaxSeqByLane({ prisma: tx, userId: policy.roomId, lanes: ["conversation"] });
-  return watermark.maxSeq === policy.conversationLaneSeq;
+  return groupCount > 0 && JSON.stringify(freezeBatch(games, policy.firstMissedDate, now))
+    === JSON.stringify([...policy.batch].sort((a, b) => a.gameId.localeCompare(b.gameId)).map(game => ({ ...game,
+      remainingMemberIds: [...game.remainingMemberIds].sort(), misses: [...game.misses].sort((a, b) => a.memberId.localeCompare(b.memberId)) })));
 }
 
 /** Egress trusts only the exact encrypted mailbox envelope, never caller-supplied batch facts. */

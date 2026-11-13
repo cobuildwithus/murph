@@ -214,7 +214,7 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
         src: "/brand-logos/connect/whoop.svg",
         width: 128,
       },
-      name: "WHOOP",
+      name: "Whoop",
       recoveryKind: "connection_reset",
     },
   },
@@ -311,7 +311,7 @@ const DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES: ConnectSourceCardStudyCase[] = [
         src: "/brand-logos/connect/whoop.svg",
         width: 128,
       },
-      name: "WHOOP",
+      name: "Whoop",
     },
   },
 ];

@@ -5,7 +5,7 @@ import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai
 import { buildGamePrivateEveningInstructions, gamePrivateEveningCheckInPolicySchema, type HostedGamePrivateEveningCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
-import { acquireHostedMailboxCausalAppendLockTx, appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxMaxSeqByLane, readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
+import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppend, readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { assertHostedDirectAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
@@ -96,10 +96,7 @@ export async function isPrivateEveningCurrentTx(policy: HostedGamePrivateEvening
   if (now >= new Date(policy.expiresAt)) return false;
   const current = await currentEvening(policy.memberId, policy.date, now, tx);
   if (current?.expiresAt.toISOString() !== policy.expiresAt || JSON.stringify(current.batch) !== JSON.stringify(policy.batch)) return false;
-  if (await privateEveningPaused(policy.memberId, policy.date, tx)) return false;
-  await acquireHostedMailboxCausalAppendLockTx({ tx, userId: policy.memberId });
-  const [watermark] = await readHostedMailboxMaxSeqByLane({ prisma: tx, userId: policy.memberId, lanes: ["conversation"] });
-  return watermark.maxSeq === policy.conversationLaneSeq;
+  return !await privateEveningPaused(policy.memberId, policy.date, tx);
 }
 
 export async function readPrivateEveningDeliveryAuthority(eventId: string, memberId: string) {
@@ -113,9 +110,8 @@ export async function publishPrivateEveningCheckIn(memberId: string, date: strin
   const db = getPrisma(), eventId = privateEveningEventId(memberId, date);
   const current = await currentEvening(memberId, date, now, db);
   if (!current) return false;
-  const [watermark] = await readHostedMailboxMaxSeqByLane({ userId: memberId, lanes: ["conversation"] });
   const policy = gamePrivateEveningCheckInPolicySchema.parse({ kind: "game_private_evening_check_in", eventId, memberId, date,
-    expiresAt: current.expiresAt.toISOString(), conversationLaneSeq: watermark.maxSeq, batch: current.batch });
+    expiresAt: current.expiresAt.toISOString(), conversationLaneSeq: "0", batch: current.batch });
   const projection = await readMyGameReminderProjection(memberId);
   const games = projection?.games.filter(game => policy.batch.some(item => item.gameId === game.id)) ?? [];
   if (games.length !== policy.batch.length) return false;

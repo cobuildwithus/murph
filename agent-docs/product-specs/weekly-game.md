@@ -610,8 +610,9 @@ resulting avatar. No private photo is shared with the subject or other players.
   and group facts from up to twenty games; pair-only timing and copy stay the
   same. Pre-join, off/open, any-N and incomplete days do not qualify. Corrected
   misses, terms or room changes, unsafe audiences and any new departure suppress
-  an already-prepared message. Any conversation received since transcript capture
-  also suppresses it, even unrelated chatter. Quiet and suppressed turns consume
+  an already-prepared message. Chat never does: Murph reads the day's chat when it
+  writes the message and stays quiet about anything a player already explained,
+  at its own judgment. Quiet and suppressed turns consume
   the daily claim; replay never creates a replacement message. Earlier historical
   departures do not stop future eligible dates. A check-in that cannot go out
   within two hours of its claim is dropped, never sent late.
@@ -826,7 +827,23 @@ resulting avatar. No private photo is shared with the subject or other players.
   any remains. Accepted replacements
   are canonical: old ciphertext is not retained, and sent messages cannot be undone.
 - **Tickets.** A prize or dare makes the loser owe the winner one ticket; a tie
-  or all-perfect game owes nothing. Each ticket carries its stake kind. The
+  or all-perfect game owes nothing for that prize or dare. A pair can also carry
+  a `both_get` prize: a perfect result issues two tickets for it, one each way.
+  Murph says both earned it; if either missed a day, it lapses without a ticket.
+  Terms and views keep the prize or dare first. Prize edits preserve the unnamed
+  both-win slot and its key; legacy kinds retain whole-list replacement. Rematches
+  compare the original prize or dare and never copy the both-win prize. A player
+  names a both-win prize in chat and the other agrees through the existing change
+  path. A delta names at most one prize or dare and one both-win prize. Group and
+  legacy-kind games cannot add one; create still accepts only one prize or dare.
+  Proposal and approval both reject a requested both-win prize after a closed
+  scheduled miss, using each player's clock and grace hour. An ask approved after
+  a miss expires; an ordinary prize edit remains valid after the shared prize
+  lapses. Any-N-days games can accept a requested prize until the game ends.
+  Readers
+  accept this kind before any writer is enabled, including pending asks. Recap
+  fallback names the earned prize when available, otherwise says both get their
+  prize. Each ticket carries its stake kind. The
   winner marks a dare done with the same redeem action, without proof. Legacy
   "winner gets" retains winner/loser settlement. "Per miss" makes each player owe every
   better player the difference in misses. A ticket is good for 14 days: the
@@ -930,9 +947,9 @@ even after failure or a newly closed day.
 
 One private evening check-in may follow an hour after the member's reminder time
 on an open day, within a 30-minute window, when text is on and no room check-in
-covers that game. It uses only the member's own unfinished tasks, a frozen batch
-and direct-conversation watermark, and the room check-in's unanswered-evening
-pause. It remains subject to the 90-day engagement pause. On activation, the
+covers that game. It uses only the member's own unfinished tasks, a frozen batch,
+and the room check-in's unanswered-evening pause. A new message from the member
+does not cancel it. It remains subject to the 90-day engagement pause. On activation, the
 member's reminder opt-out and count-game cadence carry from a validated previous
 game, then the latest same-people game if there is no lineage. An explicit choice
 for the new game wins over carry-over, including a delayed activation retry.

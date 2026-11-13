@@ -4,6 +4,12 @@ import type { DeviceSyncCompletionSetupGuide } from "@/src/lib/device-sync/conne
 
 const MURPH_IOS_APP_STORE_URL = "https://apps.apple.com/us/app/murph-ai/id6786145859";
 
+export const WHOOP_APPLE_HEALTH_SETUP_STEP = {
+  detail:
+    "In WHOOP, go to More, App Settings, Integrations, then Apple Health. Turn on all categories and tap Allow.",
+  title: "Turn on Apple Health in WHOOP",
+};
+
 export function buildWhoopAppleHealthSetupGuide(
   voiceMemoSrc?: string | null,
 ): DeviceSyncCompletionSetupGuide {
@@ -23,11 +29,7 @@ export function buildWhoopAppleHealthSetupGuide(
         detail: "Get the Murph app on your iPhone and connect Apple Health when it asks.",
         title: "Download Murph and sign in",
       },
-      {
-        detail:
-          "In WHOOP, go to More, App Settings, Integrations, then Apple Health. Turn on all categories and tap Allow.",
-        title: "Turn on Apple Health in WHOOP",
-      },
+      WHOOP_APPLE_HEALTH_SETUP_STEP,
     ],
     title: "Get your full sync",
     voiceMemoSrc:

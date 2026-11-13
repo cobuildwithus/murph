@@ -309,6 +309,12 @@ and its bound room are revalidated against the fresh exact two-player provider
 audience. This allows the requested proposal in a newly created chat with no
 inbound history. Cancelled, replaced or expired proposals cannot qualify;
 provider health, route, runtime access and dispatch deduplication still apply.
+The `game-both-win:` lifecycle family is guarded under the game lock before
+provider dispatch, including retries. It requires a retained, unskipped receipt,
+a live bound pair game with a still-earnable offer and no waiting change.
+The compatible reader ships before any offer reservation or both-win writer.
+The writer uses the existing player proposal and other-player approval; a bare
+yes to an offer cannot name a prize. This adds no notification lifecycle.
 Game evening room check-ins validate their frozen game and chat witness but do
 not inherit the game-proposal inactivity exemption. They stay subject to the
 90-day pause, the three-accepted-evening unanswered pause and the half-hour

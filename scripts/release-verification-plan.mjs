@@ -16,9 +16,13 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   // and set the Host Support critical path.
   // Contracts stays off the CLI checkout because its coverage rewrites dist
   // files imported by CLI built-runtime tests.
-  { dir: "packages/cli", shard: "cli" },
-  { dir: "packages/assistant-engine", shard: "assistant-engine" },
-  { dir: "packages/assistant-runtime", shard: "assistant-runtime" },
+  // `vitestShards` splits one package's test files across that many runners
+  // with `vitest --shard i/n`. Every file still runs exactly once, with the
+  // same isolation and worker settings; only the wall time per runner drops.
+  // Host Support run 43359763057 measured 652s, 504s, and 328s unsplit.
+  { dir: "packages/cli", shard: "cli", vitestShards: 2 },
+  { dir: "packages/assistant-engine", shard: "assistant-engine", vitestShards: 3 },
+  { dir: "packages/assistant-runtime", shard: "assistant-runtime", vitestShards: 2 },
 
   // Package timings from Host Support run 41704908795 total ~361s per platform-b
   // group, including startup and artifact checks; smaller owners fill platform-a.
@@ -141,8 +145,25 @@ function packageCoverageMatrixFromPlan() {
     }
   }
 
+  // `shard` labels the runner, `package_shard` selects its packages, and
+  // `vitest_shard` is empty unless the package's files are split.
   return {
-    include: shardNames.map((shard) => ({ shard })),
+    include: shardNames.flatMap((packageShard) => {
+      const vitestShards = PACKAGE_COVERAGE_PLAN.find(
+        (entry) => entry.shard === packageShard,
+      )?.vitestShards;
+      if (vitestShards === undefined) {
+        return [{ shard: packageShard, package_shard: packageShard, vitest_shard: "" }];
+      }
+      return Array.from({ length: vitestShards }, (_, index) => {
+        const vitestShard = `${index + 1}/${vitestShards}`;
+        return {
+          shard: `${packageShard} ${vitestShard}`,
+          package_shard: packageShard,
+          vitest_shard: vitestShard,
+        };
+      });
+    }),
   };
 }
 
@@ -152,6 +173,30 @@ function hostedWebTestMatrixFromPlan() {
       shard: `${index + 1}/${HOSTED_WEB_TEST_SHARD_COUNT}`,
     })),
   };
+}
+
+function packageFileSplitErrors(shardCounts) {
+  const errors = [];
+
+  for (const entry of PACKAGE_COVERAGE_PLAN) {
+    if (entry.vitestShards === undefined) {
+      continue;
+    }
+    if (
+      !Number.isSafeInteger(entry.vitestShards)
+      || entry.vitestShards < 2
+      || entry.vitestShards > 8
+    ) {
+      errors.push(`invalid vitestShards '${entry.vitestShards}' for ${entry.dir}`);
+    }
+    // A file split is one Vitest run divided by file; a shard that runs
+    // several packages has no single run to divide.
+    if (shardCounts.get(entry.shard) !== 1) {
+      errors.push(`${entry.dir} must be the only package in a file-split release shard`);
+    }
+  }
+
+  return errors;
 }
 
 export function validateReleaseVerificationPlan(repoRoot = defaultRepoRoot) {
@@ -172,6 +217,8 @@ export function validateReleaseVerificationPlan(repoRoot = defaultRepoRoot) {
     plannedDirs.add(entry.dir);
     shardCounts.set(entry.shard, (shardCounts.get(entry.shard) ?? 0) + 1);
   }
+
+  errors.push(...packageFileSplitErrors(shardCounts));
 
   const exclusionEntries = Object.entries(PACKAGE_COVERAGE_EXCLUSIONS);
   const excludedDirs = new Set();

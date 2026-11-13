@@ -511,6 +511,58 @@ export function validNewStakes(stakes: readonly { kind: GameStakeKind }[]): void
   }
 }
 
+/** A modern pair can change either prize slot; legacy lists still replace as a whole. */
+export function validChangedStakes(state: RuleState, stakes: readonly { kind: GameStakeKind }[]): void {
+  const current = currentTerms(state.game.terms).stakes;
+  const legacy = current.some(stake => stake.kind === "winner_gets" || stake.kind === "per_miss");
+  const modern = current.some(stake => stake.kind === "prize" || stake.kind === "dare");
+  const both = stakes.filter(stake => stake.kind === "both_get").length;
+  const primary = stakes.filter(stake => stake.kind === "prize" || stake.kind === "dare").length;
+  if (both && (state.game.seats !== 2 || legacy || !modern)
+    || modern && !legacy && (!stakes.length || primary > 1 || both > 1 || primary + both !== stakes.length)) {
+    reject("INVALID_REQUEST", "A game can have one prize or dare and one prize you both get.");
+  }
+}
+
+/** Modern prizes occupy independent slots; legacy games retain whole-list replacement. */
+export function mergeStakeSlots<T extends { kind: GameStakeKind }>(current: readonly T[], delta: readonly T[]): T[] {
+  if (current.some(stake => stake.kind === "winner_gets" || stake.kind === "per_miss")
+    || !current.some(stake => stake.kind === "prize" || stake.kind === "dare")) return [...delta];
+  return [delta.find(stake => stake.kind !== "both_get") ?? current.find(stake => stake.kind !== "both_get"),
+    delta.find(stake => stake.kind === "both_get") ?? current.find(stake => stake.kind === "both_get")]
+    .filter((stake): stake is T => stake !== undefined);
+}
+
+/** A closed scheduled miss makes the shared prize impossible, on each player's clock. */
+export function isBothWinEarnable(state: RuleState, now: Date): boolean {
+  if ("count" in currentTerms(state.game.terms).schedule) return !isGameDue(state, now);
+  const entries = indexGameEntries(state.entries);
+  return state.players.every(player => {
+    if (player.leftAt) return false;
+    if (!player.dayOne) return true;
+    for (let day = 0; day < state.game.lengthDays; day += 1) {
+      if (!isScheduledDay(state, day) || completedEntry(entries, player.memberId, day)) continue;
+      const end = dayStartInstant(addDays(player.dayOne, day + 1), player.timeZone).getTime();
+      if (now.getTime() >= end + (graceOpen(state, player, day, entries) ? GAME_GRACE_MS : 0)) return false;
+    }
+    return true;
+  });
+}
+
+/** Two thirds completed without a closed miss, with an unfinished open or future day for each. */
+export function isBothWinOfferDue(state: RuleState, now: Date): boolean {
+  const terms = currentTerms(state.game.terms);
+  if (state.game.status !== "live" || state.game.seats !== 2 || !isPairRoster(state.players)
+    || "count" in terms.schedule || !terms.stakes.some(stake => stake.kind === "prize" || stake.kind === "dare")
+    || terms.stakes.some(stake => stake.kind === "both_get") || !isBothWinEarnable(state, now)) return false;
+  const days = Array.from({ length: state.game.lengthDays }, (_, day) => day).filter(day => isScheduledDay(state, day));
+  const entries = indexGameEntries(state.entries);
+  return state.players.every(player => {
+    const completed = days.filter(day => completedEntry(entries, player.memberId, day)).length;
+    return completed >= Math.ceil(2 * days.length / 3) && completed < days.length;
+  });
+}
+
 export function validSchedule(schedule: GameSchedule, lengthDays: number): GameSchedule {
   if ("count" in schedule) {
     if (schedule.count < 1 || schedule.count > lengthDays) reject("INVALID_REQUEST", `Count must be 1 to ${lengthDays}.`);
@@ -904,6 +956,13 @@ function legacyPairStakeTickets(scores: readonly PlayerScore[], stakes: readonly
   // Same test as outcomeFor: when nobody missed a day, the outcome is perfect.
   const perfect = scores.every((score) => score.misses === 0);
   for (const stake of stakes) {
+    if (stake.kind === "both_get") {
+      if (perfect && scores.length === 2) {
+        tickets.push({ stakeKey: stake.key, owedBySeats: [scores[1].seat], owedToSeats: [scores[0].seat] },
+          { stakeKey: stake.key, owedBySeats: [scores[0].seat], owedToSeats: [scores[1].seat] });
+      }
+      continue;
+    }
     if (stake.kind !== "per_miss") {
       // A tie or a perfect game means nobody owes anything.
       if (perfect || winners.length !== 1) continue;

@@ -256,7 +256,7 @@ async function recoverGameRecap(input: RecapToolInput, context: RecapToolContext
         });
         saved = await sealGameRecap({ ...scope, recap: null });
         if (!saved) return { action: 'read_game', result: { status: 'unavailable', error: GAME_RECAP_GENERATION_RETIRED } };
-      } else saved = await sealGameRecap({ ...scope, recap: buildRecapFallback(material.validation.result) });
+      } else saved = await sealGameRecap({ ...scope, recap: buildRecapFallback(material.validation.result, material.validation.earnedBothWinPrize) });
     }
     if (!saved) return { action: 'read_game', result: { status: 'ok', recapGame: { recovered: false } } };
     return { action: 'read_game', result: { status: 'ok', chatLine: await acceptedGameRecapMessage(gameId, saved.chatLine) } };
@@ -333,14 +333,12 @@ export async function readGameChatTranscript(input: {
   playerNamesByMemberId: readonly { memberId: string; name: string }[];
   since: Date;
   until?: Date;
-  throughConversationLaneSeq?: string;
 }): Promise<GameRecapChatMessage[]> {
   const prisma = getPrisma();
   const availableAt = new Date();
   const rows = await prisma.hostedMailboxItem.findMany({
     orderBy: { laneSeq: "desc" }, take: 100,
     where: { ...buildHostedMailboxLiveItemWhere(availableAt), userId: input.containerMemberId,
-      ...(input.throughConversationLaneSeq === undefined ? {} : { laneSeq: { lte: BigInt(input.throughConversationLaneSeq) } }),
       kind: "conversation.message", lane: "conversation", occurredAt: { gte: input.since, ...(input.until ? { lte: input.until } : {}) } },
     select: { id: true, userId: true, dedupeKey: true, kind: true, lane: true, laneSeq: true, occurredAt: true,
       payloadInlineCiphertext: true, payloadSchema: true, payload: { select: { payloadCiphertext: true } } },

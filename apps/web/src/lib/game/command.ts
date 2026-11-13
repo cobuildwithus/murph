@@ -460,10 +460,10 @@ function parseChangedTasks(value: unknown): { tasks: GameTask[] } {
   return { tasks };
 }
 function parseChangedStakes(value: unknown): { stakes: GameStake[] } {
-  const stakes = list(value, "stakes", 3).map((item) => {
-    const stake = record(item, "stake");
-    return { kind: oneOf(stake.kind, "stake.kind", GAME_STAKE_KINDS), item: words(stake.item, "stake.item") };
+  if (Array.isArray(value) && (value.length === 0 || value.length > 2)) reject("INVALID_REQUEST", "A game can have one prize or dare and one prize you both get.");
+  const stakes = list(value, "prizes", 2).map((item) => {
+    const stake = record(item, "prize");
+    return { kind: oneOf(stake.kind, "prize.kind", GAME_STAKE_KINDS), item: words(stake.item, "prize.item") };
   });
-  if (!stakes.length) reject("INVALID_REQUEST", "Choose at least one stake.");
   return { stakes };
 }

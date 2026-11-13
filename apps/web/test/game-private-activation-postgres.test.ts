@@ -9,6 +9,7 @@ import { sealGameText } from "@/src/lib/game/crypto";
 import { activatePrivateGamePlayers, isPrivateKickoffCurrentTx, privateKickoffEventId, publishPrivateKickoff, reconcilePrivateGameActivations } from "@/src/lib/game/private-kickoff";
 import { readMyGameReminderProjection } from "@/src/lib/game/direct-tool";
 import { runGameCommand } from "@/src/lib/game/service";
+import { gameLocalDate } from "@/src/lib/game/time";
 import * as reminderPreferences from "@/src/lib/game/reminder-preferences";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
@@ -27,14 +28,14 @@ async function member(firstName: string) {
   return id;
 }
 
-async function game(people: string[], options: { previousGameId?: string; schedule?: { days: number[] } | { count: number }; lengthDays?: number; startedAt?: Date } = {}) {
+async function game(people: string[], options: { previousGameId?: string; schedule?: { days: number[] } | { count: number }; lengthDays?: number; startedAt?: Date; dayOne?: Date } = {}) {
   const id = `game_${randomUUID().replaceAll("-", "")}`;
   const words = { v: 1, versions: [{ n: 1, defaultTask: "Walk", tasks: people.map((_, seat) => ({ seat, text: `Task ${seat}` })), stakes: [] }] };
   const encrypted = await sealGameText({ field: "terms_words", memberId: people[0]!, rowId: id, table: "game" }, JSON.stringify(words));
   await db.game.create({ data: { id, createdBy: people[0], wordsOwnerMemberId: people[0]!, status: "live", maxPlayers: people.length > 2 ? 10 : 2,
     ...(options.previousGameId ? { previousGameId: options.previousGameId } : {}), lengthDays: options.lengthDays ?? 7,
     startedAt: options.startedAt ?? now, terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: options.schedule ?? { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [] }] },
-    termsWordsEncrypted: encrypted!, players: { create: people.map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne: new Date("2026-11-06T00:00:00Z"), joinedAt: now })) } } });
+    termsWordsEncrypted: encrypted!, players: { create: people.map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne: options.dayOne ?? new Date("2026-11-06T00:00:00Z"), joinedAt: now })) } } });
   return id;
 }
 
@@ -319,7 +320,8 @@ describe.skipIf(!enabled)("private game activation PostgreSQL", () => {
 
   it("projects only the requesting member's task and own status", async () => {
     const a = await member("Alex"), b = await member("Sam");
-    const id = await game([a, b]);
+    // The projection reads the real clock, so this game starts on the game's own today (a game day runs 3am to 3am).
+    const id = await game([a, b], { dayOne: new Date(gameLocalDate(new Date(), "UTC")) });
     const projection = await readMyGameReminderProjection(a);
     expect(projection?.games).toEqual([{ id, task: "Task 0", schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, today: "open",
       otherFirstNames: ["Sam"], on: true, everyDay: false }]);
