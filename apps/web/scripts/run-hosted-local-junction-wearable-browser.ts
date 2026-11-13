@@ -31,7 +31,7 @@ interface BrowserConfig {
   awaitCanonicalData: boolean;
   browserChannel: "chrome" | undefined;
   browserTransport: "kernel" | "local";
-  disclosureSourceName: "Garmin" | "Oura" | "Whoop";
+  disclosureSourceName: "Garmin" | "Oura" | "WHOOP";
   email: string;
   headless: boolean;
   hostedSessionCookie: string;
@@ -1329,7 +1329,7 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       ? "Garmin"
       : source === "oura"
       ? "Oura"
-      : "Whoop",
+      : "WHOOP",
     email: readHostedLocalBrowserEnvironmentValue(
       environment,
       "MURPH_E2E_PROVIDER_EMAIL",

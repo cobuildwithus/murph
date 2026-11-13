@@ -204,18 +204,18 @@ async function assertConnectPage(input: {
   });
   await requireSingleVisible({
     caseName: input.caseName,
-    label: "Whoop source heading",
-    locator: input.page.locator("h2:visible").filter({ hasText: /^Whoop$/u }),
+    label: "WHOOP source heading",
+    locator: input.page.locator("h2:visible").filter({ hasText: /^WHOOP$/u }),
   });
 
   const connectButton = await requireSingleVisible({
     caseName: input.caseName,
-    label: "Whoop connect action",
-    locator: input.page.locator('button[aria-label="Connect Whoop"]:visible'),
+    label: "WHOOP connect action",
+    locator: input.page.locator('button[aria-label="Connect WHOOP"]:visible'),
   });
   if (!await connectButton.isEnabled()) {
     throw new Error(
-      `Hosted browser ${input.caseName} rendered a disabled Whoop connection.`,
+      `Hosted browser ${input.caseName} rendered a disabled WHOOP connection.`,
     );
   }
   if (
@@ -237,21 +237,21 @@ async function assertConnectPage(input: {
   await connectButton.click();
   const disclosureDialog = await requireSingleVisible({
     caseName: input.caseName,
-    label: "Whoop disclosure dialog",
+    label: "WHOOP disclosure dialog",
     locator: input.page.locator('[role="dialog"]:visible'),
   });
   await disclosureDialog.getByRole("heading", {
     exact: true,
-    name: "Connect Whoop to Murph",
+    name: "Connect WHOOP to Murph",
   }).waitFor({ state: "visible" });
   await disclosureDialog.getByRole("button", {
     exact: true,
-    name: "Continue to Whoop",
+    name: "Continue to WHOOP",
   }).waitFor({ state: "visible" });
 
   await assertNoHorizontalOverflow({
     caseName: input.caseName,
-    label: "Whoop disclosure",
+    label: "WHOOP disclosure",
     page: input.page,
   });
 
@@ -259,7 +259,7 @@ async function assertConnectPage(input: {
   const viewport = input.page.viewportSize();
   if (!disclosureBox || !viewport) {
     throw new Error(
-      `Hosted browser ${input.caseName} could not measure the Whoop disclosure viewport containment.`,
+      `Hosted browser ${input.caseName} could not measure the WHOOP disclosure viewport containment.`,
     );
   }
   const containmentTolerancePx = 1;
@@ -272,7 +272,7 @@ async function assertConnectPage(input: {
       > viewport.height + containmentTolerancePx
   ) {
     throw new Error(
-      `Hosted browser ${input.caseName} rendered the Whoop disclosure outside the ${viewport.width}x${viewport.height} viewport.`,
+      `Hosted browser ${input.caseName} rendered the WHOOP disclosure outside the ${viewport.width}x${viewport.height} viewport.`,
     );
   }
 }
