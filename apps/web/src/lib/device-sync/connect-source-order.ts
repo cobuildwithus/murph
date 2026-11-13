@@ -13,6 +13,8 @@ type OrderedConnectSource = {
 
 const CONNECT_SOURCE_POPULARITY_ORDER = [
   "apple-health",
+  "oura",
+  "whoop",
   "samsung-health",
   "garmin",
   "fitbit",
@@ -21,8 +23,6 @@ const CONNECT_SOURCE_POPULARITY_ORDER = [
   "strava",
   ...MAINSTREAM_APPLE_HEALTH_RELAY_SOURCE_IDS,
   "withings",
-  "oura",
-  "whoop",
   ...SPECIALTY_APPLE_HEALTH_RELAY_SOURCE_IDS,
   "dexcom",
   "dexcom-g6-and-older",
