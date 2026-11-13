@@ -31,7 +31,7 @@ test("release admission requires every actual shard to succeed", async () => {
   const results = Object.fromEntries([
     "PLAN_RESULT", "BUILD_RESULT", "PACKAGE_RESULT", "WEB_BUILD_RESULT",
     "WEB_TEST_RESULT", "WEB_POSTGRES_RESULT", "CLOUDFLARE_RESULT",
-    "FIXTURE_RESULT", "BUNDLE_RESULT",
+    "BROWSER_SMOKE_RESULT", "FIXTURE_RESULT", "BUNDLE_RESULT",
   ].map((name) => [name, "success"]));
   const name = "Require every release shard to succeed";
   assert.equal(runStep(source, name, results).status, 0);
