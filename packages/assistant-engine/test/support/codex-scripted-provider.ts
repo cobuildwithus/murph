@@ -32,6 +32,9 @@ interface ScriptedResponseRoute {
   requestExcludes?: readonly string[]
   requestIncludes?: readonly string[]
   usageInputTokens?: number
+  usageCachedTokens?: number
+  usageCacheWriteTokens?: number
+  usageCacheWrite12hTokens?: number
 }
 
 export type ScriptedResponseBody = (
@@ -413,6 +416,9 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       response,
       responseId,
       usageInputTokens: scripted.usageInputTokens,
+      usageCachedTokens: scripted.usageCachedTokens,
+      usageCacheWriteTokens: scripted.usageCacheWriteTokens,
+      usageCacheWrite12hTokens: scripted.usageCacheWrite12hTokens,
       delayAfterCreatedMs: scripted.delayAfterCreatedMs,
       reasoningIntervalMs: scripted.reasoningIntervalMs,
     })
@@ -637,13 +643,20 @@ async function writeScriptedSseResponse(input: {
   response: ServerResponse
   responseId: string
   usageInputTokens?: number
+  usageCachedTokens?: number
+  usageCacheWriteTokens?: number
+  usageCacheWrite12hTokens?: number
   delayAfterCreatedMs?: number
   reasoningIntervalMs?: number
 }): Promise<boolean> {
   const inputTokens = input.usageInputTokens ?? 12
   const usage = {
     input_tokens: inputTokens,
-    input_tokens_details: { cached_tokens: 0 },
+    input_tokens_details: {
+      cached_tokens: input.usageCachedTokens ?? 0,
+      cache_write_tokens: input.usageCacheWriteTokens ?? 0,
+      cache_write_tokens_details: { ttl_12h_tokens: input.usageCacheWrite12hTokens ?? 0 },
+    },
     output_tokens: 7,
     output_tokens_details: { reasoning_tokens: 0 },
     total_tokens: inputTokens + 7,

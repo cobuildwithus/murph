@@ -2133,3 +2133,7 @@ Invite phone-code lifecycle retirement is owned by [hosted authentication migrat
 Game delivery timing and row conversion use the [weekly game contract](product-specs/weekly-game.md) and [architecture](../ARCHITECTURE.md#weekly-game). The simplification decisions and verification are recorded in the [execution record](exec-plans/completed/2026-11-10-simplify-game-state.md).
 
 Game reminder writes at maximum cardinality: [execution plan](exec-plans/completed/2026-11-11-frog-game-reminder-write.md); the live contract remains in [Architecture](../ARCHITECTURE.md#weekly-game).
+
+[Reply-only prompt-cache retention](exec-plans/completed/2026-11-12-reply-cache-retention.md)
+tracks the native opt-in and accounting proof. The current rollout contract is
+owned by [Cloudflare deployment](../apps/cloudflare/DEPLOY.md#native-prompt-cache-retention).

@@ -5,7 +5,10 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const upstreamUrl = 'https://github.com/openai/codex.git'
-const patchPath = 'patches/codex-websocket-ack.patch'
+const patchPaths = [
+  'patches/codex-websocket-ack.patch',
+  'patches/codex-prompt-cache-retention.patch',
+]
 const maxBytes = 12 * 1024 * 1024
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 
@@ -57,13 +60,13 @@ export async function addNativeReviewContext(input: {
   repoRoot?: string
   fetchSource?: (repository: string, tag: string) => void
 }): Promise<boolean> {
-  if (!input.changedFiles.split(/\r?\n/).includes(patchPath)) return false
+  if (!input.changedFiles.split(/\r?\n/).some((file) => patchPaths.includes(file))) return false
   if (!/^[a-f0-9]{40}$/.test(input.head)) throw new Error('Native review context requires an exact head.')
   const repo = input.repoRoot ?? process.cwd()
   const read = (file: string) => git(repo, ['show', `${input.head}:${file}`])
   const pin = readNativeContextPin(read('Dockerfile.cloudflare-hosted-runner-base').toString(),
     read('packages/assistant-engine/package.json').toString())
-  const patch = read(patchPath)
+  const patches = patchPaths.map(read)
   const temporary = await mkdtemp(path.join(path.dirname(input.contextDir), 'native-upstream-'))
   try {
     git(temporary, ['init', '--quiet'])
@@ -76,8 +79,10 @@ export async function addNativeReviewContext(input: {
       throw new Error('Native review context tag does not match the reviewed source commit.')
     }
     git(temporary, ['read-tree', pin.commit])
-    git(temporary, ['apply', '--cached', '--check', '-'], patch)
-    git(temporary, ['apply', '--cached', '-'], patch)
+    for (const patch of patches) {
+      git(temporary, ['apply', '--cached', '--check', '-'], patch)
+      git(temporary, ['apply', '--cached', '-'], patch)
+    }
     const changed = git(temporary, ['diff', '--cached', '--name-only', '--diff-filter=AM', pin.commit])
       .toString().trim().split('\n').filter(Boolean)
     const sourcePaths = [...new Set([...changed.filter((file) => /\.(rs|toml|md)$/.test(file)), ...nativeContextOwners])].sort()
@@ -102,11 +107,11 @@ export async function addNativeReviewContext(input: {
     }
     await writeFile(path.join(destination, 'provenance.json'), JSON.stringify({
       schemaVersion: 1, reviewedHead: input.head, upstreamUrl, ...pin,
-      patchPath, patchSha256: hash(patch), files,
+      patches: patchPaths.map((file, index) => ({ path: file, sha256: hash(patches[index]!) })), files,
       omittedChangedPaths: changed.filter((file) => !sourcePaths.includes(file)),
     }, null, 2) + '\n', { flag: 'wx' })
     await writeFile(path.join(destination, 'README.md'),
-      '# Pinned patched Codex source\n\nComplete postimages of touched native source, tests, and Markdown, plus the listed direct configuration, instruction, authentication, transport, and recovery owners and upstream repository policy. The exact reviewed patch was applied to the verified upstream tag and commit without executing upstream code. The provenance manifest records every included file and omitted binary/generated path; the original patch remains in the main snapshot.\n',
+      '# Pinned patched Codex source\n\nComplete postimages of touched native source, tests, and Markdown, plus the listed direct configuration, instruction, authentication, transport, and recovery owners and upstream repository policy. The exact reviewed patches were applied to the verified upstream tag and commit without executing upstream code. The provenance manifest records every included file and omitted binary/generated path; the original patch remains in the main snapshot.\n',
       { flag: 'wx' })
     return true
   } finally {

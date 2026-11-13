@@ -476,6 +476,7 @@ describe('Codex provider routing', () => {
     expect(provider.environments).toEqual([{ PRIVATE_ENVIRONMENT: 'must-not-pass' }])
     expect(provider.permissions).toBe(MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE)
     expect(provider.codexThreadConfig).toBeNull()
+    expect(provider.promptCacheRetention).toBeNull()
     expect(provider.workingDirectory).toBe('/vaults/test')
     expect(provider.runtimeWorkspaceRoots).toEqual(['/vaults/test'])
   })
@@ -2029,6 +2030,37 @@ describe('Codex provider routing', () => {
         sessionId: session.sessionId,
         turnId: 'turn-maintenance-provider-failure',
       }),
+    )
+  })
+
+  it.each([
+    { kind: 'direct chat', trigger: undefined, profile: 'conversation', scope: 'session-thread', expected: '12h' },
+    { kind: 'manual reply', trigger: 'manual-ask', profile: 'conversation', scope: 'session-thread', expected: '12h' },
+    { kind: 'Linq auto-reply', trigger: 'automation-auto-reply', profile: 'conversation', scope: 'session-thread', expected: '12h' },
+    { kind: 'cron', trigger: 'automation-cron', profile: 'conversation', scope: 'session-thread', expected: null },
+    { kind: 'delivery', trigger: 'manual-deliver', profile: 'conversation', scope: 'session-thread', expected: null },
+    { kind: 'operator', trigger: 'manual-ask', profile: 'operator-message', scope: 'session-thread', expected: null },
+    { kind: 'notification', trigger: undefined, profile: 'system-notification', scope: 'session-thread', expected: null },
+    { kind: 'maintenance', trigger: undefined, profile: 'maintenance', scope: 'isolated-thread', expected: null },
+    { kind: 'isolated notification or recap show', trigger: undefined, profile: 'conversation', scope: 'isolated-thread', expected: null },
+  ] as const)('selects cache retention for $kind at the provider boundary', async ({ trigger, profile, scope, expected }) => {
+    const route = createRoute()
+    const session = createAssistantSession({ providerOptions: route.providerOptions })
+    const input = { prompt: 'Synthetic turn', turnTrigger: trigger, vault: '/vaults/test' }
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(createProviderAttemptResult())
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(createExecutionPlan({
+      input, route, turnId: 'turn-cache',
+      profile: { promptProfile: profile, toolProfile: 'provider-turn', threadScope: scope },
+    }))
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({ route, session }))
+
+    await executeCodexTurnWithRecovery({
+      input, plan: createSharedPlan(), providerRequestOrdinal: 1, resolvedSession: session, route,
+      turnCreatedAt: '2026-11-12T00:00:00.000Z', turnId: 'turn-cache',
+    })
+
+    expect(providerMocks.executeCodexAssistantTurnAttemptFromInput).toHaveBeenCalledWith(
+      expect.objectContaining({ promptCacheRetention: expected }),
     )
   })
 

@@ -145,6 +145,7 @@ export interface AssistantProviderTurn {
   runtimeWorkspaceRoots?: readonly string[] | null
   resume?: AssistantProviderCodexResume | null
   serviceTier?: AssistantProviderServiceTier | null
+  promptCacheRetention?: '12h' | null
   turnTrigger?: AssistantTurnTrigger | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null

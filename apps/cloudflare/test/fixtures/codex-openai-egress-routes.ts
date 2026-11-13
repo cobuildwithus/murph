@@ -227,6 +227,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       reason: "The 0.167.1 Linux release joins the exact turn-costs path from backend-client/src/client/turn_usage.rs to the include_settled_response_ids JSON field in chatgpt_turn_cost.rs and adjacent skipping log text. Only /v1/analytics/codex/turn-costs is sent to the separate analytics origin.",
     },
     {
+      candidate: "/v1/decisionssandbox_permissions",
+      disposition: "binary_false_positive",
+      owner: "codex-guardian",
+      reason: "The 0.167.1 Linux release with the prompt-cache retention patch joins the exact Decisions URL in ext/guardian-v2/src/async_scorer/decisions.rs to the adjacent sandbox_permissions field read by the guardian owners; the patch shifts the following string data. The real /v1/decisions route remains blocked.",
+    },
+    {
       candidate: "/v1/decisionssandbox_permissionstools/listmissing",
       disposition: "binary_false_positive",
       owner: "codex-guardian",
