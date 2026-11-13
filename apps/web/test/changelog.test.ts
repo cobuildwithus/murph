@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { listAppleHealthRelayConnectSources } from "../app/(dashboard)/connect/apple-health-relay-connect-sources";
+import { listAppleHealthRelayConnectSources } from "../src/lib/device-sync/apple-health-relay-connect-sources";
 import {
   CHANGELOG_CARD_MAX_ITEMS,
   CHANGELOG_EDITIONS_PER_PAGE,
