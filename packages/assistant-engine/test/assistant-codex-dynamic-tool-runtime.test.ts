@@ -14,6 +14,7 @@ const codexMocks = vi.hoisted(() => ({
     voiceMemoRuntime: unknown
   }>,
   executionOrder: [] as string[],
+  groupRoomModelInjectedDigests: [] as Array<string | null>,
   onDynamicToolCall: null as null | ((input: {
     kind: string
     styleValue: number | null
@@ -46,6 +47,11 @@ vi.mock('../src/assistant-codex/dynamic-tools.ts', async (importOriginal) => {
           voiceMemoRuntime: input.voiceMemoRuntime ?? null,
         })
         codexMocks.executionOrder.push(`tool:${input.request.kind}`)
+        if (input.request.kind === 'group-room-model') {
+          codexMocks.groupRoomModelInjectedDigests.push(
+            input.groupRoomModelInjectedDigest ?? null,
+          )
+        }
         await codexMocks.onDynamicToolCall?.({
           kind: input.request.kind,
           styleValue:
@@ -105,6 +111,9 @@ import type {
 import {
   MURPH_MEMBER_MEMORY_TOOL,
 } from '../src/assistant-codex/dynamic-tools/member-memory.ts'
+import {
+  MURPH_GROUP_ROOM_MODEL_TOOL,
+} from '../src/assistant-codex/dynamic-tools/group-room-model.ts'
 
 const tempRoots: string[] = []
 
@@ -133,6 +142,7 @@ afterEach(async () => {
   await stopWarmCodexAppServer('dynamic-tool-runtime-test-cleanup')
   codexMocks.dynamicToolCalls.splice(0)
   codexMocks.executionOrder.splice(0)
+  codexMocks.groupRoomModelInjectedDigests.splice(0)
   codexMocks.onDynamicToolCall = null
   codexMocks.spawn.mockReset()
   vi.restoreAllMocks()
@@ -147,6 +157,40 @@ afterEach(async () => {
 })
 
 describe('Codex dynamic tool runtime routing', () => {
+  it('gives group_room_model the digest of the page this turn already carries', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-room-model-in-context-work-',
+    )
+    const codexHome = await createTempDir(
+      'assistant-codex-room-model-in-context-home-',
+    )
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      queueMicrotask(() => {
+        void runScriptedGroupRoomModelShowTurn(child)
+      })
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      approvalPolicy: 'never',
+      codexCommand: 'codex',
+      codexHome,
+      dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL],
+      env: {
+        CODEX_HOME: codexHome,
+        PATH: '/usr/bin',
+      },
+      groupRoomModelInjectedDigest: 'e'.repeat(64),
+      prompt: 'Remember the new running bit.',
+      sandbox: 'workspace-write',
+      vaultRoot: workingDirectory,
+      workingDirectory,
+    })).resolves.toMatchObject({ finalMessage: 'done' })
+
+    expect(codexMocks.groupRoomModelInjectedDigests).toEqual(['e'.repeat(64)])
+  })
+
   it('does not run an accepted member-memory mutation after the turn aborts', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-member-memory-abort-work-',
@@ -883,6 +927,52 @@ async function runScriptedAbortedMemberMemoryTurn(
     method: 'turn/completed',
     params: {
       turn: { id: 'turn-member-memory-abort', status: 'interrupted' },
+    },
+  }))
+}
+
+async function runScriptedGroupRoomModelShowTurn(
+  child: MockChildProcess,
+): Promise<void> {
+  const initialize = await child.waitForRpcMethod('initialize')
+  child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+  const threadStart = await child.waitForRpcMethod('thread/start')
+  child.stdout.write(jsonLine({
+    id: threadStart.id,
+    result: { thread: { id: 'thread-room-model-in-context' } },
+  }))
+  const turnStart = await child.waitForRpcMethod('turn/start')
+  child.stdout.write(jsonLine({
+    id: turnStart.id,
+    result: { turn: { id: 'turn-room-model-in-context' } },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/started',
+    params: { turn: { id: 'turn-room-model-in-context' } },
+  }))
+  child.stdout.write(jsonLine({
+    id: 71,
+    method: 'item/tool/call',
+    params: {
+      arguments: { action: 'show' },
+      callId: 'call-71',
+      namespace: 'murph',
+      threadId: 'thread-room-model-in-context',
+      tool: MURPH_GROUP_ROOM_MODEL_TOOL.name,
+      turnId: 'turn-room-model-in-context',
+    },
+  }))
+  await child.waitForRpcId(71)
+  child.stdout.write(jsonLine({
+    method: 'item/completed',
+    params: {
+      item: { id: 'assistant-room-model-in-context', text: 'done', type: 'agentMessage' },
+    },
+  }))
+  child.stdout.write(jsonLine({
+    method: 'turn/completed',
+    params: {
+      turn: { id: 'turn-room-model-in-context', status: 'completed' },
     },
   }))
 }

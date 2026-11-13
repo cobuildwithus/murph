@@ -32,6 +32,7 @@ import { readAssistantCurrentStatePrompt } from '../current-state.js'
 import {
   assistantRouteSupportsGroupRoomModel,
   readAssistantGroupRoomModelPrompt,
+  type AssistantGroupRoomModelPrompt,
 } from '../group-room-model.js'
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
@@ -161,6 +162,8 @@ export interface AssistantRouteTurnPlan {
   conversationHistoryMessages?: readonly AssistantProviderConversationMessage[]
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   onboardingGuidanceInjected: boolean
+  /** Digest of the room-model page whose body this turn's context carries. */
+  groupRoomModelInjectedDigest?: string | null
   codexContinuation: AssistantCodexContinuation
   planningDiagnostics: AssistantRoutePlanningDiagnostics
   resume: AssistantRouteCodexResumePlan | null
@@ -886,6 +889,17 @@ function resolveRouteNativeResumeThreadId({
   }
 }
 
+/** Only a page body that really reached this turn's context lets show omit it. */
+function resolveGroupRoomModelInjectedDigest(
+  groupRoomModel: AssistantGroupRoomModelPrompt | null,
+  turnContextPrompt: string | null,
+): string | null {
+  return groupRoomModel?.bodyDigest
+    && turnContextPrompt?.includes(groupRoomModel.prompt)
+    ? groupRoomModel.bodyDigest
+    : null
+}
+
 export async function resolveAssistantRouteTurnPlan(
   input: AssistantRouteTurnPlanInput,
 ): Promise<AssistantRouteTurnPlan> {
@@ -1104,7 +1118,7 @@ export async function resolveAssistantRouteTurnPlan(
             : []),
           ...optionalPrompt(gameLoreGuidance),
         ]
-  const groupRoomModelPrompt = authenticatedGroupProviderTurn
+  const groupRoomModel = authenticatedGroupProviderTurn
     ? await readAssistantGroupRoomModelPrompt({
         vaultRoot: input.input.vault,
       })
@@ -1119,7 +1133,7 @@ export async function resolveAssistantRouteTurnPlan(
   })
   const assistantDynamicContextPrompts = [
     ...hostedDynamicContextPrompts,
-    ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
+    ...(groupRoomModel ? [groupRoomModel.prompt] : []),
     ...gameGroupPointerPrompts(input, userActionAcceptedInputIds, conversationScope),
     ...gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope),
     ...privateGameReminderPrompts(input, conversationScope, userActionAcceptedInputIds),
@@ -1463,6 +1477,10 @@ export async function resolveAssistantRouteTurnPlan(
         : undefined,
     diagnosticsPolicy,
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
+    groupRoomModelInjectedDigest: resolveGroupRoomModelInjectedDigest(
+      groupRoomModel,
+      turnContextPrompt,
+    ),
     codexContinuation: resolveAssistantCodexContinuation({
       resumeCodexThreadId,
     }),

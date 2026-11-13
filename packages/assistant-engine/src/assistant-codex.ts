@@ -561,6 +561,7 @@ export interface CodexAppServerTurnInput {
   followUpAttachmentAllowed?: boolean | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
+  groupRoomModelInjectedDigest?: string | null
   memberMemoryMaintenanceAuthorized?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
@@ -4762,6 +4763,7 @@ async function runCodexAppServerTurnOnProcess(
           assistantStyleSettingsOverlay,
           groupRoomModelMaintenanceAuthorized:
             input.groupRoomModelMaintenanceAuthorized === true,
+          groupRoomModelInjectedDigest: input.groupRoomModelInjectedDigest,
           memberMemoryMaintenanceAuthorized:
             input.memberMemoryMaintenanceAuthorized === true,
           abortSignal: input.abortSignal

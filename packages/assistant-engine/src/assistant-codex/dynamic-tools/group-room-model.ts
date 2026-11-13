@@ -103,6 +103,8 @@ export function readGroupRoomModelDynamicToolRequest(input: {
 }
 
 export async function executeGroupRoomModelDynamicTool(input: {
+  /** Digest of the page body already in this turn's context, if any. */
+  injectedDigest?: string | null
   request: Extract<
     GroupRoomModelDynamicToolRequest,
     { kind: 'group-room-model' }
@@ -148,12 +150,17 @@ export async function executeGroupRoomModelDynamicTool(input: {
     }
 
     if (input.request.args.action === 'show') {
+      // An ordinary group turn already carries the active page. While it is
+      // unchanged, show returns only the digest a write needs, not a second
+      // copy of the body that would stay in context for the rest of the turn.
+      const bodyInContext = state.kind === 'present'
+        && input.injectedDigest === state.digest
       return groupRoomModelTextResult(
         true,
         JSON.stringify(
           state.kind === 'present'
             ? {
-                body: state.body,
+                ...(bodyInContext ? { bodyInContext } : { body: state.body }),
                 bodyUtf8Bytes: assistantConversationHistoryUtf8Bytes(
                   state.body,
                 ),

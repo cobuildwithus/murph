@@ -860,6 +860,8 @@ function buildCodexAttemptProviderInput(
       groupConversation: capabilities.groupConversation,
       groupRoomModelMaintenanceAuthorized:
         capabilities.groupRoomModelMaintenanceTurn,
+      groupRoomModelInjectedDigest:
+        attemptPlan.routePlan.groupRoomModelInjectedDigest,
       memberMemoryMaintenanceAuthorized: capabilities.memberMemoryMaintenanceTurn,
       hostedToolContext: capabilities.hostedToolContextRestricted
         ? null

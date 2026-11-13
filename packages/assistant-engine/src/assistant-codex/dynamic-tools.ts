@@ -2246,6 +2246,7 @@ type ExecuteMurphDynamicToolRequestInput = {
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   assistantStyleSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
+  groupRoomModelInjectedDigest?: string | null
   memberMemoryMaintenanceAuthorized?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
@@ -3755,6 +3756,7 @@ async function dispatchMurphDynamicToolRequest(
     }
     case 'group-room-model':
       return await executeGroupRoomModelDynamicTool({
+        injectedDigest: input.groupRoomModelInjectedDigest,
         managedMaintenanceAuthorized:
           input.groupRoomModelMaintenanceAuthorized === true,
         request: input.request,
