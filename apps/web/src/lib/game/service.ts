@@ -1,3 +1,4 @@
+import { isBothWinOfferDue, mergeStakeSlots } from "./rules";
 import { buildRecapFallback } from './recap-fallback';
 import { gameRecapEnvelopeSchema, type GameRecapEnvelope, type RecapAsset } from '@murphai/contracts/recap-show';
 import { recapGenerationId, readRecapMedia } from './recap-media';
@@ -2412,7 +2413,7 @@ async function applyChangeTermsTx({ tx, loaded }: LockedStep, gameId: string, pr
   const previous = currentTerms(loaded.state.game.terms);
   const next = { ...previous, n: previous.n + 1, fromDay: decision.effectiveFromDay,
     ...(proposal.change.kind === "edit" && proposal.change.schedule ? { schedule: proposal.change.schedule } : {}),
-    ...(proposal.stakes ? { stakes: proposal.stakes } : {}) };
+    ...(proposal.stakes ? { stakes: mergeStakeSlots(previous.stakes, proposal.stakes) } : {}) };
   const terms = { v: 1 as const, versions: [...loaded.state.game.terms.versions.filter((version) => version.fromDay < next.fromDay), next] };
   const lengthDays = proposal.change.kind === "edit" ? proposal.change.lengthDays : undefined;
   await tx.game.update({ where: { id: gameId }, data: {
@@ -2465,7 +2466,7 @@ async function readPairGameRematchNotice(gameId: string, previousGameId: string 
       checkInKind: terms.checkInKind ?? "photo",
       lengthDays: game.row.lengthDays,
       schedule: terms.schedule,
-      stakes: terms.stakes.map((stake) => ({ item: stake.item, kind: stake.kind })),
+      stakes: terms.stakes.filter(stake => stake.kind !== "both_get").map((stake) => ({ item: stake.item, kind: stake.kind })),
       tasksByMember: Object.fromEntries(tasks.map((task) => [task.memberId!, task.text]).sort(([a], [b]) => a.localeCompare(b))),
     };
   };
@@ -2708,6 +2709,7 @@ export type GameRecapMaterial = {
   players: string[];
   entries: Array<{ entryId: string; kind: string; playerName: string; text: string | null; visibleToBoth: boolean }>;
   validation: {
+    earnedBothWinPrize?: string;
     group?: boolean;
     show?: boolean;
     startedAt: Date;
@@ -2775,7 +2777,7 @@ export async function readGameRecapMaterial(gameId: string, containerMemberId: s
   }));
   return {
     players: recapPlayers.map((player) => names.get(player.memberId) ?? ""), entries,
-    validation: { group: row.maxPlayers === 10, show: isPairRecapShowEnabled(row.maxPlayers), startedAt: row.startedAt ?? row.createdAt, settledAt: row.settledAt,
+    validation: { earnedBothWinPrize: terms.stakes.filter(stake => stake.kind === "both_get" && scores.every(score => score.misses === 0)).map(stake => stake.item)[0], group: row.maxPlayers === 10, show: isPairRecapShowEnabled(row.maxPlayers), startedAt: row.startedAt ?? row.createdAt, settledAt: row.settledAt,
       playerNamesByMemberId: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "" })),
       result: scores.filter(score => score.eligible !== false).map((score) => ({ memberId: score.memberId, name: names.get(score.memberId) ?? "", score: score.score })) },
     game: { id: row.id, ...(isPairRecapShowEnabled(row.maxPlayers) ? { recapShow: true } : {}), ...(row.maxPlayers === 10 ? { maxPlayers: 10 } : {}), players: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
@@ -2934,6 +2936,13 @@ export async function readGameChallengeCase(db: Db, gameId: string, entryId: str
       || !visibleEntryIds(loaded.state, challenge.actor, new Set(reports.flatMap(report => report.entryId ? [report.entryId] : []))).has(entryId)) return null;
   }
   return { ...loaded, challenge, status: gameChallengeStatus(loaded.state, challenge, gameNow(clock, loaded.row)) };
+}
+
+/** Current offer facts, shared by generation and the locked final dispatch check. */
+export async function isBothWinOfferCurrent(db: Db, gameId: string, clock: Date) {
+  const [loaded] = await loadGames(db, [gameId]);
+  return loaded && !loaded.row.pendingChange && loaded.row.chatContainerMemberId
+    && isBothWinOfferDue(loaded.state, gameNow(clock, loaded.row)) ? loaded : null;
 }
 
 /** Database-only change state shared by generation and the final dispatch claim. */
@@ -3936,5 +3945,5 @@ function unwrittenRecapPresentation(game: Game & { players: { leftAt: Date | nul
   if (history || !isPairRecapShowEnabled(game.maxPlayers) || game.status !== 'settled' || game.recapEncrypted
     || !result || game.players.some(player => player.leftAt) || !game.settledAt
     || clock.getTime() - game.settledAt.getTime() < GAME_RECAP_UI_WAIT_MS) return null;
-  return presentGameRecap({ stored: buildRecapFallback(result.scores.map(player => ({ name: names.get(player.memberId) ?? 'Player', score: player.score }))), permittedPhotoIds: new Set(), mediaUrl: () => '' });
+  return presentGameRecap({ stored: buildRecapFallback(result.scores.map(player => ({ name: names.get(player.memberId) ?? 'Player', score: player.score })), result.scores.every(player => player.misses === 0) && currentTerms(parseStoredTerms(game.terms)).stakes.some(stake => stake.kind === 'both_get') ? 'your prize' : undefined), permittedPhotoIds: new Set(), mediaUrl: () => '' });
 }

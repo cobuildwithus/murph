@@ -50237,7 +50237,7 @@ async function runHostingTurn(input: { name: string; prompt: string; state: Host
   } }
   try {
     await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
-    const prompt = `${input.prompt}\nCurrent accepted speaker: ${input.actor === 1 ? 'Sam' : 'Alex'}. Message ref: ${hostingInputId}. Occurred at: 2030-03-06T12:00:00Z.`
+    const prompt = `${input.prompt}\nCurrent accepted speaker: ${input.state.games[0]?.players[input.actor ?? 0]?.firstName ?? 'Ava'}. Message ref: ${hostingInputId}. Occurred at: 2030-03-06T12:00:00Z.`
     const result = await executeRealCodexAppServerTurn({
       allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
       codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
@@ -50891,3 +50891,22 @@ describeRealCodex('linq group leave', () => {
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 300_000)
 })
+
+
+describeRealCodex('both-win settled reader', () => {
+  it('both-win settled read says both earned the prize without a debt', async () => {
+    const game = hostingGame({ maxPlayers: undefined, pendingInviteeCount: undefined, status: 'settled',
+      players: ['Ava', 'Leo'].map((firstName, seat) => ({ memberId: `player_${seat}`, firstName, seat, dayOne: '2030-03-01', timeZone: 'UTC' })),
+      result: { scores: [0, 1].map(seat => ({ seat, memberId: `player_${seat}`, score: 7, misses: 0 })),
+        tickets: [0, 1].map(seat => ({ owedToMemberId: `player_${seat}`, owedByMemberId: `player_${1 - seat}`,
+          what: 'Dinner out together', count: 1, status: 'open' })) } });
+    game.terms.stakes.push({ kind: 'both_get', item: 'Dinner out together' });
+    const result = await runHostingTurn({ name: 'both-win settled read', state: { games: [game] },
+      prompt: 'Ava and Leo finished their game. Ava asks Murph: What did we win?' });
+    expect(result.calls.map(call => call.action)).toEqual(['read_game']);
+    expect(result.saves).toHaveLength(0);
+    expect(result.reply).toMatch(/both/iu); expect(result.reply).toMatch(/dinner/iu);
+    expect(result.reply).toMatch(/earn|get|won|win/iu);
+    expect(result.reply).not.toMatch(/owe|debt|ticket|stake|wager|bet|—/iu);
+  }, 360_000);
+});

@@ -48,13 +48,14 @@ describe('game dynamic tools', () => {
   })
   it.each([
     { label: 'no game', games: [], carries: ['poll'] },
-    { label: 'finished pair game', games: [{ status: 'settled' }], carries: ['poll', 'again'] },
+    { label: 'finished pair game', games: [{ status: 'settled', terms: { stakes: [{ kind: 'both_get', item: 'Dinner out together' }] } }], carries: ['poll', 'again'] },
     { label: 'waiting pair game', games: [{ status: 'negotiating' }], carries: ['poll', 'pairAgree', 'pair', 'reminder'] },
     { label: 'live pair game', games: [{ status: 'live' }], carries: ['pair', 'day', 'reminder'] },
     { label: 'invited group game', games: [{ status: 'invited', maxPlayers: 10 }], carries: ['poll', 'groupJoin', 'group', 'reminder'] },
     { label: 'live group game people can still join', games: [{ status: 'live', maxPlayers: 10, pendingInviteeCount: 2 }], carries: ['groupJoin', 'group', 'day', 'reminder'] },
     { label: 'live group game with everyone in', games: [{ status: 'live', maxPlayers: 10, pendingInviteeCount: 0 }], carries: ['group', 'day', 'reminder'] },
     { label: 'live pair and invited group', games: [{ status: 'live' }, { status: 'invited', maxPlayers: 10 }], carries: ['poll', 'pair', 'groupJoin', 'group', 'day', 'reminder'] },
+    { label: 'settled both-win pair beside a live group', games: [{ status: 'settled', terms: { stakes: [{ kind: 'both_get', item: 'Dinner out together' }] } }, { status: 'live', maxPlayers: 10 }], carries: ['again', 'group', 'day', 'reminder'] },
     { label: 'live pair and settled group', games: [{ status: 'live' }, { status: 'settled', maxPlayers: 10 }], carries: ['again', 'pair', 'day', 'reminder'] },
   ])('carries each rule block once, and only for what the room holds: $label', async ({ games, carries }) => {
     const requestPort = vi.fn().mockResolvedValue({ action: 'read_game', result: { status: 'ok', state: { games } } })
@@ -579,3 +580,13 @@ it('submits host-owned song timings without asking the draft to carry them', asy
   expect(request.mock.calls[0]?.[0]).toMatchObject({ action: 'read_game', recapRead: { kind: 'upload', slot: 'song', wordsTimestamps } })
   expect(request.mock.calls[1]?.[0]).toMatchObject({ action: 'write_recap', recap: story, assets: [asset] })
 })
+
+
+it('both-win settled meaning is present in every read-facts block', () => {
+  expect(GAME_READ_FACTS_GUIDANCE).toContain('A both_get stake is a prize both players get if both do every scheduled day. After such a game the result lists it once each way: say they both earned it, never that one owes the other. If either missed a day it lapsed; leave it out.');
+});
+
+
+it('both-win reader tool still exposes only the original prize and dare writer', () => {
+  expect(MURPH_UPDATE_GAME_TOOL.inputSchema.properties.change.properties.stakes.items.properties.kind.enum).toEqual(['prize', 'dare']);
+});
