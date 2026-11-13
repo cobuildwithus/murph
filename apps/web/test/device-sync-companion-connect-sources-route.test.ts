@@ -51,7 +51,8 @@ it("returns the resolver's phone-startable list and shared relay copy without co
   );
   let relays = 0;
   for (const row of body.sources) {
-    expect(Object.keys(row).sort()).toEqual(["id", "name", "logoPath", "path", ...(row.relay ? ["relay"] : [])].sort());
+    expect(Object.keys(row).sort()).toEqual(["id", "name", "logoPath", "path", ...(row.relay ? ["relay"] : []),
+      ...(row.path === "apple_health_relay" ? [] : ["sourceProviderSlug"])].sort());
     expect(row.id).toBeTruthy();
     expect(row.name).toBeTruthy();
     expect(row.logoPath).toMatch(/^\/brand-logos\/connect\/.+\.png$/u);
@@ -71,6 +72,15 @@ it("returns the resolver's phone-startable list and shared relay copy without co
   expect(body.sources[0].path).toBe("apple_health");
   expect(await (await GET(request(true, "?ignored=value"))).json()).toEqual(body);
   expect(mocks.settings).toHaveBeenCalledWith({ member });
+});
+
+it("names each source's own status slug, and none for a wearable that comes in through Apple Health", async () => {
+  const slugs = Object.fromEntries((await payload()).sources
+    .map((row: { id: string; sourceProviderSlug?: string }) => [row.id, row.sourceProviderSlug]));
+  expect(slugs).toMatchObject({
+    "apple-health": "apple_health_kit", fitbit: "google_health", garmin: "garmin", oura: "oura", whoop: "whoop_v2",
+  });
+  expect(slugs.zepp).toBeUndefined();
 });
 
 it.each([null, "2026-11-12T09:41:00.000Z"])("returns source-specific arrival time %s", async lastDataAt => {
@@ -93,16 +103,22 @@ it.each([["strava", "strava"], ["dexcom", "dexcom_v3"]])("keeps paused %s only w
   expect((await payload()).sources[0]).toMatchObject({ id, connection: { state: "connected", lastDataAt: null } });
 });
 
-it.each([{ recoveryKind: "connection_reset" as const }, { requiresReconnect: true }])("prioritizes attention over connected sources: %j", async recovery => {
+it.each([
+  [{ recoveryKind: "connection_reset" as const }, "connection_reset"],
+  [{ requiresReconnect: true }, "reconnect"],
+])("prioritizes attention over connected sources and says why: %j", async (recovery, reason) => {
   settings([upstream("oura"), upstream("whoop_v2", recovery)]);
-  expect((await payload()).sources.slice(0, 2)).toMatchObject([
-    { id: "whoop", connection: { state: "needs_attention" } }, { id: "oura", connection: { state: "connected" } },
-  ]);
+  const [attention, connected] = (await payload()).sources.slice(0, 2);
+  expect(attention).toMatchObject({ id: "whoop", connection: { state: "needs_attention", reason } });
+  expect(connected).toMatchObject({ id: "oura", connection: { state: "connected" } });
+  expect(connected.connection).not.toHaveProperty("reason");
 });
 
 it("keeps an unfinished historical reset visible", async () => {
   settings([upstream("whoop_v2", { status: "disconnected" })], { state: "disconnected", historicalResetIncomplete: true });
-  expect((await payload()).sources[0]).toMatchObject({ id: "whoop", connection: { state: "needs_attention", lastDataAt: null } });
+  expect((await payload()).sources[0]).toMatchObject({
+    id: "whoop", connection: { state: "needs_attention", reason: "reset_unfinished", lastDataAt: null },
+  });
 });
 
 it.each(["authorization_required", "verifying_successor", "cutover_ready"])("projects Fitbit migration %s without changing resolver order", async state => {
@@ -115,6 +131,7 @@ it.each(["authorization_required", "verifying_successor", "cutover_ready"])("pro
   const rows = (await payload()).sources;
   expect(rows.find((row: { id: string }) => row.id === "fitbit").connection).toEqual({
     state: state === "authorization_required" ? "needs_attention" : "connected",
+    ...(state === "authorization_required" ? { reason: "fitbit_migration" } : {}),
     lastDataAt: state === "authorization_required" ? lastDataAt : successorAt,
   });
   expect(rows.map((row: { id: string }) => row.id)).toEqual(resolveConnectSources(sources).filter(row => !["mobvoi-health", "dexcom"].includes(row.id)).map(row => row.id));
