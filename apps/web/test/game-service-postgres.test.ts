@@ -955,6 +955,31 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(stored.recapEncrypted).toBeNull();
   });
 
+  it("sends one acceptance push after commit using the written schedule and real clock", async () => {
+    const ava = await member("Ava", "UTC"), leo = await member("Leo", "UTC");
+    await pushRoute(ava); await pushRoute(leo);
+    const gameId = randomUUID();
+    const dayOne = addDays(new Date().toISOString().slice(0, 10), 1);
+    const created = await ok(ava, { gameId, inviteeFirstName: "Leo", type: "createGame", terms: { ...TERMS, startsOn: dayOne } });
+    // The schedule still starts on the picked date; wording must ignore this dev shift.
+    await getPrisma().game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(-2 * 86_400_000) } });
+    const accept: GameCommand = { type: "join", token: created!.inviteToken!, termsVersion: 1, timeZone: "UTC" };
+    push.mockClear(); deferredResponse.hold = true;
+    try {
+      expect(await ok(leo, accept)).toMatchObject({ status: "live" });
+      await ok(leo, accept);
+      expect(push).not.toHaveBeenCalled();
+      const recipient = await getPrisma().gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId, memberId: ava } } });
+      expect(recipient.dayOne!.toISOString().slice(0, 10)).toBe(dayOne);
+      for (const task of deferredResponse.tasks.splice(0)) await task();
+      expect(push).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        data: { gameId, notification: "game_accepted" }, message: { kind: "alert", title: "They shook on it.", body: "Your game starts tomorrow." },
+      }));
+      await devStartNow(gameId, ava);
+      expect(push).toHaveBeenCalledOnce();
+    } finally { deferredResponse.hold = false; deferredResponse.tasks.length = 0; }
+  });
+
   it("caps concurrent retries and retakes per recipient and game, then allows the next recipient day", async () => {
     const poster = await member("Poster", "America/New_York");
     const recipient = await member("Recipient", "America/New_York");
